@@ -113,7 +113,11 @@ export default {
     if (request.method === 'POST') {
       const body = await request.json();
 
-      return Response.json({ success: true, result: body });
+      return Response.json({
+        success: true,
+        result: body,
+        headers: Object.fromEntries(request.headers.entries()),
+      });
     }
 
     return Response.json({ success: false }, { status: 500 });

@@ -28,18 +28,24 @@ void Channel::publish(jsg::Lock& js, jsg::Value message) {
 
   auto& context = IoContext::current();
   KJ_IF_SOME(tracer, context.getWorkerTracer()) {
-    jsg::Serializer ser(js,
-        jsg::Serializer::Options{
-          .omitHeader = false,
-        });
-    ser.write(js, jsg::JsValue(message.getHandle(js)));
-    auto tmp = ser.release();
-    JSG_REQUIRE(tmp.sharedArrayBuffers.size() == 0 && tmp.transferredArrayBuffers.size() == 0,
-        Error,
-        "Diagnostic events cannot be published with SharedArrayBuffer or "
-        "transferred ArrayBuffer instances");
-    tracer.addDiagnosticChannelEvent(
-        context.getInvocationSpanContext(), context.now(), name.toString(js), kj::mv(tmp.data));
+    js.tryCatch([&]() {
+      jsg::Serializer ser(js,
+          jsg::Serializer::Options{
+            .omitHeader = false,
+          });
+      ser.write(js, jsg::JsValue(message.getHandle(js)));
+      auto tmp = ser.release();
+      JSG_REQUIRE(tmp.sharedArrayBuffers.size() == 0 && tmp.transferredArrayBuffers.size() == 0,
+          Error,
+          "Diagnostic events cannot be published with SharedArrayBuffer or "
+          "transferred ArrayBuffer instances");
+      tracer.addDiagnosticChannelEvent(
+          context.getInvocationSpanContext(), context.now(), name.toString(js), kj::mv(tmp.data));
+    }, [&](jsg::Value&& exception) {
+      jsg::JsValue jsException(exception.getHandle(js));
+      tracer.addException(context.getInvocationSpanContext(), context.now(), kj::str("Error"),
+          kj::str("Failed to publish diagnostics channel message: ", jsException), kj::none);
+    });
   }
 }
 
@@ -133,7 +139,7 @@ jsg::Ref<Channel> DiagnosticsChannelModule::channel(jsg::Lock& js, jsg::Name cha
       .findOrCreate(name,
           [&, channel = kj::mv(channel)]() mutable
           -> kj::HashMap<kj::String, jsg::Ref<Channel>>::Entry {
-    return {kj::mv(name), jsg::alloc<Channel>(kj::mv(channel))};
+    return {kj::mv(name), js.alloc<Channel>(kj::mv(channel))};
   }).addRef();
 }
 

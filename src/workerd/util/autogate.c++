@@ -5,6 +5,8 @@
 
 #include <workerd/util/sentry.h>
 
+#include <stdlib.h>
+
 #include <capnp/message.h>
 #include <kj/common.h>
 #include <kj/debug.h>
@@ -17,10 +19,12 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
     case AutogateKey::TEST_WORKERD:
       return "test-workerd"_kj;
-    case AutogateKey::STREAMING_TAIL_WORKERS:
-      return "streaming-tail-workers"_kj;
-    case AutogateKey::URLPATTERN:
-      return "urlpattern";
+    case AutogateKey::V8_FAST_API:
+      return "v8-fast-api"_kj;
+    case AutogateKey::STREAMING_TAIL_WORKER:
+      return "streaming-tail-worker"_kj;
+    case AutogateKey::TAIL_STREAM_REFACTOR:
+      return "tail-stream-refactor"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
@@ -28,8 +32,9 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
 
 Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
   // Init all gates to false.
-  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys; i = AutogateKey((int)i + 1)) {
-    gates[(unsigned long)i] = false;
+  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
+       i = AutogateKey(static_cast<int>(i) + 1)) {
+    gates[static_cast<unsigned long>(i)] = false;
   }
 
   for (auto name: autogates) {
@@ -40,9 +45,10 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
     auto sliced = name.slice(17);
 
     // Parse the gate name into a AutogateKey.
-    for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys; i = AutogateKey((int)i + 1)) {
+    for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
+         i = AutogateKey(static_cast<int>(i) + 1)) {
       if (kj::str(i) == sliced) {
-        gates[(unsigned long)i] = true;
+        gates[static_cast<unsigned long>(i)] = true;
         break;
       }
     }
@@ -51,11 +57,11 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
 
 bool Autogate::isEnabled(AutogateKey key) {
   KJ_IF_SOME(a, globalAutogate) {
-    return a.gates[(unsigned long)key];
+    return a.gates[static_cast<unsigned long>(key)];
   }
-  LOG_ERROR_PERIODICALLY(
-      kj::str("Autogates not initialised, check for ", key, " will have no effect"));
-  return false;
+
+  static const bool defaultResult = getenv("WORKERD_ALL_AUTOGATES") != nullptr;
+  return defaultResult;
 }
 
 void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {

@@ -156,14 +156,17 @@ concept MemoryRetainerIsRootNode = requires(T a) {
 template <typename T>
 concept V8Value = requires(T a) { std::is_assignable_v<v8::Value, T>; };
 
+// sometimes jsgGetMemoryName is virtual sometimes it is not, so ¯\_(ツ)_/¯
 #define JSG_MEMORY_INFO(Name)                                                                      \
-  kj::StringPtr jsgGetMemoryName() const {                                                         \
+  _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wsuggest-override\"")          \
+      kj::StringPtr                                                                                \
+      jsgGetMemoryName() const {                                                                   \
     return #Name##_kjc;                                                                            \
   }                                                                                                \
   size_t jsgGetMemorySelfSize() const {                                                            \
     return sizeof(Name);                                                                           \
   }                                                                                                \
-  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const _Pragma("GCC diagnostic pop")
 
 // jsg::MemoryTracker is used to construct the embedder graph for v8 heap
 // snapshot construction.
@@ -221,7 +224,7 @@ class MemoryTracker final {
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   template <typename T,
-      typename test = typename std::enable_if<std::numeric_limits<T>::is_specialized, bool>::type,
+      typename test = typename std::enable_if_t<std::numeric_limits<T>::is_specialized, bool>,
       typename dummy = bool>
   inline void trackField(kj::StringPtr edgeName,
       const kj::Array<T>& value,

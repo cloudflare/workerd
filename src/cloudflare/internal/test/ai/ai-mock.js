@@ -16,42 +16,6 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    if (url.pathname === '/to-everything/markdown/transformer') {
-      const body = await request.json();
-      const decoder = new TextDecoder('utf-8');
-
-      const result = [];
-
-      for (const file of body.files) {
-        if (file.name === 'headers.md') {
-          const newHeaders = new Headers(request.headers);
-          newHeaders.delete('content-length');
-          result.push({
-            name: file.name,
-            mimeType: file.mimeType,
-            format: 'markdown',
-            tokens: 0,
-            data: Object.fromEntries(newHeaders.entries()),
-          });
-        } else {
-          const fileblob = await base64ToBlob(file.data, file.mimeType);
-          const arr = await fileblob.arrayBuffer();
-          result.push({
-            name: file.name,
-            mimeType: file.mimeType,
-            format: 'markdown',
-            tokens: 0,
-            data: decoder.decode(arr),
-          });
-        }
-      }
-
-      return Response.json({
-        success: true,
-        result: result,
-      });
-    }
-
     if (url.pathname === '/ai-api/models/search') {
       return Response.json({
         success: true,
@@ -80,9 +44,20 @@ export default {
       });
     }
 
-    const data = await request.json();
+    const reqContentType = request.headers.get('content-type');
+
+    let data = {};
+    if (reqContentType === 'application/json') {
+      data = await request.json();
+    } else {
+      data = {
+        inputs: request.body,
+        options: Object.fromEntries(url.searchParams),
+      };
+    }
 
     const modelName = request.headers.get('cf-consn-model-id');
+    const isWebsocket = request.headers.get('Upgrade') === 'websocket';
 
     const respHeaders = {
       'cf-ai-req-id': '3a1983d7-1ddd-453a-ab75-c4358c91b582',
@@ -109,6 +84,19 @@ export default {
       );
     }
 
+    if (modelName === 'readableStreamIputs') {
+      return Response.json(
+        {
+          inputs: {},
+          options: { ...data.options },
+          requestUrl: request.url,
+        },
+        {
+          headers: respHeaders,
+        }
+      );
+    }
+
     if (modelName === 'inputErrorModel') {
       return Response.json(
         {
@@ -123,6 +111,36 @@ export default {
             'content-type': 'application/json',
             ...respHeaders,
           },
+        }
+      );
+    }
+
+    // Handle websocket requests
+    if (isWebsocket && modelName === '@cf/test/websocket') {
+      // For websocket requests, extract data from URL 'body' parameter
+      const bodyParam = url.searchParams.get('body');
+      let websocketData = {};
+      if (bodyParam) {
+        try {
+          // The AI API doesn't URL-encode the body parameter, so parse directly
+          websocketData = JSON.parse(bodyParam);
+        } catch (e) {
+          websocketData = { inputs: {}, options: {} };
+        }
+      }
+
+      return Response.json(
+        {
+          ...websocketData,
+          requestUrl: request.url,
+          headers: {
+            'cf-consn-sdk-version': '2.0.0',
+            'cf-consn-model-id': '@cf/test/websocket',
+            upgrade: 'websocket',
+          },
+        },
+        {
+          headers: respHeaders,
         }
       );
     }

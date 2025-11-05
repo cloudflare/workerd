@@ -23,6 +23,7 @@ using kj::byte;
 using kj::uint;
 class OutputGate;
 class SqliteDatabase;
+class SqliteKv;
 
 struct ActorCacheReadOptions {
   // If the entry is not already in cache and has to be read from disk, don't store the result in
@@ -49,16 +50,16 @@ struct ActorCacheWriteOptions {
 // Common interface between ActorCache and ActorCache::Transaction.
 class ActorCacheOps {
  public:
-  typedef kj::String Key;
-  typedef kj::StringPtr KeyPtr;
+  using Key = kj::String;
+  using KeyPtr = kj::StringPtr;
   // Keys are text for now, but we could also change this to `Array<const byte>`.
   static inline Key cloneKey(KeyPtr ptr) {
     return kj::str(ptr);
   }
 
   // Values are raw bytes.
-  typedef kj::Array<const byte> Value;
-  typedef kj::ArrayPtr<const byte> ValuePtr;
+  using Value = kj::Array<const byte>;
+  using ValuePtr = kj::ArrayPtr<const byte>;
 
   struct KeyValuePair {
     Key key;
@@ -108,7 +109,7 @@ class ActorCacheOps {
     ActorCacheWriteOptions options;
   };
 
-  typedef ActorCacheReadOptions ReadOptions;
+  using ReadOptions = ActorCacheReadOptions;
 
   // Get the values for some key, keys, or range of keys.
   //
@@ -132,7 +133,7 @@ class ActorCacheOps {
   virtual kj::OneOf<GetResultList, kj::Promise<GetResultList>> listReverse(
       Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) = 0;
 
-  typedef ActorCacheWriteOptions WriteOptions;
+  using WriteOptions = ActorCacheWriteOptions;
 
   // Writes a key/value into cache and schedules it to be flushed to disk later.
   //
@@ -167,6 +168,11 @@ class ActorCacheInterface: public ActorCacheOps {
  public:
   // If the actor's storage is backed by SQLite, return the underlying database.
   virtual kj::Maybe<SqliteDatabase&> getSqliteDatabase() = 0;
+
+  // If the actor's storage is backed by SQLite, return the SqliteKv object which provides a
+  // synchronous interface to KV storage. This is only available for SQLite-basked DOs because
+  // old-style DOs have asyncronous storage.
+  virtual kj::Maybe<SqliteKv&> getSqliteKv() = 0;
 
   class Transaction: public ActorCacheOps {
    public:
@@ -228,7 +234,7 @@ class ActorCacheInterface: public ActorCacheOps {
 
   // Call when entering the alarm handler.
   virtual kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false) = 0;
+      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") = 0;
 
   virtual void cancelDeferredAlarmDeletion() = 0;
 
@@ -313,6 +319,9 @@ class ActorCache final: public ActorCacheInterface {
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
     return kj::none;
   }
+  kj::Maybe<SqliteKv&> getSqliteKv() override {
+    return kj::none;
+  }
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> get(
@@ -337,7 +346,7 @@ class ActorCache final: public ActorCacheInterface {
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
 
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false) override;
+      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
   // See ActorCacheInterface
@@ -353,7 +362,7 @@ class ActorCache final: public ActorCacheInterface {
     // The `Own<void>` returned by `armAlarmHandler()` is actually set up to point to the
     // `ActorCache` itself, but with an alternate disposer that deletes the alarm rather than
     // the whole object.
-    void disposeImpl(void* pointer) const {
+    void disposeImpl(void* pointer) const override {
       auto p = reinterpret_cast<ActorCache*>(pointer);
       KJ_IF_SOME(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
         d.status = DeferredAlarmDelete::Status::READY;
@@ -742,7 +751,7 @@ class ActorCache final: public ActorCacheInterface {
   kj::Canceler oomCanceler;
 
   // Type of a lock on `SharedLru::cleanList`. We use the same lock to protect `currentValues`.
-  typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
+  using Lock = kj::Locked<kj::List<Entry, &Entry::link>>;
 
   // Add this entry to the clean list and set its status to CLEAN.
   // This doesn't do much, but it makes it easier to track what's going on.

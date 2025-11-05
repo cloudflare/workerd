@@ -14,8 +14,12 @@ namespace workerd::util {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
-  STREAMING_TAIL_WORKERS,
-  URLPATTERN,
+  V8_FAST_API,
+  // Enables support for the streaming tail worker. Note that this is currently also guarded behind
+  // an experimental compat flag.
+  STREAMING_TAIL_WORKER,
+  // Enable refactor used to consolidate the different tail worker stream implementations.
+  TAIL_STREAM_REFACTOR,
   NumOfKeys  // Reserved for iteration.
 };
 
@@ -49,7 +53,7 @@ class Autogate {
   static void deinitAutogate();
 
  private:
-  bool gates[(unsigned long)AutogateKey::NumOfKeys];
+  bool gates[static_cast<unsigned long>(AutogateKey::NumOfKeys)];
 
   Autogate(capnp::List<capnp::Text>::Reader autogates);
 };

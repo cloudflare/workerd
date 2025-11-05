@@ -27,17 +27,16 @@
 /* eslint-disable */
 
 import {
-  once,
   isIterable,
   isReadable,
   isReadableNodeStream,
   isNodeStream,
-  eos,
-  destroyer as destroyerImpl,
 } from 'node-internal:streams_util';
+import { eos } from 'node-internal:streams_end_of_stream';
+import { destroyer as destroyerImpl } from 'node-internal:streams_destroy';
+import { once } from 'node-internal:internal_http_util';
 
-import * as process from 'node-internal:process';
-
+import { nextTick } from 'node-internal:internal_process';
 import { PassThrough } from 'node-internal:streams_transform';
 import { Duplex } from 'node-internal:streams_duplex';
 import { Readable, from } from 'node-internal:streams_readable';
@@ -214,7 +213,7 @@ export function pipelineImpl(streams, callback, opts) {
       if (!error) {
         lastStreamCleanup.forEach((fn) => fn());
       }
-      process.nextTick(callback, error, value);
+      nextTick(callback, error, value);
     }
   }
   let ret;
@@ -309,11 +308,11 @@ export function pipelineImpl(streams, callback, opts) {
               if (end) {
                 pt.end();
               }
-              process.nextTick(finish);
+              nextTick(finish);
             },
             (err) => {
               pt.destroy(err);
-              process.nextTick(finish, err);
+              nextTick(finish, err);
             }
           );
         } else if (isIterable(ret, true)) {
@@ -365,7 +364,7 @@ export function pipelineImpl(streams, callback, opts) {
     (signal !== null && signal !== undefined && signal.aborted) ||
     (outerSignal !== null && outerSignal !== undefined && outerSignal.aborted)
   ) {
-    process.nextTick(abort);
+    nextTick(abort);
   }
   return ret;
 }

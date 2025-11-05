@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "0.11.2"
-URL = "https://github.com/astral-sh/ruff/releases/download/0.11.2/ruff-x86_64-unknown-linux-gnu.tar.gz"
+TAG_NAME = "0.12.1"
+URL = "https://github.com/astral-sh/ruff/releases/download/0.12.1/ruff-x86_64-unknown-linux-gnu.tar.gz"
 STRIP_PREFIX = "ruff-x86_64-unknown-linux-gnu"
-SHA256 = "cc5ebc29bc0493a2f42654f757573d062d0984ce91bd796a41109ab643ef4e3f"
+SHA256 = "61357b8326d116113596a3d8e9f2398c33f0d21e0f99d50d9e03ac9578194d48"
 TYPE = "tgz"
 
 def dep_ruff_linux_amd64():
@@ -15,5 +15,5 @@ def dep_ruff_linux_amd64():
         strip_prefix = STRIP_PREFIX,
         type = TYPE,
         sha256 = SHA256,
-        build_file_content = "filegroup(name='file', srcs=glob(['**']))",
+        build_file_content = "filegroup(name='file', srcs=['ruff'], visibility=['//visibility:public'])",
     )

@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fs-access-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "fs-access-test.js")
+        ],
+        compatibilityDate = "2025-05-01",
+        compatibilityFlags = ["nodejs_compat", "experimental", "enable_nodejs_fs_module"]
+      )
+    ),
+  ],
+);

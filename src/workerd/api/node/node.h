@@ -8,10 +8,12 @@
 #include <workerd/api/node/buffer.h>
 #include <workerd/api/node/dns.h>
 #include <workerd/api/node/module.h>
+#include <workerd/api/node/process.h>
+#include <workerd/api/node/sqlite.h>
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/url.h>
 #include <workerd/api/node/util.h>
-#include <workerd/io/compatibility-date.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
@@ -22,39 +24,19 @@
 
 namespace workerd::api::node {
 
-// To be exposed only as an internal module for use by other built-ins.
-// TODO(later): Consider moving out of node.h when needed for other
-// built-ins
-class CompatibilityFlags: public jsg::Object {
- public:
-  CompatibilityFlags() = default;
-  CompatibilityFlags(jsg::Lock&, const jsg::Url&) {}
-
-  JSG_RESOURCE_TYPE(CompatibilityFlags, workerd::CompatibilityFlags::Reader flags) {
-    // Not your typical JSG_RESOURCE_TYPE definition.. here we are iterating
-    // through all of the compatibility flags and registering each as read-only
-    // literal values on the instance...
-    auto dynamic = capnp::toDynamic(flags);
-    auto schema = dynamic.getSchema();
-    for (auto field: schema.getFields()) {
-      registry.template registerReadonlyInstanceProperty<bool>(
-          field.getProto().getName(), dynamic.get(field).as<bool>());
-    }
-  }
-};
-
 #define NODEJS_MODULES(V)                                                                          \
-  V(CompatibilityFlags, "workerd:compatibility-flags")                                             \
   V(AsyncHooksModule, "node-internal:async_hooks")                                                 \
   V(BufferUtil, "node-internal:buffer")                                                            \
   V(CryptoImpl, "node-internal:crypto")                                                            \
   V(ModuleUtil, "node-internal:module")                                                            \
+  V(ProcessModule, "node-internal:process")                                                        \
   V(UtilModule, "node-internal:util")                                                              \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
   V(UrlUtil, "node-internal:url")                                                                  \
   V(DnsUtil, "node-internal:dns")                                                                  \
-  V(TimersUtil, "node-internal:timers")
+  V(TimersUtil, "node-internal:timers")                                                            \
+  V(SqliteUtil, "node-internal:sqlite")
 
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
 // node.js compat C++ modules that should be guarded by the experimental compat
@@ -63,6 +45,32 @@ class CompatibilityFlags: public jsg::Object {
 
 bool isNodeJsCompatEnabled(auto featureFlags) {
   return featureFlags.getNodeJsCompat() || featureFlags.getNodeJsCompatV2();
+}
+
+constexpr bool isNodeJsCompatFsModule(kj::StringPtr name) {
+  return name == "node:fs"_kj;
+}
+
+constexpr bool isNodeHttpModule(kj::StringPtr name) {
+  return name == "node:http"_kj || name == "node:_http_common"_kj ||
+      name == "node:_http_outgoing"_kj || name == "node:_http_client"_kj ||
+      name == "node:_http_incoming"_kj || name == "node:_http_agent"_kj || name == "node:https"_kj;
+}
+
+constexpr bool isNodeHttpServerModule(kj::StringPtr name) {
+  return name == "node:_http_server"_kj;
+}
+
+constexpr bool isNodeOsModule(kj::StringPtr name) {
+  return name == "node:os"_kj;
+}
+
+constexpr bool isNodeHttp2Module(kj::StringPtr name) {
+  return name == "node:http2"_kj;
+}
+
+constexpr bool isNodeConsoleModule(kj::StringPtr name) {
+  return name == "node:console"_kj;
 }
 
 template <class Registry>
@@ -80,12 +88,112 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
-  // If the `nodejs_compat` flag isn't enabled, only register internal modules.
-  // We need these for `console.log()`ing when running `workerd` locally.
-  kj::Maybe<jsg::ModuleType> maybeFilter;
-  if (!nodeJsCompatEnabled) maybeFilter = jsg::ModuleType::INTERNAL;
+  registry.addBuiltinBundleFiltered(NODE_BUNDLE, [&](jsg::Module::Reader module) {
+    if (!nodeJsCompatEnabled) {
+      // If the `nodejs_compat` flag isn't enabled, only register internal modules.
+      // We need these for `console.log()`ing when running `workerd` locally.
+      return module.getType() == jsg::ModuleType::INTERNAL;
+    }
 
-  registry.addBuiltinBundle(NODE_BUNDLE, maybeFilter);
+    if (isNodeJsCompatFsModule(module.getName())) {
+      return featureFlags.getEnableNodeJsFsModule();
+    }
+
+    // We put node:http and node:https modules behind a compat flag
+    // for securing backward compatibility.
+    if (isNodeHttpModule(module.getName())) {
+      return featureFlags.getEnableNodejsHttpModules();
+    }
+
+    // We put node:_http_server and related features behind a compat flag
+    // for securing backward compatibility.
+    if (isNodeHttpServerModule(module.getName())) {
+      return featureFlags.getEnableNodejsHttpServerModules();
+    }
+
+    if (isNodeOsModule(module.getName())) {
+      return featureFlags.getEnableNodeJsOsModule();
+    }
+
+    if (isNodeHttp2Module(module.getName())) {
+      return featureFlags.getEnableNodeJsHttp2Module();
+    }
+
+    if (isNodeConsoleModule(module.getName())) {
+      return featureFlags.getEnableNodeJsConsoleModule();
+    }
+
+    if (module.getName() == "node:vm"_kj) {
+      return featureFlags.getEnableNodeJsVmModule();
+    }
+
+    if (module.getName() == "node:perf_hooks"_kj) {
+      return featureFlags.getEnableNodeJsPerfHooksModule();
+    }
+
+    if (module.getName() == "node:domain"_kj) {
+      return featureFlags.getEnableNodeJsDomainModule();
+    }
+
+    if (module.getName() == "node:child_process"_kj) {
+      return featureFlags.getEnableNodeJsChildProcessModule();
+    }
+
+    if (module.getName() == "node:v8"_kj) {
+      return featureFlags.getEnableNodeJsV8Module();
+    }
+
+    if (module.getName() == "node:tty"_kj) {
+      return featureFlags.getEnableNodeJsTtyModule();
+    }
+
+    if (module.getName() == "node:punycode"_kj) {
+      return featureFlags.getEnableNodeJsPunycodeModule();
+    }
+
+    if (module.getName() == "node:cluster"_kj) {
+      return featureFlags.getEnableNodeJsClusterModule();
+    }
+
+    if (module.getName() == "node:worker_threads"_kj) {
+      return featureFlags.getEnableNodeJsWorkerThreadsModule();
+    }
+
+    if (module.getName() == "node:_stream_wrap"_kj) {
+      return featureFlags.getEnableNodeJsStreamWrapModule();
+    }
+
+    if (module.getName() == "node:wasi"_kj) {
+      return featureFlags.getEnableNodeJsWasiModule();
+    }
+
+    if (module.getName() == "node:dgram"_kj) {
+      return featureFlags.getEnableNodeJsDgramModule();
+    }
+
+    if (module.getName() == "node:inspector"_kj ||
+        module.getName() == "node:inspector/promises"_kj) {
+      return featureFlags.getEnableNodeJsInspectorModule();
+    }
+
+    if (module.getName() == "node:trace_events"_kj) {
+      return featureFlags.getEnableNodeJsTraceEventsModule();
+    }
+
+    if (module.getName() == "node:readline"_kj || module.getName() == "node:readline/promises"_kj) {
+      return featureFlags.getEnableNodeJsReadlineModule();
+    }
+
+    if (module.getName() == "node:repl"_kj) {
+      return featureFlags.getEnableNodeJsReplModule();
+    }
+
+    if (module.getName() == "node:sqlite"_kj) {
+      return featureFlags.getEnableNodeJsSqliteModule();
+    }
+
+    return true;
+  });
 
   // If the `nodejs_compat` flag is off, but the `nodejs_als` flag is on, we
   // need to register the `node:async_hooks` module from the bundle.
@@ -143,7 +251,8 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
 }  // namespace workerd::api::node
 
 #define EW_NODE_ISOLATE_TYPES                                                                      \
-  api::node::CompatibilityFlags, EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,       \
+  EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
-      EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES, EW_NODE_URL_ISOLATE_TYPES,           \
-      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES\
+      EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
+      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES,          \
+      EW_NODE_TIMERS_ISOLATE_TYPES, EW_NODE_SQLITE_ISOLATE_TYPES

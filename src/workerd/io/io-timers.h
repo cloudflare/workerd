@@ -27,7 +27,7 @@ class TimeoutId {
   // Convert an externally provided double into a TimeoutId. If you are making a new TimeoutId,
   // use a Generator instead.
   inline static TimeoutId fromNumber(NumberType id) {
-    return TimeoutId(ValueType(id));
+    return TimeoutId(static_cast<ValueType>(id));
   }
 
   // Convert a TimeoutId to an integer-convertable double for external consumption.
@@ -84,6 +84,7 @@ class TimeoutManager {
   virtual void clearTimeout(IoContext& context, TimeoutId id) = 0;
   virtual size_t getTimeoutCount() const = 0;
   virtual kj::Maybe<kj::Date> getNextTimeout() const = 0;
+  virtual void cancelAll() = 0;
 };
 
 }  // namespace workerd

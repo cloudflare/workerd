@@ -7,9 +7,13 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "abortsignal-test.js")
         ],
-        compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat"]
+        compatibilityDate = "2025-01-01",
+        compatibilityFlags = ["nodejs_compat", "enable_abortsignal_rpc", "experimental"],
+        bindings = [
+          (name = "RpcRemoteEnd", service = (name = "abortsignal-test", entrypoint = "RpcRemoteEnd")),
+        ]
       )
     ),
   ],
+  v8Flags = ["--expose-gc"]
 );

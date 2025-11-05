@@ -20,8 +20,8 @@ struct StructContext: public Object, public ContextGlobal {
   kj::String readTestStruct(TestStruct s) {
     return kj::str(s.str, ", ", s.num, ", ", s.box->value);
   }
-  TestStruct makeTestStruct(kj::String str, double num, NumberBox& box) {
-    return {kj::mv(str), num, jsg::alloc<NumberBox>(box.value)};
+  TestStruct makeTestStruct(jsg::Lock& js, kj::String str, double num, NumberBox& box) {
+    return {kj::mv(str), num, js.alloc<NumberBox>(box.value)};
   }
   V8Ref<v8::Object> readSelfStruct(Lock& js, SelfStruct s) {
     KJ_ASSERT(s.i == 123);

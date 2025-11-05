@@ -4,6 +4,8 @@
 
 #pragma once
 #include "basics.h"
+#include "events.h"
+#include "http.h"
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
@@ -19,70 +21,6 @@ class Response;
 // https://developer.mozilla.org/en-US/docs/Web/API/EventSource
 class EventSource: public EventTarget {
  public:
-  class ErrorEvent final: public Event {
-   public:
-    ErrorEvent(jsg::Lock& js, const jsg::JsValue& error)
-        : Event(kj::str("error")),
-          error(js, error) {}
-
-    static jsg::Ref<ErrorEvent> constructor() = delete;
-    JSG_RESOURCE_TYPE(ErrorEvent) {
-      JSG_INHERIT(Event);
-      JSG_LAZY_READONLY_INSTANCE_PROPERTY(error, getError);
-    }
-
-   private:
-    jsg::JsRef<jsg::JsValue> error;
-
-    jsg::JsValue getError(jsg::Lock& js) {
-      return error.getHandle(js);
-    }
-  };
-
-  class OpenEvent final: public Event {
-   public:
-    OpenEvent(): Event(kj::str("open")) {}
-    static jsg::Ref<OpenEvent> constructor() = delete;
-    JSG_RESOURCE_TYPE(OpenEvent) {
-      JSG_INHERIT(Event);
-    }
-  };
-
-  class MessageEvent final: public Event {
-   public:
-    explicit MessageEvent(kj::Maybe<kj::String> type,
-        kj::String data,
-        kj::String lastEventId,
-        kj::Maybe<jsg::Url&> url)
-        : Event(kj::mv(type).orDefault([] { return kj::str("message"); })),
-          data(kj::mv(data)),
-          lastEventId(kj::mv(lastEventId)),
-          origin(url.map([](auto& url) { return url.getOrigin(); })) {}
-
-    static jsg::Ref<MessageEvent> constructor() = delete;
-    JSG_RESOURCE_TYPE(MessageEvent) {
-      JSG_INHERIT(Event);
-      JSG_LAZY_READONLY_INSTANCE_PROPERTY(data, getData);
-      JSG_LAZY_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
-      JSG_LAZY_READONLY_INSTANCE_PROPERTY(lastEventId, getLastEventId);
-    }
-
-   private:
-    kj::String data;
-    kj::String lastEventId;
-    kj::Maybe<kj::Array<const char>> origin;
-
-    kj::StringPtr getData() {
-      return data;
-    }
-    kj::StringPtr getLastEventId() {
-      return lastEventId;
-    }
-    kj::Maybe<kj::ArrayPtr<const char>> getOrigin() {
-      return origin.map([](auto& a) -> kj::ArrayPtr<const char> { return a.asPtr(); });
-    }
-  };
-
   struct EventSourceInit {
     // We don't actually make use of the standard withCredentials option. If this is set to
     // any truthy value, we'll throw.
@@ -227,7 +165,7 @@ class EventSource: public EventTarget {
   kj::Maybe<FetchImpl> impl;
   jsg::Ref<AbortController> abortController;
   State readyState;
-  kj::String lastEventId = kj::String();
+  kj::String lastEventId;
 
   // Indicates that the close method has been previously called.
   bool closeCalled = false;
@@ -264,6 +202,4 @@ class EventSource: public EventTarget {
 
 }  // namespace workerd::api
 
-#define EW_EVENTSOURCE_ISOLATE_TYPES                                                               \
-  api::EventSource, api::EventSource::ErrorEvent, api::EventSource::OpenEvent,                     \
-      api::EventSource::MessageEvent, api::EventSource::EventSourceInit
+#define EW_EVENTSOURCE_ISOLATE_TYPES api::EventSource, api::EventSource::EventSourceInit

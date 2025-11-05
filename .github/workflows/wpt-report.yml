@@ -1,0 +1,36 @@
+name: WPT report
+
+on:
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04
+      os_name: linux
+      suffix: ''
+      extra_bazel_args: '--config=ci-test'
+      test_target: '//src/wpt/...'
+      upload_test_logs: true
+      fetch_depth: 0
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+
+  report:
+    needs: [test]
+    uses: ./.github/workflows/_wpt.yml
+    with:
+        image: ubuntu-22.04
+        logs_artifact: 'test-logs-linux-X64.zip'
+        report_artifact: 'wpt-report.json'
+
+
+
+
+

@@ -33,8 +33,8 @@ import {
 
 import {
   Transform,
-  TransformOptions,
-  TransformCallback,
+  type TransformOptions,
+  type TransformCallback,
 } from 'node-internal:streams_transform';
 
 import {
@@ -513,14 +513,12 @@ function getPaddingAndHash(options: HashOptions): PublicPrivateCipherOptions {
 }
 
 export function privateEncrypt(
-  privateKey: CreateAsymmetricKeyOptions | KeyData,
-  buffer: string | ArrayBufferView | ArrayBuffer
+  privateKey: CreateAsymmetricKeyOptions | KeyObject | CryptoKey | undefined,
+  buffer: string | ArrayBufferView | ArrayBuffer | undefined
 ): Buffer {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (privateKey === undefined) {
     throw new ERR_MISSING_ARGS('privateKey');
   }
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (buffer === undefined) {
     throw new ERR_MISSING_ARGS('buffer');
   }
@@ -542,7 +540,7 @@ export function privateEncrypt(
       }
       return getKeyObjectHandle(privateKey);
     } else {
-      const pvtKey = createPrivateKey(privateKey as CreateAsymmetricKeyOptions);
+      const pvtKey = createPrivateKey(privateKey);
       return getKeyObjectHandle(pvtKey);
     }
   })();

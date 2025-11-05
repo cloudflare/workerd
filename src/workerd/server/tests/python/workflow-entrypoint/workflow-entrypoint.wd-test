@@ -1,0 +1,36 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "py", worker = .pyWorker),
+    (name = "js", worker = .jsWorker),
+  ],
+);
+
+const pyWorker :Workerd.Worker = (
+  compatibilityDate = "2025-03-04",
+
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows"],
+
+  modules = [
+    (name = "workflow.py", pythonModule = embed "workflow.py"),
+  ],
+
+  bindings = [
+    (name = "PythonWorkflow", service = (name = "py", entrypoint = "WorkflowEntrypointExample")),
+  ],
+);
+
+const jsWorker :Workerd.Worker = (
+  compatibilityDate = "2025-03-04",
+
+  compatibilityFlags = ["nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "worker.js"),
+  ],
+
+  bindings = [
+    (name = "PythonWorkflow", service = (name = "py", entrypoint = "WorkflowEntrypointExample")),
+  ],
+);

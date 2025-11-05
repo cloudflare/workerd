@@ -1,0 +1,44 @@
+bazel_dep(name = "aspect_rules_esbuild", version = "0.23.0")
+bazel_dep(name = "aspect_rules_js", version = "2.6.2")
+bazel_dep(name = "aspect_rules_ts")
+bazel_dep(name = "rules_nodejs", version = "6.5.2")
+
+# TODO(soon): Remove after next rules_ts release
+git_override(
+    module_name = "aspect_rules_ts",
+    commit = "e7a6c5a30dde6448d735182de25a4ec8f6a35fcc",
+    remote = "https://github.com/aspect-build/rules_ts.git",
+)
+
+NODE_VERSION = "22.20.0"
+
+# ========================================================================================
+# Node.js bootstrap
+#
+# workerd uses Node.js scripts for generating TypeScript types.
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+node.toolchain(
+    node_urls = [
+        # github workflows may substitute a mirror URL here to avoid fetch failures.
+        # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
+        "https://nodejs.org/dist/v{version}/{filename}",
+    ],
+    node_version = NODE_VERSION,
+)
+
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm",
+    data = ["//:package.json"],
+    npmrc = "//:.npmrc",
+    pnpm_lock = "//:pnpm-lock.yaml",
+    verify_node_modules_ignored = "//:.bazelignore",
+)
+use_repo(npm, "npm")
+
+rules_ts_ext = use_extension("@aspect_rules_ts//ts:extensions.bzl", "ext")
+rules_ts_ext.deps(
+    # This keeps the TypeScript version in-sync with the editor, which is typically best.
+    ts_version_from = "//:package.json",
+)
+use_repo(rules_ts_ext, "npm_typescript")

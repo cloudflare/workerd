@@ -11,7 +11,7 @@ namespace workerd::api {
 constexpr uint MAX_INDEXES_LENGTH = 1;
 constexpr size_t MAX_INDEX_SIZE_IN_BYTES = 96;
 constexpr uint MAX_ARRAY_MEMBERS = 20;
-constexpr size_t MAX_CUMULATIVE_BYTES_IN_BLOBS = 256 * MAX_ARRAY_MEMBERS;
+constexpr size_t MAX_CUMULATIVE_BYTES_IN_BLOBS = 800 * MAX_ARRAY_MEMBERS;
 
 template <typename Message>
 void setDoubles(Message msg, kj::ArrayPtr<double> arr, kj::StringPtr errorPrefix) {

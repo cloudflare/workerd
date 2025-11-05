@@ -7,21 +7,28 @@ interface Fetcher {
 }
 
 export class AutoRAGInternalError extends Error {
-  public constructor(message: string, name = 'AutoRAGInternalError') {
+  constructor(message: string, name = 'AutoRAGInternalError') {
     super(message);
     this.name = name;
   }
 }
 
 export class AutoRAGNotFoundError extends Error {
-  public constructor(message: string, name = 'AutoRAGNotFoundError') {
+  constructor(message: string, name = 'AutoRAGNotFoundError') {
     super(message);
     this.name = name;
   }
 }
 
 export class AutoRAGUnauthorizedError extends Error {
-  public constructor(message: string, name = 'AutoRAGUnauthorizedError') {
+  constructor(message: string, name = 'AutoRAGUnauthorizedError') {
+    super(message);
+    this.name = name;
+  }
+}
+
+export class AutoRAGNameNotSetError extends Error {
+  constructor(message: string, name = 'AutoRAGNameNotSetError') {
     super(message);
     this.name = name;
   }
@@ -45,14 +52,41 @@ async function parseError(
   }
 }
 
+export type ComparisonFilter = {
+  key: string;
+  type: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte';
+  value: string | number | boolean;
+};
+
+export type CompoundFilter = {
+  type: 'and' | 'or';
+  filters: ComparisonFilter[];
+};
+
 export type AutoRagSearchRequest = {
   query: string;
+  filters?: CompoundFilter | ComparisonFilter;
   max_num_results?: number;
   ranking_options?: {
     ranker?: string;
     score_threshold?: number;
   };
+  reranking?: {
+    enabled?: boolean;
+    model?: string;
+  };
   rewrite_query?: boolean;
+};
+
+export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
+  stream?: boolean;
+  system_prompt?: string;
+};
+export type AutoRagAiSearchRequestStreaming = Omit<
+  AutoRagAiSearchRequest,
+  'stream'
+> & {
+  stream: true;
 };
 
 export type AutoRagSearchResponse = {
@@ -72,22 +106,54 @@ export type AutoRagSearchResponse = {
   next_page: string | null;
 };
 
+export type AutoRagListResponse = {
+  id: string;
+  enable: boolean;
+  type: string;
+  source: string;
+  vectorize_name: string;
+  paused: boolean;
+  status: string;
+}[];
+
 export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 
 export class AutoRAG {
   readonly #fetcher: Fetcher;
-  readonly #autoragId: string;
+  readonly #autoragId: string | null;
 
-  public constructor(fetcher: Fetcher, autoragId: string) {
+  constructor(fetcher: Fetcher, autoragId?: string) {
     this.#fetcher = fetcher;
-    this.#autoragId = autoragId;
+    this.#autoragId = autoragId || null;
   }
 
-  public async search(
-    params: AutoRagSearchRequest
-  ): Promise<AutoRagSearchResponse> {
+  async list(): Promise<AutoRagListResponse> {
+    const res = await this.#fetcher.fetch(
+      `https://workers-binding.ai/autorag/rags`,
+      {
+        method: 'GET',
+        headers: {
+          'content-type': 'application/json',
+        },
+      }
+    );
+
+    if (!res.ok) {
+      throw await parseError(res);
+    }
+
+    const data = (await res.json()) as { result: AutoRagListResponse };
+
+    return data.result;
+  }
+
+  async search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse> {
+    if (!this.#autoragId) {
+      throw new AutoRAGNameNotSetError('AutoRAG name not defined');
+    }
+
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/autorag/rags/${this.#autoragId}/search`,
       {
@@ -117,9 +183,17 @@ export class AutoRAG {
     return data.result;
   }
 
-  public async aiSearch(
-    params: AutoRagSearchRequest
-  ): Promise<AutoRagAiSearchResponse> {
+  async aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
+  async aiSearch(
+    params: AutoRagAiSearchRequest
+  ): Promise<AutoRagAiSearchResponse>;
+  async aiSearch(
+    params: AutoRagAiSearchRequest
+  ): Promise<AutoRagAiSearchResponse | Response> {
+    if (!this.#autoragId) {
+      throw new AutoRAGNameNotSetError('AutoRAG name not defined');
+    }
+
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/autorag/rags/${this.#autoragId}/ai-search`,
       {
@@ -142,6 +216,10 @@ export class AutoRAG {
         throw await parseError(res, 'AutoRAG not found', AutoRAGNotFoundError);
       }
       throw await parseError(res);
+    }
+
+    if (params.stream === true) {
+      return res;
     }
 
     const data = (await res.json()) as { result: AutoRagAiSearchResponse };

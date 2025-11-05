@@ -6,3 +6,17 @@ string_flag(
     build_setting_default = "",
     visibility = ["//visibility:public"],
 )
+
+# Dummy config settings for when workerd is built standalone
+# These always return false since we don't want prebuilt behavior in standalone workerd
+config_setting(
+    name = "no_build",
+    values = {"define": "never_match=true"},  # This will never match
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "prebuilt_binaries_arm64",
+    values = {"define": "never_match=true"},  # This will never match
+    visibility = ["//visibility:public"],
+)

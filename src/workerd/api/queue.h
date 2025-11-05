@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/basics.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
@@ -257,7 +258,7 @@ class QueueEvent final: public ExtendableEvent {
   struct CompletedWithError {
     kj::Exception error;
   };
-  typedef kj::OneOf<Incomplete, CompletedSuccessfully, CompletedWithError> CompletionStatus;
+  using CompletionStatus = kj::OneOf<Incomplete, CompletedSuccessfully, CompletedWithError>;
 
   void setCompletionStatus(CompletionStatus status) {
     completionStatus = status;
@@ -325,7 +326,7 @@ class QueueController final: public jsg::Object {
 
 // Extension of ExportedHandler covering queue handlers.
 struct QueueExportedHandler {
-  typedef kj::Promise<void> QueueHandler(jsg::Ref<QueueController> controller,
+  using QueueHandler = kj::Promise<void>(jsg::Ref<QueueController> controller,
       jsg::JsRef<jsg::JsValue> env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<QueueHandler>> queue;
@@ -352,6 +353,8 @@ class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj
   uint16_t getType() override {
     return EVENT_TYPE;
   }
+
+  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
 
   QueueRetryBatch getRetryBatch() const {
     return {.retry = result.retryBatch.retry, .delaySeconds = result.retryBatch.delaySeconds};

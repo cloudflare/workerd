@@ -2,6 +2,15 @@ cc_library(
     name = "simdutf",
     srcs = ["simdutf.cpp"],
     hdrs = ["simdutf.h"],
-    copts = ["-w"],
+    copts = select({
+        # Enable SSE4.2 extensions, this reduces code size as the fallback code path for pre-Westmere
+        # CPUs is no longer needed.
+        "@platforms//cpu:x86_64": ["-msse4.2"],
+        "//conditions:default": [],
+    }) + [
+        "-Wno-unused-function",
+        "-Wno-unused-const-variable",
+    ],
+    defines = ["SIMDUTF_ATOMIC_REF"],
     visibility = ["//visibility:public"],
 )

@@ -60,6 +60,7 @@ PERFETTO_CONFIG = struct(
         protobuf_py = [],
         pandas_py = [],
         tp_vendor_py = [],
+        tp_resolvers_py = [],
 
         # There are multiple configurations for the function name demangling
         # logic in trace processor:
@@ -78,6 +79,7 @@ PERFETTO_CONFIG = struct(
 
         # no open csd support needed
         open_csd = [],
+        android_test_common = [],
     ),
 
     # This struct allows embedders to customize the cc_opts for Perfetto
@@ -135,4 +137,5 @@ PERFETTO_CONFIG = struct(
     # for now we shouldn't need any perfetto-specific compiler options, should already be set up
     # properly through .bazelrc.
     default_copts = [],
+    default_cxxopts = [],
 )

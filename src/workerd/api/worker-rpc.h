@@ -15,6 +15,7 @@
 // See worker-interface.capnp for the underlying protocol.
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -23,22 +24,23 @@
 
 namespace workerd::api {
 
-// For the same reason we limit the size of WebSocket messages to 1MB, we limit RPC payloads.
-// Very large messages would both cause problems for the underlying Cap'n Proto transport,
-// as well as put too much memory pressure on the isolate. Applications which need to move
-// large amounts of data should split the data into several smaller chunks transmitted through
-// separate calls.
-constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
+// The 32MB limit is based on the fact that Cap'n Proto's default total message size limit is 64MB,
+// and we want to stay clear of that.
+// Additionally, considering total memory of the isolate is limited to 128MB a significantly larger
+// memory might cause unwarrented condemnations and terminations.
+// Applications which need to move large amounts of data should split the data into several smaller
+// chunks transmitted through separate calls.
+constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 25;
 
 // ExternalHandler used when serializing RPC messages. Serialization functions with which to
 // handle RPC specially should use this.
-class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler {
+class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandler {
  public:
   using GetStreamSinkFunc = kj::Function<rpc::JsValue::StreamSink::Client()>;
 
   // `getStreamSinkFunc` will be called at most once, the first time a stream is encountered in
   // serialization, to get the StreamSink that should be used.
-  RpcSerializerExternalHander(GetStreamSinkFunc getStreamSinkFunc)
+  RpcSerializerExternalHandler(GetStreamSinkFunc getStreamSinkFunc)
       : getStreamSinkFunc(kj::mv(getStreamSinkFunc)) {}
 
   using BuilderCallback = kj::Function<void(rpc::JsValue::External::Builder)>;
@@ -101,17 +103,17 @@ class StreamSinkImpl;
 
 // ExternalHandler used when deserializing RPC messages. Deserialization functions with which to
 // handle RPC specially should use this.
-class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHandler {
+class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHandler {
  public:
   // The `streamSink` parameter should be provided if a StreamSink already exists, e.g. when
   // deserializing results. If omitted, it will be constructed on-demand.
-  RpcDeserializerExternalHander(capnp::List<rpc::JsValue::External>::Reader externals,
+  RpcDeserializerExternalHandler(capnp::List<rpc::JsValue::External>::Reader externals,
       RpcStubDisposalGroup& disposalGroup,
       kj::Maybe<StreamSinkImpl&> streamSink)
       : externals(externals),
         disposalGroup(disposalGroup),
         streamSink(streamSink) {}
-  ~RpcDeserializerExternalHander() noexcept(false);
+  ~RpcDeserializerExternalHandler() noexcept(false);
 
   // Read and return the next external.
   rpc::JsValue::External::Reader read();
@@ -148,8 +150,8 @@ class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHan
 // makes RPCs back to the original object.
 class JsRpcTarget: public jsg::Object {
  public:
-  static jsg::Ref<JsRpcTarget> constructor() {
-    return jsg::alloc<JsRpcTarget>();
+  static jsg::Ref<JsRpcTarget> constructor(jsg::Lock& js) {
+    return js.alloc<JsRpcTarget>();
   }
 
   JSG_RESOURCE_TYPE(JsRpcTarget) {}
@@ -358,7 +360,7 @@ class JsRpcStub: public JsRpcClientProvider {
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
-  jsg::Ref<JsRpcStub> dup();
+  jsg::Ref<JsRpcStub> dup(jsg::Lock& js);
   void dispose();
 
   // Given a JsRpcTarget, make an RPC stub from it.
@@ -367,7 +369,7 @@ class JsRpcStub: public JsRpcClientProvider {
   // that extend `JsRpcTarget` and then they will simply return those. The serializer will
   // automatically handle `JsRpcTarget` by wrapping it in `JsRpcStub`. However, it can be useful
   // for testing to be able to construct a loopback stub.
-  static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
+  static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::JsObject object);
 
   // Call the stub itself as a function.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -430,11 +432,13 @@ class RpcStubDisposalGroup {
 class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
  public:
   JsRpcSessionCustomEventImpl(uint16_t typeId,
+      kj::Maybe<kj::String> wrapperModule = kj::none,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
-        typeId(typeId) {}
+        typeId(typeId),
+        wrapperModule(kj::mv(wrapperModule)) {}
 
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -449,6 +453,10 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
+  kj::Maybe<tracing::EventInfo> getEventInfo() const override {
+    return tracing::EventInfo(tracing::JsRpcEventInfo(kj::str("")));
+  }
+
   rpc::JsRpcTarget::Client getCap() {
     auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
     clientCap = kj::none;
@@ -457,6 +465,10 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
 
   kj::Promise<Result> notSupported() override {
     JSG_FAIL_REQUIRE(TypeError, "The receiver is not an RPC object");
+  }
+
+  void failed(const kj::Exception& e) override {
+    capFulfiller->reject(kj::cp(e));
   }
 
   // Event ID for jsRpcSession.
@@ -474,104 +486,12 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
   kj::Maybe<rpc::JsRpcTarget::Client> clientCap;
   uint16_t typeId;
 
+  kj::Maybe<kj::String> wrapperModule;
+
   class ServerTopLevelMembrane;
 };
 
-// Base class for exported RPC services.
-//
-// When the worker's top-level module exports a class that extends this class, it means that it
-// is a stateless service.
-//
-//     import {WorkerEntrypoint} from "cloudflare:workers";
-//     export class MyService extends WorkerEntrypoint {
-//       async fetch(req) { ... }
-//       async someRpcMethod(a, b) { ... }
-//     }
-//
-// `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
-// define a constructor.
-class WorkerEntrypoint: public jsg::Object {
- public:
-  static jsg::Ref<WorkerEntrypoint> constructor(
-      const v8::FunctionCallbackInfo<v8::Value>& args, jsg::JsObject ctx, jsg::JsObject env);
-
-  JSG_RESOURCE_TYPE(WorkerEntrypoint) {}
-};
-
-// Like WorkerEntrypoint, but this is the base class for Durable Object classes.
-//
-// Note that the name of this class as seen by JavaScript is `DurableObject`, but using that name
-// in C++ would conflict with the type name currently used by DO stubs.
-// TODO(cleanup): Rename DO stubs to `DurableObjectStub`?
-//
-// Historically, DO classes were not expected to inherit anything. However, this made it impossible
-// to tell whether an exported class was intended to be a DO class vs. something else. Originally
-// there were no other kinds of exported classes so this was fine. Going forward, we encourage
-// everyone to be explicit by inheriting this, and we require it if you want to use RPC.
-class DurableObjectBase: public jsg::Object {
- public:
-  static jsg::Ref<DurableObjectBase> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<DurableObjectState> ctx,
-      jsg::JsObject env);
-
-  JSG_RESOURCE_TYPE(DurableObjectBase) {}
-};
-
-// Base class for Workflows
-//
-// When the worker's top-level module exports a class that extends this class, it means that it
-// is a Workflow.
-//
-//     import { WorkflowEntrypoint } from "cloudflare:workers";
-//     export class MyWorkflow extends WorkflowEntrypoint {
-//       async run(batch, fns) { ... }
-//     }
-//
-// `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
-// define a constructor.
-class WorkflowEntrypoint: public jsg::Object {
- public:
-  static jsg::Ref<WorkflowEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<ExecutionContext> ctx,
-      jsg::JsObject env);
-
-  JSG_RESOURCE_TYPE(WorkflowEntrypoint) {}
-};
-
-// The "cloudflare:workers" module, which exposes the WorkerEntrypoint, WorkflowEntrypoint and DurableObject types
-// for extending.
-class EntrypointsModule: public jsg::Object {
- public:
-  EntrypointsModule() = default;
-  EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
-
-  JSG_RESOURCE_TYPE(EntrypointsModule) {
-    JSG_NESTED_TYPE(WorkerEntrypoint);
-    JSG_NESTED_TYPE(WorkflowEntrypoint);
-    JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
-    JSG_NESTED_TYPE_NAMED(JsRpcPromise, RpcPromise);
-    JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
-    JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
-    JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
-  }
-};
-
 #define EW_WORKER_RPC_ISOLATE_TYPES                                                                \
-  api::JsRpcPromise, api::JsRpcProperty, api::JsRpcStub, api::JsRpcTarget, api::WorkerEntrypoint,  \
-      api::WorkflowEntrypoint, api::DurableObjectBase, api::EntrypointsModule
+  api::JsRpcPromise, api::JsRpcProperty, api::JsRpcStub, api::JsRpcTarget
 
-template <class Registry>
-void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {
-  registry.template addBuiltinModule<EntrypointsModule>(
-      "cloudflare-internal:workers", workerd::jsg::ModuleRegistry::Type::INTERNAL);
-}
-
-template <typename TypeWrapper>
-kj::Own<jsg::modules::ModuleBundle> getInternalRpcModuleBundle(auto featureFlags) {
-  jsg::modules::ModuleBundle::BuiltinBuilder builder(
-      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
-  static const auto kSpecifier = "cloudflare-internal:workers"_url;
-  builder.addObject<EntrypointsModule, TypeWrapper>(kSpecifier);
-  return builder.finish();
-}
 };  // namespace workerd::api

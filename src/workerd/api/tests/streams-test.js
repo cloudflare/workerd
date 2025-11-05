@@ -36,6 +36,46 @@ export const ts = {
   },
 };
 
+// Regression test for https://github.com/cloudflare/workerd/issues/5113
+export const rsRequest = {
+  async test(ctrl, env) {
+    const resp = await env.subrequest.fetch(
+      new Request('http://example.org', {
+        method: 'POST',
+        body: new ReadableStream({
+          expectedLength: 10,
+          start(c) {
+            c.enqueue(enc.encode('hellohello'));
+            c.close();
+          },
+        }),
+      })
+    );
+    for await (const _ of resp.body) {
+    }
+  },
+};
+
+// Regression test for https://github.com/cloudflare/workerd/issues/5113
+export const tsRequest = {
+  async test(ctrl, env) {
+    const { readable, writable } = new TransformStream({
+      expectedLength: 10,
+    });
+    const writer = writable.getWriter();
+    writer.write(enc.encode('hellohello'));
+    writer.close();
+    const resp = await env.subrequest.fetch(
+      new Request('http://example.org', {
+        method: 'POST',
+        body: readable,
+      })
+    );
+    for await (const _ of resp.body) {
+    }
+  },
+};
+
 export const byobMin = {
   async test() {
     let controller;

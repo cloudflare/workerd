@@ -9,6 +9,15 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityDate = "2025-01-09",
         compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+          (name = "SERVER_PORT", fromEnvironment = "SERVER_PORT"),
+          (name = "ECHO_SERVER_PORT", fromEnvironment = "ECHO_SERVER_PORT"),
+          (name = "TIMEOUT_SERVER_PORT", fromEnvironment = "TIMEOUT_SERVER_PORT"),
+          (name = "END_SERVER_PORT", fromEnvironment = "END_SERVER_PORT"),
+          (name = "SERVER_THAT_DIES_PORT", fromEnvironment = "SERVER_THAT_DIES_PORT"),
+          (name = "RECONNECT_SERVER_PORT", fromEnvironment = "RECONNECT_SERVER_PORT"),
+        ]
       )
     ),
     ( name = "internet", network = ( allow = ["private"] ) ),

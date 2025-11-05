@@ -6,11 +6,13 @@ Subject: increase visibility of virtual method
 Methods were marked as protected, which conflicts with
 v8-platform-wrapper.h implementation.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
 diff --git a/include/v8-platform.h b/include/v8-platform.h
-index cecc217a62bbdb476619da89c3e0bf53bd70b282..13f349057aeb72afa42d4d77359bf4821e030139 100644
+index 6aadcab4ba987ed20d0ff3df76f54b1052713b2a..bbabb4b472095868ca1f66a7accde51aee10bca2 100644
 --- a/include/v8-platform.h
 +++ b/include/v8-platform.h
-@@ -1343,7 +1343,7 @@ class Platform {
+@@ -1407,7 +1407,7 @@ class Platform {
      return &default_observer;
    }
  

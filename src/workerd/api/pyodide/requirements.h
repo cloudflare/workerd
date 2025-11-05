@@ -17,7 +17,7 @@ capnp::json::Value::Reader getField(
 kj::String canonicalizePythonPackageName(kj::StringPtr name);
 
 // map from requirement to list of dependencies
-typedef kj::HashMap<kj::String, kj::Vector<kj::String>> DepMap;
+using DepMap = kj::HashMap<kj::String, kj::Vector<kj::String>>;
 
 DepMap getDepMapFromPackagesLock(
     capnp::List<capnp::json::Value::Field, capnp::Kind::STRUCT>::Reader &packages);

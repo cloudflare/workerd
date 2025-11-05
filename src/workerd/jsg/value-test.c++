@@ -53,29 +53,29 @@ struct OptionalContext: public ContextGlobalObject {
     JSG_STRUCT(optString, optDouble);
   };
 
-  double takeOptional(Optional<Ref<NumberBox>> num) {
-    return kj::mv(num).orDefault(jsg::alloc<NumberBox>(321))->value;
+  double takeOptional(jsg::Lock& js, Optional<Ref<NumberBox>> num) {
+    return kj::mv(num).orDefault(js.alloc<NumberBox>(321))->value;
   }
-  double takeMaybe(kj::Maybe<Ref<NumberBox>> num) {
-    return kj::mv(num).orDefault(jsg::alloc<NumberBox>(321))->value;
+  double takeMaybe(jsg::Lock& js, kj::Maybe<Ref<NumberBox>> num) {
+    return kj::mv(num).orDefault(js.alloc<NumberBox>(321))->value;
   }
-  double takeLenientOptional(LenientOptional<Ref<NumberBox>> num) {
-    return kj::mv(num).orDefault(jsg::alloc<NumberBox>(321))->value;
+  double takeLenientOptional(jsg::Lock& js, LenientOptional<Ref<NumberBox>> num) {
+    return kj::mv(num).orDefault(js.alloc<NumberBox>(321))->value;
   }
   kj::String takeOptionalMaybe(Optional<kj::Maybe<kj::String>> arg) {
     return kj::mv(arg).orDefault(kj::str("(absent)")).orDefault(kj::str("(null)"));
   }
-  Optional<Ref<NumberBox>> returnOptional(double value) {
+  Optional<Ref<NumberBox>> returnOptional(jsg::Lock& js, double value) {
     if (value == 321)
       return kj::none;
     else
-      return jsg::alloc<NumberBox>(value);
+      return js.alloc<NumberBox>(value);
   }
-  kj::Maybe<Ref<NumberBox>> returnMaybe(double value) {
+  kj::Maybe<Ref<NumberBox>> returnMaybe(jsg::Lock& js, double value) {
     if (value == 321)
       return kj::none;
     else
-      return jsg::alloc<NumberBox>(value);
+      return js.alloc<NumberBox>(value);
   }
 
   kj::String readTestOptionalFields(TestOptionalFields s) {
@@ -115,6 +115,7 @@ JSG_DECLARE_ISOLATE_TYPE(OptionalIsolate,
 
 KJ_TEST("optionals and maybes") {
   Evaluator<OptionalContext, OptionalIsolate> e(v8System);
+  e.getIsolate().setUsingFastJsgStruct();
   e.expectEval("takeOptional(new NumberBox(123))", "number", "123");
   e.expectEval("takeOptional()", "number", "321");
   e.expectEval("takeOptional(undefined)", "number", "321");
@@ -161,14 +162,14 @@ KJ_TEST("optionals and maybes") {
 
   e.expectEval(
       "var object = makeTestOptionalFields(undefined, undefined, null);\n" ENUMERATE_OBJECT,
-      "string", "nullable: null");
+      "string", "optional: undefined, lenient: undefined, nullable: null");
   e.expectEval("var object = makeTestOptionalFields('foo', 'bar', null);\n" ENUMERATE_OBJECT,
       "string", "optional: foo, lenient: bar, nullable: null");
   e.expectEval("var object = makeTestOptionalFields('foo', 'bar', 'baz');\n" ENUMERATE_OBJECT,
       "string", "optional: foo, lenient: bar, nullable: baz");
   e.expectEval(
       "var object = makeTestOptionalFields(undefined, undefined, 'bar');\n" ENUMERATE_OBJECT,
-      "string", "nullable: bar");
+      "string", "optional: undefined, lenient: undefined, nullable: bar");
 #undef ENUMERATE_OBJECT
 
   e.expectEval("readTestAllOptionalFields({})", "string", "(absent), 321");
@@ -354,11 +355,11 @@ struct DictContext: public ContextGlobalObject {
     return kj::strArray(
         KJ_MAP(f, dict.fields) { return kj::str(f.name, ": ", f.value(js)); }, ", ");
   }
-  Dict<Ref<NumberBox>> returnDict() {
+  Dict<Ref<NumberBox>> returnDict(jsg::Lock& js) {
     auto builder = kj::heapArrayBuilder<Dict<Ref<NumberBox>>::Field>(3);
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("foo"), jsg::alloc<NumberBox>(123)});
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("bar"), jsg::alloc<NumberBox>(456)});
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("baz"), jsg::alloc<NumberBox>(789)});
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("foo"), js.alloc<NumberBox>(123)});
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("bar"), js.alloc<NumberBox>(456)});
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("baz"), js.alloc<NumberBox>(789)});
     return {builder.finish()};
   }
 
@@ -1196,17 +1197,17 @@ KJ_TEST("MemoizedIdentity Values") {
 // ========================================================================================
 
 struct IdentifiedContext: public ContextGlobalObject {
-  kj::String compare(Identified<kj::Date> a, Identified<kj::Date> b, v8::Isolate* isolate) {
+  kj::String compare(jsg::Lock& js, Identified<kj::Date> a, Identified<kj::Date> b) {
     bool result = a.identity == b.identity;
     KJ_EXPECT(a.identity.hashCode() != 0);
     KJ_EXPECT(b.identity.hashCode() != 0);
     if (result) {
       KJ_EXPECT(a.identity.hashCode() == b.identity.hashCode());
     }
-    KJ_EXPECT(
-        a.identity.hashCode() == kj::hashCode(a.identity.getHandle(isolate)->GetIdentityHash()));
-    KJ_EXPECT(
-        b.identity.hashCode() == kj::hashCode(b.identity.getHandle(isolate)->GetIdentityHash()));
+    KJ_EXPECT(a.identity.hashCode() ==
+        kj::hashCode(a.identity.getHandle(js.v8Isolate)->GetIdentityHash()));
+    KJ_EXPECT(b.identity.hashCode() ==
+        kj::hashCode(b.identity.getHandle(js.v8Isolate)->GetIdentityHash()));
 
     return kj::str(result, ' ', a.unwrapped - b.unwrapped);
   }

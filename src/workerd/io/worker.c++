@@ -27,6 +27,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
 #include <v8-inspector.h>
@@ -59,6 +60,23 @@
 namespace workerd {
 
 namespace {
+
+constexpr kj::StringPtr logLevelToString(LogLevel level) {
+  switch (level) {
+    case LogLevel::DEBUG_:
+      return "debug";
+    case LogLevel::INFO:
+      return "info";
+    case LogLevel::LOG:
+      return "log";
+    case LogLevel::WARN:
+      return "warn";
+    case LogLevel::ERROR:
+      return "error";
+    default:
+      return "log";
+  }
+}
 
 void headersToCDP(const kj::HttpHeaders& in, capnp::JsonValue::Builder out) {
   std::map<kj::StringPtr, kj::Vector<kj::StringPtr>> inMap;
@@ -143,7 +161,7 @@ void sendExceptionToInspector(jsg::Lock& js,
 
 void addExceptionToTrace(jsg::Lock& js,
     IoContext& ioContext,
-    WorkerTracer& tracer,
+    BaseTracer& tracer,
     UncaughtExceptionSource source,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
@@ -217,7 +235,6 @@ void addExceptionToTrace(jsg::Lock& js,
     }
   }
 
-  // TODO(someday): Limit size of exception content?
   tracer.addException(ioContext.getInvocationSpanContext(), timestamp, kj::mv(name),
       kj::mv(message), kj::mv(stack));
 }
@@ -229,7 +246,8 @@ void reportStartupError(kj::StringPtr id,
     ExceptionOrDuration limitErrorOrTime,
     v8::TryCatch& catcher,
     kj::Maybe<Worker::ValidationErrorReporter&> errorReporter,
-    kj::Maybe<kj::Exception>& permanentException) {
+    kj::Maybe<kj::Exception>& permanentException,
+    SpanParent parentSpan) {
   v8::TryCatch catcher2(js.v8Isolate);
   ExceptionOrDuration limitErrorOrTime2 = 0 * kj::NANOSECONDS;
   try {
@@ -284,6 +302,10 @@ void reportStartupError(kj::StringPtr id,
               message.addJsStackTrace(js, lines);
               auto trace = kj::strArray(lines, "; ");
               auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
+              auto span = parentSpan.newChild("script_startup_exception"_kjc);
+              span.addLog(kj::systemPreciseCalendarClock().now(), "exception"_kjc,
+                  kj::ConstString(
+                      kj::str("script startup threw exception", id, description, trace)));
               KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
               KJ_FAIL_REQUIRE("script startup threw exception");
             }
@@ -336,7 +358,7 @@ uint64_t getCurrentThreadId() {
 #else
   // Assume MacOS or BSD
   uint64_t tid;
-  pthread_threadid_np(NULL, &tid);
+  pthread_threadid_np(nullptr, &tid);
   return tid;
 #endif
 }
@@ -492,6 +514,7 @@ struct Worker::Impl {
   kj::HashMap<kj::String, api::ExportedHandler> namedHandlers;
   kj::HashMap<kj::String, ActorClassInfo> actorClasses;
   kj::HashMap<kj::String, EntrypointClass> statelessClasses;
+  kj::HashMap<kj::String, EntrypointClass> workflowClasses;
 
   // If set, then any attempt to use this worker shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
@@ -506,6 +529,9 @@ struct Worker::Isolate::Impl {
   InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
+
+  // UUID for this isolate, initialized first time getUuid() is called.
+  kj::Lazy<kj::String> uuid;
 
   // Notification messages to deliver to the next inspector client when it connects.
   kj::Vector<kj::String> queuedNotifications;
@@ -554,7 +580,7 @@ struct Worker::Isolate::Impl {
           progressCounter(impl.lockSuccessCount),
           oldCurrentApi(currentApi),
           limitEnforcer(isolate.getLimitEnforcer()),
-          consoleMode(isolate.consoleMode),
+          loggingOptions(isolate.loggingOptions),
           lock(isolate.api->lock(stackScope)) {
       WarnAboutIsolateLockScope::maybeWarn();
 
@@ -602,7 +628,7 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
-      Worker::setupContext(*lock, context, consoleMode);
+      Worker::setupContext(*lock, context, loggingOptions);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
@@ -637,7 +663,9 @@ struct Worker::Isolate::Impl {
 
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
 
-    ConsoleMode consoleMode;
+    // When structuredLogging is YES AND consoleMode is STDOUT js logs will be emitted to STDOUT
+    // as newline separated json objects
+    LoggingOptions loggingOptions;
 
    public:
     kj::Own<jsg::Lock> lock;
@@ -782,6 +810,14 @@ static void stopProfiling(jsg::Lock& js, v8::CpuProfiler& profiler, cdp::Command
 }  // anonymous namespace
 
 struct Worker::Script::Impl {
+  kj::Own<workerd::VirtualFileSystem> vfs;
+  kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry;
+  // When using the new module registry, the module registry itself holds the
+  // SchemaLoader, so we don't need to hold it here. When using the original
+  // module registry, however, we need a schema loader to instantiate capnp
+  // modules and bindings.
+  kj::Maybe<kj::Own<capnp::SchemaLoader>> maybeSchemaLoader;
+
   kj::OneOf<jsg::NonModuleScript, kj::Path> unboundScriptOrMainModule;
 
   kj::Array<CompiledGlobal> globals;
@@ -790,6 +826,15 @@ struct Worker::Script::Impl {
 
   // If set, then any attempt to use this script shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
+
+  Impl(kj::Own<workerd::VirtualFileSystem> vfs,
+      kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry)
+      : vfs(kj::mv(vfs)),
+        maybeNewModuleRegistry(kj::mv(maybeNewModuleRegistry)) {
+    if (this->maybeNewModuleRegistry == kj::none) {
+      maybeSchemaLoader = kj::heap<capnp::SchemaLoader>();
+    }
+  }
 
   struct DynamicImportResult {
     jsg::Value value;
@@ -812,6 +857,7 @@ struct Worker::Script::Impl {
       auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
 
       co_return worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+        TmpDirStoreScope tmpDirStoreScope;
         return JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
           jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
 
@@ -874,6 +920,11 @@ struct Worker::Script::Impl {
       // already be covered by the startup resource limiter.
       return js.resolvedPromise(handler());
     });
+  }
+
+  kj::Maybe<const workerd::jsg::modules::ModuleRegistry&> getNewModuleRegistry() const {
+    return maybeNewModuleRegistry.map(
+        [](auto& r) -> const workerd::jsg::modules::ModuleRegistry& { return *r.get(); });
   }
 };
 
@@ -979,12 +1030,12 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     kj::StringPtr id,
     kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
     InspectorPolicy inspectorPolicy,
-    ConsoleMode consoleMode)
+    LoggingOptions loggingOptions)
     : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       api(kj::mv(apiParam)),
-      consoleMode(consoleMode),
+      loggingOptions(loggingOptions),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
       impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
@@ -1001,15 +1052,26 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
-    lock->setCommonJsExportDefault(features.getExportCommonJsDefaultNamespace());
     if (features.getSetToStringTag()) {
       lock->setToStringTag();
     }
     if (features.getNodeJsCompatV2()) {
       lock->setNodeJsCompatEnabled();
     }
+    if (features.getEnableNodeJsProcessV2()) {
+      lock->setNodeJsProcessV2Enabled();
+    }
+    if (features.getThrowOnUnrecognizedImportAssertion()) {
+      lock->setThrowOnUnrecognizedImportAssertion();
+    }
     if (features.getNoTopLevelAwaitInRequire()) {
       lock->disableTopLevelAwait();
+    }
+    if (features.getEnhancedErrorSerialization()) {
+      lock->setUsingEnhancedErrorSerialization();
+    }
+    if (features.getFastJsgStruct()) {
+      lock->setUsingFastJsgStruct();
     }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
@@ -1072,8 +1134,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetPromiseRejectCallback([](v8::PromiseRejectMessage message) {
       // TODO(cleanup): IoContext doesn't really need to be involved here. We are trying to call
       // a method of ServiceWorkerGlobalScope, which is the context object. So we should be able to
-      // do something like unwrap(isolate->GetCurrentContext()).emitPromiseRejection(). However, JSG
-      // doesn't currently provide an easy way to do this.
+      // do something like unwrap(lock, isolate->GetCurrentContext()).emitPromiseRejection().
+      // However, JSG doesn't currently provide an easy way to do this.
       if (IoContext::hasCurrent()) {
         try {
           IoContext::current().getCurrentLock().reportPromiseRejectEvent(message);
@@ -1095,9 +1157,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetPromiseCrossContextCallback(
         [](v8::Local<v8::Context> context, v8::Local<v8::Promise> promise,
             v8::Local<v8::Object> tag) -> v8::MaybeLocal<v8::Promise> {
+      auto& js = jsg::Lock::current();
       try {
-        auto& js = jsg::Lock::from(context->GetIsolate());
-
         // Generally this condition is only going to happen when using dynamic imports.
         // It should not be common.
         JSG_REQUIRE(IoContext::hasCurrent(), Error,
@@ -1122,7 +1183,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       } catch (...) {
         auto ex = kj::getCaughtExceptionAsKj();
         KJ_LOG(ERROR, "Setting promise cross context follower failed unexpectedly", ex);
-        jsg::throwInternalError(context->GetIsolate(), kj::mv(ex));
+        jsg::throwInternalError(js.v8Isolate, kj::mv(ex));
         return v8::MaybeLocal<v8::Promise>();
       }
     });
@@ -1216,15 +1277,21 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
 
 Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::StringPtr id,
-    Script::Source source,
+    const Script::Source& source,
     IsolateObserver::StartType startType,
     bool logNewScript,
-    kj::Maybe<ValidationErrorReporter&> errorReporter)
+    kj::Maybe<ValidationErrorReporter&> errorReporter,
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    SpanParent parentSpan,
+    kj::Own<workerd::VirtualFileSystem> vfs,
+    kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry)
     : isolate(kj::mv(isolateParam)),
       id(kj::str(id)),
-      modular(source.is<ModulesSource>()),
-      impl(kj::heap<Impl>()) {
-  this->isPython = false;
+      modular(source.variant.is<ModulesSource>()),
+      python(modular && source.variant.get<ModulesSource>().isPython),
+      impl(kj::heap<Impl>(kj::mv(vfs), kj::mv(maybeNewModuleRegistry))),
+      dynamicEnvBuilder(source.dynamicEnvBuilder.map(
+          [](const auto& inst) -> kj::Arc<DynamicEnvBuilder> { return inst.addRef(); })) {
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
@@ -1254,7 +1321,11 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       v8::Local<v8::Context> context;
       if (modular) {
         // Modules can't be compiled for multiple contexts. We need to create the real context now.
-        auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock));
+        auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock,
+            {
+              .newModuleRegistry = impl->getNewModuleRegistry(),
+              .schemaLoader = getSchemaLoader(),
+            }));
         mContext->enableWarningOnSpecialEvents();
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
@@ -1267,7 +1338,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         // We need to set the highest used index in every context we create to be a nullptr
         // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
         // a fatal error if the array is smaller than the given index.
-        context->SetAlignedPointerInEmbedderData(3, nullptr);
+        jsg::setAlignedPointerInEmbedderData(
+            context, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
       }
 
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
@@ -1311,12 +1383,20 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
         try {
           try {
-            KJ_SWITCH_ONEOF(source) {
+            KJ_SWITCH_ONEOF(source.variant) {
               KJ_CASE_ONEOF(script, ScriptSource) {
                 // This path is used for the older, service worker syntax workers.
 
+                if (script.capnpSchemas.size() > 0) {
+                  // const_cast OK because we hold the isolate lock.
+                  auto& schemaLoader = const_cast<capnp::SchemaLoader&>(getSchemaLoader());
+                  for (auto node: script.capnpSchemas) {
+                    schemaLoader.load(node);
+                  }
+                }
+
                 impl->globals =
-                    script.compileGlobals(lock, isolate->getApi(), isolate->getApi().getObserver());
+                    isolate->getApi().compileServiceWorkerGlobals(lock, script, *isolate);
 
                 {
                   // It's unclear to me if CompileUnboundScript() can get trapped in any
@@ -1333,18 +1413,25 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
                 // This path is used for the new ESM worker syntax.
 
-                this->isPython = modulesSource.isPython;
+                if (modulesSource.capnpSchemas.size() > 0) {
+                  // const_cast OK because we hold the isolate lock.
+                  auto& schemaLoader = const_cast<capnp::SchemaLoader&>(getSchemaLoader());
+                  for (auto node: modulesSource.capnpSchemas) {
+                    schemaLoader.load(node);
+                  }
+                }
+
                 if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
                   kj::Own<void> limitScope;
-                  if (isPython) {
+                  if (modulesSource.isPython) {
                     limitScope =
                         isolate->getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
                   } else {
                     limitScope = isolate->getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
                   }
-                  auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
-                  impl->configureDynamicImports(lock, modules);
-                  modulesSource.compileModules(lock, isolate->getApi());
+                  impl->configureDynamicImports(lock, *jsg::ModuleRegistry::from(lock));
+                  isolate->getApi().compileModules(
+                      lock, modulesSource, *isolate, kj::mv(artifacts), parentSpan.addRef());
                 }
                 impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
               }
@@ -1358,15 +1445,37 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           }
         } catch (const jsg::JsExceptionThrown&) {
           reportStartupError(id, lock, isolate->impl->inspector, isolate->getLimitEnforcer(),
-              kj::mv(limitErrorOrTime), catcher, errorReporter, impl->permanentException);
+              kj::mv(limitErrorOrTime), catcher, errorReporter, impl->permanentException,
+              parentSpan.addRef());
         }
       });
     });
   });
 }
 
+void Worker::Script::installVirtualFileSystemOnContext(v8::Local<v8::Context> context) const {
+  jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::VIRTUAL_FILE_SYSTEM,
+      const_cast<VirtualFileSystem*>(impl->vfs.get()));
+}
+
+const capnp::SchemaLoader& Worker::Script::getSchemaLoader() const {
+  KJ_IF_SOME(moduleRegistry, impl->maybeNewModuleRegistry) {
+    return moduleRegistry->getSchemaLoader();
+  } else {
+    return *KJ_ASSERT_NONNULL(impl->maybeSchemaLoader);
+  }
+}
+
 kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() const {
   return weakIsolateRef->addRef();
+}
+
+kj::StringPtr Worker::Isolate::getUuid() const {
+  // As of this writing, getUuid() is only used by actors, for metrics. We don't want to bother
+  // generating it if not used. The call site does not have nor want an isolate lock, so we use a
+  // kj::Lazy to make initialization thread-safe.
+  return impl->uuid.get(
+      [](kj::SpaceFor<kj::String>& space) { return space.construct(randomUUID(kj::none)); });
 }
 
 Worker::Isolate::~Isolate() noexcept(false) {
@@ -1440,7 +1549,7 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
 }
 
 void Worker::setupContext(
-    jsg::Lock& lock, v8::Local<v8::Context> context, Worker::ConsoleMode consoleMode) {
+    jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
 
@@ -1456,9 +1565,9 @@ void Worker::setupContext(
         lock.v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
 
     auto f = lock.wrapSimpleFunction(context,
-        [consoleMode, level, original = kj::mv(original)](
+        [loggingOptions, level, original = kj::mv(original)](
             jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      handleLog(js, consoleMode, level, original, info);
+      handleLog(js, loggingOptions, level, original, info);
     });
     jsg::check(console->Set(context, methodStr, f));
   };
@@ -1478,50 +1587,39 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     const Worker::Script& script,
     ExceptionOrDuration& limitErrorOrTime) {
   kj::Own<void> limitScope;
-  if (script.isPython) {
+  if (script.isPython()) {
     limitScope = script.getIsolate().getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
   } else {
     limitScope = script.getIsolate().getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
   }
-  if (script.getIsolate().getApi().getFeatureFlags().getNewModuleRegistry()) {
-    KJ_DEFER({
-      if (limitErrorOrTime.is<kj::Exception>()) {
-        // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
-        // thrown an exception.
-        throw jsg::JsExceptionThrown();
-      }
-    });
-    // This intentionally does not return the kj::Maybe directly from the
-    // call to tryResolveModuleNamespace because I intend to add some additional
-    // logging/metrics logic around this call.
-    KJ_IF_SOME(ns,
-        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, mainModule.toString(true))) {
-      return ns;
+
+  KJ_DEFER({
+    if (limitErrorOrTime.is<kj::Exception>()) {
+      // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
+      // thrown an exception.
+      throw jsg::JsExceptionThrown();
     }
-  } else {
-    auto& registry = jsContext->getModuleRegistry();
-    KJ_IF_SOME(entry, registry.resolve(js, mainModule, kj::none)) {
-      JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError, "Main module must be an ES module.");
-      auto module = entry.module.getHandle(js);
-      jsg::instantiateModule(js, module);
+  });
 
-      if (limitErrorOrTime.is<kj::Exception>()) {
-        // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
-        // thrown an exception.
-        throw jsg::JsExceptionThrown();
-      }
-
-      auto ns = module->GetModuleNamespace().As<v8::Object>();
-      // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
-      // module, even if subsequent calls pass a different context. Verify that we didn't
-      // switch contexts.
-      KJ_ASSERT(jsg::check(ns->GetCreationContext(js.v8Isolate)) == js.v8Context(),
-          "module was originally instantiated in a different context");
-
-      return jsg::JsObject(ns);
-    }
+  // Before resolving the main module, if both nodejs_compat_v2 and the new
+  // module registry are enabled, let's pre-resolve the process and buffer modules.
+  // Why? Great question! Resolving these modules synchronously causes the microtask
+  // queue to be pumped, which we don't actually want to do while resolving the main
+  // module until we are ready. Both process and buffer are exposed via globalThis
+  // when the nodejs_compat_v2 flag is used, and if the top-level scope is accessing
+  // either globalThis.process or globalThis.buffer, then we need to make sure that
+  // the modules are already resolved so we don't pump the microtask queue while
+  // synchronously accessing those globals. Resolving them here ensures that they are
+  // ready to go before we begin evaluating the main module.
+  auto featureFlags = FeatureFlags::get(js);
+  if (featureFlags.getNodeJsCompatV2() && featureFlags.getNewModuleRegistry()) {
+    JSG_REQUIRE_NONNULL(js.resolveModule("node:process", jsg::RequireEsm::YES), Error,
+        "Failed to initialize node:process module");
+    JSG_REQUIRE_NONNULL(js.resolveModule("node:buffer", jsg::RequireEsm::YES), Error,
+        "Failed to initialize node:buffer module");
   }
-  return kj::none;
+
+  return js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES);
 }
 }  // anonymous namespace
 
@@ -1579,10 +1677,26 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         currentSpan.setTag("module_context"_kjc, true);
       } else {
         // Create a new context.
-        jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock));
+        jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock,
+            {
+              .newModuleRegistry = script->impl->getNewModuleRegistry(),
+              .schemaLoader = script->getSchemaLoader(),
+            }));
       }
 
       v8::Local<v8::Context> context = KJ_REQUIRE_NONNULL(jsContext).getHandle(lock);
+
+      // Install the virtual file system on the context. Keep in mind that for service
+      // worker style workers, the Script may be shared between multiple Workers, even
+      // across different accounts. Currently, the internal state of the VFS does not
+      // contain any account-specific or worker-specific state so this is OK for now.
+      // The VFS would contain the script files only and any temporary files created
+      // within the context of a worker are always stored in temporary space attached
+      // to the IoContext or the current execution context. If we extend these capabilities
+      // in the future, we may need to revisit this. For modular workers, this is not
+      // an issue since each Worker gets its own Script instance.
+      script->installVirtualFileSystemOnContext(context);
+
       if (!script->modular) {
         recordedLock.setupContext(context);
       }
@@ -1630,6 +1744,23 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             SpanBuilder currentUserSpan =
                 spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
 
+            // Ensure that our worker top-level bootstrap has a temporary directory
+            // storage scope. This is used to store temporary files created within
+            // the top-level evaluation of the worker. With this instantiated on
+            // the stack, temporary files will be cleaned up when the scope is
+            // destroyed, which means any temporary files created in the top-level
+            // evaluation will *not* be available to the worker after the top-level
+            // evaluation is complete.
+            TmpDirStoreScope tmpDirStoreScope;
+
+            // We allow eval and new Function() during startup, becaues startup time is entirely
+            // deterministic, so we can easily reproduce the input to eval() by just running the
+            // worker again. We do not allow eval() at runtime because we need to have a record of
+            // all code that executes in production for forensic purposes, and at runtime the input
+            // to eval() could have come from a remote source on which we don't have a record.
+            js.setAllowEval(FeatureFlags::get(js).getAllowEvalDuringStartup());
+            KJ_DEFER(js.setAllowEval(false));
+
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
                 auto limitScope =
@@ -1653,26 +1784,20 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         // Historically, non-class-based handlers reused the same ctx object for all requests.
                         // This was an accident, but some Workers depend on it.
                         // Newer worker with the unique_ctx_per_invocation will allocate a new ctx for every request.
-                        obj.ctx = jsg::alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
+                        obj.ctx = js.alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
 
-                        // Python Workers append all durable objects classes in the
-                        // pythonDurableObjects named export.
+                        // Python Workers append all durable objects, worker entrypoint and workflow
+                        // entrypoint classes in the pythonEntrypoints named export.
                         bool isPythonWorker = FeatureFlags::get(js).getPythonWorkers();
-                        bool hasDoSupport = FeatureFlags::get(js).getPythonWorkersDurableObjects();
-                        if (handler.name == "pythonDurableObjects" && isPythonWorker) {
+                        if (handler.name == "pythonEntrypoints" && isPythonWorker) {
                           auto handle = obj.self.getHandle(js);
                           auto dict = js.toDict(handle);
                           for (auto& field: dict.fields) {
                             auto unwrapped = api.unwrapExport(lock, field.value);
                             KJ_SWITCH_ONEOF(unwrapped) {
                               KJ_CASE_ONEOF(cls, EntrypointClass) {
-                                JSG_REQUIRE(hasDoSupport, Error,
-                                    "The python_workers_durable_objects compat flag needs to be enabled for durable object support.");
-                                impl->actorClasses.insert(kj::mv(field.name),
-                                    ActorClassInfo{
-                                      .cls = kj::mv(cls),
-                                      .missingSuperclass = false,
-                                    });
+                                processEntrypointClass(
+                                    js, kj::mv(cls), entrypointClasses, kj::mv(field.name));
                               }
                               KJ_CASE_ONEOF(obj, api::ExportedHandler) {
                                 KJ_FAIL_ASSERT("Expected EntrypointClass");
@@ -1684,41 +1809,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         }
                       }
                       KJ_CASE_ONEOF(cls, EntrypointClass) {
-                        js.withinHandleScope([&]() {
-                          jsg::JsObject handle(KJ_ASSERT_NONNULL(cls.tryGetHandle(js.v8Isolate)));
-
-                          for (;;) {
-                            if (handle == entrypointClasses.durableObject) {
-                              impl->actorClasses.insert(kj::mv(handler.name),
-                                  ActorClassInfo{
-                                    .cls = kj::mv(cls),
-                                    .missingSuperclass = false,
-                                  });
-                              return;
-                            } else if (handle == entrypointClasses.workerEntrypoint) {
-                              impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
-                              return;
-                            } else if (handle == entrypointClasses.workflowEntrypoint) {
-                              impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
-                              return;
-                            }
-
-                            handle = KJ_UNWRAP_OR(handle.getPrototype(js).tryCast<jsg::JsObject>(), {
-                              // Reached end of prototype chain.
-
-                              // For historical reasons, we assume a class is a Durable Object
-                              // class if it doesn't inherit anything.
-                              // TODO(someday): Log a warning suggesting extending DurableObject.
-                              // TODO(someday): Introduce a compat flag that makes this required.
-                              impl->actorClasses.insert(kj::mv(handler.name),
-                                  ActorClassInfo{
-                                    .cls = kj::mv(cls),
-                                    .missingSuperclass = true,
-                                  });
-                              return;
-                            });
-                          }
-                        });
+                        processEntrypointClass(
+                            js, kj::mv(cls), entrypointClasses, kj::mv(handler.name));
                       }
                     }
                   }
@@ -1746,7 +1838,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         } catch (const jsg::JsExceptionThrown&) {
           reportStartupError(script->id, lock, script->isolate->impl->inspector,
               script->isolate->getLimitEnforcer(), kj::mv(limitErrorOrTime), catcher, errorReporter,
-              impl->permanentException);
+              impl->permanentException, currentSpan);
         }
       });
     });
@@ -1768,15 +1860,59 @@ Worker::~Worker() noexcept(false) {
   lock->push(kj::mv(impl));
 }
 
+void Worker::processEntrypointClass(jsg::Lock& js,
+    EntrypointClass cls,
+    EntrypointClasses entrypointClasses,
+    kj::String handlerName) {
+  js.withinHandleScope([&]() {
+    jsg::JsObject handle(KJ_ASSERT_NONNULL(cls.tryGetHandle(js.v8Isolate)));
+
+    for (;;) {
+      if (handle == entrypointClasses.durableObject) {
+        impl->actorClasses.insert(kj::mv(handlerName),
+            ActorClassInfo{
+              .cls = kj::mv(cls),
+              .missingSuperclass = false,
+            });
+        return;
+      } else if (handle == entrypointClasses.workerEntrypoint) {
+        impl->statelessClasses.insert(kj::mv(handlerName), kj::mv(cls));
+        return;
+      } else if (handle == entrypointClasses.workflowEntrypoint) {
+        impl->workflowClasses.insert(kj::mv(handlerName), kj::mv(cls));
+        return;
+      }
+
+      handle = KJ_UNWRAP_OR(handle.getPrototype(js).tryCast<jsg::JsObject>(), {
+        // Reached end of prototype chain.
+
+        // For historical reasons, we assume a class is a Durable Object
+        // class if it doesn't inherit anything.
+        // TODO(someday): Log a warning suggesting extending DurableObject.
+        // TODO(someday): Introduce a compat flag that makes this required.
+        impl->actorClasses.insert(kj::mv(handlerName),
+            ActorClassInfo{
+              .cls = kj::mv(cls),
+              .missingSuperclass = true,
+            });
+        return;
+      });
+    }
+  });
+}
+
 void Worker::handleLog(jsg::Lock& js,
-    ConsoleMode consoleMode,
+    const LoggingOptions& loggingOptions,
     LogLevel level,
     const v8::Global<v8::Function>& original,
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   // Call original V8 implementation so messages sent to connected inspector if any
   auto context = js.v8Context();
   int length = info.Length();
-  v8::LocalVector<v8::Value> args(js.v8Isolate, length + 1);
+  // to pass additional arguments from this function to js' `formatLog` we add arguments to the end
+  // of the arguments vector, then in formatLog we `pop` these from the vector.
+  // 3 is just the number of args we currently pass.
+  v8::LocalVector<v8::Value> args(js.v8Isolate, length + 3);
   for (auto i: kj::zeroTo(length)) args[i] = info[i];
   jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), length, args.data()));
 
@@ -1864,7 +2000,7 @@ void Worker::handleLog(jsg::Lock& js,
     }
   }
 
-  if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
+  if (loggingOptions.consoleMode == Worker::ConsoleMode::INSPECTOR_ONLY) {
     // Lets us dump console.log()s to stdout when running test-runner with --verbose flag, to make
     // it easier to debug tests.  Note that when --verbose is not passed, KJ_LOG(INFO, ...) will
     // not even evaluate its arguments, so `message()` will not be called at all.
@@ -1882,7 +2018,8 @@ void Worker::handleLog(jsg::Lock& js,
 #endif
 
     // Log warnings and errors to stderr
-    auto useStderr = level >= LogLevel::WARN;
+    // Always log to stdout when structuredLogging is enabled.
+    auto useStderr = level >= LogLevel::WARN && !loggingOptions.structuredLogging;
     auto fd = useStderr ? stderr : stdout;
     auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
     auto colors =
@@ -1894,9 +2031,12 @@ void Worker::handleLog(jsg::Lock& js,
     KJ_ASSERT(formatLogVal->IsFunction());
     auto formatLog = formatLogVal.As<v8::Function>();
 
-    args[length] = v8::Boolean::New(js.v8Isolate, colors);
+    auto levelStr = logLevelToString(level);
+    args[length] = js.boolean(colors);
+    args[length + 1] = js.boolean(loggingOptions.structuredLogging.toBool());
+    args[length + 2] = js.strIntern(levelStr);
     auto formatted = js.toString(
-        jsg::check(formatLog->Call(context, js.v8Undefined(), length + 1, args.data())));
+        jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
     fprintf(fd, "%s\n", formatted.cStr());
     fflush(fd);
   }
@@ -1978,20 +2118,12 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
   }
 
   kj::StringPtr n = name.orDefault("default"_kj);
-  KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
-    jsg::Lock& js = *this;
-    if (FeatureFlags::get(js).getUniqueCtxPerInvocation()) {
-      api::ExportedHandler constructedHandler = h.clone(js);
 
-      constructedHandler.ctx = jsg::alloc<api::ExecutionContext>(js,
-          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
-      return kj::heap(kj::mv(constructedHandler));
-    }
-    return fakeOwn(h);
-  } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
+  auto getHandlerFromEntrypointClass =
+      [&](EntrypointClass& cls) -> kj::Maybe<kj::Own<api::ExportedHandler>> {
     jsg::Lock& js = *this;
     auto handler = kj::heap(cls(js,
-        jsg::alloc<api::ExecutionContext>(js,
+        js.alloc<api::ExecutionContext>(js,
             jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js)),
         KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
@@ -2002,6 +2134,21 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     handler->ctx = kj::none;
 
     return handler;
+  };
+
+  KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
+    jsg::Lock& js = *this;
+    if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
+      api::ExportedHandler constructedHandler = h.clone(js);
+      constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
+          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
+      return kj::heap(kj::mv(constructedHandler));
+    }
+    return fakeOwn(h);
+  } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
+    return getHandlerFromEntrypointClass(cls);
+  } else KJ_IF_SOME(cls, worker.impl->workflowClasses.find(n)) {
+    return getHandlerFromEntrypointClass(cls);
   } else if (name == kj::none) {
     // If the default export was requested, and we didn't find a handler for it, we'll fall back
     // to addEventListener().
@@ -2019,12 +2166,12 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     }
 
     KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
-  }
+  };
 }
 
 api::ServiceWorkerGlobalScope& Worker::Lock::getGlobalScope() {
-  return *reinterpret_cast<api::ServiceWorkerGlobalScope*>(
-      getContext()->GetAlignedPointerFromEmbedderData(1));
+  return KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<api::ServiceWorkerGlobalScope>(
+      getContext(), jsg::ContextPointerSlot::GLOBAL_WRAPPER));
 }
 
 TimeoutId::Generator& Worker::Lock::getTimeoutIdGenerator() {
@@ -2107,37 +2254,23 @@ void Worker::Lock::logUncaughtException(
 
 void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception) {
   jsg::Lock& js = *this;
-
-  // If we have an attached serialized exception, deserialize it and log that instead, rather
-  // than try to reconstruct based on the KJ exception description.
-  //
-  // TODO(cleanup): Eventually, js.exceptionToJsValue() should do this internally, and then we
-  //   should remove the code from here.
-  KJ_IF_SOME(serializedJsError, exception.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
-    if (!js.v8Isolate->IsExecutionTerminating()) {
-      kj::Maybe<jsg::JsValue> deserialized;
-
-      v8::TryCatch tryCatch(js.v8Isolate);
-      try {
-        jsg::Deserializer deser(js, serializedJsError);
-        deserialized = deser.readValue(js);
-      } catch (jsg::JsExceptionThrown&) {
-        // Failed to deserialize, we'll continue with exceptionToJsValue() instead.
-        //
-        // Note that we're intentionally not checking tryCatch.CanContinue() here, because we still
-        // want to log the exception even if the isolate has been terminated.
-      }
-
-      KJ_IF_SOME(d, deserialized) {
-        logUncaughtException(source, d);
-        return;
-      }
-    }
+  try {
+    auto jsError = js.exceptionToJsValue(kj::mv(exception),
+        {
+          .trusted = true,
+        });
+    logUncaughtException(source, jsError.getHandle(js));
+  } catch (const jsg::JsExceptionThrown&) {
+    // An exception occurred while trying to convert the exception to a JS value.
+    // With exceptionToJs, this should only happen if the isolate is terminating
+    // because of a fatal error when trying to deserialize a tunneled exception
+    // detail. In this case, we will want to log the original exception instead,
+    // so let's try exceptionToJs again but this time ignoring the detail, and
+    // if it throws again, we'll give up and propagate that exception to the
+    // caller.
+    auto jsError = js.exceptionToJsValue(kj::cp(exception), {.ignoreDetail = true});
+    logUncaughtException(source, jsError.getHandle(js));
   }
-
-  // Couldn't deserialize an attached exception, so use `exceptionToJsValue()`.
-  auto jsError = js.exceptionToJsValue(kj::mv(exception));
-  logUncaughtException(source, jsError.getHandle(js));
 }
 
 void Worker::Lock::reportPromiseRejectEvent(v8::PromiseRejectMessage& message) {
@@ -2163,8 +2296,11 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       // Walk the prototype chain.
       jsg::JsValue proto = startProto;
       for (;;) {
-        auto protoObj = JSG_REQUIRE_NONNULL(proto.tryCast<jsg::JsObject>(), TypeError,
-            "Exported value's prototype chain does not end in Object.");
+        auto protoObj = KJ_UNWRAP_OR(proto.tryCast<jsg::JsObject>(), {
+          errorReporter.addError(
+              kj::str("Exported value's prototype chain does not end in Object."));
+          return;
+        });
         if (protoObj == prototypeOfObject) {
           // Reached the prototype for `Object`. Stop here.
           break;
@@ -2281,6 +2417,22 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         });
 
         errorReporter.addEntrypoint(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
+      }
+
+      for (auto& entry: worker.impl->workflowClasses) {
+        KJ_IF_SOME(entrypointName, getEntrypointName(entry.key)) {
+          kj::HashSet<kj::String> seenNames;
+
+          js.withinHandleScope([&]() {
+            // For stateless classes, we need to get the class's prototype property
+            jsg::JsObject ctor(KJ_ASSERT_NONNULL(entry.value.tryGetHandle(js.v8Isolate)));
+            jsg::JsValue proto = ctor.get(js, "prototype");
+            collectMethodsFromPrototypeChain(proto, seenNames);
+          });
+
+          errorReporter.addWorkflowClass(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
+        } else {
+        }
       }
     }
   });
@@ -2608,8 +2760,7 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
       }
       case cdp::Command::TAKE_HEAP_SNAPSHOT: {
         auto& lock = recordedLock.lock;
-        auto params = cmd.getTakeHeapSnapshot().getParams();
-        takeHeapSnapshot(*lock, params.getExposeInternals(), params.getCaptureNumericValue());
+        takeHeapSnapshot(*lock, cmd.getTakeHeapSnapshot().getParams());
         break;
       }
     }
@@ -2639,7 +2790,7 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
       lock->runMicrotasks();
     } else {
       // Oops, we already exceeded the limit, so force the microtask queue to be thrown away.
-      lock->terminateExecution();
+      lock->terminateNextExecution();
       lock->runMicrotasks();
     }
 
@@ -2653,7 +2804,8 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
           // We need to set the highest used index in every context we create to be a nullptr
           // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
           // a fatal error if the array is smaller than the given index.
-          dummyContext->SetAlignedPointerInEmbedderData(3, nullptr);
+          jsg::setAlignedPointerInEmbedderData(
+              dummyContext, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
           auto& inspector = *KJ_ASSERT_NONNULL(isolate.impl->inspector);
           inspector.contextCreated(v8_inspector::V8ContextInfo(dummyContext, 1,
               v8_inspector::StringView(reinterpret_cast<const uint8_t*>("Worker"), 6)));
@@ -2943,19 +3095,20 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
 
   WebSocketIoHandler ioHandler;
 
-  void takeHeapSnapshot(jsg::Lock& js, bool exposeInternals, bool captureNumericValue) {
+  void takeHeapSnapshot(
+      jsg::Lock& js, cdp::HeapProfiler::Command::TakeHeapSnapshot::Params::Reader params) {
     struct Activity: public v8::ActivityControl {
       InspectorChannelImpl& channel;
       Activity(InspectorChannelImpl& channel): channel(channel) {}
 
-      ControlOption ReportProgressValue(uint32_t done, uint32_t total) {
+      ControlOption ReportProgressValue(uint32_t done, uint32_t total) override {
         capnp::MallocMessageBuilder message;
         auto event = message.initRoot<cdp::Event>();
-        auto params = event.initReportHeapSnapshotProgress();
-        params.setDone(done);
-        params.setTotal(total);
+        auto progressParams = event.initReportHeapSnapshotProgress();
+        progressParams.setDone(done);
+        progressParams.setTotal(total);
         if (done == total) {
-          params.setFinished(true);
+          progressParams.setFinished(true);
         }
         auto notification = getCdpJsonCodec().encode(event);
         channel.sendNotification(kj::mv(notification));
@@ -2994,10 +3147,20 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
     Activity activity(*this);
     Writer writer(*this);
 
+    v8::HeapProfiler::HeapSnapshotOptions options{};
+    if (params.getReportProgress()) {
+      options.control = &activity;
+    }
+    if (params.getExposeInternals()) {
+      options.snapshot_mode = v8::HeapProfiler::HeapSnapshotMode::kExposeInternals;
+    }
+    if (params.getCaptureNumericValue()) {
+      options.numerics_mode = v8::HeapProfiler::NumericsMode::kExposeNumericValues;
+    }
+
     auto profiler = js.v8Isolate->GetHeapProfiler();
     auto snapshot = kj::Own<const v8::HeapSnapshot>(
-        profiler->TakeHeapSnapshot(&activity, nullptr, exposeInternals, captureNumericValue),
-        HeapSnapshotDeleter::INSTANCE);
+        profiler->TakeHeapSnapshot(options), HeapSnapshotDeleter::INSTANCE);
     snapshot->Serialize(&writer);
   }
 
@@ -3079,7 +3242,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(kj::Timer& timer,
   KJ_REQUIRE(impl->inspector != kj::none);
 
   kj::HttpHeaders headers(headerTable);
-  headers.set(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
+  headers.setPtr(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
   auto webSocket = response.acceptWebSocket(headers);
 
   // This `attachInspector()` overload is used by the internal Cloudflare Workers runtime, which has
@@ -3147,12 +3310,25 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     });
   }
 
-  if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
+  if (loggingOptions.consoleMode == Worker::ConsoleMode::INSPECTOR_ONLY) {
     // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
     KJ_LOG(INFO, "console warning", description);
   } else {
     fprintf(stderr, "%s\n", description.cStr());
     fflush(stderr);
+  }
+
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+      // json encoding is required over simply wrapping it in quotes to correctly escape the string.
+      capnp::JsonCodec json;
+      auto jsonDescription = kj::str("[", json.encode(capnp::Text::Reader(description)), "]");
+
+      auto timestamp = ioContext.now();
+      tracer.addLog(
+          ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN, kj::mv(jsonDescription));
+    }
   }
 }
 
@@ -3217,14 +3393,21 @@ void Worker::Isolate::logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr des
 
 struct Worker::Actor::Impl {
   Actor::Id actorId;
+  Frankenvalue props;
   MakeStorageFunc makeStorage;
 
   kj::Own<ActorObserver> metrics;
 
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
+  // When a boolean, indicates whether a `transient` should exist. If true, it will be initialized
+  // on the first `ensureConstructed()`.
+  kj::OneOf<bool, jsg::JsRef<jsg::JsValue>> transient;
+
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
 
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> ctxObject;
+
   kj::Maybe<rpc::Container::Client> container;
+  kj::Maybe<FacetManager&> facetManager;
 
   struct NoClass {};
   struct Initializing {};
@@ -3338,7 +3521,6 @@ struct Worker::Actor::Impl {
   // in each CustomEvent.
   kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
   kj::Maybe<uint16_t> hibernationEventType;
-  kj::PromiseFulfillerPair<void> constructorFailedPaf = kj::newPromiseAndFulfiller<void>();
 
   struct ScheduledAlarm {
     ScheduledAlarm(
@@ -3376,10 +3558,10 @@ struct Worker::Actor::Impl {
   kj::ForkedPromise<void> runningAlarmTask = kj::Promise<void>(kj::READY_NOW).fork();
 
   Impl(Worker::Actor& self,
-      Worker::Lock& lock,
       Actor::Id actorId,
       bool hasTransient,
       MakeActorCacheFunc makeActorCache,
+      Frankenvalue props,
       MakeStorageFunc makeStorage,
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
@@ -3387,11 +3569,15 @@ struct Worker::Actor::Impl {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
+      kj::Maybe<FacetManager&> facetManager,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
+        props(kj::mv(props)),
         makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
+        transient(hasTransient),
         container(kj::mv(container)),
+        facetManager(facetManager),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
         outputGate(hooks),
@@ -3401,14 +3587,8 @@ struct Worker::Actor::Impl {
         shutdownFulfiller(kj::mv(paf.fulfiller)),
         hibernationManager(kj::mv(manager)),
         hibernationEventType(kj::mv(hibernationEventType)) {
-    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-      if (hasTransient) {
-        transient.emplace(js, js.obj());
-      }
-
-      actorCache = makeActorCache(
-          self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
-    });
+    actorCache =
+        makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
   }
 };
 
@@ -3442,23 +3622,25 @@ Worker::Actor::Actor(const Worker& worker,
     bool hasTransient,
     MakeActorCacheFunc makeActorCache,
     kj::Maybe<kj::StringPtr> className,
+    Frankenvalue props,
     MakeStorageFunc makeStorage,
-    Worker::Lock& lock,
     kj::Own<Loopback> loopback,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
-    kj::Maybe<rpc::Container::Client> container)
+    kj::Maybe<rpc::Container::Client> container,
+    kj::Maybe<FacetManager&> facetManager)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
-  impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
+  impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
-      hibernationEventType, kj::mv(container));
+      hibernationEventType, kj::mv(container), facetManager);
 
   KJ_IF_SOME(c, className) {
-    KJ_IF_SOME(cls, lock.getWorker().impl->actorClasses.find(c)) {
-      impl->classInstance = &(cls);
+    KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
+      // const_cast OK because we're just storing the pointer and will only use this under lock.
+      impl->classInstance = const_cast<ActorClassInfo*>(&cls);
     } else {
       kj::throwFatalException(KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c));
     }
@@ -3509,12 +3691,19 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       KJ_IF_SOME(c, impl->actorCache) {
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
-      auto handler = info.cls(lock,
-          jsg::alloc<api::DurableObjectState>(cloneId(),
-              jsg::JsRef<jsg::JsValue>(
-                  js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-              kj::mv(storage), kj::mv(impl->container), containerRunning),
-          KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
+
+      auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
+          jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
+          impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
+          impl->facetManager);
+
+      auto handler =
+          info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
+
+      // Since we JUST passed `ctx` into the class constructor, it definitely has a handle
+      // attached. Let's grab it and stash it to implement getCtx().
+      auto ctxHandle = jsg::JsObject(KJ_ASSERT_NONNULL(ctx.tryGetHandle(js)));
+      impl->ctxObject = jsg::JsRef<jsg::JsObject>(js, ctxHandle);
 
       // HACK: We set handler.env to undefined because we already passed the real env into the
       //   constructor, and we want the handler methods to act like they take just one parameter.
@@ -3541,30 +3730,14 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       e.setDescription(kj::mv(description));
     }
 
-    impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
+    context.abort(kj::cp(e));
     impl->classInstance = kj::mv(e);
   }
 }
 
 Worker::Actor::~Actor() noexcept(false) {
-  // TODO(someday) Each IoContext contains a strong reference to its Actor, so a IoContext
-  // object must be destroyed before their Actor. However, IoContext has its lifetime extended
-  // by the IoContext::drain() promise which is stored in waitUntilTasks.
-  // IoContext::drain() may hang if Actor::onShutdown() never resolves/rejects, which means the
-  // IoContext and the Actor will not destruct as we'd expect. Ideally, we'd want an object
-  // that represents Actor liveness that does what shutdown() does now. It should be reasonable to
-  // implement that once we have tests that invoke the Actor dtor.
-
-  // Destroy under lock.
-  //
-  // TODO(perf): In principle it could make sense to defer destruction of the actor until an async
-  //   lock can be obtained. But, actor destruction is not terribly common and is not done when
-  //   the actor is idle (so, no one is waiting), so it's not a huge deal. The runtime does
-  //   potentially colocate multiple actors on the same thread, but they are always from the same
-  //   namespace and hence would be locking the same isolate anyway -- it's not like one of the
-  //   other actors could be running while we wait for this lock.
-  worker->runInLockScope(
-      Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) { impl = nullptr; });
+  // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
+  // to our thread, or is a handle that can be dropped outside of the lock.
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
@@ -3610,15 +3783,25 @@ kj::Promise<void> Worker::Actor::onBroken() {
     impl->abortFulfiller = kj::mv(paf.fulfiller);
   }
 
-  return abortPromise
-      // inputGate.onBroken() is covered by IoContext::onAbort(), but outputGate.onBroken() is
-      // not.
-      .exclusiveJoin(impl->outputGate.onBroken())
-      .exclusiveJoin(kj::mv(impl->constructorFailedPaf.promise));
+  return abortPromise;
 }
 
 const Worker::Actor::Id& Worker::Actor::getId() {
   return impl->actorId;
+}
+
+bool Worker::Actor::idsEqual(const Id& a, const Id& b) {
+  if (a.which() != b.which()) return false;
+
+  KJ_SWITCH_ONEOF(a) {
+    KJ_CASE_ONEOF(actorId, kj::Own<ActorIdFactory::ActorId>) {
+      return actorId->equals(*b.get<kj::Own<ActorIdFactory::ActorId>>());
+    }
+    KJ_CASE_ONEOF(str, kj::String) {
+      return str == b.get<kj::String>();
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 Worker::Actor::Id Worker::Actor::cloneId(Worker::Actor::Id& id) {
@@ -3639,7 +3822,15 @@ Worker::Actor::Id Worker::Actor::cloneId() {
 
 kj::Maybe<jsg::JsRef<jsg::JsValue>> Worker::Actor::getTransient(Worker::Lock& lock) {
   KJ_REQUIRE(&lock.getWorker() == worker.get());
-  return impl->transient.map([&](jsg::JsRef<jsg::JsValue>& val) { return val.addRef(lock); });
+
+  if (impl->transient.tryGet<bool>().orDefault(false)) {
+    // First call and `hasTransient` was true. Initialize it now, since we have the lock.
+    jsg::Lock& js = lock;
+    impl->transient.init<jsg::JsRef<jsg::JsValue>>(js, js.obj());
+  }
+
+  return impl->transient.tryGet<jsg::JsRef<jsg::JsValue>>().map(
+      [&](jsg::JsRef<jsg::JsValue>& val) { return val.addRef(lock); });
 }
 
 kj::Maybe<ActorCacheInterface&> Worker::Actor::getPersistent() {
@@ -3858,6 +4049,14 @@ void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
           .eagerlyEvaluate([](kj::Exception&& e) { LOG_EXCEPTION("actorMetricsFlushLoop", e); });
 }
 
+jsg::JsObject Worker::Actor::getCtx(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(impl->ctxObject).getHandle(js);
+}
+
+jsg::JsValue Worker::Actor::getEnv(jsg::Lock& js) {
+  return jsg::JsValue(KJ_REQUIRE_NONNULL(worker->impl->env).getHandle(js));
+}
+
 kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManager() {
   return impl->hibernationManager.map(
       [](kj::Own<HibernationManager>& hib) -> HibernationManager& { return *hib; });
@@ -3894,13 +4093,18 @@ uint Worker::Isolate::getLockSuccessCount() const {
 }
 
 kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
-    Script::Source source,
+    const Script::Source& source,
     IsolateObserver::StartType startType,
+    SpanParent parentSpan,
+    kj::Own<workerd::VirtualFileSystem> vfs,
     bool logNewScript,
-    kj::Maybe<ValidationErrorReporter&> errorReporter) const {
+    kj::Maybe<ValidationErrorReporter&> errorReporter,
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry) const {
   // Script doesn't already exist, so compile it.
-  return kj::atomicRefcounted<Script>(
-      kj::atomicAddRef(*this), scriptId, kj::mv(source), startType, logNewScript, errorReporter);
+  return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, source, startType,
+      logNewScript, errorReporter, kj::mv(artifacts), kj::mv(parentSpan), kj::mv(vfs),
+      kj::mv(maybeNewModuleRegistry));
 }
 
 void Worker::Isolate::completedRequest() const {
@@ -4267,7 +4471,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
       });
     }));
   };
-  typedef decltype(signalResponse) SignalResponse;
+  using SignalResponse = decltype(signalResponse);
 
   class ResponseWrapper final: public kj::HttpService::Response {
    public:
@@ -4303,6 +4507,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
   // the request until a later turn of the event loop.
   auto maybeRequestId = co_await kj::evalLater(kj::mv(signalRequest));
 
+  // While we checked above that the headers are valid, let's check again
+  // after the co_await...
   KJ_IF_SOME(rid, maybeRequestId) {
     ResponseWrapper wrapper(response, kj::mv(rid), kj::mv(signalResponse));
     co_await inner->request(method, url, headers, requestBody, wrapper);

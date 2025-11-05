@@ -133,6 +133,7 @@ function groupMembersByKey<Member extends ts.ClassElement | ts.TypeElement>(
 
 // Returns the index of a member in `members` with the specified `key`, or -1 if
 // none exists
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
 function findMemberIndex<Member extends ts.ClassElement | ts.TypeElement>(
   members: Member[],
   key: string,

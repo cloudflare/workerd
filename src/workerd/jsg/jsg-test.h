@@ -34,7 +34,8 @@ class Evaluator {
 
   IsolateType& getIsolate() {
     // Slightly more efficient to only instantiate each isolate type once (17s vs. 20s):
-    static IsolateType isolate(v8System, ConfigurationType(), kj::heap<IsolateObserver>());
+    static IsolateType isolate(
+        v8System, v8::IsolateGroup::GetDefault(), ConfigurationType(), kj::heap<IsolateObserver>());
     return isolate;
   }
 
@@ -146,7 +147,7 @@ class Evaluator {
         v8::TryCatch tryCatch(js.v8Isolate);
 
         try {
-          func(js);
+          func(lock);
         } catch (JsExceptionThrown&) {
           if (tryCatch.HasTerminated()) {
             KJ_FAIL_ASSERT("TerminateExecution() was called");
@@ -169,8 +170,8 @@ struct NumberBox: public Object {
   explicit NumberBox(double value): value(value) {}
   NumberBox() = default;
 
-  static Ref<NumberBox> constructor(double value) {
-    return jsg::alloc<NumberBox>(value);
+  static Ref<NumberBox> constructor(jsg::Lock& js, double value) {
+    return js.alloc<NumberBox>(value);
   }
 
   void increment() {
@@ -189,8 +190,8 @@ struct NumberBox: public Object {
   double addBox(NumberBox& other) {
     return value + other.value;
   }
-  Ref<NumberBox> addReturnBox(double other) {
-    return jsg::alloc<NumberBox>(value + other);
+  Ref<NumberBox> addReturnBox(jsg::Lock& js, double other) {
+    return js.alloc<NumberBox>(value + other);
   }
   double addMultiple(NumberBox& a, double b, NumberBox& c) {
     return value + a.value + b + c.value;
@@ -203,17 +204,16 @@ struct NumberBox: public Object {
     value = newValue;
   }
 
-  Ref<NumberBox> getBoxed() {
-    return jsg::alloc<NumberBox>(value);
+  Ref<NumberBox> getBoxed(jsg::Lock& js) {
+    return js.alloc<NumberBox>(value);
   }
   void setBoxed(NumberBox& newValue) {
     value = newValue.value;
   }
 
   v8::Local<v8::Value> getBoxedFromTypeHandler(
-      jsg::Lock& js, v8::Isolate*, const TypeHandler<Ref<NumberBox>>& numberBoxTypeHandler) {
-    // This function takes an Isolate just to prove it can take multiple value-less parameters.
-    return numberBoxTypeHandler.wrap(js, alloc<NumberBox>(value));
+      jsg::Lock& js, const TypeHandler<Ref<NumberBox>>& numberBoxTypeHandler) {
+    return numberBoxTypeHandler.wrap(js, js.alloc<NumberBox>(value));
   }
 
   JSG_RESOURCE_TYPE(NumberBox) {
@@ -242,8 +242,8 @@ class BoxBox: public Object {
 
   Ref<NumberBox> inner;
 
-  static Ref<BoxBox> constructor(NumberBox& inner, double add) {
-    return jsg::alloc<BoxBox>(jsg::alloc<NumberBox>(inner.value + add));
+  static Ref<BoxBox> constructor(jsg::Lock& js, NumberBox& inner, double add) {
+    return js.alloc<BoxBox>(js.alloc<NumberBox>(inner.value + add));
   }
 
   Ref<NumberBox> getInner() {
@@ -261,8 +261,8 @@ class BoxBox: public Object {
 };
 
 struct ExtendedNumberBox: public NumberBox {
-  static Ref<ExtendedNumberBox> constructor(double value, kj::String text) {
-    auto result = jsg::alloc<ExtendedNumberBox>();
+  static Ref<ExtendedNumberBox> constructor(jsg::Lock& js, double value, kj::String text) {
+    auto result = js.alloc<ExtendedNumberBox>();
     result->value = value;
     result->text = kj::mv(text);
     return result;

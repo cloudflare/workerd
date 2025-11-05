@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export {
-  AiOptions,
+  type AiOptions,
   InferenceUpstreamError,
   Ai,
 } from 'cloudflare-internal:ai-api';
@@ -20,3 +20,9 @@ export {
   AutoRAGNotFoundError,
   AutoRAGUnauthorizedError,
 } from 'cloudflare-internal:autorag-api';
+
+export {
+  ToMarkdownService,
+  type ConversionResponse,
+  type SupportedFileFormat,
+} from 'cloudflare-internal:to-markdown-api';

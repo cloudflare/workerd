@@ -5,13 +5,14 @@ Subject: Modify where to look for fp16 dependency. This dependency is normally
  downloaded by gn but we need to fetch it in Bazel. We do so in the workerd
  repo in the WORKSPACE file.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 56c6f15cbcbcedaae0176ca5fe45e29dd155afe9..653d4409c14e639d1f04df20c0ae8b8ad6b5b837 100644
+index 904d5699094bfb1136b031160dd21454d33bb582..01f13e0cf264b4c363a4b53566432c699df61c69 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3860,16 +3860,22 @@ filegroup(
-     }),
+@@ -4012,17 +4012,23 @@ v8_library(
+   ],
  )
  
 -v8_library(
@@ -20,6 +21,7 @@ index 56c6f15cbcbcedaae0176ca5fe45e29dd155afe9..653d4409c14e639d1f04df20c0ae8b8a
 -  hdrs = [
 -    "third_party/fp16/src/include/fp16/fp16.h",
 -    "third_party/fp16/src/include/fp16/bitcasts.h",
+-    "third_party/fp16/src/include/fp16/macros.h",
 -  ],
 -  includes = [
 -    "third_party/fp16/src/include",
@@ -37,6 +39,7 @@ index 56c6f15cbcbcedaae0176ca5fe45e29dd155afe9..653d4409c14e639d1f04df20c0ae8b8a
 +    name = "lib_fp16_includes",
 +    hdrs = [
 +        "@fp16//:include/fp16/bitcasts.h",
++        "@fp16//:include/fp16/macros.h",
 +        "@fp16//:include/fp16/fp16.h",
 +    ],
 +    strip_include_prefix = "include",

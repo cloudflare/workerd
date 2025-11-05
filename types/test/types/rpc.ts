@@ -74,8 +74,10 @@ class TestCounter extends RpcTarget {
 
 const symbolMethod = Symbol('symbolMethod');
 
-class TestEntrypoint extends WorkerEntrypoint<Env> {
-  constructor(ctx: ExecutionContext, env: Env) {
+type Props = {myProp: number};
+
+class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
+  constructor(ctx: ExecutionContext<Props>, env: Env) {
     super(ctx, env);
   }
 
@@ -90,7 +92,7 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
 
   private privateInstanceProperty = 0;
   private get privateProperty() {
-    expectTypeOf(this.ctx).toEqualTypeOf<ExecutionContext>();
+    expectTypeOf(this.ctx).toEqualTypeOf<ExecutionContext<Props>>();
     expectTypeOf(this.env).toEqualTypeOf<Env>();
 
     return 1;
@@ -406,11 +408,10 @@ class TestNaughtyObject extends DurableObject {
 interface Env {
   REGULAR_SERVICE: Service;
   RPC_SERVICE: Service<TestEntrypoint>;
+  TYPEOF_RPC_SERVICE: Service<typeof TestEntrypoint>;
   NAUGHTY_SERVICE: Service<TestNaughtyEntrypoint>;
   // @ts-expect-error `BoringClass` isn't an RPC capable type
   __INVALID_RPC_SERVICE_1: Service<BoringClass>;
-  // @ts-expect-error `TestEntrypoint` is a `DurableObject`, not a `WorkerEntrypoint`
-  __INVALID_RPC_SERVICE_2: Service<TestObject>;
 
   REGULAR_OBJECT: DurableObjectNamespace;
   RPC_OBJECT: DurableObjectNamespace<TestObject>;
@@ -745,7 +746,7 @@ export default <ExportedHandler<Env>>{
           null: null;
           boolean: boolean;
           number: number;
-          bigint: BigInt;
+          bigint: bigint;
           string: string;
           ArrayBuffer: ArrayBuffer;
           DataView: DataView;
@@ -763,7 +764,7 @@ export default <ExportedHandler<Env>>{
             null: null;
             boolean: boolean;
             number: number;
-            bigint: BigInt;
+            bigint: bigint;
             string: string;
             ArrayBuffer: ArrayBuffer;
             DataView: DataView;

@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "commonjs.h"
 #include "jsg.h"
 #include "setup.h"
 
@@ -10,32 +9,33 @@
 
 #include <kj/mutex.h>
 
-#include <set>
-
 namespace workerd::jsg {
+
 namespace {
 
-// Implementation of `v8::Module::ResolveCallback`.
-v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
+// Generalized module resolution callback that handles both evaluation and source phase imports
+template <bool IsSourcePhase>
+v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolveModuleCallback(
+    v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
-    v8::Local<v8::FixedArray> import_assertions,
+    v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
-  auto& js = jsg::Lock::from(context->GetIsolate());
-  v8::MaybeLocal<v8::Module> result;
+  using ReturnType = std::conditional_t<IsSourcePhase, v8::Object, v8::Module>;
 
-  // TODO(new-module-registry): The specification for import assertions strongly
-  // recommends that embedders reject import attributes and types they do not
-  // understand/implement. This is because import attributes can alter the
-  // interpretation of a module and are considered to be part of the unique
-  // key for caching a module.
+  auto& js = Lock::current();
+  v8::MaybeLocal<ReturnType> result;
+
+  // The specification for import attributes strongly recommends that embedders
+  // reject import attributes and types they do not understand/implement. This
+  // is because import attributes can alter the interpretation of a module and
+  // are considered to be part of the unique key for caching a module.
   // Throwing an error for things we do not understand is the safest thing to do.
-  // However, historically we have not followed this guideline in the spec and
-  // it's not clear if enforcing that constraint would be breaking so let's
-  // first try to determine if anyone is making use of import assertions.
-  // If we're lucky, we won't receive any hits on this and we can start
-  // enforcing the rule without a compat flag.
-  if (import_assertions->Length() > 0) {
-    LOG_NOSENTRY(WARNING, "Import attributes specified (and ignored) on static import");
+  // However, historically we have not followed this guideline in the spec
+  // and unfortunately there are applications deployed that will break if we
+  // started enforcing that guideline without a compat flag.
+  if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
+    JSG_REQUIRE(!js.getThrowOnUnrecognizedImportAssertion(), Error,
+        "Unrecognized import attributes specified");
   }
 
   js.tryCatch([&] {
@@ -50,6 +50,21 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     if (isNodeJsCompatEnabled(js)) {
       KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
         spec = kj::mv(nodeSpec);
+      }
+    }
+
+    // Handle process module redirection based on enable_nodejs_process_v2 flag
+    if constexpr (!IsSourcePhase) {
+      if (spec == "node:process") {
+        auto specifierPath =
+            kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                         : "node-internal:legacy_process"_kj);
+        KJ_IF_SOME(info,
+            registry->resolve(
+                js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+          result = info.module.getHandle(js.v8Isolate);
+          return;
+        }
       }
     }
 
@@ -74,7 +89,18 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
             internalOnly ? ModuleRegistry::ResolveOption::INTERNAL_ONLY
                          : ModuleRegistry::ResolveOption::DEFAULT,
             ModuleRegistry::ResolveMethod::IMPORT, spec.asPtr())) {
-      result = resolved.module.getHandle(js);
+      if constexpr (!IsSourcePhase) {
+        result = resolved.module.getHandle(js);
+      } else {
+        KJ_IF_SOME(sourceObject, resolved.getModuleSourceObject(js)) {
+          result = sourceObject;
+        } else {
+          js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
+              kj::str("Source phase import not available for module: ", targetPath.toString(),
+                  ".\n  imported from \"", ref.specifier.toString(), "\"")))));
+          return;
+        }
+      }
     } else {
       // This is a bit annoying. If the module was not found, then
       // we need to check to see if it is a prefixed specifier. If it is,
@@ -87,7 +113,14 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
             registry->resolve(js, kj::Path::parse(spec), ref.specifier,
                 ModuleRegistry::ResolveOption::DEFAULT, ModuleRegistry::ResolveMethod::IMPORT,
                 spec.asPtr())) {
-          result = resolve.module.getHandle(js);
+          if constexpr (!IsSourcePhase) {
+            result = resolve.module.getHandle(js);
+          } else {
+            js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
+                kj::str("Source phase import not available for module: ", targetPath.toString(),
+                    ".\n  imported from \"", ref.specifier.toString(), "\"")))));
+            return;
+          }
           return;
         }
       }
@@ -99,7 +132,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     // which we do not want here. Instead, we'll schedule an exception on the isolate
     // directly and set the result to an empty v8::MaybeLocal.
     js.v8Isolate->ThrowException(value.getHandle(js));
-    result = v8::MaybeLocal<v8::Module>();
+    result = v8::MaybeLocal<ReturnType>();
   });
 
   return result;
@@ -110,7 +143,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
 // callback; V8 will crash if you try to call `SetSyntheticModuleExport()` from anywhere else.
 v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
-  auto& js = Lock::from(context->GetIsolate());
+  auto& js = Lock::current();
   v8::EscapableHandleScope scope(js.v8Isolate);
   v8::MaybeLocal<v8::Value> result;
 
@@ -158,44 +191,32 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
         }
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::CommonJsModuleInfo) {
-        bool ok = true;
         v8::TryCatch catcher(js.v8Isolate);
         // const_cast is safe here because we're protected by the isolate js.
         auto& commonjs = const_cast<ModuleRegistry::CommonJsModuleInfo&>(info);
         try {
           commonjs.evalFunc(js);
-        } catch (const JsExceptionThrown&) {
-          if (catcher.CanContinue()) catcher.ReThrow();
-          // leave `result` empty to propagate the JS exception
-          ok = false;
-        }
-
-        if (ok) {
-          // Handle the named exports...
-          auto exports = commonjs.moduleContext->module->getExports(js);
-          if (!module->SetSyntheticModuleExport(js.v8Isolate, defaultStr, exports).IsJust()) {
-            ok = false;
-          }
-
-          if (ok && exports->IsObject()) {
-            JsObject obj = JsObject(exports.As<v8::Object>());
-            KJ_IF_SOME(exports, ref.module.maybeNamedExports) {
-              for (auto& name: exports) {
-                // Ignore default... just in case someone was silly enough to include it.
-                if (name == "default"_kj) continue;
-                auto val = obj.get(js, name);
-                if (!module->SetSyntheticModuleExport(js.v8Isolate, js.strIntern(name), val)
-                         .IsJust()) {
-                  ok = false;
-                  break;
+          auto exports = commonjs.getExports(js);
+          if (module->SetSyntheticModuleExport(js.v8Isolate, defaultStr, exports).IsJust()) {
+            KJ_IF_SOME(obj, exports.tryCast<JsObject>()) {
+              KJ_IF_SOME(exports, ref.module.maybeNamedExports) {
+                for (auto& name: exports) {
+                  // Ignore default... just in case someone was silly enough to include it.
+                  if (name == "default"_kj) continue;
+                  auto val = obj.get(js, name);
+                  if (!module->SetSyntheticModuleExport(js.v8Isolate, js.strIntern(name), val)
+                           .IsJust()) {
+                    break;
+                  }
                 }
               }
             }
+            result = makeResolvedPromise();
           }
+        } catch (const JsExceptionThrown&) {
+          if (catcher.CanContinue()) catcher.ReThrow();
+          // leave `result` empty to propagate the JS exception
         }
-
-        if (ok) result = makeResolvedPromise();
-        // If ok is false, we leave result empty to propagate the JS exception
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::TextModuleInfo) {
         if (module->SetSyntheticModuleExport(js.v8Isolate, defaultStr, info.value.getHandle(js))
@@ -241,7 +262,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
   })) {
     // V8 doc comments say in the case of an error, throw the error and return an empty Maybe.
     // I.e. NOT a rejected promise. OK...
-    context->GetIsolate()->ThrowException(makeInternalError(js.v8Isolate, kj::mv(exception)));
+    js.v8Isolate->ThrowException(js.exceptionToJsValue(kj::mv(exception)).getHandle(js));
     result = v8::Local<v8::Promise>();
   }
 
@@ -251,8 +272,8 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
 }  // namespace
 
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
-  return static_cast<ModuleRegistry*>(
-      isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
+  return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistry>(
+      isolate->GetCurrentContext(), jsg::ContextPointerSlot::MODULE_REGISTRY));
 }
 
 void instantiateModule(
@@ -273,7 +294,8 @@ void instantiateModule(
   if (status == v8::Module::Status::kEvaluated || status == v8::Module::Status::kEvaluating) return;
 
   if (status == v8::Module::Status::kUninstantiated) {
-    jsg::check(module->InstantiateModule(context, &resolveCallback));
+    jsg::check(module->InstantiateModule(
+        context, resolveModuleCallback<false>, resolveModuleCallback<true>));
   }
 
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
@@ -361,7 +383,7 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
 }
 
 v8::Local<v8::Module> createSyntheticModule(
-    jsg::Lock& js, kj::StringPtr name, kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports) {
+    jsg::Lock& js, kj::StringPtr name, kj::Maybe<kj::ArrayPtr<const kj::StringPtr>> maybeExports) {
   v8::LocalVector<v8::String> exportNames(js.v8Isolate);
   exportNames.push_back(v8StrIntern(js.v8Isolate, "default"_kj));
   KJ_IF_SOME(exports, maybeExports) {
@@ -391,7 +413,7 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
-    kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
+    kj::Maybe<kj::ArrayPtr<const kj::StringPtr>> maybeExports,
     SyntheticModuleInfo synthetic)
     : ModuleInfo(js, createSyntheticModule(js, name, maybeExports), kj::mv(synthetic)) {
   KJ_IF_SOME(exports, maybeExports) {
@@ -399,9 +421,8 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
   }
 }
 
-Ref<CommonJsModuleContext> ModuleRegistry::CommonJsModuleInfo::initModuleContext(
-    jsg::Lock& js, kj::StringPtr name) {
-  return jsg::alloc<jsg::CommonJsModuleContext>(js, kj::Path::parse(name));
+jsg::JsValue ModuleRegistry::CommonJsModuleInfo::getExports(jsg::Lock& js) {
+  return provider->getExports(js);
 }
 
 ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(
@@ -447,7 +468,7 @@ JsValue ModuleRegistry::requireImpl(Lock& js, ModuleInfo& info, RequireImplOptio
       module->GetStatus() == v8::Module::Status::kInstantiating) {
     KJ_IF_SOME(synth, info.maybeSynthetic) {
       KJ_IF_SOME(cjs, synth.tryGet<ModuleRegistry::CommonJsModuleInfo>()) {
-        return JsValue(cjs.moduleContext->getExports(js));
+        return cjs.getExports(js);
       }
     }
   }

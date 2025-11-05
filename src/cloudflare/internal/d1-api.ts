@@ -2,13 +2,49 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import { withSpan } from 'cloudflare-internal:tracing-helpers';
+import type { Span } from './tracing';
+
+interface D1Meta {
+  duration: number;
+  size_after: number;
+  rows_read: number;
+  rows_written: number;
+  last_row_id: number;
+  changed_db: boolean;
+  changes: number;
+
+  /**
+   * The region of the database instance that executed the query.
+   */
+  served_by_region?: string;
+
+  /**
+   * True if-and-only-if the database instance that executed the query was the primary.
+   */
+  served_by_primary?: boolean;
+
+  timings?: {
+    /**
+     * The duration of the SQL query execution by the database instance. It doesn't include any network time.
+     */
+    sql_duration_ms: number;
+  };
+
+  /**
+   * Number of total attempts to execute the query, due to automatic retries.
+   * Note: All other fields in the response like `timings` only apply to the last attempt.
+   */
+  total_attempts?: number;
+}
+
 interface Fetcher {
   fetch: typeof fetch;
 }
 
 type D1Response = {
   success: true;
-  meta: Record<string, unknown>;
+  meta: D1Meta & Record<string, unknown>;
   error?: never;
 };
 
@@ -24,7 +60,7 @@ type D1UpstreamFailure = {
   results?: never;
   error: string;
   success: false;
-  meta: Record<string, unknown>;
+  meta: D1Meta & Record<string, unknown>;
 };
 
 type D1RowsColumns<T = unknown> = D1Response & {
@@ -70,31 +106,33 @@ const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = 'first-unconstrained';
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
 class D1Database {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
   protected readonly fetcher: Fetcher;
 
-  public constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher) {
     this.fetcher = fetcher;
     this.alwaysPrimarySession = new D1DatabaseSessionAlwaysPrimary(
       this.fetcher
     );
   }
 
-  public prepare(query: string): D1PreparedStatement {
+  prepare(query: string): D1PreparedStatement {
     return new D1PreparedStatement(this.alwaysPrimarySession, query);
   }
 
-  public async batch<T = unknown>(
+  async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
     return this.alwaysPrimarySession.batch(statements);
   }
 
-  public async exec(query: string): Promise<D1ExecResult> {
+  async exec(query: string): Promise<D1ExecResult> {
     return this.alwaysPrimarySession.exec(query);
   }
 
-  public withSession(
+  withSession(
     constraintOrBookmark?: D1SessionBookmarkOrConstraint
   ): D1DatabaseSession {
     constraintOrBookmark = constraintOrBookmark?.trim();
@@ -107,7 +145,7 @@ class D1Database {
   /**
    * @deprecated
    */
-  public async dump(): Promise<ArrayBuffer> {
+  async dump(): Promise<ArrayBuffer> {
     return this.alwaysPrimarySession.dump();
   }
 }
@@ -116,7 +154,7 @@ class D1DatabaseSession {
   protected fetcher: Fetcher;
   protected bookmarkOrConstraint: D1SessionBookmarkOrConstraint;
 
-  public constructor(
+  constructor(
     fetcher: Fetcher,
     bookmarkOrConstraint: D1SessionBookmarkOrConstraint
   ) {
@@ -152,25 +190,51 @@ class D1DatabaseSession {
     return this.getBookmark();
   }
 
-  public prepare(sql: string): D1PreparedStatement {
+  prepare(sql: string): D1PreparedStatement {
     return new D1PreparedStatement(this, sql);
   }
 
-  public async batch<T = unknown>(
+  async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
-    const exec = (await this._sendOrThrow(
-      '/query',
-      statements.map((s: D1PreparedStatement) => s.statement),
-      statements.map((s: D1PreparedStatement) => s.params),
-      'ROWS_AND_COLUMNS'
-    )) as D1UpstreamSuccess<T>[];
-    return exec.map(toArrayOfObjects);
+    return withSpan('d1_batch', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'batch');
+      span.setAttribute(
+        'db.query.text',
+        statements.map((s: D1PreparedStatement) => s.statement).join('\n')
+      );
+      span.setAttribute('db.operation.batch.size', statements.length);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.getBookmark() ?? undefined
+      );
+
+      const exec = (await this._sendOrThrow(
+        '/query',
+        statements.map((s: D1PreparedStatement) => s.statement),
+        statements.map((s: D1PreparedStatement) => s.params),
+        'ROWS_AND_COLUMNS',
+        span
+      )) as D1UpstreamSuccess<T>[];
+
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.getBookmark() ?? undefined
+      );
+      addAggregatedD1MetaToSpan(
+        span,
+        exec.map((e) => e.meta)
+      );
+
+      return exec.map(toArrayOfObjects);
+    });
   }
 
   // Returns the latest bookmark we received from all responses processed so far.
   // It does not return constraints that might have be passed during the session creation.
-  public getBookmark(): D1SessionBookmark | null {
+  getBookmark(): D1SessionBookmark | null {
     switch (this.bookmarkOrConstraint) {
       // First to any replica, and then anywhere that satisfies the bookmark.
       case D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED:
@@ -212,15 +276,23 @@ class D1DatabaseSession {
     });
   }
 
-  public async _sendOrThrow<T = unknown>(
+  async _sendOrThrow<T = unknown>(
     endpoint: string,
     query: string | string[],
     params: unknown[],
-    resultsFormat: ResultsFormat
+    resultsFormat: ResultsFormat,
+    span: Span
   ): Promise<D1UpstreamSuccess<T>[] | D1UpstreamSuccess<T>> {
-    const results = await this._send(endpoint, query, params, resultsFormat);
+    const results = await this._send(
+      endpoint,
+      query,
+      params,
+      resultsFormat,
+      span
+    );
     const firstResult = firstIfArray(results);
     if (!firstResult.success) {
+      span.setAttribute('error.type', firstResult.error);
       throw new Error(`D1_ERROR: ${firstResult.error}`, {
         cause: new Error(firstResult.error),
       });
@@ -229,11 +301,12 @@ class D1DatabaseSession {
     }
   }
 
-  public async _send<T = unknown>(
+  async _send<T = unknown>(
     endpoint: string,
     query: string | string[],
     params: unknown[],
-    resultsFormat: ResultsFormat
+    resultsFormat: ResultsFormat,
+    span: Span
   ): Promise<D1UpstreamResponse<T>[] | D1UpstreamResponse<T>> {
     /* this needs work - we currently only support ordered ?n params */
     const body = JSON.stringify(
@@ -273,6 +346,7 @@ class D1DatabaseSession {
         (e.cause as Error | undefined)?.message ||
         e.message ||
         'Something went wrong';
+      span.setAttribute('error.type', message);
       throw new Error(`D1_ERROR: ${message}`, {
         cause: new Error(message),
       });
@@ -281,14 +355,14 @@ class D1DatabaseSession {
 }
 
 class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
-  public constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher) {
     // Will always go to primary, since we won't be ever updating this constraint.
     super(fetcher, D1_SESSION_CONSTRAINT_FIRST_PRIMARY);
   }
 
   // We ignore bookmarks for this special type of session,
   // since all queries are sent to the primary.
-  public override _updateBookmark(
+  override _updateBookmark(
     _newBookmark: D1SessionBookmark
   ): D1SessionBookmark | null {
     return null;
@@ -296,7 +370,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
 
   // There is no bookmark returned ever by this special type of session,
   // since all queries are sent to the primary.
-  public override getBookmark(): D1SessionBookmark | null {
+  override getBookmark(): D1SessionBookmark | null {
     return null;
   }
 
@@ -305,41 +379,55 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
   // For backwards compatibility they always go to the primary database.
   //
 
-  public async exec(query: string): Promise<D1ExecResult> {
-    const lines = query.trim().split('\n');
-    const _exec = await this._send('/execute', lines, [], 'NONE');
-    const exec = Array.isArray(_exec) ? _exec : [_exec];
-    const error = exec
-      .map((r) => {
-        return r.error ? 1 : 0;
-      })
-      .indexOf(1);
-    if (error !== -1) {
-      throw new Error(
-        `D1_EXEC_ERROR: Error in line ${error + 1}: ${lines[error]}: ${
-          exec[error]?.error
-        }`,
-        {
-          cause: new Error(
-            `Error in line ${error + 1}: ${lines[error]}: ${exec[error]?.error}`
-          ),
-        }
+  async exec(query: string): Promise<D1ExecResult> {
+    return withSpan('d1_exec', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'exec');
+      span.setAttribute('db.query.text', query);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+
+      const lines = query.trim().split('\n');
+      const _exec = await this._send('/execute', lines, [], 'NONE', span);
+      const exec = Array.isArray(_exec) ? _exec : [_exec];
+
+      addAggregatedD1MetaToSpan(
+        span,
+        exec.map((e) => e.meta)
       );
-    } else {
-      return {
-        count: exec.length,
-        duration: exec.reduce((p, c) => {
-          return p + (c.meta['duration'] as number);
-        }, 0),
-      };
-    }
+
+      const error = exec
+        .map((r) => {
+          return r.error ? 1 : 0;
+        })
+        .indexOf(1);
+      if (error !== -1) {
+        span.setAttribute('error.type', `Error in line ${error + 1}`);
+        throw new Error(
+          `D1_EXEC_ERROR: Error in line ${error + 1}: ${lines[error]}: ${
+            exec[error]?.error
+          }`,
+          {
+            cause: new Error(
+              `Error in line ${error + 1}: ${lines[error]}: ${exec[error]?.error}`
+            ),
+          }
+        );
+      } else {
+        return {
+          count: exec.length,
+          duration: exec.reduce((p, c) => {
+            return p + c.meta['duration'];
+          }, 0),
+        };
+      }
+    });
   }
 
   /**
    * DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
    * Only applies to the deprecated v1 alpha databases.
    */
-  public async dump(): Promise<ArrayBuffer> {
+  async dump(): Promise<ArrayBuffer> {
     const response = await this._wrappedFetch('http://d1/dump', {
       method: 'POST',
       headers: {
@@ -363,11 +451,13 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
 }
 
 class D1PreparedStatement {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly dbSession: D1DatabaseSession;
-  public readonly statement: string;
-  public readonly params: unknown[];
+  readonly statement: string;
+  readonly params: unknown[];
 
-  public constructor(
+  constructor(
     dbSession: D1DatabaseSession,
     statement: string,
     values?: unknown[]
@@ -377,7 +467,7 @@ class D1PreparedStatement {
     this.params = values || [];
   }
 
-  public bind(...values: unknown[]): D1PreparedStatement {
+  bind(...values: unknown[]): D1PreparedStatement {
     // Validate value types
     const transformedValues = values.map((r: unknown): unknown => {
       const rType = typeof r;
@@ -421,94 +511,169 @@ class D1PreparedStatement {
     );
   }
 
-  public async first<T = unknown>(colName: string): Promise<T | null>;
-  public async first<T = Record<string, unknown>>(): Promise<T | null>;
-  public async first<T = unknown>(
+  async first<T = unknown>(colName: string): Promise<T | null>;
+  async first<T = Record<string, unknown>>(): Promise<T | null>;
+  async first<T = unknown>(
     colName?: string
   ): Promise<Record<string, T> | T | null> {
-    const info = firstIfArray(
-      await this.dbSession._sendOrThrow<Record<string, T>>(
-        '/query',
-        this.statement,
-        this.params,
-        'ROWS_AND_COLUMNS'
-      )
-    );
+    return withSpan('d1_first', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'first');
+      span.setAttribute('db.query.text', this.statement);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
 
-    const results = toArrayOfObjects(info).results;
-    const hasResults = results.length > 0;
-    if (!hasResults) return null;
+      const info = firstIfArray(
+        await this.dbSession._sendOrThrow<Record<string, T>>(
+          '/query',
+          this.statement,
+          this.params,
+          'ROWS_AND_COLUMNS',
+          span
+        )
+      );
 
-    const firstResult = results.at(0);
-    if (colName !== undefined) {
-      if (firstResult?.[colName] === undefined) {
-        throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
-          cause: new Error('Column not found'),
-        });
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+      addD1MetaToSpan(span, info.meta);
+
+      const results = toArrayOfObjects(info).results;
+      const hasResults = results.length > 0;
+      if (!hasResults) return null;
+
+      const firstResult = results.at(0);
+      if (colName !== undefined) {
+        if (firstResult?.[colName] === undefined) {
+          span.setAttribute('error.type', 'Column not found');
+          throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
+            cause: new Error('Column not found'),
+          });
+        }
+        return firstResult[colName];
+      } else {
+        return firstResult as Record<string, T>;
       }
-      return firstResult[colName];
-    } else {
-      return firstResult as Record<string, T>;
-    }
+    });
   }
 
   /* eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters */
-  public async run<T = Record<string, unknown>>(): Promise<D1Response> {
-    return firstIfArray(
-      await this.dbSession._sendOrThrow<T>(
-        '/execute',
-        this.statement,
-        this.params,
-        'NONE'
-      )
-    );
+  async run<T = Record<string, unknown>>(): Promise<D1Response> {
+    return withSpan('d1_run', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'run');
+      span.setAttribute('db.query.text', this.statement);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+
+      const result = firstIfArray(
+        await this.dbSession._sendOrThrow<T>(
+          '/execute',
+          this.statement,
+          this.params,
+          'NONE',
+          span
+        )
+      );
+
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+      addD1MetaToSpan(span, result.meta);
+      return result;
+    });
   }
 
-  public async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
-    return toArrayOfObjects(
-      firstIfArray(
+  async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
+    return withSpan('d1_all', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'all');
+      span.setAttribute('db.query.text', this.statement);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+
+      const result = firstIfArray(
         await this.dbSession._sendOrThrow<T[]>(
           '/query',
           this.statement,
           this.params,
-          'ROWS_AND_COLUMNS'
+          'ROWS_AND_COLUMNS',
+          span
         )
-      )
-    );
+      );
+
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+      addD1MetaToSpan(span, result.meta);
+
+      return toArrayOfObjects(result);
+    });
   }
 
-  public async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
-    const s = firstIfArray(
-      await this.dbSession._sendOrThrow<Record<string, unknown>>(
-        '/query',
-        this.statement,
-        this.params,
-        'ROWS_AND_COLUMNS'
-      )
-    );
-    // If no results returned, return empty array
-    if (!('results' in s)) return [];
+  async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
+    return withSpan('d1_all', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'raw');
+      span.setAttribute('db.query.text', this.statement);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
 
-    // If ARRAY_OF_OBJECTS returned, extract cells
-    if (Array.isArray(s.results)) {
-      const raw: T[] = [];
-      for (const row of s.results) {
-        if (options?.columnNames && raw.length === 0) {
-          raw.push(Array.from(Object.keys(row)) as T);
+      const s = firstIfArray(
+        await this.dbSession._sendOrThrow<Record<string, unknown>>(
+          '/query',
+          this.statement,
+          this.params,
+          'ROWS_AND_COLUMNS',
+          span
+        )
+      );
+
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+      addD1MetaToSpan(span, s.meta);
+
+      // If no results returned, return empty array
+      if (!('results' in s)) return [];
+
+      // If ARRAY_OF_OBJECTS returned, extract cells
+      if (Array.isArray(s.results)) {
+        const raw: T[] = [];
+        for (const row of s.results) {
+          if (options?.columnNames && raw.length === 0) {
+            raw.push(Array.from(Object.keys(row)) as T);
+          }
+          const entry = Object.keys(row).map((k) => {
+            return row[k];
+          });
+          raw.push(entry as T);
         }
-        const entry = Object.keys(row).map((k) => {
-          return row[k];
-        });
-        raw.push(entry as T);
+        return raw;
+      } else {
+        // Otherwise, data is already in the correct format
+        return [
+          ...(options?.columnNames ? [s.results.columns as T] : []),
+          ...(s.results.rows as T[]),
+        ];
       }
-      return raw;
-    } else {
-      // Otherwise, data is already in the correct format
-      return [
-        ...(options?.columnNames ? [s.results.columns as T] : []),
-        ...(s.results.rows as T[]),
-      ];
-    }
+    });
   }
 }
 
@@ -564,6 +729,83 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
   } catch {
     throw new Error(`Failed to parse body as JSON, got: ${body}`);
   }
+}
+
+function addAggregatedD1MetaToSpan(span: Span, metas: D1Meta[]): void {
+  const aggregatedMeta = aggregateD1Meta(metas);
+  addD1MetaToSpan(span, aggregatedMeta);
+}
+
+function addD1MetaToSpan(span: Span, meta: D1Meta): void {
+  span.setAttribute('cloudflare.d1.response.size_after', meta.size_after);
+  span.setAttribute('cloudflare.d1.response.rows_read', meta.rows_read);
+  span.setAttribute('cloudflare.d1.response.rows_written', meta.rows_written);
+  span.setAttribute('cloudflare.d1.response.last_row_id', meta.last_row_id);
+  span.setAttribute('cloudflare.d1.response.changed_db', meta.changed_db);
+  span.setAttribute('cloudflare.d1.response.changes', meta.changes);
+  span.setAttribute(
+    'cloudflare.d1.response.served_by_region',
+    meta.served_by_region
+  );
+  span.setAttribute(
+    'cloudflare.d1.response.served_by_primary',
+    meta.served_by_primary
+  );
+  span.setAttribute(
+    'cloudflare.d1.response.sql_duration_ms',
+    meta.timings?.sql_duration_ms ?? undefined
+  );
+  span.setAttribute(
+    'cloudflare.d1.response.total_attempts',
+    meta.total_attempts
+  );
+}
+
+// When a query is executing multiple statements, and we receive a D1Meta
+// for each statement, we need to aggregate the meta data before we annotate
+// the telemetry, with different rules for each field.
+function aggregateD1Meta(metas: D1Meta[]): D1Meta {
+  const aggregatedMeta: D1Meta = {
+    duration: 0,
+    size_after: 0,
+    rows_read: 0,
+    rows_written: 0,
+    last_row_id: 0,
+    changed_db: false,
+    changes: 0,
+  };
+
+  for (const meta of metas) {
+    aggregatedMeta.duration += meta.duration;
+    // for size_after, we only want the last value
+    aggregatedMeta.size_after = meta.size_after;
+    aggregatedMeta.rows_read += meta.rows_read;
+    aggregatedMeta.rows_written += meta.rows_written;
+    aggregatedMeta.last_row_id = meta.last_row_id;
+    if (meta.served_by_region) {
+      aggregatedMeta.served_by_region = meta.served_by_region;
+    }
+    if (meta.served_by_primary) {
+      aggregatedMeta.served_by_primary = meta.served_by_primary;
+    }
+    if (meta.timings?.sql_duration_ms) {
+      aggregatedMeta.timings = {
+        sql_duration_ms:
+          (aggregatedMeta.timings?.sql_duration_ms ?? 0) +
+          meta.timings.sql_duration_ms,
+      };
+    }
+    if (meta.total_attempts) {
+      aggregatedMeta.total_attempts =
+        (aggregatedMeta.total_attempts ?? 0) + meta.total_attempts;
+    }
+    aggregatedMeta.changes += meta.changes;
+    if (meta.changed_db) {
+      aggregatedMeta.changed_db = true;
+    }
+  }
+
+  return aggregatedMeta;
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): D1Database {

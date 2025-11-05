@@ -21,8 +21,8 @@ inline auto mapAddRef(kj::Maybe<kj::Rc<T>>& maybe) -> kj::Maybe<kj::Rc<T>> {
 }
 
 template <typename T>
-inline auto mapAddRef(kj::Maybe<kj::Arc<T>>& maybe) -> kj::Maybe<kj::Arc<T>> {
-  return maybe.map([](kj::Arc<T>& t) { return t.addRef(); });
+inline auto mapAddRef(const kj::Maybe<kj::Arc<T>>& maybe) -> kj::Maybe<kj::Arc<T>> {
+  return maybe.map([](const kj::Arc<T>& t) { return t.addRef(); });
 }
 
 template <typename T>
@@ -40,8 +40,12 @@ inline auto mapAddRef(kj::Array<kj::Own<T>>& array) -> kj::Array<kj::Own<T>> {
   return KJ_MAP(t, array) { return kj::addRef(*t); };
 }
 
-inline auto mapCopyString(kj::Maybe<kj::String>& string) -> kj::Maybe<kj::String> {
-  return string.map([](kj::String& s) { return kj::str(s); });
+inline auto mapCopyString(const kj::Maybe<kj::String>& string) -> kj::Maybe<kj::String> {
+  return string.map([](const kj::String& s) { return kj::str(s); });
+}
+
+inline auto mapCopyString(const kj::Maybe<kj::StringPtr>& string) -> kj::Maybe<kj::String> {
+  return string.map([](const kj::StringPtr& s) { return kj::str(s); });
 }
 
 }  // namespace workerd

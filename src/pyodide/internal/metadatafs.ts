@@ -1,19 +1,30 @@
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { createReadonlyFS } from 'pyodide-internal:readOnlyFS';
+import { PythonWorkersInternalError } from 'pyodide-internal:util';
 
-function createTree(paths: string[]): MetadataFSInfo {
-  const tree = new Map();
+function createTree(paths: string[]): MetadataDirInfo {
+  const tree: MetadataFSInfo = new Map();
   paths.forEach((elt: string, idx: number) => {
-    let subTree = tree;
+    let subTree: MetadataFSInfo = tree;
     const parts = elt.split('/');
-    const name = parts.pop();
+    const name = parts.pop()!;
     for (const part of parts) {
-      let next = subTree.get(part);
+      if (typeof subTree === 'number') {
+        throw new PythonWorkersInternalError(
+          'expected subtree to not be a number'
+        );
+      }
+      let next: MetadataFSInfo | undefined = subTree.get(part);
       if (!next) {
         next = new Map();
         subTree.set(part, next);
       }
       subTree = next;
+    }
+    if (typeof subTree === 'number') {
+      throw new PythonWorkersInternalError(
+        'expected subtree to not be a number'
+      );
     }
     subTree.set(name, idx);
   });
@@ -27,7 +38,7 @@ export function createMetadataFS(Module: Module): object {
   const sizes = MetadataReader.getSizes();
   const rootInfo = createTree(names);
   const FSOps: FSOps<MetadataFSInfo> = {
-    getNodeMode(parent, name, info) {
+    getNodeMode(_parent, _name, info) {
       return {
         permissions: 0o555, // read and execute but not write
         isDir: typeof info !== 'number',
@@ -43,18 +54,22 @@ export function createMetadataFS(Module: Module): object {
         node.tree = info as MetadataDirInfo;
       } else {
         node.index = info as number;
-        node.usedBytes = sizes[info as number];
+        node.usedBytes = sizes[info as number]!;
       }
     },
     readdir(node) {
       if (node.tree == undefined) {
-        throw new Error('cannot read directory, tree is undefined');
+        throw new PythonWorkersInternalError(
+          'cannot read directory, tree is undefined'
+        );
       }
       return Array.from(node.tree.keys());
     },
     lookup(parent, name) {
       if (parent.tree == undefined) {
-        throw new Error('cannot lookup directory, tree is undefined');
+        throw new PythonWorkersInternalError(
+          'cannot lookup directory, tree is undefined'
+        );
       }
       const res = parent.tree.get(name);
       if (res === undefined) {

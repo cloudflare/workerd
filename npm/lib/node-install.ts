@@ -51,7 +51,7 @@ function validateBinaryVersion(...command: string[]): void {
 Local development will not work. This usually means you're on an unsupported
 operating system, or missing some shared libraries.`;
     if (process.platform === "linux") {
-      msg += " On Debian-based systems,\nmake sure you've installed the \`libc++1\` package."
+      msg += " On Debian-based systems,\nmake sure you've installed the `libc++1` package."
     }
     console.error(msg);
     return;

@@ -7,16 +7,12 @@ wd_ts_bundle(
     internal_modules = glob(
         [
             "internal/*.ts",
-            "internal/*.js",
         ],
-        allow_empty = True,
     ),
     modules = glob(
         [
             "*.ts",
-            "*.js",
         ],
-        allow_empty = True,
     ),
     schema_id = "0xbcc8f57c63814006",
     tsconfig_json = "tsconfig.json",

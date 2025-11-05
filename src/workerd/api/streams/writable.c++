@@ -22,7 +22,7 @@ jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
     jsg::Lock& js, jsg::Ref<WritableStream> stream) {
   JSG_REQUIRE(
       !stream->isLocked(), TypeError, "This WritableStream is currently locked to a writer.");
-  auto writer = jsg::alloc<WritableStreamDefaultWriter>();
+  auto writer = js.alloc<WritableStreamDefaultWriter>();
   writer->lockToStream(js, *stream);
   return kj::mv(writer);
 }
@@ -52,13 +52,14 @@ jsg::Promise<void> WritableStreamDefaultWriter::abort(
   KJ_UNREACHABLE;
 }
 
-void WritableStreamDefaultWriter::attach(WritableStreamController& controller,
+void WritableStreamDefaultWriter::attach(jsg::Lock& js,
+    WritableStreamController& controller,
     jsg::Promise<void> closedPromise,
     jsg::Promise<void> readyPromise) {
   KJ_ASSERT(state.is<Initial>());
   state = controller.addRef();
   this->closedPromise = kj::mv(closedPromise);
-  replaceReadyPromise(kj::mv(readyPromise));
+  replaceReadyPromise(js, kj::mv(readyPromise));
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::close(jsg::Lock& js) {
@@ -133,6 +134,10 @@ jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getReady
   return KJ_ASSERT_NONNULL(readyPromise, "the writer was never attached to a stream");
 }
 
+kj::Maybe<jsg::Promise<void>> WritableStreamDefaultWriter::isReady(jsg::Lock& js) {
+  return readyPromisePending.map([&](jsg::Promise<void>& p) { return p.whenResolved(js); });
+}
+
 void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& stream) {
   KJ_ASSERT(!stream.isLocked());
   KJ_ASSERT(stream.getController().lockWriter(js, *this));
@@ -166,8 +171,10 @@ void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-void WritableStreamDefaultWriter::replaceReadyPromise(jsg::Promise<void> readyPromise) {
-  this->readyPromise = kj::mv(readyPromise);
+void WritableStreamDefaultWriter::replaceReadyPromise(
+    jsg::Lock& js, jsg::Promise<void> readyPromise) {
+  this->readyPromisePending = kj::mv(readyPromise);
+  this->readyPromise = KJ_ASSERT_NONNULL(this->readyPromisePending).whenResolved(js);
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::write(jsg::Lock& js, v8::Local<v8::Value> chunk) {
@@ -292,7 +299,11 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
       "To use the new WritableStream() constructor, enable the "
       "streams_enable_constructors compatibility flag. "
       "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
-  auto stream = jsg::alloc<WritableStream>(newWritableStreamJsController());
+  auto controller = newWritableStreamJsController();
+  // We account for the memory usage of the WritableStream and its controller together because their
+  // lifetimes are identical and memory accounting itself has a memory overhead.
+  auto stream = js.allocAccounted<WritableStream>(
+      sizeof(WritableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
   stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
@@ -547,7 +558,7 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
   auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
       "WritableStream can only be serialized for RPC.");
-  auto externalHandler = dynamic_cast<RpcSerializerExternalHander*>(&handler);
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
       "WritableStream can only be serialized for RPC.");
 
@@ -598,7 +609,7 @@ jsg::Ref<WritableStream> WritableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got WritableStream on non-RPC serialized object?");
-  auto externalHandler = dynamic_cast<RpcDeserializerExternalHander*>(&handler);
+  auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got WritableStream on non-RPC serialized object?");
 
   auto reader = externalHandler->read();
@@ -615,7 +626,7 @@ jsg::Ref<WritableStream> WritableStream::deserialize(
   auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
   auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
 
-  return jsg::alloc<WritableStream>(
+  return js.alloc<WritableStream>(
       ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
 }
 

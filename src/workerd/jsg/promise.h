@@ -8,6 +8,7 @@
 #include "util.h"
 #include "wrappable.h"
 
+#include <v8-function.h>
 #include <v8-promise.h>
 
 #include <kj/async.h>
@@ -33,13 +34,13 @@ struct OpaqueWrappable<T, false>: public Wrappable {
   T value;
   bool movedAway = false;
 
-  kj::StringPtr jsgGetMemoryName() const override {
+  kj::StringPtr jsgGetMemoryName() const override final {
     return "OpaqueWrappable"_kjc;
   }
-  size_t jsgGetMemorySelfSize() const override {
+  size_t jsgGetMemorySelfSize() const override final {
     return sizeof(OpaqueWrappable);
   }
-  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override final {
     Wrappable::jsgGetMemoryInfo(tracker);
   }
 };
@@ -49,16 +50,6 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
   // When T is GC-visitable, make sure to implement visitation.
 
   using OpaqueWrappable<T, false>::OpaqueWrappable;
-
-  kj::StringPtr jsgGetMemoryName() const override {
-    return "OpaqueWrappable"_kjc;
-  }
-  size_t jsgGetMemorySelfSize() const override {
-    return sizeof(OpaqueWrappable);
-  }
-  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
-    Wrappable::jsgGetMemoryInfo(tracker);
-  }
 
   void jsgVisitForGc(GcVisitor& visitor) override {
     if (!this->movedAway) {
@@ -244,11 +235,11 @@ class Promise {
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func, typename ErrorFunc>
   PromiseForResult<Func, T, true> then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
-    typedef ReturnType<Func, T, true> Output;
+    using Output = ReturnType<Func, T, true>;
     static_assert(kj::isSameType<Output, ReturnType<ErrorFunc, Value, true>>(),
         "functions passed to .then() must return exactly the same type");
 
-    typedef ThenCatchPair<Func, ErrorFunc> FuncPair;
+    using FuncPair = ThenCatchPair<Func, ErrorFunc>;
     return thenImpl<Output>(js, FuncPair{kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc)},
         &promiseContinuation<FuncPair, false, T, Output>,
         &promiseContinuation<FuncPair, true, Value, Output>);
@@ -259,10 +250,10 @@ class Promise {
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func>
   PromiseForResult<Func, T, true> then(Lock& js, Func&& func) {
-    typedef ReturnType<Func, T, true> Output;
+    using Output = ReturnType<Func, T, true>;
 
     // HACK: The error function is never called, so it need not actually be a functor.
-    typedef ThenCatchPair<Func, bool> FuncPair;
+    using FuncPair = ThenCatchPair<Func, bool>;
     return thenImpl<Output>(js, FuncPair{kj::fwd<Func>(func), false},
         &promiseContinuation<FuncPair, false, T, Output>,
         &identityPromiseContinuation<FuncPair, true>);
@@ -274,7 +265,7 @@ class Promise {
         "function passed to .catch_() must return exactly the promise's type");
 
     // HACK: The non-error function is never called, so it need not actually be a functor.
-    typedef ThenCatchPair<bool, ErrorFunc> FuncPair;
+    using FuncPair = ThenCatchPair<bool, ErrorFunc>;
     return thenImpl<T>(js, FuncPair{false, kj::fwd<ErrorFunc>(errorFunc)},
         &identityPromiseContinuation<FuncPair, false>,
         &promiseContinuation<FuncPair, true, Value, T>);
@@ -353,8 +344,8 @@ class Promise {
           [&] { check(v8Resolver.getHandle(js)->Reject(js.v8Context(), exception)); });
     }
 
-    void reject(Lock& js, kj::Exception exception) {
-      reject(js, makeInternalError(js.v8Isolate, kj::mv(exception)));
+    void reject(Lock& js, kj::Exception exception, ExceptionToJsOptions options = {}) {
+      reject(js, exceptionToJs(js.v8Isolate, kj::mv(exception), options));
     }
 
     Resolver addRef(Lock& js) {
@@ -380,6 +371,21 @@ class Promise {
   JSG_MEMORY_INFO(Promise) {
     KJ_IF_SOME(promise, v8Promise) {
       tracker.trackField("promise", promise);
+    }
+  }
+
+  // Ths is for testing/diagnostics purposes only.
+  enum class State {
+    PENDING = v8::Promise::kPending,
+    FULFILLED = v8::Promise::kFulfilled,
+    REJECTED = v8::Promise::kRejected,
+    CONSUMED = 3  // Not a real state; indicates the Promise has been consumed.
+  };
+  State getState(Lock& js) {
+    KJ_IF_SOME(promise, v8Promise) {
+      return static_cast<State>(promise.getHandle(js)->State());
+    } else {
+      return State::CONSUMED;
     }
   }
 
@@ -496,14 +502,14 @@ Promise<T> Lock::rejectedPromise(jsg::Value exception) {
 }
 
 template <typename T>
-Promise<T> Lock::rejectedPromise(kj::Exception&& exception) {
+Promise<T> Lock::rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions options) {
   return withinHandleScope(
-      [&] { return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception))); });
+      [&] { return rejectedPromise<T>(exceptionToJs(kj::mv(exception), options)); });
 }
 
 template <class Func>
 PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
-  typedef RemovePromise<ReturnType<Func, void>> Result;
+  using Result = RemovePromise<ReturnType<Func, void>>;
   v8::TryCatch tryCatch(v8Isolate);
   try {
     if constexpr (isPromise<ReturnType<Func, void>>()) {
@@ -547,7 +553,8 @@ void thenWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
       v8::Isolate* isolate = args.GetIsolate();
       auto& wrapper = TypeWrapper::from(isolate);
       auto context = isolate->GetCurrentContext();
-      return wrapper.wrap(context, kj::none, unwrapOpaque<Input>(isolate, args[0]));
+      auto& lock = Lock::from(isolate);
+      return wrapper.wrap(lock, context, kj::none, unwrapOpaque<Input>(isolate, args[0]));
     });
   }
 }
@@ -559,8 +566,10 @@ void thenUnwrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* isolate = args.GetIsolate();
     auto& wrapper = TypeWrapper::from(isolate);
     auto context = isolate->GetCurrentContext();
+    auto& js = Lock::from(isolate);
     return wrapOpaque(context,
-        wrapper.template unwrap<Output>(context, args[0], TypeErrorContext::promiseResolution()));
+        wrapper.template unwrap<Output>(
+            js, context, args[0], TypeErrorContext::promiseResolution()));
   });
 }
 
@@ -580,7 +589,8 @@ class PromiseWrapper {
   }
 
   template <typename T>
-  v8::Local<v8::Promise> wrap(v8::Local<v8::Context> context,
+  v8::Local<v8::Promise> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       Promise<T>&& promise) {
     // Add a .then() to unwrap the value (i.e. convert C++ value to JavaScript).
@@ -592,8 +602,6 @@ class PromiseWrapper {
     auto markedAsHandled = promise.markedAsHandled;
     auto then = check(v8::Function::New(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}),
         1, v8::ConstructorBehavior::kThrow));
-
-    auto& js = jsg::Lock::from(context->GetIsolate());
     auto ret = check(promise.consumeHandle(js)->Then(context, then));
     // Although we added a .then() to the promise to translate the value to JavaScript, we would
     // like things to behave as if the C++ code returned this Promise directly to JavaScript. In
@@ -607,7 +615,8 @@ class PromiseWrapper {
   }
 
   template <typename T>
-  kj::Maybe<Promise<T>> tryUnwrap(v8::Local<v8::Context> context,
+  kj::Maybe<Promise<T>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Promise<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -625,7 +634,7 @@ class PromiseWrapper {
             context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
         promise = check(promise->Then(context, then));
       }
-      return Promise<T>(context->GetIsolate(), promise);
+      return Promise<T>(js.v8Isolate, promise);
     } else {
       // Input is a resolved value (not a promise). Try to unwrap it now.
 
@@ -639,10 +648,10 @@ class PromiseWrapper {
       if (config.unwrapCustomThenables && isThenable(context, handle)) {
         auto paf = check(v8::Promise::Resolver::New(context));
         check(paf->Resolve(context, handle));
-        return tryUnwrap(context, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
+        return tryUnwrap(
+            js, context, paf->GetPromise(), static_cast<Promise<T>*>(nullptr), parentObject);
       }
 
-      auto& js = Lock::from(context->GetIsolate());
       if constexpr (isVoid<T>()) {
         // When expecting Promise<void>, we treat absolutely any non-promise value as being
         // an immediately-resolved promise. This is consistent with JavaScript where you'd
@@ -659,7 +668,7 @@ class PromiseWrapper {
         return js.resolvedPromise();
       } else {
         auto& wrapper = *static_cast<TypeWrapper*>(this);
-        KJ_IF_SOME(value, wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
+        KJ_IF_SOME(value, wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
           return js.resolvedPromise(kj::mv(value));
         } else {
           // Wrong type.
@@ -675,7 +684,7 @@ class PromiseWrapper {
   static bool isThenable(v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
     if (handle->IsObject()) {
       auto obj = handle.As<v8::Object>();
-      return check(obj->Has(context, v8StrIntern(context->GetIsolate(), "then")));
+      return check(obj->Has(context, v8StrIntern(v8::Isolate::GetCurrent(), "then")));
     }
     return false;
   }
@@ -720,8 +729,7 @@ class UnhandledRejectionHandler {
     explicit UnhandledRejection(jsg::Lock& js,
         jsg::V8Ref<v8::Promise> promise,
         jsg::Value value,
-        v8::Local<v8::Message> message,
-        size_t rejectionNumber);
+        v8::Local<v8::Message> message);
 
     ~UnhandledRejection();
 
@@ -746,8 +754,6 @@ class UnhandledRejectionHandler {
     inline bool isAlive() {
       return !promise.IsEmpty() && !value.IsEmpty();
     }
-
-    size_t rejectionNumber;
 
     uint hashCode() const {
       return hash;
@@ -776,7 +782,8 @@ class UnhandledRejectionHandler {
   };
 
   struct UnhandledRejectionCallbacks {
-    inline const UnhandledRejection& keyForRow(const UnhandledRejection& row) const {
+    inline const UnhandledRejection& keyForRow(
+        const UnhandledRejection& row KJ_LIFETIMEBOUND) const {
       return row;
     }
     inline bool matches(const UnhandledRejection& a, const UnhandledRejection& b) const {
@@ -795,7 +802,6 @@ class UnhandledRejectionHandler {
 
   kj::Function<Handler> handler;
   bool scheduled = false;
-  size_t rejectionCount = 0;
 
   using UnhandledRejectionsTable =
       kj::Table<UnhandledRejection, kj::HashIndex<UnhandledRejectionCallbacks>>;

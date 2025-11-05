@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
+import assert from 'node:assert';
 import {
   FunctionType,
   Member,
@@ -12,19 +12,19 @@ import {
   StructureGroups,
   Type,
   Type_Which,
-} from "@workerd/jsg/rtti.capnp.js";
-import ts from "typescript";
-import { createStructureNode } from "./structure";
+} from '@workerd/jsg/rtti';
+import ts from 'typescript';
+import { createStructureNode } from './structure';
 
-export { getTypeName } from "./type";
+export { getTypeName } from './type';
 
 export type StructureMap = Map<string, Structure>;
 // Builds a lookup table mapping type names to structures
 function collectStructureMap(root: StructureGroups): StructureMap {
   const map = new Map<string, Structure>();
-  root.getGroups().forEach((group) => {
-    group.getStructures().forEach((structure) => {
-      map.set(structure.getFullyQualifiedName(), structure);
+  root.groups.forEach((group) => {
+    group.structures.forEach((structure) => {
+      map.set(structure.fullyQualifiedName, structure);
     });
   });
   return map;
@@ -44,61 +44,83 @@ function collectIncluded(map: StructureMap, root?: string): Set<string> {
 
   function visitType(type: Type): void {
     switch (type.which()) {
-      case Type_Which.PROMISE:
-        { visitType(type.getPromise().getValue()); return; }
+      case Type_Which.PROMISE: {
+        visitType(type.promise.value);
+        return;
+      }
       case Type_Which.STRUCTURE: {
-        const name = type.getStructure().getFullyQualifiedName();
+        const name = type.structure.fullyQualifiedName;
         const structure = map.get(name);
         assert(structure !== undefined, `Unknown structure type: ${name}`);
-        { visitStructure(structure); return; }
+        {
+          visitStructure(structure);
+          return;
+        }
       }
-      case Type_Which.ARRAY:
-        { visitType(type.getArray().getElement()); return; }
-      case Type_Which.MAYBE:
-        { visitType(type.getMaybe().getValue()); return; }
+      case Type_Which.ARRAY: {
+        visitType(type.array.element);
+        return;
+      }
+      case Type_Which.MAYBE: {
+        visitType(type.maybe.value);
+        return;
+      }
       case Type_Which.DICT: {
-        const dict = type.getDict();
-        visitType(dict.getKey());
-        { visitType(dict.getValue()); return; }
+        const dict = type.dict;
+        visitType(dict.key);
+        visitType(dict.value);
+        return;
       }
-      case Type_Which.ONE_OF:
-        { type.getOneOf().getVariants().forEach(visitType); return; }
-      case Type_Which.FUNCTION:
-        { visitFunction(type.getFunction()); return; }
+      case Type_Which.ONE_OF: {
+        type.oneOf.variants.forEach(visitType);
+        return;
+      }
+      case Type_Which.FUNCTION: {
+        visitFunction(type.function);
+        return;
+      }
     }
   }
 
   function visitFunction(func: FunctionType | Method): void {
-    func.getArgs().forEach(visitType);
-    visitType(func.getReturnType());
+    func.args.forEach(visitType);
+    visitType(func.returnType);
   }
 
   function visitMember(member: Member): void {
     switch (member.which()) {
-      case Member_Which.METHOD:
-        { visitFunction(member.getMethod()); return; }
-      case Member_Which.PROPERTY:
-        { visitType(member.getProperty().getType()); return; }
-      case Member_Which.NESTED:
-        { visitStructure(member.getNested().getStructure()); return; }
-      case Member_Which.CONSTRUCTOR:
-        { member.getConstructor().getArgs().forEach(visitType); return; }
+      case Member_Which.METHOD: {
+        visitFunction(member.method);
+        return;
+      }
+      case Member_Which.PROPERTY: {
+        visitType(member.property.type);
+        return;
+      }
+      case Member_Which.NESTED: {
+        visitStructure(member.nested.structure);
+        return;
+      }
+      case Member_Which.CONSTRUCTOR: {
+        member.$constructor.args.forEach(visitType);
+        return;
+      }
     }
   }
 
   function visitStructure(structure: Structure): void {
-    const name = structure.getFullyQualifiedName();
+    const name = structure.fullyQualifiedName;
     if (included.has(name)) return;
     included.add(name);
-    structure.getMembers().forEach(visitMember);
-    if (structure.hasExtends()) {
-      visitType(structure.getExtends());
+    structure.members.forEach(visitMember);
+    if (structure._hasExtends()) {
+      visitType(structure.extends);
     }
-    if (structure.hasIterator()) {
-      visitFunction(structure.getIterator());
+    if (structure._hasIterator()) {
+      visitFunction(structure.iterator);
     }
-    if (structure.hasAsyncIterator()) {
-      visitFunction(structure.getAsyncIterator());
+    if (structure._hasAsyncIterator()) {
+      visitFunction(structure.asyncIterator);
     }
   }
 
@@ -106,7 +128,7 @@ function collectIncluded(map: StructureMap, root?: string): Set<string> {
     // If no root was specified, visit all structures with
     // `JSG_(STRUCT_)TS_ROOT` macros
     for (const structure of map.values()) {
-      if (structure.getTsRoot()) visitStructure(structure);
+      if (structure.tsRoot) visitStructure(structure);
     }
   } else {
     // Otherwise, visit just that root
@@ -128,25 +150,25 @@ function collectClasses(map: StructureMap): Set<string> {
   const classes = new Set<string>();
   for (const structure of map.values()) {
     // 1) Add all classes inherited by this class
-    if (structure.hasExtends()) {
-      const extendsType = structure.getExtends();
-      if (extendsType.isStructure()) {
-        classes.add(extendsType.getStructure().getFullyQualifiedName());
+    if (structure._hasExtends()) {
+      const extendsType = structure.extends;
+      if (extendsType._isStructure) {
+        classes.add(extendsType.structure.fullyQualifiedName);
       }
     }
 
-    structure.getMembers().forEach((member) => {
+    structure.members.forEach((member) => {
       // 2) Add this class if it's constructible
-      if (member.isConstructor()) {
-        classes.add(structure.getFullyQualifiedName());
+      if (member._isConstructor) {
+        classes.add(structure.fullyQualifiedName);
       }
       // 3) Add this class if it contains static methods
-      if (member.isMethod() && member.getMethod().getStatic()) {
-        classes.add(structure.getFullyQualifiedName());
+      if (member._isMethod && member.method.static) {
+        classes.add(structure.fullyQualifiedName);
       }
       // 4) Add all nested types defined by this class
-      if (member.isNested()) {
-        classes.add(member.getNested().getStructure().getFullyQualifiedName());
+      if (member._isNested) {
+        classes.add(member.nested.structure.fullyQualifiedName);
       }
     });
   }
@@ -162,10 +184,10 @@ export function generateDefinitions(root: StructureGroups): {
   const classes = collectClasses(structureMap);
 
   // Can't use `flatMap()` here as `getGroups()` returns a `capnp.List`
-  const nodes = root.getGroups().map((group) => {
+  const nodes = root.groups.map((group) => {
     const structureNodes: ts.Statement[] = [];
-    group.getStructures().forEach((structure) => {
-      const name = structure.getFullyQualifiedName();
+    group.structures.forEach((structure) => {
+      const name = structure.fullyQualifiedName;
       if (globalIncluded.has(name)) {
         const asClass = classes.has(name);
         structureNodes.push(createStructureNode(structure, { asClass }));
@@ -179,12 +201,11 @@ export function generateDefinitions(root: StructureGroups): {
 }
 
 export function collectTypeScriptModules(root: StructureGroups): string {
-  let result = "";
+  let result = '';
 
-  root.getModules().forEach((module) => {
-    if (!module.isTsDeclarations()) return;
-    const declarations = module
-      .getTsDeclarations()
+  root.modules.forEach((module) => {
+    if (!module._isTsDeclarations) return;
+    const declarations = module.tsDeclarations
       // Looks for any lines starting with `///`, which indicates a TypeScript
       // Triple-Slash Directive (https://www.typescriptlang.org/docs/handbook/triple-slash-directives.html)
       .replaceAll(/^\/\/\/.+$/gm, (match) => {
@@ -193,10 +214,10 @@ export function collectTypeScriptModules(root: StructureGroups): string {
           '/// <reference types="@workerd/types-internal" />',
           `Unexpected triple-slash directive, got ${match}`
         );
-        return "";
+        return '';
       });
 
-    result += `declare module "${module.getSpecifier()}" {\n${declarations}\n}\n`;
+    result += `declare module "${module.specifier}" {\n${declarations}\n}\n`;
   });
 
   return result;

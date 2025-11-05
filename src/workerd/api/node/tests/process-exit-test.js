@@ -26,7 +26,7 @@ export const test2 = {
     // we check only that we received an internal error and that no other
     // lines of code ran after the process.exit call.
     {
-      const obj = env.foo.get(
+      let obj = env.foo.get(
         env.foo.idFromName('210bd0cbd803ef7883a1ee9d86cce06f')
       );
       await rejects(obj.fetch('http://example.org'), {
@@ -35,7 +35,14 @@ export const test2 = {
       await rejects(obj.fetch('http://example.org'), {
         message: /^The Node.js process.exit/,
       });
-      // The durable object should have been created twice.
+      // The durable object should have been created once, since we didn't recreate the stub.
+      strictEqual(fooCreateCount, 1);
+
+      // If we recreate the stub and try again, then the counter will increment.
+      obj = env.foo.get(env.foo.idFromName('210bd0cbd803ef7883a1ee9d86cce06f'));
+      await rejects(obj.fetch('http://example.org'), {
+        message: /^The Node.js process.exit/,
+      });
       strictEqual(fooCreateCount, 2);
     }
   },

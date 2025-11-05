@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "internet", network = (allow = ["private"])),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityDate = "2025-04-11",
+  modules = [
+    (name = "worker", esModule = embed "websocket-client-error-test.js"),
+  ],
+  bindings = [
+    (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
+    (name = "BIG_MESSAGE_SERVER_PORT", fromEnvironment = "BIG_MESSAGE_SERVER_PORT"),
+  ]
+);

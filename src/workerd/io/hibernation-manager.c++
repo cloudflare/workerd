@@ -85,6 +85,11 @@ HibernationManagerImpl::HibernationManagerImpl(
       readLoopTasks(onDisconnect) {}
 
 HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
+  // Drop our outstanding tasks, the `readLoopTasks` have weak references to the
+  // `HibernatableWebSockets` in `allWs`, and since we're about to drop all of those WebSockets,
+  // we can't allow any more events to be delivered.
+  readLoopTasks.clear();
+
   // Note that the HibernatableWebSocket destructor handles removing any references to itself in
   // `tagToWs`, and even removes the hashmap entry if there are no more entries in the bucket.
   allWs.clear();
@@ -146,7 +151,11 @@ void HibernationManagerImpl::acceptWebSocket(
 
   // Finally, we initiate the readloop for this HibernatableWebSocket and
   // give the task to the HibernationManager so it lives long.
-  readLoopTasks.add(handleReadLoop(refToHibernatable));
+  readLoopTasks.add(handleReadLoop(refToHibernatable).catch_([](kj::Exception&& e) {
+    if (isInterestingException(e)) {
+      LOG_EXCEPTION("HibernationManagerImpl::handleReadLoop", e);
+    }
+  }));
 }
 
 kj::Promise<void> HibernationManagerImpl::handleReadLoop(HibernatableWebSocket& refToHibernatable) {
@@ -193,12 +202,12 @@ void HibernationManagerImpl::setWebSocketAutoResponse(
 }
 
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::
-    getWebSocketAutoResponse() {
+    getWebSocketAutoResponse(jsg::Lock& js) {
   KJ_IF_SOME(req, autoResponsePair->request) {
     // When getting the currently set auto-response pair, if we have a request we must have a response
     // set. If not, we'll throw.
     return api::WebSocketRequestResponsePair::constructor(
-        kj::str(req), kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response)));
+        js, kj::str(req), kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response)));
   }
   return kj::none;
 }

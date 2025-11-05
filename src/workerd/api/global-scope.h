@@ -5,15 +5,18 @@
 #pragma once
 
 #include "basics.h"
+#include "filesystem.h"
 #include "hibernation-event-params.h"
 #include "http.h"
+#include "messagechannel.h"
+#include "performance.h"
+#ifdef WORKERD_FUZZILLI
+#include "fuzzilli.h"
+#include "unsafe.h"
+#endif
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#endif
 
 namespace workerd::jsg {
 class DOMException;
@@ -78,44 +81,41 @@ class Navigator: public jsg::Object {
   kj::StringPtr getUserAgent() {
     return "Cloudflare-Workers"_kj;
   }
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  jsg::Optional<jsg::Ref<api::gpu::GPU>> getGPU(CompatibilityFlags::Reader flags);
-#endif
 
   bool sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body);
 
-  JSG_RESOURCE_TYPE(Navigator) {
+  kj::uint getHardwareConcurrency() {
+    // Workers does not expose hardware concurrency to users.
+    // From the user code perspective there's only one core.
+    return 1;
+  }
+
+  kj::StringPtr getLanguage() {
+    // Some packages depend on navigator.language being set to a specific value.
+    return "en"_kj;
+  }
+
+  kj::Array<kj::String> getLanguages() {
+    auto builder = kj::heapArrayBuilder<kj::String>(1);
+    builder.add(kj::str("en"));
+    return builder.finish();
+  }
+
+  jsg::Ref<StorageManager> getStorage(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(Navigator, CompatibilityFlags::Reader reader) {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-    JSG_READONLY_INSTANCE_PROPERTY(gpu, getGPU);
-#endif
-  }
-};
+    JSG_READONLY_INSTANCE_PROPERTY(hardwareConcurrency, getHardwareConcurrency);
 
-class Performance: public jsg::Object {
- public:
-  // We always return a time origin of 0, making performance.now() equivalent to Date.now(). There
-  // is no other appropriate time origin to use given that the Worker platform is intended to be
-  // treated like one big computer rather than many individual instances. In particular, if and
-  // when we start snapshotting applications after startup and then starting instances from that
-  // snapshot, what would the right time origin be? The time when the snapshot was created? This
-  // seems to leak implementation details in a weird way.
-  //
-  // Note that the purpose of `timeOrigin` is normally to allow `now()` to return a more-precise
-  // measurement. Measuring against a recent time allows the values returned by `now()` to be
-  // smaller in magnitude, which allows them to be more precise due to the nature of floating
-  // point numbers. In our case, though, we don't return precise measurements from this interface
-  // anyway, for Spectre reasons -- it returns the same as Date.now().
-  double getTimeOrigin() {
-    return 0.0;
-  }
+    if (reader.getEnableNavigatorLanguage()) {
+      JSG_READONLY_INSTANCE_PROPERTY(language, getLanguage);
+      JSG_READONLY_INSTANCE_PROPERTY(languages, getLanguages);
+    }
 
-  double now();
-
-  JSG_RESOURCE_TYPE(Performance) {
-    JSG_READONLY_INSTANCE_PROPERTY(timeOrigin, getTimeOrigin);
-    JSG_METHOD(now);
+    if (reader.getWebFileSystem()) {
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(storage, getStorage);
+    }
   }
 };
 
@@ -135,38 +135,6 @@ class Cloudflare: public jsg::Object {
   }
 };
 
-class PromiseRejectionEvent: public Event {
- public:
-  PromiseRejectionEvent(
-      v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason);
-
-  static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
-
-  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) {
-    return promise.addRef(js);
-  }
-  jsg::Value getReason(jsg::Lock& js) {
-    return reason.addRef(js);
-  }
-
-  JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
-    JSG_INHERIT(Event);
-    JSG_READONLY_INSTANCE_PROPERTY(promise, getPromise);
-    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("promise", promise);
-    tracker.trackField("reason", reason);
-  }
-
- private:
-  jsg::V8Ref<v8::Promise> promise;
-  jsg::Value reason;
-
-  void visitForGc(jsg::GcVisitor& visitor);
-};
-
 class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
  public:
   jsg::Unimplemented importScripts(kj::String s) {
@@ -175,6 +143,15 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
 
   JSG_RESOURCE_TYPE(WorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
+
+    // *** WARNING ***: *Every* new export here must be treated as a potentially
+    // breaking change. It doesn't matter if it's a new method, a new property,
+    // or a new nested type. Adding anything to the global scope risks breaking
+    // existing user code that is feature-sniffing or monkeypatching the global.
+    // *Always* add new exports behind a new compatibility flag! And when in
+    // doubt, don't add the new export on globalThis at all. The only things
+    // that should be exported on globalThis should be standardized web APIs or
+    // Node.js compat mode globals.
 
     JSG_NESTED_TYPE(EventTarget);
 
@@ -234,9 +211,7 @@ class ExecutionContext: public jsg::Object {
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
-    if (flags.getWorkerdExperimental()) {
-      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
-      // this works in production.
+    if (flags.getEnableCtxExports()) {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
@@ -253,6 +228,17 @@ class ExecutionContext: public jsg::Object {
       // * Enable the Durable Object version at the same time -- and make sure they're suitably
       //   consistent with each other.
       JSG_METHOD(abort);
+    }
+
+    if (flags.getEnableCtxExports()) {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly exports: Cloudflare.Exports;
+      });
+    } else {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+      });
     }
   }
 
@@ -296,44 +282,44 @@ class AlarmInvocationInfo: public jsg::Object {
 // treat incorrect types as if the field is undefined. Without this, Durable Object class
 // constructors that set a field with one of these names would cause confusing type errors.
 struct ExportedHandler {
-  typedef jsg::Promise<jsg::Ref<api::Response>> FetchHandler(jsg::Ref<api::Request> request,
+  using FetchHandler = jsg::Promise<jsg::Ref<api::Response>>(jsg::Ref<api::Request> request,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  typedef kj::Promise<void> TailHandler(kj::Array<jsg::Ref<TraceItem>> events,
+  using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
-  typedef kj::Promise<void> TailStreamHandler(
+  using TailStreamHandler = kj::Promise<void>(
       jsg::JsObject obj, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailStreamHandler>> tailStream;
 
-  typedef kj::Promise<void> ScheduledHandler(jsg::Ref<ScheduledController> controller,
+  using ScheduledHandler = kj::Promise<void>(jsg::Ref<ScheduledController> controller,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
-  typedef kj::Promise<void> AlarmHandler(jsg::Ref<AlarmInvocationInfo> alarmInfo);
+  using AlarmHandler = kj::Promise<void>(jsg::Ref<AlarmInvocationInfo> alarmInfo);
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
-  typedef jsg::Promise<void> TestHandler(jsg::Ref<TestController> controller,
+  using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TestHandler>> test;
 
-  typedef kj::Promise<void> HibernatableWebSocketMessageHandler(
+  using HibernatableWebSocketMessageHandler = kj::Promise<void>(
       jsg::Ref<WebSocket>, kj::OneOf<kj::String, kj::Array<byte>> message);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketMessageHandler>> webSocketMessage;
 
-  typedef kj::Promise<void> HibernatableWebSocketCloseHandler(
+  using HibernatableWebSocketCloseHandler = kj::Promise<void>(
       jsg::Ref<WebSocket>, int code, kj::String reason, bool wasClean);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketCloseHandler>> webSocketClose;
 
-  typedef kj::Promise<void> HibernatableWebSocketErrorHandler(jsg::Ref<WebSocket>, jsg::Value);
+  using HibernatableWebSocketErrorHandler = kj::Promise<void>(jsg::Ref<WebSocket>, jsg::Value);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketErrorHandler>> webSocketError;
 
   // Self-ref potentially allows extracting other custom handlers from the object.
@@ -359,7 +345,7 @@ struct ExportedHandler {
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
     type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTailStreamHandler<Env = unknown> = (event : TailStream.TailEvent, env: Env, ctx: ExecutionContext) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+    type ExportedHandlerTailStreamHandler<Env = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
     type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
@@ -432,19 +418,17 @@ class Immediate final: public jsg::Object {
   }
 
  private:
-  // On the off chance user code holds onto to the Ref<Immediate> longer than
-  // the IoContext remains alive, let's maintain just a weak reference to the
-  // IoContext here to avoid problems. This reference is used only for handling
-  // the dispose operation, so it should be perfectly fine for it to be weak
-  // and a non-op after the IoContext is gone.
-  kj::Own<IoContext::WeakRef> contextRef;
+  // Note: We cannot use IoContext::WeakRef here because it's not thread-safe (it's only intended
+  // to be held from KJ I/O objects, but this is a JSG object which can be accessed by V8's GC
+  // on different threads). Instead, we use IoPtr<IoContext> which is safe to hold from JSG objects.
+  IoPtr<IoContext> ioContext;
   TimeoutId timeoutId;
 };
 
 // Global object API exposed to JavaScript.
 class ServiceWorkerGlobalScope: public WorkerGlobalScope {
  public:
-  ServiceWorkerGlobalScope(v8::Isolate* isolate);
+  ServiceWorkerGlobalScope();
 
   // Drop all references to JavaScript objects so that the context can be garbage-collected. Call
   // this when the context will never be used again and should be disposed.
@@ -463,7 +447,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::HttpService::Response& response,
       kj::Maybe<kj::StringPtr> cfBlobJson,
       Worker::Lock& lock,
-      kj::Maybe<ExportedHandler&> exportedHandler);
+      kj::Maybe<ExportedHandler&> exportedHandler,
+      kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
 
@@ -495,19 +480,22 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Promise<void> setHibernatableEventTimeout(
       kj::Promise<void> event, kj::Maybe<uint32_t> eventTimeoutMs);
 
-  void sendHibernatableWebSocketMessage(kj::OneOf<kj::String, kj::Array<byte>> message,
+  void sendHibernatableWebSocketMessage(IoContext& context,
+      kj::OneOf<kj::String, kj::Array<byte>> message,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void sendHibernatableWebSocketClose(HibernatableSocketParams::Close close,
+  void sendHibernatableWebSocketClose(IoContext& context,
+      HibernatableSocketParams::Close close,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void sendHibernatableWebSocketError(kj::Exception e,
+  void sendHibernatableWebSocketError(IoContext& context,
+      kj::Exception e,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
@@ -521,10 +509,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // ---------------------------------------------------------------------------
   // JS API
 
-  jsg::JsString btoa(jsg::Lock& js, jsg::JsValue data);
+  jsg::JsString btoa(jsg::Lock& js, jsg::JsString data);
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
-  void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
+  void queueMicrotask(jsg::Lock& js, jsg::Function<void()> task);
+
+#ifdef WORKERD_FUZZILLI
+  void fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args);
+#endif
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
@@ -539,7 +531,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Optional<double> msDelay,
       jsg::Arguments<jsg::Value> args);
-  void clearTimeout(kj::Maybe<TimeoutId::NumberType> timeoutId);
+  void clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
   TimeoutId::NumberType setTimeoutInternal(jsg::Function<void()> function, double msDelay);
 
@@ -547,9 +539,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Optional<double> msDelay,
       jsg::Arguments<jsg::Value> args);
-  void clearInterval(kj::Maybe<TimeoutId::NumberType> timeoutId) {
-    clearTimeout(timeoutId);
-  }
+  void clearInterval(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
   jsg::Promise<jsg::Ref<Response>> fetch(jsg::Lock& js,
       kj::OneOf<jsg::Ref<Request>, kj::String> request,
@@ -560,22 +550,22 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   }
 
   // Implemented in global-scope.c++ to avoid including crypto.h
-  jsg::Ref<Crypto> getCrypto();
+  jsg::Ref<Crypto> getCrypto(jsg::Lock& js);
 
-  jsg::Ref<Scheduler> getScheduler() {
-    return jsg::alloc<Scheduler>();
+  jsg::Ref<Scheduler> getScheduler(jsg::Lock& js) {
+    return js.alloc<Scheduler>();
   }
 
-  jsg::Ref<Navigator> getNavigator() {
-    return jsg::alloc<Navigator>();
+  jsg::Ref<Navigator> getNavigator(jsg::Lock& js) {
+    return js.alloc<Navigator>();
   }
 
-  jsg::Ref<Performance> getPerformance() {
-    return jsg::alloc<Performance>();
+  jsg::Ref<Performance> getPerformance(jsg::Lock& js) {
+    return js.alloc<Performance>(Worker::Isolate::from(js).getLimitEnforcer());
   }
 
-  jsg::Ref<Cloudflare> getCloudflare() {
-    return jsg::alloc<Cloudflare>();
+  jsg::Ref<Cloudflare> getCloudflare(jsg::Lock& js) {
+    return js.alloc<Cloudflare>();
   }
 
   // The origin is unknown, return "null" as described in
@@ -584,7 +574,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     return "null";
   }
 
-  jsg::Ref<CacheStorage> getCaches();
+  jsg::Ref<CacheStorage> getCaches(jsg::Lock& js);
 
   void reportError(jsg::Lock& js, jsg::JsValue error);
 
@@ -592,7 +582,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // compat Buffer and process at the global scope in all modules as lazy instance
   // properties.
   jsg::JsValue getBuffer(jsg::Lock& js);
+  void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
+  void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);
@@ -600,6 +592,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(WorkerGlobalScope);
+
+    // *** WARNING ***: *Every* new export here must be treated as a potentially
+    // breaking change. It doesn't matter if it's a new method, a new property,
+    // or a new nested type. Adding anything to the global scope risks breaking
+    // existing user code that is feature-sniffing or monkeypatching the global.
+    // *Always* add new exports behind a new compatibility flag! And when in
+    // doubt, don't add the new export on globalThis at all. The only things
+    // that should be exported on globalThis should be standardized web APIs or
+    // Node.js compat mode globals.
 
     JSG_NESTED_TYPE(DOMException);
     JSG_NESTED_TYPE(WorkerGlobalScope);
@@ -644,6 +645,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
 
+#ifdef WORKERD_FUZZILLI
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(fuzzilli);
+    }
+#endif
+
     JSG_NESTED_TYPE(Event);
     JSG_NESTED_TYPE(ExtendableEvent);
     JSG_NESTED_TYPE(CustomEvent);
@@ -664,6 +671,19 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(CountQueuingStrategy);
     JSG_NESTED_TYPE(ErrorEvent);
 
+    if (flags.getExposeGlobalMessageChannel()) {
+      JSG_NESTED_TYPE(MessageChannel);
+      JSG_NESTED_TYPE(MessagePort);
+    }
+
+    if (flags.getWebFileSystem()) {
+      JSG_NESTED_TYPE(FileSystemHandle);
+      JSG_NESTED_TYPE(FileSystemFileHandle);
+      JSG_NESTED_TYPE(FileSystemDirectoryHandle);
+      JSG_NESTED_TYPE(FileSystemWritableFileStream);
+      JSG_NESTED_TYPE(StorageManager);
+    }
+
     JSG_NESTED_TYPE(EventSource);
 
     if (flags.getStreamsJavaScriptControllers()) {
@@ -675,8 +695,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
 
     if (flags.getNodeJsCompatV2()) {
-      JSG_LAZY_INSTANCE_PROPERTY(Buffer, getBuffer);
-      JSG_LAZY_INSTANCE_PROPERTY(process, getProcess);
+      JSG_INSTANCE_PROPERTY(Buffer, getBuffer, setBuffer);
+      JSG_INSTANCE_PROPERTY(process, getProcess, setProcess);
       JSG_LAZY_INSTANCE_PROPERTY(global, getSelf);
       JSG_METHOD(setImmediate);
       JSG_METHOD(clearImmediate);
@@ -714,8 +734,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(URLSearchParams);
     }
 
-    // We conditionally enable a more spec compliant URLPattern to avoid any breakages.
-    if (util::Autogate::isEnabled(util::AutogateKey::URLPATTERN)) {
+    if (flags.getSpecCompliantUrlpattern()) {
       JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
     } else {
       JSG_NESTED_TYPE(URLPattern);
@@ -737,19 +756,16 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
 
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-    // WebGPU
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUAdapter, GPUAdapter);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUOutOfMemoryError, GPUOutOfMemoryError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUValidationError, GPUValidationError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUInternalError, GPUInternalError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUDeviceLostInfo, GPUDeviceLostInfo);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUBufferUsage, GPUBufferUsage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUShaderStage, GPUShaderStage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUMapMode, GPUMapMode);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUTextureUsage, GPUTextureUsage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUColorWrite, GPUColorWrite);
-#endif
+    // Performance API
+    if (flags.getEnableGlobalPerformanceClasses()) {
+      JSG_NESTED_TYPE(Performance);
+      JSG_NESTED_TYPE(PerformanceEntry);
+      JSG_NESTED_TYPE(PerformanceMark);
+      JSG_NESTED_TYPE(PerformanceMeasure);
+      JSG_NESTED_TYPE(PerformanceResourceTiming);
+      JSG_NESTED_TYPE(PerformanceObserver);
+      JSG_NESTED_TYPE(PerformanceObserverEntryList);
+    }
 
     JSG_TS_ROOT();
     JSG_TS_DEFINE(
@@ -870,8 +886,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // `Module` is also declared `abstract` to disable its `BufferSource` constructor.
 
     JSG_TS_OVERRIDE({
-      btoa(data: string): string;
-
       setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
       setTimeout<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
@@ -879,6 +893,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       setInterval<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
       structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+      queueMicrotask(task: Function): void;
 
       fetch(input: RequestInfo | URL, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
     });
@@ -893,6 +908,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
  private:
   jsg::UnhandledRejectionHandler unhandledRejections;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> processValue;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
+  kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.
@@ -901,7 +919,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
-      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::PromiseRejectionEvent,           \
-      api::Navigator, api::Performance, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

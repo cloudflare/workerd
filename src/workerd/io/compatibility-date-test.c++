@@ -4,6 +4,8 @@
 
 #include "compatibility-date.h"
 
+#include <workerd/io/supported-compatibility-date.embed.h>
+
 #include <capnp/message.h>
 #include <capnp/serialize-text.h>
 #include <kj/debug.h>
@@ -169,10 +171,9 @@ KJ_TEST("compatibility flag parsing") {
         "unknown_feature"_kj, "fetch_refuses_unknown_protocols"_kj, "another_feature"_kj,
         "formdata_parser_supports_files"_kj},
       "(formDataParserSupportsFiles = true, fetchRefusesUnknownProtocols = true)",
-      {"Invalid compatibility date: abcd",
-        "Compatibility flag specified multiple times: fetch_refuses_unknown_protocols",
+      {"Compatibility flag specified multiple times: fetch_refuses_unknown_protocols",
         "Compatibility flag specified multiple times: formdata_parser_supports_files",
-        "No such compatibility flag: another_feature",
+        "Invalid compatibility date: abcd", "No such compatibility flag: another_feature",
         "No such compatibility flag: unknown_feature"});
 
   // Can explicitly disable flag that's enabled for all dates.s
@@ -216,7 +217,7 @@ KJ_TEST("compatibility flag parsing") {
       " brotliContentEncoding = true,"
       " strictCrypto = true,"
       " rttiApi = false,"
-      " webgpu = false,"
+      " obsolete35 = false,"
       " cryptoPreservePublicExponent = true,"
       " vectorizeQueryMetadataOptional = true,"
       " unsafeModule = false,"
@@ -274,7 +275,7 @@ KJ_TEST("compatibility flag parsing") {
       " brotliContentEncoding = true,"
       " strictCrypto = true,"
       " rttiApi = false,"
-      " webgpu = false,"
+      " obsolete35 = false,"
       " cryptoPreservePublicExponent = true,"
       " vectorizeQueryMetadataOptional = true,"
       " unsafeModule = false,"

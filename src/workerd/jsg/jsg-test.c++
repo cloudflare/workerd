@@ -61,14 +61,14 @@ KJ_TEST("context type is exposed in the global scope") {
 
 struct InheritContext: public ContextGlobalObject {
   struct Other: public Object {
-    static jsg::Ref<Other> constructor() {
-      return jsg::alloc<Other>();
+    static jsg::Ref<Other> constructor(jsg::Lock& js) {
+      return js.alloc<Other>();
     }
     JSG_RESOURCE_TYPE(Other) {}
   };
 
-  Ref<NumberBox> newExtendedAsBase(double value, kj::String text) {
-    return ExtendedNumberBox::constructor(value, kj::mv(text));
+  Ref<NumberBox> newExtendedAsBase(jsg::Lock& js, double value, kj::String text) {
+    return ExtendedNumberBox::constructor(js, value, kj::mv(text));
   }
 
   JSG_RESOURCE_TYPE(InheritContext) {
@@ -150,8 +150,8 @@ KJ_TEST("utf-8 scripts") {
 // ========================================================================================
 
 struct RefContext: public ContextGlobalObject {
-  Ref<NumberBox> addAndReturnCopy(NumberBox& box, double value) {
-    auto copy = jsg::alloc<NumberBox>(box.value);
+  Ref<NumberBox> addAndReturnCopy(jsg::Lock& js, NumberBox& box, double value) {
+    auto copy = js.alloc<NumberBox>(box.value);
     copy->value += value;
     return copy;
   }
@@ -322,8 +322,8 @@ KJ_TEST("jsg::Lock logWarning") {
 struct CallableContext: public ContextGlobalObject {
   struct MyCallable: public Object {
    public:
-    static Ref<MyCallable> constructor() {
-      return alloc<MyCallable>();
+    static Ref<MyCallable> constructor(jsg::Lock& js) {
+      return js.alloc<MyCallable>();
     }
 
     bool foo() {
@@ -336,8 +336,8 @@ struct CallableContext: public ContextGlobalObject {
     }
   };
 
-  Ref<MyCallable> getCallable() {
-    return alloc<MyCallable>();
+  Ref<MyCallable> getCallable(jsg::Lock& js) {
+    return js.alloc<MyCallable>();
   }
 
   JSG_RESOURCE_TYPE(CallableContext) {
@@ -362,8 +362,8 @@ KJ_TEST("Test JSG_CALLABLE") {
 // ========================================================================================
 struct InterceptContext: public ContextGlobalObject {
   struct ProxyImpl: public jsg::Object {
-    static jsg::Ref<ProxyImpl> constructor() {
-      return jsg::alloc<ProxyImpl>();
+    static jsg::Ref<ProxyImpl> constructor(jsg::Lock& js) {
+      return js.alloc<ProxyImpl>();
     }
 
     int getBar() {
@@ -407,52 +407,130 @@ struct IsolateUuidContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(IsolateUuidIsolate, IsolateUuidContext);
 
-KJ_TEST("jsg::Lock getUuid") {
-  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
-  bool called = false;
-  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
-    // Returns the same value
-    KJ_ASSERT(lock.getUuid() == lock.getUuid());
-    KJ_ASSERT(isolate.getUuid() == lock.getUuid());
-    KJ_ASSERT(lock.getUuid().size() == 36);
-    called = true;
-  });
-  KJ_ASSERT(called);
-}
-
 KJ_TEST("External memory adjustment") {
   IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
-    // Creating with a specific amount works as expected
-    auto adjuster = lock.getExternalMemoryAdjustment(100);
-    KJ_ASSERT(adjuster.getAmount() == 100);
+    // Creating an inner scope to check the case where the adjustment object does not outlive the isolate
+    {
+      // Creating with a specific amount works as expected
+      auto adjuster = lock.getExternalMemoryAdjustment(100);
+      KJ_ASSERT(adjuster.getAmount() == 100);
 
-    // Adjusting up works as expected
-    adjuster.adjust(lock, 10);
-    KJ_ASSERT(adjuster.getAmount() == 110);
+      // Adjusting up works as expected
+      adjuster.adjust(10);
+      KJ_ASSERT(adjuster.getAmount() == 110);
 
-    // Adjusting down works as expected
-    adjuster.adjust(lock, -10);
-    KJ_ASSERT(adjuster.getAmount() == 100);
+      // Adjusting down works as expected
+      adjuster.adjust(-10);
+      KJ_ASSERT(adjuster.getAmount() == 100);
 
-    // Setting an explicit value just works
-    adjuster.set(lock, 50);
-    KJ_ASSERT(adjuster.getAmount() == 50);
+      // Setting an explicit value just works
+      adjuster.set(50);
+      KJ_ASSERT(adjuster.getAmount() == 50);
 
-    // Decrementing by more than the amount just sets to 0
-    adjuster.adjust(lock, -200);
-    KJ_ASSERT(adjuster.getAmount() == 0);
+      // Decrementing by more than the amount will throw an exception
+      try {
+        adjuster.adjust(-200);
+      } catch (...) {
+        auto exc = kj::getCaughtExceptionAsKj();
+        KJ_ASSERT(exc.getDescription() ==
+            "expected amount >= -static_cast<ssize_t>(this->amount) [-200 >= -50]; Memory usage may not be decreased below zero");
+      }
 
-    adjuster.set(lock, 100);
-    auto adjuster2 = kj::mv(adjuster);
-    KJ_ASSERT(adjuster2.getAmount() == 100);
-    KJ_ASSERT(adjuster.getAmount() == 0);
+      KJ_ASSERT(adjuster.getAmount() == 50);
 
+      adjuster.set(100);
+      auto adjuster2 = kj::mv(adjuster);
+      KJ_ASSERT(adjuster2.getAmount() == 100);
+
+      // Checking that the amount is zero after the adjuster is moved away would be nice to have,
+      // but we should aim to avoid use-after-move entirely.
+      // KJ_ASSERT(adjuster.getAmount() == 0);
+    }
     // Note that we are not testing the actual effect on the isolate itself here.
     // While we have added a getExternalMemory() API to the isolate via a patch in
     // the internal repo, we have not added that patch to workerd so testing the
     // specific external memory reported by the isolate is possible but a bit
     // more cumbersome here.
+  });
+}
+
+KJ_TEST("External memory adjustment - defered") {
+  kj::Arc<const ExternalMemoryTarget> target;
+
+  // A memory allocation that will outlive the isolate
+  kj::Array<kj::byte> mem;
+
+  {
+    IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+
+    target = isolate.runInLockScope(
+        [&](IsolateUuidIsolate::Lock& lock) { return lock.getExternalMemoryTarget(); });
+
+    // Adjustment to memory while not holding lock will be applied later
+    auto adjuster1 = target->getAdjustment(1000);
+    KJ_ASSERT(adjuster1.getAmount() == 1000);
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 1000);
+
+    {
+      // This adjustment has no effect because the adjuster is destroyed before we take the lock again
+      auto adjuster2 = target->getAdjustment(1000);
+      KJ_ASSERT(adjuster2.getAmount() == 1000);
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 2000);
+    }
+
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 1000);
+    KJ_ASSERT(target->isIsolateAliveForTest());
+
+    isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+      // Once lock is taken, the amount is applied
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+
+      // Adjustment made while holding lock applies immediately
+      adjuster1.adjust(-500);
+      KJ_ASSERT(adjuster1.getAmount() == 500);
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+      KJ_ASSERT(target->isIsolateAliveForTest());
+    });
+
+    mem = isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+      return kj::heapArray<kj::byte>(100).attach(target->getAdjustment(100));
+    });
+  }
+
+  KJ_ASSERT(!target->isIsolateAliveForTest());
+
+  // Delete the long-lived array, which will call the adjustment's destructor, to make sure it's safe.
+  mem = nullptr;
+
+  // Making an adjustment anyway won't do anything but also won't crash
+  auto adjuster3 = target->getAdjustment(500);
+  KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 400);
+}
+
+KJ_TEST("Memory Allocation Error Propagation") {
+  class MyAllocator final: public v8::ArrayBuffer::Allocator {
+   public:
+    void* Allocate(size_t length) override {
+      return nullptr;
+    }
+    void* AllocateUninitialized(size_t length) override {
+      return nullptr;
+    }
+    void Free(void* data, size_t length) override {}
+    size_t MaxAllocationSize() const override {
+      return 10;
+    }
+  };
+
+  MyAllocator allocator;
+  v8::Isolate::CreateParams createParams;
+  createParams.constraints.ConfigureDefaults(10, 10);
+  createParams.array_buffer_allocator = &allocator;
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>(), createParams);
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    KJ_EXPECT_THROW_MESSAGE(
+        "Failed to allocate ArrayBuffer backing store", lock.allocBackingStore(100 * 1024));
   });
 }
 

@@ -13,13 +13,40 @@ export default {
     ],
   },
   'abort/general.any.js': {
-    comment: 'These tests will be enabled in a later PR',
-    skipAllTests: true,
+    comment: 'See individual tests',
+    disabledTests: [
+      // Flaky since 2025-06-09. To be investigated.
+      'Stream errors once aborted, after reading. Underlying connection closed.',
+      // Flaky since 2025-07-25. To be investigated.
+      'Stream errors once aborted. Underlying connection closed.',
+    ],
+    expectedFailures: [
+      // The fetch promise still resolves for some reason
+      'Aborting rejects with AbortError',
+      'Aborting rejects with abort reason',
+      'Already aborted signal rejects immediately',
+
+      // Doesn't reject
+      'response.arrayBuffer() rejects if already aborted',
+      'response.blob() rejects if already aborted',
+      'response.bytes() rejects if already aborted',
+      'response.json() rejects if already aborted',
+      'response.text() rejects if already aborted',
+      'Call text() twice on aborted response',
+
+      // Instead throws TypeError: Parsing a Body as FormData requires a Content-Type header.
+      'response.formData() rejects if already aborted',
+
+      // ReadableStream.cancel was not called synchronously at the right time
+      'Readable stream synchronously cancels with AbortError if aborted before reading',
+
+      // Cloned request needs to have a different signal object, that's in the same state as the original
+      'Signal state is cloned',
+      'Signal on request object should also have abort reason',
+      'Signal on request object',
+    ],
   },
-  'abort/request.any.js': {
-    comment: 'These tests will be enabled in a later PR',
-    skipAllTests: true,
-  },
+  'abort/request.any.js': {},
 
   'basic/accept-header.any.js': {
     comment: 'Response.type must be basic',
@@ -32,22 +59,19 @@ export default {
   },
   'basic/conditional-get.any.js': {
     comment:
-      "It seems like they expect us to use the ETag if re-requested but return 200 OK anyway. Don't quite get it.",
-    expectedFailures: ['Testing conditional GET with ETags'],
+      "This test is too browser specific. It's assuming a request was served from cache vs received by server.",
+    omittedTests: ['Testing conditional GET with ETags'],
   },
   'basic/error-after-response.any.js': {
     comment:
       'Stream disconnected prematurely and a dropped promise when faced with intentionally bad chunked encoding from WPT',
-    skipAllTests: true,
+    disabledTests: true,
   },
-  'basic/gc.any.js': {
-    comment: 'Run WPT tests with --expose-gc if we want to run this test',
-    skipAllTests: true,
-  },
+  'basic/gc.any.js': {},
   'basic/header-value-combining.any.js': {
     comment:
       "Stream disconnected prematurely and a dropped promise. Not yet sure what is triggering about WPT's output",
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/header-value-null-byte.any.js': {
     comment: 'We should return a nicer TypeError instead of "internal error"',
@@ -60,39 +84,31 @@ export default {
   'basic/http-response-code.any.js': {},
   'basic/integrity.sub.any.js': {
     comment: 'Integrity is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/keepalive.any.js': {
-    comment: 'Hard to run - involves iframes and workers',
-    expectedFailures: [
-      "[keepalive] simple GET request on 'load' [no payload]; setting up",
-      "[keepalive] simple GET request on 'unload' [no payload]; setting up",
-      "[keepalive] simple GET request on 'pagehide' [no payload]; setting up",
-      "[keepalive] simple POST request on 'load' [no payload]; setting up",
-      "[keepalive] simple POST request on 'unload' [no payload]; setting up",
-      "[keepalive] simple POST request on 'pagehide' [no payload]; setting up",
-      'simple keepalive test for web workers;',
-    ],
+    comment: 'Keepalive is not implemented',
+    disabledTests: true,
   },
   'basic/mediasource.window.js': {
-    comment: 'MediaSource not implemented',
-    expectedFailures: ['Cannot fetch blob: URL from a MediaSource'],
+    comment: 'MediaSource not implemented. It is DOM-specific',
+    omittedTests: ['Cannot fetch blob: URL from a MediaSource'],
   },
   'basic/mode-no-cors.sub.any.js': {
     comment: 'Request.mode is not relevant to us',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/mode-same-origin.any.js': {
     comment: 'Request.mode is not relevant to us',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/referrer.any.js': {
     comment: 'Referrer is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'basic/request-forbidden-headers.any.js': {
     comment: 'We do not have forbidden headers',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'basic/request-head.any.js': {},
   'basic/request-headers-case.any.js': {
@@ -106,7 +122,7 @@ export default {
   'basic/request-headers.any.js': {
     comment: 'Reasons listed per test case',
     expectedFailures: [
-      // Float16Array not implemengted
+      // Float16Array not implemented
       'Fetch with POST with Float16Array body',
       // Fake HTTP method names not accepted
       'Fetch with Chicken',
@@ -122,7 +138,7 @@ export default {
       'Fetch with PUT and mode "same-origin" needs an Origin header',
       'Fetch with PUT with body',
       'Fetch with POST and mode "no-cors" needs an Origin header',
-      // WPT is epxecting us to insert some kind of User-Agent
+      // WPT is expecting us to insert some kind of User-Agent
       'Fetch with GET',
       'Fetch with POST with Blob body',
       'Fetch with POST with Float64Array body',
@@ -141,35 +157,34 @@ export default {
   },
   'basic/request-private-network-headers.tentative.any.js': {
     comment: 'We do not have forbidden headers',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'basic/request-referrer.any.js': {
     comment: 'Referrer is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'basic/request-upload.any.js': {
-    comment: 'Multiple reasons for failure; see below',
-    skipAllTests: true,
+    comment: 'Appears to corrupt the state of workerd',
+    disabledTests: true,
   },
   'basic/request-upload.h2.any.js': {
-    comment: 'Do we support HTTP 2?',
-    skipAllTests: true,
+    comment: 'Enable if HTTP/2 is implemented',
+    disabledTests: true,
   },
   'basic/response-null-body.any.js': {
     comment:
       'Response begins with hello-worldHTTP/1.1 which will lead to invalid protocol errors coming up on other tests later on',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/response-url.sub.any.js': {},
   'basic/scheme-about.any.js': {},
   'basic/scheme-blob.sub.any.js': {
     comment: 'URL.createObjectURL() is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/scheme-data.any.js': {
     comment: 'Response.type must be basic',
     expectedFailures: [
-      // For this test: we should not return body when invoking HEAD on data url
       'Fetching [HEAD] data:,response%27s%20body is OK',
       'Fetching data:,response%27s%20body is OK',
       'Fetching data:,response%27s%20body is OK (same-origin)',
@@ -181,8 +196,8 @@ export default {
   },
   'basic/scheme-others.sub.any.js': {},
   'basic/status.h2.any.js': {
-    comment: 'Do we support HTTP 2?',
-    skipAllTests: true,
+    comment: 'Enable if HTTP/2 is implemented',
+    disabledTests: true,
   },
   'basic/stream-response.any.js': {},
   'basic/stream-safe-creation.any.js': {},
@@ -198,94 +213,91 @@ export default {
 
   'body/cloned-any.js': {
     comment:
-      'At a glance it seems like we are just taking references to them instead of cloning?',
+      'We need to actually clone the body instead of taking a reference to it.',
     expectedFailures: ['TypedArray is cloned', 'ArrayBuffer is cloned'],
   },
   'body/formdata.any.js': {},
-  'body/mime-type.any.js': {
-    comment: 'They expected text/html but we kept text/plain',
-    expectedFailures: ['_Response: Extract a MIME type with clone'],
-  },
+  'body/mime-type.any.js': {},
 
   'cors/cors-basic.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-cookies-redirect.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-cookies.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-expose-star.sub.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-filtering.sub.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-keepalive.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-multiple-origins.sub.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-no-preflight.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-origin.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-cache.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-not-cors-safelisted.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-redirect.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-referrer.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-response-validation.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-star.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-status.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-redirect-credentials.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-redirect-preflight.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-redirect.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
 
   'crashtests/huge-fetch.any.js': {},
@@ -300,7 +312,8 @@ export default {
     ],
   },
   'credentials/authentication-redirection.any.js': {
-    comment: 'I think this is ok because we do not care about CORS',
+    comment:
+      'Even though the actual bug was fixed (Authorization now stripped), these tests are failing due to certificate problems',
     expectedFailures: [
       'getAuthorizationHeaderValue - same origin redirection',
       'getAuthorizationHeaderValue - cross origin redirection',
@@ -308,7 +321,7 @@ export default {
   },
   'credentials/cookies.any.js': {
     comment: 'Request.credentials is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
 
   'headers/header-setcookie.any.js': {
@@ -393,61 +406,54 @@ export default {
   },
   'headers/headers-no-cors.any.js': {
     comment: 'Request.mode is not relevant',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'headers/headers-normalize.any.js': {},
   'headers/headers-record.any.js': {
-    comment: 'Investigate our Headers implementation',
-    expectedFailures: [
-      'Correct operation ordering with two properties',
-      'Correct operation ordering with two properties one of which has an invalid name',
-      'Correct operation ordering with two properties one of which has an invalid value',
-      'Correct operation ordering with non-enumerable properties',
-      'Correct operation ordering with undefined descriptors',
-      'Basic operation with Symbol keys',
-      'Operation with non-enumerable Symbol keys',
-    ],
+    comment:
+      'This test checks the exact order of operations in JS involved in accessing headers. Our implementation is in C++ instead.',
+    omittedTests: true,
   },
   'headers/headers-structure.any.js': {},
 
   'idlharness.any.js': {
-    comment: 'Does not contain any relevant tests',
-    skipAllTests: true,
+    comment: 'Implement IDL support in harness',
+    disabledTests: true,
   },
 
   'policies/csp-blocked.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/nested-policy.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/referrer-no-referrer.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/referrer-origin-when-cross-origin.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/referrer-origin.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/referrer-unsafe-url.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
 
   'redirect/redirect-back-to-original-origin.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'redirect/redirect-count.any.js': {},
   'redirect/redirect-empty-location.any.js': {
     comment:
-      '(1) CORS is not implemented, our behaviour is OK, (2) We are expected to reject fetch in this case',
+      'Fix our handling of empty Location header. Even when fixed, tests will still fail due to CORS stuff',
     expectedFailures: [
       'redirect response with empty Location, manual mode',
       'redirect response with empty Location, follow mode',
@@ -455,46 +461,17 @@ export default {
   },
   'redirect/redirect-keepalive.any.js': {
     comment: 'Keepalive is not implemented',
-    expectedFailures: [
-      '[keepalive][new window][unload] same-origin redirect; setting up',
-      '[keepalive][new window][unload] same-origin redirect + preflight; setting up',
-      '[keepalive][new window][unload] cross-origin redirect; setting up',
-      '[keepalive][new window][unload] cross-origin redirect + preflight; setting up',
-      '[keepalive][new window][unload] redirect to file URL; setting up',
-      '[keepalive][new window][unload] redirect to data URL; setting up',
-    ],
+    disabledTests: true,
   },
   'redirect/redirect-keepalive.https.any.js': {
     comment: 'Keepalive is not implemented',
-    expectedFailures: [
-      '[keepalive][iframe][load] mixed content redirect; setting up',
-    ],
+    disabledTests: true,
   },
   'redirect/redirect-location-escape.tentative.any.js': {},
   'redirect/redirect-location.any.js': {
-    comment: 'Manual mode apparently expects status to be 0 in these cases',
-    expectedFailures: [
-      'Redirect 301 in "manual" mode with invalid location',
-      'Redirect 303 in "manual" mode without location',
-      'Redirect 302 in "manual" mode with data location',
-      'Redirect 308 in "manual" mode without location',
-      'Redirect 302 in "manual" mode with valid location',
-      'Redirect 302 in "manual" mode with invalid location',
-      'Redirect 307 in "manual" mode with valid location',
-      'Redirect 303 in "manual" mode with invalid location',
-      'Redirect 307 in "manual" mode without location',
-      'Redirect 308 in "manual" mode with data location',
-      'Redirect 308 in "manual" mode with valid location',
-      'Redirect 303 in "manual" mode with valid location',
-      'Redirect 308 in "manual" mode with invalid location',
-      'Redirect 307 in "manual" mode with invalid location',
-      'Redirect 307 in "manual" mode with data location',
-      'Redirect 303 in "manual" mode with data location',
-      'Redirect 301 in "manual" mode with valid location',
-      'Redirect 302 in "manual" mode without location',
-      'Redirect 301 in "manual" mode without location',
-      'Redirect 301 in "manual" mode with data location',
-    ],
+    comment:
+      'Status is expected to be 0 in a browser to avoid leaking info. We do not implement CORS',
+    omittedTests: [/Redirect 3\d\d in "manual" mode .*/],
   },
   'redirect/redirect-method.any.js': {
     comment: 'Reasons listed per case',
@@ -519,102 +496,177 @@ export default {
     ],
   },
   'redirect/redirect-mode.any.js': {
-    comment: 'CORS is not implemented',
-    skipAllTests: true,
+    comment: "This test contains stuff besides CORS. Don't omit it all.",
+    omittedTests: [
+      /(same|cross)-origin redirect 3\d\d in manual redirect and (no-cors|cors) mode/,
+      /cross-origin redirect 3\d\d in follow redirect and no-cors mode/,
+      'manual redirect with a CORS error should be rejected',
+    ],
   },
   'redirect/redirect-origin.any.js': {
     comment: 'CORS is not implemented',
-    expectedFailures: [
-      '[POST] Redirect 302 Same origin to other origin',
-      '[GET] Redirect 308 Other origin to same origin',
-      '[POST] Redirect 307 Other origin to same origin',
-      '[GET] Redirect 308 Other origin to other origin',
-      '[GET] Redirect 302 Same origin to other origin',
-      '[GET] Redirect 307 Other origin to other origin',
-      '[POST] Redirect 308 Other origin to same origin',
-      '[POST] Redirect 303 Same origin to other origin',
-      '[GET] Redirect 301 Other origin to other origin',
-      '[GET] Redirect 301 Same origin to other origin',
-      '[GET] Redirect 302 Other origin to same origin',
-      '[POST] Redirect 301 Other origin to other origin',
-      '[GET] Redirect 303 Other origin to other origin',
-      '[GET] Redirect 307 Other origin to same origin',
-      '[POST] Redirect 302 Other origin to other origin',
-      '[POST] Redirect 303 Other origin to other origin',
-      '[POST] Redirect 303 Other origin to same origin',
-      '[GET] Redirect 308 Same origin to other origin',
-      '[GET] Redirect 302 Other origin to other origin',
-      '[POST] Redirect 301 Same origin to other origin',
-      '[POST] Redirect 302 Other origin to same origin',
-      '[POST] Redirect 307 Same origin to other origin',
-      '[GET] Redirect 301 Other origin to same origin',
-      '[POST] Redirect 308 Other origin to other origin',
-      '[POST] Redirect 308 Same origin to other origin',
-      '[POST] Redirect 307 Other origin to other origin',
-      '[GET] Redirect 307 Same origin to other origin',
-      '[POST] Redirect 301 Other origin to same origin',
-      '[GET] Redirect 303 Same origin to other origin',
-      '[GET] Redirect 303 Other origin to same origin',
-    ],
+    omittedTests: true,
   },
   'redirect/redirect-referrer-override.any.js': {
     comment: 'Referer is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'redirect/redirect-referrer.any.js': {
     comment: 'Referrer is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'redirect/redirect-schemes.any.js': {},
   'redirect/redirect-to-dataurl.any.js': {},
   'redirect/redirect-upload.h2.any.js': {
     comment: 'Do we support HTTP 2?',
-    skipAllTests: true,
+    omittedTests: true,
   },
 
   'request/forbidden-method.any.js': {
     comment: 'We do not have forbidden methods',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'request/multi-globals/construct-in-detached-frame.window.js': {
     comment: "We don't support detached realms",
-    expectedFailures: [
-      'creating a request from another request in a detached realm should work',
-    ],
+    omittedTests: true,
   },
   'request/request-bad-port.any.js': {},
   'request/request-cache-default-conditional.any.js': {
-    comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    comment: 'Unsupported cache mode: default',
+    expectedFailures: [
+      'RequestCache "default" mode with an If-Modified-Since header (following a request without additional headers) is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-Modified-Since header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-Modified-Since header (following a request without additional headers) is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-Modified-Since header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-Modified-Since header is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-Modified-Since header is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-Modified-Since header is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-Modified-Since header is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-None-Match header (following a request without additional headers) is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-None-Match header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-None-Match header (following a request without additional headers) is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-None-Match header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-None-Match header is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-None-Match header is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-None-Match header is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-None-Match header is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-Unmodified-Since header (following a request without additional headers) is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-Unmodified-Since header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-Unmodified-Since header (following a request without additional headers) is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-Unmodified-Since header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-Unmodified-Since header is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-Unmodified-Since header is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-Unmodified-Since header is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-Unmodified-Since header is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-Match header (following a request without additional headers) is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-Match header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-Match header (following a request without additional headers) is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-Match header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-Match header is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-Match header is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-Match header is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-Match header is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-Range header (following a request without additional headers) is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-Range header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-Range header (following a request without additional headers) is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-Range header (following a request without additional headers) is treated similarly to "no-store" with Last-Modified and fresh response',
+      'RequestCache "default" mode with an If-Range header is treated similarly to "no-store" with Etag and stale response',
+      'RequestCache "default" mode with an If-Range header is treated similarly to "no-store" with Last-Modified and stale response',
+      'RequestCache "default" mode with an If-Range header is treated similarly to "no-store" with Etag and fresh response',
+      'RequestCache "default" mode with an If-Range header is treated similarly to "no-store" with Last-Modified and fresh response',
+    ],
   },
   'request/request-cache-default.any.js': {
-    comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    comment: "All fail with 'Unsupported cache mode: default' even no-store",
+    expectedFailures: [
+      'RequestCache "default" mode checks the cache for previously cached content and goes to the network for stale responses with Etag and stale response',
+      'RequestCache "default" mode checks the cache for previously cached content and goes to the network for stale responses with Last-Modified and stale response',
+      'RequestCache "default" mode checks the cache for previously cached content and avoids going to the network if a fresh response exists with Etag and fresh response',
+      'RequestCache "default" mode checks the cache for previously cached content and avoids going to the network if a fresh response exists with Last-Modified and fresh response',
+      'Responses with the "Cache-Control: no-store" header are not stored in the cache with Etag and stale response',
+      'Responses with the "Cache-Control: no-store" header are not stored in the cache with Last-Modified and stale response',
+      'Responses with the "Cache-Control: no-store" header are not stored in the cache with Etag and fresh response',
+      'Responses with the "Cache-Control: no-store" header are not stored in the cache with Last-Modified and fresh response',
+    ],
   },
   'request/request-cache-force-cache.any.js': {
-    comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    comment: 'Unsupported cache mode: default',
+    expectedFailures: [
+      'RequestCache "force-cache" mode checks the cache for previously cached content and avoid revalidation for stale responses with Etag and stale response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and avoid revalidation for stale responses with Last-Modified and stale response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and avoid revalidation for fresh responses with Etag and fresh response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and avoid revalidation for fresh responses with Last-Modified and fresh response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and goes to the network if a cached response is not found with Etag and stale response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and goes to the network if a cached response is not found with Last-Modified and stale response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and goes to the network if a cached response is not found with Etag and fresh response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and goes to the network if a cached response is not found with Last-Modified and fresh response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and goes to the network if a cached response would vary with Etag and stale response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and goes to the network if a cached response would vary with Last-Modified and stale response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and goes to the network if a cached response would vary with Etag and fresh response',
+      'RequestCache "force-cache" mode checks the cache for previously cached content and goes to the network if a cached response would vary with Last-Modified and fresh response',
+      'RequestCache "force-cache" stores the response in the cache if it goes to the network with Etag and stale response',
+      'RequestCache "force-cache" stores the response in the cache if it goes to the network with Last-Modified and stale response',
+      'RequestCache "force-cache" stores the response in the cache if it goes to the network with Etag and fresh response',
+      'RequestCache "force-cache" stores the response in the cache if it goes to the network with Last-Modified and fresh response',
+    ],
   },
   'request/request-cache-no-cache.any.js': {
-    comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    comment: 'Unsupported cache mode: default',
+    expectedFailures: [
+      'RequestCache "no-cache" mode revalidates stale responses found in the cache with Etag and stale response',
+      'RequestCache "no-cache" mode revalidates stale responses found in the cache with Last-Modified and stale response',
+      'RequestCache "no-cache" mode revalidates fresh responses found in the cache with Etag and fresh response',
+      'RequestCache "no-cache" mode revalidates fresh responses found in the cache with Last-Modified and fresh response',
+    ],
   },
   'request/request-cache-no-store.any.js': {
-    comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    comment: 'Unsupported cache mode: default',
+    expectedFailures: [
+      'RequestCache "no-store" mode does not check the cache for previously cached content and goes to the network regardless with Etag and stale response',
+      'RequestCache "no-store" mode does not check the cache for previously cached content and goes to the network regardless with Last-Modified and stale response',
+      'RequestCache "no-store" mode does not check the cache for previously cached content and goes to the network regardless with Etag and fresh response',
+      'RequestCache "no-store" mode does not check the cache for previously cached content and goes to the network regardless with Last-Modified and fresh response',
+      'RequestCache "no-store" mode does not store the response in the cache with Etag and stale response',
+      'RequestCache "no-store" mode does not store the response in the cache with Last-Modified and stale response',
+      'RequestCache "no-store" mode does not store the response in the cache with Etag and fresh response',
+      'RequestCache "no-store" mode does not store the response in the cache with Last-Modified and fresh response',
+    ],
   },
   'request/request-cache-only-if-cached.any.js': {
-    comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    comment: 'Unsupported cache mode: default',
+    expectedFailures: [
+      'RequestCache "only-if-cached" mode checks the cache for previously cached content and avoids revalidation for stale responses with Etag and stale response',
+      'RequestCache "only-if-cached" mode checks the cache for previously cached content and avoids revalidation for stale responses with Last-Modified and stale response',
+      'RequestCache "only-if-cached" mode checks the cache for previously cached content and avoids revalidation for fresh responses with Etag and fresh response',
+      'RequestCache "only-if-cached" mode checks the cache for previously cached content and avoids revalidation for fresh responses with Last-Modified and fresh response',
+      'RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects to same-origin content with Etag and fresh response',
+      'RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects to same-origin content with Last-Modified and fresh response',
+      'RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects to same-origin content with Etag and stale response',
+      'RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects to same-origin content with Last-Modified and stale response',
+      'RequestCache "only-if-cached" (with "same-origin") does not follow redirects across origins and rejects with Etag and fresh response',
+      'RequestCache "only-if-cached" (with "same-origin") does not follow redirects across origins and rejects with Last-Modified and fresh response',
+      'RequestCache "only-if-cached" (with "same-origin") does not follow redirects across origins and rejects with Etag and stale response',
+      'RequestCache "only-if-cached" (with "same-origin") does not follow redirects across origins and rejects with Last-Modified and stale response',
+    ],
   },
   'request/request-cache-reload.any.js': {
-    comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    comment: 'Unsupported cache mode: default',
+    expectedFailures: [
+      'RequestCache "reload" mode does not check the cache for previously cached content and goes to the network regardless with Etag and stale response',
+      'RequestCache "reload" mode does not check the cache for previously cached content and goes to the network regardless with Last-Modified and stale response',
+      'RequestCache "reload" mode does not check the cache for previously cached content and goes to the network regardless with Etag and fresh response',
+      'RequestCache "reload" mode does not check the cache for previously cached content and goes to the network regardless with Last-Modified and fresh response',
+      'RequestCache "reload" mode does store the response in the cache with Etag and stale response',
+      'RequestCache "reload" mode does store the response in the cache with Last-Modified and stale response',
+      'RequestCache "reload" mode does store the response in the cache with Etag and fresh response',
+      'RequestCache "reload" mode does store the response in the cache with Last-Modified and fresh response',
+      'RequestCache "reload" mode does store the response in the cache even if a previous response is already stored with Etag and stale response',
+      'RequestCache "reload" mode does store the response in the cache even if a previous response is already stored with Last-Modified and stale response',
+      'RequestCache "reload" mode does store the response in the cache even if a previous response is already stored with Etag and fresh response',
+      'RequestCache "reload" mode does store the response in the cache even if a previous response is already stored with Last-Modified and fresh response',
+    ],
   },
-  'request/request-cache.js': {
-    comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
-  },
+  'request/request-cache.js': {},
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
     comment:
@@ -632,7 +684,7 @@ export default {
   },
   'request/request-error.any.js': {
     comment:
-      'These tests would require us to throw errors for some invalid situations that we just ingore',
+      'These tests would require us to throw errors for some invalid situations that we just ignore',
     expectedFailures: [
       "RequestInit's window is not null",
       'Input URL has credentials',
@@ -649,55 +701,13 @@ export default {
   'request/request-error.js': {},
   'request/request-headers.any.js': {
     comment: 'Neither CORS nor header filtering is implemented',
-    expectedFailures: [
-      'Adding invalid request header "Accept-Charset: KO"',
-      'Adding invalid request header "accept-charset: KO"',
-      'Adding invalid request header "ACCEPT-ENCODING: KO"',
-      'Adding invalid request header "Accept-Encoding: KO"',
-      'Adding invalid request header "Access-Control-Request-Headers: KO"',
-      'Adding invalid request header "Access-Control-Request-Method: KO"',
-      'Adding invalid request header "Connection: KO"',
-      'Adding invalid request header "Content-Length: KO"',
-      'Adding invalid request header "Cookie: KO"',
-      'Adding invalid request header "Cookie2: KO"',
-      'Adding invalid request header "Date: KO"',
-      'Adding invalid request header "DNT: KO"',
-      'Adding invalid request header "Expect: KO"',
-      'Adding invalid request header "Host: KO"',
-      'Adding invalid request header "Keep-Alive: KO"',
-      'Adding invalid request header "Origin: KO"',
-      'Adding invalid request header "Referer: KO"',
-      'Adding invalid request header "Set-Cookie: KO"',
-      'Adding invalid request header "TE: KO"',
-      'Adding invalid request header "Trailer: KO"',
-      'Adding invalid request header "Transfer-Encoding: KO"',
-      'Adding invalid request header "Upgrade: KO"',
-      'Adding invalid request header "Via: KO"',
-      'Adding invalid request header "Proxy-: KO"',
-      'Adding invalid request header "proxy-a: KO"',
-      'Adding invalid request header "Sec-: KO"',
-      'Adding invalid request header "sec-b: KO"',
-      'Adding invalid no-cors request header "Content-Type: KO"',
-      'Adding invalid no-cors request header "Potato: KO"',
-      'Adding invalid no-cors request header "proxy: KO"',
-      'Adding invalid no-cors request header "proxya: KO"',
-      'Adding invalid no-cors request header "sec: KO"',
-      'Adding invalid no-cors request header "secb: KO"',
-      'Adding invalid no-cors request header "Empty-Value: "',
-      'Check that request constructor is filtering headers provided as init parameter',
-      'Check that no-cors request constructor is filtering headers provided as init parameter',
-      'Check that no-cors request constructor is filtering headers provided as part of request parameter',
-    ],
+    omittedTests: true,
   },
   'request/request-init-002.any.js': {},
-  'request/request-init-contenttype.any.js': {
-    comment:
-      'We are expected to have a space between multipart/form-data and the boundary field',
-    expectedFailures: ['Default Content-Type for Request with FormData body'],
-  },
+  'request/request-init-contenttype.any.js': {},
   'request/request-init-priority.any.js': {
     comment: 'Request.priority is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'request/request-init-stream.any.js': {
     comment: 'Most of these are because duplex is not implemented',
@@ -709,12 +719,11 @@ export default {
       "It is error to set .duplex = 'full' when the body is a Uint8Array.",
       "It is error to set .duplex = 'full' when the body is a Blob.",
       "It is error to set .duplex = 'full' when the body is a ReadableStream.",
-      'Constructing a Request with a stream on which read() and releaseLock() are called',
     ],
   },
   'request/request-keepalive.any.js': {
     comment: 'keepalive is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'request/request-structure.any.js': {
     comment: 'Unimplemented or partially implemented fields',
@@ -740,45 +749,59 @@ export default {
   },
   'response/response-arraybuffer-realm.window.js': {
     comment: 'Skipped because it involves iframes',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'response/response-blob-realm.any.js': {
     comment: 'Skipped because it involves iframes',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'response/response-cancel-stream.any.js': {},
   'response/response-clone-iframe.window.js': {
     comment: 'Skipped because it involves iframes',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'response/response-clone.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
+    comment: 'TODO Investigate this',
+    expectedFailures: [
+      "Check Response's clone with default values, without body",
+      'Check response clone use structureClone for teed ReadableStreams (Int8Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Int16Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Int32Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (ArrayBufferchunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Uint8Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Uint8ClampedArraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Uint16Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Uint32Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (BigInt64Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (BigUint64Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Float16Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Float32Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Float64Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (DataViewchunk)',
+    ],
   },
   'response/response-consume-empty.any.js': {
     comment:
       'We seem to be returning the boundary value as text but WPT expects no value',
     expectedFailures: ['Consume empty FormData response body as text'],
   },
-  'response/response-consume-stream.any.js': {
-    comment:
-      'Triggers UBSan error in BodyBufferInputStream::tryRead. memcpy from a NULL pointer. Yikes',
-    skipAllTests: true,
-  },
+  'response/response-consume-stream.any.js': {},
   'response/response-error-from-stream.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
+    comment: 'We have TypeError, they want pull Error',
+    expectedFailures: [
+      'ReadableStream start() Error propagates to Response.formData() Promise',
+      'ReadableStream pull() Error propagates to Response.formData() Promise',
+    ],
   },
   'response/response-error.any.js': {
     comment: 'Likely just missing validation',
     expectedFailures: ["Throws TypeError when responseInit's statusText is Ā"],
   },
   'response/response-from-stream.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
+    comment: 'Missing expected exception (TypeError)',
+    expectedFailures: [
+      'Constructing a Response with a stream on which getReader() is called',
+    ],
   },
   'response/response-headers-guard.any.js': {
     comment: 'Likely just missing validation',
@@ -789,11 +812,7 @@ export default {
     expectedFailures: ['Check default value for statusText attribute'],
   },
   'response/response-init-002.any.js': {},
-  'response/response-init-contenttype.any.js': {
-    comment:
-      'We are inserting a space between multipart/form-data and the boundary',
-    expectedFailures: ['Default Content-Type for Response with FormData body'],
-  },
+  'response/response-init-contenttype.any.js': {},
   'response/response-static-error.any.js': {
     comment:
       'We need to make Headers immutable when constructing Response.error()',
@@ -824,46 +843,14 @@ export default {
       'Check response returned by static method redirect(), status = 308',
     ],
   },
-  'response/response-stream-bad-chunk.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-1.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-2.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-3.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-4.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-5.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-6.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-by-pipe.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
+  'response/response-stream-bad-chunk.any.js': {},
+  'response/response-stream-disturbed-1.any.js': {},
+  'response/response-stream-disturbed-2.any.js': {},
+  'response/response-stream-disturbed-3.any.js': {},
+  'response/response-stream-disturbed-4.any.js': {},
+  'response/response-stream-disturbed-5.any.js': {},
+  'response/response-stream-disturbed-6.any.js': {},
+  'response/response-stream-disturbed-by-pipe.any.js': {},
   'response/response-stream-disturbed-util.js': {},
   'response/response-stream-with-broken-then.any.js': {
     comment:
@@ -873,8 +860,6 @@ export default {
       'Attempt to inject value: undefined via Object.prototype.then.',
       'Attempt to inject undefined via Object.prototype.then.',
       'Attempt to inject 8.2 via Object.prototype.then.',
-      'intercepting arraybuffer to body readable stream conversion via Object.prototype.then should not be possible',
-      'intercepting arraybuffer to text conversion via Object.prototype.then should not be possible',
     ],
   },
 } satisfies TestRunnerConfig;

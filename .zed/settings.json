@@ -1,0 +1,60 @@
+// Folder-specific settings
+//
+// For a full list of overridable settings, and general information on folder-specific settings,
+// see the documentation: https://zed.dev/docs/configuring-zed#settings-files
+{
+  "languages": {
+    "C++": {
+      "formatter": {
+        "external": {
+          "command": "bazel-bin/build/deps/formatters/clang-format",
+          "arguments": ["-i", "{buffer_path}"]
+        }
+      }
+    },
+    "Python": {
+      "formatter": {
+        "external": {
+          "command": "bazel-bin/build/deps/formatters/ruff",
+          "arguments": ["format", "--stdin-filename", "{buffer_path}"]
+        }
+      }
+    },
+    "Starlark": {
+      "formatter": {
+        "external": {
+          "command": "bazel-bin/build/deps/formatters/buildifier",
+          "arguments": ["--lint=fix", "--path", "{buffer_path}"]
+        }
+      }
+    }
+  },
+  "file_types": {
+    "Cap'n Proto": ["*.wd-test"],
+    "Starlark": ["BUILD.*"]
+  },
+  "lsp": {
+    "clangd": {
+      "binary": {
+        "arguments": [
+          "--background-index",
+          "--header-insertion=never",
+          "--query-driver=**",
+          "--clang-tidy"
+        ],
+        "path": "/bin/clangd-19"
+      }
+    },
+    "rust-analyzer": {
+      "initialization_options": {
+        "workspace": {
+          "discoverConfig": {
+            "command": ["just", "_rust-analyzer"],
+            "progressLabel": "generating rust analyzer config",
+            "filesToWatch": ["BUILD.bazel"]
+          }
+        }
+      }
+    }
+  }
+}

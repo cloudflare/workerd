@@ -1,7 +1,89 @@
-import { strictEqual, ok, throws } from 'node:assert';
+import { strictEqual, ok, throws, rejects } from 'node:assert';
+import { WorkerEntrypoint, RpcTarget } from 'cloudflare:workers';
 
 // Test for the AbortSignal and AbortController standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
+
+class WrappedAbortSignal extends RpcTarget {
+  constructor() {
+    super();
+    this.ac = new AbortController();
+  }
+
+  forget() {
+    this.ac.signal.skipReleaseForTest();
+  }
+
+  getSignal() {
+    return this.ac.signal;
+  }
+}
+
+let globalAbortController;
+export class RpcRemoteEnd extends WorkerEntrypoint {
+  async echo(signal) {
+    return signal;
+  }
+
+  async countToInfinity(signal) {
+    let onAbortWasFired = false;
+
+    signal.onabort = () => {
+      onAbortWasFired = true;
+    };
+
+    for (let i = 0; ; i++) {
+      await scheduler.wait(50);
+      if (signal.aborted) {
+        return { counter: i, reason: signal.reason, onAbortWasFired };
+      }
+    }
+  }
+
+  async countToInfinityWithRequest(req) {
+    return this.countToInfinity(req.signal);
+  }
+
+  async countToInfinityWithTimeout(remoteSignal) {
+    let timeout = AbortSignal.timeout(1000);
+    let signal = AbortSignal.any([timeout, remoteSignal]);
+    return this.countToInfinity(signal);
+  }
+
+  async ignoreSignal(signal) {
+    let i = 0;
+
+    for (i = 0; i < 10; i++) {
+      await scheduler.wait(50);
+    }
+
+    return { counter: i, reason: signal.reason };
+  }
+
+  async chainReaction(signal) {
+    let onAbortWasFired = false;
+
+    signal.onabort = () => {
+      onAbortWasFired = true;
+    };
+
+    const inner = await this.env.RpcRemoteEnd.countToInfinity(signal);
+    return { inner, reason: signal.reason, onAbortWasFired };
+  }
+
+  async tryUsingGlobalAbortController() {
+    if (globalAbortController === undefined) {
+      globalAbortController = new AbortController();
+      await this.env.RpcRemoteEnd.echo(globalAbortController.signal); // send the signal over
+    } else {
+      globalAbortController.abort(new Error('boom?'));
+    }
+  }
+
+  async getWrappedSignal() {
+    return new WrappedAbortSignal();
+  }
+}
 
 export const abortcontroller = {
   test() {
@@ -160,6 +242,30 @@ export const anyAbort3 = {
   },
 };
 
+function initAny(signal, resolve) {
+  const any = AbortSignal.any([signal]);
+  any.onabort = () => {
+    resolve();
+  };
+}
+
+export const anyAbort4 = {
+  async test() {
+    // Reproduces a failure seen under asan.
+    const ac = new AbortController();
+    ac.signal.addEventListener('abort', (event) => {});
+    const { promise, resolve } = Promise.withResolvers();
+
+    // Set up AbortSignal.any() to call "resolve" when ac.signal aborts.  We use a separate
+    // function to avoid accidentally capturing references in this scope.
+    initAny(ac.signal, resolve);
+
+    gc();
+    ac.abort();
+    await promise;
+  },
+};
+
 export const onabortPrototypeProperty = {
   test() {
     const ac = new AbortController();
@@ -186,5 +292,303 @@ export const onabortPrototypeProperty = {
     const handler = {};
     ac.signal.onabort = handler;
     strictEqual(ac.signal.onabort, handler);
+  },
+};
+
+export const rpcUnusedSignal = {
+  async test(ctrl, env, ctx) {
+    const ac = new AbortController();
+    const responseSignal = await env.RpcRemoteEnd.echo(ac.signal);
+
+    ok(responseSignal instanceof AbortSignal);
+    strictEqual(responseSignal.aborted, false);
+    strictEqual(responseSignal.reason, undefined);
+  },
+};
+
+export const rpcNeverAbortsSignal = {
+  async test(ctrl, env, ctx) {
+    const otherRequest = new Request('http://example.com');
+
+    const responseSignal = await env.RpcRemoteEnd.echo(otherRequest.signal);
+    ok(responseSignal instanceof AbortSignal);
+    strictEqual(responseSignal.aborted, false);
+    strictEqual(responseSignal.reason, undefined);
+  },
+};
+
+export const rpcAbortSignalTimeout = {
+  async test(ctrl, env, ctx) {
+    const signal = AbortSignal.timeout(200);
+    const res = await env.RpcRemoteEnd.countToInfinity(signal);
+
+    // We don't care the exact value it got to, but at least 1 iteration should have happened
+    ok(res.counter >= 1);
+
+    // Make sure the reason was passed without being garbled
+    ok(res.reason instanceof DOMException);
+    strictEqual(res.reason.message, 'The operation was aborted due to timeout');
+
+    // Make sure an event was dispatched on the remote side
+    ok(res.onAbortWasFired);
+  },
+};
+
+export const rpcAbortSignalAbort = {
+  async test(ctrl, env, ctx) {
+    // NB: AbortSignal.abort returns an abort signal that is already aborted
+    const expectedReason = "just didn't feel like it";
+    const signal = AbortSignal.abort(expectedReason);
+    const res = await env.RpcRemoteEnd.countToInfinity(signal);
+
+    // No iterations should have happened
+    strictEqual(res.counter, 0);
+
+    // Make sure the reason was passed without being garbled
+    strictEqual(res.reason, "just didn't feel like it");
+
+    // No event is dispatched on an already aborted signal
+    ok(!res.onAbortWasFired);
+  },
+};
+
+export const rpcAbortControllerSignal = {
+  async test(ctrl, env, ctx) {
+    const ac = new AbortController();
+    const resPromise = env.RpcRemoteEnd.countToInfinity(ac.signal);
+
+    // Wait an arbitrary amount of time, then use the AbortController to abort the remote end.
+    await scheduler.wait(200);
+    const expectedReason = 'changed my mind';
+    ac.abort(expectedReason);
+
+    const res = await resPromise;
+
+    // We don't care the exact value it got to, but at least 1 iteration should have happened
+    ok(res.counter >= 1);
+
+    // Make sure the reason was passed without being garbled
+    strictEqual(res.reason, expectedReason);
+
+    // Make sure an event was dispatched on the remote side
+    ok(res.onAbortWasFired);
+  },
+};
+
+export const rpcAbortControllerSignalNoReasonProvided = {
+  async test(ctrl, env, ctx) {
+    const ac = new AbortController();
+    const resPromise = env.RpcRemoteEnd.countToInfinity(ac.signal);
+
+    // Wait an arbitrary amount of time, then use the AbortController to abort the remote end.
+    await scheduler.wait(200);
+    ac.abort();
+
+    const res = await resPromise;
+
+    // We don't care the exact value it got to, but at least 1 iteration should have happened
+    ok(res.counter >= 1);
+
+    // Make sure the reason was passed without being garbled
+    ok(res.reason instanceof DOMException);
+    strictEqual(res.reason.message, 'The operation was aborted');
+
+    // Make sure an event was dispatched on the remote side
+    ok(res.onAbortWasFired);
+  },
+};
+
+export const rpcAbortSignalFurtherCloned = {
+  async test(ctrl, env, ctx) {
+    const ac = new AbortController();
+    const resPromise = env.RpcRemoteEnd.chainReaction(ac.signal);
+
+    // Wait an arbitrary amount of time, then use the AbortController to abort the remote end.
+    await scheduler.wait(200);
+    const expectedReason = 'changed my mind';
+    ac.abort(expectedReason);
+
+    const res = await resPromise;
+
+    // We don't care the exact value it got to, but at least 1 iteration should have happened
+    ok(res.inner.counter >= 1);
+
+    // Make sure the reason was passed without being garbled
+    strictEqual(res.reason, expectedReason);
+    strictEqual(res.inner.reason, expectedReason);
+
+    // Make sure an event was dispatched on the remote side
+    ok(res.onAbortWasFired);
+    ok(res.inner.onAbortWasFired);
+  },
+};
+
+export const rpcAbortSignalManyClients = {
+  async test(ctrl, env, ctx) {
+    const signal = AbortSignal.timeout(200);
+
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () => env.RpcRemoteEnd.countToInfinity(signal))
+    );
+    strictEqual(responses.length, 5);
+
+    for (const res of responses) {
+      // We don't care the exact value it got to, but at least 1 iteration should have happened
+      ok(res.counter >= 1);
+
+      // Make sure the reason was passed without being garbled
+      ok(res.reason instanceof DOMException);
+      strictEqual(
+        res.reason.message,
+        'The operation was aborted due to timeout'
+      );
+
+      // Make sure an event was dispatched on the remote side
+      ok(res.onAbortWasFired);
+    }
+  },
+};
+
+export const rpcAbortSignalAny = {
+  async test(ctrl, env, ctx) {
+    const unusedAc = new AbortController();
+    const signal = AbortSignal.any([AbortSignal.timeout(200), unusedAc.signal]);
+    const res = await env.RpcRemoteEnd.countToInfinity(signal);
+
+    // We don't care the exact value it got to, but at least 1 iteration should have happened
+    ok(res.counter >= 1);
+
+    // Make sure the reason was passed without being garbled
+    ok(res.reason instanceof DOMException);
+    strictEqual(res.reason.message, 'The operation was aborted due to timeout');
+
+    // Make sure an event was dispatched on the remote side
+    ok(res.onAbortWasFired);
+  },
+};
+
+export const rpcAbortSignalAnyOnRemoteEnd = {
+  async test(ctrl, env, ctx) {
+    const ac = new AbortController();
+    const resPromise = env.RpcRemoteEnd.countToInfinityWithTimeout(ac.signal);
+
+    // Wait an arbitrary amount of time, then use the AbortController to abort the remote end.
+    await scheduler.wait(200);
+    const expectedReason =
+      'our timeout triggered before the 1000ms timeout on the other side';
+    ac.abort(expectedReason);
+
+    const res = await resPromise;
+
+    // We don't care the exact value it got to, but at least 1 iteration should have happened
+    ok(res.counter >= 1);
+
+    // Make sure the reason was passed without being garbled
+    strictEqual(res.reason, expectedReason);
+
+    // Make sure an event was dispatched on the remote side
+    ok(res.onAbortWasFired);
+  },
+};
+
+export const rpcRequestSignal = {
+  async test(ctrl, env, ctx) {
+    // Construct a request holding an AbortSignal, and then send this request to the other side
+    // Note that this signal isn't affected by the request_signal_passthrough compat flag, which
+    // only modifies the behaviour of the signal on the incoming request.
+    const req = new Request('http://example.com', {
+      signal: AbortSignal.timeout(200),
+    });
+
+    const res = await env.RpcRemoteEnd.countToInfinityWithRequest(req);
+
+    // We don't care the exact value it got to, but at least 1 iteration should have happened
+    ok(res.counter >= 1);
+
+    // Make sure the reason was passed without being garbled
+    ok(res.reason instanceof DOMException);
+    strictEqual(res.reason.message, 'The operation was aborted due to timeout');
+
+    // Make sure an event was dispatched on the remote side
+    ok(res.onAbortWasFired);
+  },
+};
+
+export const rpcCrossRequestSignal = {
+  async test(ctrl, env, ctx) {
+    // Save an AbortController in the global scope
+    await env.RpcRemoteEnd.tryUsingGlobalAbortController();
+
+    // Try to use it again
+    await rejects(
+      async () => env.RpcRemoteEnd.tryUsingGlobalAbortController(),
+      {
+        name: 'Error',
+        message:
+          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, request/response bodies, and others) created in the context of one request handler cannot be accessed from a different request's handler. This is a limitation of Cloudflare Workers which allows us to improve overall performance. (I/O type: RefcountedCanceler)",
+      }
+    );
+  },
+};
+
+export const rpcRemoteCanIgnoreSignal = {
+  async test(ctrl, env, ctx) {
+    const ac = new AbortController();
+    const resPromise = env.RpcRemoteEnd.ignoreSignal(ac.signal);
+
+    // Wait an arbitrary amount of time, then use the AbortController to abort the remote end.
+    await scheduler.wait(200);
+    const expectedReason = 'changed my mind';
+    ac.abort(expectedReason);
+
+    const res = await resPromise;
+
+    // Every iteration completes, the remote is not reacting to the abort
+    strictEqual(res.counter, 10);
+
+    // Make sure the reason was passed without being garbled
+    strictEqual(res.reason, expectedReason);
+  },
+};
+
+export const rpcDestroySignalUnclean = {
+  async test(ctrl, env, ctx) {
+    // wrapper is a RPCTarget that just holds an AbortSignal
+    const wrapper = await env.RpcRemoteEnd.getWrappedSignal();
+
+    // Get our clone of the signal
+    const signal = await wrapper.getSignal();
+
+    // Tell the AbortSignal not to send a release message on disposal
+    await wrapper.forget();
+
+    // Destroy the wrapper
+    wrapper[Symbol.dispose]();
+
+    // No release message was sent, our clone will provide a message explaining the other side is
+    // gone.
+    ok(signal.aborted);
+    strictEqual(
+      signal.reason.message,
+      'An AbortSignal received over RPC was implicitly aborted because the connection back to its ' +
+        'trigger was lost.'
+    );
+  },
+};
+
+export const rpcDestroySignalClean = {
+  async test(ctrl, env, ctx) {
+    // wrapper is a RPCTarget that just holds an AbortSignal
+    const wrapper = await env.RpcRemoteEnd.getWrappedSignal();
+
+    // Get our clone of the signal
+    const signal = await wrapper.getSignal();
+
+    // Destroy the wrapper
+    wrapper[Symbol.dispose]();
+
+    // A release message was sent, the signal will remain in an unaborted state
+    ok(!signal.aborted);
+    strictEqual(signal.reason, undefined);
   },
 };

@@ -183,11 +183,11 @@ kj::Promise<void> WorkerQueue::send(
   KJ_IF_SOME(opts, options) {
     KJ_IF_SOME(type, opts.contentType) {
       auto validatedType = validateContentType(type);
-      headers.add(HDR_MSG_FORMAT, validatedType);
+      headers.addPtrPtr(HDR_MSG_FORMAT, validatedType);
       contentType = validatedType;
     }
     KJ_IF_SOME(secs, opts.delaySeconds) {
-      headers.add(HDR_MSG_DELAY, kj::str(secs));
+      headers.addPtr(HDR_MSG_DELAY, kj::str(secs));
     }
   }
 
@@ -195,7 +195,7 @@ kj::Promise<void> WorkerQueue::send(
   KJ_IF_SOME(type, contentType) {
     serialized = serialize(js, body, type, SerializeArrayBufferBehavior::DEEP_COPY);
   } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
-    headers.add("X-Msg-Fmt", IncomingQueueMessage::ContentType::JSON);
+    headers.addPtrPtr("X-Msg-Fmt", IncomingQueueMessage::ContentType::JSON);
     serialized = serialize(
         js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::DEEP_COPY);
   } else {
@@ -306,14 +306,14 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
   // decide whether it's too large.
   // TODO(someday): Enforce the size limits here instead for very slightly better performance.
   auto headers = kj::HttpHeaders(context.getHeaderTable());
-  headers.add("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
-  headers.add("CF-Queue-Batch-Bytes"_kj, kj::str(totalSize));
-  headers.add("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
+  headers.addPtr("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
+  headers.addPtr("CF-Queue-Batch-Bytes"_kj, kj::str(totalSize));
+  headers.addPtr("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
   headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
   KJ_IF_SOME(opts, options) {
     KJ_IF_SOME(secs, opts.delaySeconds) {
-      headers.add(HDR_MSG_DELAY, kj::str(secs));
+      headers.addPtr(HDR_MSG_DELAY, kj::str(secs));
     }
   }
 
@@ -419,7 +419,7 @@ QueueEvent::QueueEvent(
   auto incoming = params.getMessages();
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(incoming.size());
   for (auto i: kj::indices(incoming)) {
-    messagesBuilder.add(jsg::alloc<QueueMessage>(js, incoming[i], result));
+    messagesBuilder.add(js.alloc<QueueMessage>(js, incoming[i], result));
   }
   messages = messagesBuilder.finish();
 }
@@ -430,7 +430,7 @@ QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> res
       result(result) {
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(params.messages.size());
   for (auto i: kj::indices(params.messages)) {
-    messagesBuilder.add(jsg::alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
+    messagesBuilder.add(js.alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
   }
   messages = messagesBuilder.finish();
 }
@@ -470,20 +470,20 @@ struct StartQueueEventResponse {
 };
 
 StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
+    IoContext& context,
     kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params,
     IoPtr<QueueEventResult> result,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
-    const jsg::TypeHandler<QueueExportedHandler>& handlerHandler,
-    kj::Rc<OutcomeObserver> outcomeObserver) {
+    const jsg::TypeHandler<QueueExportedHandler>& handlerHandler) {
   jsg::Lock& js = lock;
   jsg::Ref<QueueEvent> event(nullptr);
   KJ_SWITCH_ONEOF(params) {
     KJ_CASE_ONEOF(p, rpc::EventDispatcher::QueueParams::Reader) {
-      event = jsg::alloc<QueueEvent>(js, p, result);
+      event = js.alloc<QueueEvent>(js, p, result);
     }
     KJ_CASE_ONEOF(p, QueueEvent::Params) {
-      event = jsg::alloc<QueueEvent>(js, kj::mv(p), result);
+      event = js.alloc<QueueEvent>(js, kj::mv(p), result);
     }
   }
 
@@ -492,15 +492,14 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
   KJ_IF_SOME(h, exportedHandler) {
     auto queueHandler = KJ_ASSERT_NONNULL(handlerHandler.tryUnwrap(lock, h.self.getHandle(lock)));
     KJ_IF_SOME(f, queueHandler.queue) {
-      auto promise =
-          f(lock, jsg::alloc<QueueController>(event.addRef()),
-              jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
-              .then(
-                  [outcomeObserver = outcomeObserver.addRef(), event = event.addRef()]() mutable {
+      auto promise = f(lock, js.alloc<QueueController>(event.addRef()),
+          jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
+                         .then([event = event.addRef(), &context]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
-      },
-                  [outcomeObserver = outcomeObserver.addRef(), event = event.addRef()](
-                      kj::Exception&& e) mutable {
+        KJ_IF_SOME(t, context.getWorkerTracer()) {
+          t.setReturn(context.now());
+        }
+      }, [event = event.addRef()](kj::Exception&& e) mutable {
         event->setCompletionStatus(QueueEvent::CompletedWithError{kj::cp(e)});
         return kj::mv(e);
       });
@@ -531,18 +530,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
 
 }  // namespace
 
-kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
-    kj::Own<IoContext_IncomingRequest> incomingRequest,
-    kj::Maybe<kj::StringPtr> entrypointName,
-    Frankenvalue props,
-    kj::TaskSet& waitUntilTasks) {
-  // This method has three main chunks of logic:
-  // 1. Do all necessary setup work. This starts right below this comment.
-  // 2. Call into the worker's queue event handler.
-  // 3. Wait on the necessary portions of the worker's code to complete.
-  incomingRequest->delivered();
-  auto& context = incomingRequest->getContext();
-
+kj::Maybe<tracing::EventInfo> QueueCustomEventImpl::getEventInfo() const {
   kj::String queueName;
   uint32_t batchSize;
   KJ_SWITCH_ONEOF(params) {
@@ -556,13 +544,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     }
   }
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
-        tracing::QueueEventInfo(kj::str(queueName), batchSize));
-  }
+  return tracing::EventInfo(tracing::QueueEventInfo(kj::mv(queueName), batchSize));
+}
 
-  auto outcomeObserver = kj::rc<OutcomeObserver>(
-      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
+kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
+    kj::Own<IoContext_IncomingRequest> incomingRequest,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
+    kj::TaskSet& waitUntilTasks) {
+  // This method has three main chunks of logic:
+  // 1. Do all necessary setup work. This starts right below this comment.
+  // 2. Call into the worker's queue event handler.
+  // 3. Wait on the necessary portions of the worker's code to complete.
+  incomingRequest->delivered();
+  auto& context = incomingRequest->getContext();
 
   // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
   // waitUntil'ed callback safely without worrying about whether this coroutine gets canceled.
@@ -576,15 +571,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   // 2. This is where we call into the worker's queue event handler
   auto runProm = context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
-          &metrics = incomingRequest->getMetrics(), outcomeObserver = kj::mv(outcomeObserver),
+          &metrics = incomingRequest->getMetrics(),
           props = kj::mv(props)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
-    auto startResp =
-        startQueueEvent(lock.getGlobalScope(), kj::mv(params), context.addObject(result), lock,
-            lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler,
-            kj::mv(outcomeObserver));
+    auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
+        context.addObject(result), lock,
+        lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler);
     queueEvent->event = kj::mv(startResp.event);
     queueEvent->exportedHandlerProm = kj::mv(startResp.exportedHandlerProm);
     queueEvent->isServiceWorkerHandler = startResp.isServiceWorkerHandler;
@@ -698,7 +692,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
         // already rejected.
         kj::String abortError;
         co_await ioContext.onAbort()
-            .then([] {}, [&abortError](kj::Exception&& e) {
+            .catch_([&abortError](kj::Exception&& e) {
           abortError = kj::str(e);
         }).exclusiveJoin(ioContext.afterLimitTimeout(1 * kj::MICROSECONDS).then([&abortError]() {
           abortError = kj::str("onAbort() promise has unexpectedly not yet been rejected");

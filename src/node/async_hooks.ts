@@ -6,11 +6,11 @@
 import { default as async_hooks } from 'node-internal:async_hooks';
 
 class AsyncHook {
-  public enable(): this {
+  enable(): this {
     return this;
   }
 
-  public disable(): this {
+  disable(): this {
     return this;
   }
 }

@@ -99,6 +99,23 @@ class Url final {
   // Resolve the input relative to this URL
   kj::Maybe<Url> tryResolve(kj::ArrayPtr<const char> input) const KJ_WARN_UNUSED_RESULT;
 
+  enum class RelativeOption {
+    DEFAULT,
+    // If the URL ends with a trailing slash, remove it before determining the basename.
+    STRIP_TAILING_SLASHES,
+  };
+  struct Relative;
+  // Given this URL, returns a struct that is a basename and a base Url pair
+  // such that base.tryResolve(basename) is equivalent to this URL. Query
+  // parameters and fragments are not preserved.
+  Relative getRelative(RelativeOption option = RelativeOption::DEFAULT) const KJ_LIFETIMEBOUND;
+
+  // Returns the parent URL of this URL, which is the URL with the last path component
+  // removed and the trailing slash removed if it exists. For instance, if the URL is
+  // "https://example.com/foo/bar/baz", the parent URL will be "https://example.com/foo/bar".
+  // If the URL has no parent (e.g. "https://example.com/") kj::none is returned.
+  kj::Maybe<jsg::Url> getParent() const KJ_WARN_UNUSED_RESULT;
+
   HostType getHostType() const;
   SchemeType getSchemeType() const;
 
@@ -122,6 +139,11 @@ class Url final {
  private:
   Url(kj::Own<void> inner);
   kj::Own<void> inner;
+};
+
+struct Url::Relative {
+  Url base;
+  kj::String name;
 };
 
 constexpr Url::EquivalenceOption operator|(Url::EquivalenceOption a, Url::EquivalenceOption b) {

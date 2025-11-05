@@ -11,6 +11,7 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "urlsearchparams_delete_has_value_arg",
+          "urlpattern_original",
         ]
       )
     ),

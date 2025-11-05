@@ -19,7 +19,7 @@ declare abstract class NonRetryableError extends Error {
    * `__brand` is used to differentiate between `NonRetryableError` and `Error`
    * and is omitted from the constructor because users should not set it
    */
-  public constructor(message: string, name?: string);
+  constructor(message: string, name?: string);
 }
 
 declare abstract class Workflow<PARAMS = unknown> {
@@ -28,14 +28,14 @@ declare abstract class Workflow<PARAMS = unknown> {
    * @param id Id for the instance of this Workflow
    * @returns A promise that resolves with a handle for the Instance
    */
-  public get(id: string): Promise<WorkflowInstance>;
+  get(id: string): Promise<WorkflowInstance>;
 
   /**
    * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
    * @param options Options when creating an instance including name and params
    * @returns A promise that resolves with a handle for the Instance
    */
-  public create(
+  create(
     options?: WorkflowInstanceCreateOptions<PARAMS>
   ): Promise<WorkflowInstance>;
 
@@ -45,10 +45,25 @@ declare abstract class Workflow<PARAMS = unknown> {
    * @param batch List of Options when creating an instance including name and params
    * @returns A promise that resolves with a list of handles for the created instances.
    */
-  public createBatch(
+  createBatch(
     batch: WorkflowInstanceCreateOptions<PARAMS>[]
   ): Promise<WorkflowInstance[]>;
 }
+
+type WorkflowDurationLabel =
+  | 'second'
+  | 'minute'
+  | 'hour'
+  | 'day'
+  | 'week'
+  | 'month'
+  | 'year';
+
+type WorkflowSleepDuration =
+  | `${number} ${WorkflowDurationLabel}${'s' | ''}`
+  | number;
+
+type WorkflowRetentionDuration = WorkflowSleepDuration;
 
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
@@ -60,6 +75,14 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
    * The event payload the Workflow instance is triggered with
    */
   params?: PARAMS;
+  /**
+   * The retention policy for the Workflow instance.
+   * Defaults to the maximum retention period available for the owner's account.
+   */
+  retention?: {
+    successRetention?: WorkflowRetentionDuration;
+    errorRetention?: WorkflowRetentionDuration;
+  };
 }
 
 type InstanceStatus = {
@@ -83,30 +106,41 @@ interface WorkflowError {
 }
 
 declare abstract class WorkflowInstance {
-  public id: string;
+  id: string;
 
   /**
    * Pause the instance.
    */
-  public pause(): Promise<void>;
+  pause(): Promise<void>;
 
   /**
    * Resume the instance. If it is already running, an error will be thrown.
    */
-  public resume(): Promise<void>;
+  resume(): Promise<void>;
 
   /**
    * Terminate the instance. If it is errored, terminated or complete, an error will be thrown.
    */
-  public terminate(): Promise<void>;
+  terminate(): Promise<void>;
 
   /**
    * Restart the instance.
    */
-  public restart(): Promise<void>;
+  restart(): Promise<void>;
 
   /**
    * Returns the current status of the instance.
    */
-  public status(): Promise<InstanceStatus>;
+  status(): Promise<InstanceStatus>;
+
+  /**
+   * Send an event to this instance.
+   */
+  sendEvent({
+    type,
+    payload,
+  }: {
+    type: string;
+    payload: unknown;
+  }): Promise<void>;
 }

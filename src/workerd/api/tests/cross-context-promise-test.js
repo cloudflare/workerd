@@ -94,7 +94,9 @@ export const expiredContextWorks = {
     strictEqual(results[1].status, 'fulfilled');
     strictEqual(
       results[0].reason.message,
-      'The script will never generate a response.'
+      "The Workers runtime canceled this request because it detected that your Worker's code " +
+        'had hung and would never generate a response. Refer to: ' +
+        'https://developers.cloudflare.com/workers/observability/errors/'
     );
     strictEqual(results[1].value.status, 200);
     strictEqual(await results[1].value.text(), 'ok');

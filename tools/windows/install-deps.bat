@@ -75,7 +75,7 @@ echo.
 echo.* Step 7: Install LLVM compiler toolchain.
 @rem The MSVC build frequently breaks in some ways when the LLVM version is updated, we may have to
 @rem manually install a different version again soon.
-@rem winget install "LLVM" --version 18.1.8
+@rem winget install "LLVM" --version 19.1.7
 
 echo.
 echo.* Step 8: Install bazelisk as %LOCALAPPDATA%\Programs\bazelisk\bazel.exe.

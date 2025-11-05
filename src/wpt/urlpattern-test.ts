@@ -7,11 +7,15 @@ import { type TestRunnerConfig } from 'harness/harness';
 export default {
   'urlpattern-compare.tentative.any.js': {
     comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'urlpattern-compare.tentative.https.any.js': {
     comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
-    skipAllTests: true,
+    omittedTests: true,
+  },
+  'urlpattern-generate.tentative.any.js': {
+    comment: 'URLPattern.generate is not part of the URLPattern spec',
+    omittedTests: true,
   },
   'urlpattern-hasregexpgroups.any.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
@@ -172,6 +176,6 @@ export default {
   },
   'urlpattern.https.any.js': {
     comment: 'Test cases are identical to urlpattern.any.js.',
-    skipAllTests: true,
+    omittedTests: true,
   },
 } satisfies TestRunnerConfig;

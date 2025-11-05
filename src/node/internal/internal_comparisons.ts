@@ -42,6 +42,7 @@ import {
   isBooleanObject,
   isBigIntObject,
   isSymbolObject,
+  isFloat16Array,
   isFloat32Array,
   isFloat64Array,
 } from 'node-internal:internal_types';
@@ -65,7 +66,7 @@ function areSimilarRegExps(a: RegExp, b: RegExp) {
   );
 }
 
-type FloatArray = Float32Array | Float64Array;
+type FloatArray = Float16Array | Float32Array | Float64Array;
 type AnyArrayBuffer = ArrayBuffer | SharedArrayBuffer;
 
 type Memos = {
@@ -234,7 +235,10 @@ function innerDeepEqual(
     ) {
       return false;
     }
-    if (!strict && (isFloat32Array(val1) || isFloat64Array(val1))) {
+    if (
+      !strict &&
+      (isFloat16Array(val1) || isFloat32Array(val1) || isFloat64Array(val1))
+    ) {
       if (!areSimilarFloatArrays(val1 as FloatArray, val2 as FloatArray)) {
         return false;
       }

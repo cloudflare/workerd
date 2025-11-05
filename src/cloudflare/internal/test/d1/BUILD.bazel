@@ -7,7 +7,7 @@ wd_test(
     data = glob(
         ["*.js"],
         exclude = ["d1-api-test-with-sessions.js"],
-    ),
+    ) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
 
 wd_test(
@@ -25,8 +25,5 @@ py_wd_test(
         "*.js",
     ]),
     make_snapshot = False,
-    tags = [
-        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
-        "no-asan",
-    ],
+    use_snapshot = None,
 )

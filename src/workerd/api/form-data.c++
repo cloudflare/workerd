@@ -79,7 +79,7 @@ kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
     }
     // The file is created with the same data as the blob (essentially as just
     // a view of the same blob) to avoid copying the data.
-    return jsg::alloc<File>(
+    return js.alloc<File>(
         blob.addRef(), blob->getData(), kj::mv(fn), kj::str(blob->getType()), dateNow());
   };
 
@@ -241,7 +241,7 @@ void FormData::parseFormDataImpl(
 
     if (message.size() > 0) {
       // If we skipped a CR, we must avoid including it in the message data.
-      message = message.first(message.size() - uint(message.back() == '\r'));
+      message = message.first(message.size() - static_cast<uint>(message.back() == '\r'));
     }
 
     callback(name, filename.map([](auto& str) { return str.asPtr(); }), type, message.asBytes());
@@ -273,7 +273,7 @@ kj::Array<FormData::EntryWithoutLock> FormData::parseWithoutLock(
         } else {
           data.add(FormData::EntryWithoutLock{
             .name = kj::str(name),
-            .value = kj::str(message),
+            .value = kj::heapArray<kj::byte>(message),
           });
         }
       });
@@ -318,22 +318,24 @@ void FormData::parse(jsg::Lock& js,
               kj::Maybe<kj::StringPtr> maybeType, kj::ArrayPtr<const kj::byte> message) {
         KJ_IF_SOME(filename, maybeFilename) {
           if (convertFilesToStrings) {
+            auto messageData = kj::heapArray<char>(message.asChars());
             data.add(FormData::Entry{
               .name = kj::str(name),
-              .value = kj::str(message.asChars()),
+              .value = kj::str(kj::mv(messageData)),
             });
           } else {
             auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, message.size());
             jsg::BufferSource bytes(js, kj::mv(backing));
             bytes.asArrayPtr().copyFrom(message);
             data.add(FormData::Entry{.name = kj::str(name),
-              .value = jsg::alloc<File>(js, kj::mv(bytes), kj::str(filename),
+              .value = js.alloc<File>(js, kj::mv(bytes), kj::str(filename),
                   kj::str(maybeType.orDefault(nullptr)), dateNow())});
           }
         } else {
+          auto messageData = kj::heapArray<char>(message.asChars());
           data.add(FormData::Entry{
             .name = kj::str(name),
-            .value = kj::str(message.asChars()),
+            .value = kj::str(kj::mv(messageData)),
           });
         }
       });
@@ -348,8 +350,8 @@ void FormData::parse(jsg::Lock& js,
       data.reserve(query.size());
       for (auto& param: query) {
         data.add(Entry{
-          .name = kj::mv(param.name),
-          .value = kj::mv(param.value),
+          .name = kj::str(param.name),
+          .value = kj::str(param.value),
         });
       }
       return;
@@ -404,20 +406,21 @@ kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
   return builder.releaseAsArray().releaseAsBytes();
 }
 
-FormData::EntryType FormData::clone(FormData::EntryType& value) {
+FormData::EntryType FormData::clone(jsg::Lock& js, FormData::EntryType& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(file, jsg::Ref<File>) {
       return file.addRef();
     }
     KJ_CASE_ONEOF(string, kj::String) {
-      return kj::str(string);
+      auto data = kj::heapArray<char>(string);
+      return kj::str(kj::mv(data));
     }
   }
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<FormData> FormData::constructor() {
-  return jsg::alloc<FormData>();
+jsg::Ref<FormData> FormData::constructor(jsg::Lock& js) {
+  return js.alloc<FormData>();
 }
 
 void FormData::append(jsg::Lock& js,
@@ -434,20 +437,20 @@ void FormData::delete_(kj::String name) {
   data.truncate(pivot - data.begin());
 }
 
-kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(kj::String name) {
+kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(jsg::Lock& js, kj::String name) {
   for (auto& [k, v]: data) {
     if (k == name) {
-      return clone(v);
+      return clone(js, v);
     }
   }
   return kj::none;
 }
 
-kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::getAll(kj::String name) {
+kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::getAll(jsg::Lock& js, kj::String name) {
   kj::Vector<kj::OneOf<jsg::Ref<File>, kj::String>> result;
   for (auto& [k, v]: data) {
     if (k == name) {
-      result.add(clone(v));
+      result.add(clone(js, v));
     }
   }
   return result.releaseAsArray();
@@ -478,16 +481,16 @@ void FormData::set(jsg::Lock& js,
   }
 }
 
-jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState{JSG_THIS});
+jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock& js) {
+  return js.alloc<EntryIterator>(IteratorState{JSG_THIS});
 }
 
-jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState{JSG_THIS});
+jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock& js) {
+  return js.alloc<KeyIterator>(IteratorState{JSG_THIS});
 }
 
-jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState{JSG_THIS});
+jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock& js) {
+  return js.alloc<ValueIterator>(IteratorState{JSG_THIS});
 }
 
 void FormData::forEach(jsg::Lock& js,
@@ -511,7 +514,7 @@ void FormData::forEach(jsg::Lock& js,
   // are added to the search params unconditionally on each iteration.
   for (size_t i = 0; i < this->data.size(); i++) {
     auto& [key, value] = this->data[i];
-    callback(js, clone(value), key, JSG_THIS);
+    callback(js, clone(js, value), key, JSG_THIS);
   }
 }
 

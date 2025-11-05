@@ -1,5 +1,7 @@
 #include "dh.h"
 
+#include "impl.h"
+
 #include <workerd/io/io-context.h>
 
 #include <ncrypto.h>
@@ -13,8 +15,10 @@ namespace workerd::api {
 
 namespace {
 
-// Maximum DH prime size, adapted from BoringSSL.
-constexpr int OPENSSL_DH_MAX_MODULUS_BITS = 10000;
+// Maximum DH prime size, adapted from BoringSSL. This is already defined in more recent versions.
+#ifndef OPENSSL_DH_MAX_MODULUS_BITS
+#define OPENSSL_DH_MAX_MODULUS_BITS 10000
+#endif
 
 // Returns a function that can be used to create an instance of a standardized
 // Diffie-Hellman group.
@@ -212,24 +216,28 @@ void DiffieHellman::setPublicKey(kj::ArrayPtr<kj::byte> key) {
 
 jsg::BufferSource DiffieHellman::getPublicKey(jsg::Lock& js) {
   const BIGNUM* pub_key = DH_get0_pub_key(dh);
+  JSG_REQUIRE(pub_key != nullptr, Error, "No public key");
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(js, *pub_key), Error, "Error while retrieving DiffieHellman public key");
 }
 
 jsg::BufferSource DiffieHellman::getPrivateKey(jsg::Lock& js) {
   const BIGNUM* priv_key = DH_get0_priv_key(dh);
+  JSG_REQUIRE(priv_key != nullptr, Error, "No private key");
   return JSG_REQUIRE_NONNULL(bignumToArrayPadded(js, *priv_key), Error,
       "Error while retrieving DiffieHellman private key");
 }
 
 jsg::BufferSource DiffieHellman::getGenerator(jsg::Lock& js) {
   const BIGNUM* g = DH_get0_g(dh);
+  JSG_REQUIRE(g != nullptr, Error, "No DiffieHellman generator");
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(js, *g), Error, "Error while retrieving DiffieHellman generator");
 }
 
 jsg::BufferSource DiffieHellman::getPrime(jsg::Lock& js) {
   const BIGNUM* p = DH_get0_p(dh);
+  JSG_REQUIRE(p != nullptr, Error, "No DiffieHellman prime");
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(js, *p), Error, "Error while retrieving DiffieHellman prime");
 }

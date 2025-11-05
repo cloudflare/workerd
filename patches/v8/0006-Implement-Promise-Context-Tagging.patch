@@ -5,10 +5,10 @@ Subject: Implement Promise Context Tagging
 
 
 diff --git a/include/v8-callbacks.h b/include/v8-callbacks.h
-index ffa98d0c31281100fafea427035a901d52c48b87..27f7e34460482255588ff18cc6f10937e392cefc 100644
+index 09fb5843d724e4278a72cc5d4bfb290ab639bde9..5395482ddf1a08464f79ffcb5b79e8b742d8c0ee 100644
 --- a/include/v8-callbacks.h
 +++ b/include/v8-callbacks.h
-@@ -517,6 +517,15 @@ using FilterETWSessionByURL2Callback = FilterETWSessionByURLResult (*)(
+@@ -514,6 +514,14 @@ using FilterETWSessionByURL2Callback = FilterETWSessionByURLResult (*)(
      Local<Context> context, const std::string& etw_filter_payload);
  #endif  // V8_OS_WIN
  
@@ -17,18 +17,17 @@ index ffa98d0c31281100fafea427035a901d52c48b87..27f7e34460482255588ff18cc6f10937
 + * promise's context tag is not strictly equal to the isolate's current
 + * promise context tag.
 + */
-+using PromiseCrossContextCallback = MaybeLocal<Promise> (*)(Local<Context> context,
-+                                                            Local<Promise> promise,
-+                                                            Local<Object> tag);
++using PromiseCrossContextCallback = MaybeLocal<Promise> (*)(
++    Local<Context> context, Local<Promise> promise, Local<Object> tag);
 +
  }  // namespace v8
  
  #endif  // INCLUDE_V8_ISOLATE_CALLBACKS_H_
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 3a261b4ad1aaa8f424a2a7e5d6dbad7b4ad8d7bf..43ae2fb0f577b03b0d2b37896dcdbc7eb74e1688 100644
+index bb9676d982a0e3e29dece75191ad069d1a89535a..5d5c3eac8261184ebe50769c7c9f00123f0d5700 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1890,6 +1890,9 @@ class V8_EXPORT Isolate {
+@@ -1848,6 +1848,9 @@ class V8_EXPORT Isolate {
     */
    uint64_t GetHashSeed();
  
@@ -38,12 +37,12 @@ index 3a261b4ad1aaa8f424a2a7e5d6dbad7b4ad8d7bf..43ae2fb0f577b03b0d2b37896dcdbc7e
    Isolate() = delete;
    ~Isolate() = delete;
    Isolate(const Isolate&) = delete;
-@@ -1937,6 +1940,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
+@@ -1895,6 +1898,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
    return {};
  }
  
 +class Isolate::PromiseContextScope {
-+public:
++ public:
 +  PromiseContextScope(Isolate* isolate, v8::Local<v8::Object> tag);
 +  ~PromiseContextScope();
 +  PromiseContextScope(const PromiseContextScope&) = delete;
@@ -51,7 +50,7 @@ index 3a261b4ad1aaa8f424a2a7e5d6dbad7b4ad8d7bf..43ae2fb0f577b03b0d2b37896dcdbc7e
 +  PromiseContextScope& operator=(const PromiseContextScope&) = delete;
 +  PromiseContextScope& operator=(PromiseContextScope&&) = delete;
 +
-+private:
++ private:
 +  internal::Isolate* isolate_;
 +};
 +
@@ -59,19 +58,21 @@ index 3a261b4ad1aaa8f424a2a7e5d6dbad7b4ad8d7bf..43ae2fb0f577b03b0d2b37896dcdbc7e
  
  #endif  // INCLUDE_V8_ISOLATE_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 5c6315a5c20f026f6e780aa05ed2ade7ff317ceb..10b0957774479a5f7afd04b28fb50f37e5dfded4 100644
+index 07291df51d7344b47a9ba6909048c0a844cd157c..73c875def0126423653b63935fa7de67af8746ab 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -12453,6 +12453,23 @@ TryToCopyAndConvertArrayToCppBuffer<CTypeInfoBuilder<double>::Build().GetId(),
+@@ -12619,6 +12619,25 @@ TryToCopyAndConvertArrayToCppBuffer<CTypeInfoBuilder<double>::Build().GetId(),
                                                              max_length);
  }
  
-+void Isolate::SetPromiseCrossContextCallback(PromiseCrossContextCallback callback) {
++void Isolate::SetPromiseCrossContextCallback(
++    PromiseCrossContextCallback callback) {
 +  i::Isolate* isolate = reinterpret_cast<i::Isolate*>(this);
 +  isolate->set_promise_cross_context_callback(callback);
 +}
 +
-+Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate, v8::Local<v8::Object> tag)
++Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate,
++                                                  v8::Local<v8::Object> tag)
 +    : isolate_(reinterpret_cast<i::Isolate*>(isolate)) {
 +  DCHECK(!isolate_->has_promise_context_tag());
 +  DCHECK(!tag.IsEmpty());
@@ -150,7 +151,7 @@ index 50677631b5399453eebc6b149272431f74b1fce6..c652bd836b27805865e0a902ef9cf7c1
    }
  
 diff --git a/src/builtins/promise-misc.tq b/src/builtins/promise-misc.tq
-index 00d70d004d4e5d360acd32c8def308145433a944..3da2c5ebf54301ef23f18ffc9e68352249752159 100644
+index f3ece10afb659042fbb195a98cad8254cf1188c5..cd5261012bd9a2f16b2f3354b6c526ab3c58500f 100644
 --- a/src/builtins/promise-misc.tq
 +++ b/src/builtins/promise-misc.tq
 @@ -55,6 +55,7 @@ macro PromiseInit(promise: JSPromise): void {
@@ -186,10 +187,10 @@ index 00d70d004d4e5d360acd32c8def308145433a944..3da2c5ebf54301ef23f18ffc9e683522
    return instance;
  }
 diff --git a/src/compiler/js-create-lowering.cc b/src/compiler/js-create-lowering.cc
-index e33979b014fe87423fc3673c466b1e6d4e739db9..0f407785ac1089627a8fafddb29a49398b207db0 100644
+index e22b54b4c8354017481367ab0999ddd11a387b9c..1fdd5a1a8cbc464f39099b3f08655fb025dace48 100644
 --- a/src/compiler/js-create-lowering.cc
 +++ b/src/compiler/js-create-lowering.cc
-@@ -1118,10 +1118,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
+@@ -1126,10 +1126,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
            jsgraph()->EmptyFixedArrayConstant());
    a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kReactionsOrResultOffset),
            jsgraph()->ZeroConstant());
@@ -204,10 +205,10 @@ index e33979b014fe87423fc3673c466b1e6d4e739db9..0f407785ac1089627a8fafddb29a4939
         offset < JSPromise::kSizeWithEmbedderFields; offset += kTaggedSize) {
      a.Store(AccessBuilder::ForJSObjectOffset(offset),
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index b343c472ccb6fc696aad39ca2e49b698dbb03ad0..dbd9f782201dba3f355d464f0235eb3f611423c3 100644
+index 2b62e68d69be38c7a18404249bff80e6b9cd7c1d..b9e6ea4b5a259672d7224ad1f1974e010207f78a 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
-@@ -891,6 +891,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
+@@ -970,6 +970,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
    }
    os << "\n - has_handler: " << has_handler();
    os << "\n - is_silent: " << is_silent();
@@ -216,16 +217,14 @@ index b343c472ccb6fc696aad39ca2e49b698dbb03ad0..dbd9f782201dba3f355d464f0235eb3f
  }
  
 diff --git a/src/execution/isolate-inl.h b/src/execution/isolate-inl.h
-index a321214c69fcc4a7ba2d73f92db0f3066b2b3459..d32a20c3fffa4c0b6f980a82fc8c1fad4363afc0 100644
+index 3e122ecf5d3c60eb4a334eaef30fedbf71102bba..0d7e90da840560c371e5ca4e9626c056bbf78a6b 100644
 --- a/src/execution/isolate-inl.h
 +++ b/src/execution/isolate-inl.h
-@@ -134,6 +134,26 @@ bool Isolate::is_execution_terminating() {
+@@ -133,6 +133,25 @@ bool Isolate::is_execution_terminating() {
           i::ReadOnlyRoots(this).termination_exception();
  }
  
-+Tagged<Object> Isolate::promise_context_tag() {
-+  return promise_context_tag_;
-+}
++Tagged<Object> Isolate::promise_context_tag() { return promise_context_tag_; }
 +
 +bool Isolate::has_promise_context_tag() {
 +  return promise_context_tag_ != ReadOnlyRoots(this).the_hole_value();
@@ -239,7 +238,8 @@ index a321214c69fcc4a7ba2d73f92db0f3066b2b3459..d32a20c3fffa4c0b6f980a82fc8c1fad
 +  promise_context_tag_ = tag;
 +}
 +
-+void Isolate::set_promise_cross_context_callback(PromiseCrossContextCallback callback) {
++void Isolate::set_promise_cross_context_callback(
++    PromiseCrossContextCallback callback) {
 +  promise_cross_context_callback_ = callback;
 +}
 +
@@ -247,10 +247,10 @@ index a321214c69fcc4a7ba2d73f92db0f3066b2b3459..d32a20c3fffa4c0b6f980a82fc8c1fad
  Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
    if (is_execution_terminating() && !v8_flags.strict_termination_checks) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index ecd9c2d1a23a2ee56629b7dbbdce9b139eefa08e..0f811474a9af972623ac303bd9f88a93d4f21668 100644
+index d178d3d4057a2987425f01bd15083b8bcce49bff..1cb2673e48f7279aee8f191efebf8ea749876b8a 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
-@@ -609,6 +609,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
+@@ -624,6 +624,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
                        FullObjectSlot(&thread->pending_message_));
    v->VisitRootPointer(Root::kStackRoots, nullptr,
                        FullObjectSlot(&thread->context_));
@@ -259,7 +259,7 @@ index ecd9c2d1a23a2ee56629b7dbbdce9b139eefa08e..0f811474a9af972623ac303bd9f88a93
  
    for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
         block = block->next_) {
-@@ -5683,6 +5685,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+@@ -5875,6 +5877,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
      shared_heap_object_cache_.push_back(ReadOnlyRoots(this).undefined_value());
    }
  
@@ -267,12 +267,12 @@ index ecd9c2d1a23a2ee56629b7dbbdce9b139eefa08e..0f811474a9af972623ac303bd9f88a93
    InitializeThreadLocal();
  
    // Profiler has to be created after ThreadLocal is initialized
-@@ -7655,5 +7658,39 @@ void Isolate::InitializeBuiltinJSDispatchTable() {
- #endif
+@@ -7981,5 +7984,40 @@ void Isolate::PrintNumberStringCacheStats(const char* comment,
+   PrintF("\n");
  }
  
 +class Isolate::PromiseCrossContextCallbackScope {
-+public:
++ public:
 +  PromiseCrossContextCallbackScope(Isolate& isolate) : isolate_(isolate) {
 +    DCHECK(!isolate_.in_promise_cross_context_callback_);
 +    isolate_.in_promise_cross_context_callback_ = true;
@@ -280,13 +280,15 @@ index ecd9c2d1a23a2ee56629b7dbbdce9b139eefa08e..0f811474a9af972623ac303bd9f88a93
 +  ~PromiseCrossContextCallbackScope() {
 +    isolate_.in_promise_cross_context_callback_ = false;
 +  }
-+private:
++
++ private:
 +  Isolate& isolate_;
 +};
 +
-+MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(Handle<NativeContext> context,
-+                                                               Handle<JSPromise> promise) {
-+  if (promise_cross_context_callback_ == nullptr || in_promise_cross_context_callback_) {
++MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(
++    Handle<NativeContext> context, Handle<JSPromise> promise) {
++  if (promise_cross_context_callback_ == nullptr ||
++      in_promise_cross_context_callback_) {
 +    return promise;
 +  }
 +  PromiseCrossContextCallbackScope callback_scope(*this);
@@ -294,12 +296,11 @@ index ecd9c2d1a23a2ee56629b7dbbdce9b139eefa08e..0f811474a9af972623ac303bd9f88a93
 +
 +  Handle<JSObject> context_tag(Cast<JSObject>(promise->context_tag()), this);
 +  v8::Local<v8::Promise> result;
-+  API_ASSIGN_RETURN_ON_EXCEPTION_VALUE (
++  API_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
 +      this, result,
-+      promise_cross_context_callback_(
-+          Utils::ToLocal(context),
-+          v8::Utils::PromiseToLocal(promise),
-+          v8::Utils::ToLocal(context_tag)),
++      promise_cross_context_callback_(Utils::ToLocal(context),
++                                      v8::Utils::PromiseToLocal(promise),
++                                      v8::Utils::ToLocal(context_tag)),
 +      MaybeHandle<JSPromise>());
 +
 +  return v8::Utils::OpenHandle(*result);
@@ -308,10 +309,10 @@ index ecd9c2d1a23a2ee56629b7dbbdce9b139eefa08e..0f811474a9af972623ac303bd9f88a93
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/execution/isolate.h b/src/execution/isolate.h
-index aa31de22ead059023ac04f123d7eea53fca4e751..1b874e59fac9b81d6b79eed481a7037bb62021bc 100644
+index 161aa43c75c843a964200fa06844e4c83c808529..57b24f516177409afed63310c22da92f5214b13c 100644
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
-@@ -2393,6 +2393,14 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2390,6 +2390,15 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
                                         v8::ExceptionContext callback_kind);
    void SetExceptionPropagationCallback(ExceptionPropagationCallback callback);
  
@@ -319,14 +320,15 @@ index aa31de22ead059023ac04f123d7eea53fca4e751..1b874e59fac9b81d6b79eed481a7037b
 +  inline bool has_promise_context_tag();
 +  inline void clear_promise_context_tag();
 +  inline void set_promise_context_tag(Tagged<Object> tag);
-+  inline void set_promise_cross_context_callback(PromiseCrossContextCallback callback);
-+  MaybeHandle<JSPromise> RunPromiseCrossContextCallback(Handle<NativeContext> context,
-+                                                        Handle<JSPromise> promise);
++  inline void set_promise_cross_context_callback(
++      PromiseCrossContextCallback callback);
++  MaybeHandle<JSPromise> RunPromiseCrossContextCallback(
++      Handle<NativeContext> context, Handle<JSPromise> promise);
 +
  #ifdef V8_ENABLE_WASM_SIMD256_REVEC
    void set_wasm_revec_verifier_for_test(
        compiler::turboshaft::WasmRevecVerifier* verifier) {
-@@ -2920,6 +2928,12 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2929,6 +2938,12 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
  
    bool is_frozen_ = false;
  
@@ -339,7 +341,7 @@ index aa31de22ead059023ac04f123d7eea53fca4e751..1b874e59fac9b81d6b79eed481a7037b
    friend class GlobalSafepoint;
    friend class heap::HeapTester;
    friend class IsolateForPointerCompression;
-@@ -2927,6 +2941,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2936,6 +2951,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
    friend class IsolateGroup;
    friend class TestSerializer;
    friend class SharedHeapNoClientsTest;
@@ -348,10 +350,10 @@ index aa31de22ead059023ac04f123d7eea53fca4e751..1b874e59fac9b81d6b79eed481a7037b
  
  // The current entered Isolate and its thread data. Do not access these
 diff --git a/src/heap/factory.cc b/src/heap/factory.cc
-index d59acde0f942877e7beb3fd27d3d1613d12c3937..16bfe7f4d2b3720186f85ed989a4d12154ee97b0 100644
+index 104eebbacc0081a7055a62cf93a47c829205909b..c5cd0998181bf9ea0d87ac0f7f3f7d91a82ec4e6 100644
 --- a/src/heap/factory.cc
 +++ b/src/heap/factory.cc
-@@ -4500,6 +4500,12 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
+@@ -4597,6 +4597,12 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
    DisallowGarbageCollection no_gc;
    Tagged<JSPromise> raw = *promise;
    raw->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
@@ -376,25 +378,39 @@ index 93a4a34f9f1f7fad40611d4b9432aaf944c9fbae..188619ea64c9e307f014898e4023ce79
    flags: SmiTagged<JSPromiseFlags>;
  }
  
+diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
+index c37d9edafd5f5b460a9aa39f5aa5a275a6d49015..0e3aa9cb10bafcf0528adf43500c426773b46ec5 100644
+--- a/src/objects/value-serializer.cc
++++ b/src/objects/value-serializer.cc
+@@ -1113,8 +1113,8 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
+   WriteVarint(static_cast<uint32_t>(view->byte_length()));
+   if (version_ >= 14) {
+     uint32_t flags =
+-      JSArrayBufferViewIsLengthTracking::encode(view->is_length_tracking()) |
+-      JSArrayBufferViewIsBackedByRab::encode(view->is_backed_by_rab());
++        JSArrayBufferViewIsLengthTracking::encode(view->is_length_tracking()) |
++        JSArrayBufferViewIsBackedByRab::encode(view->is_backed_by_rab());
+     WriteVarint(flags);
+   }
+   return ThrowIfOutOfMemory();
 diff --git a/src/profiler/heap-snapshot-generator.cc b/src/profiler/heap-snapshot-generator.cc
-index 0b78b71cfa733321c6b8b1cf2ae99688e3c31841..7e159b34b86a0510c3c4a886ff1df3a057cf261d 100644
+index f585667c754fa3df8df565477a9f977747618b5e..ca2a36d31568824bd98e958f7c02189e0809af85 100644
 --- a/src/profiler/heap-snapshot-generator.cc
 +++ b/src/profiler/heap-snapshot-generator.cc
-@@ -2023,6 +2023,9 @@ void V8HeapExplorer::ExtractJSPromiseReferences(HeapEntry* entry,
+@@ -2117,6 +2117,8 @@ void V8HeapExplorer::ExtractJSPromiseReferences(HeapEntry* entry,
    SetInternalReference(entry, "reactions_or_result",
                         promise->reactions_or_result(),
                         JSPromise::kReactionsOrResultOffset);
-+  SetInternalReference(entry, "context_tag",
-+                       promise->context_tag(),
++  SetInternalReference(entry, "context_tag", promise->context_tag(),
 +                       JSPromise::kContextTagOffset);
  }
  
  void V8HeapExplorer::ExtractJSGeneratorObjectReferences(
 diff --git a/src/runtime/runtime-promise.cc b/src/runtime/runtime-promise.cc
-index 262b9aa5aa6974a4628d0679ada91aff76567906..9142039e4f6b52727e6e590807618c5f03ba22b9 100644
+index 262b9aa5aa6974a4628d0679ada91aff76567906..9730731cd42c0ea6ce0d96ec250a11fcc434ebf8 100644
 --- a/src/runtime/runtime-promise.cc
 +++ b/src/runtime/runtime-promise.cc
-@@ -216,5 +216,40 @@ RUNTIME_FUNCTION(Runtime_ConstructSuppressedError) {
+@@ -216,5 +216,41 @@ RUNTIME_FUNCTION(Runtime_ConstructSuppressedError) {
    return *result;
  }
  
@@ -417,8 +433,8 @@ index 262b9aa5aa6974a4628d0679ada91aff76567906..9142039e4f6b52727e6e590807618c5f
 +  Handle<JSPromise> promise = args.at<JSPromise>(0);
 +
 +  // If promise.context_tag() is strict equal to isolate.promise_context_tag(),
-+  // or if the promise being checked does not have a context tag, we'll just return
-+  // promise directly.
++  // or if the promise being checked does not have a context tag, we'll just
++  // return promise directly.
 +  Tagged<Object> obj = promise->context_tag();
 +  if (obj == Smi::zero() || obj == isolate->promise_context_tag()) {
 +    return *promise;
@@ -428,7 +444,8 @@ index 262b9aa5aa6974a4628d0679ada91aff76567906..9142039e4f6b52727e6e590807618c5f
 +  // has not been set, then it should just return the same promise back here.
 +  Handle<JSPromise> result;
 +  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-+    isolate->RunPromiseCrossContextCallback(isolate->native_context(), promise));
++                                     isolate->RunPromiseCrossContextCallback(
++                                         isolate->native_context(), promise));
 +
 +  return *result;
 +}
@@ -436,16 +453,42 @@ index 262b9aa5aa6974a4628d0679ada91aff76567906..9142039e4f6b52727e6e590807618c5f
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
-index 141334bc26240d4247f989744f1d8e45b59a5222..0e80cfccb3bfb466dbe68ff6838710a720b0ce8c 100644
+index 6cdea7cbc680626df7df106ffa5d2baf75dd027f..a8e43308a815b8f52e55076cd7a4857ad821e1a0 100644
 --- a/src/runtime/runtime.h
 +++ b/src/runtime/runtime.h
-@@ -429,7 +429,9 @@ namespace internal {
-   F(PromiseResolveAfterResolved, 2, 1)   \
-   F(ConstructSuppressedError, 3, 1)      \
-   F(ConstructAggregateErrorHelper, 4, 1) \
+@@ -432,20 +432,22 @@ constexpr bool CanTriggerGC(T... properties) {
+   F(StrictNotEqual, 2, 1)                  \
+   F(ReferenceEqual, 2, 1)
+ 
+-#define FOR_EACH_INTRINSIC_PROMISE(F, I) \
+-  F(EnqueueMicrotask, 1, 1)              \
+-  F(PromiseHookAfter, 1, 1)              \
+-  F(PromiseHookBefore, 1, 1)             \
+-  F(PromiseHookInit, 2, 1)               \
+-  F(PromiseRejectEventFromStack, 2, 1)   \
+-  F(PromiseRevokeReject, 1, 1)           \
+-  F(RejectPromise, 3, 1)                 \
+-  F(ResolvePromise, 2, 1)                \
+-  F(PromiseRejectAfterResolved, 2, 1)    \
+-  F(PromiseResolveAfterResolved, 2, 1)   \
+-  F(ConstructSuppressedError, 3, 1)      \
+-  F(ConstructAggregateErrorHelper, 4, 1) \
 -  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1)
++#define FOR_EACH_INTRINSIC_PROMISE(F, I)                    \
++  F(EnqueueMicrotask, 1, 1)                                 \
++  F(PromiseHookAfter, 1, 1)                                 \
++  F(PromiseHookBefore, 1, 1)                                \
++  F(PromiseHookInit, 2, 1)                                  \
++  F(PromiseRejectEventFromStack, 2, 1)                      \
++  F(PromiseRevokeReject, 1, 1)                              \
++  F(RejectPromise, 3, 1)                                    \
++  F(ResolvePromise, 2, 1)                                   \
++  F(PromiseRejectAfterResolved, 2, 1)                       \
++  F(PromiseResolveAfterResolved, 2, 1)                      \
++  F(ConstructSuppressedError, 3, 1)                         \
++  F(ConstructAggregateErrorHelper, 4, 1)                    \
 +  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1) \
-+  F(PromiseContextInit, 1, 1)            \
++  F(PromiseContextInit, 1, 1)                               \
 +  F(PromiseContextCheck, 1, 1)
  
  #define FOR_EACH_INTRINSIC_PROXY(F, I) \

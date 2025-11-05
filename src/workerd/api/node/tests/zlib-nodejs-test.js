@@ -2631,3 +2631,69 @@ export const compatFlagTest = {
     ]);
   },
 };
+
+export const stateSizeTest = {
+  test() {
+    const Uint32Array_orig = Uint32Array;
+    assert.throws(
+      () => {
+        const message = 'Come on, Fhqwhgads.';
+        const buffer = Buffer.from(message);
+        globalThis.Uint32Array = function (...args) {
+          if (args.length == 1 && arguments[0] == 2) {
+            return new Uint32Array_orig(new ArrayBuffer(32), 32);
+          }
+          return new Uint32Array_orig(...args);
+        };
+
+        const zipper = new zlib.Gzip();
+        const zipped = zipper._processChunk(buffer, zlib.constants.FINISH);
+        const unzipper = new zlib.Gunzip();
+        unzipper._processChunk(zipped, zlib.constants.FINISH);
+      },
+      {
+        message: /Invalid write result buffer/,
+      }
+    );
+    globalThis.Uint32Array = Uint32Array_orig;
+  },
+};
+
+export const zlibStreamTest = {
+  async test() {
+    const imgBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII';
+
+    const buf = Buffer.from(imgBase64, 'base64');
+    const imageStream = Readable.from(Buffer.from(imgBase64, 'base64'));
+    const g = zlib.createGzip();
+
+    const { promise, resolve } = Promise.withResolvers();
+    const chunks = [];
+    const w = new Writable({
+      construct(callback) {
+        // Double queueMicrotask is intentional to reproduce the bug.
+        // Do not remove any of them.
+        queueMicrotask(() => {
+          queueMicrotask(() => {
+            callback(null);
+          });
+        });
+      },
+      write(chunk, encoding, callback) {
+        chunks.push(chunk);
+        callback();
+      },
+    });
+    w.on('close', resolve);
+    const pp = imageStream.pipe(g);
+    pp.pipe(w);
+
+    await promise;
+
+    assert.strictEqual(
+      zlib.gunzipSync(Buffer.concat(chunks)).toString('hex'),
+      buf.toString('hex')
+    );
+  },
+};

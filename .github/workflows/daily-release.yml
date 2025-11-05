@@ -12,22 +12,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.DEVPROD_PAT }}
           ref: main
-          
+
       - name: Get current date
         id: date
         run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-        
+
       - name: Update compatibility date
         run: |
           echo "${{ steps.date.outputs.date }}" > src/workerd/io/supported-compatibility-date.txt
-          
+
       - name: Check for changes
         id: git-check
         run: |
@@ -36,16 +36,15 @@ jobs:
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
-          
-      - name: Set up Git identity
-        if: steps.git-check.outputs.changed == 'true'
+          echo "last_email=$(git show --format="%ae" -s)" >> $GITHUB_OUTPUT
+
+      # Publish new version if compatibility-date changed and last commit wasn't a daily release
+      # already.
+      - name: Commit and push change
+        if: steps.git-check.outputs.changed == 'true' && steps.git-check.outputs.last_email != 'workers-devprod@cloudflare.com'
         run: |
           git config user.email "workers-devprod@cloudflare.com"
           git config user.name "Workers DevProd"
-          
-      - name: Commit and push changes
-        if: steps.git-check.outputs.changed == 'true'
-        run: |
           git add src/workerd/io/supported-compatibility-date.txt
           git commit -m "Release ${{ steps.date.outputs.date }}"
           git push

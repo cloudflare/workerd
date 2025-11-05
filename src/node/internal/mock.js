@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
@@ -418,7 +415,6 @@ export class MockTracker {
             arguments: argList,
             error,
             result,
-            // eslint-disable-next-line no-restricted-syntax
             stack: new Error(),
             target: undefined,
             this: thisArg,
@@ -443,7 +439,6 @@ export class MockTracker {
             arguments: argList,
             error,
             result,
-            // eslint-disable-next-line no-restricted-syntax
             stack: new Error(),
             target,
             this: result,

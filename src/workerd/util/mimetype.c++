@@ -136,13 +136,12 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
     if (typeCandidate.size() == 0 || hasInvalidCodepoints(typeCandidate, isTokenChar)) {
       return kj::none;
     }
-    maybeType = kj::str(typeCandidate);
+    maybeType = toLower(typeCandidate);
     input = input.slice(n + 1);
   } else {
     // If the solidus is not found, then it's not a valid mime type
     return kj::none;
   }
-  auto& type = KJ_ASSERT_NONNULL(maybeType);
 
   // If there's nothing else to parse at this point, it's not a valid mime type.
   if (input.size() == 0) return kj::none;
@@ -155,19 +154,18 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
     if (subtypeCandidate.size() == 0 || hasInvalidCodepoints(subtypeCandidate, isTokenChar)) {
       return kj::none;
     }
-    maybeSubtype = kj::str(subtypeCandidate);
+    maybeSubtype = toLower(subtypeCandidate);
     input = input.slice(n + 1);
   } else {
     auto subtypeCandidate = trimWhitespace(input);
     if (subtypeCandidate.size() == 0 || hasInvalidCodepoints(subtypeCandidate, isTokenChar)) {
       return kj::none;
     }
-    maybeSubtype = kj::str(subtypeCandidate);
+    maybeSubtype = toLower(subtypeCandidate);
     input = input.slice(input.size());
   }
-  auto& subtype = KJ_ASSERT_NONNULL(maybeSubtype);
 
-  MimeType result(type, subtype);
+  MimeType result(kj::mv(KJ_ASSERT_NONNULL(maybeType)), mv(KJ_ASSERT_NONNULL(maybeSubtype)));
 
   if (!(options & ParseOptions::IGNORE_PARAMS)) {
     // Parse the parameters...
@@ -247,8 +245,11 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
 }
 
 MimeType::MimeType(kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params)
-    : type_(toLower(type)),
-      subtype_(toLower(subtype)) {
+    : MimeType(toLower(type), toLower(subtype), kj::mv(params)) {}
+
+MimeType::MimeType(kj::String type, kj::String subtype, kj::Maybe<MimeParams> params)
+    : type_(kj::mv(type)),
+      subtype_(kj::mv(subtype)) {
   KJ_IF_SOME(p, params) {
     params_ = kj::mv(p);
   }
@@ -304,7 +305,15 @@ kj::String MimeType::paramsToString() const {
 void MimeType::paramsToString(MimeType::ToStringBuffer& buffer) const {
   bool first = true;
   for (auto& param: params()) {
-    buffer.append(first ? "" : ";", param.key, "=");
+    buffer.append(first ? "" : ";");
+    if (param.key == "boundary") {
+      // This is to pass a pedantic WPT test that expects a space before only the boundary parameter
+      // [1]: https://html.spec.whatwg.org/#submit-body
+      // [2]: https://github.com/web-platform-tests/wpt/pull/29554
+      buffer.append(" ");
+    }
+
+    buffer.append(param.key, "=");
     first = false;
     if (param.value.size() == 0) {
       buffer.append("\"\"");
@@ -344,7 +353,7 @@ MimeType MimeType::clone(ParseOptions options) const {
       copy.insert(kj::str(entry.key), kj::str(entry.value));
     }
   }
-  return MimeType(type_, subtype_, kj::mv(copy));
+  return MimeType(kj::str(type_), kj::str(subtype_), kj::mv(copy));
 }
 
 bool MimeType::operator==(const MimeType& other) const {
@@ -359,66 +368,12 @@ kj::String KJ_STRINGIFY(const MimeType& mimeType) {
   return mimeType.toString();
 }
 
-const kj::StringPtr MimeType::PLAINTEXT_STRING = "text/plain;charset=UTF-8"_kj;
-const kj::StringPtr MimeType::PLAINTEXT_ASCII_STRING = "text/plain;charset=US-ASCII"_kj;
+kj::String KJ_STRINGIFY(const ConstMimeType& state) {
+  return state.toString();
+}
+
 const MimeType MimeType::PLAINTEXT = MimeType::parse(PLAINTEXT_STRING);
 const MimeType MimeType::PLAINTEXT_ASCII = MimeType::parse(PLAINTEXT_ASCII_STRING);
-const MimeType MimeType::CSS = MimeType("text"_kj, "css"_kj);
-const MimeType MimeType::HTML = MimeType("text"_kj, "html"_kj);
-const MimeType MimeType::TEXT_JAVASCRIPT = MimeType("text"_kj, "javascript"_kj);
-const MimeType MimeType::JSON = MimeType("application"_kj, "json"_kj);
-const MimeType MimeType::FORM_URLENCODED = MimeType("application"_kj, "x-www-form-urlencoded"_kj);
-const MimeType MimeType::OCTET_STREAM = MimeType("application"_kj, "octet-stream"_kj);
-const MimeType MimeType::XHTML = MimeType("application"_kj, "xhtml+xml"_kj);
-const MimeType MimeType::JAVASCRIPT = MimeType("application"_kj, "javascript"_kj);
-const MimeType MimeType::XJAVASCRIPT = MimeType("application"_kj, "x-javascript"_kj);
-const MimeType MimeType::FORM_DATA = MimeType("multipart"_kj, "form-data"_kj);
-const MimeType MimeType::MANIFEST_JSON = MimeType("application"_kj, "manifest+json"_kj);
-const MimeType MimeType::VTT = MimeType("text"_kj, "vtt"_kj);
-const MimeType MimeType::EVENT_STREAM = MimeType("text"_kj, "event-stream"_kj);
-const MimeType MimeType::WILDCARD = MimeType("*"_kj, "*"_kj);
-
-bool MimeType::isText(const MimeType& mimeType) {
-  auto type = mimeType.type();
-  return type == "text" || isXml(mimeType) || isJson(mimeType) || isJavascript(mimeType);
-}
-
-bool MimeType::isXml(const MimeType& mimeType) {
-  auto type = mimeType.type();
-  auto subtype = mimeType.subtype();
-  return (type == "text" || type == "application") &&
-      (subtype == "xml" || subtype.endsWith("+xml"));
-}
-
-bool MimeType::isJson(const MimeType& mimeType) {
-  auto type = mimeType.type();
-  auto subtype = mimeType.subtype();
-  return (type == "text" || type == "application") &&
-      (subtype == "json" || subtype.endsWith("+json"));
-}
-
-bool MimeType::isFont(const MimeType& mimeType) {
-  auto type = mimeType.type();
-  auto subtype = mimeType.subtype();
-  return (type == "font" || type == "application") &&
-      (subtype.startsWith("font-") || subtype.startsWith("x-font-"));
-}
-
-bool MimeType::isJavascript(const MimeType& mimeType) {
-  return JAVASCRIPT == mimeType || XJAVASCRIPT == mimeType || TEXT_JAVASCRIPT == mimeType;
-}
-
-bool MimeType::isImage(const MimeType& mimeType) {
-  return mimeType.type() == "image";
-}
-
-bool MimeType::isVideo(const MimeType& mimeType) {
-  return mimeType.type() == "video";
-}
-
-bool MimeType::isAudio(const MimeType& mimeType) {
-  return mimeType.type() == "audio";
-}
 
 kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
   kj::Maybe<MimeType> mimeType;
@@ -477,6 +432,20 @@ kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
   }
 
   return kj::mv(mimeType);
+}
+
+kj::String MimeType::formDataWithBoundary(kj::StringPtr boundary) {
+  ToStringBuffer buffer(128);
+  // Note that the expectation is that the boundary is already properly formed
+  // and does not need any additional quoting or escaping.
+  buffer.append("multipart/form-data; boundary=", boundary);
+  return buffer.toString();
+}
+
+kj::String MimeType::formUrlEncodedWithCharset(kj::StringPtr charset) {
+  ToStringBuffer buffer(128);
+  buffer.append("application/x-www-form-urlencoded;charset=", charset);
+  return buffer.toString();
 }
 
 }  // namespace workerd

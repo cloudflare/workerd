@@ -5,19 +5,27 @@
 #include "server.h"
 #include "workerd-api.h"
 
+#include <workerd/api/unsafe.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
-#include <workerd/io/supported-compatibility-date.capnp.h>
+#include <workerd/io/supported-compatibility-date.embed.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
+#include <workerd/server/cpp-capnp-schema.embed.h>
+#include <workerd/server/json-logger.h>
 #include <workerd/server/v8-platform-impl.h>
-#include <workerd/server/workerd-meta.capnp.h>
+#include <workerd/server/workerd-capnp-schema.embed.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <openssl/rand.h>
+
+#ifdef __linux__
+#include <sys/mman.h>
 #include <sys/stat.h>
+#endif
 
 #include <capnp/dynamic.h>
 #include <capnp/message.h>
@@ -28,10 +36,6 @@
 #include <kj/filesystem.h>
 #include <kj/main.h>
 #include <kj/map.h>
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#endif
 
 #if _WIN32
 #include <windows.h>
@@ -72,6 +76,32 @@
 
 #include <workerd/util/use-perfetto-categories.h>
 
+// since kj installs their global signal handlers
+// and exits with 1 Fuzzilli doesn't realize that an application crashed due to the signo.
+// Therefore, we install a handler before and just raise the signo
+#ifdef WORKERD_FUZZILLI
+
+void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
+  // inform reprl - remove debug output for clean testing
+  struct sigaction sa = {};
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(signo, &sa, nullptr);
+  raise(signo);
+}
+
+void initSignalHandlers() {
+  struct sigaction action {};
+  action.sa_flags = SA_SIGINFO;
+  action.sa_sigaction = &signalHandler;
+
+  for (auto signo: {SIGBUS, SIGFPE, SIGABRT, SIGILL, SIGTRAP, SIGSEGV}) {
+    KJ_SYSCALL(sigaction(signo, &action, nullptr));
+  }
+}
+#endif
+
 namespace workerd::server {
 namespace {
 
@@ -79,6 +109,22 @@ static kj::StringPtr getVersionString() {
   static const kj::String result = kj::str("workerd ", SUPPORTED_COMPATIBILITY_DATE);
   return result;
 }
+
+// =======================================================================================
+
+// For ASan's leak sanitizer, suppress warnings about leaks with stacks that include "unknown
+// modules". This suppression is adopted from the GN build and applies to addresses that LSan can't
+// symbolize or even map to a binary – perhaps JIT or snapshot-generated code in V8's case?
+// TODO(someday): Suppression is needed to get several python tests to pass under LSan. Investigate
+// if this is an actual leak (perhaps a bug in V8 itself since it is suppressed there?) at a later
+// time.
+#if __has_feature(address_sanitizer)
+extern "C" __attribute__((no_sanitize("address"))) __attribute__((visibility("default")))
+__attribute__((used)) const char*
+__lsan_default_suppressions() {
+  return "leak:<unknown module>\n";
+}
+#endif
 
 // =======================================================================================
 
@@ -635,14 +681,14 @@ class NetworkWithLoopback final: public kj::Network {
 
 class CliMain final: public SchemaFileImpl::ErrorReporter {
  public:
-  CliMain(kj::ProcessContext& context, char** argv)
+  CliMain(StructuredLoggingProcessContext& context, char** argv)
       : context(context),
         argv(argv),
         server(kj::heap<Server>(*fs,
             io.provider->getTimer(),
             network,
             entropySource,
-            Worker::ConsoleMode::STDOUT,
+            Worker::LoggingOptions(Worker::ConsoleMode::STDOUT),
             [&](kj::String error) {
               if (watcher == kj::none) {
                 // TODO(someday): Don't just fail on the first error, keep going in order to report
@@ -664,11 +710,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       KJ_ASSERT(size > sizeof(COMPILED_MAGIC_SUFFIX) + sizeof(uint64_t));
       kj::byte magic[sizeof(COMPILED_MAGIC_SUFFIX)]{};
       exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX), magic);
-      if (kj::arrayPtr(magic) == kj::arrayPtr(COMPILED_MAGIC_SUFFIX).asBytes()) {
+      if (kj::arrayPtr(magic) == kj::asBytes(COMPILED_MAGIC_SUFFIX)) {
         // Oh! It appears we are running a compiled binary, it has a config appended to the end.
         uint64_t configSize;
-        exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t),
-            kj::arrayPtr(&configSize, 1).asBytes());
+        exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t), kj::asBytes(configSize));
         KJ_ASSERT(size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t) >
             configSize * sizeof(capnp::word));
         size_t offset = size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t) -
@@ -700,6 +745,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
           .addSubCommand("serve", KJ_BIND_METHOD(*this, getServe), "run the server")
           .addSubCommand(
               "compile", KJ_BIND_METHOD(*this, getCompile), "create a self-contained binary")
+#ifdef WORKERD_FUZZILLI
+          .addSubCommand("fuzzilli", KJ_BIND_METHOD(*this, getFuzz), "run reprl for fuzzing")
+#endif
           .addSubCommand("test", KJ_BIND_METHOD(*this, getTest), "run unit tests")
           .addSubCommand("pyodide-lock", KJ_BIND_METHOD(*this, getPyodideLock),
               "outputs the package lock file used by Pyodide")
@@ -784,10 +832,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       server->setPythonCreateBaselineSnapshot();
       return true;
     }, "Save a baseline snapshot to the disk cache")
-        .addOption({"python-load-snapshot"}, [this]() {
-      server->setPythonLoadSnapshot();
-      return true;
-    }, "Load a snapshot from the package disk cache");
+        .addOptionWithArg({"python-load-snapshot"}, CLI_METHOD(setPythonLoadSnapshot), "<path>",
+            "Load a snapshot from the package disk cache.");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
@@ -828,8 +874,6 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       auto features = message.getRoot<CompatibilityFlags>();
       features.setPythonWorkers(true);
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(features));
-      auto version = getPythonBundleName(pythonRelease);
-      KJ_ASSERT_NONNULL(fetchPyodideBundle(config, version), "Failed to get Pyodide bundle");
 
       auto lock = KJ_ASSERT_NONNULL(api::pyodide::getPyodideLock(pythonRelease));
 
@@ -889,6 +933,15 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "Enable predictable mode. This makes workerd behave more deterministically by using "
             "pre-set values instead of random data or timestamps to facilitate testing.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
+        .callAfterParsing(CLI_METHOD(test))
+        .build();
+  }
+
+  kj::MainFunc getFuzz() {
+    auto builder = kj::MainBuilder(context, getVersionString(),
+        "Creates a custom signal handler and depending on the config leverages Stdin.reprl() to communicate with fuzzilli.");
+
+    return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
         .callAfterParsing(CLI_METHOD(test))
         .build();
   }
@@ -1048,6 +1101,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     kj::Maybe<kj::Own<const kj::Directory>> dir =
         fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
     server->setPyodideDiskCacheRoot(kj::mv(dir));
+  }
+
+  void setPythonLoadSnapshot(kj::StringPtr pathStr) {
+    server->setPythonLoadSnapshot(kj::str(pathStr));
   }
 
   void parsePythonCompatFlag(kj::StringPtr compatFlagStr) {
@@ -1333,10 +1390,17 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #endif
       TRACE_EVENT("workerd", "serveImpl()");
       auto config = getConfig();
+
+      // Configure structured logging in the process context
+      if (config.hasLogging() ? config.getLogging().getStructuredLogging()
+                              : config.getStructuredLogging()) {
+        context.enableStructuredLogging();
+      }
+
       auto platform = jsg::defaultPlatform(0);
       WorkerdPlatform v8Platform(*platform);
-      jsg::V8System v8System(
-          v8Platform, KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; });
+      jsg::V8System v8System(v8Platform,
+          KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
       auto promise = func(v8System, config);
       KJ_IF_SOME(w, watcher) {
         promise = promise.exclusiveJoin(waitForChanges(w).then([this]() {
@@ -1443,7 +1507,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #endif
 
  private:
-  kj::ProcessContext& context;
+  StructuredLoggingProcessContext& context;
   char** argv;
 
   bool binaryConfig = false;
@@ -1641,15 +1705,16 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 }  // namespace workerd::server
 
 int main(int argc, char* argv[]) {
-  ::kj::TopLevelProcessContext context(argv[0]);
+  workerd::server::StructuredLoggingProcessContext context(argv[0]);
+
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
 
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  workerd::api::gpu::initialize();
+#if defined(WORKERD_FUZZILLI) && defined(__linux__)
+  initSignalHandlers();
 #endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);

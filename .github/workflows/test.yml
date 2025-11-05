@@ -2,12 +2,6 @@ name: Tests
 
 on:
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - 'justfile'
-      - '.devcontainer'
-      - '**/*.md'
-      - '.gitignore'
   merge_group:
   push:
     branches:
@@ -19,6 +13,14 @@ concurrency:
   group: test.yml-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  # Read repo
+  contents: read
+  # Read/write artifacts
+  actions: write
+  # Required for adding comments to PR.
+  # Specifically for sticky-pull-request-comment workflow action.
+  pull-requests: write
 jobs:
   fixup:
     if: github.event_name == 'pull_request'
@@ -31,10 +33,10 @@ jobs:
       matrix:
         os:
           [
-            { name: linux, image: ubuntu-22.04 },
-            { name: linux-arm, image: ubuntu-22.04-arm },
-            { name: macOS, image: macos-15 },
-            { name: windows, image: windows-2025 },
+            { name: linux, arch: X64, image: ubuntu-22.04 },
+            { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm },
+            { name: macOS, arch: ARM64, image: macos-26 },
+            { name: windows, arch: X64, image: windows-2025 },
           ]
         config: [
             # Default build: no suffix or additional bazel arguments
@@ -44,7 +46,7 @@ jobs:
           ]
         include:
           # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
-          - os: { name: linux, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
             config: { suffix: -asan }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
@@ -53,38 +55,120 @@ jobs:
           # - os:     { name : windows, image : windows-2025 }
           #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
         exclude:
-          - os: { name: windows, image: windows-2025 }
+          - os: { name: windows, arch: X64, image: windows-2025 }
             config: { suffix: -debug }
           # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
           # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
           # debug configuration.
-          - os: { name: macOS, image: macos-15 }
+          - os: { name: macOS, arch: ARM64, image: macos-26 }
             config: { suffix: -debug }
-          - os: { name: linux, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
             config: { suffix: -debug }
+            # linux release is handled by separate test-linux job
+          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
+            config: { suffix: '' }
       fail-fast: false
+    name: test (${{ matrix.os.name }}, ${{ matrix.os.image}}${{matrix.config.suffix != '' && format(', {0}', matrix.config.suffix) || ''}})
     uses: ./.github/workflows/_bazel.yml
     with:
       image: ${{ matrix.os.image }}
       os_name: ${{ matrix.os.name }}
+      arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
-      extra_bazel_args: '--config=ci-test'
-    secrets:
-      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
-      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
-  lint:
-    uses: ./.github/workflows/_bazel.yml
-    with:
-      extra_bazel_args: '--config=lint --config=ci-test'
-      run_tests: false
+      extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}'
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
 
+  # Handled separately from `test` to speed up execution of workers-sdk-test which depends on it.
+  test-linux:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04
+      os_name: linux
+      arch_name: 'X64'
+      suffix: ''
+      extra_bazel_args: '--config=ci-test --config=ci-linux'
+      upload_test_logs: true
+      upload_binary: true
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+
+  lint:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      extra_bazel_args: '--config=lint --config=clang-tidy --config=ci-test --config=ci-linux'
+      run_tests: false
+      parse_headers: true
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+
+  check-snapshot:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Cache
+        id: cache
+        uses: actions/cache@v4
+        # Use same cache and build configuration as release build, this allows us to keep download
+        # sizes small and generate types with optimization enabled, should be slightly faster.
+        with:
+          path: ~/bazel-disk-cache
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
+      - name: build types
+        run: |
+          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
+      - name: Check snapshot diff
+        run: |
+          diff -r types/generated-snapshot/latest bazel-bin/types/definitions/latest > types.diff
+          diff -r types/generated-snapshot/experimental bazel-bin/types/definitions/experimental >> types.diff
+      - name: 'Put diff on the environment'
+        if: failure()
+        id: types_diff
+        run: |
+          {
+            echo 'TYPES_DIFF<<EOF'
+            cat types.diff
+            echo EOF
+          } >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        id: artifact-upload-step
+        with:
+          name: generated-snapshot
+          path: bazel-bin/types/definitions/
+      - name: 'Comment on PR with error details'
+        if: failure()
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
+        with:
+          message: |
+            The generated output of `@cloudflare/workers-types` has been changed by this PR. If this is intentional, run `just generate-types` to update the snapshot. Alternatively, you can download the full generated types: ${{ steps.artifact-upload-step.outputs.artifact-url }}
+
+            <details>
+            <summary>Full Type Diff</summary>
+
+            ```diff
+            ${{ env.TYPES_DIFF }}
+            ```
+
+            </details>
+      - name: 'Comment on PR with error details'
+        if: success()
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
+        with:
+          only_update: true
+          message: |
+            The generated output of `@cloudflare/workers-types` matches the snapshot in `types/generated-snapshot` :tada:
+
   workers-sdk-test:
-    needs: test
+    needs: [test-linux, check-snapshot]
     name: Run workers-sdk tests
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout workers-sdk
         uses: actions/checkout@v4
@@ -97,7 +181,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           # Match workers-sdk node version
-          node-version: 18.20.5
+          node-version: 20.19.1
           cache: 'pnpm'
       - name: Install workers-sdk dependencies
         run: pnpm install
@@ -105,16 +189,42 @@ jobs:
       - name: Download workerd binary
         uses: actions/download-artifact@v4
         with:
-          name: linux-arm-ARM64-binary
+          name: linux-X64-binary
           path: /tmp
 
       - name: Make workerd binary executable
         run: chmod +x /tmp/workerd
 
-      - name: Build Wrangler + Miniflare & dependencies
-        run: pnpm build --filter miniflare --filter wrangler
+      - name: Download generated types
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-snapshot
+          path: /tmp/test-types
 
-      - name: Run Miniflare tests
-        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler
+      - name: Create and install workers-types package
+        run: |
+          cp /tmp/test-types/oldest/* /tmp/test-types
+          cat > /tmp/test-types/package.json << EOF
+          {
+              "name": "@cloudflare/workers-types"
+            }
+          EOF
+          pnpm add /tmp/test-types -w
+
+      - name: Run Wrangler, Miniflare, Vitest, Vite unit tests
+        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Wrangler Node.js e2e tests
+        run: pnpm test:e2e --filter wrangler -- unenv-preset
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+  wpt-report:
+    needs: [test-linux]
+    uses: ./.github/workflows/_wpt.yml
+    with:
+      image: 'ubuntu-22.04'
+      logs_artifact: 'test-logs-linux-X64.zip'
+      report_artifact: 'wpt-report-linux-X64.json'

@@ -23,17 +23,52 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { checkServerIdentity } from 'node-internal:internal_tls';
+import {
+  checkServerIdentity,
+  convertALPNProtocols,
+  createServer,
+  Server,
+  getCiphers,
+} from 'node-internal:internal_tls';
 import {
   createSecureContext,
   SecureContext,
 } from 'node-internal:internal_tls_common';
+import * as constants from 'node-internal:internal_tls_constants';
 import { TLSSocket, connect } from 'node-internal:internal_tls_wrap';
-export { TLSSocket, connect, createSecureContext, checkServerIdentity };
-export default {
-  SecureContext,
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+
+let createSecurePair = undefined;
+
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v24) {
+  createSecurePair = function createSecurePair(): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createSecurePair');
+  };
+}
+
+export * from 'node-internal:internal_tls_constants';
+export {
   TLSSocket,
   connect,
   createSecureContext,
+  createServer,
   checkServerIdentity,
+  SecureContext,
+  Server,
+  convertALPNProtocols,
+  getCiphers,
+  createSecurePair,
+};
+export default {
+  SecureContext,
+  Server,
+  TLSSocket,
+  connect,
+  createSecureContext,
+  createServer,
+  checkServerIdentity,
+  convertALPNProtocols,
+  getCiphers,
+  createSecurePair,
+  ...constants,
 };

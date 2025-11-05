@@ -10,6 +10,8 @@ aggressive than what's done in the GN build system and not needed for
 workerd - disabling alwayslink improves the binary size by ~ 1MB as it
 allows the linker to eliminate unused symbols.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
 diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
 index 5fda2f468492a7a69266dba40c0862b0e31fa7a1..5127ceb7b783b11d5750c01977d7e34606c39667 100644
 --- a/bazel/BUILD.icu

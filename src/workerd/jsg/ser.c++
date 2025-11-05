@@ -10,6 +10,117 @@
 #include <v8-proxy.h>
 
 namespace workerd::jsg {
+namespace {
+// Keep in sync with the nativeError serialization tag defined in
+// worker-interface.capnp
+constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
+
+// The error tag is serialized as a uint32_t immediately following
+// the SERIALIZATION_TAG_NATIVE_ERROR tag in order to more efficiently
+// determine the type of error when deserializing so that we can
+// construct the appropriate v8::Exception type on deserialization
+// without having to expensive string comparison on the error name.
+enum class ErrorTag : uint32_t {
+  // The UNKNOWN tag is used when the error name is not recognized.
+  // When this occurs, we will serialize the name of the error, and
+  // when it is deserialized, we will create a generic Error and then
+  // set the name to the stored name.
+  UNKNOWN,
+  ERROR,
+  TYPE_ERROR,
+  RANGE_ERROR,
+  REFERENCE_ERROR,
+  SYNTAX_ERROR,
+  WASM_COMPILE_ERROR,
+  WASM_LINK_ERROR,
+  WASM_RUNTIME_ERROR,
+  WASM_SUSPEND_ERROR,
+  EVAL_ERROR,
+  URI_ERROR,
+  AGGREGATE_ERROR,
+  SUPPRESSED_ERROR,
+};
+
+constexpr ErrorTag getErrorTagFromName(jsg::Lock& js, kj::StringPtr str) {
+  if (str == "Error"_kj) {
+    return ErrorTag::ERROR;
+  } else if (str == "TypeError"_kj) {
+    return ErrorTag::TYPE_ERROR;
+  } else if (str == "RangeError"_kj) {
+    return ErrorTag::RANGE_ERROR;
+  } else if (str == "ReferenceError"_kj) {
+    return ErrorTag::REFERENCE_ERROR;
+  } else if (str == "SyntaxError"_kj) {
+    return ErrorTag::SYNTAX_ERROR;
+  } else if (str == "WasmCompileError"_kj) {
+    return ErrorTag::WASM_COMPILE_ERROR;
+  } else if (str == "WasmLinkError"_kj) {
+    return ErrorTag::WASM_LINK_ERROR;
+  } else if (str == "WasmRuntimeError"_kj) {
+    return ErrorTag::WASM_RUNTIME_ERROR;
+  } else if (str == "WasmSuspendError"_kj) {
+    return ErrorTag::WASM_SUSPEND_ERROR;
+  } else if (str == "EvalError"_kj) {
+    return ErrorTag::EVAL_ERROR;
+  } else if (str == "URIError"_kj) {
+    return ErrorTag::URI_ERROR;
+  } else if (str == "AggregateError"_kj) {
+    return ErrorTag::AGGREGATE_ERROR;
+  } else if (str == "SuppressedError"_kj) {
+    return ErrorTag::SUPPRESSED_ERROR;
+  }
+  return ErrorTag::UNKNOWN;
+}
+
+JsObject toJsError(Lock& js, ErrorTag tag, JsValue message) {
+  auto str = message.toJsString(js);
+  switch (tag) {
+    case ErrorTag::ERROR: {
+      return JsObject(v8::Exception::Error(str).As<v8::Object>());
+    }
+    case ErrorTag::TYPE_ERROR: {
+      return JsObject(v8::Exception::TypeError(str).As<v8::Object>());
+    }
+    case ErrorTag::RANGE_ERROR: {
+      return JsObject(v8::Exception::RangeError(str).As<v8::Object>());
+    }
+    case ErrorTag::REFERENCE_ERROR: {
+      return JsObject(v8::Exception::ReferenceError(str).As<v8::Object>());
+    }
+    case ErrorTag::SYNTAX_ERROR: {
+      return JsObject(v8::Exception::SyntaxError(str).As<v8::Object>());
+    }
+    case ErrorTag::WASM_COMPILE_ERROR: {
+      return JsObject(v8::Exception::WasmCompileError(str).As<v8::Object>());
+    }
+    case ErrorTag::WASM_LINK_ERROR: {
+      return JsObject(v8::Exception::WasmLinkError(str).As<v8::Object>());
+    }
+    case ErrorTag::WASM_RUNTIME_ERROR: {
+      return JsObject(v8::Exception::WasmRuntimeError(str).As<v8::Object>());
+    }
+    case ErrorTag::WASM_SUSPEND_ERROR: {
+      return JsObject(v8::Exception::WasmSuspendError(str).As<v8::Object>());
+    }
+    case ErrorTag::EVAL_ERROR: {
+      return JsObject(v8::Exception::EvalError(str).As<v8::Object>());
+    }
+    case ErrorTag::URI_ERROR: {
+      return JsObject(v8::Exception::URIError(str).As<v8::Object>());
+    }
+    case ErrorTag::AGGREGATE_ERROR: {
+      return JsObject(v8::Exception::AggregateError(str).As<v8::Object>());
+    }
+    case ErrorTag::SUPPRESSED_ERROR: {
+      return JsObject(v8::Exception::SuppressedError(str).As<v8::Object>());
+    }
+    case ErrorTag::UNKNOWN: {
+      return JsObject(v8::Exception::Error(str).As<v8::Object>());
+    }
+  }
+  return JsObject(v8::Exception::Error(str).As<v8::Object>());
+}
+}  // namespace
 
 void Serializer::ExternalHandler::serializeFunction(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
@@ -24,6 +135,7 @@ void Serializer::ExternalHandler::serializeProxy(
 Serializer::Serializer(Lock& js, Options options)
     : externalHandler(options.externalHandler),
       treatClassInstancesAsPlainObjects(options.treatClassInstancesAsPlainObjects),
+      treatErrorsAsHostObjects(js.isUsingEnhancedErrorSerialization()),
       ser(js.v8Isolate, this) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Serializer must be allocated on the stack");
@@ -47,15 +159,16 @@ Serializer::Serializer(Lock& js, Options options)
 
 v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
     v8::Isolate* isolate, v8::Local<v8::SharedArrayBuffer> sab) {
+  auto& js = jsg::Lock::from(isolate);
   uint32_t n;
   auto value = JsValue(sab);
   for (n = 0; n < sharedArrayBuffers.size(); n++) {
     // If the SharedArrayBuffer has already been added, return the existing ID for it.
-    if (sharedArrayBuffers[n] == value) {
+    if (sharedArrayBuffers[n].getHandle(js) == value) {
       return v8::Just(n);
     }
   }
-  sharedArrayBuffers.add(value);
+  sharedArrayBuffers.add(jsg::JsRef(js, value));
   sharedBackingStores.add(sab->GetBackingStore());
   return v8::Just(n);
 }
@@ -72,11 +185,10 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
 }
 
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
-  auto isolate = v8::Isolate::GetCurrent();
+  auto& js = jsg::Lock::current();
   try {
-    Lock& js = Lock::from(isolate);
     auto exception = js.domException(kj::str("DataCloneError"), kj::str(message));
-    isolate->ThrowException(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
+    js.v8Isolate->ThrowException(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
   } catch (JsExceptionThrown&) {
     // Apparently an exception was thrown during the construction of the DOMException. Most likely
     // we were terminated. In any case, we'll let that exception stay scheduled and propagate back
@@ -84,20 +196,26 @@ void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
   } catch (...) {
     // A KJ exception was thrown, we'll have to convert it to JavaScript and propagate that
     // exception instead.
-    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    throwInternalError(js.v8Isolate, kj::getCaughtExceptionAsKj());
   }
 }
 
 bool Serializer::HasCustomHostObject(v8::Isolate* isolate) {
   // V8 will always call WriteHostObject() for objects that have internal fields. We only need
   // to override IsHostObject() if we want to treat pure-JS objects differently, which we do if
-  // treatClassInstancesAsPlainObjects is false.
-  return !treatClassInstancesAsPlainObjects;
+  // treatClassInstancesAsPlainObjects is false, or if treatErrorsAsHostObjects is true.
+  return !treatClassInstancesAsPlainObjects || treatErrorsAsHostObjects;
 }
 
 v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
   // This is only called if HasCustomHostObject() returned true.
-  KJ_ASSERT(!treatClassInstancesAsPlainObjects);
+  KJ_ASSERT(!treatClassInstancesAsPlainObjects || treatErrorsAsHostObjects);
+
+  if (object->IsNativeError()) {
+    return v8::Just(treatErrorsAsHostObjects);
+  }
+
+  if (treatClassInstancesAsPlainObjects) return v8::Just(false);
   KJ_ASSERT(!prototypeOfObject.IsEmpty());
 
   // If the object's prototype is Object.prototype, then it is a plain object, which we'll allow
@@ -111,14 +229,62 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
   try {
     jsg::Lock& js = jsg::Lock::from(isolate);
 
+    if (object->IsNativeError()) {
+      auto nameStr = js.str("name"_kj);
+      auto messageStr = js.str("message"_kj);
+
+      // Get the standard name, message, stack, cause, error, errors properties from
+      // the error object.
+      writeRawUint32(SERIALIZATION_TAG_NATIVE_ERROR);
+
+      // A mix of ad-hoc and regular serialization. We first serialize
+      // the error tag, which is an enum that identifies the type of error
+      // for faster/easier deserialization. Then we serialize the message which
+      // usually come from the prototype. Then we grab the own properties,
+      // serializing the number of them followed by each name and value in
+      // sequence.
+
+      jsg::JsObject errorObj(object);
+      auto name = errorObj.get(js, nameStr);
+      auto nameKjStr = name.toString(js);
+      auto tag = getErrorTagFromName(js, nameKjStr);
+      writeRawUint32(static_cast<uint32_t>(tag));
+      // We only write the name if it is not one of the known error types.
+      if (tag == ErrorTag::UNKNOWN) {
+        write(js, name);
+      }
+
+      write(js, errorObj.get(js, messageStr));
+
+      auto names = errorObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
+          PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
+
+      auto obj = js.obj();
+      for (size_t n = 0; n < names.size(); n++) {
+        auto name = names.get(js, n);
+        // The name typically comes from the prototype and therefore
+        // do not show up in the own properties of the error object, and the
+        // message we want to treat specially since we need it early in the
+        // deserialization.
+        // Since we already have them serialized above, we can filter them
+        // out here.
+        if (name.strictEquals(nameStr) || name.strictEquals(messageStr)) continue;
+
+        obj.set(js, name, errorObj.get(js, name));
+      }
+      write(js, obj);
+
+      return v8::Just(true);
+    }
+
     if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
         !Wrappable::isWorkerdApiObject(object)) {
       KJ_IF_SOME(eh, externalHandler) {
-        if (object->IsFunction()) {
-          eh.serializeFunction(js, *this, object.As<v8::Function>());
-          return v8::Just(true);
-        } else if (object->IsProxy()) {
+        if (object->IsProxy()) {
           eh.serializeProxy(js, *this, object.As<v8::Proxy>());
+          return v8::Just(true);
+        } else if (object->IsFunction()) {
+          eh.serializeFunction(js, *this, object.As<v8::Function>());
           return v8::Just(true);
         }
       }
@@ -132,7 +298,8 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     }
 
     Wrappable* wrappable = reinterpret_cast<Wrappable*>(
-        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+            static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 
     // HACK: Although we don't technically know yet that `wrappable` is an `Object`, we know that
     //   only subclasses of `Object` register serializers. So *if* a serializer is found, then this
@@ -187,11 +354,11 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   uint32_t n;
   for (n = 0; n < arrayBuffers.size(); n++) {
     // If the ArrayBuffer has already been added, we do not want to try adding it again.
-    if (arrayBuffers[n] == value) {
+    if (arrayBuffers[n].getHandle(js) == value) {
       return;
     }
   }
-  arrayBuffers.add(value);
+  arrayBuffers.add(jsg::JsRef(js, value));
 
   backingStores.add(arrayBuffer->GetBackingStore());
   check(arrayBuffer->Detach(v8::Local<v8::Value>()));
@@ -235,6 +402,7 @@ void Deserializer::init(Lock& js,
   if (options.readHeader) {
     check(deser.ReadHeader(js.v8Context()));
   }
+  preserveStackInErrors = options.preserveStackInErrors;
   KJ_IF_SOME(version, options.version) {
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
     deser.SetWireFormatVersion(version);
@@ -292,6 +460,57 @@ v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
 v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
   try {
     uint tag = readRawUint32();
+
+    if (tag == SERIALIZATION_TAG_NATIVE_ERROR) {
+      auto& js = Lock::from(isolate);
+      auto stack = js.str("stack"_kj);
+
+      // The first uint32_t is the error tag, which identifies the type of error.
+      auto errorTag = static_cast<ErrorTag>(readRawUint32());
+      // If The error tag is UNKNOWN, we will read the name of the error next.
+      // If the error is known, we don't both serializing the name.
+      kj::Maybe<JsValue> maybeName;
+      if (errorTag == ErrorTag::UNKNOWN) {
+        maybeName = readValue(js);
+      }
+
+      // The next value is the message, which is always present.
+      // Now let's create the error object based on the tag and message.
+      auto obj = toJsError(js, errorTag, readValue(js));
+
+      // If we have a name, we set it on the error object. This is not
+      // perfect but it gets close enough. Specifically, when the error
+      // was serialized, if the user has modified the name or created
+      // their own subclass, then we end up having to create just a
+      // regular error here and change the name. It is not possible
+      // for us here to clone the exact error class that was used,
+      // so instanceof checks will not work as expected. But, that's ok.
+      KJ_IF_SOME(name, maybeName) {
+        // We use defineProperty here since the name is not typically
+        // modifiable with set() on error objects.
+        obj.defineProperty(js, "name"_kj, name);
+      }
+
+      // Now let's read the remaining properties... They were serialized as
+      // a plain object with some own properties.
+      KJ_IF_SOME(serObj, readValue(js).tryCast<JsObject>()) {
+        auto names = serObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
+            PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
+        for (size_t n = 0; n < names.size(); n++) {
+          auto name = names.get(js, n);
+          // If the preserveStackInErrors option is false, then we will not
+          // restore the serialized stack property if it is included in the
+          // serialized output.
+          if (!preserveStackInErrors && name.strictEquals(stack)) continue;
+          auto value = serObj.get(js, name);
+          obj.set(js, name, value);
+        }
+      }
+
+      v8::Local<v8::Object> ret = obj;
+      return ret;
+    }
+
     KJ_IF_SOME(result, IsolateBase::from(isolate).deserialize(Lock::from(isolate), tag, *this)) {
       return result;
     } else {
@@ -324,7 +543,7 @@ JsValue structuredClone(
   }
   ser.write(js, value);
   auto released = ser.release();
-  Deserializer des(js, released, kj::none);
+  Deserializer des(js, released);
   return des.readValue(js);
 }
 

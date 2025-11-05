@@ -5,6 +5,7 @@
 #include "eventsource.h"
 
 #include "http.h"
+#include "messagechannel.h"
 #include "streams/common.h"
 
 #include <workerd/io/features.h>
@@ -242,7 +243,7 @@ jsg::Ref<EventSource> EventSource::constructor(
     }
   }
 
-  auto eventsource = jsg::alloc<EventSource>(js,
+  auto eventsource = js.alloc<EventSource>(js,
       JSG_REQUIRE_NONNULL(jsg::Url::tryParse(url.asPtr()), DOMSyntaxError,
           kj::str("Cannot open an EventSource to '", url, "'. The URL is invalid.")),
       kj::mv(init));
@@ -256,7 +257,7 @@ jsg::Ref<EventSource> EventSource::from(jsg::Lock& js, jsg::Ref<ReadableStream> 
   JSG_REQUIRE(!readable->isLocked(), TypeError, "This ReadableStream is locked.");
   JSG_REQUIRE(
       !readable->isDisturbed(), TypeError, "This ReadableStream has already been read from.");
-  auto eventsource = jsg::alloc<EventSource>(js);
+  auto eventsource = js.alloc<EventSource>(js);
   eventsource->run(js, kj::mv(readable), false /* No reconnection attempts */);
   return kj::mv(eventsource);
 }
@@ -267,12 +268,12 @@ EventSource::EventSource(jsg::Lock& js, jsg::Url url, kj::Maybe<EventSourceInit>
         .url = kj::mv(url),
         .options = kj::mv(init).orDefault({}),
       }),
-      abortController(jsg::alloc<AbortController>()),
+      abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
 EventSource::EventSource(jsg::Lock& js)
     : context(IoContext::current()),
-      abortController(jsg::alloc<AbortController>()),
+      abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
 void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool reconnecting) {
@@ -288,7 +289,7 @@ void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool rec
     readyState = State::CONNECTING;
 
   // Dispatch the error event.
-  dispatchEventImpl(js, jsg::alloc<ErrorEvent>(js, error));
+  dispatchEventImpl(js, js.alloc<ErrorEvent>(js, error));
 
   // Log the error as an uncaught exception for debugging purposes.
   IoContext::current().logUncaughtException(UncaughtExceptionSource::ASYNC_TASK, error);
@@ -297,7 +298,7 @@ void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool rec
 void EventSource::notifyOpen(jsg::Lock& js) {
   if (readyState == State::CLOSED) return;
   readyState = State::OPEN;
-  dispatchEventImpl(js, jsg::alloc<OpenEvent>());
+  dispatchEventImpl(js, js.alloc<OpenEvent>());
 }
 
 void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages) {
@@ -306,9 +307,10 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
     for (auto& message: messages) {
       auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
       if (data.size() == 0) continue;
+      kj::String type = kj::mv(message.event).orDefault(kj::str("message"));
       dispatchEventImpl(js,
-          jsg::alloc<MessageEvent>(kj::mv(message.event), kj::mv(data), kj::mv(message.id),
-              impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
+          js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
+              kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
     }
   }, [&](jsg::Value exception) {
     // If we end up with an exception being thrown in one of the event handlers, we will
@@ -320,9 +322,9 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
 void EventSource::reconnect(jsg::Lock& js) {
   KJ_ASSERT(impl != kj::none);
   readyState = State::CONNECTING;
-  abortController = jsg::alloc<AbortController>();
+  abortController = js.alloc<AbortController>(js);
   auto signal = abortController->getSignal();
-  context.awaitIo(js, signal->wrap(context.afterLimitTimeout(reconnectionTime)))
+  context.awaitIo(js, signal->wrap(js, context.afterLimitTimeout(reconnectionTime)))
       .then(js,
           JSG_VISITABLE_LAMBDA(
               (self = JSG_THIS), (self), (jsg::Lock & js) mutable { self->start(js); }),
@@ -363,7 +365,7 @@ void EventSource::start(jsg::Lock& js) {
         // TODO(cleanup): Using jsg::ByteString here is really annoying. It would be nice to have
         // an internal alternative that doesn't require an allocation.
         KJ_IF_SOME(contentType,
-            response->getHeaders(js)->get(jsg::ByteString(kj::str("content-type")))) {
+            response->getHeaders(js)->get(js, jsg::ByteString(kj::str("content-type")))) {
         bool invalid = false;
         KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
         invalid = parsed != MimeType::EVENT_STREAM;
@@ -418,12 +420,13 @@ void EventSource::start(jsg::Lock& js) {
         return js.resolvedPromise();
       });
 
-  auto headers = jsg::alloc<Headers>();
+  auto headers = js.alloc<Headers>();
   headers->set(
-      jsg::ByteString(kj::str("accept")), jsg::ByteString(MimeType::EVENT_STREAM.essence()));
-  headers->set(jsg::ByteString(kj::str("cache-control")), jsg::ByteString(kj::str("no-cache")));
+      js, jsg::ByteString(kj::str("accept")), jsg::ByteString(MimeType::EVENT_STREAM.essence()));
+  headers->set(js, jsg::ByteString(kj::str("cache-control")), jsg::ByteString(kj::str("no-cache")));
   if (lastEventId != ""_kjc) {
-    headers->set(jsg::ByteString(kj::str("last-event-id")), jsg::ByteString(kj::str(lastEventId)));
+    headers->set(
+        js, jsg::ByteString(kj::str("last-event-id")), jsg::ByteString(kj::str(lastEventId)));
   }
 
   fetchImpl(js, kj::mv(fetcher), kj::str(i.url),

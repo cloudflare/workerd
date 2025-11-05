@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    ( name = "leak-fetch-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "leak-fetch-test.js")
+        ],
+        compatibilityDate = "2025-06-15",
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "subrequest", service = "leak-fetch-test")
+        ]
+      )
+    ),
+  ],
+);

@@ -7,8 +7,9 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "global-scope-test.js")
         ],
-        compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat", "set_tostring_tag"]
+        compatibilityDate = "2025-01-15",
+        # "experimental" is for ctx.exports
+        compatibilityFlags = ["nodejs_compat", "enable_ctx_exports"]
       )
     ),
   ],

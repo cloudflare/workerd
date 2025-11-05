@@ -72,14 +72,14 @@ To build `workerd`, you need:
 * Bazel
   * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), it will automatically download and use the right version of Bazel for building workerd.
 * On Linux:
-  * We use the clang/LLVM toolchain to build workerd and support version 18 and higher. Earlier versions of clang may still work, but are not officially supported.
-  * Clang 18+ (e.g. package `clang-18` on Debian Bookworm). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--action_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
+  * We use the clang/LLVM toolchain to build workerd and support version 19 and higher. Earlier versions of clang may still work, but are not officially supported.
+  * Clang 19+ (e.g. package `clang-19` on Debian Bookworm). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--action_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
 
-  * libc++ 18+ (e.g. packages `libc++-18-dev` and `libc++abi-18-dev`)
-  * LLD 18+ (e.g. package `lld-18`).
+  * libc++ 19+ (e.g. packages `libc++-19-dev` and `libc++abi-19-dev`)
+  * LLD 19+ (e.g. package `lld-19`).
   * `python3`, `python3-distutils`, and `tcl8.6`
 * On macOS:
-  * Xcode 16 installation (available on macOS 14 and higher). Building with just the Xcode Command Line Tools is not being tested, but should work too.
+  * Xcode 16.3 installation (available on macOS 15 and higher). Building with just the Xcode Command Line Tools is not being tested, but should work too.
   * Homebrew installed `tcl-tk` package (provides Tcl 8.6)
 * On Windows:
   * Install [App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget)

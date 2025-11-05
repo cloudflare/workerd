@@ -1,10 +1,24 @@
 import assert from 'node:assert';
+import { waitUntil } from 'cloudflare:workers';
 import {
   WorkerEntrypoint,
   DurableObject,
+  RpcPromise,
+  RpcProperty,
   RpcStub,
   RpcTarget,
+  ServiceStub,
 } from 'cloudflare:workers';
+
+try {
+  waitUntil(null);
+  throw new Error('This should have thrown');
+} catch (error) {
+  assert.match(
+    error.message,
+    /Disallowed operation called within global scope./
+  );
+}
 
 class MyCounter extends RpcTarget {
   constructor(i = 0) {
@@ -218,7 +232,13 @@ export class MyService extends WorkerEntrypoint {
   }
 
   throwingMethod() {
-    throw new Error('METHOD THREW');
+    const err = new Error('METHOD THREW');
+    err.abc = 123;
+    throw err;
+  }
+
+  async neverReturn() {
+    await new Promise((resolve) => {});
   }
 
   async tryUseGlobalRpcPromise() {
@@ -444,12 +464,32 @@ export class MyService extends WorkerEntrypoint {
       resolve = r;
     });
 
-    this.ctx.waitUntil(
-      (async () => {
-        await scheduler.wait(100);
-        resolve();
-      })()
-    );
+    this.ctx.waitUntil(scheduler.wait(100).then(resolve));
+  }
+
+  testImportedWaitUntil() {
+    // Initialize globalWaitUntilPromise to a promise that will be resolved in a waitUntil task
+    // later on. We'll perform a cross-context wait to verify that the waitUntil task actually
+    // completes and resolves the promise.
+    let resolve;
+    globalWaitUntilPromise = new Promise((r) => {
+      resolve = r;
+    });
+
+    waitUntil(scheduler.wait(100).then(resolve));
+  }
+
+  async call(func, arg) {
+    return await func(arg);
+  }
+
+  async getProp(obj, prop) {
+    return await obj[prop];
+  }
+
+  // Useful to test pipelining.
+  async identity(x) {
+    return x;
   }
 }
 
@@ -468,6 +508,31 @@ export class MyServiceProxy extends WorkerEntrypoint {
   }
 }
 
+class PostAbortCallTester extends RpcTarget {
+  constructor(ctx) {
+    super();
+    this.ctx = ctx;
+  }
+
+  ping() {
+    return 'pong';
+  }
+
+  hang() {
+    return new Promise((resolve) => {});
+  }
+
+  abort() {
+    this.ctx.abort('test aborted by abort()');
+  }
+
+  async failCriticalSection() {
+    await this.ctx.blockConcurrencyWhile(() => {
+      throw new Error('test broken critical section');
+    });
+  }
+}
+
 export class MyActor extends DurableObject {
   #counter = 0;
 
@@ -481,6 +546,22 @@ export class MyActor extends DurableObject {
   async increment(amount) {
     this.#counter += amount;
     return this.#counter;
+  }
+
+  async doCallbackBlockingConcurrency() {
+    // Check that we can receive RPC callbacks during blockConcurrencyWhile(), if they are from
+    // an RPC running inside the block. This verifies that the critical section is captured
+    // correctly in IoContext::makeReentryCallback().
+    return this.ctx.blockConcurrencyWhile(async () => {
+      let func = () => {
+        return 12345;
+      };
+      return await this.env.MyService.getRpcPromise(func);
+    });
+  }
+
+  makePostAbortCallTester() {
+    return new PostAbortCallTester(this.ctx);
   }
 }
 
@@ -758,6 +839,15 @@ export let namedServiceBinding = {
         'serialization.',
     });
 
+    // A stateless entryponit method that never returns should fail due to PendingEvent tracking.
+    await assert.rejects(() => env.MyService.neverReturn(), {
+      name: 'Error',
+      message:
+        "The Workers runtime canceled this request because it detected that your Worker's code " +
+        'had hung and would never generate a response. Refer to: ' +
+        'https://developers.cloudflare.com/workers/observability/errors/',
+    });
+
     {
       let map = await env.MyService.getMap();
       assert.strictEqual(map.get('foo'), 123);
@@ -775,6 +865,8 @@ export let namedActorBinding = {
     assert.strictEqual(await stub.increment(5), 5);
     assert.strictEqual(await stub.increment(2), 7);
     assert.strictEqual(await stub.increment(8), 15);
+
+    assert.strictEqual(await stub.doCallbackBlockingConcurrency(), 12345);
   },
 };
 
@@ -810,23 +902,60 @@ export let defaultExportClass = {
 
 export let loopbackJsRpcTarget = {
   async test(controller, env, ctx) {
-    let counter = new MyCounter(4);
-    let stub = new RpcStub(counter);
-    assert.strictEqual(await stub.increment(5), 9);
-    assert.strictEqual(await stub.increment(7), 16);
+    {
+      let counter = new MyCounter(4);
+      let stub = new RpcStub(counter);
+      assert.strictEqual(await stub.increment(5), 9);
+      assert.strictEqual(await stub.increment(7), 16);
 
-    assert.strictEqual(await stub.fetch(true, 123, 'baz'), '16 true 123 baz');
+      assert.strictEqual(await stub.fetch(true, 123, 'baz'), '16 true 123 baz');
 
-    assert.strictEqual(counter.disposed, false);
-    stub[Symbol.dispose]();
+      assert.strictEqual(counter.disposed, false);
+      stub[Symbol.dispose]();
 
-    await assert.rejects(stub.increment(2), {
-      name: 'Error',
-      message: 'RPC stub used after being disposed.',
-    });
+      await assert.rejects(stub.increment(2), {
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
+      });
 
-    await counter.onDisposed();
-    assert.strictEqual(counter.disposed, true);
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+
+      assert.strictEqual(stub instanceof RpcStub, true);
+      assert.strictEqual(stub.increment instanceof RpcProperty, true);
+      assert.strictEqual(stub.increment(1) instanceof RpcPromise, true);
+      assert.strictEqual(env.MyService instanceof ServiceStub, true);
+    }
+
+    // In fact, RpcStubs can be created from any old object.
+    {
+      let stub = new RpcStub({
+        sum(a, b) {
+          return a + b;
+        },
+      });
+
+      assert.strictEqual(await stub.sum(12, 34), 46);
+    }
+
+    // Or function.
+    {
+      let func = (a, b) => {
+        return a + b;
+      };
+      func.ownProperty = 'hello';
+      let stub = new RpcStub(func);
+
+      assert.strictEqual(await stub(12, 34), 46);
+      assert.strictEqual(await stub.ownProperty, 'hello');
+    }
+
+    // Or Proxy of an RpcTarget.
+    {
+      let counter = new MyCounter(4);
+      let stub = new RpcStub(new Proxy(counter, {}));
+      assert.strictEqual(await stub.increment(5), 9);
+    }
   },
 };
 
@@ -1123,11 +1252,23 @@ export let crossContextSharingDoesntWork = {
 
 export let waitUntilWorks = {
   async test(controller, env, ctx) {
-    globalWaitUntilPromise = null;
-    await env.MyService.testWaitUntil();
+    // Tests ctx.waitUntil
+    {
+      globalWaitUntilPromise = null;
+      await env.MyService.testWaitUntil();
 
-    assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
-    await globalWaitUntilPromise;
+      assert.ok(globalWaitUntilPromise instanceof Promise);
+      await globalWaitUntilPromise;
+    }
+
+    // Tests `import { waitUntil } from 'cloudflare:workers` on WorkerEntrypoint
+    {
+      globalWaitUntilPromise = null;
+      await env.MyService.testImportedWaitUntil();
+
+      assert.ok(globalWaitUntilPromise instanceof Promise);
+      await globalWaitUntilPromise;
+    }
   },
 };
 
@@ -1525,19 +1666,13 @@ export let serializeHttpTypes = {
       });
     }
 
-    // Check that a Request with an AbortSignal can't be sent. (We should fix this someday, by
-    // making AbortSignal itself RPC-compatible.)
-    await assert.rejects(
-      env.MyService.roundTrip(
+    {
+      let req = await env.MyService.roundTrip(
         new Request('http://foo', { signal: AbortSignal.timeout(100) })
-      ),
-      {
-        name: 'DataCloneError',
-        message:
-          'Could not serialize object of type "AbortSignal". This type does not support ' +
-          'serialization.',
-      }
-    );
+      );
+      assert.strictEqual(req.url, 'http://foo');
+      assert.ok(req.signal instanceof AbortSignal);
+    }
 
     {
       let req = await env.MyService.returnResponse();
@@ -1563,7 +1698,9 @@ export let testAsyncStackTrace = {
     try {
       await env.MyService.throwingMethod();
     } catch (e) {
-      // verify stack trace was produced
+      // check that the custom property made it through
+      assert.strictEqual(e.abc, 123);
+      // verify a local stack trace was produced
       assert.strictEqual(e.stack.includes('at async Object.test'), true);
     }
   },
@@ -1575,6 +1712,7 @@ export let testExceptionProperties = {
     try {
       await env.MyService.throwingMethod();
     } catch (e) {
+      assert.strictEqual(e.abc, 123);
       assert.strictEqual(e.remote, true);
       assert.strictEqual(e.message, 'METHOD THREW');
     }
@@ -1607,8 +1745,7 @@ export let domExceptionClone = {
   test() {
     const de1 = new DOMException('hello', 'NotAllowedError');
 
-    // custom own properties on the instance are not preserved...
-    de1.foo = 'ignored';
+    de1.foo = 'abc';
 
     const de2 = structuredClone(de1);
     assert.strictEqual(de1.name, de2.name);
@@ -1616,8 +1753,8 @@ export let domExceptionClone = {
     assert.strictEqual(de1.stack, de2.stack);
     assert.strictEqual(de1.code, de2.code);
     assert.notStrictEqual(de1, de2);
-    assert.notStrictEqual(de1.foo, de2.foo);
-    assert.strictEqual(de2.foo, undefined);
+    assert.strictEqual(de1.foo, de2.foo);
+    assert.strictEqual(de2.foo, 'abc');
   },
 };
 
@@ -1671,6 +1808,92 @@ export let proxiedRpcTarget = {
       await env.MyService.incrementCounter(proxy, 1);
 
       assert.strictEqual(counter.i, 124);
+    }
+
+    // Proxy function.
+    {
+      let func = (i) => {
+        return i * 3;
+      };
+      func.ownProp = 123;
+      let proxy = new Proxy(func, {
+        apply(target, thisArg, argumentsList) {
+          return target(...argumentsList) + 2;
+        },
+      });
+
+      assert.strictEqual(await env.MyService.call(proxy, 2), 8);
+      assert.strictEqual(await env.MyService.getProp(proxy, 'ownProp'), 123);
+
+      // Try pipelining.
+      assert.strictEqual(await env.MyService.identity(() => proxy)()(4), 14);
+      assert.strictEqual(
+        await env.MyService.identity(() => proxy)().ownProp,
+        123
+      );
+
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ x: proxy }))().x(4),
+        14
+      );
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ x: proxy }))().x.ownProp,
+        123
+      );
+    }
+
+    // Proxy RPC target that is callable.
+    {
+      let counter = new MyCounter(0);
+
+      // We make the proxy target be a function so that it is callable, but we implement
+      // getPrototypeOf() to make it appear to implement RpcTarget.
+      let func = (i) => i * 11;
+      func.ownProp = 123;
+      let proxy = new Proxy(func, {
+        get(target, prop, receiver) {
+          if (prop == 'increment') {
+            return (i) => counter.increment(i + 123);
+          } else if (prop == 'ownProp') {
+            return target.ownProp;
+          } else {
+            let result = counter[prop];
+            if (result instanceof Function) {
+              result = result.bind(counter);
+            }
+            return result;
+          }
+        },
+        has(target, prop) {
+          return prop in counter || prop === 'ownProp';
+        },
+        getPrototypeOf(target) {
+          return Object.getPrototypeOf(counter);
+        },
+      });
+
+      // We can call it.
+      assert.strictEqual(await env.MyService.call(proxy, 3), 33);
+
+      // We *cannot* access own properties of the function.
+      assert.rejects(() => env.MyService.getProp(proxy, 'ownProp'), {
+        name: 'TypeError',
+        message: 'The RPC receiver does not implement the method "ownProp".',
+      });
+
+      // We *can* access prototype properties, becaues it's an RpcTarget.
+      await env.MyService.incrementCounter(proxy, 1);
+      assert.strictEqual(counter.i, 124);
+
+      // Try pipelined calls.
+      assert.strictEqual(
+        await env.MyService.identity(() => proxy)().increment(3),
+        250
+      );
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ p: proxy }))().p.increment(4),
+        377
+      );
     }
 
     // Can't proxy a class that doesn't extend `RpcTarget`.
@@ -1745,5 +1968,82 @@ export let testConstructEntrypoint = {
   async test(controller, env, ctx) {
     const constructed = constructEntrypoint(MyEntrypoint, env);
     assert.strictEqual(await constructed.rpcFunc(), 'hello from entrypoint');
+  },
+};
+
+// Test that calls to an RpcTarget made after the context is aborted don't get delivered.
+export let portAbortCall = {
+  async test(controller, env, ctx) {
+    {
+      let id = env.MyActor.newUniqueId();
+      let actor = env.MyActor.get(id);
+      let stub = await actor.makePostAbortCallTester();
+
+      let hangPromise = stub.hang();
+      assert.strictEqual(await stub.ping(), 'pong');
+      let abortPromise = stub.abort();
+      let pingPromise = stub.ping();
+
+      await assert.rejects(abortPromise, {
+        name: 'Error',
+        message: 'test aborted by abort()',
+      });
+      await assert.rejects(pingPromise, {
+        name: 'Error',
+        message: 'test aborted by abort()',
+      });
+      await assert.rejects(hangPromise, {
+        name: 'Error',
+        message: 'test aborted by abort()',
+      });
+      // TODO(bug): This should propagate the abort reason.
+      await assert.rejects(stub.ping(), {
+        name: 'Error',
+        message:
+          'The execution context which hosts this callback is no longer running.',
+      });
+      await assert.rejects(actor.increment(2), {
+        name: 'Error',
+        message: 'test aborted by abort()',
+      });
+    }
+
+    // Start over with a new stub, this time use failCriticalSection() to break the actor. As of
+    // this writing, this differs significantly from plain `abort()` in that
+    // `IoContext::abortException` never gets set, since `IoContext::abort()` is not directly
+    // called, but instead the exception is joined into the on-abort promise.
+    {
+      let id = env.MyActor.newUniqueId();
+      let actor = env.MyActor.get(id);
+      let stub = await actor.makePostAbortCallTester();
+
+      let hangPromise = stub.hang();
+      assert.strictEqual(await stub.ping(), 'pong');
+      let failPromise = stub.failCriticalSection();
+      let pingPromise = stub.ping();
+
+      await assert.rejects(failPromise, {
+        name: 'Error',
+        message: 'test broken critical section',
+      });
+      await assert.rejects(pingPromise, {
+        name: 'Error',
+        message: 'test broken critical section',
+      });
+      await assert.rejects(hangPromise, {
+        name: 'Error',
+        message: 'test broken critical section',
+      });
+      // TODO(bug): This should propagate the abort reason.
+      await assert.rejects(stub.ping(), {
+        name: 'Error',
+        message:
+          'The execution context which hosts this callback is no longer running.',
+      });
+      await assert.rejects(actor.increment(2), {
+        name: 'Error',
+        message: 'test broken critical section',
+      });
+    }
   },
 };

@@ -1700,6 +1700,8 @@ export const byteLength = {
     strictEqual(Buffer.byteLength(int32), 32);
     const uint32 = new Uint32Array(8);
     strictEqual(Buffer.byteLength(uint32), 32);
+    const float16 = new Float16Array(8);
+    strictEqual(Buffer.byteLength(float16), 16);
     const float32 = new Float32Array(8);
     strictEqual(Buffer.byteLength(float32), 32);
     const float64 = new Float64Array(8);
@@ -5696,9 +5698,9 @@ export const toString = {
     // default utf-8 if undefined
     strictEqual(Buffer.from('utf-8').toString(), 'utf-8');
 
-    const invalidEncodings = new Array(10)
-      .fill(0)
-      .map((_, i) => String(i + 1).repeat(i + 1));
+    const invalidEncodings = Array.from({ length: 10 }, (_, i) =>
+      String(i + 1).repeat(i + 1)
+    );
     // Invalid encodings
     for (const encoding of [...invalidEncodings, null]) {
       const error = {
@@ -6026,7 +6028,7 @@ export const transcodeTest = {
 
     // Test that Uint8Array arguments are okay.
     {
-      const uint8array = new Uint8Array([...Buffer.from('hä', 'latin1')]);
+      const uint8array = new Uint8Array(Buffer.from('hä', 'latin1'));
       deepStrictEqual(
         transcode(uint8array, 'latin1', 'utf16le'),
         Buffer.from('hä', 'utf16le')

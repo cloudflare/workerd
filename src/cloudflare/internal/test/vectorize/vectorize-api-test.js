@@ -20,7 +20,7 @@ export const test_vector_search_vector_query = {
     const IDX = env['vector-search'];
     {
       // with returnValues = true, returnMetadata = "indexed"
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+      const results = await IDX.query(new Float32Array(5), {
         topK: 3,
         returnValues: true,
         returnMetadata: 'indexed',
@@ -98,7 +98,7 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = false ("none")
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+      const results = await IDX.query(new Float32Array(5), {
         topK: 3,
         returnMetadata: false,
       });
@@ -126,7 +126,7 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = true ("all")
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+      const results = await IDX.query(new Float32Array(5), {
         topK: 3,
         returnMetadata: true,
       });
@@ -161,7 +161,7 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = unset (none)
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+      const results = await IDX.query(new Float32Array(5), {
         topK: 3,
       });
       assert.equal(true, results.count > 0);
@@ -188,7 +188,7 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = unset (none), filter = "Peter Piper picked a peck of pickled peppers"
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+      const results = await IDX.query(new Float32Array(5), {
         topK: 1,
         filter: {
           text: { $eq: 'Peter Piper picked a peck of pickled peppers' },
@@ -210,7 +210,7 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = unset (none), filter = "Peter Piper picked a peck of pickled peppers"
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+      const results = await IDX.query(new Float32Array(5), {
         topK: 1,
         filter: {
           text: {

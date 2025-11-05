@@ -26,7 +26,7 @@ interface Container @0x9aaceefc06523bca {
     enableInternet @1 :Bool = false;
     # Set true to enable the container to talk directly to the public internet. Otherwise, the
     # public internet will not be accessible -- but it's still possible to intercept connection
-    # attempts and handle them in the DO, using the "listen" methods below.
+    # attempts and handle them in the DO, using the `listenTcp()` method below.
 
     environmentVariables @2 :List(Text);
     # Specifies the environment variables of the container.
@@ -36,7 +36,7 @@ interface Container @0x9aaceefc06523bca {
     # The container runtime should validate the environment variables input.
   }
 
-  monitor @2 ();
+  monitor @2 () -> (exitCode: Int32);
   # Waits for the container to shut down.
   #
   # If the container shuts down because the root process exited with a success status, or because
@@ -93,4 +93,15 @@ interface Container @0x9aaceefc06523bca {
     # Like Port.connect() but also receives the address and port number to which the container was
     # attempting to connect.
   }
+
+  setInactivityTimeout @7 (durationMs  :Int64);
+  # Configures the duration where the runtime should shutdown the container after there is
+  # no connections or activity to the Container.
+  #
+  # After a capability disconnect, the runtime should signal the container
+  # at the configured duration.
+  #
+  # Note that if there is an open connection to the container, the runtime must not shutdown the container.
+  # If there is no activity timeout duration configured and no container connection, it's up to the runtime
+  # to decide when to signal the container to exit.
 }

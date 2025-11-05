@@ -10,6 +10,36 @@ the same interface on top of different JavaScript engines. However, as of today,
 quite the case. At present application code will still need to use V8 APIs directly in some
 cases. We would like to improve this in the future.
 
+## V8 Fast API
+
+V8 Fast API allows V8 to compile JavaScript code that calls native functions in a way that directly jumps to the C++ implementation without going through the usual JavaScript-to-C++ binding layers. This is accomplished by having V8 generate specialized machine code that knows how to call the C++ function directly, skipping the overhead of value conversion and JavaScript calling conventions.
+
+### Requirements for Fast API compatibility
+
+For a method to be compatible with Fast API, it must adhere to several constraints due to v8 itself, and may change as the fast api mechanism continues to evolve:
+
+1. **Return Type**: Must be one of these primitive types: `void`, `bool`, `int32_t`, `uint32_t`, `float`, or `double`.
+
+2. **Parameter Types**: Can be the primitive types listed above, or V8 handle types like `v8::Local<v8::Value>` or `v8::Local<v8::Object>`, or types that can be unwrapped from a V8 value using the TypeWrapper.
+
+3. **Method Structure**: Can be a regular instance method, a const instance method, or a method that takes `jsg::Lock&` as its first parameter.
+
+### Using Fast API in workerd
+
+By default, any `JSG_METHOD(name)` will execute fast path if the method signature is compatible with Fast API requirements. To explicitly force the function to use v8 Fast API in workerd, you can use `JSG_ASSERT_FASTAPI`.
+
+### How it works
+
+When a method is registered with the v8 fast api, workerd automatically:
+
+1. Checks if the method signature is compatible with Fast API requirements
+2. Registers both a regular (slow path) method handler and a Fast API handler
+3. Let's V8 optimize calls to this method when possible
+
+V8 determines at runtime whether to use the fast or slow path:
+- The fast path is used when the method is called from optimized code
+- The slow path is used when called from unoptimized code or when handling complex cases
+
 ## The Basics
 
 If you haven't done so already, I recommend reading through both the ["KJ Style Guide"][]
@@ -550,8 +580,8 @@ object. This wrapper is created lazily when the `jsg::Ref<T>` instance is first 
 out to JavaScript via JSG mechanisms.
 
 ```cpp
-// We'll discuss jsg::alloc a bit later as part of the introduction to Resource Types.
-jsg::Ref<Foo> foo = jsg::alloc<Foo>();
+// We'll discuss js.alloc a bit later as part of the introduction to Resource Types.
+jsg::Ref<Foo> foo = js.alloc<Foo>();
 
 jsg::Ref<Foo> foo2 = foo.addRef();
 
@@ -796,7 +826,7 @@ public:
   Foo(int value): value(value) {}
 
   static jsg::Ref<Foo> constructor(jsg::Lock& js, int value) {
-    return jsg::alloc<Foo>(value);
+    return js.alloc<Foo>(value);
   }
 
   JSG_RESOURCE_TYPE(Foo) {}
@@ -1430,11 +1460,11 @@ the following rules are applied:
    modifier will be added if it's not already present. In the special case that the override is a
    `type`-alias to `never`, the generated definition will be deleted.
 
-2. Otherwise, the override will be converted to a TypeScript class as follows: (where `<name>` is the
+2. Otherwise, the override will be converted to a TypeScript class as follows: (where `<n>` is the
    unqualified C++ type name of this resource type)
 
-   1. If an override starts with `extends `, `implements ` or `{`: `class <name> ` will be prepended
-   2. If an override starts with `<`: `class <name>` will be prepended
+   1. If an override starts with `extends `, `implements ` or `{`: `class <n> ` will be prepended
+   2. If an override starts with `<`: `class <n>` will be prepended
    3. Otherwise, `class ` will be prepended
 
    After this, if the override doesn't end with `}`, ` {}` will be appended.

@@ -2,17 +2,37 @@ load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
-load("@npm//:capnpc-ts/package_json.bzl", capnpc_ts_bin = "bin")
+load("@npm//:capnp-es/package_json.bzl", capnp_es_bins = "bin")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 
-cc_capnp_library(
+# This is used to embed the ICU data file which libicu needs at runtime to do its thing.
+# We bake this file into the binary to avoid shipping it separately. (V8's normal GN build can
+# actually do this for us, but we use the Bazel build which doesn't have this option.) Using #embed
+# makes this very fast and convenient.
+wd_cc_embed(
     name = "icudata-embed",
-    srcs = ["icudata-embed.capnp"],
-    data = ["@com_googlesource_chromium_icu//:icudata"],
-    defines = ["WORKERD_ICU_DATA_EMBED"],
-    include_prefix = ".",
+    src = "@com_googlesource_chromium_icu//:common/icudtl.dat",
+    base_name = "icu-data-file",
+    strip_include_prefix = "",
     visibility = ["//visibility:public"],
+)
+
+# Also re-export the v8 ICU library for @workerd-v8
+alias(
+    name = "v8_icu",
+    actual = "@v8//:v8_icu",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+# For convenience, less typing than the full label:
+# (assuming working directory is the root of the repository)
+#   bazel run format
+alias(
+    name = "format",
+    actual = "//build/deps/formatters:format",
+    tags = ["manual"],
 )
 
 npm_link_all_packages(name = "node_modules")
@@ -23,9 +43,22 @@ npm_link_package(
     package = "@workerd/jsg",
 )
 
-capnpc_ts_bin.capnpc_ts_binary(
-    name = "capnpc_ts",
+# Plugin to generate .js files
+capnp_es_bins.capnpc_js_binary(
+    name = "capnpc_js_plugin",
     visibility = ["//visibility:public"],
+)
+
+# Plugin to generate .ts files
+capnp_es_bins.capnpc_ts_binary(
+    name = "capnpc_ts_plugin",
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "prettierrc",
+    srcs = [":.prettierrc.json"],
+    visibility = ["//build/deps/formatters:__pkg__"],
 )
 
 # Platform definition for using clang-cl on Windows
@@ -92,9 +125,9 @@ selects.config_setting_group(
     ],
 )
 
-# prettier
-js_library(
-    name = "prettierrc",
-    srcs = [".prettierrc.json"],
+# Clang-tidy config to use
+label_flag(
+    name = "clang_tidy_config",
+    build_setting_default = ":.clang-tidy",
     visibility = ["//visibility:public"],
 )

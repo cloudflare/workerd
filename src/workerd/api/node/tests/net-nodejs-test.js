@@ -23,30 +23,49 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { fail, ok, strictEqual, throws } from 'node:assert';
+import { fail, ok, strictEqual, deepStrictEqual, throws } from 'node:assert';
 import { mock } from 'node:test';
 import { once } from 'node:events';
 import * as net from 'node:net';
+import * as tls from 'node:tls';
 
-const enc = new TextEncoder();
+export const checkPortsSetCorrectly = {
+  test(ctrl, env, ctx) {
+    const keys = [
+      'SIDECAR_HOSTNAME',
+      'SERVER_PORT',
+      'ECHO_SERVER_PORT',
+      'TIMEOUT_SERVER_PORT',
+      'END_SERVER_PORT',
+      'SERVER_THAT_DIES_PORT',
+      'RECONNECT_SERVER_PORT',
+    ];
+    for (const key of keys) {
+      strictEqual(typeof env[key], 'string');
+      ok(env[key].length > 0);
+    }
+  },
+};
 
 // test/parallel/test-net-access-byteswritten.js
 export const testNetAccessBytesWritten = {
   test() {
     // Check that the bytesWritten getter doesn't crash if object isn't
-    // constructed. Also check bytesRead...
-
-    // TODO(now): Should be undefined
-    strictEqual(net.Socket.prototype.bytesWritten, NaN);
-    strictEqual(net.Socket.prototype.bytesRead, undefined);
+    // constructed.
+    strictEqual(net.Socket.prototype.bytesWritten, undefined);
+    strictEqual(
+      Object.getPrototypeOf(tls.TLSSocket).prototype.bytesWritten,
+      undefined
+    );
+    strictEqual(tls.TLSSocket.prototype.bytesWritten, undefined);
   },
 };
 
 // test/parallel/test-net-after-close.js
 export const testNetAfterClose = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9999, 'localhost');
+    const c = net.connect(Number(env.SERVER_PORT), env.SIDECAR_HOSTNAME);
     c.resume();
     c.on('close', () => resolve());
     await promise;
@@ -65,12 +84,12 @@ export const testNetAfterClose = {
 
 // test/parallel/test-net-allow-half-open.js
 export const testNetAllowHalfOpen = {
-  async test() {
+  async test(ctrl, env, ctx) {
     // Verify that the socket closes properly when the other end closes
     // and allowHalfOpen is false.
 
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9999, 'localhost');
+    const c = net.connect(Number(env.SERVER_PORT), env.SIDECAR_HOSTNAME);
     strictEqual(c.allowHalfOpen, false);
     c.resume();
 
@@ -82,9 +101,7 @@ export const testNetAllowHalfOpen = {
     const finishFn = mock.fn(() => {
       ok(!c.destroyed);
     });
-    const closeFn = mock.fn(() => {
-      resolve();
-    });
+    const closeFn = mock.fn(resolve);
     c.on('end', endFn);
 
     // Even tho we're not writing anything, since the socket receives a
@@ -105,10 +122,10 @@ export const testNetBetterErrorMessagesPortHostname = {
   async test() {
     // This is intentionally not a completely faithful reproduction of the
     // original test, as we don't have the ability to mock DNS lookups.
-    const { promise, resolve } = Promise.withResolvers();
+    const { promise, resolve, reject } = Promise.withResolvers();
     const c = net.connect(0, 'invalid address');
     c.on('connect', () => {
-      throw new Error('should not connect');
+      reject(new Error('should not connect'));
     });
     const errorFn = mock.fn((error) => {
       // TODO(review): Currently our errors do not match the errors that
@@ -131,11 +148,11 @@ export const testNetBetterErrorMessagesPortHostname = {
 
 // test/parallel/test-net-binary.js
 export const testNetBinary = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
 
     // Connect to the echo server
-    const c = net.connect(9998, 'localhost');
+    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.setEncoding('latin1');
     let result = '';
     c.on('data', (chunk) => {
@@ -158,9 +175,9 @@ export const testNetBinary = {
 
 // test/parallel/test-net-buffersize.js
 export const testNetBuffersize = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9999, 'localhost');
+    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
     const finishFn = mock.fn(() => {
       strictEqual(c.bufferSize, 0);
       resolve();
@@ -178,10 +195,10 @@ export const testNetBuffersize = {
 
 // test/parallel/test-net-bytes-read.js
 export const testNetBytesRead = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
     // Connect to the echo server
-    const c = net.connect(9998, 'localhost');
+    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.resume();
     c.write('hello');
     c.end();
@@ -197,38 +214,36 @@ export const testNetBytesRead = {
   },
 };
 
-// test/parallel/test-net-bytes-stats.js
-// export const testNetBytesStats = {
-//   async test() {
-//     // This is intentionally not a completely faithful reproduction of the
-//     // original test which checks the bytesRead on the server side.
-//
-//     // Connect to the echo server
-//     const { promise, resolve } = Promise.withResolvers();
-//     const c = net.connect(9998, 'localhost');
-//     let bytesDelivered = 0;
-//     c.on('data', (chunk) => (bytesDelivered += chunk.byteLength));
-//     c.write('hello');
-//     c.end();
-//     const endFn = mock.fn(() => {
-//       strictEqual(c.bytesWritten, 5);
-//       strictEqual(bytesDelivered, 5);
-//       strictEqual(c.bytesRead, 5);
-//       resolve();
-//     });
-//     c.on('end', endFn);
-//
-//     await promise;
-//     strictEqual(endFn.mock.callCount(), 1);
-//   },
-// };
+export const testNetBytesStats = {
+  async test(ctrl, env) {
+    // This is intentionally not a completely faithful reproduction of the
+    // original test which checks the bytesRead on the server side.
+    // Connect to the echo server
+    const { promise, resolve } = Promise.withResolvers();
+    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
+    let bytesDelivered = 0;
+    c.on('data', (chunk) => (bytesDelivered += chunk.byteLength));
+    c.write('hello');
+    c.end();
+    const endFn = mock.fn(() => {
+      strictEqual(c.bytesWritten, 0);
+      strictEqual(bytesDelivered, 5);
+      strictEqual(c.bytesRead, 5);
+      resolve();
+    });
+    c.on('end', endFn);
+
+    await promise;
+    strictEqual(endFn.mock.callCount(), 1);
+  },
+};
 
 // test/parallel/test-net-bytes-written-large.js
 const N = 10000000;
 export const testNetBytesWrittenLargeVariant1 = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9998, 'localhost');
+    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.resume();
 
     const writeFn = mock.fn(() => {
@@ -244,9 +259,9 @@ export const testNetBytesWrittenLargeVariant1 = {
 
 // test/parallel/test-net-can-reset-timeout.js
 export const testNetCanResetTimeout = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9997, 'localhost');
+    const c = net.connect(env.TIMEOUT_SERVER_PORT, env.SIDECAR_HOSTNAME);
     const dataFn = mock.fn(() => {
       c.end();
     });
@@ -264,37 +279,49 @@ async function assertAbort(socket, testName) {
     await once(socket, 'close');
     fail(`close ${testName} should have thrown`);
   } catch (err) {
-    strictEqual(err.name, 'AbortError');
+    strictEqual(err.name, 'AbortError', err.message);
   }
 }
 
 // test/parallel/test-net-connect-abort-controller.js
 export const testNetConnectAbortControllerPostAbort = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const ac = new AbortController();
     const { signal } = ac;
-    const socket = net.connect({ port: 9999, signal });
+    const socket = net.connect({
+      host: env.SIDECAR_HOSTNAME,
+      port: env.SERVER_PORT,
+      signal,
+    });
     ac.abort();
     await assertAbort(socket, 'postAbort');
   },
 };
 
 export const testNetConnectAbortControllerPreAbort = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const ac = new AbortController();
     const { signal } = ac;
     ac.abort();
-    const socket = net.connect({ port: 9999, signal });
+    const socket = net.connect({
+      host: env.SIDECAR_HOSTNAME,
+      port: env.SERVER_PORT,
+      signal,
+    });
     await assertAbort(socket, 'preAbort');
   },
 };
 
 export const testNetConnectAbortControllerTickAbort = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const ac = new AbortController();
     const { signal } = ac;
     queueMicrotask(() => ac.abort());
-    const socket = net.connect({ port: 9999, signal });
+    const socket = net.connect({
+      host: env.SIDECAR_HOSTNAME,
+      port: env.SERVER_PORT,
+      signal,
+    });
     await assertAbort(socket, 'tickAbort');
   },
 };
@@ -354,11 +381,11 @@ export const testNetConnectAfterDestroy = {
 
 // test/parallel/test-net-connect-buffer.js
 export const testNetConnectBuffer = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
     const c = net.connect({
-      port: 9998,
-      host: 'localhost',
+      port: env.ECHO_SERVER_PORT,
+      host: env.SIDECAR_HOSTNAME,
       highWaterMark: 0,
     });
 
@@ -406,9 +433,9 @@ export const testNetConnectBuffer = {
 
 // test/parallel/test-net-connect-destroy.js
 export const testNetConnectDestroy = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9999, 'localhost');
+    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.on('close', () => resolve());
     c.destroy();
     await promise;
@@ -417,9 +444,13 @@ export const testNetConnectDestroy = {
 
 // test/parallel/test-net-connect-immediate-destroy.js
 export const testNetConnectImmediateDestroy = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const connectFn = mock.fn();
-    const socket = net.connect(9999, 'localhost', connectFn);
+    const socket = net.connect(
+      env.SERVER_PORT,
+      env.SIDECAR_HOSTNAME,
+      connectFn
+    );
     socket.destroy();
     await Promise.resolve();
     strictEqual(connectFn.mock.callCount(), 0);
@@ -428,9 +459,9 @@ export const testNetConnectImmediateDestroy = {
 
 // test/parallel/test-net-connect-immediate-finish.js
 export const testNetConnectImmediateFinish = {
-  async text() {
+  async text(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9999, 'localhost');
+    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.end();
     c.on('finish', () => resolve());
     await promise;
@@ -443,8 +474,8 @@ export const testNetConnectImmediateFinish = {
 // something different than the original Node.js test
 export const testNetConnectKeepAlive = {
   async test() {
-    // Test that setKeepAlive call does not throw.
-    throws(() => new net.Socket({ keepAlive: true }));
+    // We are not throwing on truthy keepAlive value for mysql/redis clients.
+    // throws(() => new net.Socket({ keepAlive: true }));
     const c = new net.Socket();
     c.setKeepAlive(false);
     c.setKeepAlive(true);
@@ -454,10 +485,10 @@ export const testNetConnectKeepAlive = {
 
 // test/parallel/test-net-connect-memleak.js
 export const testNetConnectMemleak = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
     const connectFn = mock.fn(() => resolve());
-    const c = net.connect(9999, 'localhost', connectFn);
+    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME, connectFn);
     c.emit('connect');
     await promise;
     strictEqual(connectFn.mock.callCount(), 1);
@@ -489,9 +520,13 @@ export const testNetConnectNoArg = {
 // test/parallel/test-net-connect-options-allowhalfopen.js
 // Simplified version of the equivalent Node.js test
 export const testNetConnectOptionsAllowHalfOpen = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve, reject } = Promise.withResolvers();
-    const c = net.connect({ port: 9999, allowHalfOpen: true });
+    const c = net.connect({
+      host: env.SIDECAR_HOSTNAME,
+      port: env.SERVER_PORT,
+      allowHalfOpen: true,
+    });
     c.resume();
     const writeFn = mock.fn(() => {
       c.write('hello', (err) => {
@@ -540,14 +575,17 @@ export const testNetConnectOptionsInvalid = {
 };
 
 // test/parallel/test-net-connect-options-ipv6.js
+// TODO(soon): sidecar-supervisor assigns IPv4 addresses only. IPv6 support should be added.
+/*
 export const testNetConnectOptionsIpv6 = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect({ host: '::1', port: 9999 });
+    const c = net.connect({ host: '::1', port: env.SERVER_PORT });
     c.on('connect', () => resolve());
     await promise;
   },
 };
+*/
 
 // test/parallel/test-net-connect-options-path.js
 // We do not support the path option so this test does something different
@@ -559,6 +597,7 @@ export const testNetConnectOptionsPath = {
 };
 
 // test/parallel/test-net-connect-options-port.js
+// TODO(soon): Update this test.
 export const testNetConnectOptionsPort = {
   async test() {
     [true, false].forEach((port) => {
@@ -580,25 +619,42 @@ export const testNetConnectOptionsPort = {
 // the paused connection from keeping the process alive. We don't have unref
 // so let's just make sure things clean up okay when the IoContext is destroyed.
 export const testNetConnectPausedConnection = {
-  test() {
-    net.connect(9999, 'localhost').pause();
+  test(ctrl, env, ctx) {
+    net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME).pause();
+  },
+};
+
+// test/parallel/test-net-connect-reset.js
+export const testNetConnectReset = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = new net.Socket();
+    socket.resetAndDestroy();
+    // Emit error if socket is not connecting/connected
+    socket.on('error', (err) => {
+      strictEqual(err.code, 'ERR_SOCKET_CLOSED');
+      strictEqual(err.name, 'Error');
+      resolve();
+    });
+    await promise;
   },
 };
 
 // test/parallel/test-net-dns-custom-lookup.js
 // test/parallel/test-net-dns-lookup.js
 export const testNetDnsCustomLookup = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
     const lookup = mock.fn((host, options, callback) => {
       strictEqual(host, 'localhost');
-      strictEqual(options.family, 0);
+      strictEqual(options.family, 4);
       queueMicrotask(() => callback(null, '127.0.0.1', 4));
     });
     const c = net.connect({
-      port: 9999,
+      port: env.SERVER_PORT,
       host: 'localhost',
       lookup,
+      family: 4,
     });
     c.on('lookup', (err, ip, type) => {
       strictEqual(err, null);
@@ -611,12 +667,45 @@ export const testNetDnsCustomLookup = {
   },
 };
 
+// test/parallel/test-net-dns-error.js
+// This test differs from original Node.js test since our error code for isValidHost
+// is different from Node.js.
+export const testNetDnsError = {
+  async test() {
+    const p1 = Promise.withResolvers();
+    const p2 = Promise.withResolvers();
+    const host = '*'.repeat(64);
+    const socket = net.connect(42, host, () =>
+      p1.reject(new Error('Should not have called'))
+    );
+    socket.on('error', function (err) {
+      strictEqual(err.name, 'TypeError');
+      strictEqual(
+        err.message,
+        'Specified address is empty string, contains unsupported characters or is too long.'
+      );
+      p1.resolve();
+    });
+    socket.on('lookup', function (err, ip, type) {
+      strictEqual(err.name, 'TypeError');
+      strictEqual(
+        err.message,
+        'Specified address is empty string, contains unsupported characters or is too long.'
+      );
+      strictEqual(ip, undefined);
+      strictEqual(type, undefined);
+      p2.resolve();
+    });
+    await Promise.all([p1, p2]);
+  },
+};
+
 // test/parallel/test-net-dns-lookup-skip.js
 export const testNetDnsLookupSkip = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const lookup = mock.fn();
-    ['127.0.0.1', '::1'].forEach((host) => {
-      net.connect({ host, port: 9999, lookup }).destroy();
+    [env.SIDECAR_HOSTNAME, '::1'].forEach((host) => {
+      net.connect({ host, port: env.SERVER_PORT, lookup }).destroy();
     });
     strictEqual(lookup.mock.callCount(), 0);
   },
@@ -624,8 +713,8 @@ export const testNetDnsLookupSkip = {
 
 // test/parallel/test-net-during-close.js
 export const testNetDuringClose = {
-  test() {
-    const c = net.connect(9999, 'localhost');
+  test(ctrl, env, ctx) {
+    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.destroy();
     c.remoteAddress;
     c.remoteFamily;
@@ -635,9 +724,9 @@ export const testNetDuringClose = {
 
 // test/parallel/test-net-end-destroyed.js
 export const testNetEndDestroyed = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9999, 'localhost');
+    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.resume();
 
     const endFn = mock.fn(() => {
@@ -1036,9 +1125,9 @@ export const testNetIsIpv6 = {
 
 // test/parallel/test-net-large-string.js
 export const testNetLargeString = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9998, 'localhost');
+    const c = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
     let response = '';
     const size = 40 * 1024;
     const data = 'あ'.repeat(size);
@@ -1055,9 +1144,9 @@ export const testNetLargeString = {
 // test/parallel/test-net-local-address-port.js
 // The localAddress information is a non-op in our implementation
 export const testNetLocalAddressPort = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9999, 'localhost');
+    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.on('connect', () => {
       strictEqual(c.localAddress, '0.0.0.0');
       strictEqual(c.localPort, 0);
@@ -1067,9 +1156,38 @@ export const testNetLocalAddressPort = {
   },
 };
 
+// test/parallel/test-net-localerror.js
+export const testNetLocalError = {
+  async test() {
+    const connect = (opts, code, type) => {
+      throws(() => net.connect(opts), { code, name: type.name });
+    };
+
+    connect(
+      {
+        host: 'localhost',
+        port: 0,
+        localAddress: 'foobar',
+      },
+      'ERR_INVALID_IP_ADDRESS',
+      TypeError
+    );
+
+    connect(
+      {
+        host: 'localhost',
+        port: 0,
+        localPort: 'foobar',
+      },
+      'ERR_INVALID_ARG_TYPE',
+      TypeError
+    );
+  },
+};
+
 // test/parallel/test-net-onread-static-buffer.js
 export const testNetOnReadStaticBuffer = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
     const buffer = Buffer.alloc(1024);
     const fn = mock.fn((nread, buf) => {
@@ -1078,8 +1196,8 @@ export const testNetOnReadStaticBuffer = {
       resolve();
     });
     const c = net.connect({
-      port: 9998,
-      host: 'localhost',
+      port: env.ECHO_SERVER_PORT,
+      host: env.SIDECAR_HOSTNAME,
       onread: {
         buffer,
         callback: fn,
@@ -1094,17 +1212,799 @@ export const testNetOnReadStaticBuffer = {
   },
 };
 
+export const testNetReconnect = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const N = 50;
+    const client = net.connect(env.RECONNECT_SERVER_PORT, env.SIDECAR_HOSTNAME);
+
+    client.setEncoding('UTF8');
+
+    const onDataFn = mock.fn((chunk) => {
+      strictEqual(chunk, 'hello\r\n');
+      client.end();
+    });
+    client.on('data', onDataFn);
+
+    const endFn = mock.fn(() => {});
+    client.on('end', endFn);
+
+    const closeFn = mock.fn((had_error) => {
+      strictEqual(had_error, false);
+      if (closeFn.mock.callCount() < N) {
+        client.connect(env.RECONNECT_SERVER_PORT, env.SIDECAR_HOSTNAME); // reconnect
+      } else {
+        resolve();
+      }
+    });
+    client.on('close', closeFn);
+
+    await promise;
+    strictEqual(closeFn.mock.callCount(), N + 1);
+    strictEqual(onDataFn.mock.callCount(), N + 1);
+    strictEqual(endFn.mock.callCount(), N + 1);
+  },
+};
+
 // test/parallel/test-net-remote-address-port.js
 // test/parallel/test-net-remote-address.js
 export const testNetRemoteAddress = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
-    const c = net.connect(9999, 'localhost');
+    const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.on('connect', () => {
-      strictEqual(c.remoteAddress, 'localhost');
-      strictEqual(c.remotePort, 9999);
+      strictEqual(c.remoteAddress, env.SIDECAR_HOSTNAME);
+      strictEqual(c.remotePort, parseInt(env.SERVER_PORT));
       resolve();
     });
     await promise;
+  },
+};
+
+// // test/parallel/test-net-socket-byteswritten.js
+export const testNetSocketBytesWritten = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect(env.END_SERVER_PORT, env.SIDECAR_HOSTNAME);
+
+    // Cork the socket, then write twice; this should cause a writev, which
+    // previously caused an err in the bytesWritten count.
+    socket.cork();
+
+    socket.write('one');
+    socket.write(Buffer.from('twø', 'utf8'));
+
+    socket.uncork();
+
+    // one = 3 bytes, twø = 4 bytes
+    strictEqual(socket.bytesWritten, 3 + 4);
+
+    const connectFn = mock.fn(() => {
+      strictEqual(socket.bytesWritten, 3 + 4);
+    });
+    socket.on('connect', connectFn);
+
+    socket.on('end', function () {
+      strictEqual(socket.bytesWritten, 3 + 4);
+      resolve();
+    });
+
+    await promise;
+    strictEqual(connectFn.mock.callCount(), 1);
+  },
+};
+
+// test/parallel/test-net-socket-connect-invalid-autoselectfamily.js
+export const testSocketConnectInvalidAutoselectFamily = {
+  async test() {
+    throws(
+      () => {
+        net.connect({ port: 8080, autoSelectFamily: 'INVALID' });
+      },
+      { code: 'ERR_INVALID_ARG_TYPE' }
+    );
+  },
+};
+
+// test/parallel/test-net-socket-connect-invalid-autoselectfamilyattempttimeout.js
+export const testSocketConnectInvalidAutoselectFamilyTimeout = {
+  async test() {
+    for (const autoSelectFamilyAttemptTimeout of [-10, 0]) {
+      throws(
+        () => {
+          net.connect({
+            port: 8080,
+            autoSelectFamily: true,
+            autoSelectFamilyAttemptTimeout,
+          });
+        },
+        { code: 'ERR_OUT_OF_RANGE' }
+      );
+
+      throws(
+        () => {
+          net.setDefaultAutoSelectFamilyAttemptTimeout(
+            autoSelectFamilyAttemptTimeout
+          );
+        },
+        { code: 'ERR_OUT_OF_RANGE' }
+      );
+    }
+
+    // Check the default value of autoSelectFamilyAttemptTimeout is 10
+    // if passed number is less than 10
+    for (const autoSelectFamilyAttemptTimeout of [1, 9]) {
+      net.setDefaultAutoSelectFamilyAttemptTimeout(
+        autoSelectFamilyAttemptTimeout
+      );
+      strictEqual(net.getDefaultAutoSelectFamilyAttemptTimeout(), 10);
+    }
+  },
+};
+
+// test/parallel/test-net-socket-connect-without-cb.js
+export const testNetSocketConnectWithoutCb = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const client = new net.Socket();
+    client.on('connect', resolve);
+    client.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+    await promise;
+  },
+};
+
+// test/parallel/test-net-socket-connecting.js
+export const testNetSocketConnecting = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const client = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME, () => {
+      strictEqual(client.connecting, false);
+
+      // Legacy getter
+      strictEqual(client._connecting, false);
+      resolve();
+    });
+    strictEqual(client.connecting, true);
+
+    // Legacy getter
+    strictEqual(client._connecting, true);
+    await promise;
+  },
+};
+
+// test/parallel/test-net-socket-destroy-send.js
+export const testNetSocketDestroySend = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const conn = net.createConnection(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+
+    conn.on('connect', function () {
+      // Test destroy returns this, even on multiple calls when it short-circuits.
+      strictEqual(conn, conn.destroy().destroy());
+      conn.on('error', reject);
+
+      conn.write(Buffer.from('kaboom'), (err) => {
+        strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+        strictEqual(err.name, 'Error');
+        strictEqual(
+          err.message,
+          'Cannot call write after a stream was destroyed'
+        );
+        resolve();
+      });
+    });
+
+    await promise;
+  },
+};
+
+// test/parallel/test-net-socket-end-callback.js
+export const testNetSocketEndCallback = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const connect = (...args) => {
+      const socket = net.createConnection(
+        env.SERVER_PORT,
+        env.SIDECAR_HOSTNAME,
+        () => {
+          socket.end(...args);
+        }
+      );
+    };
+
+    let count = 0;
+    const cb = mock.fn(() => {
+      if (++count === 3) {
+        resolve();
+      }
+    });
+
+    connect(cb);
+    connect('foo', cb);
+    connect('foo', 'utf8', cb);
+    await promise;
+    strictEqual(cb.mock.callCount(), 3);
+  },
+};
+
+// test/parallel/test-net-socket-no-halfopen-enforcer.js
+export const testNetSocketNoHalfopenEnforcer = {
+  async test() {
+    const socket = new net.Socket({ allowHalfOpen: false });
+    strictEqual(socket.listenerCount('end'), 1);
+  },
+};
+
+// test/parallel/test-net-socket-ready-without-cb.js
+export const testNetSocketReadyWithoutCb = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const client = new net.Socket();
+    client.on('ready', resolve);
+    client.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+    await promise;
+  },
+};
+
+// test/parallel/test-net-socket-reset-send.js
+export const testNetSocketResetSend = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const conn = net.createConnection(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+    conn.on('connect', () => {
+      strictEqual(conn, conn.resetAndDestroy().destroy());
+      conn.on('error', reject);
+
+      conn.write(Buffer.from('fzfzfzfzfz'), (err) => {
+        strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+        strictEqual(err.name, 'Error');
+        strictEqual(
+          err.message,
+          'Cannot call write after a stream was destroyed'
+        );
+        resolve();
+      });
+    });
+    await promise;
+  },
+};
+
+// test/parallel/test-net-socket-timeout.js
+export const testNetSocketTimeout = {
+  async test(ctrl, env) {
+    // Verify that invalid delays throw
+    const s = new net.Socket();
+    const nonNumericDelays = [
+      '100',
+      true,
+      false,
+      undefined,
+      null,
+      '',
+      {},
+      () => {},
+      [],
+    ];
+    const badRangeDelays = [-0.001, -1, -Infinity, Infinity, NaN];
+    const validDelays = [0, 0.001, 1, 1e6];
+    const invalidCallbacks = [
+      1,
+      '100',
+      true,
+      false,
+      null,
+      {},
+      [],
+      Symbol('test'),
+    ];
+
+    for (let i = 0; i < nonNumericDelays.length; i++) {
+      throws(
+        () => {
+          s.setTimeout(nonNumericDelays[i], () => {});
+        },
+        { code: 'ERR_INVALID_ARG_TYPE' },
+        nonNumericDelays[i]
+      );
+    }
+
+    for (let i = 0; i < badRangeDelays.length; i++) {
+      throws(
+        () => {
+          s.setTimeout(badRangeDelays[i], () => {});
+        },
+        { code: 'ERR_OUT_OF_RANGE' },
+        badRangeDelays[i]
+      );
+    }
+
+    for (let i = 0; i < validDelays.length; i++) {
+      s.setTimeout(validDelays[i], () => {});
+    }
+
+    for (let i = 0; i < invalidCallbacks.length; i++) {
+      [0, 1].forEach((msec) =>
+        throws(() => s.setTimeout(msec, invalidCallbacks[i]), {
+          code: 'ERR_INVALID_ARG_TYPE',
+          name: 'TypeError',
+        })
+      );
+    }
+
+    {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const socket = net.createConnection(
+        env.SERVER_PORT,
+        env.SIDECAR_HOSTNAME
+      );
+      strictEqual(
+        socket.setTimeout(1, () => {
+          socket.destroy();
+          strictEqual(
+            socket.setTimeout(1, () =>
+              reject(new Error('Should not have called setTimeout callback'))
+            ),
+            socket
+          );
+          resolve();
+        }),
+        socket
+      );
+      await promise;
+    }
+  },
+};
+
+// test/parallel/test-net-socket-write-after-close.js
+export const testNetSocketWriteAfterClose = {
+  async test(ctrl, env) {
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const client = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME, () => {
+        client.on('error', (err) => {
+          strictEqual(err.name, 'Error');
+          // Node.js tests for a different error message.
+          strictEqual(err.message, 'Socket is closed');
+          strictEqual(err.code, 'ERR_SOCKET_CLOSED');
+          resolve();
+        });
+        client._handle = null;
+        client.write('foo');
+      });
+      await promise;
+    }
+  },
+};
+
+// test/parallel/test-net-socket-write-error.js
+export const testNetSocketWriteError = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const client = net.createConnection(
+      env.SERVER_PORT,
+      env.SIDECAR_HOSTNAME,
+      () => {
+        client.on('error', reject);
+        throws(
+          () => {
+            client.write(1337);
+          },
+          {
+            code: 'ERR_INVALID_ARG_TYPE',
+            name: 'TypeError',
+          }
+        );
+
+        resolve();
+      }
+    );
+    await promise;
+  },
+};
+
+// test/parallel/test-net-sync-cork.js
+export const testNetSyncCork = {
+  async test(ctrl, env) {
+    const N = 100;
+    const buf = Buffer.alloc(2, 'a');
+
+    const { promise, resolve } = Promise.withResolvers();
+    const conn = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
+
+    conn.on('connect', () => {
+      let res = true;
+      let i = 0;
+      for (; i < N && res; i++) {
+        conn.cork();
+        conn.write(buf);
+        res = conn.write(buf);
+        conn.uncork();
+      }
+      strictEqual(i, N);
+      resolve();
+    });
+    await promise;
+  },
+};
+
+// test/parallel/test-net-timeout-no-handle.js
+export const testNetTimeoutNoHandle = {
+  async test() {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const socket = new net.Socket();
+    socket.setTimeout(50);
+
+    socket.on('timeout', () => {
+      strictEqual(socket._handle, null);
+      resolve();
+    });
+
+    socket.on('connect', reject);
+
+    // Since the timeout is unrefed, the code will exit without this
+    setTimeout(() => {}, 200);
+    await promise;
+  },
+};
+
+// test/parallel/test-net-writable.js
+export const testNetWritable = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect(env.SERVER_THAT_DIES_PORT, env.SIDECAR_HOSTNAME);
+    socket.on('end', () => {
+      strictEqual(socket.writable, true);
+      socket.write('hello world');
+      resolve();
+    });
+    await promise;
+  },
+};
+
+// test/parallel/test-net-write-arguments.js
+export const testNetWriteArguments = {
+  async test() {
+    const socket = net.Stream({ highWaterMark: 0 });
+
+    throws(
+      () => {
+        socket.write(null);
+      },
+      {
+        code: 'ERR_STREAM_NULL_VALUES',
+        name: 'TypeError',
+        message: 'May not write null values to stream',
+      }
+    );
+
+    [true, false, undefined, 1, 1.0, +Infinity, -Infinity, [], {}].forEach(
+      (value) => {
+        const socket = net.Stream({ highWaterMark: 0 });
+        // We need to check the callback since 'error' will only
+        // be emitted once per instance.
+        throws(
+          () => {
+            socket.write(value);
+          },
+          {
+            code: 'ERR_INVALID_ARG_TYPE',
+            name: 'TypeError',
+          }
+        );
+      }
+    );
+  },
+};
+
+// test/parallel/test-net-write-cb-on-destroy-before-connect.js
+export const testNetWriteCbOnDestroyBefureConnected = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = new net.Socket();
+
+    socket.on('connect', () => {
+      reject(new Error('Connect should not have been called'));
+    });
+
+    socket.connect(Number(env.SERVER_PORT), env.SIDECAR_HOSTNAME);
+
+    ok(socket.connecting);
+
+    socket.write('foo', (err) => {
+      strictEqual(err.code, 'ERR_SOCKET_CLOSED_BEFORE_CONNECTION');
+      strictEqual(err.name, 'Error');
+      resolve();
+    });
+
+    socket.destroy();
+    await promise;
+  },
+};
+
+// test/parallel/test-net-write-connect-write.js
+export const testNetWriteConnectWrite = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const conn = net.connect(env.ECHO_SERVER_PORT, env.SIDECAR_HOSTNAME);
+    let received = '';
+
+    conn.setEncoding('utf8');
+    conn.on('connect', function () {
+      conn.write(' after');
+    });
+    conn.on('data', function (buf) {
+      received += buf;
+      conn.end();
+    });
+    conn.write('before');
+
+    conn.on('end', function () {
+      strictEqual(received, 'before after');
+      resolve();
+    });
+    await promise;
+  },
+};
+
+export const testSocketAddress = {
+  test() {
+    // Test constructor with default options
+    const addr1 = new net.SocketAddress();
+    strictEqual(addr1.address, '127.0.0.1');
+    strictEqual(addr1.port, 0);
+    strictEqual(addr1.family, 'ipv4');
+    strictEqual(addr1.flowlabel, 0);
+
+    // Test constructor with IPv4 options
+    const addr2 = new net.SocketAddress({
+      address: '192.168.1.1',
+      port: 8080,
+      family: 'ipv4',
+    });
+    strictEqual(addr2.address, '192.168.1.1');
+    strictEqual(addr2.port, 8080);
+    strictEqual(addr2.family, 'ipv4');
+    strictEqual(addr2.flowlabel, 0);
+
+    // Test constructor with IPv6 options
+    const addr3 = new net.SocketAddress({
+      address: '::1',
+      port: 3000,
+      family: 'ipv6',
+      flowlabel: 123,
+    });
+    strictEqual(addr3.address, '::1');
+    strictEqual(addr3.port, 3000);
+    strictEqual(addr3.family, 'ipv6');
+    strictEqual(addr3.flowlabel, 123);
+
+    // Test default IPv6 address
+    const addr4 = new net.SocketAddress({ family: 'ipv6' });
+    strictEqual(addr4.address, '::');
+    strictEqual(addr4.family, 'ipv6');
+
+    // Test toJSON method
+    const addr5 = new net.SocketAddress({
+      address: '10.0.0.1',
+      port: 9000,
+      family: 'ipv4',
+    });
+    const json = addr5.toJSON();
+    strictEqual(json.address, '10.0.0.1');
+    strictEqual(json.port, 9000);
+    strictEqual(json.family, 'ipv4');
+    strictEqual(json.flowlabel, 0);
+
+    // Test isSocketAddress static method
+    ok(net.SocketAddress.isSocketAddress(addr1));
+    ok(net.SocketAddress.isSocketAddress(addr2));
+    ok(!net.SocketAddress.isSocketAddress({}));
+    ok(!net.SocketAddress.isSocketAddress(null));
+    ok(!net.SocketAddress.isSocketAddress('string'));
+
+    // Test parse static method with IPv4
+    const parsed1 = net.SocketAddress.parse('192.168.1.100:8080');
+    ok(parsed1);
+    strictEqual(parsed1.address, '192.168.1.100');
+    strictEqual(parsed1.port, 8080);
+    strictEqual(parsed1.family, 'ipv4');
+
+    // Test parse static method with IPv6
+    const parsed2 = net.SocketAddress.parse('[::1]:3000');
+    ok(parsed2);
+    strictEqual(parsed2.address, '::1');
+    strictEqual(parsed2.port, 3000);
+    strictEqual(parsed2.family, 'ipv6');
+
+    // Test parse with invalid input
+    strictEqual(net.SocketAddress.parse('invalid'), undefined);
+    strictEqual(net.SocketAddress.parse(''), undefined);
+
+    // Test constructor validation - invalid family
+    throws(() => new net.SocketAddress({ family: 'invalid' }), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    // Test constructor validation - invalid IPv4 address
+    throws(
+      () =>
+        new net.SocketAddress({
+          address: '300.300.300.300',
+          family: 'ipv4',
+        }),
+      {
+        code: 'ERR_INVALID_ADDRESS',
+      }
+    );
+
+    // Test constructor validation - invalid IPv6 address
+    throws(
+      () =>
+        new net.SocketAddress({
+          address: 'invalid::ipv6',
+          family: 'ipv6',
+        }),
+      {
+        code: 'ERR_INVALID_ADDRESS',
+      }
+    );
+
+    // Test constructor validation - invalid port
+    throws(() => new net.SocketAddress({ port: -1 }), {
+      code: 'ERR_SOCKET_BAD_PORT',
+    });
+
+    throws(() => new net.SocketAddress({ port: 65536 }), {
+      code: 'ERR_SOCKET_BAD_PORT',
+    });
+
+    // Test family case insensitive
+    const addr6 = new net.SocketAddress({ family: 'IPv4' });
+    strictEqual(addr6.family, 'ipv4');
+
+    const addr7 = new net.SocketAddress({ family: 'IPv6' });
+    strictEqual(addr7.family, 'ipv6');
+
+    // Test port type coercion
+    const addr8 = new net.SocketAddress({ port: '8080' });
+    console.log(typeof addr8.port);
+    strictEqual(addr8.port, 8080);
+  },
+};
+
+export const testBlockList = {
+  test() {
+    // Test BlockList constructor and static methods
+    const bl = new net.BlockList();
+    ok(net.BlockList.isBlockList(bl));
+    ok(!net.BlockList.isBlockList({}));
+    ok(!net.BlockList.isBlockList(null));
+
+    // Test addAddress with IPv4
+    bl.addAddress('192.168.1.1');
+    bl.addAddress('10.0.0.1', 'ipv4');
+
+    // Test check method with IPv4 addresses
+    ok(bl.check('192.168.1.1'));
+    ok(bl.check('10.0.0.1', 'ipv4'));
+    ok(!bl.check('192.168.1.2'));
+    ok(!bl.check('192.168.1.1', 'ipv6'));
+
+    // Test addAddress with IPv6
+    bl.addAddress('2001:db8::1', 'ipv6');
+    ok(bl.check('2001:db8::1', 'ipv6'));
+    ok(!bl.check('2001:db8::2', 'ipv6'));
+
+    // Test addAddress with SocketAddress
+    const addr1 = new net.SocketAddress({ address: '172.16.0.1', port: 80 });
+    bl.addAddress(addr1);
+    ok(bl.check(addr1));
+    ok(bl.check('172.16.0.1'));
+
+    // Test addRange with IPv4
+    bl.addRange('192.168.2.1', '192.168.2.10');
+    ok(bl.check('192.168.2.1'));
+    ok(bl.check('192.168.2.5'));
+    ok(bl.check('192.168.2.10'));
+    ok(!bl.check('192.168.2.11'));
+    ok(!bl.check('192.168.1.255'));
+
+    // Test addRange with IPv6
+    bl.addRange('2001:db8::10', '2001:db8::20', 'ipv6');
+    ok(bl.check('2001:db8::15', 'ipv6'));
+    ok(bl.check('2001:db8::10', 'ipv6'));
+    ok(bl.check('2001:db8::20', 'ipv6'));
+    ok(!bl.check('2001:db8::21', 'ipv6'));
+
+    // Test addRange with SocketAddress
+    const startAddr = new net.SocketAddress({
+      address: '172.16.1.1',
+      port: 80,
+    });
+    const endAddr = new net.SocketAddress({ address: '172.16.1.5', port: 80 });
+    bl.addRange(startAddr, endAddr);
+    ok(bl.check('172.16.1.3'));
+    ok(!bl.check('172.16.1.6'));
+
+    // Test addSubnet with IPv4
+    bl.addSubnet('10.1.0.0', 24);
+    ok(bl.check('10.1.0.1'));
+    ok(bl.check('10.1.0.255'));
+    ok(!bl.check('10.1.1.1'));
+
+    // Test addSubnet with IPv6
+    bl.addSubnet('2001:db8::', 32, 'ipv6');
+    ok(bl.check('2001:db8::1', 'ipv6'));
+    ok(bl.check('2001:db8:ffff::1', 'ipv6'));
+    ok(!bl.check('2001:db9::1', 'ipv6'));
+
+    // Test addSubnet with SocketAddress
+    const subnetAddr = new net.SocketAddress({
+      address: '172.17.0.0',
+      port: 80,
+    });
+    bl.addSubnet(subnetAddr, 16);
+    ok(bl.check('172.17.1.1'));
+    ok(bl.check('172.17.255.255'));
+    ok(!bl.check('172.18.0.1'));
+
+    // Test rules getter
+    const rules = bl.rules;
+    ok(Array.isArray(rules));
+    ok(rules.length > 0);
+    ok(rules.some((rule) => rule.includes('Address: IPv4 192.168.1.1')));
+    ok(
+      rules.some((rule) =>
+        rule.includes('Range: IPv4 192.168.2.1-192.168.2.10')
+      )
+    );
+    ok(rules.some((rule) => rule.includes('Subnet: IPv4 10.1.0.0/24')));
+
+    // Test toJSON
+    const json = bl.toJSON();
+    ok(Array.isArray(json));
+    deepStrictEqual(json, rules);
+
+    // Test fromJSON
+    const bl2 = new net.BlockList();
+    bl2.fromJSON(['Address: IPv4 203.0.113.1', 'Subnet: IPv4 198.51.100.0/24']);
+    ok(bl2.check('203.0.113.1'));
+    ok(bl2.check('198.51.100.100'));
+    ok(!bl2.check('203.0.113.2'));
+
+    // Test error cases
+    throws(() => bl.addAddress(123), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    throws(() => bl.addAddress('invalid.ip'), {
+      code: 'ERR_INVALID_IP_ADDRESS',
+    });
+
+    throws(() => bl.addAddress('192.168.1.1', 'invalid'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    throws(() => bl.addRange('192.168.1.10', '192.168.1.1'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    throws(() => bl.addSubnet('192.168.1.0', 33), {
+      code: 'ERR_OUT_OF_RANGE',
+    });
+
+    throws(() => bl.addSubnet('192.168.1.0', -1), {
+      code: 'ERR_OUT_OF_RANGE',
+    });
+
+    // Test IPv4-mapped IPv6 addresses
+    bl.addAddress('192.168.10.1');
+    ok(bl.check('::ffff:192.168.10.1', 'ipv6'));
+
+    bl.addRange('192.168.11.1', '192.168.11.10');
+    ok(bl.check('::ffff:192.168.11.5', 'ipv6'));
+
+    bl.addSubnet('192.168.12.0', 24);
+    ok(bl.check('::ffff:192.168.12.100', 'ipv6'));
   },
 };

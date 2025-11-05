@@ -3,11 +3,12 @@ import {
   createVerify,
   createPrivateKey,
   createPublicKey,
+  generateKeyPairSync,
   sign,
   verify,
 } from 'node:crypto';
 
-import { strictEqual, throws } from 'node:assert';
+import { ok, strictEqual, throws } from 'node:assert';
 
 const rsaSig =
   '26bb4d9641ecec048b791322c6427f62f3f4e21f7198e9e7544c8a56af40' +
@@ -142,5 +143,39 @@ export const dsaSignVerifyObjects = {
     throws(() => verify('sha256', Buffer.alloc(0), pub, Buffer.alloc(0)), {
       message: 'Verifying with DSA keys is not currently supported',
     });
+  },
+};
+
+export const testSignLength = {
+  test() {
+    // Tests that generated signatures are not overly long.
+    const message = `Test message 123: ${Math.random().toString(36).substring(2, 15)}`;
+
+    const keyPair = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+      publicKeyEncoding: {
+        type: 'spki',
+        format: 'pem',
+      },
+      privateKeyEncoding: {
+        type: 'pkcs8',
+        format: 'pem',
+      },
+    });
+
+    for (let n = 0; n < 1000; n++) {
+      const sign = createSign('SHA256');
+      sign.write(Buffer.from(message));
+      sign.end();
+
+      const sig = sign.sign(keyPair.privateKey);
+
+      const verify = createVerify('SHA256');
+      verify.write(Buffer.from(message));
+      verify.end();
+
+      // It will only verify correctly if the signature is the correct length.
+      ok(verify.verify(keyPair.publicKey, sig));
+    }
   },
 };

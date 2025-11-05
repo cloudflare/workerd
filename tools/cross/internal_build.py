@@ -9,7 +9,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("pr_id", help="Pull Request ID")
-    parser.add_argument("sha", help="Commit SHA")
+    parser.add_argument("merge_sha", help="Merge Commit SHA")
+    parser.add_argument("head_sha", help="HEAD Commit SHA")
     parser.add_argument("run_attempt", help="# of Run Attempt")
     parser.add_argument("branch_name", help="PR's Branch Name")
     parser.add_argument("URL", help="URL to submit build task")
@@ -30,7 +31,8 @@ if __name__ == "__main__":
 
     payload = {
         "pr_id": args.pr_id,
-        "commit_sha": args.sha,
+        "merge_commit_sha": args.merge_sha,
+        "head_commit_sha": args.head_sha,
         "run_attempt": args.run_attempt,
         "branch_name": args.branch_name,
     }

@@ -20,11 +20,15 @@
 
 namespace workerd::api {
 class SqlStorage;
+class SyncKvStorage;
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
 class DurableObject;
 class DurableObjectId;
 class WebSocket;
+class DurableObjectClass;
+class LoopbackDurableObjectNamespace;
+class LoopbackColoLocalActorNamespace;
 
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
 
@@ -79,6 +83,22 @@ class DurableObjectStorageOperations {
     JSG_STRUCT_TS_OVERRIDE(DurableObjectListOptions);  // Rename from DurableObjectStorageOperationsListOptions
   };
 
+  // A more convenient form of `ListOptions` for actually implementing the operation -- but less
+  // convenient for specifying it.
+  struct CompiledListOptions {
+    kj::String start;
+    kj::Maybe<kj::String> end;
+    bool reverse;
+    kj::Maybe<uint> limit;
+  };
+
+  // Compile `ListOptions` into `CompiledListOptions`. Returns null if the list operation would
+  // provably return no results (e.g. the end key is before the start key). This may (or may not)
+  // move some of the strings from the input to the output.
+  //
+  // This is public so that SyncKvStorage can reuse it.
+  static kj::Maybe<CompiledListOptions> compileListOptions(kj::Maybe<ListOptions>& maybeOptions);
+
   jsg::Promise<jsg::JsRef<jsg::JsValue>> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
   struct PutOptions {
@@ -125,7 +145,7 @@ class DurableObjectStorageOperations {
   jsg::Promise<void> deleteAlarm(jsg::Lock& js, jsg::Optional<SetAlarmOptions> options);
 
  protected:
-  typedef kj::StringPtr OpName;
+  using OpName = kj::StringPtr;
   static constexpr OpName OP_GET = "get()"_kj;
   static constexpr OpName OP_GET_ALARM = "getAlarm()"_kj;
   static constexpr OpName OP_LIST = "list()"_kj;
@@ -176,7 +196,7 @@ class DurableObjectTransaction;
 
 class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOperations {
  public:
-  DurableObjectStorage(IoPtr<ActorCacheInterface> cache, bool enableSql)
+  DurableObjectStorage(jsg::Lock&, IoPtr<ActorCacheInterface> cache, bool enableSql)
       : cache(kj::mv(cache)),
         enableSql(enableSql) {}
 
@@ -185,7 +205,8 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // forward write requests, and since we already have a reference to the primary prior to
   // constructing the `DurableObjectStorage`, we can just pass in the information we need to build
   // a stub. The stub is then stored in `maybePrimary`.
-  DurableObjectStorage(IoPtr<ActorCacheInterface> cache,
+  DurableObjectStorage(jsg::Lock& js,
+      IoPtr<ActorCacheInterface> cache,
       bool enableSql,
       kj::Own<IoChannelFactory::ActorChannel> primaryActorChannel,
       kj::Own<ActorIdFactory::ActorId> primaryActorId);
@@ -196,6 +217,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
   // Throws if not SQLite-backed.
   SqliteDatabase& getSqliteDb(jsg::Lock& js);
+  SqliteKv& getSqliteKv(jsg::Lock& js);
 
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
@@ -219,6 +241,8 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   jsg::Promise<void> sync(jsg::Lock& js);
 
   jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
+
+  jsg::Ref<SyncKvStorage> getKv(jsg::Lock& js);
 
   // Get a bookmark for the current state of the database. Note that since this is async, the
   // bookmark will include any writes in the current atomic batch, including writes that are
@@ -275,6 +299,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     JSG_METHOD(sync);
 
     JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
+    JSG_LAZY_INSTANCE_PROPERTY(kv, getKv);
     JSG_METHOD(transactionSync);
 
     JSG_METHOD(getCurrentBookmark);
@@ -385,6 +410,72 @@ class DurableObjectTransaction final: public jsg::Object, public DurableObjectSt
   friend DurableObjectStorage;
 };
 
+class DurableObjectFacets: public jsg::Object {
+ public:
+  DurableObjectFacets(kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager)
+      : facetManager(kj::mv(facetManager)) {}
+
+  // Describes how to run a facet. The app provides this when first accessing a facet that isn't
+  // already running.
+  struct StartupOptions {
+    // The actor class to use to implement the facet.
+    //
+    // Note that the $ is needed only because `class` is a keyword in C++. JSG removes the $ from
+    // the name in the JS API. C++ does not officially recognize the existence of a $ symbol but
+    // all major compilers support using it as if it were a letter.
+    kj::OneOf<jsg::Ref<DurableObjectClass>,
+        jsg::Ref<LoopbackDurableObjectNamespace>,
+        jsg::Ref<LoopbackColoLocalActorNamespace>>
+        $class;
+
+    // Value to expose as `ctx.id` in the facet.
+    jsg::Optional<kj::OneOf<jsg::Ref<DurableObjectId>, kj::String>> id;
+
+    JSG_STRUCT($class, id);
+
+    JSG_STRUCT_TS_OVERRIDE(FacetStartupOptions<
+        T extends Rpc.DurableObjectBranded | undefined = undefined> {
+      class: DurableObjectClass<T>;
+      id?: DurableObjectId | string;
+
+      $class: never;  // work around generate-types bug
+    });
+  };
+
+  // Get a facet by name, starting it if it isn't already running. `getStartupOptions` is invoked
+  // only if the facet wasn't already running, to get information needed to start the facet.
+  //
+  // Returns a `Fetcher` instead of a `DurableObject` becasue the returend stub does not have the
+  // `id` or `name` methods that a DO stub normally has.
+  jsg::Ref<Fetcher> get(jsg::Lock& js,
+      kj::String name,
+      jsg::Function<jsg::Promise<StartupOptions>()> getStartupOptions);
+
+  void abort(jsg::Lock& js, kj::String name, jsg::JsValue reason);
+  void delete_(jsg::Lock& js, kj::String name);
+
+  JSG_RESOURCE_TYPE(DurableObjectFacets) {
+    JSG_METHOD(get);
+    JSG_METHOD(abort);
+    JSG_METHOD_NAMED(delete, delete_);
+
+    JSG_TS_OVERRIDE({
+      get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
+          name: string,
+          getStartupOptions: () => FacetStartupOptions<T> | Promise<FacetStartupOptions<T>>)
+          : Fetcher<T>;
+    });
+  }
+
+ private:
+  kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;
+
+  Worker::Actor::FacetManager& getFacetManager() {
+    return *JSG_REQUIRE_NONNULL(
+        facetManager, Error, "This Durable Object does not support creating facets.");
+  }
+};
+
 // The type placed in event.actorState (pre-modules API).
 // NOTE: It hasn't been renamed under the assumption that it will only be
 // used for colo-local namespaces.
@@ -395,7 +486,7 @@ class ActorState: public jsg::Object {
       kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent);
 
-  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
+  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
 
   jsg::Optional<jsg::JsValue> getTransient(jsg::Lock& js) {
     return transient.map([&](jsg::JsRef<jsg::JsValue>& v) { return v.getHandle(js); });
@@ -441,8 +532,8 @@ class WebSocketRequestResponsePair: public jsg::Object {
         response(kj::mv(response)) {};
 
   static jsg::Ref<WebSocketRequestResponsePair> constructor(
-      kj::String request, kj::String response) {
-    return jsg::alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
+      jsg::Lock& js, kj::String request, kj::String response) {
+    return js.alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
   };
 
   kj::StringPtr getRequest() {
@@ -470,11 +561,14 @@ class WebSocketRequestResponsePair: public jsg::Object {
 // The type passed as the first parameter to durable object class's constructor.
 class DurableObjectState: public jsg::Object {
  public:
-  DurableObjectState(Worker::Actor::Id actorId,
-      jsg::JsRef<jsg::JsValue> exports,
+  DurableObjectState(jsg::Lock& js,
+      Worker::Actor::Id actorId,
+      jsg::JsValue exports,
+      jsg::JsValue props,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container,
-      bool containerRunning);
+      bool containerRunning,
+      kj::Maybe<Worker::Actor::FacetManager&> facetManager);
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -482,7 +576,11 @@ class DurableObjectState: public jsg::Object {
     return exports.getHandle(js);
   }
 
-  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
+  jsg::JsValue getProps(jsg::Lock& js) {
+    return props.getHandle(js);
+  }
+
+  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
 
   jsg::Optional<jsg::Ref<DurableObjectStorage>> getStorage() {
     return storage.map([&](jsg::Ref<DurableObjectStorage>& p) { return p.addRef(); });
@@ -492,12 +590,16 @@ class DurableObjectState: public jsg::Object {
     return container.map([](jsg::Ref<Container>& c) { return c.addRef(); });
   }
 
+  jsg::Ref<DurableObjectFacets> getFacets(jsg::Lock& js) {
+    return js.alloc<DurableObjectFacets>(facetManager);
+  }
+
   jsg::Promise<jsg::JsRef<jsg::JsValue>> blockConcurrencyWhile(
       jsg::Lock& js, jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>()> callback);
 
   // Reset the object, including breaking the output gate and canceling any writes that haven't
   // been committed yet.
-  void abort(jsg::Optional<kj::String> reason);
+  void abort(jsg::Lock& js, jsg::Optional<kj::String> reason);
 
   // Sets and returns a new hibernation manager in an actor if there's none or returns the existing.
   Worker::Actor::HibernationManager& maybeInitHibernationManager(Worker::Actor& actor);
@@ -536,7 +638,7 @@ class DurableObjectState: public jsg::Object {
       jsg::Optional<jsg::Ref<api::WebSocketRequestResponsePair>> maybeReqResp);
 
   // Gets the currently set object-wide websocket auto response.
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse();
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(jsg::Lock& js);
 
   // Get the last auto response timestamp or null
   kj::Maybe<kj::Date> getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws);
@@ -554,14 +656,17 @@ class DurableObjectState: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
-    if (flags.getWorkerdExperimental()) {
-      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
-      // this works in production.
+    if (flags.getEnableCtxExports()) {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
+    JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
+    if (flags.getWorkerdExperimental()) {
+      // Experimental new API, details may change!
+      JSG_LAZY_INSTANCE_PROPERTY(facets, getFacets);
+    }
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
     JSG_METHOD(getWebSockets);
@@ -575,12 +680,29 @@ class DurableObjectState: public jsg::Object {
     JSG_METHOD(abort);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-      readonly id: DurableObjectId;
-      readonly storage: DurableObjectStorage;
-      blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
-    });
-    // Make `storage` non-optional
+
+    // Type overrides:
+    // * Define Props/Exports type parameters.
+    // * Make `storage` non-optional
+    // * Make `id` strictly `DurableObjectId` (it's only a string for colo-local actors which are
+    //   not available publicly).
+    if (flags.getEnableCtxExports()) {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly exports: Cloudflare.Exports;
+        readonly id: DurableObjectId;
+        readonly storage: DurableObjectStorage;
+        blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+      });
+    } else {
+      // No ctx.exports yet.
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly id: DurableObjectId;
+        readonly storage: DurableObjectStorage;
+        blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+      });
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -600,8 +722,10 @@ class DurableObjectState: public jsg::Object {
  private:
   Worker::Actor::Id id;
   jsg::JsRef<jsg::JsValue> exports;
+  jsg::JsRef<jsg::JsValue> props;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
   kj::Maybe<jsg::Ref<Container>> container;
+  kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;
 
   // Limits for Hibernatable WebSocket tags.
 
@@ -616,6 +740,7 @@ class DurableObjectState: public jsg::Object {
       api::DurableObjectStorageOperations::GetOptions,                                             \
       api::DurableObjectStorageOperations::GetAlarmOptions,                                        \
       api::DurableObjectStorageOperations::PutOptions,                                             \
-      api::DurableObjectStorageOperations::SetAlarmOptions, api::WebSocketRequestResponsePair
+      api::DurableObjectStorageOperations::SetAlarmOptions, api::WebSocketRequestResponsePair,     \
+      api::DurableObjectFacets, api::DurableObjectFacets::StartupOptions
 
 }  // namespace workerd::api

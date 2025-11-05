@@ -18,21 +18,23 @@ static void Test_JSON_ENC(benchmark::State& state) {
   // Perform setup here
 
   for (auto _: state) {
-    // This code gets timed
-    KJ_EXPECT(json.encode(capnp::VOID) == "null");
-    KJ_EXPECT(json.encode(true) == "true");
-    KJ_EXPECT(json.encode(false) == "false");
-    KJ_EXPECT(json.encode(123) == "123");
-    KJ_EXPECT(json.encode(-5.5) == "-5.5");
-    KJ_EXPECT(json.encode(capnp::Text::Reader("foo")) == "\"foo\"");
-    KJ_EXPECT(json.encode(capnp::Text::Reader("ab\"cd\\ef\x03")) == "\"ab\\\"cd\\\\ef\\u0003\"");
+    for (size_t i = 0; i < 10000; i++) {
+      // This code gets timed
+      KJ_EXPECT(json.encode(capnp::VOID) == "null");
+      KJ_EXPECT(json.encode(true) == "true");
+      KJ_EXPECT(json.encode(false) == "false");
+      KJ_EXPECT(json.encode(123) == "123");
+      KJ_EXPECT(json.encode(-5.5) == "-5.5");
+      KJ_EXPECT(json.encode(capnp::Text::Reader("foo")) == "\"foo\"");
+      KJ_EXPECT(json.encode(capnp::Text::Reader("ab\"cd\\ef\x03")) == "\"ab\\\"cd\\\\ef\\u0003\"");
 
-    json.setPrettyPrint(false);
-    kj::byte bytes[] = {12, 34, 56};
-    KJ_EXPECT(json.encode(capnp::Data::Reader(bytes, 3)) == "[12,34,56]");
+      json.setPrettyPrint(false);
+      kj::byte bytes[] = {12, 34, 56};
+      KJ_EXPECT(json.encode(capnp::Data::Reader(bytes, 3)) == "[12,34,56]");
 
-    json.setPrettyPrint(true);
-    KJ_EXPECT(json.encode(capnp::Data::Reader(bytes, 3)) == "[12, 34, 56]");
+      json.setPrettyPrint(true);
+      KJ_EXPECT(json.encode(capnp::Data::Reader(bytes, 3)) == "[12, 34, 56]");
+    }
   }
 }
 
@@ -41,12 +43,16 @@ static void Test_JSON_DEC(benchmark::State& state) {
   capnp::JsonCodec json;
   capnp::MallocMessageBuilder responseMessage;
   json.handleByAnnotation<workerd::api::public_beta::R2BindingRequest>();
-  kj::StringPtr dummy =
+  static constexpr kj::StringPtr dummy =
       "{\"version\":1,\"method\":\"completeMultipartUpload\",\"object\":\"multipart_object_name4\",\"uploadId\":\"uploadId\",\"parts\":[{\"etag\":\"1234\",\"part\":1},{\"etag\":\"56789\",\"part\":2}]}"_kj;
 
   for (auto _: state) {
-    auto responseBuilder = responseMessage.initRoot<workerd::api::public_beta::R2BindingRequest>();
-    json.decode(dummy, responseBuilder);
+    for (size_t i = 0; i < 100000; i++) {
+      auto responseBuilder =
+          responseMessage.initRoot<workerd::api::public_beta::R2BindingRequest>();
+      json.decode(dummy, responseBuilder);
+      benchmark::DoNotOptimize(responseBuilder);
+    }
   }
 }
 

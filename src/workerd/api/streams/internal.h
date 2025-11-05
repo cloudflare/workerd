@@ -92,7 +92,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseReader in common.h for details on the use of maybeJs
 
-  kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
+  kj::Maybe<PipeController&> tryPipeLock() override;
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
@@ -123,9 +123,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   class PipeLocked: public PipeController {
    public:
-    PipeLocked(ReadableStreamInternalController& inner, jsg::Ref<WritableStream> ref)
-        : inner(inner),
-          ref(kj::mv(ref)) {}
+    PipeLocked(ReadableStreamInternalController& inner): inner(inner) {}
 
     bool isClosed() override;
 
@@ -143,17 +141,8 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(ref);
-    }
-
-    kj::StringPtr jsgGetMemoryName() const;
-    size_t jsgGetMemorySelfSize() const;
-    void jsgGetMemoryInfo(jsg::MemoryTracker& info) const;
-
    private:
     ReadableStreamInternalController& inner;
-    jsg::Ref<WritableStream> ref;
   };
 
   kj::Maybe<ReadableStream&> owner;
@@ -287,8 +276,6 @@ class WritableStreamInternalController: public WritableStreamController {
   kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
 
   uint64_t currentWriteBufferSize = 0;
-  bool warnAboutExcessiveBackpressure = true;
-  size_t excessiveBackpressureWarningCount = 0;
 
   // The highWaterMark is the total amount of data currently buffered in
   // the controller waiting to be flushed out to the underlying WritableStreamSink.
@@ -381,75 +368,4 @@ class WritableStreamInternalController: public WritableStreamController {
   // events.
   std::list<WriteEvent> queue;
 };
-
-// An implementation of ReadableStreamSource and WritableStreamSink which communicates read and
-// write requests via a OneOf.
-//
-// This class is also used as the implementation of FixedLengthStream, in which case `limit` is
-// non-nullptr.
-class IdentityTransformStreamImpl: public kj::Refcounted,
-                                   public ReadableStreamSource,
-                                   public WritableStreamSink {
-  // TODO(soon): Reimplement this in terms of kj::OneWayPipe, so we can optimize pumpTo().
-
- public:
-  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none): limit(limit) {}
-
-  ~IdentityTransformStreamImpl() noexcept(false) {
-    // Due to the different natures of JS and C++ disposal, there is no point in enforcing the limit
-    // for a FixedLengthStream here.
-    //
-    // 1. Creating but not using a `new FixedLengthStream(n)` should not be an error, and ought not
-    //    to logspam us.
-    // 2. Chances are high that by the time this object gets destroyed, it's too late to tell the
-    //    user about the failure.
-  }
-
-  // ReadableStreamSource implementation -------------------------------------------------
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
-
-  kj::Promise<size_t> tryReadInternal(void* buffer, size_t maxBytes);
-
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override;
-
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
-
-  void cancel(kj::Exception reason) override;
-
-  // WritableStreamSink implementation ---------------------------------------------------
-
-  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override;
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
-
-  kj::Promise<void> end() override;
-
-  void abort(kj::Exception reason) override;
-
- private:
-  kj::Promise<size_t> readHelper(kj::ArrayPtr<kj::byte> bytes);
-
-  kj::Promise<void> writeHelper(kj::ArrayPtr<const kj::byte> bytes);
-
-  kj::Maybe<uint64_t> limit;
-
-  struct ReadRequest {
-    kj::ArrayPtr<kj::byte> bytes;
-    // WARNING: `bytes` may be invalid if fulfiller->isWaiting() returns false! (This indicates the
-    //   read was canceled.)
-
-    kj::Own<kj::PromiseFulfiller<size_t>> fulfiller;
-  };
-
-  struct WriteRequest {
-    kj::ArrayPtr<const kj::byte> bytes;
-    kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-  };
-
-  struct Idle {};
-
-  kj::OneOf<Idle, ReadRequest, WriteRequest, kj::Exception, StreamStates::Closed> state = Idle();
-};
-
 }  // namespace workerd::api

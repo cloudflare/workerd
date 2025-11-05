@@ -203,7 +203,7 @@ private:
   static jsg::Promise<void> returnFunction(
       jsg::Lock& js,
       AsyncIteratorState& state,
-      jsg::Optional<jsg::Value> value);
+      jsg::Optional<jsg::Value>& value);
 
 public:
   explicit ReadableStream(IoContext& ioContext,
@@ -424,8 +424,8 @@ class ByteLengthQueuingStrategy: public jsg::Object {
 public:
   ByteLengthQueuingStrategy(QueuingStrategyInit init) : init(init) {}
 
-  static jsg::Ref<ByteLengthQueuingStrategy> constructor(QueuingStrategyInit init) {
-    return jsg::alloc<ByteLengthQueuingStrategy>(init);
+  static jsg::Ref<ByteLengthQueuingStrategy> constructor(jsg::Lock& js, QueuingStrategyInit init) {
+    return js.alloc<ByteLengthQueuingStrategy>(init);
   }
 
   double getHighWaterMark() const { return init.highWaterMark; }
@@ -454,8 +454,8 @@ class CountQueuingStrategy: public jsg::Object {
 public:
   CountQueuingStrategy(QueuingStrategyInit init) : init(init) {}
 
-  static jsg::Ref<CountQueuingStrategy> constructor(QueuingStrategyInit init) {
-    return jsg::alloc<CountQueuingStrategy>(init);
+  static jsg::Ref<CountQueuingStrategy> constructor(jsg::Lock& js, QueuingStrategyInit init) {
+    return js.alloc<CountQueuingStrategy>(init);
   }
 
   double getHighWaterMark() const { return init.highWaterMark; }

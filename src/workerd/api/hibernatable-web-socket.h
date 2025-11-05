@@ -7,12 +7,12 @@
 #include <workerd/api/basics.h>
 #include <workerd/api/hibernation-event-params.h>
 #include <workerd/api/web-socket.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
 
 #include <kj/debug.h>
-#include <kj/time.h>
 
 namespace workerd::api {
 
@@ -76,6 +76,8 @@ class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::Custom
   uint16_t getType() override {
     return typeId;
   }
+
+  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
 
   kj::Promise<Result> notSupported() override {
     KJ_UNIMPLEMENTED("hibernatable web socket event not supported");

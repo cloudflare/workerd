@@ -20,7 +20,7 @@ inline void maybeSetV8ContinuationContext(
   } else {
     value = v8::Undefined(isolate);
   }
-  isolate->SetContinuationPreservedEmbedderData(value);
+  isolate->SetContinuationPreservedEmbedderDataV2(value);
 }
 }  // namespace
 
@@ -62,8 +62,8 @@ kj::Maybe<Ref<AsyncContextFrame>> AsyncContextFrame::currentRef(Lock& js) {
 }
 
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
-  auto value = isolate->GetContinuationPreservedEmbedderData();
-  KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, value)) {
+  auto value = isolate->GetContinuationPreservedEmbedderDataV2();
+  KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, value.As<v8::Value>())) {
     AsyncContextFrame* frame = dynamic_cast<AsyncContextFrame*>(&wrappable);
     KJ_ASSERT(frame != nullptr);
     return *frame;
@@ -72,18 +72,21 @@ kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
 }
 
 Ref<AsyncContextFrame> AsyncContextFrame::create(Lock& js, StorageEntry storageEntry) {
-  return alloc<AsyncContextFrame>(js, kj::mv(storageEntry));
+  return js.alloc<AsyncContextFrame>(js, kj::mv(storageEntry));
 }
 
-v8::Local<v8::Function> AsyncContextFrame::wrap(
-    Lock& js, V8Ref<v8::Function>& fn, kj::Maybe<v8::Local<v8::Value>> thisArg) {
-  return wrap(js, fn.getHandle(js), thisArg);
+v8::Local<v8::Function> AsyncContextFrame::wrap(Lock& js,
+    V8Ref<v8::Function>& fn,
+    jsg::Function<void()> validate,
+    kj::Maybe<v8::Local<v8::Value>> thisArg) {
+  return wrap(js, fn.getHandle(js), kj::mv(validate), thisArg);
 }
 
-v8::Local<v8::Function> AsyncContextFrame::wrapSnapshot(Lock& js) {
+v8::Local<v8::Function> AsyncContextFrame::wrapSnapshot(Lock& js, jsg::Function<void()> validate) {
   return js.wrapReturningFunction(js.v8Context(),
-      JSG_VISITABLE_LAMBDA((frame = AsyncContextFrame::currentRef(js)), (frame),
-          (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+      JSG_VISITABLE_LAMBDA((frame = AsyncContextFrame::currentRef(js), validate = kj::mv(validate)),
+          (frame, validate), (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+            validate(js);
             auto context = js.v8Context();
             JSG_REQUIRE(args[0]->IsFunction(), TypeError, "The first argument must be a function");
             auto fn = args[0].As<v8::Function>();
@@ -97,15 +100,19 @@ v8::Local<v8::Function> AsyncContextFrame::wrapSnapshot(Lock& js) {
           }));
 }
 
-v8::Local<v8::Function> AsyncContextFrame::wrap(
-    Lock& js, v8::Local<v8::Function> fn, kj::Maybe<v8::Local<v8::Value>> thisArg) {
+v8::Local<v8::Function> AsyncContextFrame::wrap(Lock& js,
+    v8::Local<v8::Function> fn,
+    jsg::Function<void()> validate,
+    kj::Maybe<v8::Local<v8::Value>> thisArg) {
   auto context = js.v8Context();
 
   return js.wrapReturningFunction(context,
       JSG_VISITABLE_LAMBDA(
-          (frame = JSG_THIS, thisArg = js.v8Ref(thisArg.orDefault(context->Global())),
-              fn = js.v8Ref(fn)),
-          (frame, thisArg, fn), (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+          (frame = JSG_THIS, validate = kj::mv(validate),
+              thisArg = js.v8Ref(thisArg.orDefault(context->Global())), fn = js.v8Ref(fn)),
+          (frame, validate, thisArg, fn),
+          (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+            validate(js);
             auto function = fn.getHandle(js);
 
             v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length());

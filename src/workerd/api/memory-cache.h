@@ -2,13 +2,13 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/uuid.h>
+#include <workerd/util/checked-queue.h>
 
 #include <kj/hash.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
-#include <kj/timer.h>
+#include <kj/time.h>
 
 #include <set>
 
@@ -170,7 +170,6 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
       kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler,
       const kj::MonotonicClock& timer);
 
- public:
   // RAII class that attaches itself to a cache, suggests cache limits to the
   // cache it is attached to, and allows interacting with the cache.
   class Use {
@@ -185,13 +184,13 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     // expired). If no such value exists, nothing is returned, regardless of any
     // in-progress fallbacks trying to produce such a value.
     kj::Maybe<kj::Own<CacheValue>> getWithoutFallback(
-        const kj::String& key, SpanBuilder& span) const;
+        const kj::String& key, SpanBuilder& readSpan) const;
 
     struct FallbackResult {
       kj::Own<CacheValue> value;
       kj::Maybe<double> expiration;
     };
-    typedef kj::Function<void(kj::Maybe<FallbackResult>)> FallbackDoneCallback;
+    using FallbackDoneCallback = kj::Function<void(kj::Maybe<FallbackResult>, SpanBuilder&)>;
     using GetWithFallbackOutcome = kj::OneOf<kj::Own<CacheValue>, FallbackDoneCallback>;
 
     // Returns either:
@@ -200,7 +199,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     //    or to a FallbackDoneCallback. In the latter case, the caller should
     //    invoke the fallback function.
     kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
-        const kj::String& key, SpanBuilder& span) const;
+        const kj::String& key, SpanBuilder& readSpan) const;
 
     void delete_(const kj::String& key) const;
 
@@ -232,7 +231,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     struct Waiter {
       kj::Own<kj::CrossThreadPromiseFulfiller<Use::GetWithFallbackOutcome>> fulfiller;
     };
-    std::deque<Waiter> waiting;
+    workerd::util::Queue<Waiter> waiting;
 
     InProgress(kj::String&& key): key(kj::mv(key)) {}
 
@@ -342,7 +341,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
   // when a new version of a worker is deployed.
   class ValueSizeCallbacks {
    public:
-    inline const MemoryCacheEntry& keyForRow(const MemoryCacheEntry& entry) const {
+    inline const MemoryCacheEntry& keyForRow(const MemoryCacheEntry& entry KJ_LIFETIMEBOUND) const {
       return entry;
     }
 
@@ -365,7 +364,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
   // at the very end, ordered by their cache keys.
   class ExpirationCallbacks {
    public:
-    inline const MemoryCacheEntry& keyForRow(const MemoryCacheEntry& entry) const {
+    inline const MemoryCacheEntry& keyForRow(const MemoryCacheEntry& entry KJ_LIFETIMEBOUND) const {
       return entry;
     }
 

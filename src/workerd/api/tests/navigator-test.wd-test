@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "navigator-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "navigator-test.js")
+        ],
+        compatibilityDate = "2025-01-15",
+        compatibilityFlags = ["nodejs_compat", "enable_navigator_language"],
+      ),
+    ),
+  ],
+);

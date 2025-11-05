@@ -1,19 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
-
-def rust_cxx_include(name, visibility = [], include_prefix = None):
-    native.genrule(
-        name = "%s/generated" % name,
-        outs = ["cxx.h"],
-        cmd = "$(location @cxxbridge-cmd//:cxxbridge-cmd) --header > \"$@\"",
-        tools = ["@cxxbridge-cmd//:cxxbridge-cmd"],
-    )
-
-    native.cc_library(
-        name = name,
-        hdrs = ["cxx.h"],
-        include_prefix = include_prefix,
-        visibility = visibility,
-    )
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test", "rust_unpretty")
 
 def rust_cxx_bridge(
         name,
@@ -30,8 +15,12 @@ def rust_cxx_bridge(
             src + ".h",
             src + ".cc",
         ],
-        cmd = "$(location @cxxbridge-cmd//:cxxbridge-cmd) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
-        tools = ["@cxxbridge-cmd//:cxxbridge-cmd"],
+        cmd = "$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
+        tools = ["@workerd-cxx//:codegen"],
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     native.cc_library(
@@ -46,11 +35,16 @@ def rust_cxx_bridge(
         }),
         deps = deps,
         visibility = visibility,
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
 def wd_rust_crate(
         name,
         cxx_bridge_src = None,
+        cxx_bridge_srcs = [],
         deps = [],
         proc_macro_deps = [],
         data = [],
@@ -80,24 +74,36 @@ def wd_rust_crate(
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
-        hdrs = native.glob(["**/*.h"], allow_empty = True)
+        cxx_bridge_srcs = cxx_bridge_srcs + [cxx_bridge_src]
 
+    # Add cxx dependency if there are any cxx bridges
+    if len(cxx_bridge_srcs) > 0:
+        cxx_bridge_deps = cxx_bridge_deps + [
+            "@workerd-cxx//kj-rs",
+            "@workerd-cxx//:cxx",
+        ]
+        deps = deps + [
+            "@workerd-cxx//kj-rs",
+            "@workerd-cxx//:cxx",
+        ]
+
+    include_prefix = "workerd/" + native.package_name().removeprefix("src/")
+
+    hdrs = native.glob(["**/*.h"], allow_empty = True)
+    for bridge_src in cxx_bridge_srcs:
         rust_cxx_bridge(
-            name = name + "@cxx",
-            src = cxx_bridge_src,
+            name = bridge_src + "@cxx",
+            src = bridge_src,
             hdrs = hdrs,
-            include_prefix = "workerd/rust/" + name,
+            include_prefix = include_prefix,
             strip_include_prefix = "",
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
-            deps = cxx_bridge_deps + [
-                "@crates_vendor//:cxx",
-                "//src/rust/cxx-integration:cxx-include",
-            ],
+            deps = cxx_bridge_deps,
         )
 
-        deps.append("@crates_vendor//:cxx")
-        deps.append(name + "@cxx")
+    for bridge_src in cxx_bridge_srcs:
+        deps.append(bridge_src + "@cxx")
 
     crate_features = []
 
@@ -105,11 +111,15 @@ def wd_rust_crate(
         name = name,
         crate_name = crate_name,
         srcs = srcs,
-        deps = deps,
+        deps = deps + ["@workerd//deps/rust:runtime"],
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     rust_test(
@@ -131,3 +141,10 @@ def wd_rust_crate(
             "//conditions:default": 1,
         }),
     )
+
+    if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:
+        rust_unpretty(
+            name = name + "@expand",
+            deps = [":" + name],
+            tags = ["manual", "off-by-default"],
+        )

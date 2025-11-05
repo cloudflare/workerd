@@ -1,9 +1,9 @@
-import assert from "node:assert";
-import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
-import ts from "typescript";
-import { generateDefinitions } from "./generator";
-import { printNodeList, printer } from "./print";
-import { SourcesMap, createMemoryProgram } from "./program";
+import assert from 'node:assert';
+import { StructureGroups } from '@workerd/jsg/rtti';
+import ts from 'typescript';
+import { generateDefinitions } from './generator';
+import { printNodeList, printer } from './print';
+import { SourcesMap, createMemoryProgram } from './program';
 import {
   CommentsData,
   compileOverridesDefines,
@@ -14,9 +14,9 @@ import {
   createImportableTransformer,
   createIteratorTransformer,
   createOverrideDefineTransformer,
-} from "./transforms";
-import { createClassToInterfaceTransformer } from "./transforms/class-to-interface";
-import { createAddOnMessageDeclarationTransformer } from "./transforms/onmessage-declaration";
+} from './transforms';
+import { createClassToInterfaceTransformer } from './transforms/class-to-interface';
+import { createAddOnMessageDeclarationTransformer } from './transforms/onmessage-declaration';
 
 const definitionsHeader = `/*! *****************************************************************************
 Copyright (c) Cloudflare. All rights reserved.
@@ -64,7 +64,7 @@ export function printDefinitions(
   // Assemble partial overrides and defines to valid TypeScript source files
   const [sources, replacements] = compileOverridesDefines(root);
   // Add source file containing generated nodes
-  const sourcePath = "/$virtual/source.ts";
+  const sourcePath = '/$virtual/source.ts';
   let source = printNodeList(nodes);
   sources.set(sourcePath, printNodeList(nodes));
 
@@ -77,7 +77,7 @@ export function printDefinitions(
     // Run global scope transformer after overrides so members added in
     // overrides are extracted
     createGlobalScopeTransformer(checker),
-    createClassToInterfaceTransformer(["Request", "Response", "WebSocket"]),
+    createClassToInterfaceTransformer(['Request', 'Response', 'WebSocket']),
     // TODO: enable this once we've figured out how not to expose internal modules
     // createInternalNamespaceTransformer(root, structureMap),
     createCommentsTransformer(commentData),

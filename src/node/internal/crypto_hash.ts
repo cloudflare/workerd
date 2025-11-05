@@ -53,8 +53,8 @@ import {
 
 import {
   Transform,
-  TransformOptions,
-  TransformCallback,
+  type TransformOptions,
+  type TransformCallback,
 } from 'node-internal:streams_transform';
 
 import { KeyObject } from 'node-internal:crypto_keys';
@@ -68,20 +68,17 @@ interface _kState {
 }
 
 declare class Hash extends Transform {
-  public [kHandle]: cryptoImpl.HashHandle;
-  public [kState]: _kState;
+  [kHandle]: cryptoImpl.HashHandle;
+  [kState]: _kState;
 
-  public constructor(
-    algorithm: string | cryptoImpl.HashHandle,
-    options?: HashOptions
-  );
+  constructor(algorithm: string | cryptoImpl.HashHandle, options?: HashOptions);
 
-  public copy(options?: HashOptions): Hash;
-  public update(
+  copy(options?: HashOptions): Hash;
+  update(
     data: string | Buffer | ArrayBufferView,
     encoding?: string
   ): Hash | Hmac;
-  public digest(outputEncoding?: string): Buffer | string;
+  digest(outputEncoding?: string): Buffer | string;
 }
 
 // These helper functions are needed because the constructors can
@@ -193,19 +190,19 @@ Hash.prototype.digest = function (
 ///////////////////////////
 
 declare class Hmac extends Transform {
-  public [kHandle]: cryptoImpl.HmacHandle;
-  public [kState]: _kState;
-  public constructor(
+  [kHandle]: cryptoImpl.HmacHandle;
+  [kState]: _kState;
+  constructor(
     hmac: string,
     key: ArrayLike | KeyObject | CryptoKey,
     options?: TransformOptions
   );
-  public copy(options?: HashOptions): Hash;
-  public update(
+  copy(options?: HashOptions): Hash;
+  update(
     data: string | Buffer | ArrayBufferView,
     encoding?: string
   ): Hash | Hmac;
-  public digest(outputEncoding?: string): Buffer | string;
+  digest(outputEncoding?: string): Buffer | string;
 }
 
 export function createHmac(

@@ -48,11 +48,28 @@ struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
   }
 
   BufferSource makeBufferSource(jsg::Lock& js) {
-    return BufferSource(js, BackingStore::from(kj::arr<kj::byte>(1, 2, 3)));
+    return BufferSource(js, BackingStore::from(js, kj::arr<kj::byte>(1, 2, 3)));
   }
 
   BufferSource makeArrayBuffer(jsg::Lock& js) {
     return BufferSource(js, BackingStore::alloc<v8::ArrayBuffer>(js, 3));
+  }
+
+  bool doTest(jsg::Lock& js, jsg::BufferSource buf) {
+    buf.asArrayPtr()[0] = 1;
+    buf.asArrayPtr()[1] = 2;
+    buf.asArrayPtr()[2] = 3;
+    buf.asArrayPtr()[3] = 4;
+    buf.asArrayPtr()[4] = 5;
+    buf.asArrayPtr()[5] = 6;
+    buf.asArrayPtr()[6] = 7;
+    buf.asArrayPtr()[7] = 8;
+
+    auto ptr = buf.asArrayPtr<uint32_t>();
+    KJ_ASSERT(ptr.size() == 2);
+    KJ_ASSERT(ptr[0] == 0x04030201);
+    KJ_ASSERT(ptr[1] == 0x08070605);
+    return true;
   }
 
   JSG_RESOURCE_TYPE(BufferSourceContext) {
@@ -60,6 +77,7 @@ struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(takeUint8Array);
     JSG_METHOD(makeBufferSource);
     JSG_METHOD(makeArrayBuffer);
+    JSG_METHOD(doTest);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(BufferSourceIsolate, BufferSourceContext);
@@ -87,6 +105,8 @@ KJ_TEST("BufferSource works") {
 
   e.expectEval("const ab = new BigInt64Array(1); takeBufferSource(ab) === ab", "boolean", "true");
 
+  e.expectEval("const ab = new Float16Array(4); takeBufferSource(ab) === ab", "boolean", "true");
+
   e.expectEval("const ab = new Float32Array(2); takeBufferSource(ab) === ab", "boolean", "true");
 
   e.expectEval("const ab = new Float64Array(1); takeBufferSource(ab) === ab", "boolean", "true");
@@ -97,6 +117,8 @@ KJ_TEST("BufferSource works") {
                "u8.byteLength === 0 && u2.byteLength === 1 && u2 instanceof Uint8Array && "
                "u2.buffer.byteLength === 4 && u2.byteOffset === 1 && u8 !== u2",
       "boolean", "true");
+
+  e.expectEval("const buf = new Uint8Array(12); doTest(buf.subarray(4))", "boolean", "true");
 }
 
 }  // namespace

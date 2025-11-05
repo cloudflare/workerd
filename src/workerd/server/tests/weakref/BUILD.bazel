@@ -1,0 +1,18 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+js_test(
+    name = "js-weak-ref-test",
+    data = [
+        ":config.capnp",
+        ":index.mjs",
+        "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
+    ],
+    entry_point = "test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WORKERD_CONFIG": "$(rootpath :config.capnp)",
+    },
+    flaky = True,
+    tags = ["js-test"],
+)

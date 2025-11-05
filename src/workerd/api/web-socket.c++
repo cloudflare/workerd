@@ -5,6 +5,7 @@
 #include "web-socket.h"
 
 #include "events.h"
+#include "messagechannel.h"
 #include "util.h"
 
 #include <workerd/io/features.h>
@@ -12,6 +13,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/compat/url.h>
@@ -63,7 +65,7 @@ WebSocket::WebSocket(
 
 jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
     jsg::Lock& js, kj::WebSocket& ws, HibernationPackage package) {
-  return jsg::alloc<WebSocket>(js, IoContext::current(), ws, kj::mv(package));
+  return js.alloc<WebSocket>(js, IoContext::current(), ws, kj::mv(package));
 }
 
 WebSocket::WebSocket(kj::Own<kj::WebSocket> native)
@@ -128,8 +130,8 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
     // Sets readyState to CLOSED.
     reportError(js, jsg::JsValue(e.getHandle(js)).addRef(js));
 
-    dispatchEventImpl(js,
-        jsg::alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"), false));
+    dispatchEventImpl(
+        js, js.alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"), false));
   });
   // Note that in this attach we pass a strong reference to the WebSocket. The reference will be
   // dropped when either the connection promise completes or the IoContext is torn down,
@@ -247,7 +249,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   // Users should use Authorization header for this purpose.
   kj::String connUrl =
       uriEncodeControlChars(urlRecord.toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
-  auto ws = jsg::alloc<WebSocket>(kj::mv(url));
+  auto ws = js.alloc<WebSocket>(kj::mv(url));
 
   headers.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::str("permessage-deflate"));
   // By default, browsers set the compression extension header for `new WebSocket()`.
@@ -474,8 +476,16 @@ WebSocket::Accepted::~Accepted() noexcept(false) {
   }
 }
 
+// Default max WebSocket message size limit. Note that kj-http's own default is 1MiB
+// (`kj::WebSocket::SUGGESTED_MAX_MESSAGE_SIZE`). We've found this to be too small for many commmon
+// use cases, such as proxying Chrome Devtools Protocol messages.
+//
+// JS-RPC messages are size-limited to 32MiB, and it seems to be working well, so we're setting the
+// WebSocket default max message size to match that.
+static constexpr size_t WEBSOCKET_MAX_MESSAGE_SIZE = 32u << 20;
+
 void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
-  size_t maxMessageSize = kj::WebSocket::SUGGESTED_MAX_MESSAGE_SIZE;
+  size_t maxMessageSize = WEBSOCKET_MAX_MESSAGE_SIZE;
   if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
     maxMessageSize = 128u << 20;
   }
@@ -530,7 +540,7 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
       if (!native.closedIncoming && e.getType() == kj::Exception::Type::DISCONNECTED) {
         // Report premature disconnect or cancel as a close event.
         dispatchEventImpl(js,
-            jsg::alloc<CloseEvent>(
+            js.alloc<CloseEvent>(
                 1006, kj::str("WebSocket disconnected without sending Close frame."), false));
         native.closedIncoming = true;
         // If there are no further messages to send, so we can discard the underlying connection.
@@ -747,7 +757,7 @@ kj::Maybe<kj::Date> WebSocket::getAutoResponseTimestamp() {
 }
 
 void WebSocket::dispatchOpen(jsg::Lock& js) {
-  dispatchEventImpl(js, jsg::alloc<Event>("open"));
+  dispatchEventImpl(js, js.alloc<Event>("open"));
 }
 
 void WebSocket::ensurePumping(jsg::Lock& js) {
@@ -814,7 +824,7 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
 
 kj::Promise<void> WebSocket::sendAutoResponse(kj::String message, kj::WebSocket& ws) {
   if (autoResponseStatus.isPumping) {
-    autoResponseStatus.pendingAutoResponseDeque.push_back(kj::mv(message));
+    autoResponseStatus.pendingAutoResponseDeque.push(kj::mv(message));
   } else if (!autoResponseStatus.isClosed) {
     auto p = ws.send(message).fork();
     autoResponseStatus.ongoingAutoResponse = p.addBranch();
@@ -872,9 +882,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
     autoResponse.isPumping = false;
 
-    if (autoResponse.pendingAutoResponseDeque.size() > 0) {
-      autoResponse.pendingAutoResponseDeque.clear();
-    }
+    autoResponse.pendingAutoResponseDeque.clear();
 
     if (!completed) {
       // We didn't make it to `completed = true` at the end of this function, so either an
@@ -900,10 +908,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
       auto size = countBytesFromMessage(gatedMessage.message);
 
       while (gatedMessage.pendingAutoResponses > 0) {
-        KJ_ASSERT(
-            autoResponse.pendingAutoResponseDeque.size() >= gatedMessage.pendingAutoResponses);
-        auto message = kj::mv(autoResponse.pendingAutoResponseDeque.front());
-        autoResponse.pendingAutoResponseDeque.pop_front();
+        auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
         gatedMessage.pendingAutoResponses--;
         autoResponse.queuedAutoResponses--;
         co_await ws.send(message);
@@ -937,8 +942,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
     // If there are any auto-responses left to process, we should do it now.
     // We should also check if the last sent message was a close. Shouldn't happen.
     while (autoResponse.pendingAutoResponseDeque.size() > 0 && !autoResponse.isClosed) {
-      auto message = kj::mv(autoResponse.pendingAutoResponseDeque.front());
-      autoResponse.pendingAutoResponseDeque.pop_front();
+      auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
       co_await ws.send(message);
     }
 
@@ -1002,16 +1006,16 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
         jsg::Lock& js = wLock;
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
-            dispatchEventImpl(js, jsg::alloc<MessageEvent>(js, js.str(text)));
+            dispatchEventImpl(js, js.alloc<MessageEvent>(js, js.str(text)));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
             dispatchEventImpl(js,
-                jsg::alloc<MessageEvent>(
+                js.alloc<MessageEvent>(
                     js, jsg::JsValue(js.arrayBuffer(kj::mv(data)).getHandle(js))));
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
             native.closedIncoming = true;
-            dispatchEventImpl(js, jsg::alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
+            dispatchEventImpl(js, js.alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
             // Native WebSocket no longer needed; release.
             tryReleaseNative(js);
             return false;
@@ -1029,10 +1033,10 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
   }
 }
 
-jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
+jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock& js) {
   auto pipe = kj::newWebSocketPipe();
-  auto pair = jsg::alloc<WebSocketPair>(
-      jsg::alloc<WebSocket>(kj::mv(pipe.ends[0])), jsg::alloc<WebSocket>(kj::mv(pipe.ends[1])));
+  auto pair = js.alloc<WebSocketPair>(
+      js.alloc<WebSocket>(kj::mv(pipe.ends[0])), js.alloc<WebSocket>(kj::mv(pipe.ends[1])));
   auto first = pair->getFirst();
   auto second = pair->getSecond();
 
@@ -1041,8 +1045,8 @@ jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
   return kj::mv(pair);
 }
 
-jsg::Ref<WebSocketPair::PairIterator> WebSocketPair::entries(jsg::Lock&) {
-  return jsg::alloc<PairIterator>(IteratorState{
+jsg::Ref<WebSocketPair::PairIterator> WebSocketPair::entries(jsg::Lock& js) {
+  return js.alloc<PairIterator>(IteratorState{
     .pair = JSG_THIS,
     .index = 0,
   });
@@ -1059,7 +1063,7 @@ void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
     error = err.addRef(js);
 
     dispatchEventImpl(js,
-        jsg::alloc<ErrorEvent>(kj::str("error"),
+        js.alloc<ErrorEvent>(
             ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we

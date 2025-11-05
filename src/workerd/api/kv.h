@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/streams/readable.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/jsg/jsg.h>
 
@@ -31,11 +32,13 @@ class KvNamespace: public jsg::Object {
   };
 
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
-  // representing this namespace.
+  // representing this namespace. It is also used to construct fetcher for JSRPC methods.
   // `additionalHeaders` is what gets appended to every outbound request.
-  explicit KvNamespace(kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
+  explicit KvNamespace(
+      kj::String bindingName, kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
       : additionalHeaders(kj::mv(additionalHeaders)),
-        subrequestChannel(subrequestChannel) {}
+        subrequestChannel(subrequestChannel),
+        bindingName(kj::mv(bindingName)) {}
 
   struct GetOptions {
     jsg::Optional<kj::String> type;
@@ -50,10 +53,15 @@ class KvNamespace: public jsg::Object {
   using GetResult = kj::Maybe<
       kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::JsRef<jsg::JsValue>>>;
 
-  jsg::Promise<KvNamespace::GetResult> getSingle(
-      jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
+  jsg::Promise<KvNamespace::GetResult> getSingle(jsg::Lock& js,
+      IoContext& context,
+      TraceContext& traceContext,
+      kj::String name,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
   jsg::Promise<jsg::JsRef<jsg::JsMap>> getBulk(jsg::Lock& js,
+      IoContext& context,
+      TraceContext& traceContext,
       kj::Array<kj::String> name,
       jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
       bool withMetadata);
@@ -82,12 +90,17 @@ class KvNamespace: public jsg::Object {
   };
 
   jsg::Promise<GetWithMetadataResult> getWithMetadataImpl(jsg::Lock& js,
+      IoContext& context,
+      TraceContext& traceContext,
       kj::String name,
       jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
       LimitEnforcer::KvOpType op);
 
-  jsg::Promise<KvNamespace::GetWithMetadataResult> getWithMetadataSingle(
-      jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
+  jsg::Promise<KvNamespace::GetWithMetadataResult> getWithMetadataSingle(jsg::Lock& js,
+      IoContext& context,
+      TraceContext& traceContext,
+      kj::String name,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
   kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>>
   getWithMetadata(jsg::Lock& js,
@@ -130,13 +143,18 @@ class KvNamespace: public jsg::Object {
       const jsg::TypeHandler<PutSupportedTypes>& putTypeHandler);
 
   jsg::Promise<void> delete_(jsg::Lock& js, kj::String name);
+  jsg::Ref<JsRpcPromise> deleteBulk(const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  JSG_RESOURCE_TYPE(KvNamespace) {
+  JSG_RESOURCE_TYPE(KvNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
     JSG_METHOD(put);
     JSG_METHOD(getWithMetadata);
     JSG_METHOD_NAMED(delete, delete_);
+    if (flags.getWorkerdExperimental()) {
+      // Temporary method for tests
+      JSG_METHOD(deleteBulk);
+    }
 
     JSG_TS_ROOT();
 
@@ -153,44 +171,86 @@ class KvNamespace: public jsg::Object {
     // `Metadata` before `Key` type parameter for backwards-compatibility with `workers-types@3`.
     // `Key` is also an optional type parameter, which must come after required parameters.
 
-    JSG_TS_OVERRIDE(KVNamespace<Key extends string = string> {
-      get(key: Key, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<string | null>;
-      get(key: Key, type: "text"): Promise<string | null>;
-      get<ExpectedValue = unknown>(key: Key, type: "json"): Promise<ExpectedValue | null>;
-      get(key: Key, type: "arrayBuffer"): Promise<ArrayBuffer | null>;
-      get(key: Key, type: "stream"): Promise<ReadableStream | null>;
-      get(key: Key, options?: KVNamespaceGetOptions<"text">): Promise<string | null>;
-      get<ExpectedValue = unknown>(key: Key, options?: KVNamespaceGetOptions<"json">): Promise<ExpectedValue | null>;
-      get(key: Key, options?: KVNamespaceGetOptions<"arrayBuffer">): Promise<ArrayBuffer | null>;
-      get(key: Key, options?: KVNamespaceGetOptions<"stream">): Promise<ReadableStream | null>;
+    if (flags.getWorkerdExperimental()) {
+      JSG_TS_OVERRIDE(KVNamespace<Key extends string = string> {
+        get(key: Key, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<string | null>;
+        get(key: Key, type: "text"): Promise<string | null>;
+        get<ExpectedValue = unknown>(key: Key, type: "json"): Promise<ExpectedValue | null>;
+        get(key: Key, type: "arrayBuffer"): Promise<ArrayBuffer | null>;
+        get(key: Key, type: "stream"): Promise<ReadableStream | null>;
+        get(key: Key, options?: KVNamespaceGetOptions<"text">): Promise<string | null>;
+        get<ExpectedValue = unknown>(key: Key, options?: KVNamespaceGetOptions<"json">): Promise<ExpectedValue | null>;
+        get(key: Key, options?: KVNamespaceGetOptions<"arrayBuffer">): Promise<ArrayBuffer | null>;
+        get(key: Key, options?: KVNamespaceGetOptions<"stream">): Promise<ReadableStream | null>;
 
-      get(key: Array<Key>, type: "text"): Promise<Map<string, string | null>>;
-      get<ExpectedValue = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, ExpectedValue | null>>;
-      get(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, string | null>>;
-      get(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, string | null>>;
-      get<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, ExpectedValue | null>>;
+        get(key: Array<Key>, type: "text"): Promise<Map<string, string | null>>;
+        get<ExpectedValue = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, ExpectedValue | null>>;
+        get(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, string | null>>;
+        get(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, string | null>>;
+        get<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, ExpectedValue | null>>;
 
-      list<Metadata = unknown>(options?: KVNamespaceListOptions): Promise<KVNamespaceListResult<Metadata, Key>>;
+        list<Metadata = unknown>(options?: KVNamespaceListOptions): Promise<KVNamespaceListResult<Metadata, Key>>;
 
-      put(key: Key, value: string | ArrayBuffer | ArrayBufferView | ReadableStream, options?: KVNamespacePutOptions): Promise<void>;
+        put(key: Key, value: string | ArrayBuffer | ArrayBufferView | ReadableStream, options?: KVNamespacePutOptions): Promise<void>;
 
-      getWithMetadata<Metadata = unknown>(key: Key, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
-      getWithMetadata<Metadata = unknown>(key: Key, type: "text"): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
-      getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Key, type: "json"): Promise<KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
-      getWithMetadata<Metadata = unknown>(key: Key, type: "arrayBuffer"): Promise<KVNamespaceGetWithMetadataResult<ArrayBuffer, Metadata>>;
-      getWithMetadata<Metadata = unknown>(key: Key, type: "stream"): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
-      getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"text">): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
-      getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"json">): Promise<KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
-      getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"arrayBuffer">): Promise<KVNamespaceGetWithMetadataResult<ArrayBuffer, Metadata>>;
-      getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"stream">): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, type: "text"): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Key, type: "json"): Promise<KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, type: "arrayBuffer"): Promise<KVNamespaceGetWithMetadataResult<ArrayBuffer, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, type: "stream"): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"text">): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"json">): Promise<KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"arrayBuffer">): Promise<KVNamespaceGetWithMetadataResult<ArrayBuffer, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"stream">): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
 
-      getWithMetadata<Metadata = unknown>(key: Array<Key>, type: "text"): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
-      getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
-      getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
-      getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
-      getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
-      delete(key: Key): Promise<void>;
-    });
+        getWithMetadata<Metadata = unknown>(key: Array<Key>, type: "text"): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+        delete(key: Key): Promise<void>;
+        deleteBulk(keys: Key | Key[]): Promise<void>;
+      });
+    } else {
+      JSG_TS_OVERRIDE(KVNamespace<Key extends string = string> {
+        get(key: Key, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<string | null>;
+        get(key: Key, type: "text"): Promise<string | null>;
+        get<ExpectedValue = unknown>(key: Key, type: "json"): Promise<ExpectedValue | null>;
+        get(key: Key, type: "arrayBuffer"): Promise<ArrayBuffer | null>;
+        get(key: Key, type: "stream"): Promise<ReadableStream | null>;
+        get(key: Key, options?: KVNamespaceGetOptions<"text">): Promise<string | null>;
+        get<ExpectedValue = unknown>(key: Key, options?: KVNamespaceGetOptions<"json">): Promise<ExpectedValue | null>;
+        get(key: Key, options?: KVNamespaceGetOptions<"arrayBuffer">): Promise<ArrayBuffer | null>;
+        get(key: Key, options?: KVNamespaceGetOptions<"stream">): Promise<ReadableStream | null>;
+
+        get(key: Array<Key>, type: "text"): Promise<Map<string, string | null>>;
+        get<ExpectedValue = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, ExpectedValue | null>>;
+        get(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, string | null>>;
+        get(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, string | null>>;
+        get<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, ExpectedValue | null>>;
+
+        list<Metadata = unknown>(options?: KVNamespaceListOptions): Promise<KVNamespaceListResult<Metadata, Key>>;
+
+        put(key: Key, value: string | ArrayBuffer | ArrayBufferView | ReadableStream, options?: KVNamespacePutOptions): Promise<void>;
+
+        getWithMetadata<Metadata = unknown>(key: Key, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, type: "text"): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Key, type: "json"): Promise<KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, type: "arrayBuffer"): Promise<KVNamespaceGetWithMetadataResult<ArrayBuffer, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, type: "stream"): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"text">): Promise<KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"json">): Promise<KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"arrayBuffer">): Promise<KVNamespaceGetWithMetadataResult<ArrayBuffer, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"stream">): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
+
+        getWithMetadata<Metadata = unknown>(key: Array<Key>, type: "text"): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+        getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+        delete(key: Key): Promise<void>;
+      });
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -199,19 +259,20 @@ class KvNamespace: public jsg::Object {
 
  protected:
   // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes
-  // the limiter for that op type to be checked. If a string is used, that's used as the operation
-  // name for the HttpClient without any limiter enforcement.
+  // the limiter for that op type to be checked. If a string is used, there isn't any limiter
+  // enforcement.
   // NOTE: The urlStr is added to the headers as a non-owning reference and thus must outlive
   // the usage of the headers.
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context,
       kj::HttpHeaders& headers,
       kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrName,
       kj::StringPtr urlStr,
-      kj::Maybe<kj::OneOf<ListOptions, kj::OneOf<kj::String, GetOptions>, PutOptions>> options);
+      TraceContext& traceContext);
 
  private:
   kj::Array<AdditionalHeader> additionalHeaders;
   uint subrequestChannel;
+  kj::String bindingName;
 };
 
 #define EW_KV_ISOLATE_TYPES                                                                        \

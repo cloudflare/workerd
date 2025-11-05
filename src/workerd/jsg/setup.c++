@@ -11,8 +11,6 @@
 
 #include "libplatform/libplatform.h"
 
-#include <workerd/util/uuid.h>
-
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
 
@@ -22,7 +20,8 @@
 #endif
 
 #ifdef WORKERD_ICU_DATA_EMBED
-#include <icudata-embed.capnp.h>
+#include "icu-data-file.embed.h"
+
 #include <unicode/udata.h>
 #endif
 
@@ -74,14 +73,45 @@ static kj::Own<v8::Platform> userPlatform(v8::Platform& platform) {
   return kj::Own<v8::Platform>(&platform, kj::NullDisposer::instance);
 }
 
-V8System::V8System(): V8System(defaultPlatform(0), nullptr) {}
-V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags): V8System(defaultPlatform(0), flags) {}
-V8System::V8System(v8::Platform& platformParam): V8System(platformParam, nullptr) {}
-V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : V8System(userPlatform(platformParam), flags) {}
-V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : platformInner(kj::mv(platformParam)),
-      platformWrapper(*platformInner) {
+V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags) {
+  auto platform = defaultPlatform(0);
+  auto defaultPlatformPtr = platform.get();
+  init(kj::mv(platform), flags, [defaultPlatformPtr](v8::Isolate* isolate) {
+    return v8::platform::PumpMessageLoop(
+        defaultPlatformPtr, isolate, v8::platform::MessageLoopBehavior::kDoNotWait);
+  }, [defaultPlatformPtr](v8::Isolate* isolate) {
+    v8::platform::NotifyIsolateShutdown(defaultPlatformPtr, isolate);
+  });
+}
+
+V8System::V8System(v8::Platform& platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    v8::Platform* defaultPlatformPtr) {
+  KJ_REQUIRE_NONNULL(defaultPlatformPtr);
+  init(userPlatform(platformParam), flags, [defaultPlatformPtr](v8::Isolate* isolate) {
+    return v8::platform::PumpMessageLoop(
+        defaultPlatformPtr, isolate, v8::platform::MessageLoopBehavior::kDoNotWait);
+  }, [defaultPlatformPtr](v8::Isolate* isolate) {
+    v8::platform::NotifyIsolateShutdown(defaultPlatformPtr, isolate);
+  });
+}
+
+V8System::V8System(v8::Platform& platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    PumpMsgLoopType pumpMsgLoopFn,
+    ShutdownIsolateType shutdownIsolateFn) {
+  init(userPlatform(platformParam), flags, kj::mv(pumpMsgLoopFn), kj::mv(shutdownIsolateFn));
+}
+
+void V8System::init(kj::Own<v8::Platform> platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    PumpMsgLoopType pumpMsgLoopFn,
+    ShutdownIsolateType shutdownIsolateFn) {
+  platformInner = kj::mv(platformParam);
+  platformWrapper = kj::heap<V8PlatformWrapper>(*platformInner);
+  pumpMsgLoop = kj::mv(pumpMsgLoopFn);
+  shutdownIsolate = kj::mv(shutdownIsolateFn);
+
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
 #endif
@@ -120,6 +150,14 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
 
+  // These features are completed and enabled by default in Chrome, but not
+  // in V8. Follows Node.js: https://github.com/nodejs/node/pull/58154
+  v8::V8::SetFlagsFromString("--js-explicit-resource-management");
+  v8::V8::SetFlagsFromString("--js-float16array");
+
+  // Enable source phase imports for WebAssembly modules
+  v8::V8::SetFlagsFromString("--js-source-phase-imports");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
@@ -137,10 +175,10 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
 
 #ifdef WORKERD_ICU_DATA_EMBED
   // V8's bazel build files currently don't support the option to embed ICU data, so we do it
-  // ourselves. `WORKERD_ICU_DATA_EMBED`, if defined, will refer to a `kj::ArrayPtr<const byte>`
-  // containing the data.
+  // ourselves. `ICU_DATA_FILE`, if defined, will refer to a `kj::ArrayPtr<const byte>` containing
+  // the data.
   UErrorCode err = U_ZERO_ERROR;
-  udata_setCommonData(EMBEDDED_ICU_DATA_FILE->begin(), &err);
+  udata_setCommonData(ICU_DATA_FILE.begin(), &err);
   udata_setFileAccess(UDATA_ONLY_PACKAGES, &err);
   KJ_ASSERT(err == U_ZERO_ERROR);
 #else
@@ -149,9 +187,13 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   v8::V8::InitializeICUDefaultLocation(nullptr);
 #endif
 
-  v8::V8::InitializePlatform(&platformWrapper);
+  v8::V8::InitializePlatform(platformWrapper.get());
+
+  // A recent change in v8 initializes cppgc in V8::Initialize if it's not already initialized
+  // Hence the ordering here is important
+  cppgc::InitializeProcess(platformWrapper->GetPageAllocator());
+
   v8::V8::Initialize();
-  cppgc::InitializeProcess(platformWrapper.GetPageAllocator());
   v8Initialized = true;
 }
 
@@ -184,34 +226,34 @@ void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* gr
 }
 
 void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
-  tracker.trackField("uuid", uuid);
   tracker.trackField("heapTracer", heapTracer);
 }
 
 void IsolateBase::deferDestruction(Item item) {
+  KJ_REQUIRE_NONNULL(ptr, "tried to defer destruction after V8 isolate was destroyed");
+  KJ_REQUIRE(queueState == QueueState::ACTIVE, "tried to defer destruction during isolate shutdown",
+      queueState);
   queue.lockExclusive()->push(kj::mv(item));
 }
 
-void IsolateBase::deferExternalMemoryDecrement(int64_t size) {
-  pendingExternalMemoryDecrement.fetch_add(size, std::memory_order_relaxed);
-}
-void IsolateBase::clearPendingExternalMemoryDecrement() {
-  KJ_ASSERT(v8::Locker::IsLocked(ptr));
-  int64_t amount = pendingExternalMemoryDecrement.exchange(0, std::memory_order_relaxed);
-  if (amount > 0) {
-    externalMemoryAccounter.Decrease(ptr, amount);
-  }
+kj::Arc<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
+  return externalMemoryTarget.addRef();
 }
 
 void IsolateBase::terminateExecution() const {
   ptr->TerminateExecution();
 }
 
-void IsolateBase::clearDestructionQueue() {
-  // Safe to destroy the popped batch outside of the lock because the lock is only actually used to
-  // guard the push buffer.
-  DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
-  auto drop = queue.lockExclusive()->pop();
+void IsolateBase::applyDeferredActions() {
+  // Clear the deferred destruction queue.
+  {
+    // Safe to destroy the popped batch outside of the lock because the lock is only actually used
+    // to guard the push buffer.
+    DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
+    auto drop = queue.lockExclusive()->pop();
+  }
+
+  externalMemoryTarget->applyDeferredMemoryUpdate();
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
@@ -262,10 +304,11 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
 void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
-  auto& wrappable =
-      *static_cast<Wrappable*>(handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
-          Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-
+  v8::HandleScope scope(isolate);
+  auto& wrappable = *static_cast<Wrappable*>(
+      handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
+          Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+          static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
   // visit the reference again, but it will DCHECK-fail on that second attempt because the
@@ -294,7 +337,8 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return v8::CppHeap::Create(system, heapParams);
   });
 }
-static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap) {
+static v8::Isolate* newIsolate(
+    v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap, v8::IsolateGroup group) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
@@ -312,27 +356,27 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
 
     if (params.array_buffer_allocator == nullptr &&
         params.array_buffer_allocator_shared == nullptr) {
+#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+          v8::ArrayBuffer::Allocator::NewDefaultAllocator(group));
+#else
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
-    }
-#if V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
-    // Create new isolate group so that isolate is in its own group and not in a shared group. That
-    // way the isolates don't all use the same pointer cage.
-    v8::IsolateGroup group = v8::IsolateGroup::Create();
-    return v8::Isolate::New(group, params);
-#else
-    return v8::Isolate::New(params);
 #endif
+    }
+    return v8::Isolate::New(group, params);
   });
 }
 }  // namespace
 
-IsolateBase::IsolateBase(const V8System& system,
+IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
-    kj::Own<IsolateObserver> observer)
-    : system(system),
-      cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
-      ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
+    kj::Own<IsolateObserver> observer,
+    v8::IsolateGroup group)
+    : v8System(system),
+      cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
+      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
+      externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
@@ -341,13 +385,17 @@ IsolateBase::IsolateBase(const V8System& system,
 
     ptr->SetFatalErrorHandler(&fatalError);
     ptr->SetOOMErrorHandler(&oomError);
+    // We also set the global OOM error handler.  This is a bit of
+    // a hack: Later in the run the allocation of a sandbox may fail
+    // due to OOM.  In that case we want our handler to be called
+    // even though there is no current isolate.
+    v8::V8::SetFatalMemoryErrorCallback(&oomError);
 
     ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
     ptr->SetData(SET_DATA_ISOLATE_BASE, this);
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
-    ptr->SetWasmJSPIEnabledCallback(&jspiEnabledCallback);
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -387,22 +435,22 @@ IsolateBase::IsolateBase(const V8System& system,
       auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
-
-      // Create Symbol.dispose and Symbol.asyncDispose.
-      symbolAsyncDispose.Reset(ptr,
-          v8::Symbol::New(ptr,
-              v8::String::NewFromUtf8(ptr, "asyncDispose", v8::NewStringType::kInternalized)
-                  .ToLocalChecked()));
     }
   });
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
+  // Ensure objects that outlive the isolate won't attempt to modify external memory
+  // on the now-destroyed isolate.
+  externalMemoryTarget->detach();
+
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    // Terminate the v8::platform's task queue associated with this isolate
+    v8System.shutdownIsolate(ptr);
     ptr->Dispose();
+    ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
-    ;
   });
 }
 
@@ -412,21 +460,21 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
+  KJ_REQUIRE(queueState == QueueState::ACTIVE);
+  queueState = QueueState::DROPPING;
   // Delete all wrappers.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     v8::Locker lock(ptr);
     v8::Isolate::Scope isolateScope(ptr);
 
     // Make sure everything in the deferred destruction queue is dropped.
-    clearDestructionQueue();
-    clearPendingExternalMemoryDecrement();
+    applyDeferredActions();
 
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.
     KJ_DEFER(heapTracer.destroy());
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
-    KJ_DEFER(symbolAsyncDispose.Reset());
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
 
@@ -436,6 +484,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Destroy all wrappers.
     heapTracer.clearWrappers();
+    queueState = QueueState::DROPPED;
   });
 }
 
@@ -456,22 +505,23 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
 
 v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
-  v8::Isolate* isolate = context->GetIsolate();
-  IsolateBase* self = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  return {.codegen_allowed = self->evalAllowed, .modified_source = {}};
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+  auto& base = IsolateBase::from(isolate);
+  if (base.evalAllowed) {
+    // If eval is allowed, notify the observer so that it can take any action necessary.
+    // Once possible action is logging the source to be evaluated for auditing purposes.
+    // TODO(cleanup): Consider making it so that `onDynamicEval()` returns true or false
+    // depending on whether eval should be allowed or not.
+    base.observer->onDynamicEval(context, source, isCodeLike ? IsCodeLike::YES : IsCodeLike::NO);
+  }
+  return {.codegen_allowed = base.evalAllowed, .modified_source = {}};
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
   // Don't allow WASM unless arbitrary eval() is allowed.
   IsolateBase* self =
-      static_cast<IsolateBase*>(context->GetIsolate()->GetData(SET_DATA_ISOLATE_BASE));
+      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
   return self->evalAllowed;
-}
-
-bool IsolateBase::jspiEnabledCallback(v8::Local<v8::Context> context) {
-  IsolateBase* self =
-      static_cast<IsolateBase*>(context->GetIsolate()->GetData(SET_DATA_ISOLATE_BASE));
-  return self->jspiEnabled;
 }
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
@@ -672,6 +722,9 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
     case v8::StateTag::IDLE:
       vmState = "idle";
       break;
+    case v8::StateTag::IDLE_EXTERNAL:
+      vmState = "idle_external";
+      break;
     case v8::StateTag::LOGGING:
       vmState = "logging";
       break;
@@ -728,15 +781,5 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   return kj::StringPtr(scratch.begin(), pos - scratch.begin());
 }
 #endif
-
-// TODO(soon): Replace this with Isolate::GetHashSeed() once current v8 release supports it.
-// Ref: https://chromium-review.googlesource.com/c/v8/v8/+/6286748
-kj::StringPtr IsolateBase::getUuid() {
-  // Lazily create a random UUID for this isolate.
-  KJ_IF_SOME(u, uuid) {
-    return u;
-  }
-  return uuid.emplace(randomUUID(kj::none));
-}
 
 }  // namespace workerd::jsg

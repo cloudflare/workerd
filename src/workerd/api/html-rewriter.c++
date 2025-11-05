@@ -325,9 +325,17 @@ class Rewriter final: public WritableStreamSink {
   // this (buildRewriter()) modifies that vector.
   kj::Own<lol_html_HtmlRewriter> rewriter;
 
-  kj::Own<WritableStreamSink> inner;
+  // Stores data written by lol-html, which will be periodically flushed to inner.
+  kj::Vector<kj::byte> outputBuffer;
 
-  kj::Maybe<kj::Promise<void>> writePromise;
+  // Used to ensure memory usage is reported to V8 and cannot grow arbritrarily
+  jsg::ExternalMemoryAdjustment externalMemoryAdjustment;
+
+  // True if we are currently flushing from outputBuffer to inner (in flushWrite)
+  bool flushing = false;
+
+  // The destination for the output from lol-html
+  kj::Own<WritableStreamSink> inner;
 
   kj::Maybe<kj::Exception> maybeException;
 
@@ -422,6 +430,7 @@ Rewriter::Rewriter(jsg::Lock& js,
     kj::ArrayPtr<const char> encoding,
     kj::Own<WritableStreamSink> inner)
     : rewriter(buildRewriter(js, unregisteredHandlers, encoding, *this)),
+      externalMemoryAdjustment(js.getExternalMemoryAdjustment()),
       inner(kj::mv(inner)),
       ioContext(IoContext::current()),
       maybeAsyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
@@ -505,25 +514,24 @@ kj::Promise<void> Rewriter::finishWrite() {
 }
 
 kj::Promise<void> Rewriter::flushWrite() {
-  auto checkException = [this]() -> kj::Promise<void> {
-    KJ_ASSERT(writePromise == kj::none);
+  KJ_ASSERT(!flushing);
 
-    KJ_IF_SOME(exception, maybeException) {
-      inner->abort(kj::cp(exception));
-      return kj::cp(exception);
-    }
+  if (!outputBuffer.empty()) {
+    KJ_DEFER({
+      externalMemoryAdjustment.set(0);
+      outputBuffer.clear();
+      flushing = false;
+    });
 
-    return kj::READY_NOW;
-  };
-
-  KJ_IF_SOME(wp, writePromise) {
-    KJ_DEFER(writePromise = kj::none);
-    return wp.then([checkException]() { return checkException(); });
+    flushing = true;
+    co_await inner->write(outputBuffer);
   }
 
-  return checkException();
+  KJ_IF_SOME(exception, maybeException) {
+    inner->abort(kj::cp(exception));
+    kj::throwFatalException(kj::cp(exception));
+  }
 }
-
 template <typename T, typename CType>
 lol_html_rewriter_directive_t Rewriter::thunk(CType* content, void* userdata) {
   auto& registration = *reinterpret_cast<RegisteredHandler*>(userdata);
@@ -592,10 +600,11 @@ kj::Promise<void> Rewriter::thunkPromise(CType* content, RegisteredHandler& regi
     // (when transform() was called). If someone wants, instead, to use the context
     // that was current when on(...) is called, the ElementHandler can use AsyncResource
     // (or eventually the standard AsyncContext once that lands).
-    jsg::AsyncContextFrame::Scope asyncContextScope(lock, maybeAsyncContext);
-    auto jsContent = jsg::alloc<T>(*content, *this);
+    jsg::Lock& js = lock;
+    jsg::AsyncContextFrame::Scope asyncContextScope(js, maybeAsyncContext);
+    auto jsContent = js.alloc<T>(*content, *this);
     auto scope = HTMLRewriter::TokenScope(jsContent);
-    auto value = registeredHandler.callback(lock, kj::mv(jsContent));
+    auto value = registeredHandler.callback(js, kj::mv(jsContent));
 
     if constexpr (kj::isSameType<T, EndTag>()) {
       // TODO(someday): We can't unconditionally pop the top of `registeredEndTagHandlers`,
@@ -745,7 +754,7 @@ void Rewriter::onEndTag(lol_html_element_t* element, ElementCallbackFunction&& c
 
 void Rewriter::output(const char* buffer, size_t size, void* userdata) {
   auto& rewriter = *reinterpret_cast<Rewriter*>(userdata);
-  rewriter.outputImpl(kj::arrayPtr(buffer, size).asBytes());
+  rewriter.outputImpl(kj::asBytes(buffer, size));
 }
 
 void Rewriter::outputImpl(kj::ArrayPtr<const byte> buffer) {
@@ -754,15 +763,9 @@ void Rewriter::outputImpl(kj::ArrayPtr<const byte> buffer) {
     return;
   }
 
-  auto bufferCopy = kj::heapArray(buffer);
-
-  KJ_IF_SOME(wp, writePromise) {
-    writePromise = wp.then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
-      return inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
-    });
-  } else {
-    writePromise = inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
-  }
+  KJ_ASSERT(!flushing);
+  externalMemoryAdjustment.adjust(buffer.size());
+  outputBuffer.addAll(buffer);
 }
 
 // =======================================================================================
@@ -824,12 +827,12 @@ kj::StringPtr Element::getNamespaceURI() {
   return lol_html_element_namespace_uri_get(&checkToken(impl).element);
 }
 
-jsg::Ref<Element::AttributesIterator> Element::getAttributes() {
+jsg::Ref<Element::AttributesIterator> Element::getAttributes(jsg::Lock& js) {
   auto& implRef = checkToken(impl);
 
   auto iter = LOL_HTML_OWN(attributes_iterator, lol_html_attributes_iterator_get(&implRef.element));
 
-  auto jsIter = jsg::alloc<Element::AttributesIterator>(kj::mv(iter));
+  auto jsIter = js.alloc<Element::AttributesIterator>(kj::mv(iter));
   implRef.attributesIterators.add(jsIter.addRef());
   return kj::mv(jsIter);
 }
@@ -1200,8 +1203,8 @@ void HTMLRewriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("impl", impl);
 }
 
-jsg::Ref<HTMLRewriter> HTMLRewriter::constructor() {
-  return jsg::alloc<HTMLRewriter>();
+jsg::Ref<HTMLRewriter> HTMLRewriter::constructor(jsg::Lock& js) {
+  return js.alloc<HTMLRewriter>();
 }
 
 jsg::Ref<HTMLRewriter> HTMLRewriter::on(
@@ -1238,12 +1241,11 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
 
   auto pipe = newIdentityPipe();
   response = Response::constructor(
-      js, kj::Maybe(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in))), kj::mv(response));
+      js, kj::Maybe(js.alloc<ReadableStream>(ioContext, kj::mv(pipe.in))), kj::mv(response));
 
   kj::String ownContentType;
   kj::String encoding = kj::str("utf-8");
-  auto contentTypeKey = jsg::ByteString(kj::str("content-type"));
-  KJ_IF_SOME(contentType, response->getHeaders(js)->get(kj::mv(contentTypeKey))) {
+  KJ_IF_SOME(contentType, response->getHeaders(js)->getNoChecks(js, "content-type"_kj)) {
     // TODO(cleanup): readContentTypeParameter can be replaced with using
     // workerd/util/mimetype.h directly.
     KJ_IF_SOME(charset, readContentTypeParameter(contentType, "charset")) {

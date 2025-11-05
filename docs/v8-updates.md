@@ -16,9 +16,11 @@ To update the version of V8 used by workerd, the steps are:
    fetch v8
    ```
 
+   You should probably put this outside of your workerd repo to avoid confusing Bazel.
+
 4. Sync the local copy of V8 to the version used by workerd.
 
-   First, find workerd's current version of V8 in `v8.bzl`. We will call this `<old_version>`.
+   First, find workerd's current version of V8 in `v8.MODULE.bazel`. We will call this `<old_version>`.
 
    Then sync your fetched version v8 based on the tag.
 
@@ -56,7 +58,7 @@ To update the version of V8 used by workerd, the steps are:
 8. Remove the existing patches from `<path_to_workerd>/patches/v8` and copy over the latest generated patches
 from the V8 directory.
 
-9. Update the `VERSION` for V8 in `v8.bzl`.
+9. Update the `VERSION` for V8 in `v8.MODULE.bazel`.
 
     The list of patches should be refreshed if new patches are being added or existing
     patches are being removed.
@@ -65,14 +67,16 @@ from the V8 directory.
     bazel's preferred format just by looking into the mismatch error while trying to compile
     workerd using the newer V8 version or by running
     `openssl dgst -sha256 -binary <tarball_filename> | openssl base64 -A`
+    where `<tarball_filename>` is the file available at
+    `https://github.com/v8/v8/archive/refs/tags<new_version>.tar.gz`
 
-10. Update V8's dependencies in `v8.bzl` and `WORKSPACE`.
+10. Update V8's dependencies in `v8.MODULE.bazel` and `WORKSPACE`.
 
     You can find the commit versions for V8's dependencies under `<path_to_v8>/DEPS`.
 
     These currently include `zlib` and `com_googlesource_chromium_icu`.
     Typically you'll get a build failure if the projects are out of sync. Copy the
-    commit versions from `v8/DEPS` to the `v8.bzl` or `WORKSPACE` file.
+    commit versions from `v8/DEPS` to the `v8.MODULE.bazel` or `WORKSPACE` file.
 
 11. Check workerd's tests pass with the updated V8.
 

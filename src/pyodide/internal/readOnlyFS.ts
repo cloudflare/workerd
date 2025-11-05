@@ -8,13 +8,14 @@ export function createReadonlyFS<Info>(
       return ReadOnlyFS.createNode(null, '/', mount.opts.info);
     },
     createNode(parent, name, info): FSNode<Info> {
+      // eslint-disable-next-line prefer-const
       let { permissions: mode, isDir } = FSOps.getNodeMode(parent, name, info);
       if (isDir) {
         mode |= 1 << 14; // set S_IFDIR
       } else {
         mode |= 1 << 15; // set S_IFREG
       }
-      var node = FS.createNode(parent, name, mode);
+      const node = FS.createNode(parent, name, mode);
       node.node_ops = ReadOnlyFS.node_ops;
       node.stream_ops = ReadOnlyFS.stream_ops;
       FSOps.setNodeAttributes(node, info, isDir);
@@ -49,7 +50,7 @@ export function createReadonlyFS<Info>(
       lookup(parent, name) {
         const child = FSOps.lookup(parent, name);
         if (child === undefined) {
-          throw FS.genericErrors[44]; // ENOENT
+          throw FS.genericErrors?.[44] ?? new FS.ErrnoError(44); // ENOENT
         }
         return ReadOnlyFS.createNode(parent, name, child);
       },
@@ -63,9 +64,6 @@ export function createReadonlyFS<Info>(
         } else if (whence === 2) {
           // SEEK_END
           if (FS.isFile(stream.node.mode)) {
-            if (stream.node.usedBytes == undefined) {
-              throw new Error('File size is undefined');
-            }
             position += stream.node.usedBytes;
           }
         }
@@ -73,7 +71,7 @@ export function createReadonlyFS<Info>(
       },
       read(stream, buffer, offset, length, position) {
         if (position >= stream.node.usedBytes) return 0;
-        var size = Math.min(stream.node.usedBytes - position, length);
+        const size = Math.min(stream.node.usedBytes - position, length);
         buffer = buffer.subarray(offset, offset + size);
         return FSOps.read(stream, position, buffer);
       },

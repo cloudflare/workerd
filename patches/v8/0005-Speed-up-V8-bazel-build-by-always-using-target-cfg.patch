@@ -7,11 +7,13 @@ See the workerd build cfg changes for rationale. This provides a significant
 speedup for the build: Components like ICU were previously compiled in
 both target and exec configurations as generator tools depend on them.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 7521eac6a6a0ef4777e2d7602bda9e7495a00d24..56c6f15cbcbcedaae0176ca5fe45e29dd155afe9 100644
+index 7f7a4072a8465e019e06c7ef97f829ed40e62277..904d5699094bfb1136b031160dd21454d33bb582 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -17,6 +17,7 @@ load(
+@@ -19,6 +19,7 @@ load(
      "v8_mksnapshot",
      "v8_string",
      "v8_torque_files",
@@ -19,7 +21,7 @@ index 7521eac6a6a0ef4777e2d7602bda9e7495a00d24..56c6f15cbcbcedaae0176ca5fe45e29d
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4235,22 +4236,20 @@ filegroup(
+@@ -4388,22 +4389,20 @@ filegroup(
      ],
  )
  
@@ -48,7 +50,7 @@ index 7521eac6a6a0ef4777e2d7602bda9e7495a00d24..56c6f15cbcbcedaae0176ca5fe45e29d
  )
  
  v8_mksnapshot(
-@@ -4459,7 +4458,6 @@ v8_binary(
+@@ -4624,7 +4623,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -57,10 +59,10 @@ index 7521eac6a6a0ef4777e2d7602bda9e7495a00d24..56c6f15cbcbcedaae0176ca5fe45e29d
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 270d982eb55415c59f0659de13fa34cd820a9c83..a1539ab5399fe4759fcdbf93e62eb130cb7a2ae7 100644
+index 52037382b78a50aea49d9401b88801845f67d30c..026583d04f4ee89f5d840c0b71022efda9c6e86c 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -341,6 +341,15 @@ def v8_library(
+@@ -347,6 +347,15 @@ def v8_library(
              **kwargs
          )
  
@@ -76,7 +78,7 @@ index 270d982eb55415c59f0659de13fa34cd820a9c83..a1539ab5399fe4759fcdbf93e62eb130
  # Use a single generator target for torque definitions and initializers. We can
  # split the set of outputs by using OutputGroupInfo, that way we do not need to
  # run the torque generator twice.
-@@ -409,7 +418,7 @@ _v8_torque_files = rule(
+@@ -415,7 +424,7 @@ _v8_torque_files = rule(
          "tool": attr.label(
              allow_files = True,
              executable = True,
@@ -85,7 +87,7 @@ index 270d982eb55415c59f0659de13fa34cd820a9c83..a1539ab5399fe4759fcdbf93e62eb130
          ),
          "args": attr.string_list(),
      },
-@@ -510,13 +519,16 @@ _v8_mksnapshot = rule(
+@@ -516,13 +525,16 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -104,7 +106,7 @@ index 270d982eb55415c59f0659de13fa34cd820a9c83..a1539ab5399fe4759fcdbf93e62eb130
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -643,3 +655,34 @@ def v8_build_config(name, arch):
+@@ -649,3 +661,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

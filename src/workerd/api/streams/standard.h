@@ -156,7 +156,7 @@ class ReadableImpl {
   void close(jsg::Lock& js);
 
   // Push a chunk of data into the queue.
-  void enqueue(jsg::Lock& js, kj::Own<Entry> entry, jsg::Ref<Self> self);
+  void enqueue(jsg::Lock& js, kj::Rc<Entry> entry, jsg::Ref<Self> self);
 
   void doClose(jsg::Lock& js);
 
@@ -222,11 +222,6 @@ class ReadableImpl {
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue> state;
   Algorithms algorithms;
 
-  bool disturbed = false;
-  bool pullAgain = false;
-  bool pulling = false;
-  bool started = false;
-  bool starting = false;
   size_t highWaterMark = 1;
 
   struct PendingCancel {
@@ -238,6 +233,14 @@ class ReadableImpl {
     }
   };
   kj::Maybe<PendingCancel> maybePendingCancel;
+
+  struct Flags {
+    uint8_t pullAgain : 1 = 0;
+    uint8_t pulling : 1 = 0;
+    uint8_t started : 1 = 0;
+    uint8_t starting : 1 = 0;
+  };
+  Flags flags{};
 
   friend Self;
 };
@@ -266,7 +269,7 @@ class WritableImpl {
     }
   };
 
-  WritableImpl(WritableStream& owner);
+  WritableImpl(jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
 
@@ -336,6 +339,10 @@ class WritableImpl {
     kj::Maybe<jsg::Function<StreamQueuingStrategy::SizeAlgorithm>> size;
 
     Algorithms() {};
+    ~Algorithms() {
+      // Clear all algorithm references to break circular references
+      clear();
+    }
     Algorithms(Algorithms&& other) = default;
     Algorithms& operator=(Algorithms&& other) = default;
 
@@ -364,22 +371,25 @@ class WritableImpl {
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, StreamStates::Erroring, Writable> state =
       Writable();
   Algorithms algorithms;
-  bool started = false;
-  bool starting = false;
-  bool backpressure = false;
+
   size_t highWaterMark = 1;
+  size_t amountBuffered = 0;
 
   // `writeRequests` is often going to be empty in common usage patterns, in which case std::list
   // is more memory efficient than a std::deque, for example.
   std::list<WriteRequest> writeRequests;
-  size_t amountBuffered = 0;
-  bool warnAboutExcessiveBackpressure = true;
-  size_t excessiveBackpressureWarningCount = 0;
 
   kj::Maybe<WriteRequest> inFlightWrite;
   kj::Maybe<jsg::Promise<void>::Resolver> inFlightClose;
   kj::Maybe<jsg::Promise<void>::Resolver> closeRequest;
   kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
+
+  struct Flags {
+    uint8_t started : 1 = 0;
+    uint8_t starting : 1 = 0;
+    uint8_t backpressure : 1 = 0;
+  };
+  Flags flags{};
 
   friend Self;
 };
@@ -457,7 +467,7 @@ class ReadableStreamBYOBRequest: public jsg::Object {
  public:
   ReadableStreamBYOBRequest(jsg::Lock& js,
       kj::Own<ByteQueue::ByobRequest> readRequest,
-      jsg::Ref<ReadableByteStreamController> controller);
+      kj::Rc<WeakRef<ReadableByteStreamController>> controller);
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamBYOBRequest);
 
@@ -491,12 +501,12 @@ class ReadableStreamBYOBRequest: public jsg::Object {
  private:
   struct Impl {
     kj::Own<ByteQueue::ByobRequest> readRequest;
-    jsg::Ref<ReadableByteStreamController> controller;
+    kj::Rc<WeakRef<ReadableByteStreamController>> controller;
     jsg::V8Ref<v8::Uint8Array> view;
 
     Impl(jsg::Lock& js,
         kj::Own<ByteQueue::ByobRequest> readRequest,
-        jsg::Ref<ReadableByteStreamController> controller);
+        kj::Rc<WeakRef<ReadableByteStreamController>> controller);
 
     void updateView(jsg::Lock& js);
   };
@@ -517,6 +527,11 @@ class ReadableByteStreamController: public jsg::Object {
 
   ReadableByteStreamController(
       UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
+  ~ReadableByteStreamController() noexcept(false);
+
+  jsg::Ref<ReadableByteStreamController> getSelf() {
+    return JSG_THIS;
+  }
 
   void start(jsg::Lock& js);
 
@@ -553,6 +568,7 @@ class ReadableByteStreamController: public jsg::Object {
   }
 
  private:
+  kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
@@ -573,7 +589,10 @@ class WritableStreamDefaultController: public jsg::Object {
  public:
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
-  explicit WritableStreamDefaultController(WritableStream& owner);
+  explicit WritableStreamDefaultController(
+      jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+
+  ~WritableStreamDefaultController() noexcept(false);
 
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 
@@ -588,7 +607,7 @@ class WritableStreamDefaultController: public jsg::Object {
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
 
   bool isStarted() {
-    return impl.started;
+    return impl.flags.started;
   }
 
   void setup(jsg::Lock& js, UnderlyingSink underlyingSink, StreamQueuingStrategy queuingStrategy);
@@ -603,6 +622,9 @@ class WritableStreamDefaultController: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
   void cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason);
+
+  // Clear algorithms to break circular references during destruction
+  void clearAlgorithms();
 
  private:
   kj::Maybe<IoContext&> ioContext;

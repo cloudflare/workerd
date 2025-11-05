@@ -63,7 +63,10 @@ crates_vendor(
     mode = "remote",
     packages = PACKAGES,
     # Not needed, we have a well-defined set of supported platforms
-    render_config = render_config(generate_target_compatible_with = False),
+    render_config = render_config(
+        generate_cargo_toml_env_vars = False,
+        generate_target_compatible_with = False,
+    ),
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
@@ -85,10 +88,7 @@ cc_library(
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
-    deps = select({
-        "@platforms//os:windows": [":empty_lib"],
-        "//conditions:default": [],
-    }),
+    deps = [":empty_lib"],
 )
 
 write_file(
@@ -107,4 +107,9 @@ rust_static_library(
     },
     stamp = -1,  # default to bazel --stamp flag
     tags = ["manual"],
+)
+
+cc_library(
+    name = "allocator",
+    visibility = ["//visibility:public"],
 )

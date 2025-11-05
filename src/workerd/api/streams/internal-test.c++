@@ -21,10 +21,10 @@ class FooStream: public ReadableStreamSource {
   FooStream(): ptr(&data[0]), remaining_(size) {
     KJ_ASSERT(RAND_bytes(data, size) == 1);
   }
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     maxMaxBytesSeen_ = kj::max(maxMaxBytesSeen_, maxBytes);
     numreads_++;
-    if (remaining_ == 0) return (size_t)0;
+    if (remaining_ == 0) return static_cast<size_t>(0);
     KJ_ASSERT(minBytes == maxBytes);
     KJ_ASSERT(maxBytes <= size);
     auto amount = kj::min(remaining_, maxBytes);
@@ -61,7 +61,7 @@ class FooStream: public ReadableStreamSource {
 template <int size>
 class BarStream: public FooStream<size> {
  public:
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
     return size;
   }
 };
@@ -144,11 +144,11 @@ KJ_TEST("zero-length stream") {
 
   class Zero: public ReadableStreamSource {
    public:
-    kj::Promise<size_t> tryRead(void*, size_t, size_t) {
-      return (size_t)0;
+    kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
+      return static_cast<size_t>(0);
     }
-    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
-      return (size_t)0;
+    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+      return static_cast<size_t>(0);
     }
   };
 
@@ -164,8 +164,8 @@ KJ_TEST("lying stream") {
 
   class Dishonest: public FooStream<10000> {
    public:
-    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
-      return (size_t)10;
+    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+      return static_cast<size_t>(10);
     }
   };
 
@@ -187,8 +187,8 @@ KJ_TEST("honest small stream") {
 
   class HonestSmall: public FooStream<100> {
    public:
-    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
-      return (size_t)100;
+    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+      return static_cast<size_t>(100);
     }
   };
 
@@ -231,7 +231,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
 
     jsg::Ref<ReadableStream> source = ReadableStream::constructor(env.js, kj::none, kj::none);
     jsg::Ref<WritableStream> sink =
-        jsg::alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::none);
+        env.js.alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::none);
 
     auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions{.preventClose = true});
 
@@ -307,11 +307,11 @@ KJ_TEST("WritableStreamInternalController observability") {
 
   class MyObserver final: public ByteStreamObserver {
    public:
-    virtual void onChunkEnqueued(size_t bytes) {
+    void onChunkEnqueued(size_t bytes) override {
       ++queueSize;
       queueSizeBytes += bytes;
     };
-    virtual void onChunkDequeued(size_t bytes) {
+    void onChunkDequeued(size_t bytes) override {
       queueSizeBytes -= bytes;
       --queueSize;
     };
@@ -323,7 +323,7 @@ KJ_TEST("WritableStreamInternalController observability") {
   auto& observer = *myObserver;
   kj::Maybe<jsg::Ref<WritableStream>> stream;
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    stream = jsg::alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::mv(myObserver));
+    stream = env.js.alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::mv(myObserver));
 
     auto write = [&](size_t size) {
       auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));

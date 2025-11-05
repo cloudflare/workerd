@@ -48,8 +48,8 @@ void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
 
 #pragma region ValueQueue::QueueEntry
 
-kj::Own<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
-  return kj::heap<Entry>(getValue(js), getSize());
+kj::Rc<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
+  return addRefToThis();
 }
 
 ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
@@ -88,7 +88,7 @@ void ValueQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
   impl.read(js, kj::mv(request));
 }
 
-void ValueQueue::Consumer::push(jsg::Lock& js, kj::Own<Entry> entry) {
+void ValueQueue::Consumer::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -139,7 +139,7 @@ void ValueQueue::maybeUpdateBackpressure() {
   impl.maybeUpdateBackpressure();
 }
 
-void ValueQueue::push(jsg::Lock& js, kj::Own<Entry> entry) {
+void ValueQueue::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -148,7 +148,7 @@ size_t ValueQueue::size() const {
 }
 
 void ValueQueue::handlePush(
-    jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Own<Entry> entry) {
+    jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Rc<Entry> entry) {
   // If there are no pending reads, just add the entry to the buffer and return, adjusting
   // the size of the queue in the process.
   if (state.readRequests.empty()) {
@@ -316,8 +316,8 @@ size_t ByteQueue::Entry::getSize() const {
   return store.size();
 }
 
-kj::Own<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
-  return kj::heap<ByteQueue::Entry>(store.clone(js));
+kj::Rc<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
+  return addRefToThis();
 }
 
 void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
@@ -365,7 +365,7 @@ void ByteQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
   impl.read(js, kj::mv(request));
 }
 
-void ByteQueue::Consumer::push(jsg::Lock& js, kj::Own<Entry> entry) {
+void ByteQueue::Consumer::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -438,13 +438,12 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
     KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, amount)) {
+      auto entry = kj::rc<Entry>(kj::mv(store));
 
-      auto entry = kj::heap<Entry>(kj::mv(store));
-
-      auto start = sourcePtr.begin() + req.pullInto.filled;
+      auto start = sourcePtr.slice(req.pullInto.filled);
 
       // Safely copy the data over into the entry.
-      std::copy(start, start + amount, entry->toArrayPtr().begin());
+      entry->toArrayPtr().first(amount).copyFrom(start.first(amount));
 
       // Push the entry into the other consumers.
       queue.push(js, kj::mv(entry), consumer);
@@ -482,11 +481,11 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   consumer.resolveRead(js, req);
 
   if (unaligned > 0) {
-    auto start = sourcePtr.begin() + (amount - unaligned);
+    auto start = sourcePtr.slice(amount - unaligned);
 
     KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, unaligned)) {
-      auto excess = kj::heap<Entry>(kj::mv(store));
-      std::copy(start, start + unaligned, excess->toArrayPtr().begin());
+      auto excess = kj::rc<Entry>(kj::mv(store));
+      excess->toArrayPtr().first(unaligned).copyFrom(start.first(unaligned));
       consumer.push(js, kj::mv(excess));
     } else {
       js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
@@ -563,13 +562,14 @@ void ByteQueue::maybeUpdateBackpressure() {
     // take of them from time to time since. Since maybeUpdateBackpressure
     // is going to be called regularly while the queue is actively in use,
     // this is as good a place to clean them out as any.
-    auto pivot KJ_UNUSED = std::remove_if(state.pendingByobReadRequests.begin(),
+    auto pivot = std::remove_if(state.pendingByobReadRequests.begin(),
         state.pendingByobReadRequests.end(), [](auto& item) { return item->isInvalidated(); });
+    state.pendingByobReadRequests.erase(pivot, state.pendingByobReadRequests.end());
   }
   impl.maybeUpdateBackpressure();
 }
 
-void ByteQueue::push(jsg::Lock& js, kj::Own<Entry> entry) {
+void ByteQueue::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -578,7 +578,7 @@ size_t ByteQueue::size() const {
 }
 
 void ByteQueue::handlePush(
-    jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Own<Entry> newEntry) {
+    jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Rc<Entry> newEntry) {
   const auto bufferData = [&](size_t offset) {
     state.queueTotalSize += newEntry->getSize() - offset;
     state.buffer.emplace_back(QueueEntry{
@@ -631,7 +631,7 @@ void ByteQueue::handlePush(
           auto sourcePtr = entry.entry->toArrayPtr();
           auto sourceSize = sourcePtr.size() - entry.offset;
 
-          auto destPtr = pending.pullInto.store.asArrayPtr().begin() + pending.pullInto.filled;
+          auto destPtr = pending.pullInto.store.asArrayPtr().slice(pending.pullInto.filled);
           auto destAmount = pending.pullInto.store.size() - pending.pullInto.filled;
 
           // sourceSize is the amount of data remaining in the current entry to copy.
@@ -642,8 +642,8 @@ void ByteQueue::handlePush(
           // so let's verify.
           KJ_REQUIRE(sourceSize > 0 && sourceSize < destAmount);
 
-          // Safely copy amountToCopy bytes from sourcePtr to destPtr
-          std::copy(sourcePtr.begin() + entry.offset, sourcePtr.end(), destPtr);
+          // Safely copy sourceSize bytes from sourcePtr to destPtr
+          destPtr.first(sourceSize).copyFrom(sourcePtr.slice(entry.offset));
 
           // We have completely consumed the data in this entry and can safely free
           // our reference to it now. Yay!
@@ -691,9 +691,8 @@ void ByteQueue::handlePush(
     // the entryOffset and pending.pullInto.filled offsets to determine the range
     // where we start copying.
     auto entryPtr = newEntry->toArrayPtr();
-    auto destPtr = pending.pullInto.store.asArrayPtr().begin() + pending.pullInto.filled;
-    std::copy(
-        entryPtr.begin() + entryOffset, entryPtr.begin() + entryOffset + amountToCopy, destPtr);
+    auto destPtr = pending.pullInto.store.asArrayPtr().slice(pending.pullInto.filled);
+    destPtr.first(amountToCopy).copyFrom(entryPtr.slice(entryOffset).first(amountToCopy));
 
     // Yay! this pending read has been fulfilled. There might be more tho. Let's adjust
     // the amountAvailable and continue trying to consume data.
@@ -773,10 +772,10 @@ void ByteQueue::handleRead(jsg::Lock& js,
 
           // Once we have the amount, we safely copy amountToCopy bytes from the
           // entry into the destination request, accounting properly for the offsets.
-          auto sourcePtr = entry.entry->toArrayPtr().begin() + entry.offset;
-          auto destPtr = request.pullInto.store.asArrayPtr().begin() + request.pullInto.filled;
+          auto sourcePtr = entry.entry->toArrayPtr().slice(entry.offset);
+          auto destPtr = request.pullInto.store.asArrayPtr().slice(request.pullInto.filled);
 
-          std::copy(sourcePtr, sourcePtr + amountToCopy, destPtr);
+          destPtr.first(amountToCopy).copyFrom(sourcePtr.first(amountToCopy));
 
           request.pullInto.filled += amountToCopy;
 
@@ -900,7 +899,7 @@ bool ByteQueue::handleMaybeClose(
           auto sourcePtr = entry.entry->toArrayPtr();
           auto sourceSize = sourcePtr.size() - entry.offset;
 
-          auto destPtr = pending.pullInto.store.asArrayPtr().begin() + pending.pullInto.filled;
+          auto destPtr = pending.pullInto.store.asArrayPtr().slice(pending.pullInto.filled);
           auto destAmount = pending.pullInto.store.size() - pending.pullInto.filled;
 
           // There should be space available to copy into and data to copy from, or
@@ -912,15 +911,14 @@ bool ByteQueue::handleMaybeClose(
           // destAmount is the amount of space remaining to be filled in the pending read.
           auto amountToCopy = kj::min(sourceSize, destAmount);
 
-          auto sourceStart = sourcePtr.begin() + entry.offset;
-          auto sourceEnd = sourceStart + amountToCopy;
+          auto sourceStart = sourcePtr.slice(entry.offset);
 
           // It shouldn't be possible for sourceEnd to extend past the sourcePtr.end()
           // but let's make sure just to be safe.
-          KJ_ASSERT(sourceEnd <= sourcePtr.end());
+          KJ_ASSERT(amountToCopy <= sourceStart.size());
 
           // Safely copy amountToCopy bytes from the source into the destination.
-          std::copy(sourceStart, sourceEnd, destPtr);
+          destPtr.first(amountToCopy).copyFrom(sourceStart.first(amountToCopy));
           pending.pullInto.filled += amountToCopy;
 
           // We do not need to adjust down the atLeast here because, no matter what,
@@ -931,8 +929,8 @@ bool ByteQueue::handleMaybeClose(
 
           KJ_ASSERT(entry.offset <= sourcePtr.size());
 
-          if (sourceEnd == sourcePtr.end()) {
-            // If sourceEnd is equal to sourcePtr.end(), we've consumed the entire entry
+          if (amountToCopy == sourcePtr.size()) {
+            // If amountToCopy is equal to sourcePtr.size(), we've consumed the entire entry
             // and we can free it.
             auto released = kj::mv(next);
             state.buffer.pop_front();

@@ -62,13 +62,13 @@ export function exportChallenge(
 // rely on any object state.
 
 export declare class Certificate {
-  public constructor();
-  public verifySpkac: typeof verifySpkac;
-  public exportPublicKey: typeof exportPublicKey;
-  public exportChallenge: typeof exportChallenge;
-  public static verifySpkac: typeof verifySpkac;
-  public static exportPublicKey: typeof exportPublicKey;
-  public static exportChallenge: typeof exportChallenge;
+  constructor();
+  verifySpkac: typeof verifySpkac;
+  exportPublicKey: typeof exportPublicKey;
+  exportChallenge: typeof exportChallenge;
+  static verifySpkac: typeof verifySpkac;
+  static exportPublicKey: typeof exportPublicKey;
+  static exportChallenge: typeof exportChallenge;
 }
 
 // For backwards compatibility reasons, this cannot be converted into a

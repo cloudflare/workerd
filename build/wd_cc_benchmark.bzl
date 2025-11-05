@@ -2,6 +2,7 @@
 
 def wd_cc_benchmark(
         name,
+        args = [],
         linkopts = [],
         deps = [],
         visibility = None,
@@ -11,6 +12,7 @@ def wd_cc_benchmark(
 
     native.cc_binary(
         name = name,
+        args = ["--benchmark_min_time=1s"] + args,
         defines = ["WD_IS_BENCHMARK"],
         # Use shared linkage for benchmarks, matching the approach used for tests. Unfortunately,
         # bazel does not support shared linkage on macOS and it is broken on Windows, so only
@@ -25,12 +27,12 @@ def wd_cc_benchmark(
         }),
         visibility = visibility,
         deps = deps + [
-            "@com_google_benchmark//:benchmark_main",
+            "@workerd-google-benchmark//:benchmark_main",
             "//src/workerd/tests:bench-tools",
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        tags = ["benchmark"],
+        tags = ["workerd-benchmark"],
         **kwargs
     )
 
@@ -40,5 +42,5 @@ def wd_cc_benchmark(
         outs = [name + ".benchmark.csv"],
         srcs = [name],
         cmd = "./$(location {}) --benchmark_format=csv > \"$@\"".format(name),
-        tags = ["off-by-default", "benchmark_report"],
+        tags = ["off-by-default", "benchmark_report", "workerd-benchmark"],
     )

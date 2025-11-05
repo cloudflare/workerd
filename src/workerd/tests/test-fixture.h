@@ -78,7 +78,7 @@ struct TestFixture {
 
   // Special void version of runInIoContext that ignores exceptions with given descriptions.
   void runInIoContext(kj::Function<kj::Promise<void>(const Environment&)>&& callback,
-      kj::ArrayPtr<kj::StringPtr> errorsToIgnore);
+      const kj::ArrayPtr<const kj::StringPtr> errorsToIgnore);
 
   struct Response {
     uint statusCode;
@@ -105,6 +105,7 @@ struct TestFixture {
   ThreadContext threadContext;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
+  v8::IsolateGroup isolateGroup;
   kj::Own<Worker::Api> api;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;

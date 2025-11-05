@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export class NonRetryableError extends Error {
-  public constructor(message: string, name = 'NonRetryableError') {
+  constructor(message: string, name = 'NonRetryableError') {
     super(message);
     this.name = name;
   }
@@ -40,53 +40,71 @@ async function callFetcher<T>(
 }
 
 class InstanceImpl implements WorkflowInstance {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly fetcher: Fetcher;
-  public readonly id: string;
+  readonly id: string;
 
-  public constructor(id: string, fetcher: Fetcher) {
+  constructor(id: string, fetcher: Fetcher) {
     this.id = id;
     this.fetcher = fetcher;
   }
 
-  public async pause(): Promise<void> {
+  async pause(): Promise<void> {
     await callFetcher(this.fetcher, '/pause', {
       id: this.id,
     });
   }
-  public async resume(): Promise<void> {
+  async resume(): Promise<void> {
     await callFetcher(this.fetcher, '/resume', {
       id: this.id,
     });
   }
 
-  public async terminate(): Promise<void> {
+  async terminate(): Promise<void> {
     await callFetcher(this.fetcher, '/terminate', {
       id: this.id,
     });
   }
 
-  public async restart(): Promise<void> {
+  async restart(): Promise<void> {
     await callFetcher(this.fetcher, '/restart', {
       id: this.id,
     });
   }
 
-  public async status(): Promise<InstanceStatus> {
+  async status(): Promise<InstanceStatus> {
     const result = await callFetcher<InstanceStatus>(this.fetcher, '/status', {
       id: this.id,
     });
     return result;
   }
+
+  async sendEvent({
+    type,
+    payload,
+  }: {
+    type: string;
+    payload: unknown;
+  }): Promise<void> {
+    await callFetcher(this.fetcher, '/send-event', {
+      type,
+      payload,
+      id: this.id,
+    });
+  }
 }
 
 class WorkflowImpl {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly fetcher: Fetcher;
 
-  public constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher) {
     this.fetcher = fetcher;
   }
 
-  public async get(id: string): Promise<WorkflowInstance> {
+  async get(id: string): Promise<WorkflowInstance> {
     const result = await callFetcher<{
       id: string;
     }>(this.fetcher, '/get', { id });
@@ -94,7 +112,7 @@ class WorkflowImpl {
     return new InstanceImpl(result.id, this.fetcher);
   }
 
-  public async create(
+  async create(
     options?: WorkflowInstanceCreateOptions
   ): Promise<WorkflowInstance> {
     const result = await callFetcher<{
@@ -104,7 +122,7 @@ class WorkflowImpl {
     return new InstanceImpl(result.id, this.fetcher);
   }
 
-  public async createBatch(
+  async createBatch(
     options: WorkflowInstanceCreateOptions[]
   ): Promise<WorkflowInstance[]> {
     const results = await callFetcher<

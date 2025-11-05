@@ -49,6 +49,7 @@ export class WorkerdServerHarness {
     };
 
     // Start the subprocess.
+    console.log('[HARNESS] Starting workerd with args:', args);
     this.#child = spawn(this.#workerdBinary, args, options);
 
     // Create a promise for every named listen port we were told in our constructor to expect. Parse
@@ -64,6 +65,7 @@ export class WorkerdServerHarness {
         new Promise((resolve, reject) => {
           this.#child.stdio[CONTROL_FD].on('data', (data) => {
             const parsed = JSON.parse(data);
+            console.log('[HARNESS] Control message:', parsed);
             if (parsed.event === 'listen' && parsed.socket === listenPort) {
               resolve(parsed.port);
             }
@@ -77,6 +79,7 @@ export class WorkerdServerHarness {
     this.#listenInspectorPort = new Promise((resolve, reject) => {
       this.#child.stdio[CONTROL_FD].on('data', (data) => {
         const parsed = JSON.parse(data);
+        console.log('[HARNESS] Inspector message:', parsed);
         if (parsed.event === 'listen-inspector') {
           resolve(parsed.port);
         }
@@ -94,6 +97,7 @@ export class WorkerdServerHarness {
     // Wait for the subprocess to complete spawning before we return.
     await new Promise((resolve, reject) => {
       this.#child.once('spawn', resolve).once('error', reject);
+      console.log('[HARNESS] Workerd process spawned');
     });
   }
 
@@ -114,8 +118,48 @@ export class WorkerdServerHarness {
   async stop() {
     assert.notEqual(this.#child, null);
 
-    await this.#child.kill();
-    let result = await this.#closed;
+    console.log('[HARNESS] Sending SIGTERM to workerd...');
+
+    // First try SIGTERM with a timeout
+    const SIGTERM_TIMEOUT = 5000; // 5 seconds
+    const SIGKILL_TIMEOUT = 2000; // 2 more seconds for SIGKILL
+
+    let result;
+    let killed = false;
+
+    // Set up a timeout for SIGTERM
+    const sigtermTimeout = setTimeout(() => {
+      if (!killed) {
+        console.log('[HARNESS] SIGTERM timeout, sending SIGKILL...');
+        this.#child.kill('SIGKILL');
+        killed = true;
+      }
+    }, SIGTERM_TIMEOUT);
+
+    // Set up a final timeout for SIGKILL
+    const sigkillTimeout = setTimeout(() => {
+      if (!killed) {
+        console.error(
+          '[HARNESS] Process did not respond to signals, forcing termination'
+        );
+        // This shouldn't happen, but just in case...
+        process.exit(1);
+      }
+    }, SIGTERM_TIMEOUT + SIGKILL_TIMEOUT);
+
+    try {
+      // Send SIGTERM
+      this.#child.kill('SIGTERM');
+
+      // Wait for the process to close
+      result = await this.#closed;
+      killed = true;
+      console.log('[HARNESS] Workerd process terminated successfully');
+    } finally {
+      // Clean up timeouts
+      clearTimeout(sigtermTimeout);
+      clearTimeout(sigkillTimeout);
+    }
 
     this.#child = null;
     this.#listenPorts = null;

@@ -9,7 +9,7 @@
 #include <workerd/api/web-socket.h>
 #include <workerd/jsg/jsg.h>
 
-#include <kj/debug.h>
+#include <kj/exception.h>
 
 #include <list>
 
@@ -37,7 +37,8 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
 
   void setWebSocketAutoResponse(
       kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) override;
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() override;
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
+      jsg::Lock& js) override;
   void setTimerChannel(TimerChannel& timerChannel) override;
 
   kj::Own<HibernationManager> addRef() override;
@@ -139,7 +140,6 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
     friend HibernationManagerImpl;
   };
 
- private:
   // Removes a HibernatableWebSocket from the HibernationManager's various collections.
   void dropHibernatableWebSocket(HibernatableWebSocket& hib);
 

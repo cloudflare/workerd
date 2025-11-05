@@ -468,6 +468,7 @@ struct BuildRtti<Configuration, v8::Promise> {
   };
 
 #define FOR_EACH_BUILTIN_TYPE(F, ...)                                                              \
+  F(jsg::JsUint8Array, BuiltinType::Type::V8_UINT8_ARRAY)                                          \
   F(jsg::BufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                       \
   F(kj::Date, BuiltinType::Type::KJ_DATE)                                                          \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                                  \
@@ -496,7 +497,6 @@ FOR_EACH_BUILTIN_TYPE(DECLARE_BUILTIN_TYPE)
   F(jsg::Name, JsgImplType::Type::JSG_NAME)                                                        \
   F(jsg::SelfRef, JsgImplType::Type::JSG_SELF_REF)                                                 \
   F(jsg::Unimplemented, JsgImplType::Type::JSG_UNIMPLEMENTED)                                      \
-  F(jsg::Varargs, JsgImplType::Type::JSG_VARARGS)                                                  \
   F(v8::Isolate*, JsgImplType::Type::V8_ISOLATE)                                                   \
   F(v8::FunctionCallbackInfo<v8::Value>, JsgImplType::Type::V8_FUNCTION_CALLBACK_INFO)             \
   F(v8::PropertyCallbackInfo<v8::Value>, JsgImplType::Type::V8_PROPERTY_CALLBACK_INFO)
@@ -609,8 +609,8 @@ struct MemberCounter {
     ++members;
   }
 
-  template <const char* name, typename Property, auto property>
-  inline void registerStructProperty() {
+  template <typename Property, auto property>
+  inline void registerStructProperty(const char* name) {
     ++members;
   }
 
@@ -644,16 +644,16 @@ struct MemberCounter {
     ++members;
   }
 
-  template <const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() {
-    ++members;
-  }
-
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() { /* not included */ }
 
   template <const char* name, typename T>
   inline void registerStaticConstant(T value) {
+    ++members;
+  }
+
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerStaticProperty() {
     ++members;
   }
 
@@ -717,6 +717,8 @@ struct MembersBuilder {
   inline void registerInstanceProperty() {
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
+    prop.setSetterFastApiCompatible(isFastApiCompatible<Setter>);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
@@ -726,6 +728,7 @@ struct MembersBuilder {
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setReadonly(true);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
@@ -748,22 +751,13 @@ struct MembersBuilder {
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
-  template <const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() {
-    auto prop = members[memberIndex++].initProperty();
-    prop.setName(name);
-    prop.setReadonly(readOnly);
-    prop.setLazy(true);
-    auto jsBuiltin = prop.initType().initJsBuiltin();
-    jsBuiltin.setModule(moduleName);
-    jsBuiltin.setExport(name);
-  }
-
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerPrototypeProperty() {
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setPrototype(true);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
+    prop.setSetterFastApiCompatible(isFastApiCompatible<Setter>);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
@@ -789,8 +783,18 @@ struct MembersBuilder {
     // BuildRtti<Configuration, T>::build(constant.initType());
   }
 
-  template <const char* name, typename Property, Property Self::*property>
-  void registerStructProperty() {
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerStaticProperty() {
+    auto prop = members[memberIndex++].initProperty();
+    prop.setName(name);
+    prop.setReadonly(true);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
+    using GetterTraits = FunctionTraits<Getter>;
+    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
+  }
+
+  template <typename Property, Property Self::*property>
+  void registerStructProperty(const char* name) {
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     BuildRtti<Configuration, Property>::build(prop.initType(), rtti);
@@ -801,6 +805,8 @@ struct MembersBuilder {
     auto method = members[memberIndex++].initMethod();
 
     method.setName(name);
+    method.setFastApiCompatible(isFastApiCompatible<Method>);
+
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
@@ -823,6 +829,8 @@ struct MembersBuilder {
 
     method.setName(name);
     method.setStatic(true);
+    method.setFastApiCompatible(isFastApiCompatible<Method>);
+
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;

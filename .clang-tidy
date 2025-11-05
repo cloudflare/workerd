@@ -1,0 +1,59 @@
+---
+# TODO: We currently disable default checks with -*. While many checks provide little value or
+# produce false positives, try to incrementally enable most of them.
+# TODO: these checks are in progress of cleaning up
+Checks: >
+  -*,
+  bugprone-argument-comment,
+  bugprone-capturing-this-in-member-variable,
+  bugprone-forward-declaration-namespace,
+  bugprone-move-forwarding-reference,
+  bugprone-undefined-memory-manipulation,
+  bugprone-unhandled-self-assignment,
+  bugprone-unused-raii,
+  bugprone-use-after-move,
+  cppcoreguidelines-misleading-capture-default-by-value,
+  google-readability-casting,
+  misc-confusable-identifiers,
+  misc-header-include-cycle,
+  misc-redundant-expression,
+  misc-throw-by-value-catch-by-reference,
+  misc-unused-alias-decls,
+  modernize-macro-to-enum,
+  modernize-redundant-void-arg,
+  modernize-type-traits,
+  modernize-unary-static-assert,
+  modernize-use-bool-literals,
+  modernize-use-constraints,
+  modernize-use-emplace,
+  modernize-use-equals-delete,
+  modernize-use-nullptr,
+  modernize-use-using,
+  performance-for-range-copy,
+  performance-move-constructor-init,
+  readability-container-contains,
+  readability-duplicate-include,
+  readability-redundant-access-specifiers,
+  readability-redundant-casting,
+  readability-redundant-declaration,
+  readability-redundant-member-init,
+  readability-static-accessed-through-instance
+
+# TODO: Fix and enable
+# bugprone-parent-virtual-call
+# bugprone-return-const-ref-from-parameter
+# cppcoreguidelines-missing-std-forward
+# modernize-use-override
+# modernize-use-ranges
+# readability-avoid-const-params-in-decls
+# readability-redundant-smartptr-get
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*src/workerd/.*'
+
+CheckOptions:
+  # JSG has very entrenched include cycles
+  - key: misc-header-include-cycle.IgnoredFilesList
+    value: "jsg/jsg.h|jsg/dom-exception.h"
+  - key: cppcoreguidelines-missing-std-forward.ForwardFunction
+    value: "kj::fwd"

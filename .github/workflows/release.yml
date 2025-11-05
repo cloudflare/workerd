@@ -14,6 +14,10 @@ on:
         description: 'Is Prerelease'
         type: boolean
         default: false
+permissions:
+  id-token: write
+  contents: write
+  actions: write
 
 jobs:
   version:
@@ -70,90 +74,55 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-15, windows-2022]
-        target-arch: [ X64 ]
         include:
-          - os-name: linux
-            os: ubuntu-22.04
+          - title: linux
+            os-name: Linux
+            image: ubuntu-22.04
             bazel-config: release_linux
-          - os-name: linux-arm64
-            os: ubuntu-22.04-arm
+            target-arch: X64
+          - title: linux-arm64
+            os-name: Linux
+            image: ubuntu-22.04-arm
             bazel-config: release_linux
             target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
-          # release binaries on the macos-15 runner.
-          - os-name: macOS-x64
-            # This configuration is used for cross-compiling – macos-15 is Apple Silicon-based but
+          # release binaries on the macos-26 runner.
+          - title: macOS-x64
+            os-name: macOS
+            # This configuration is used for cross-compiling – macos-26 is Apple Silicon-based but
             # we use it to compile the x64 release.
-            os: macos-15
+            image: macos-26
             bazel-config: release_macos_cross_x86_64
-          - os-name: macOS-arm64
-            os: macos-15
+            target-arch: X64
+          - title: macOS-arm64
+            os-name: macOS
+            image: macos-26
             bazel-config: release_macos
             target-arch: ARM64
-          - os-name: windows
-            os: windows-2022
+          - title: windows
+            os-name: Windows
+            image: windows-2025
             bazel-config: release_windows
-    runs-on: ${{ matrix.os }}
-    name: build (${{ matrix.os-name }})
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          show-progress: false
-      - name: Cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: ~/bazel-disk-cache
-          # Use a different cache key than for tests here, otherwise the release cache could end up
-          # being used for test builds, where it provides little benefit.
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-      - name: Setup Linux
-        if: runner.os == 'Linux'
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          wget https://apt.llvm.org/llvm.sh
-          sed -i '/apt-get install/d' llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
-      - name: Setup macOS
-        if: runner.os == 'macOS'
-        run: |
-          # Install lld and link it to /usr/local/bin. We overwrite any existing link, which may
-          # exist from an older pre-installed LLVM version on the runner image.
-          brew install lld
-          sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
-          # Enable lld identical code folding to significantly reduce binary size.
-          echo "build:macos --config=macos_lld_icf" >> .bazelrc
-      - name: Setup Windows
-        if: runner.os == 'Windows'
-        run: |
-          git config --global core.symlinks true
-          git config --system core.longpaths true
-          git config --show-scope --show-origin core.symlinks
-          # Set a custom output root directory to avoid long file name issues.
-          [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=\\\\?\\C:\\tmp')
-      - name: Configure download mirrors
-        shell: bash
-        run: |
-          if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
-            # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
-            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
-          fi
-      - name: Bazel build
-        # Strip debug info here – we don't generate debug info but some is pulled in from external
-        # static libraries, for example the Rust STL. This is equivalent to the -Wl,-S linker
-        # option, symbols will not be removed.
-        run: |
-          bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=${{ matrix.bazel-config }} //src/workerd/server:workerd
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ runner.os }}-${{ matrix.target-arch }}-binary
-          path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
+            target-arch: X64
+    name: build (${{ matrix.title }})
+    uses: './.github/workflows/_bazel.yml'
+    with:
+      image: ${{ matrix.image }}
+      os_name: ${{ matrix.os-name }}
+      phase: '-release'
+      extra_bazel_args: '--strip=always --config=${{matrix.bazel-config}} --config=wpt-report'
+      arch_name: ${{ matrix.target-arch }}
+      upload_binary: true
+      macos_use_lld: true
+      # On release, generate a full WPT report...
+      run_tests: true
+      upload_test_logs: true
+      test_target: //src/wpt/...
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+
+
 
   upload-artifacts:
     name: Upload Artifacts
@@ -216,7 +185,7 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 24
       - name: Modify package.json version
         run: node npm/scripts/bump-version.mjs npm/workerd-${{ matrix.arch }}/package.json
         env:
@@ -278,7 +247,7 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 24
 
       - name: Cache
         id: cache
@@ -288,19 +257,11 @@ jobs:
         with:
           path: ~/bazel-disk-cache
           key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-      - name: Setup Linux
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          wget https://apt.llvm.org/llvm.sh
-          sed -i '/apt-get install/d' llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
       - name: Build type generating Worker
         run: |
-          bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types_worker
+          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types_worker
 
       - name: Modify package.json version
         run: node npm/scripts/bump-version.mjs npm/workerd/package.json
@@ -310,17 +271,17 @@ jobs:
       - run: mkdir -p npm/workerd/lib
       - run: mkdir -p npm/workerd/bin
       - name: Build node-install
-        run: npx esbuild npm/lib/node-install.ts --outfile=npm/workerd/install.js --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-install.ts --outfile=npm/workerd/install.js --bundle --target=node22 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - name: Build node-shim
-        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node22 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - name: Build node-path
-        run: npx esbuild npm/lib/node-path.ts --outfile=npm/workerd/lib/main.js --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-path.ts --outfile=npm/workerd/lib/main.js --bundle --target=node22 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
@@ -331,8 +292,6 @@ jobs:
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd/.npmrc
       - run: cd npm/workerd && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
   build-and-publish-types:
     runs-on: ubuntu-22.04
@@ -349,19 +308,11 @@ jobs:
         with:
           path: ~/bazel-disk-cache
           key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-      - name: Setup Linux
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          wget https://apt.llvm.org/llvm.sh
-          sed -i '/apt-get install/d' llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
       - name: build types
         run: |
-            bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
+            bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
       - name: Build package
         run: node npm/scripts/build-types-package.mjs
         env:
@@ -371,6 +322,3 @@ jobs:
       - run: cp npm/workers-types/oldest/* npm/workers-types
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workers-types/.npmrc
       - run: cd npm/workers-types && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
-

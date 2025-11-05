@@ -1,129 +1,125 @@
-import assert from "assert";
-import fs from "fs/promises";
-import { test } from "node:test";
-import path from "path";
-import { BuiltinType_Type, StructureGroups } from "@workerd/jsg/rtti.capnp.js";
-import { Message } from "capnp-ts";
-import { main } from "../scripts/build-types";
-import { printDefinitions } from "../src";
-import { readComments } from "../scripts/build-worker";
+import assert from 'assert';
+import fs from 'fs/promises';
+import { test } from 'node:test';
+import path from 'path';
+import { BuiltinType_Type, StructureGroups } from '@workerd/jsg/rtti';
+import { Message } from 'capnp-es';
+import { printDefinitions } from '../src';
+import { readComments } from '../scripts/build-worker';
 
-test("main: generates types", async () => {
+test('main: generates types', async () => {
   const message = new Message();
   const root = message.initRoot(StructureGroups);
-  const groups = root.initGroups(1);
+  const groups = root._initGroups(1);
   const group = groups.get(0);
-  group.setName("definitions");
-  const structures = group.initStructures(5);
+  group.name = 'definitions';
+  const structures = group._initStructures(5);
 
   const eventTarget = structures.get(0);
-  eventTarget.setName("EventTarget");
-  eventTarget.setFullyQualifiedName("workerd::api::EventTarget");
+  eventTarget.name = 'EventTarget';
+  eventTarget.fullyQualifiedName = 'workerd::api::EventTarget';
   {
-    const members = eventTarget.initMembers(2);
-    members.get(0).initConstructor();
-    const method = members.get(1).initMethod();
-    method.setName("addEventListener");
+    const members = eventTarget._initMembers(2);
+    members.get(0)._initConstructor();
+    const method = members.get(1)._initMethod();
+    method.name = 'addEventListener';
     {
-      const args = method.initArgs(2);
-      args.get(0).initString().setName("kj::String");
-      args.get(1).initBuiltin().setType(BuiltinType_Type.V8FUNCTION);
+      const args = method._initArgs(2);
+      args.get(0)._initString().name = 'kj::String';
+      args.get(1)._initBuiltin().type = BuiltinType_Type.V8FUNCTION;
     }
-    method.initReturnType().setVoidt();
+    method._initReturnType().voidt = true;
   }
-  eventTarget.setTsDefine("interface Event {}");
-  eventTarget.setTsOverride(`<EventMap extends Record<string, Event> = Record<string, Event>> {
+  eventTarget.tsDefine = 'interface Event {}';
+  eventTarget.tsOverride = `<EventMap extends Record<string, Event> = Record<string, Event>> {
     addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
-  }`);
+  }`;
 
   const workerGlobalScope = structures.get(1);
-  workerGlobalScope.setName("WorkerGlobalScope");
-  workerGlobalScope.setFullyQualifiedName("workerd::api::WorkerGlobalScope");
-  let extendsStructure = workerGlobalScope.initExtends().initStructure();
-  extendsStructure.setName("EventTarget");
-  extendsStructure.setFullyQualifiedName("workerd::api::EventTarget");
-  workerGlobalScope.setTsDefine(`type WorkerGlobalScopeEventMap = {
+  workerGlobalScope.name = 'WorkerGlobalScope';
+  workerGlobalScope.fullyQualifiedName = 'workerd::api::WorkerGlobalScope';
+  let extendsStructure = workerGlobalScope._initExtends()._initStructure();
+  extendsStructure.name = 'EventTarget';
+  extendsStructure.fullyQualifiedName = 'workerd::api::EventTarget';
+  workerGlobalScope.tsDefine = `type WorkerGlobalScopeEventMap = {
     fetch: Event;
     scheduled: Event;
-  }`);
-  workerGlobalScope.setTsOverride(
-    "extends EventTarget<WorkerGlobalScopeEventMap>"
-  );
+  }`;
+  workerGlobalScope.tsOverride =
+    'extends EventTarget<WorkerGlobalScopeEventMap>';
 
   const serviceWorkerGlobalScope = structures.get(2);
-  serviceWorkerGlobalScope.setName("ServiceWorkerGlobalScope");
-  serviceWorkerGlobalScope.setFullyQualifiedName(
-    "workerd::api::ServiceWorkerGlobalScope"
-  );
-  extendsStructure = serviceWorkerGlobalScope.initExtends().initStructure();
-  extendsStructure.setName("WorkerGlobalScope");
-  extendsStructure.setFullyQualifiedName("workerd::api::WorkerGlobalScope");
-  serviceWorkerGlobalScope.setTsRoot(true);
+  serviceWorkerGlobalScope.name = 'ServiceWorkerGlobalScope';
+  serviceWorkerGlobalScope.fullyQualifiedName =
+    'workerd::api::ServiceWorkerGlobalScope';
+  extendsStructure = serviceWorkerGlobalScope._initExtends()._initStructure();
+  extendsStructure.name = 'WorkerGlobalScope';
+  extendsStructure.fullyQualifiedName = 'workerd::api::WorkerGlobalScope';
+  serviceWorkerGlobalScope.tsRoot = true;
   {
-    const members = serviceWorkerGlobalScope.initMembers(2);
+    const members = serviceWorkerGlobalScope._initMembers(2);
 
     // Test that global extraction is performed after iterator processing
-    const method = members.get(0).initMethod();
-    method.setName("things");
-    const methodArgs = method.initArgs(1);
-    methodArgs.get(0).setBoolt();
-    const methodReturn = method.initReturnType().initStructure();
-    methodReturn.setName("ThingIterator");
-    methodReturn.setFullyQualifiedName("workerd::api::ThingIterator");
+    const method = members.get(0)._initMethod();
+    method.name = 'things';
+    const methodArgs = method._initArgs(1);
+    methodArgs.get(0).boolt = true;
+    const methodReturn = method._initReturnType()._initStructure();
+    methodReturn.name = 'ThingIterator';
+    methodReturn.fullyQualifiedName = 'workerd::api::ThingIterator';
 
-    const prop = members.get(1).initProperty();
-    prop.setName("prop");
-    prop.setReadonly(true);
-    prop.setPrototype(true);
-    prop.initType().initPromise().initValue().initNumber().setName("int");
+    const prop = members.get(1)._initProperty();
+    prop.name = 'prop';
+    prop.readonly = true;
+    prop.prototype = true;
+    prop._initType()._initPromise()._initValue()._initNumber().name = 'int';
   }
 
   const iterator = structures.get(3);
-  iterator.setName("ThingIterator");
-  iterator.setFullyQualifiedName("workerd::api::ThingIterator");
-  iterator.initExtends().initIntrinsic().setName("v8::kIteratorPrototype");
-  iterator.setIterable(true);
+  iterator.name = 'ThingIterator';
+  iterator.fullyQualifiedName = 'workerd::api::ThingIterator';
+  iterator._initExtends()._initIntrinsic().name = 'v8::kIteratorPrototype';
+  iterator.iterable = true;
   {
-    const members = iterator.initMembers(1);
-    const nextMethod = members.get(0).initMethod();
-    nextMethod.setName("next");
-    const nextStruct = nextMethod.initReturnType().initStructure();
-    nextStruct.setName("ThingIteratorNext");
-    nextStruct.setFullyQualifiedName("workerd::api::ThingIteratorNext");
-    const iteratorMethod = iterator.initIterator();
-    iteratorMethod.initReturnType().setUnknown();
+    const members = iterator._initMembers(1);
+    const nextMethod = members.get(0)._initMethod();
+    nextMethod.name = 'next';
+    const nextStruct = nextMethod._initReturnType()._initStructure();
+    nextStruct.name = 'ThingIteratorNext';
+    nextStruct.fullyQualifiedName = 'workerd::api::ThingIteratorNext';
+    const iteratorMethod = iterator._initIterator();
+    iteratorMethod._initReturnType().unknown = true;
   }
   const iteratorNext = structures.get(4);
-  iteratorNext.setName("ThingIteratorNext");
-  iteratorNext.setFullyQualifiedName("workerd::api::ThingIteratorNext");
+  iteratorNext.name = 'ThingIteratorNext';
+  iteratorNext.fullyQualifiedName = 'workerd::api::ThingIteratorNext';
   {
-    const members = iteratorNext.initMembers(2);
-    const doneProp = members.get(0).initProperty();
-    doneProp.setName("done");
-    doneProp.initType().setBoolt();
-    const valueProp = members.get(1).initProperty();
-    valueProp.setName("value");
-    const valueType = valueProp.initType().initMaybe();
-    valueType.setName("jsg::Optional");
-    valueType.initValue().initString().setName("kj::String");
+    const members = iteratorNext._initMembers(2);
+    const doneProp = members.get(0)._initProperty();
+    doneProp.name = 'done';
+    doneProp._initType().boolt = true;
+    const valueProp = members.get(1)._initProperty();
+    valueProp.name = 'value';
+    const valueType = valueProp._initType()._initMaybe();
+    valueType.name = 'jsg::Optional';
+    valueType._initValue()._initString().name = 'kj::String';
   }
 
   // https://bazel.build/reference/test-encyclopedia#initial-conditions
   const tmpPath = process.env.TEST_TMPDIR;
   assert(tmpPath !== undefined);
-  const definitionsDir = path.join(tmpPath, "definitions");
+  const definitionsDir = path.join(tmpPath, 'definitions');
   await fs.mkdir(definitionsDir);
-  const inputDir = path.join(tmpPath, "capnp");
+  const inputDir = path.join(tmpPath, 'capnp');
   await fs.mkdir(inputDir);
-  const inputPath = path.join(inputDir, "types.api.capnp.bin");
-  const outputPath = path.join(definitionsDir, "types", "index.d.ts");
-  const comments = await readComments();
+  const inputPath = path.join(inputDir, 'types.api.capnp.bin');
+  const comments = readComments();
 
   await fs.writeFile(inputPath, new Uint8Array(message.toArrayBuffer()));
-  const { ambient } = await printDefinitions(
+  const { ambient } = printDefinitions(
     message.getRoot(StructureGroups),
     comments,
-    ""
+    ''
   );
 
   assert.strictEqual(
@@ -146,33 +142,21 @@ and limitations under the License.
 // noinspection JSUnusedGlobalSymbols
 declare var onmessage: never;
 /**
- * An event which takes place in the DOM.
+ * The **\`Event\`** interface represents an event which takes place on an \`EventTarget\`.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event)
  */
 interface Event {
 }
 /**
- * EventTarget is a DOM interface implemented by objects that can receive events and may have listeners for them.
+ * The **\`EventTarget\`** interface is implemented by objects that can receive events and may have listeners for them.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget)
  */
 declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
     constructor();
     /**
-     * Appends an event listener for events whose type attribute value is type. The callback argument sets the callback that will be invoked when the event is dispatched.
-     *
-     * The options argument sets listener-specific options. For compatibility this can be a boolean, in which case the method behaves exactly as if the value was specified as options's capture.
-     *
-     * When set to true, options's capture prevents callback from being invoked when the event's eventPhase attribute value is BUBBLING_PHASE. When false (or not present), callback will not be invoked when event's eventPhase attribute value is CAPTURING_PHASE. Either way, callback will be invoked if event's eventPhase attribute value is AT_TARGET.
-     *
-     * When set to true, options's passive indicates that the callback will not cancel the event by invoking preventDefault(). This is used to enable performance optimizations described in § 2.8 Observing event listeners.
-     *
-     * When set to true, options's once indicates that the callback will only be invoked once after which the event listener will be removed.
-     *
-     * If an AbortSignal is passed for options's signal, then the event listener will be removed when signal is aborted.
-     *
-     * The event listener is appended to target's event listener list and is not appended if it has the same type, callback, and capture.
+     * The **\`addEventListener()\`** method of the EventTarget interface sets up a function that will be called whenever the specified event is delivered to the target.
      *
      * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/addEventListener)
      */
@@ -185,7 +169,7 @@ type WorkerGlobalScopeEventMap = {
 declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
 }
 /**
- * This ServiceWorker API interface represents the global execution context of a service worker.
+ * The **\`ServiceWorkerGlobalScope\`** interface of the Service Worker API represents the global execution context of a service worker.
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ServiceWorkerGlobalScope)

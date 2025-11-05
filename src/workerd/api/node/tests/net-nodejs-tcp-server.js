@@ -7,13 +7,20 @@
 // We execute this command using Node.js, which makes net.createServer available.
 const net = require('node:net');
 
+function reportPort(server) {
+  const address = server.address();
+  console.info(`Listening on ${address.address}:${address.port}`);
+}
+
 const server = net.createServer((s) => {
   s.on('error', () => {
     // Do nothing
   });
   s.end();
 });
-server.listen(9999, () => console.info('Listening on port 9999'));
+server.listen(process.env.SERVER_PORT, process.env.SIDECAR_HOSTNAME, () =>
+  reportPort(server)
+);
 
 const echoServer = net.createServer((s) => {
   s.setTimeout(100);
@@ -22,7 +29,11 @@ const echoServer = net.createServer((s) => {
   });
   s.pipe(s);
 });
-echoServer.listen(9998, () => console.info('Listening on port 9998'));
+echoServer.listen(
+  process.env.ECHO_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(echoServer)
+);
 
 const timeoutServer = net.createServer((s) => {
   s.setTimeout(100);
@@ -39,4 +50,48 @@ const timeoutServer = net.createServer((s) => {
     // Do nothing
   });
 });
-timeoutServer.listen(9997, () => console.info('Listening on port 9997'));
+timeoutServer.listen(
+  process.env.TIMEOUT_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(timeoutServer)
+);
+
+const endServer = net.createServer((s) => {
+  s.end();
+});
+endServer.listen(
+  process.env.END_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(endServer)
+);
+
+let count = 0;
+const serverThatDies = net.createServer(function (s) {
+  // We ignore the first event because wd_test checks for the connected state
+  // while preparing the sidecar test suite.
+  if (count++ > 0) {
+    serverThatDies.close();
+  }
+  s.end();
+});
+serverThatDies.listen(
+  process.env.SERVER_THAT_DIES_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(serverThatDies)
+);
+
+const reconnectServer = net.createServer((s) => {
+  s.resume();
+  s.on('error', () => {
+    // Do nothing
+  });
+  s.write('hello\r\n');
+  s.on('end', () => {
+    s.end();
+  });
+});
+reconnectServer.listen(
+  process.env.RECONNECT_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(reconnectServer)
+);

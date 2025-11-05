@@ -1,11 +1,14 @@
 #include <workerd/rust/cxx-integration-test/lib.rs.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
 
+#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 #include <signal.h>
 
 #include <kj/async.h>
 #include <kj/test.h>
+
+using namespace kj_rs;
 
 // Test generic rust/c++ integration boundary.
 // See src/rust/cxx-integration-tests for rust backend.
@@ -26,13 +29,25 @@ KJ_TEST("ok Result") {
 }
 
 KJ_TEST("err Result") {
-  // if fn returns an error, it is translated into ::rust::Error exception.
+  // if fn returns an error, it is translated into kj::Exception exception.
   try {
     rust::test::result_error();
     KJ_FAIL_REQUIRE("exception is expected");
-  } catch (::rust::Error e) {
+  } catch (kj::Exception& e) {
     // this is expected
-    KJ_EXPECT(e.what() == "test error"_kj);
+    KJ_EXPECT(e.getDescription() == "test error"_kj);
+  }
+}
+
+KJ_TEST("err Result with getCaughtExceptionAsKj") {
+  // if fn returns an error, it is translated into kj::Exception exception that can be accessed
+  // using getCaughtExceptionAsKj as is very common in the source code.
+  try {
+    rust::test::result_error();
+    KJ_FAIL_REQUIRE("exception is expected");
+  } catch (...) {
+    // this is expected
+    KJ_EXPECT(kj::getCaughtExceptionAsKj().getDescription() == "test error"_kj);
   }
 }
 
@@ -148,11 +163,11 @@ KJ_TEST("opaque rust type") {
 
   // ::rust::Str is _not_ null-terminated so kj::StringPtr can't be created from
   // it. need to allocate to create c++-string (or use it as ArrayPtr).
-  auto strName = (std::string)name;
+  auto strName = std::string(name);
   KJ_EXPECT("test_name"_kj == kj::StringPtr(strName.c_str()));
 
   s->set_name("another_name");
-  KJ_EXPECT("another_name"_kj == kj::StringPtr((std::string)s->get_name()));
+  KJ_EXPECT("another_name"_kjc == kj::arrayPtr(s->get_name().data(), s->get_name().size()));
 }
 
 KJ_TEST("rust::String test") {

@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include <kj/hash.h>
-#include "form-data.h"
+#include <kj/one-of.h>
 #include <workerd/api/blob.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
@@ -48,7 +47,7 @@ public:
   // Constructor called by the URL class when created.
   URLSearchParams(kj::Maybe<kj::ArrayPtr<const char>> maybeQuery, URL& url);
 
-  static jsg::Ref<URLSearchParams> constructor(jsg::Optional<Initializer> init);
+  static jsg::Ref<URLSearchParams> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
 
   void append(jsg::USVString name, jsg::USVString value);
   void delete_(jsg::Lock& js, jsg::USVString name, jsg::Optional<jsg::USVString> value);
@@ -162,12 +161,12 @@ public:
   URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base = kj::none);
   ~URL() noexcept(false) override;
 
-  static jsg::Ref<URL> constructor(jsg::USVString url, jsg::Optional<jsg::USVString> base);
+  static jsg::Ref<URL> constructor(jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base);
 
   static kj::Maybe<jsg::Ref<URL>> parse(jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base) {
     // Method should not throw if the parse fails
     return js.tryCatch([&]() -> kj::Maybe<jsg::Ref<URL>> {
-      return constructor(kj::mv(url), kj::mv(base));
+      return constructor(js, kj::mv(url), kj::mv(base));
     }, [](auto) -> kj::Maybe<jsg::Ref<URL>> { return kj::none; });
   }
 
@@ -203,7 +202,7 @@ public:
   kj::ArrayPtr<const char> getHash();
   void setHash(jsg::USVString value);
 
-  jsg::Ref<URLSearchParams> getSearchParams();
+  jsg::Ref<URLSearchParams> getSearchParams(jsg::Lock& js);
 
   // Standard utility that returns true if the given input can be
   // successfully parsed as a URL. This is useful for validating
@@ -250,6 +249,9 @@ public:
     tracker.trackField("inner", inner);
     tracker.trackField("searchParams", maybeSearchParams);
   }
+
+  operator const jsg::Url&() const { return inner; }
+  operator jsg::Url() { return inner.clone(); }
 
 private:
   jsg::Url inner;

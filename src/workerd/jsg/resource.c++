@@ -27,9 +27,6 @@ void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context)
 v8::Local<v8::Symbol> getSymbolDispose(v8::Isolate* isolate) {
   return v8::Symbol::GetDispose(isolate);
 }
-v8::Local<v8::Symbol> getSymbolAsyncDispose(v8::Isolate* isolate) {
-  return v8::Symbol::GetAsyncDispose(isolate);
-}
 
 void throwIfConstructorCalledAsFunction(
     const v8::FunctionCallbackInfo<v8::Value>& args, const std::type_info& type) {

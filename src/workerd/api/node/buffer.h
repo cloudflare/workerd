@@ -27,38 +27,35 @@ class BufferUtil final: public jsg::Object {
   };
 
   int compare(jsg::Lock& js,
-      kj::Array<kj::byte> one,
-      kj::Array<kj::byte> two,
+      jsg::BufferSource one,
+      jsg::BufferSource two,
       jsg::Optional<CompareOptions> maybeOptions);
 
-  jsg::BufferSource concat(jsg::Lock& js, kj::Array<kj::Array<kj::byte>> list, uint32_t length);
+  jsg::BufferSource concat(jsg::Lock& js, kj::Array<jsg::BufferSource> list, uint32_t length);
 
   jsg::BufferSource decodeString(jsg::Lock& js, jsg::JsString string, EncodingValue encoding);
 
   void fillImpl(jsg::Lock& js,
-      kj::Array<kj::byte> buffer,
+      jsg::BufferSource buffer,
       kj::OneOf<jsg::JsString, jsg::BufferSource> value,
       uint32_t start,
       uint32_t end,
       jsg::Optional<EncodingValue> encoding);
 
   jsg::Optional<uint32_t> indexOf(jsg::Lock& js,
-      kj::Array<kj::byte> buffer,
+      jsg::BufferSource buffer,
       kj::OneOf<jsg::JsString, jsg::BufferSource> value,
       int32_t byteOffset,
       EncodingValue encoding,
       bool isForward);
 
-  void swap(jsg::Lock& js, kj::Array<kj::byte> buffer, int size);
+  void swap(jsg::Lock& js, jsg::BufferSource buffer, int size);
 
-  jsg::JsString toString(jsg::Lock& js,
-      kj::Array<kj::byte> bytes,
-      uint32_t start,
-      uint32_t end,
-      EncodingValue encoding);
+  jsg::JsString toString(
+      jsg::Lock& js, jsg::BufferSource bytes, uint32_t start, uint32_t end, EncodingValue encoding);
 
   uint32_t write(jsg::Lock& js,
-      kj::Array<kj::byte> buffer,
+      jsg::BufferSource buffer,
       jsg::JsString string,
       uint32_t offset,
       uint32_t length,
@@ -73,12 +70,12 @@ class BufferUtil final: public jsg::Object {
     kSize = 7,
   };
 
-  jsg::JsString decode(jsg::Lock& js, kj::Array<kj::byte> bytes, kj::Array<kj::byte> state);
-  jsg::JsString flush(jsg::Lock& js, kj::Array<kj::byte> state);
-  bool isAscii(kj::Array<kj::byte> bytes);
-  bool isUtf8(kj::Array<kj::byte> bytes);
+  jsg::JsString decode(jsg::Lock& js, jsg::BufferSource bytes, jsg::BufferSource state);
+  jsg::JsString flush(jsg::Lock& js, jsg::BufferSource state);
+  bool isAscii(jsg::BufferSource bytes);
+  bool isUtf8(jsg::BufferSource bytes);
   jsg::BufferSource transcode(jsg::Lock& js,
-      kj::Array<kj::byte> source,
+      jsg::BufferSource source,
       EncodingValue rawFromEncoding,
       EncodingValue rawToEncoding);
 

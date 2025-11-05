@@ -1,31 +1,25 @@
 {
   "name": "@cloudflare/workerd-root",
   "private": true,
-  "scripts": {
-    "lint": "eslint types/src",
-    "format": "prettier"
-  },
+  "scripts": {},
   "dependencies": {
-    "capnp-ts": "^0.7.0",
-    "prettier": "^3.5.1",
-    "typescript": "5.6.2"
+    "prettier": "^3.6.2",
+    "typescript": "5.9.2"
   },
   "devDependencies": {
-    "@eslint/js": "^9.20.0",
-    "@types/debug": "^4.1.12",
-    "@types/node": "^22.7.5",
-    "capnpc-ts": "^0.7.0",
+    "@eslint/js": "^9.37.0",
+    "@types/node": "^24.7.2",
+    "capnp-es": "0.0.11",
     "chrome-remote-interface": "^0.33.3",
-    "esbuild": "^0.25.0",
-    "eslint": "^9.20.1",
-    "expect-type": "^1.1.0",
-    "typescript-eslint": "^8.23.0"
+    "esbuild": "^0.25.10",
+    "eslint": "^9.37.0",
+    "expect-type": "^1.2.2",
+    "typescript-eslint": "^8.46.1"
   },
   "pnpm": {
-    "overrides": {
-      "capnpc-ts>typescript": "4.7.4"
-    },
-    "onlyBuiltDependencies": []
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
-  "packageManager": "pnpm@9.7.1+sha512.faf344af2d6ca65c4c5c8c2224ea77a81a5e8859cbc4e06b1511ddce2f0151512431dd19e6aff31f2c6a8f5f2aced9bd2273e1fed7dd4de1868984059d2c4247"
+  "packageManager": "pnpm@10.18.3"
 }

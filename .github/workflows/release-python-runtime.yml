@@ -3,12 +3,11 @@ name: Build Python Runtime
 on:
   workflow_dispatch:
     inputs:
-      pyodide:
-        description: The Pyodide version
-      pyodideRevision:
-        description: The Pyodide revision date
-      backport:
-        description: The Pyodide release backport number
+      update-released:
+        description: 'Update already released versions?'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -18,35 +17,71 @@ jobs:
       - uses: actions/checkout@v4
         with:
           show-progress: false
-      - name: Setup Linux
-        if: runner.os == 'Linux'
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          wget https://apt.llvm.org/llvm.sh
-          sed -i '/apt-get install/d' llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
       - name: Configure download mirrors
         shell: bash
         run: |
           if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
-            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
+            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak build/deps/nodejs.MODULE.bazel
           fi
-      - name: Bazel build
-        run: |
-          bazel build //src/pyodide:pyodide.capnp.bin@rule --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux
-          cp bazel-bin/src/pyodide/${{ inputs.pyodide }}/generated/pyodide.capnp.bin .
-      - name: Upload Pyodide capnproto bundle
+      - name: Build and upload Pyodide capnproto bundle
         env:
           R2_ACCOUNT_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.PYODIDE_CAPNP_R2_SECRET_ACCESS_KEY }}
         run: |
+          bazel build @workerd//src/pyodide:python_bundles @workerd//src/pyodide:bundle_version_info --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
           # boto3 v1.36.0 fails with:
           # NotImplemented error occurred in CreateMultipartUpload operation: Header 'x-amz-checksum-algorithm' with value 'CRC32' not implemented
-          pip install 'boto3<1.36.0'
-          python3 src/pyodide/upload_bundle.py pyodide.capnp.bin pyodide_${{ inputs.pyodide }}_${{ inputs.pyodideRevision }}_${{ inputs.backport }}.capnp.bin
+          pip install 'boto3<1.36.0' requests
+          python3 src/pyodide/upload_bundles.py ${{ inputs.update-released == true && '--update-released' || '' }}
+
+      - name: Check for open PR and commit changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Commit changes to python_metadata.bzl and push to branch
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "release-python-runtime.yml GitHub Action"
+
+          # Get current branch name
+          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+          echo "Current branch: $BRANCH_NAME"
+
+          # Check if there are changes to python_metadata.bzl
+          if git diff --quiet build/python_metadata.bzl; then
+            echo "No changes to python_metadata.bzl"
+            exit 0
+          fi
+
+          echo "Changes detected in python_metadata.bzl"
+
+          # Check if there's an open PR for this branch
+          PR_COUNT=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq length)
+
+          if [ "$PR_COUNT" -eq 0 ]; then
+            echo "No open PR found for branch $BRANCH_NAME, skipping commit"
+            exit 0
+          fi
+
+          echo "Found open PR for branch $BRANCH_NAME"
+
+          # Commit and push the changes
+          git add build/python_metadata.bzl
+          git commit --fixup HEAD -m "Update python_metadata.bzl with new bundle info
+
+          This commit updates the backport and integrity values in python_metadata.bzl
+          based on the latest Pyodide bundle upload.
+
+          🤖 Generated automatically by release-python-runtime workflow"
+
+          # --no-verify because 'git merge-base origin/main HEAD' fails in pre-commit.
+          # There shouldn't be formatting errors anyways and if there are CI will catch it.
+          git push origin "$BRANCH_NAME" --no-verify
+          echo "Changes committed and pushed to $BRANCH_NAME"

@@ -38,7 +38,7 @@ struct SocketInfo {
   JSG_STRUCT(remoteAddress, localAddress);
 };
 
-typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
+using AnySocketAddress = kj::OneOf<SocketAddress, kj::String>;
 
 struct SocketOptions {
   jsg::Optional<kj::String> secureTransport;
@@ -67,7 +67,7 @@ class Socket: public jsg::Object {
       kj::Promise<void> watchForDisconnectTask,
       jsg::Optional<SocketOptions> options,
       kj::Own<kj::TlsStarterCallback> tlsStarter,
-      bool isSecureSocket,
+      SecureTransportKind secureTransport,
       kj::String domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
@@ -81,7 +81,7 @@ class Socket: public jsg::Object {
         options(kj::mv(options)),
         remoteAddress(kj::mv(remoteAddress)),
         tlsStarter(context.addObject(kj::mv(tlsStarter))),
-        isSecureSocket(isSecureSocket),
+        secureTransport(secureTransport),
         domain(kj::mv(domain)),
         isDefaultFetchPort(isDefaultFetchPort),
         openedResolver(kj::mv(openedPrPair.resolver)),
@@ -101,6 +101,25 @@ class Socket: public jsg::Object {
   jsg::MemoizedIdentity<jsg::Promise<SocketInfo>>& getOpened() {
     return openedPromise;
   }
+
+  bool getUpgraded() const {
+    return upgraded;
+  }
+
+  kj::StringPtr getSecureTransport() const {
+    switch (secureTransport) {
+      case SecureTransportKind::OFF:
+        return "off"_kj;
+      case SecureTransportKind::STARTTLS:
+        return "starttls"_kj;
+      case SecureTransportKind::ON:
+        return "on"_kj;
+    }
+  }
+
+  // Takes ownership of the underlying connection stream, detaching the readable and writable streams.
+  // This is a destructive operation that renders the Socket unusable for further I/O operations.
+  kj::Own<kj::AsyncIoStream> takeConnectionStream(jsg::Lock& js);
 
   // Closes the socket connection.
   //
@@ -134,8 +153,14 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
     JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
     JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
+    JSG_READONLY_PROTOTYPE_PROPERTY(upgraded, getUpgraded);
+    JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
     JSG_METHOD(close);
     JSG_METHOD(startTls);
+
+    JSG_TS_OVERRIDE({
+      get secureTransport(): 'on' | 'off' | 'starttls';
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -173,9 +198,9 @@ class Socket: public jsg::Object {
   kj::String remoteAddress;
   // Callback used to upgrade the existing connection to a secure one.
   IoOwn<kj::TlsStarterCallback> tlsStarter;
-  // Set to true on sockets created with `useSecureTransport` set to true or a socket returned by
-  // `startTls`.
-  bool isSecureSocket;
+  // Set to true when the socket is upgraded to a secure one.
+  bool upgraded = false;
+  SecureTransportKind secureTransport;
   // The domain/ip this socket is connected to. Used for startTls.
   kj::String domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
@@ -220,9 +245,10 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::String remoteAddress,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
-    bool isSecureSocket,
+    SecureTransportKind secureTransport,
     kj::String domain,
-    bool isDefaultFetchPort);
+    bool isDefaultFetchPort,
+    kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);
 
 jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
@@ -242,8 +268,15 @@ class SocketsModule final: public jsg::Object {
   jsg::Ref<Socket> connect(
       jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options);
 
-  JSG_RESOURCE_TYPE(SocketsModule) {
+  // Creates a Fetcher from a Socket that can perform HTTP requests over the socket connection
+  jsg::Promise<jsg::Ref<Fetcher>> internalNewHttpClient(jsg::Lock& js, jsg::Ref<Socket> socket);
+
+  JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(internalNewHttpClient);
+    }
   }
 };
 

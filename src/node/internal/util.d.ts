@@ -2,27 +2,38 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+
+import perfHooks from 'node:perf_hooks';
+
+export const Performance = perfHooks.Performance;
+export const PerformanceEntry = perfHooks.PerformanceEntry;
+export const PerformanceMeasure = perfHooks.PerformanceMeasure;
+export const PerformanceMark = perfHooks.PerformanceMark;
+export const PerformanceObserver = perfHooks.PerformanceObserver;
+export const PerformanceObserverEntryList =
+  perfHooks.PerformanceObserverEntryList;
+export const PerformanceResourceTiming = perfHooks.PerformanceResourceTiming;
 
 export abstract class MIMEType {
-  public constructor(input: string);
-  public type: string;
-  public subtype: string;
-  public readonly essence: string;
-  public readonly params: MIMEParams;
-  public toString(): string;
-  public toJSON(): string;
+  constructor(input: string);
+  type: string;
+  subtype: string;
+  readonly essence: string;
+  readonly params: MIMEParams;
+  toString(): string;
+  toJSON(): string;
 }
 
 export abstract class MIMEParams {
-  public constructor();
-  public delete(name: string): void;
-  public get(name: string): string | undefined;
-  public has(name: string): boolean;
-  public set(name: string, value: string): void;
-  public entries(): Iterable<string[]>;
-  public keys(): Iterable<string>;
-  public values(): Iterable<string>;
+  constructor();
+  delete(name: string): void;
+  get(name: string): string | undefined;
+  has(name: string): boolean;
+  set(name: string, value: string): void;
+  entries(): Iterable<string[]>;
+  keys(): Iterable<string>;
+  values(): Iterable<string>;
 }
 
 export const kResourceTypeInspect: unique symbol;
@@ -57,19 +68,6 @@ export function previewEntries(value: unknown): PreviewedEntries | undefined;
 
 export function getConstructorName(value: unknown): string;
 
-export type TypedArray =
-  | Uint8Array
-  | Uint8ClampedArray
-  | Uint16Array
-  | Uint32Array
-  | Int8Array
-  | Int16Array
-  | Int32Array
-  | BigUint64Array
-  | BigInt64Array
-  | Float32Array
-  | Float64Array;
-
 export function isArrayBufferView(value: unknown): value is ArrayBufferView;
 export function isArgumentsObject(value: unknown): value is IArguments;
 export function isArrayBuffer(value: unknown): value is ArrayBuffer;
@@ -82,6 +80,7 @@ export function isBooleanObject(value: unknown): value is boolean;
 export function isDataView(value: unknown): value is DataView;
 export function isDate(value: unknown): value is Date;
 export function isExternal(value: unknown): boolean;
+export function isFloat16Array(value: unknown): value is Float16Array;
 export function isFloat32Array(value: unknown): value is Float32Array;
 export function isFloat64Array(value: unknown): value is Float64Array;
 export function isGeneratorFunction(value: unknown): value is GeneratorFunction;
@@ -106,22 +105,17 @@ export function isSetIterator(
 export function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
 export function isStringObject(value: unknown): value is string;
 export function isSymbolObject(value: unknown): value is symbol;
-export function isTypedArray(value: unknown): value is TypedArray;
+export function isTypedArray(value: unknown): value is NodeJS.TypedArray;
 export function isUint8Array(value: unknown): value is Uint8Array;
 export function isUint8ClampedArray(value: unknown): value is Uint8ClampedArray;
 export function isUint16Array(value: unknown): value is Uint16Array;
 export function isUint32Array(value: unknown): value is Uint32Array;
-export function isWeakMap(value: unknown): value is WeakMap<any, unknown>;
-export function isWeakSet(value: unknown): value is WeakSet<any>;
+export function isWeakMap(value: unknown): value is WeakMap<unknown, unknown>;
+export function isWeakSet(value: unknown): value is WeakSet<unknown>;
 export function isAnyArrayBuffer(
   value: unknown
 ): value is ArrayBuffer | SharedArrayBuffer;
 export function isBoxedPrimitive(
   value: unknown
 ): value is number | string | boolean | bigint | symbol;
-
-export function getEnvObject(): Record<string, string>;
-export function getBuiltinModule(id: string): any;
 export function getCallSites(frames?: number): Record<string, string>[];
-export function processExitImpl(code: number): void;
-export const processPlatform: string;

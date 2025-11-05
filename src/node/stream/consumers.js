@@ -26,7 +26,7 @@
 import { Buffer } from 'node-internal:internal_buffer';
 
 export async function blob(stream) {
-  return new Blob(await Array.fromAsync(stream));
+  return new Blob(await Array.fromAsync(stream)); // eslint-disable-line no-undef
 }
 
 export async function arrayBuffer(stream) {
@@ -39,7 +39,7 @@ export async function buffer(stream) {
 }
 
 export async function text(stream) {
-  const dec = new TextDecoder();
+  const dec = new TextDecoder(); // eslint-disable-line no-undef
   let str = '';
   for await (const chunk of stream) {
     if (typeof chunk === 'string') str += chunk;

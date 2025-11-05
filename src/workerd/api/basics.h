@@ -9,6 +9,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-own.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/canceler.h>
 
@@ -32,41 +33,46 @@ class Event: public jsg::Object {
     JSG_STRUCT(bubbles, cancelable, composed);
   };
 
-  inline explicit Event(kj::String ownType, Init init = Init(), bool trusted = true)
+  inline explicit Event(kj::String ownType, Init init = {}, bool trusted = true)
       : ownType(kj::mv(ownType)),
-        type(this->ownType),
-        init(init),
-        trusted(trusted) {}
+        type(this->ownType) {
+    flags.trusted = trusted;
+    flags.bubbles = init.bubbles.orDefault(false);
+    flags.cancelable = init.cancelable.orDefault(false);
+    flags.composed = init.composed.orDefault(false);
+  }
 
-  inline explicit Event(kj::StringPtr type, Init init = Init(), bool trusted = true)
-      : type(type),
-        init(init),
-        trusted(trusted) {}
+  inline explicit Event(kj::StringPtr type, Init init = {}, bool trusted = true): type(type) {
+    flags.trusted = trusted;
+    flags.bubbles = init.bubbles.orDefault(false);
+    flags.cancelable = init.cancelable.orDefault(false);
+    flags.composed = init.composed.orDefault(false);
+  }
 
   inline bool isPreventDefault() const {
-    return preventedDefault;
+    return flags.preventedDefault;
   }
   inline void clearPreventDefault() {
-    preventedDefault = false;
+    flags.preventedDefault = false;
   }
 
   void beginDispatch(jsg::Ref<EventTarget> target);
   inline void endDispatch() {
-    isBeingDispatched = false;
+    flags.isBeingDispatched = false;
   }
 
   inline bool isStopped() const {
-    return stopped;
+    return flags.stopped;
   }
 
-  static jsg::Ref<Event> constructor(kj::String type, jsg::Optional<Init> init);
+  static jsg::Ref<Event> constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init);
   kj::StringPtr getType();
 
   inline void stopImmediatePropagation() {
-    stopped = true;
+    flags.stopped = true;
   }
   inline void preventDefault() {
-    preventedDefault = true;
+    flags.preventedDefault = true;
   }
 
   // The only phases we actually use are NONE and AT_TARGET but we provide
@@ -79,7 +85,7 @@ class Event: public jsg::Object {
   };
 
   inline int getEventPhase() const {
-    return isBeingDispatched ? AT_TARGET : NONE;
+    return flags.isBeingDispatched ? AT_TARGET : NONE;
   }
 
   // Much of the following is not used in our implementation of Event
@@ -88,25 +94,25 @@ class Event: public jsg::Object {
   // provided to fill-out Event spec compliance.
 
   inline bool getCancelBubble() const {
-    return propagationStopped;
+    return flags.propagationStopped;
   }
   inline void setCancelBubble(bool stopped) {
-    propagationStopped = stopped;
+    flags.propagationStopped = stopped;
   }
   inline void stopPropagation() {
-    propagationStopped = true;
+    flags.propagationStopped = true;
   }
   inline bool getComposed() const {
-    return init.composed.orDefault(false);
+    return flags.composed;
   }
   inline bool getBubbles() const {
-    return init.bubbles.orDefault(false);
+    return flags.bubbles;
   }
   inline bool getCancelable() const {
-    return init.cancelable.orDefault(false);
+    return flags.cancelable;
   }
   inline bool getDefaultPrevented() const {
-    return getCancelable() && preventedDefault;
+    return getCancelable() && flags.preventedDefault;
   }
   inline bool getReturnValue() const {
     return !getDefaultPrevented();
@@ -123,13 +129,13 @@ class Event: public jsg::Object {
   // by EW internally is Trusted, any Event created using new Event() in JS
   // is not trusted.
   inline bool getIsTrusted() const {
-    return trusted;
+    return flags.trusted;
   }
 
   // The currentTarget is the EventTarget on which the Event is being
   // dispatched. This will be set every time dispatchEvent() is called
-  // successfully and will remain set after dispatching is completed.
-  jsg::Optional<jsg::Ref<EventTarget>> getCurrentTarget();
+  // successfully and will be null after dispatchEvent returns.
+  kj::Maybe<jsg::Ref<EventTarget>> getCurrentTarget();
 
   // Because we don't support hierarchical EventTargets, this function
   // will always return the same value as getCurrentTarget().
@@ -154,11 +160,23 @@ class Event: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_PROTOTYPE_PROPERTY(defaultPrevented, getDefaultPrevented);
       JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
-      JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
+      } else {
+        // The original implementation had getTarget simply deferring to
+        // getCurrentTarget, the new impl moves the original impl into
+        // getTarget here so having currentTarget point to getTarget
+        // preserves the original behavior.
+        JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getTarget);
+      }
       JSG_READONLY_PROTOTYPE_PROPERTY(target, getTarget);
-      JSG_READONLY_PROTOTYPE_PROPERTY(srcElement, getCurrentTarget);
+      JSG_READONLY_PROTOTYPE_PROPERTY(srcElement, getTarget);
       JSG_READONLY_PROTOTYPE_PROPERTY(timeStamp, getTimestamp);
-      JSG_READONLY_PROTOTYPE_PROPERTY(isTrusted, getIsTrusted);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_INSTANCE_PROPERTY(isTrusted, getIsTrusted);
+      } else {
+        JSG_READONLY_PROTOTYPE_PROPERTY(isTrusted, getIsTrusted);
+      }
 
       JSG_PROTOTYPE_PROPERTY(cancelBubble, getCancelBubble, setCancelBubble);
     } else {
@@ -169,7 +187,11 @@ class Event: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_INSTANCE_PROPERTY(defaultPrevented, getDefaultPrevented);
       JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
-      JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
+      } else {
+        JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getTarget);
+      }
       JSG_READONLY_INSTANCE_PROPERTY(target, getTarget);
       JSG_READONLY_INSTANCE_PROPERTY(srcElement, getCurrentTarget);
       JSG_READONLY_INSTANCE_PROPERTY(timeStamp, getTimestamp);
@@ -198,13 +220,19 @@ class Event: public jsg::Object {
   // listing ownType first so type can be initialized with it in constructor
   kj::String ownType;
   kj::StringPtr type;
-  Init init;
-  bool trusted = true;
-  bool stopped = false;
-  bool preventedDefault = false;
-  bool isBeingDispatched = false;
-  bool propagationStopped = false;
   kj::Maybe<jsg::Ref<EventTarget>> target;
+
+  struct Flags {
+    uint8_t trusted : 1 = 1;
+    uint8_t stopped : 1 = 0;
+    uint8_t preventedDefault : 1 = 0;
+    uint8_t isBeingDispatched : 1 = 0;
+    uint8_t propagationStopped : 1 = 0;
+    uint8_t composed : 1 = 0;
+    uint8_t bubbles : 1 = 0;
+    uint8_t cancelable : 1 = 0;
+  };
+  Flags flags{};
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(target);
@@ -222,7 +250,7 @@ class ExtendableEvent: public Event {
 
   void waitUntil(kj::Promise<void> promise);
 
-  jsg::Optional<jsg::Ref<ActorState>> getActorState();
+  jsg::Optional<jsg::Ref<ActorState>> getActorState(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ExtendableEvent) {
     JSG_INHERIT(Event);
@@ -289,8 +317,13 @@ class EventTarget: public jsg::Object {
   }
 
   inline void enableWarningOnSpecialEvents() {
-    warnOnSpecialEvents = true;
+    flags.warnOnSpecialEvents = true;
   }
+
+  // The EventListenerCallback, if given, is called whenever addEventListener
+  // or removeEventListener is invoked to report the number of registered
+  // handlers for the event.
+  using EventListenerCallback = jsg::Function<void(kj::StringPtr, size_t)>;
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -308,30 +341,39 @@ class EventTarget: public jsg::Object {
     jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
     JSG_STRUCT(capture, passive, once, signal);
+
+    // A following signal is used when the EventTarget is an AbortSignal
+    // that is being followed by another AbortSignal via the AbortSignal.any.
+    // This is used to keep the following signal alive until either the
+    // signal is triggered or this AbortSignal is destroyed.
+    jsg::Optional<jsg::Ref<AbortSignal>> followingSignal;
   };
 
   using AddEventListenerOpts = kj::OneOf<AddEventListenerOptions, bool>;
   using EventListenerOpts = kj::OneOf<EventListenerOptions, bool>;
 
-  typedef jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<Event>)> HandlerFunction;
+  using HandlerFunction = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<Event>)>;
+
   struct HandlerObject {
     HandlerFunction handleEvent;
-    JSG_STRUCT(handleEvent);
+    jsg::SelfRef self;
+    JSG_STRUCT(handleEvent, self);
 
     // TODO(cleanup): Get rid of this override and parse the type directly in param-extractor.rs
     JSG_STRUCT_TS_OVERRIDE({
       handleEvent: (event: Event) => any | undefined;
     });
   };
-  typedef kj::OneOf<HandlerFunction, HandlerObject> Handler;
+  using Handler = kj::OneOf<HandlerFunction, HandlerObject>;
 
   void addEventListener(jsg::Lock& js,
       kj::String type,
-      jsg::Identified<Handler> handler,
-      jsg::Optional<AddEventListenerOpts> maybeOptions);
+      kj::Maybe<jsg::Identified<Handler>> maybeHandler,
+      jsg::Optional<AddEventListenerOpts> maybeOptions,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
   void removeEventListener(jsg::Lock& js,
       kj::String type,
-      jsg::HashableV8Ref<v8::Object> handler,
+      kj::Maybe<jsg::HashableV8Ref<v8::Object>> maybeHandler,
       jsg::Optional<EventListenerOpts> options);
   bool dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event);
 
@@ -355,7 +397,7 @@ class EventTarget: public jsg::Object {
   }
   JSG_REFLECTION(onEvents);
 
-  static jsg::Ref<EventTarget> constructor();
+  static jsg::Ref<EventTarget> constructor(jsg::Lock& js);
 
   // Registers a lambda that will be called when the given event type is emitted.
   // The handler will be registered for as long as the returned kj::Own<void>
@@ -368,6 +410,11 @@ class EventTarget: public jsg::Object {
       jsg::Lock& js, kj::String type, jsg::Function<void(jsg::Ref<Event>)> func, bool once = false);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ protected:
+  void setEventListenerCallback(EventListenerCallback&& callback) {
+    maybeListenerCallback = kj::mv(callback);
+  }
 
  private:
   // RAII-style listener that can be attached to an EventTarget.
@@ -494,15 +541,19 @@ class EventTarget: public jsg::Object {
 
   kj::HashMap<kj::String, EventHandlerSet> typeMap;
 
-  // When using module syntax, the "fetch", "scheduled", "trace", etc.
-  // events are handled by exports rather than events. When warnOnSpecialEvents is true,
-  // when using module syntax, attempts to register event handlers for these special
-  // types of events will result in a warning being emitted.
-  bool warnOnSpecialEvents = false;
+  kj::Maybe<EventListenerCallback> maybeListenerCallback;
 
-  // Event handlers are not supposed to return values. The first time one does, we'll
-  // emit a warning to help users debug things but we'll otherwise ignore it.
-  bool warnOnHandlerReturn = true;
+  struct Flags {
+    // When using module syntax, the "fetch", "scheduled", "trace", etc.
+    // events are handled by exports rather than events. When warnOnSpecialEvents is true,
+    // when using module syntax, attempts to register event handlers for these special
+    // types of events will result in a warning being emitted.
+    uint8_t warnOnSpecialEvents : 1 = 0;
+    // Event handlers are not supposed to return values. The first time one does, we'll
+    // emit a warning to help users debug things but we'll otherwise ignore it.
+    uint8_t warnOnHandlerReturn : 1 = 1;
+  };
+  Flags flags;
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -510,21 +561,25 @@ class EventTarget: public jsg::Object {
 };
 
 // An implementation of the Web Platform Standard AbortSignal API
+class AbortTriggerRpcClient;
+
 class AbortSignal final: public EventTarget {
  public:
-  enum class Flag { NONE, NEVER_ABORTS };
+  enum class Flag { NONE, NEVER_ABORTS, IGNORE_FOR_SUBREQUESTS };
 
   AbortSignal(kj::Maybe<kj::Exception> exception = kj::none,
       jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
       Flag flag = Flag::NONE);
 
+  using PendingReason = kj::RefcountedWrapper<
+      kj::OneOf<kj::Array<kj::byte> /* v8Serialized */, kj::Exception /* if capability is dropped */
+          >>;
+
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
   static jsg::Ref<AbortSignal> constructor() = delete;
 
-  bool getAborted() {
-    return canceler->isCanceled();
-  }
+  bool getAborted(jsg::Lock& js);
 
   jsg::JsValue getReason(jsg::Lock& js);
 
@@ -549,7 +604,8 @@ class AbortSignal final: public EventTarget {
 
   static jsg::Ref<AbortSignal> any(jsg::Lock& js,
       kj::Array<jsg::Ref<AbortSignal>> signals,
-      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler);
+      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
 
   // While AbortSignal extends EventTarget, and our EventTarget implementation will
   // automatically support onabort being set as an own property, the spec defines
@@ -557,6 +613,12 @@ class AbortSignal final: public EventTarget {
   // need to explicitly set it as a prototype property here.
   kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
   void setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler);
+
+  void addEventListener(jsg::Lock& js,
+      kj::String type,
+      jsg::Identified<Handler> handler,
+      jsg::Optional<AddEventListenerOpts> maybeOptions,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
 
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
@@ -572,27 +634,31 @@ class AbortSignal final: public EventTarget {
     }
     JSG_PROTOTYPE_PROPERTY(onabort, getOnAbort, setOnAbort);
     JSG_METHOD(throwIfAborted);
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(skipReleaseForTest);
+      JSG_TS_OVERRIDE({ skipReleaseForTest: never });
+    }
   }
 
   // Allows this AbortSignal to also serve as a kj::Canceler
   template <typename T>
-  kj::Promise<T> wrap(kj::Promise<T> promise) {
+  kj::Promise<T> wrap(jsg::Lock& js, kj::Promise<T> promise) {
+    subscribeToRpcAbort(js);
+
     JSG_REQUIRE(!canceler->isCanceled(), TypeError, "The AbortSignal has already been triggered");
     return canceler->wrap(kj::mv(promise));
   }
 
   template <typename T>
   static kj::Promise<T> maybeCancelWrap(
-      kj::Maybe<jsg::Ref<AbortSignal>>& signal, kj::Promise<T> promise) {
+      jsg::Lock& js, kj::Maybe<jsg::Ref<AbortSignal>>& signal, kj::Promise<T> promise) {
     KJ_IF_SOME(s, signal) {
-      return s->wrap(kj::mv(promise));
+      return s->wrap(js, kj::mv(promise));
     } else {
       return kj::mv(promise);
     }
   }
-
-  static kj::Exception abortException(
-      jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> reason = kj::none);
 
   RefcountedCanceler& getCanceler();
 
@@ -603,24 +669,78 @@ class AbortSignal final: public EventTarget {
     tracker.trackField("reason", reason);
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+
+  // To test what happens if a capability is dropped before invoking release on the cloned abort
+  // signal, this method will tell every rpcClient to skip this step before destruction.
+  void skipReleaseForTest();
+
+  static jsg::Ref<AbortSignal> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::ABORT_SIGNAL);
+
+  // True if this is a signal on the request of an incoming fetch. When the compat flag
+  // `requestSignalPassthrough` is set, this flag has no effect. But to ensure backwards
+  // compatibility, when this flag is not set, this signal will not be passed through to
+  // subrequests derived from the incoming request.
+  bool isIgnoredForSubrequests(jsg::Lock& js) const;
+
  private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
+
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
+
+  static kj::Exception abortException(
+      jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> reason);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
   friend class AbortController;
+
+  // -------------------------------------------------------------
+  // RPC client functionality. Used if this signal was serialized.
+
+  // A collection of rpcClients, which will be notified if this signal is triggered and when this
+  // signal is destroyed.
+  kj::Vector<IoOwn<AbortTriggerRpcClient>> rpcClients;
+
+  // Trigger an abort on all associated clients
+  kj::Promise<void> sendToRpc(kj::Array<kj::byte>&& reason);
+
+  // ---------------------------------------------------------------
+  // RPC server functionality. Used if this signal was deserialized.
+
+  // A promise that is fulfilled if an abort() message is received over RPC.
+  kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;
+
+  // A refcounted object used to receive a serialized abort reason
+  // The abort reason is required in asynchronous event handlers as well as synchronous methods
+  // like getReason(). As a result, we can't pass the abort reason in the above promise, and both
+  // sync and async methods will need to check this value.
+  kj::Maybe<IoOwn<PendingReason>> pendingReason;
+
+  // Synchronously check if an abort reason was sent over RPC
+  bool hasPendingReason();
+  kj::Maybe<jsg::JsValue> deserializePendingReason(jsg::Lock& js);
+
+  // Wait for abort over RPC.
+  // We invoke this once at least one event handler is attached to the AbortSignal
+  void subscribeToRpcAbort(jsg::Lock& js);
 };
 
 // An implementation of the Web Platform Standard AbortController API
 class AbortController final: public jsg::Object {
  public:
-  explicit AbortController(): signal(jsg::alloc<AbortSignal>()) {}
+  explicit AbortController(
+      jsg::Lock& js, AbortSignal::Flag abortSignalFlag = AbortSignal::Flag::NONE)
+      : signal(js.alloc<AbortSignal>(
+            kj::none /* exception */, kj::none /* maybeReason */, abortSignalFlag)) {}
 
-  static jsg::Ref<AbortController> constructor() {
-    return jsg::alloc<AbortController>();
+  static jsg::Ref<AbortController> constructor(jsg::Lock& js) {
+    return js.alloc<AbortController>(js);
   }
 
   jsg::Ref<AbortSignal> getSignal() {

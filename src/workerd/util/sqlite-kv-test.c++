@@ -153,5 +153,182 @@ KJ_TEST("large key") {
       "string or blob too big: SQLITE_TOOBIG", kv.put(tooBigString, "hello"_kj.asBytes()));
 }
 
+KJ_TEST("SQLite-KV multi-put") {
+  class TestSqliteObserver: public SqliteObserver {
+   public:
+    void addQueryStats(uint64_t read, uint64_t written) override {
+      rowsRead += read;
+      rowsWritten += written;
+    }
+
+    uint64_t rowsRead = 0;
+    uint64_t rowsWritten = 0;
+  };
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  TestSqliteObserver sqliteObserver;
+  SqliteDatabase db(
+      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteKv kv(db);
+
+  // Test basic multi-put with a simple struct
+  struct KeyValue {
+    kj::StringPtr key;
+    kj::ArrayPtr<const byte> value;
+  };
+
+  kj::Vector<KeyValue> pairs;
+  pairs.add(KeyValue{"foo"_kj, "abc"_kj.asBytes()});
+  pairs.add(KeyValue{"bar"_kj, "def"_kj.asBytes()});
+  pairs.add(KeyValue{"baz"_kj, "123"_kj.asBytes()});
+
+  kv.put(pairs, {.allowUnconfirmed = false});
+
+  KJ_EXPECT(sqliteObserver.rowsWritten == 3);
+
+  // Verify all values were written correctly
+  bool called = false;
+  KJ_EXPECT(kv.get("foo", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "abc");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+
+  called = false;
+  KJ_EXPECT(kv.get("bar", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "def");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+
+  called = false;
+  KJ_EXPECT(kv.get("baz", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "123");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+
+  // Test multi-put overwrites existing values
+  kj::Vector<KeyValue> pairs2;
+  pairs2.add(KeyValue{"foo"_kj, "xyz"_kj.asBytes()});
+  pairs2.add(KeyValue{"bar"_kj, "uvw"_kj.asBytes()});
+
+  kv.put(pairs2, {.allowUnconfirmed = false});
+
+  called = false;
+  KJ_EXPECT(kv.get("foo", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "xyz");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+
+  called = false;
+  KJ_EXPECT(kv.get("bar", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "uvw");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+
+  // Verify other key unchanged
+  called = false;
+  KJ_EXPECT(kv.get("baz", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "123");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+
+  // Test empty multi-put (should succeed)
+  kj::Vector<KeyValue> emptyPairs;
+  kv.put(emptyPairs, {.allowUnconfirmed = false});
+
+  // Verify database unchanged
+  called = false;
+  KJ_EXPECT(kv.get("foo", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "xyz");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+}
+
+KJ_TEST("SQLite-KV multi-put rollback on error") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteKv kv(db);
+
+  // Pre-populate with some data
+  kv.put("existing", "value"_kj.asBytes());
+
+  struct KeyValue {
+    kj::StringPtr key;
+    kj::ArrayPtr<const byte> value;
+  };
+
+  // Create a multi-put that will fail due to a key being too large
+  kj::Vector<KeyValue> pairs;
+  pairs.add(KeyValue{"key1"_kj, "value1"_kj.asBytes()});
+  pairs.add(KeyValue{"key2"_kj, "value2"_kj.asBytes()});
+
+  // Add a key that exceeds the limit (2.2MB actual limit)
+  kj::String tooBigString = kj::heapString(2400000);
+  pairs.add(KeyValue{tooBigString, "value3"_kj.asBytes()});
+
+  // The multi-put should throw
+  KJ_EXPECT_THROW_MESSAGE(
+      "string or blob too big: SQLITE_TOOBIG", kv.put(pairs, {.allowUnconfirmed = false}));
+
+  // Verify that the first two keys were NOT written (transaction rolled back)
+  KJ_EXPECT(!kv.get("key1", [&](kj::ArrayPtr<const byte> value) {
+    KJ_FAIL_EXPECT("key1 should not exist after rollback");
+  }));
+
+  KJ_EXPECT(!kv.get("key2", [&](kj::ArrayPtr<const byte> value) {
+    KJ_FAIL_EXPECT("key2 should not exist after rollback");
+  }));
+
+  // Verify existing data is unchanged
+  bool called = false;
+  KJ_EXPECT(kv.get("existing", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "value");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+}
+
+KJ_TEST("SQLite-KV multi-put with allowUnconfirmed") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteKv kv(db);
+
+  struct KeyValue {
+    kj::StringPtr key;
+    kj::ArrayPtr<const byte> value;
+  };
+
+  kj::Vector<KeyValue> pairs;
+  pairs.add(KeyValue{"foo"_kj, "abc"_kj.asBytes()});
+  pairs.add(KeyValue{"bar"_kj, "def"_kj.asBytes()});
+
+  // Test with allowUnconfirmed = true
+  kv.put(pairs, {.allowUnconfirmed = true});
+
+  // Verify values were written
+  bool called = false;
+  KJ_EXPECT(kv.get("foo", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "abc");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+
+  called = false;
+  KJ_EXPECT(kv.get("bar", [&](kj::ArrayPtr<const byte> value) {
+    KJ_EXPECT(kj::str(value.asChars()) == "def");
+    called = true;
+  }));
+  KJ_EXPECT(called);
+}
+
 }  // namespace
 }  // namespace workerd

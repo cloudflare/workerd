@@ -193,7 +193,7 @@ class ZlibContext final {
   int level = 0;
   int memLevel = 0;
   int strategy = 0;
-  kj::Vector<kj::byte> dictionary{};
+  kj::Vector<kj::byte> dictionary;
 
   int err = Z_OK;
   unsigned int gzip_id_bytes_read = 0;
@@ -292,12 +292,15 @@ class ZlibUtil final: public jsg::Object {
   template <class CompressionContext>
   class CompressionStream: public jsg::Object {
    public:
-    explicit CompressionStream(ZlibMode _mode): context_(_mode) {}
+    explicit CompressionStream(
+        ZlibMode _mode, kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        : allocator(kj::mv(externalMemoryTarget)),
+          context_(_mode) {}
     // TODO(soon): Find a way to add noexcept(false) to this destructor.
     ~CompressionStream();
     KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);
 
-    static jsg::Ref<CompressionStream> constructor(ZlibModeValue mode);
+    static jsg::Ref<CompressionStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
     void close();
     bool checkError(jsg::Lock& js);
@@ -315,11 +318,11 @@ class ZlibUtil final: public jsg::Object {
     void write(jsg::Lock& js,
         int flush,
         jsg::Optional<kj::Array<kj::byte>> input,
-        int inputOffset,
-        int inputLength,
+        uint32_t inputOffset,
+        uint32_t inputLength,
         kj::Array<kj::byte> output,
-        int outputOffset,
-        int outputLength);
+        uint32_t outputOffset,
+        uint32_t outputLength);
     void reset(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(CompressionStream) {
@@ -357,9 +360,11 @@ class ZlibUtil final: public jsg::Object {
 
   class ZlibStream final: public CompressionStream<ZlibContext> {
    public:
-    explicit ZlibStream(ZlibMode mode): CompressionStream(mode) {}
+    explicit ZlibStream(
+        ZlibMode mode, kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        : CompressionStream(mode, kj::mv(externalMemoryTarget)) {}
     KJ_DISALLOW_COPY_AND_MOVE(ZlibStream);
-    static jsg::Ref<ZlibStream> constructor(ZlibModeValue mode);
+    static jsg::Ref<ZlibStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
     // Instance methods
     void initialize(int windowBits,
@@ -382,10 +387,11 @@ class ZlibUtil final: public jsg::Object {
   template <typename CompressionContext>
   class BrotliCompressionStream: public CompressionStream<CompressionContext> {
    public:
-    explicit BrotliCompressionStream(ZlibMode _mode)
-        : CompressionStream<CompressionContext>(_mode) {}
+    explicit BrotliCompressionStream(
+        ZlibMode _mode, kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        : CompressionStream<CompressionContext>(_mode, kj::mv(externalMemoryTarget)) {}
     KJ_DISALLOW_COPY_AND_MOVE(BrotliCompressionStream);
-    static jsg::Ref<BrotliCompressionStream> constructor(ZlibModeValue mode);
+    static jsg::Ref<BrotliCompressionStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
     bool initialize(jsg::Lock& js,
         jsg::BufferSource params,
@@ -421,10 +427,11 @@ class ZlibUtil final: public jsg::Object {
       ZlibContext::Options options,
       ZlibModeValue mode,
       CompressCallback cb);
-  kj::Array<kj::byte> zlibSync(InputSource data, ZlibContext::Options options, ZlibModeValue mode);
+  kj::Array<kj::byte> zlibSync(
+      jsg::Lock& js, InputSource data, ZlibContext::Options options, ZlibModeValue mode);
 
   template <typename Context>
-  kj::Array<kj::byte> brotliSync(InputSource data, BrotliContext::Options options);
+  kj::Array<kj::byte> brotliSync(jsg::Lock& js, InputSource data, BrotliContext::Options options);
   template <typename Context>
   void brotliWithCallback(
       jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);

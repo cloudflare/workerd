@@ -8,6 +8,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
 
@@ -76,6 +77,12 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
     }
   }
 
+  void cancelAll() override {
+    timerTask = nullptr;
+    timeouts.clear();
+    timeoutTimes.clear();
+  }
+
  private:
   struct IdAndIterator {
     TimeoutId id;
@@ -142,6 +149,7 @@ IoContext::IoContext(ThreadContext& thread,
     kj::Maybe<Worker::Actor&> actorParam,
     kj::Own<LimitEnforcer> limitEnforcerParam)
     : thread(thread),
+      tmpDirStoreScope(TmpDirStoreScope::create()),
       worker(kj::mv(workerParam)),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
@@ -149,17 +157,19 @@ IoContext::IoContext(ThreadContext& thread,
       deleteQueue(kj::arc<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
       waitUntilTasks(*this),
+      tasks(*this),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
-  auto localAbortPromise = kj::mv(paf.promise);
+  abortPromise = paf.promise.fork();
 
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
     auto promise = limitEnforcer->onLimitsExceeded();
     if (isInspectorEnabled()) {
       // Arrange to report the problem to the inspector in addition to aborting.
+      // TODO(cleanup): This is weird. Should it go somewhere else?
       promise = (kj::coCapture([this, promise = kj::mv(promise)]() mutable -> kj::Promise<void> {
         kj::Maybe<kj::Exception> maybeException;
         try {
@@ -184,56 +194,51 @@ IoContext::IoContext(ThreadContext& thread,
     return promise;
   };
 
-  localAbortPromise = localAbortPromise.exclusiveJoin(makeLimitsPromise());
+  // Arrange to abort when limits expire.
+  abortWhen(makeLimitsPromise());
 
   KJ_IF_SOME(a, actor) {
     // Arrange to complain if the input gate is broken, which indicates a critical section failed
     // and the actor can no longer be used.
-    localAbortPromise = localAbortPromise.exclusiveJoin(a.getInputGate().onBroken());
+    abortWhen(a.getInputGate().onBroken());
 
-    // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
-    // or unintentional async work
-    localAbortPromise =
-        (kj::coCapture([this, promise = kj::mv(localAbortPromise)]() mutable -> kj::Promise<void> {
-      try {
-        co_await promise;
-      } catch (...) {
-        auto exception = kj::getCaughtExceptionAsKj();
-        KJ_IF_SOME(a, actor) {
-          a.shutdownActorCache(exception);
-        }
-        kj::throwFatalException(kj::mv(exception));
-      }
-    }))();
-  }
-
-  // Abort when the time limit expires, the isolate is terminated, the input gate is broken, or
-  // `abortFulfiller` is fulfilled for some other reason.
-  abortPromise = localAbortPromise.fork();
-
-  // We don't construct `tasks` for actor requests because we put all tasks into `waitUntilTasks`
-  // in that case.
-  if (actor == kj::none) {
-    kj::TaskSet::ErrorHandler& errorHandler = *this;
-    tasks.emplace(errorHandler);
+    // Also complain if the output gate is broken, which indicates a critical storage failure that
+    // means we cannot continue execution. (In fact, we need to retroactively pretend that previous
+    // execution didn't happen, but that is taken care of elsewhere.)
+    abortWhen(a.getOutputGate().onBroken());
   }
 }
 
 IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> contextParam,
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-    tracing::InvocationSpanContext invocationSpanContext)
+    kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
-      invocationSpanContext(kj::mv(invocationSpanContext)) {}
+      maybeTriggerInvocationSpan(kj::mv(maybeTriggerInvocationSpan)) {}
+
+tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanContext() {
+  // Creating a new InvocationSpanContext can be a bit expensive since it needs to
+  // generate random IDs, so we only create it lazily when requested, which should
+  // only be when tracing is enabled and we need to record spans.
+  KJ_IF_SOME(ctx, invocationSpanContext) {
+    return ctx;
+  }
+
+  invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
+      maybeTriggerInvocationSpan.map(
+          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
+      context->getEntropySource());
+  return KJ_ASSERT_NONNULL(invocationSpanContext);
+}
 
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
 // that sets waitedForWaitUntil). So, we can now safely add the request to
 // context->incomingRequests, which implies taking responsibility for draining on the way out.
-void IoContext::IncomingRequest::delivered() {
+void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   KJ_REQUIRE(!wasDelivered, "delivered() can only be called once");
   if (!context->incomingRequests.empty()) {
     // There is already an IncomingRequest running in this context, and we're going to make it no
@@ -250,6 +255,7 @@ void IoContext::IncomingRequest::delivered() {
 
   context->incomingRequests.addFront(*this);
   wasDelivered = true;
+  deliveredLocation = location;
   metrics->delivered();
 
   KJ_IF_SOME(a, context->actor) {
@@ -265,15 +271,28 @@ void IoContext::IncomingRequest::delivered() {
   }
 }
 
+kj::Date IoContext::IncomingRequest::now() {
+  metrics->clockRead();
+  return ioChannelFactory->getTimer().now();
+}
+
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!wasDelivered) {
     // Request was never added to context->incomingRequests in the first place.
     return;
   }
 
+  // Hack: We need to report an accurate time stamps for the STW outcome event, but the timer may
+  // not be available when the outcome event gets reported. Define the outcome event time as the
+  // time when the incoming request shuts down.
+  KJ_IF_SOME(w, workerTracer) {
+    w->recordTimestamp(now());
+  }
+
   if (&context->incomingRequests.front() == this) {
     // We're the current request, make sure to consume CPU time attribution.
     context->limitEnforcer->reportMetrics(*metrics);
+    context->lastDeliveredLocation = deliveredLocation;
 
     if (!waitedForWaitUntil && !context->waitUntilTasks.isEmpty()) {
       KJ_LOG(WARNING, "failed to invoke drain() on IncomingRequest before destroying it",
@@ -288,6 +307,27 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   }
   context->worker->getIsolate().completedRequest();
   metrics->jsDone();
+
+  if (context->isShared()) {
+    // This context is not about to be destroyed when we drop it, but if it was aborted, we would
+    // prefer for it to get cleaned up promptly.
+
+    KJ_IF_SOME(e, context->abortException) {
+      // The context was aborted. It's possible that the event ended with background work still
+      // scheduled, because `drain()` ends early on abort. We should cancel that background work
+      // now.
+      //
+      // We couldn't do this in abort() because it can be called from inside a task that could
+      // be canceled, and a self-cancellation would lead to a crash.
+
+      if (!context->canceler.isEmpty()) {
+        context->canceler.cancel(e);
+      }
+      context->timeoutManager->cancelAll();
+      context->tasks.clear();
+      context->waitUntilTasks.clear();
+    }
+  }
 }
 
 InputGate::Lock IoContext::getInputLock() {
@@ -401,7 +441,29 @@ void IoContext::logUncaughtExceptionAsync(
   //   async lock here, we'll probably have to update all the call sites of this method... ick.
   kj::Maybe<RequestObserver&> metrics;
   if (!incomingRequests.empty()) metrics = getMetrics();
-  runImpl(runnable, false, Worker::Lock::TakeSynchronously(metrics), kj::none, true);
+  runImpl(
+      runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
+}
+
+void IoContext::abort(kj::Exception&& e) {
+  if (abortException != kj::none) {
+    return;
+  }
+  abortException = kj::cp(e);
+  KJ_IF_SOME(a, actor) {
+    // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
+    // or unintentional async work
+    a.shutdownActorCache(kj::cp(e));
+  }
+  abortFulfiller->reject(kj::mv(e));
+}
+
+void IoContext::abortWhen(kj::Promise<void> promise) {
+  // Unlike addTask(), abortWhen() always uses `tasks`, even in actors, because we do not want
+  // these tasks to block hibernation.
+  if (abortException == kj::none) {
+    tasks.add(promise.catch_([this](kj::Exception&& e) { abort(kj::mv(e)); }));
+  }
 }
 
 void IoContext::addTask(kj::Promise<void> promise) {
@@ -413,8 +475,6 @@ void IoContext::addTask(kj::Promise<void> promise) {
     addWaitUntil(kj::mv(promise));
     return;
   }
-
-  auto& tasks = KJ_ASSERT_NONNULL(this->tasks, "I/O context finalized");
 
   if (actor == kj::none) {
     // This metric won't work correctly in actors since it's being tracked per-request, but tasks
@@ -440,6 +500,11 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
     }
   }
 
+  if (incomingRequests.empty()) {
+    DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
+        lastDeliveredLocation, kj::getStackTrace());
+  }
+
   waitUntilTasks.add(kj::mv(promise));
 }
 
@@ -453,11 +518,17 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
   }
 
   kj::Promise<void> timeoutPromise = nullptr;
+  auto timeoutLogPromise = [this]() -> kj::Promise<void> {
+    return context->run([this](Worker::Lock&) {
+      context->logWarning(
+          "IoContext timed out due to inactivity, waitUntil tasks were cancelled without completing.");
+    });
+  };
   KJ_IF_SOME(a, context->actor) {
     // For actors, all promises are canceled on actor shutdown, not on a fixed timeout,
     // because work doesn't necessarily happen on a per-request basis in actors and we don't want
     // work being unexpectedly canceled based on which request initiated it.
-    timeoutPromise = a.onShutdown();
+    timeoutPromise = a.onShutdown().then(kj::mv(timeoutLogPromise));
 
     // Also arrange to cancel the drain if a new request arrives, since it will take over
     // responsibility for background tasks.
@@ -466,11 +537,11 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     timeoutPromise = timeoutPromise.exclusiveJoin(kj::mv(drainPaf.promise));
   } else {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
-    timeoutPromise = context->limitEnforcer->limitDrain();
+    timeoutPromise = context->limitEnforcer->limitDrain().then(kj::mv(timeoutLogPromise));
   }
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch().then([] {}, [](kj::Exception&&) {}));
+      .exclusiveJoin(context->onAbort().catch_([](kj::Exception&&) {}));
 }
 
 kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::IncomingRequest::
@@ -493,7 +564,7 @@ kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::Incomin
   return context->waitUntilTasks.onEmpty()
       .then([]() { return IoContext_IncomingRequest::FinishScheduledResult::COMPLETED; })
       .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch().then([] {
+      .exclusiveJoin(context->onAbort().then([] {
     return IoContext_IncomingRequest::FinishScheduledResult::ABORTED;
   }, [](kj::Exception&&) { return IoContext_IncomingRequest::FinishScheduledResult::ABORTED; }));
 }
@@ -508,6 +579,16 @@ class IoContext::PendingEvent: public kj::Refcounted {
 };
 
 IoContext::~IoContext() noexcept(false) {
+  if (!canceler.isEmpty()) {
+    KJ_IF_SOME(e, abortException) {
+      // Assume the abort exception is why we are canceling.
+      canceler.cancel(e);
+    } else {
+      canceler.cancel(JSG_KJ_EXCEPTION(
+          FAILED, Error, "The execution context responding to this call was canceled."));
+    }
+  }
+
   // Detach the PendingEvent if it still exists.
   KJ_IF_SOME(pe, pendingEvent) {
     pe.maybeContext = kj::none;
@@ -525,14 +606,14 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
 
   context.pendingEvent = kj::none;
 
-  // We can't execute finalizers just yet. We need to run the event loop to see if any queued
+  // We can't abort just yet. We need to run the event loop to see if any queued
   // events come back into JavaScript. If registerPendingEvent() is called in the meantime, this
   // will be canceled.
-  context.runFinalizersTask = Worker::AsyncLock::whenThreadIdle()
+  context.abortFromHangTask = Worker::AsyncLock::whenThreadIdle()
                                   .then([&context = context]() noexcept {
-    // We have nothing left to do and no PendingEvent has been registered. Run finalizers now.
+    // We have nothing left to do and no PendingEvent has been registered. Abort now.
     return context.worker->takeAsyncLock(context.getMetrics())
-        .then([&context](Worker::AsyncLock asyncLock) { context.runFinalizers(asyncLock); });
+        .then([&context](Worker::AsyncLock asyncLock) { context.abortFromHang(asyncLock); });
   }).eagerlyEvaluate(nullptr);
 }
 
@@ -546,10 +627,12 @@ kj::Own<void> IoContext::registerPendingEvent() {
   KJ_IF_SOME(pe, pendingEvent) {
     return kj::addRef(pe);
   } else {
-    KJ_REQUIRE(!isFinalized(), "request has already been finalized");
+    KJ_IF_SOME(e, abortException) {
+      kj::throwFatalException(kj::cp(e));
+    }
 
     // Cancel any already-scheduled finalization.
-    runFinalizersTask = kj::none;
+    abortFromHangTask = kj::none;
 
     auto result = kj::refcounted<PendingEvent>(*this);
     pendingEvent = *result;
@@ -708,8 +791,10 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   auto deferredTimeoutTimeRemoval = kj::defer([this, &context, timeoutTimesKey]() {
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
     // no longer be available, but we can just skip starting a new timer in that case as it'd be
-    // canceled anyway.
-    if (context.selfRef->isValid()) {
+    // canceled anyway. Similarly we should skip rescheduling if the context has been aborted since
+    // there's no way the events can run anyway (and we'll cause trouble if `cancelAll()` is being
+    // called in ~IoContext_IncomingRequest).
+    if (context.selfRef->isValid() && context.abortException == kj::none) {
       bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
       timeoutTimes.erase(timeoutTimesKey);
       if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
@@ -784,8 +869,7 @@ size_t IoContext::getTimeoutCount() {
 }
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
-  kj::Date adjustedTime = incomingRequest.ioChannelFactory->getTimer().now();
-  incomingRequest.metrics->clockRead();
+  kj::Date adjustedTime = incomingRequest.now();
 
   KJ_IF_SOME(maybeNextTimeout, timeoutManager->getNextTimeout()) {
     // Don't return a time beyond when the next setTimeout() callback is intended to run. This
@@ -809,14 +893,17 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   SpanBuilder userSpan = nullptr;
 
   KJ_IF_SOME(n, options.operationName) {
-    // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
-    // a memory allocation here, but there might be use cases for dynamically allocated strings.
-    span = makeTraceSpan(kj::ConstString(kj::str(n)));
-    userSpan = makeUserTraceSpan(kj::ConstString(kj::mv(n)));
+    span = makeTraceSpan(n.clone());
+    userSpan = makeUserTraceSpan(n.clone());
   }
 
   TraceContext tracing(kj::mv(span), kj::mv(userSpan));
-  auto ret = func(tracing, getIoChannelFactory());
+  kj::Own<WorkerInterface> ret;
+  KJ_IF_SOME(existing, options.existingTraceContext) {
+    ret = func(existing, getIoChannelFactory());
+  } else {
+    ret = func(tracing, getIoChannelFactory());
+  }
 
   if (options.wrapMetrics) {
     auto& metrics = getMetrics();
@@ -853,6 +940,20 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
+      });
+}
+
+kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
+    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
+  return getSubrequest(
+      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+  },
+      SubrequestOptions{
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .existingTraceContext = traceContext,
       });
 }
 
@@ -923,6 +1024,11 @@ kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
       channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
 }
 
+kj::Own<kj::HttpClient> IoContext::getHttpClient(
+    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
+  return asHttpClient(getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), traceContext));
+}
+
 kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
@@ -976,7 +1082,10 @@ SpanParent IoContext::getCurrentTraceSpan() {
 SpanParent IoContext::getCurrentUserTraceSpan() {
   // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
   // context, as with Jaeger spans.
-  return getMetrics().getUserSpan();
+  KJ_IF_SOME(workerTracer, getWorkerTracer()) {
+    return workerTracer.getUserRequestSpan();
+  }
+  return SpanParent(nullptr);
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
@@ -1064,10 +1173,9 @@ void IoContext::runInContextScope(Worker::LockType lockType,
 }
 
 void IoContext::runImpl(Runnable& runnable,
-    bool takePendingEvent,
     Worker::LockType lockType,
     kj::Maybe<InputGate::Lock> inputLock,
-    bool allowPermanentException) {
+    Runnable::Exceptional exceptional) {
   KJ_IF_SOME(l, inputLock) {
     KJ_REQUIRE(l.isFor(KJ_ASSERT_NONNULL(actor).getInputGate()));
   }
@@ -1075,13 +1183,12 @@ void IoContext::runImpl(Runnable& runnable,
   getIoChannelFactory().getTimer().syncTime();
 
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
-    if (!allowPermanentException) {
-      workerLock.requireNoPermanentException();
-    }
-
     kj::Own<void> event;
-    if (takePendingEvent) {
-      // Prevent finalizers from running while we're still executing JavaScript.
+    if (!exceptional) {
+      workerLock.requireNoPermanentException();
+      // Prevent prematurely detecting a hang while we're still executing JavaScript.
+      // TODO(cleanup): Is this actually still needed or is this vestigial? Seems like it should
+      //   not be necessary.
       event = registerPendingEvent();
     }
 
@@ -1103,24 +1210,60 @@ void IoContext::runImpl(Runnable& runnable,
 
       if (gotTermination) {
         // We already consumed the termination pseudo-exception, so if we call RunMicrotasks() now,
-        // they will run with no limit. But if we call TerminateExecution() again now, it will
+        // they will run with no limit. But if we call terminateNextExecution() again now, it will
         // conveniently cause RunMicrotasks() to terminate _right after_ dequeuing the contents of
         // the task queue, which is perfect, because it effectively cancels them all.
-        js.terminateExecution();
+        js.terminateNextExecution();
       }
 
-      // Running the microtask queue can itself trigger a pending exception in the isolate.
-      v8::TryCatch tryCatch(workerLock.getIsolate());
+      // Run microtask checkpoint with an active IoContext
+      {
+        // Running the microtask queue can itself trigger a pending exception in the isolate.
+        v8::TryCatch tryCatch(workerLock.getIsolate());
 
-      js.runMicrotasks();
+        js.runMicrotasks();
 
-      if (tryCatch.HasCaught()) {
-        // It really shouldn't be possible for microtasks to throw regular exceptions.
-        // so if we got here it should be a terminal condition.
-        KJ_ASSERT(tryCatch.HasTerminated());
-        // If we do not reset here we end up with a dangling exception in the isolate that
-        // leads to an assert in v8 when the Lock is destroyed.
-        tryCatch.Reset();
+        if (tryCatch.HasCaught()) {
+          // It really shouldn't be possible for microtasks to throw regular exceptions.
+          // so if we got here it should be a terminal condition.
+          KJ_ASSERT(tryCatch.HasTerminated());
+          // If we do not reset here we end up with a dangling exception in the isolate that
+          // leads to an assert in v8 when the Lock is destroyed.
+          tryCatch.Reset();
+          // Ensure we don't pump the message loop in this case
+          gotTermination = true;
+        }
+      }
+
+      // Run FinalizationRegistry cleanup tasks without an IoContext
+      {
+        SuppressIoContextScope noIoCtxt;
+        while (!gotTermination && js.pumpMsgLoop()) {
+          // Check if FinalizationRegistry cleanup callbacks have not breached our limits
+          if (limitEnforcer->getLimitsExceeded() != kj::none) {
+            // We can potentially log this, but due to a lack of IoContext we cannot notify
+            // the worker
+            break;
+          }
+
+          // It is possible that a microtask got enqueued during pumpMsgLoop execution
+          // Microtasks enqueued by FinalizationRegistry cleanup tasks should also run
+          // without an active IoContext
+          v8::TryCatch tryCatch(workerLock.getIsolate());
+
+          js.runMicrotasks();
+
+          if (tryCatch.HasCaught()) {
+            // It really shouldn't be possible for microtasks to throw regular exceptions.
+            // so if we got here it should be a terminal condition.
+            KJ_ASSERT(tryCatch.HasTerminated());
+            // If we do not reset here we end up with a dangling exception in the isolate that
+            // leads to an assert in v8 when the Lock is destroyed.
+            tryCatch.Reset();
+            // Ensure we don't pump the message loop in this case
+            gotTermination = true;
+          }
+        }
       }
     });
 
@@ -1135,16 +1278,10 @@ void IoContext::runImpl(Runnable& runnable,
         // Check if we hit a limit.
         limitEnforcer->requireLimitsNotExceeded();
 
-        // If we were terminated because abort() was called, then it's not an unknown
-        // reason...
-        if (!abortFulfiller->isWaiting()) {
-          // The assumption is that we've terminated because the IoContext was aborted and
-          // isolate->TerminateExection() was called (likely because of someone using
-          // process.exit(...) in Node.js compat mode).
-
-          // TODO(later): If this ends up being too spammy in sentry that we'll need to
-          // revisit, but for now... log the assert and move on.
-          KJ_FAIL_ASSERT("request terminated because it was aborted");
+        // Check if we were aborted. TerminateExecution() may be called after abort() in order
+        // to prevent any more JavaScript from executing.
+        KJ_IF_SOME(e, abortException) {
+          kj::throwFatalException(kj::cp(e));
         }
 
         // That should have thrown, so we shouldn't get here.
@@ -1210,47 +1347,17 @@ auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
   }
 }
 
-void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
-  KJ_ASSERT(actor == kj::none);  // we don't finalize actor requests
+void IoContext::abortFromHang(Worker::AsyncLock& asyncLock) {
+  KJ_ASSERT(actor == kj::none);  // we don't perform hang detection on actor requests
 
-  tasks = kj::none;
-  // Tasks typically have callbacks that dereference IoOwns. Since those callbacks
-  // will throw after request finalization, we should cancel them now.
-
-  if (abortFulfiller->isWaiting()) {
-    // Don't bother fulfilling `abortFulfiller` if limits were exceeded because in that case the
-    // abort promise will be fulfilled shortly anyway.
-    if (limitEnforcer->getLimitsExceeded() == kj::none) {
-      abort(JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
-    }
+  // Don't bother aborting if limits were exceeded because in that case the abort promise will be
+  // fulfilled shortly anyway.
+  if (limitEnforcer->getLimitsExceeded() == kj::none) {
+    abort(JSG_KJ_EXCEPTION(FAILED, Error,
+        "The Workers runtime canceled this request because it detected that your Worker's code "
+        "had hung and would never generate a response. Refer to: "
+        "https://developers.cloudflare.com/workers/observability/errors/"));
   }
-
-  if (auto warnings = ownedObjects.finalize(); !warnings.empty()) {
-    // Log all the warnings.
-    //
-    // Logging a warning calls console.log() which could be maliciously overridden, so we must use
-    // run() here (as opposed to just constructing a Scope). But we don't want it to try to create
-    // a new PendingEvent, so we have to call runImpl() directly to pass false for the second
-    // parameter.
-    struct RunnableImpl: public Runnable {
-      IoContext& context;
-      kj::Vector<kj::StringPtr> warnings;
-
-      RunnableImpl(IoContext& context, kj::Vector<kj::StringPtr> warnings)
-          : context(context),
-            warnings(kj::mv(warnings)) {}
-      void run(Worker::Lock& lock) override {
-        for (auto warning: warnings) {
-          context.logWarning(warning);
-        }
-      }
-    };
-
-    RunnableImpl runnable(*this, kj::mv(warnings));
-    runImpl(runnable, false, asyncLock, kj::none, true);
-  }
-
-  promiseContextTag = kj::none;
 }
 
 namespace {

@@ -3,6 +3,7 @@
 #include "jsg.h"
 
 #include <v8-container.h>
+#include <v8-date.h>
 #include <v8-external.h>
 
 namespace workerd::jsg {
@@ -25,7 +26,6 @@ inline void requireOnStack(void* self) {
   V(ArgumentsObject)                                                                               \
   V(NativeError)                                                                                   \
   V(Name)                                                                                          \
-  V(Function)                                                                                      \
   V(AsyncFunction)                                                                                 \
   V(GeneratorFunction)                                                                             \
   V(GeneratorObject)                                                                               \
@@ -45,13 +45,13 @@ inline void requireOnStack(void* self) {
   V(ArrayBuffer)                                                                                   \
   V(ArrayBufferView)                                                                               \
   V(TypedArray)                                                                                    \
-  V(Uint8Array)                                                                                    \
   V(Uint8ClampedArray)                                                                             \
   V(Int8Array)                                                                                     \
   V(Uint16Array)                                                                                   \
   V(Int16Array)                                                                                    \
   V(Uint32Array)                                                                                   \
   V(Int32Array)                                                                                    \
+  V(Float16Array)                                                                                  \
   V(Float32Array)                                                                                  \
   V(Float64Array)                                                                                  \
   V(BigInt64Array)                                                                                 \
@@ -230,11 +230,29 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
   using JsBase<v8::Array, JsArray>::JsBase;
 };
 
+class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
+ public:
+  template <typename T = kj::byte>
+  kj::ArrayPtr<T> asArrayPtr() {
+    v8::Local<v8::Uint8Array> inner = *this;
+    auto buf = inner->Buffer();
+    T* data = static_cast<T*>(buf->Data()) + inner->ByteOffset();
+    size_t length = inner->ByteLength();
+    return kj::ArrayPtr(data, length);
+  }
+
+  using JsBase<v8::Uint8Array, JsUint8Array>::JsBase;
+};
+
 class JsString final: public JsBase<v8::String, JsString> {
  public:
   int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  jsg::ByteString toByteString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
   int hashCode() const;
 
   bool containsOnlyOneByte() const;
@@ -249,29 +267,27 @@ class JsString final: public JsBase<v8::String, JsString> {
 
   static JsString concat(Lock& js, const JsString& one, const JsString& two) KJ_WARN_UNUSED_RESULT;
 
-  enum WriteOptions {
-    NONE = v8::String::NO_OPTIONS,
-    NO_NULL_TERMINATION = v8::String::NO_NULL_TERMINATION,
-    PRESERVE_ONE_BYTE_NULL = v8::String::PRESERVE_ONE_BYTE_NULL,
-    REPLACE_INVALID_UTF8 = v8::String::REPLACE_INVALID_UTF8,
+  enum WriteFlags {
+    NONE = v8::String::WriteFlags::kNone,
+    NULL_TERMINATION = v8::String::WriteFlags::kNullTerminate,
+    REPLACE_INVALID_UTF8 = v8::String::WriteFlags::kReplaceInvalidUtf8,
   };
 
   template <typename T>
-  kj::Array<T> toArray(
-      Lock& js, WriteOptions options = WriteOptions::NONE) const KJ_WARN_UNUSED_RESULT;
+  kj::Array<T> toArray(Lock& js, WriteFlags options = WriteFlags::NONE) const KJ_WARN_UNUSED_RESULT;
 
   struct WriteIntoStatus {
     // The number of elements (e.g. char, byte, uint16_t) read from this string.
-    int read;
+    size_t read;
     // The number of elements (e.g. char, byte, uint16_t) written to the buffer.
-    int written;
+    size_t written;
   };
   WriteIntoStatus writeInto(
-      Lock& js, kj::ArrayPtr<char> buffer, WriteOptions options = WriteOptions::NONE) const;
+      Lock& js, kj::ArrayPtr<char> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
-      Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteOptions options = WriteOptions::NONE) const;
+      Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
-      Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteOptions options = WriteOptions::NONE) const;
+      Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteFlags options = WriteFlags::NONE) const;
 
   using JsBase<v8::String, JsString>::JsBase;
 };
@@ -288,6 +304,7 @@ class JsRegExp final: public JsBase<v8::RegExp, JsRegExp> {
 class JsDate final: public JsBase<v8::Date, JsDate> {
  public:
   jsg::ByteString toUTCString(Lock& js) const;
+  jsg::ByteString toISOString(Lock& js) const;
   operator kj::Date() const;
   using JsBase<v8::Date, JsDate>::JsBase;
 };
@@ -317,20 +334,68 @@ class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
   using JsBase<v8::Proxy, JsProxy>::JsBase;
 };
 
-#define V(Name)                                                                                    \
-  class Js##Name final: public JsBase<v8::Name, Js##Name> {                                        \
-   public:                                                                                         \
-    using JsBase<v8::Name, Js##Name>::JsBase;                                                      \
-  };
+class JsSymbol final: public JsBase<v8::Symbol, JsSymbol> {
+ public:
+  kj::String description(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
-V(Symbol)
-V(BigInt)
-V(Number)
-V(Int32)
-V(Uint32)
-V(Set)
+  using JsBase<v8::Symbol, JsSymbol>::JsBase;
+};
 
-#undef V
+class JsSet final: public JsBase<v8::Set, JsSet> {
+ public:
+  void add(Lock& js, const JsValue& value);
+  bool has(Lock& js, const JsValue& value) const;
+  bool delete_(Lock& js, const JsValue& value);
+  void clear();
+  size_t size() const;
+
+  template <IsJsValue... Args>
+  void addAll(Lock& js, Args... args) {
+    (check(inner->Add(js.v8Context(), args.inner)), ...);
+  }
+
+  void addAll(Lock& js, kj::ArrayPtr<const JsValue> values);
+
+  operator JsArray() const;
+
+  using JsBase<v8::Set, JsSet>::JsBase;
+};
+
+class JsBigInt final: public JsBase<v8::BigInt, JsBigInt> {
+ public:
+  // If the BigInt value does not fit in int64_t, returns kj::none
+  // and schedules an exception on the isolate.
+  kj::Maybe<int64_t> toInt64(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  // If the BigInt value does not fit in int64_t, returns kj::none
+  // and schedules an exception on the isolate.
+  kj::Maybe<uint64_t> toUint64(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::BigInt, JsBigInt>::JsBase;
+};
+
+class JsInt32 final: public JsBase<v8::Int32, JsInt32> {
+ public:
+  kj::Maybe<int32_t> value(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::Int32, JsInt32>::JsBase;
+};
+
+class JsUint32 final: public JsBase<v8::Uint32, JsUint32> {
+ public:
+  kj::Maybe<uint32_t> value(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::Uint32, JsUint32>::JsBase;
+};
+
+class JsNumber final: public JsBase<v8::Number, JsNumber> {
+ public:
+  kj::Maybe<double> value(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  bool isSafeInteger(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<double> toSafeInteger(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::Number, JsNumber>::JsBase;
+};
 
 class JsObject final: public JsBase<v8::Object, JsObject> {
  public:
@@ -352,6 +417,13 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   void set(Lock& js, kj::StringPtr name, const JsValue& value);
   void setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value);
   void setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& value);
+
+  // Like set but uses the defineProperty API instead in order to override
+  // the default property attributes. This is useful for defining properties
+  // that otherwise would not be normally settable, such as the name of an
+  // error object.
+  void defineProperty(Lock& js, kj::StringPtr name, const JsValue& value);
+
   JsValue get(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
   JsValue get(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
 
@@ -440,7 +512,7 @@ inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
 }
 
 template <typename T>
-inline kj::Array<T> JsString::toArray(Lock& js, WriteOptions options) const {
+inline kj::Array<T> JsString::toArray(Lock& js, WriteFlags options) const {
   if constexpr (kj::isSameType<T, kj::byte>()) {
     KJ_DASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
@@ -460,6 +532,16 @@ inline JsArray Lock::arr(const Args&... args) {
   return JsArray(v8::Array::New(v8Isolate, &values[0], sizeof...(Args)));
 }
 
+template <typename T, typename Func>
+inline JsArray Lock::arr(kj::ArrayPtr<T> values, Func fn) {
+  v8::LocalVector<v8::Value> vec(v8Isolate);
+  vec.reserve(values.size());
+  for (const T& val: values) {
+    vec.push_back(fn(*this, val));
+  }
+  return JsArray(v8::Array::New(v8Isolate, vec.data(), vec.size()));
+}
+
 template <typename... Args>
   requires(std::assignable_from<JsValue&, Args> && ...)
 inline JsSet Lock::set(const Args&... args) {
@@ -475,6 +557,46 @@ inline JsObject Lock::opaque(T&& inner) {
   KJ_ASSERT(wrapped->IsObject());
   return JsObject(wrapped.template As<v8::Object>());
 }
+
+class JsFunction final: public JsBase<v8::Function, JsFunction> {
+ public:
+  using JsBase<v8::Function, JsFunction>::JsBase;
+
+  // Calls the function with the given receiver and arguments.
+  template <IsJsValue... Args>
+  JsValue call(Lock& js, const JsValue& recv, Args... args) const {
+    v8::Local<v8::Function> fn = *this;
+    v8::Local<v8::Value> argv[] = {args...};
+    return JsValue(check(fn->Call(js.v8Context(), recv, sizeof...(Args), argv)));
+  }
+
+  // Calls the function with a null receiver and arguments.
+  template <IsJsValue... Args>
+  JsValue callNoReceiver(Lock& js, Args... args) const {
+    return call(js, js.null(), kj::fwd<Args...>(args...));
+  }
+
+  // Calls the function with the given receiver and arguments.
+  JsValue call(Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
+
+  // Calls the function with a null receiver and arguments. When null is passed
+  // as the receiver, the global object is used instead.
+  JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
+
+  // Gets the function's length property.
+  size_t length(Lock& js) const;
+
+  // Gets the function's name property.
+  JsString name(Lock& js) const;
+
+  // Not guaranteed to be unique, but will be the same for the same function.
+  // Use the JsValue strictEquals() method for true identity comparison.
+  uint hashCode() const;
+
+  operator JsObject() const {
+    return JsObject(inner);
+  }
+};
 
 // A persistent handle for a Js* type suitable for storage and GC visitable.
 //
@@ -540,7 +662,7 @@ class JsRef final {
   // requires V8Ref types.
   template <typename U>
   operator V8Ref<U>() && {
-    return kj::mv(value).template cast<U>(Lock::from(v8::Isolate::GetCurrent()));
+    return kj::mv(value).template cast<U>(jsg::Lock::current());
   }
 
   JSG_MEMORY_INFO(JsRef) {
@@ -563,7 +685,7 @@ inline JsRef<Self> JsBase<T, Self>::addRef(Lock& js) {
 }
 
 inline kj::String KJ_STRINGIFY(const JsValue& value) {
-  return value.toString(Lock::from(v8::Isolate::GetCurrent()));
+  return value.toString(jsg::Lock::current());
 }
 
 template <typename TypeWrapper>
@@ -583,27 +705,30 @@ struct JsValueWrapper {
   }
 
 #define V(Name)                                                                                    \
-  v8::Local<v8::Name> wrap(                                                                        \
-      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, Js##Name value) {  \
+  v8::Local<v8::Name> wrap(jsg::Lock& js, v8::Local<v8::Context> context,                          \
+      kj::Maybe<v8::Local<v8::Object>> creator, Js##Name value) {                                  \
     return value;                                                                                  \
   }                                                                                                \
-  v8::Local<v8::Name> wrap(v8::Local<v8::Context> context,                                         \
+  v8::Local<v8::Name> wrap(jsg::Lock& js, v8::Local<v8::Context> context,                          \
       kj::Maybe<v8::Local<v8::Object>> creator, JsRef<Js##Name> value) {                           \
-    return value.getHandle(Lock::from(context->GetIsolate()));                                     \
+    return value.getHandle(js);                                                                    \
   }
 
   TYPES_TO_WRAP(V)
 #undef V
 
   template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
-  kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> context,
+  kj::Maybe<T> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       T*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if constexpr (kj::isSameType<T, JsString>()) {
       return T(check(handle->ToString(context)));
     } else if constexpr (kj::isSameType<T, JsBoolean>()) {
-      return T(handle->ToBoolean(context->GetIsolate()));
+      return T(handle->ToBoolean(js.v8Isolate));
+    } else if constexpr (kj::isSameType<T, JsNumber>()) {
+      return T(check(handle->ToNumber(context)));
     } else {
       JsValue value(handle);
       KJ_IF_SOME(t, value.tryCast<T>()) {
@@ -614,14 +739,14 @@ struct JsValueWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
-  kj::Maybe<JsRef<T>> tryUnwrap(v8::Local<v8::Context> context,
+  kj::Maybe<JsRef<T>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       JsRef<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto isolate = context->GetIsolate();
-    auto& js = Lock::from(isolate);
+    auto isolate = js.v8Isolate;
     KJ_IF_SOME(result,
-        TypeWrapper::from(isolate).tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
+        TypeWrapper::from(isolate).tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
       return JsRef(js, result);
     }
     return kj::none;
@@ -631,7 +756,7 @@ struct JsValueWrapper {
 class JsMessage final {
  public:
   static JsMessage create(Lock& js, const JsValue& exception);
-  explicit inline JsMessage(): inner(v8::Local<v8::Message>()) {
+  explicit inline JsMessage() {
     requireOnStack(this);
   }
   explicit inline JsMessage(v8::Local<v8::Message> inner): inner(inner) {
@@ -654,5 +779,192 @@ class JsMessage final {
  private:
   v8::Local<v8::Message> inner;
 };
+
+inline JsObject Lock::global() {
+  return JsObject(v8Context()->Global());
+}
+
+inline JsValue Lock::undefined() {
+  return JsValue(v8::Undefined(v8Isolate));
+}
+
+inline JsValue Lock::null() {
+  return JsValue(v8::Null(v8Isolate));
+}
+
+inline JsBoolean Lock::boolean(bool val) {
+  return JsBoolean(v8::Boolean::New(v8Isolate, val));
+}
+
+inline JsNumber Lock::num(double val) {
+  return JsNumber(v8::Number::New(v8Isolate, val));
+}
+
+inline JsNumber Lock::num(float val) {
+  return JsNumber(v8::Number::New(v8Isolate, val));
+}
+
+inline JsInt32 Lock::num(int8_t val) {
+  return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
+}
+
+inline JsInt32 Lock::num(int16_t val) {
+  return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
+}
+
+inline JsInt32 Lock::num(int32_t val) {
+  return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
+}
+
+inline JsBigInt Lock::bigInt(int64_t val) {
+  return JsBigInt(v8::BigInt::New(v8Isolate, val));
+}
+
+inline JsUint32 Lock::num(uint8_t val) {
+  return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
+}
+
+inline JsUint32 Lock::num(uint16_t val) {
+  return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
+}
+
+inline JsUint32 Lock::num(uint32_t val) {
+  return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
+}
+
+inline JsBigInt Lock::bigInt(uint64_t val) {
+  return JsBigInt(v8::BigInt::NewFromUnsigned(v8Isolate, val));
+}
+
+inline JsString Lock::str() {
+  return JsString(v8::String::Empty(v8Isolate));
+}
+
+inline JsString Lock::str(kj::ArrayPtr<const char16_t> str) {
+  return JsString(check(v8::String::NewFromTwoByte(v8Isolate,
+      reinterpret_cast<const uint16_t*>(str.begin()), v8::NewStringType::kNormal, str.size())));
+}
+
+inline JsString Lock::str(kj::ArrayPtr<const uint16_t> str) {
+  return JsString(check(
+      v8::String::NewFromTwoByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
+}
+
+inline JsString Lock::str(kj::ArrayPtr<const char> str) {
+  return JsString(check(
+      v8::String::NewFromUtf8(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
+}
+
+inline JsString Lock::str(kj::ArrayPtr<const kj::byte> str) {
+  return JsString(check(
+      v8::String::NewFromOneByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
+}
+
+inline JsString Lock::strIntern(kj::StringPtr str) {
+  return JsString(check(v8::String::NewFromUtf8(
+      v8Isolate, str.begin(), v8::NewStringType::kInternalized, str.size())));
+}
+
+inline JsString Lock::strExtern(kj::ArrayPtr<const char> str) {
+  return JsString(newExternalOneByteString(*this, str));
+}
+
+inline JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) {
+  return JsString(newExternalTwoByteString(*this, str));
+}
+
+inline JsObject Lock::obj() {
+  return JsObject(v8::Object::New(v8Isolate));
+}
+
+inline JsObject Lock::objNoProto() {
+  return JsObject(v8::Object::New(v8Isolate, v8::Null(v8Isolate), nullptr, nullptr, 0));
+}
+
+inline JsMap Lock::map() {
+  return JsMap(v8::Map::New(v8Isolate));
+}
+
+inline JsValue Lock::external(void* ptr) {
+  return JsValue(v8::External::New(v8Isolate, ptr));
+}
+
+inline JsValue Lock::error(kj::StringPtr message) {
+  return JsValue(v8::Exception::Error(v8Str(v8Isolate, message)));
+}
+
+inline JsValue Lock::typeError(kj::StringPtr message) {
+  return JsValue(v8::Exception::TypeError(v8Str(v8Isolate, message)));
+}
+
+inline JsValue Lock::rangeError(kj::StringPtr message) {
+  return JsValue(v8::Exception::RangeError(v8Str(v8Isolate, message)));
+}
+
+inline JsSymbol Lock::symbol(kj::StringPtr str) {
+  return JsSymbol(v8::Symbol::New(v8Isolate, v8StrIntern(v8Isolate, str)));
+}
+
+inline JsSymbol Lock::symbolShared(kj::StringPtr str) {
+  return JsSymbol(v8::Symbol::For(v8Isolate, v8StrIntern(v8Isolate, str)));
+}
+
+inline JsSymbol Lock::symbolInternal(kj::StringPtr str) {
+  return JsSymbol(v8::Symbol::ForApi(v8Isolate, v8StrIntern(v8Isolate, str)));
+}
+
+inline JsDate Lock::date(double timestamp) {
+  return JsDate(check(v8::Date::New(v8Context(), timestamp)).As<v8::Date>());
+}
+
+inline JsDate Lock::date(kj::Date date) {
+  return JsDate(jsg::check(v8::Date::New(v8Context(), (date - kj::UNIX_EPOCH) / kj::MILLISECONDS))
+                    .As<v8::Date>());
+}
+
+inline void JsObject::set(Lock& js, const JsValue& name, const JsValue& value) {
+  check(inner->Set(js.v8Context(), name.inner, value.inner));
+}
+
+inline void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
+  set(js, js.strIntern(name), value);
+}
+
+inline JsValue JsObject::get(Lock& js, const JsValue& name) {
+  return JsValue(check(inner->Get(js.v8Context(), name.inner)));
+}
+
+inline JsValue JsObject::get(Lock& js, kj::StringPtr name) {
+  return get(js, js.strIntern(name));
+}
+
+inline bool JsObject::has(Lock& js, const JsValue& name, HasOption option) {
+  if (option == HasOption::OWN) {
+    KJ_ASSERT(name.inner->IsName());
+    return check(inner->HasOwnProperty(js.v8Context(), name.inner.As<v8::Name>()));
+  } else {
+    return check(inner->Has(js.v8Context(), name.inner));
+  }
+}
+
+inline bool JsObject::has(Lock& js, kj::StringPtr name, HasOption option) {
+  return has(js, js.strIntern(name), option);
+}
+
+inline void JsObject::delete_(Lock& js, const JsValue& name) {
+  check(inner->Delete(js.v8Context(), name.inner));
+}
+
+inline void JsObject::delete_(Lock& js, kj::StringPtr name) {
+  delete_(js, js.strIntern(name));
+}
+
+inline int JsString::length(jsg::Lock& js) const {
+  return inner->Length();
+}
+
+inline size_t JsString::utf8Length(jsg::Lock& js) const {
+  return inner->Utf8LengthV2(js.v8Isolate);
+}
 
 }  // namespace workerd::jsg

@@ -11,9 +11,9 @@ wd_ts_bundle(
     ]),
     modules = glob([
         "*.ts",
-        "*.js",
         "assert/*.ts",
         "dns/*.ts",
+        "fs/*.ts",
         "stream/*.js",
         "path/*.ts",
         "util/*.ts",

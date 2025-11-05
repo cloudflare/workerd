@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
@@ -23,6 +24,7 @@ filegroup(
             "modules.c++",
             "r2*.c++",
             "rtti.c++",
+            "tracing-module.c++",
             "url.c++",
             "urlpattern.c++",
             "urlpattern-standard.c++",
@@ -50,6 +52,7 @@ filegroup(
             "modules.h",
             "r2*.h",
             "rtti.h",
+            "tracing-module.h",
             "url.h",
             "urlpattern.h",
             "urlpattern-standard.h",
@@ -64,7 +67,7 @@ wd_cc_library(
     srcs = glob(["r2*.c++"]),
     hdrs = glob(["r2*.h"]),
     implementation_deps = [
-        "//src/workerd/api:r2-api_capnp",
+        ":r2-api_capnp",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -83,7 +86,19 @@ wd_cc_library(
     deps = [
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:checked-queue",
         "//src/workerd/util:uuid",
+    ],
+)
+
+wd_cc_library(
+    name = "tracing-module",
+    srcs = ["tracing-module.c++"],
+    hdrs = ["tracing-module.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
     ],
 )
 
@@ -99,6 +114,8 @@ wd_cc_library(
     ],
     implementation_deps = [
         ":pyodide",
+        "//src/workerd/api:urlpattern",
+        "//src/workerd/api:urlpattern-standard",
         "//src/workerd/jsg:rtti",
     ],
     visibility = ["//visibility:public"],
@@ -107,6 +124,7 @@ wd_cc_library(
         ":hyperdrive",
         ":memory-cache",
         ":r2",
+        ":tracing-module",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
@@ -150,13 +168,22 @@ wd_cc_library(
         "pyodide/requirements.h",
         "pyodide/setup-emscripten.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
+        "//src/pyodide:pyodide_static.capnp.h",
     ],
-    implementation_deps = ["//src/workerd/io"],
+    implementation_deps = [
+        "//src/workerd/io",
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/pyodide:pyodide_static",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-http",
+        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
@@ -169,12 +196,14 @@ wd_cc_library(
     name = "util",
     srcs = ["util.c++"],
     hdrs = ["util.h"],
-    implementation_deps = ["@simdutf"],
+    implementation_deps = [
+        "//src/workerd/util:mimetype",
+        "//src/workerd/util:strings",
+        "@simdutf",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
-        "//src/workerd/util",
-        "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -183,12 +212,14 @@ wd_cc_library(
     name = "encoding",
     srcs = ["encoding.c++"],
     hdrs = ["encoding.h"],
+    implementation_deps = [
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":util",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/util",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -199,11 +230,11 @@ wd_cc_library(
     hdrs = ["data-url.h"],
     implementation_deps = [
         ":encoding",
+        "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg:url",
-        "//src/workerd/util",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
@@ -316,14 +347,65 @@ kj_test(
     deps = [
         ":encoding",
         ":html-rewriter",
+        "//src/workerd/api:urlpattern",
+        "//src/workerd/api:urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
     ],
 )
 
 kj_test(
+    src = "base64-test.c++",
+    deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "ser-errors-test.c++",
+    deps = [
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "streams/writable-sink-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/writable-sink-adapter-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-adapter-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 wd_test(
@@ -344,25 +426,25 @@ wd_test(
         "--experimental",
     ],
     data = [
-        # To reduce complexity, tail-worker-test calls into other tests to get traces from them.
+        # To reduce complexity, tail-worker-test calls into other tests to get traces from them and
+        # includes several tail worker implementations.
         "actor-alarms-test.js",
         "http-test.js",
         "queue-test.js",
         "tail-worker-test.js",
         "tail-worker-test-receiver.js",
         "tail-worker-test-dummy.js",
+        "tail-worker-test-invalid.js",
+        "tail-worker-test-jsrpc.js",
         "tests/websocket-hibernation.js",
     ],
 )
 
+# Test for a worker that can log to itself using the isTracer parameter
 wd_test(
-    src = "tail-worker-test-invalid.wd-test",
-    args = [
-        "--experimental",
-    ],
+    src = "self-logger-test.wd-test",
     data = [
-        "http-test.js",
-        "tail-worker-test-invalid.js",
+        "self-logger-test.js",
     ],
 )
 
@@ -392,7 +474,11 @@ wd_test(
 wd_test(
     src = "kv-test.wd-test",
     args = ["--experimental"],
-    data = ["kv-test.js"],
+    data = [
+        "kv-instrumentation-test.js",
+        "kv-test.js",
+        "tests/instrumentation-tail-worker.js",
+    ],
 )
 
 wd_test(
@@ -404,7 +490,11 @@ wd_test(
 wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
-    data = ["r2-test.js"],
+    data = [
+        "r2-instrumentation-test.js",
+        "r2-test.js",
+        "tests/instrumentation-tail-worker.js",
+    ],
 )
 
 wd_test(
@@ -417,7 +507,20 @@ wd_test(
     size = "large",
     src = "sql-test.wd-test",
     args = ["--experimental"],
-    data = ["sql-test.js"],
+    data = [
+        "sql-test.js",
+        "sql-test-tail.js",
+    ],
+)
+
+wd_test(
+    src = "sync-kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "sync-kv-instrumentation-test.js",
+        "sync-kv-test.js",
+        "tests/instrumentation-tail-worker.js",
+    ],
 )
 
 wd_test(
@@ -548,6 +651,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "tests/htmlrewriter-test.wd-test",
     args = ["--experimental"],
     data = ["tests/htmlrewriter-test.js"],
@@ -583,6 +687,12 @@ wd_test(
     src = "tests/navigator-beacon-test.wd-test",
     args = ["--experimental"],
     data = ["tests/navigator-beacon-test.js"],
+)
+
+wd_test(
+    src = "tests/navigator-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/navigator-test.js"],
 )
 
 wd_test(
@@ -627,6 +737,44 @@ wd_test(
     data = ["tests/websocket-hibernation.js"],
 )
 
+js_binary(
+    name = "websocket-client-error-sidecar",
+    entry_point = "tests/websocket-client-error-sidecar.js",
+)
+
+wd_test(
+    src = "tests/websocket-client-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/websocket-client-error-test.js",
+    ],
+    sidecar = "websocket-client-error-sidecar",
+    sidecar_port_bindings = [
+        "BIG_MESSAGE_SERVER_PORT",
+    ],
+)
+
+js_binary(
+    name = "http-socket-server",
+    entry_point = "tests/http-socket-server.js",
+)
+
+wd_test(
+    src = "tests/http-socket-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/http-socket-test.js",
+        "tests/starttls-server.pem",
+    ],
+    sidecar = "http-socket-server",
+    sidecar_port_bindings = [
+        "HTTP_SOCKET_SERVER_PORT",
+        "SOCKET_PARTIALLY_WRITTEN",
+        "STARTTLS_SOCKET",
+        "FLUSH_HELLO_SOCKET",
+    ],
+)
+
 wd_test(
     src = "tests/js-rpc-socket-test.wd-test",
     args = [
@@ -645,7 +793,10 @@ wd_test(
 wd_test(
     src = "tests/new-module-registry-test.wd-test",
     args = ["--experimental"],
-    data = ["tests/new-module-registry-test.js"],
+    data = [
+        "tests/new-module-registry-test.js",
+        "tests/test.wasm",
+    ],
 )
 
 wd_test(
@@ -682,4 +833,114 @@ wd_test(
     src = "tests/disable-importable-env-test.wd-test",
     args = ["--experimental"],
     data = ["tests/disable-importable-env-test.js"],
+)
+
+wd_test(
+    src = "tests/webfs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/webfs-test.js"],
+)
+
+wd_test(
+    src = "tests/worker-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/worker-test.js"],
+)
+
+wd_test(
+    src = "tests/request-clone-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-clone-test.js"],
+)
+
+wd_test(
+    src = "tests/request-signal-enabled.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-signal-enabled.js"],
+)
+
+wd_test(
+    src = "tests/request-signal-disabled.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-signal-disabled.js"],
+)
+
+wd_test(
+    src = "tests/request-signal-passthrough.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-signal-passthrough.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "worker-loader-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-test.js"],
+)
+
+wd_test(
+    src = "tests/leak-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/leak-fetch-test.js"],
+)
+
+wd_test(
+    src = "tests/messageport-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/messageport-test.js"],
+)
+
+js_binary(
+    name = "starttls-nodejs-server",
+    entry_point = "tests/starttls-nodejs-server.js",
+)
+
+wd_test(
+    src = "tests/starttls-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/starttls-nodejs-test.js",
+        "tests/starttls-server.pem",
+    ],
+    sidecar = "starttls-nodejs-server",
+    sidecar_port_bindings = [
+        "STARTTLS_CA_PORT",
+    ],
+)
+
+wd_test(
+    src = "tests/streams-circ-ref-regression-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/streams-circ-ref-regression-test.js"],
+)
+
+wd_test(
+    src = "tests/experimental-eval-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/experimental-eval-test.js"],
+)
+
+wd_test(
+    src = "tests/fetch-redirect-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fetch-redirect-test.js"],
+)
+
+wd_test(
+    src = "tests/rpc-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/rpc-error-test.js",
+        "tests/rpc-error-test.rpc.js",
+    ],
+)
+
+wd_test(
+    src = "actor-kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "actor-kv-test.js",
+        "actor-kv-test-tail.js",
+        "tests/instrumentation-tail-worker.js",
+    ],
 )

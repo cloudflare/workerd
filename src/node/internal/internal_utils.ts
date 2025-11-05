@@ -28,8 +28,11 @@
 
 import { default as bufferUtil } from 'node-internal:buffer';
 import type { Encoding } from 'node-internal:buffer';
-import { validateFunction } from 'node-internal:validators';
-import { ERR_FALSY_VALUE_REJECTION } from 'node-internal:internal_errors';
+import { validateFunction, validateString } from 'node-internal:validators';
+import {
+  ERR_FALSY_VALUE_REJECTION,
+  type Falsy,
+} from 'node-internal:internal_errors';
 
 const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
 
@@ -115,7 +118,7 @@ export function getEncodingOps(enc: unknown): Encoding | undefined {
   return undefined;
 }
 
-export function spliceOne(list: (string | undefined)[], index: number): void {
+export function spliceOne(list: unknown[], index: number): void {
   for (; index + 1 < list.length; index++) list[index] = list[index + 1];
   list.pop();
 }
@@ -209,9 +212,12 @@ function callbackifyOnRejected(
   reason: unknown,
   cb: (error?: unknown) => void
 ): void {
+  // `!reason` guard inspired by bluebird (https://github.com/petkaantonov/bluebird/blob/2207fae3572f03b089bc92d3a6cefdd278cff7ab/src/nodeify.js#L30-L43).
+  // Because `null` is a special error value in callbacks which means "no error
+  // occurred", we error-wrap so the callback consumer can distinguish between
+  // "the promise rejected with null" or "the promise fulfilled with undefined".
   if (!reason) {
-    cb(new ERR_FALSY_VALUE_REJECTION(String(reason)));
-    return;
+    reason = new ERR_FALSY_VALUE_REJECTION(reason as Falsy);
   }
   cb(reason);
 }
@@ -367,3 +373,111 @@ export function callbackify<T extends (...args: unknown[]) => Promise<unknown>>(
   // @ts-expect-error
   return callbackified;
 }
+
+export function parseEnv(content: string): Record<string, string> {
+  validateString(content, 'content');
+
+  const result: Record<string, string> = {};
+  const lines = content.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    if (line === undefined) continue;
+
+    if (!line.trim()) continue;
+    if (line.trimStart().startsWith('#')) continue;
+    if (line.trimStart().startsWith('export '))
+      line = line.substring(line.indexOf('export ') + 7);
+
+    const equalIndex = line.indexOf('=');
+    if (equalIndex === -1) continue;
+
+    const key = line.substring(0, equalIndex).trim();
+    if (!key) continue;
+
+    let value = line.substring(equalIndex + 1).trimStart();
+    if (value.length > 0) {
+      const maybeQuote = value[0];
+      if (maybeQuote === '"' || maybeQuote === "'" || maybeQuote === '`') {
+        // Check if the closing quote is on the same line
+        const closeIndex = value.indexOf(maybeQuote, 1);
+
+        if (closeIndex !== -1) {
+          // Found closing quote on same line
+          value = value.substring(1, closeIndex);
+          // Only handle escape sequences for double quotes
+          if (maybeQuote === '"') value = value.replace(/\\n/g, '\n');
+          // For single quotes and backticks, keep \n as literal
+        } else {
+          // Check for multiline strings
+          let fullValue = value.substring(1); // Remove opening quote
+          let currentLine = i;
+          let foundClosingQuote = false;
+
+          // Look for closing quote in subsequent lines
+          while (currentLine < lines.length - 1) {
+            currentLine++;
+            const nextLine = lines[currentLine];
+            if (nextLine !== undefined) {
+              const closeInNextLine = nextLine.indexOf(maybeQuote);
+              if (closeInNextLine !== -1) {
+                // Found closing quote
+                fullValue += '\n' + nextLine.substring(0, closeInNextLine);
+                value = fullValue;
+
+                // Only handle escape sequences for double quotes
+                if (maybeQuote === '"') {
+                  value = value.replace(/\\n/g, '\n');
+                }
+
+                foundClosingQuote = true;
+                i = currentLine; // Update line counter
+                break;
+              } else {
+                // Continue building multiline value
+                fullValue += '\n' + nextLine;
+              }
+            }
+          }
+
+          if (!foundClosingQuote) {
+            if (value.length === 1) {
+              // Just the quote character, return it as the value
+              value = maybeQuote;
+            } else {
+              // Return content after the opening quote
+              value = value.substring(1);
+            }
+          }
+        }
+      } else {
+        const hashIndex = value.indexOf('#');
+        if (hashIndex !== -1) value = value.substring(0, hashIndex);
+        value = value.trimEnd();
+      }
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+export type NonEmptyArray<T> = [T, ...T[]];
+export type PositiveInteger<T extends number> = T extends 0
+  ? never
+  : `${T}` extends `${infer _}.${infer _}`
+    ? never
+    : `${T}` extends `-${infer _}`
+      ? never
+      : T;
+export type FixedLengthArray<
+  T,
+  Length extends number,
+  Accumulator extends NonEmptyArray<T> = [T],
+> =
+  Length extends PositiveInteger<Length>
+    ? number extends Length
+      ? NonEmptyArray<T>
+      : Length extends Accumulator['length']
+        ? Accumulator
+        : FixedLengthArray<T, Length, [T, ...Accumulator]>
+    : never;

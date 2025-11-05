@@ -34,6 +34,7 @@ constexpr T reverse(T value) {
 }
 
 template <Uint64OrUint32 T>
+// NOLINTNEXTLINE(edgeworker-multiple-bool-args)
 constexpr std::array<T, crcTableSize> gen_crc_table(T polynomial, bool reflectIn, bool reflectOut) {
   constexpr auto numIterations = sizeof(polynomial) * 8;  // number of bits in polynomial
   auto crcTable = std::array<T, crcTableSize>{};
@@ -74,7 +75,7 @@ uint32_t crc32c(uint32_t crc, const uint8_t *data, unsigned int length) {
   // one-by-one in the main loop.
   while (length >= 8) {
     // 8-byte unaligned read
-    uint64_t val = *(uint64_t *)data;
+    uint64_t val = *reinterpret_cast<const uint64_t *>(data);
 #if __ARM_FEATURE_CRC32
     crc = __builtin_arm_crc32cd(crc, val);
 #else

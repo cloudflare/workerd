@@ -2,7 +2,8 @@ use std::future::Future;
 use std::sync::OnceLock;
 
 use tokio::task::JoinHandle;
-use tracing::{info, Instrument};
+use tracing::Instrument;
+use tracing::info;
 
 static TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -17,9 +18,15 @@ pub(crate) fn init(worker_threads: Option<usize>) {
         builder.worker_threads(worker_threads);
     }
 
-    let runtime = builder.enable_time().enable_io().build().unwrap();
+    let runtime = builder
+        .enable_time()
+        .enable_io()
+        .build()
+        .expect("failed to build tokio runtime");
 
-    TOKIO_RUNTIME.set(runtime).unwrap();
+    TOKIO_RUNTIME
+        .set(runtime)
+        .expect("failed to set tokio runtime");
     spawn(async {
         info!(nosentry = true, "tokio runtime is online");
     });
@@ -30,7 +37,11 @@ pub(crate) fn init(worker_threads: Option<usize>) {
 /// # Panics
 /// if tokio runtime is not available yet.
 pub fn runtime_handle() -> tokio::runtime::Handle {
-    TOKIO_RUNTIME.get().unwrap().handle().clone()
+    TOKIO_RUNTIME
+        .get()
+        .expect("tokio runtime is not initialized")
+        .handle()
+        .clone()
 }
 
 /// This is helper to set the spawn and stuff duplicating the signature of

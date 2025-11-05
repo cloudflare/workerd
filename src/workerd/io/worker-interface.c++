@@ -4,6 +4,8 @@
 
 #include "worker-interface.h"
 
+#include <workerd/util/http-util.h>
+
 #include <kj/debug.h>
 
 using kj::byte;
@@ -57,8 +59,8 @@ class PromisedWorkerInterface final: public WorkerInterface {
   }
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
-    KJ_IF_SOME(w, worker) {
-      co_return co_await w->runScheduled(scheduledTime, cron);
+    KJ_IF_SOME(wrk, worker) {
+      co_return co_await wrk->runScheduled(scheduledTime, cron);
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
@@ -78,7 +80,16 @@ class PromisedWorkerInterface final: public WorkerInterface {
     KJ_IF_SOME(w, worker) {
       co_return co_await w->customEvent(kj::mv(event));
     } else {
-      co_await promise;
+      try {
+        co_await promise;
+      } catch (...) {
+        // Due to the exception, we're going to discard our CustomEvent. But we should tell it
+        // about why it failed first. This is important for JsRpcSessionCustomEventImpl in
+        // particular, as it needs to resolve the RPC client to the correct error.
+        auto exception = kj::getCaughtExceptionAsKj();
+        event->failed(exception);
+        kj::throwFatalException(kj::mv(exception));
+      }
       co_return co_await KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
     }
   }
@@ -373,7 +384,7 @@ kj::Promise<void> RpcWorkerInterface::connect(kj::StringPtr host,
 kj::Promise<void> RpcWorkerInterface::prewarm(kj::StringPtr url) {
   auto req = dispatcher.prewarmRequest(capnp::MessageSize{url.size() / sizeof(capnp::word) + 4, 0});
   req.setUrl(url);
-  return req.send().ignoreResult();
+  return req.sendIgnoringResult();
 }
 
 kj::Promise<WorkerInterface::ScheduledResult> RpcWorkerInterface::runScheduled(

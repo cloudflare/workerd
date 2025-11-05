@@ -16,18 +16,25 @@
 namespace workerd::api::public_beta {
 jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {
   KJ_IF_SOME(j, jwt) {
-    return jsg::alloc<R2Bucket>(
+    return js.alloc<R2Bucket>(
         featureFlags, subrequestChannel, kj::mv(bucketName), kj::str(j), R2Bucket::friend_tag_t{});
   }
-  return jsg::alloc<R2Bucket>(
+  return js.alloc<R2Bucket>(
       featureFlags, subrequestChannel, kj::mv(bucketName), R2Bucket::friend_tag_t{});
 }
 
 jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(
     jsg::Lock& js, kj::String name, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   auto& context = IoContext::current();
-  auto client = r2GetClient(context, subrequestChannel,
-      {"r2_create"_kjc, {"rpc.method"_kjc, "CreateBucket"_kjc}, name.asPtr()});
+
+  auto traceSpan = context.makeTraceSpan("r2_create_bucket"_kjc);
+  auto userSpan = context.makeUserTraceSpan("r2_create_bucket"_kjc);
+  TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
+
+  traceContext.userSpan.setTag("rpc.service"_kjc, "r2"_kjc);
+  traceContext.userSpan.setTag("rpc.method"_kjc, "CreateBucket"_kjc);
+  traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, name.asPtr());
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
@@ -43,13 +50,15 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(
   auto promise =
       doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), nullptr, jwt);
 
-  return context.awaitIo(js, kj::mv(promise),
+  auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
       [this, subrequestChannel = subrequestChannel, name = kj::mv(name), &errorType](
-          jsg::Lock&, R2Result r2Result) mutable {
+          jsg::Lock& js, R2Result r2Result) mutable {
     r2Result.throwIfError("createBucket", errorType);
-    return jsg::alloc<R2Bucket>(
+    return js.alloc<R2Bucket>(
         featureFlags, subrequestChannel, kj::mv(name), R2Bucket::friend_tag_t{});
   });
+
+  return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
 }
 
 jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
@@ -58,8 +67,14 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
     CompatibilityFlags::Reader flags) {
   auto& context = IoContext::current();
-  auto client = r2GetClient(
-      context, subrequestChannel, {"r2_list"_kjc, {"rpc.method"_kjc, "ListObjects"_kjc}});
+
+  auto traceSpan = context.makeTraceSpan("r2_list_buckets"_kjc);
+  auto userSpan = context.makeUserTraceSpan("r2_list_buckets"_kjc);
+  TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
+
+  traceContext.userSpan.setTag("rpc.service"_kjc, "r2"_kjc);
+  traceContext.userSpan.setTag("rpc.method"_kjc, "ListBuckets"_kjc);
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
@@ -82,7 +97,7 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
   auto requestJson = json.encode(requestBuilder);
   auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), nullptr, jwt, flags);
 
-  return context.awaitIo(js, kj::mv(promise),
+  auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
       [this, &retrievedBucketType, &errorType](jsg::Lock& js, R2Result r2Result) mutable {
     r2Result.throwIfError("listBucket", errorType);
 
@@ -94,9 +109,8 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
 
     auto buckets = js.map();
     for (auto b: responseBuilder.getBuckets()) {
-      auto bucket =
-          jsg::alloc<RetrievedBucket>(featureFlags, subrequestChannel, kj::str(b.getName()),
-              kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
+      auto bucket = js.alloc<RetrievedBucket>(featureFlags, subrequestChannel, kj::str(b.getName()),
+          kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
       buckets.set(js, b.getName(), jsg::JsValue(retrievedBucketType.wrap(js, kj::mv(bucket))));
     }
 
@@ -110,13 +124,22 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
 
     return kj::mv(result);
   });
+
+  return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
 }
 
 jsg::Promise<void> R2Admin::delete_(
     jsg::Lock& js, kj::String name, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   auto& context = IoContext::current();
-  auto client = r2GetClient(context, subrequestChannel,
-      {"r2_delete"_kjc, {"rpc.method"_kjc, "DeleteBucket"_kjc}, name.asPtr()});
+
+  auto traceSpan = context.makeTraceSpan("r2_delete_bucket"_kjc);
+  auto userSpan = context.makeUserTraceSpan("r2_delete_bucket"_kjc);
+  TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
+
+  traceContext.userSpan.setTag("rpc.service"_kjc, "r2"_kjc);
+  traceContext.userSpan.setTag("rpc.method"_kjc, "DeleteBucket"_kjc);
+  traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::StringPtr(name));
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
@@ -132,9 +155,12 @@ jsg::Promise<void> R2Admin::delete_(
   auto promise =
       doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), nullptr, jwt);
 
-  return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock&, R2Result r2Result) mutable {
+  auto awaitIoResult =
+      context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock&, R2Result r2Result) mutable {
     r2Result.throwIfError("deleteBucket", errorType);
   });
+
+  return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
 }
 
 }  // namespace workerd::api::public_beta

@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 // a transform stream is a readable/writable stream where you do
 // something with the data.  Sometimes it's called a "filter",
 // but that's not a great name for it, since that implies a thing where
@@ -71,10 +68,14 @@
 'use strict';
 
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+import { nextTick } from 'node-internal:internal_process';
 
 import { Duplex } from 'node-internal:streams_duplex';
 
-import { getHighWaterMark } from 'node-internal:streams_util';
+import { getHighWaterMark } from 'node-internal:streams_state';
+
+const streamsNodejsV24Compat =
+  Cloudflare.compatibilityFlags.enable_streams_nodejs_v24_compat; // eslint-disable-line no-undef
 
 Object.setPrototypeOf(Transform.prototype, Duplex.prototype);
 Object.setPrototypeOf(Transform, Duplex);
@@ -88,7 +89,7 @@ export function Transform(options) {
   // applied but would be semver-major. Or even better;
   // make Transform a Readable with the Writable interface.
   const readableHighWaterMark = options
-    ? getHighWaterMark(options, 'readableHighWaterMark', true)
+    ? getHighWaterMark(this, options, 'readableHighWaterMark', true)
     : null;
   if (readableHighWaterMark === 0) {
     // A Duplex will buffer both on the writable and readable side while
@@ -98,11 +99,7 @@ export function Transform(options) {
       ...options,
       highWaterMark: null,
       readableHighWaterMark,
-      // TODO (ronag): 0 is not optimal since we have
-      // a "bug" where we check needDrain before calling _write and not after.
-      // Refs: https://github.com/nodejs/node/pull/32887
-      // Refs: https://github.com/nodejs/node/pull/35941
-      writableHighWaterMark: options?.writableHighWaterMark || 0,
+      writableHighWaterMark: options.writableHighWaterMark || 0,
     };
   }
   Duplex.call(this, options);
@@ -175,7 +172,13 @@ Transform.prototype._write = function (chunk, encoding, callback) {
     if (val != null) {
       this.push(val);
     }
-    if (
+    // This is a semver-major change. Ref: https://github.com/nodejs/node/commit/557044af407376aff28a0a0800f3053bb58e9239
+    if (streamsNodejsV24Compat && rState.ended) {
+      // If user has called this.push(null) we have to delay the callback to properly propagate the new
+      // state.
+      nextTick(callback);
+      return;
+    } else if (
       wState.ended ||
       // Backwards compat.
       length === rState.length ||

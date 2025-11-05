@@ -175,9 +175,9 @@ Sign.prototype.sign = function (
   // Options specific to (EC)DSA
   const dsaSigEnc = getDSASignatureEncoding(options);
 
-  const res = Buffer.from(
-    this[kHandle].sign(key, rsaPadding, pssSaltLength, dsaSigEnc)
-  );
+  const u8 = this[kHandle].sign(key, rsaPadding, pssSaltLength, dsaSigEnc);
+
+  const res = Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
 
   if (encoding && encoding !== 'buffer') {
     return res.toString(encoding);

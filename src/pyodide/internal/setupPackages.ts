@@ -1,15 +1,13 @@
 import { parseTarInfo } from 'pyodide-internal:tar';
-import { createTarFS } from 'pyodide-internal:tarfs';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
+import { LOCKFILE } from 'pyodide-internal:metadata';
 import {
-  REQUIREMENTS,
-  LOAD_WHEELS_FROM_R2,
-  LOCKFILE,
-  LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
-} from 'pyodide-internal:metadata';
-import { simpleRunPython } from 'pyodide-internal:util';
+  invalidateCaches,
+  PythonWorkersInternalError,
+  PythonUserError,
+  simpleRunPython,
+} from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
-import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 const canonicalizeNameRegex = /[-_.]+/g;
 const DYNLIB_PATH = '/usr/lib';
@@ -53,9 +51,17 @@ function createTarFsInfo(): TarFSInfo {
  * in /usr/lib.
  */
 class VirtualizedDir {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private rootInfo: TarFSInfo; // site-packages directory
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private dynlibTarFs: TarFSInfo; // /usr/lib directory
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private soFiles: FilePath[];
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private loadedRequirements: Set<string>;
   constructor() {
     this.rootInfo = createTarFsInfo();
@@ -74,7 +80,7 @@ class VirtualizedDir {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
-        throw new Error(
+        throw new PythonWorkersInternalError(
           `File/folder ${key} being written by multiple packages`
         );
       }
@@ -121,7 +127,7 @@ class VirtualizedDir {
     for (const soFile of soFiles) {
       // If folder is in list of requirements include .so file in list to preload.
       const [pkg, ...rest] = soFile.split('/');
-      if (requirements.has(pkg)) {
+      if (requirements.has(pkg!)) {
         this.soFiles.push(rest);
       }
     }
@@ -129,7 +135,9 @@ class VirtualizedDir {
     for (const req of requirements) {
       const child = tarInfo.children!.get(req);
       if (!child) {
-        throw new Error(`Requirement ${req} not found in pyodide packages tar`);
+        throw new PythonUserError(
+          `Requirement ${req} not found in pyodide packages tar`
+        );
       }
       this.mountOverlay(child, 'site');
       this.loadedRequirements.add(req);
@@ -144,6 +152,7 @@ class VirtualizedDir {
     return this.dynlibTarFs;
   }
 
+  /** Only used for Pyodide 0.26.0a2 */
   getSoFilesToLoad(): FilePath[] {
     return this.soFiles;
   }
@@ -152,7 +161,7 @@ class VirtualizedDir {
     return this.loadedRequirements.has(req);
   }
 
-  mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>) {
+  mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>): void {
     Module.FS.mkdirTree(Module.FS.sessionSitePackages);
     Module.FS.mount(
       tarFS,
@@ -175,7 +184,7 @@ class VirtualizedDir {
  *
  * TODO(later): This needs to be removed when external package loading is enabled.
  */
-export function buildVirtualizedDir(requirements: Set<string>): VirtualizedDir {
+export function buildVirtualizedDir(): VirtualizedDir {
   if (EmbeddedPackagesTarReader.read === undefined) {
     // Package retrieval is enabled, so the embedded tar reader isn't initialized.
     // All packages, including STDLIB_PACKAGES, are loaded in `loadPackages`.
@@ -184,18 +193,7 @@ export function buildVirtualizedDir(requirements: Set<string>): VirtualizedDir {
 
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo(EmbeddedPackagesTarReader);
 
-  let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
-
-  // Currently, we include all packages within the big bundle in Edgeworker.
-  // During this transitionary period, we add the option (via autogate)
-  // to load packages from GCS (in which case they are accessible through the ArtifactBundler)
-  // or to simply use the packages within the big bundle. The latter is not ideal
-  // since we're locked to a specific packages version, so we will want to move away
-  // from it eventually.
-  if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
-    requirements.forEach((r) => requirementsInBigBundle.add(r));
-  }
-
+  const requirementsInBigBundle = new Set(STDLIB_PACKAGES);
   const res = new VirtualizedDir();
   res.addBigBundle(bigTarInfo, bigTarSoFiles, requirementsInBigBundle);
 
@@ -215,45 +213,24 @@ export function patchLoadPackage(pyodide: Pyodide): void {
 }
 
 function disabledLoadPackage(): never {
-  throw new Error(
+  throw new PythonWorkersInternalError(
     'pyodide.loadPackage is disabled because packages are encoded in the binary'
   );
 }
 
 /**
- * This mounts a TarFS representing the site-packages directory (which contains the Python packages)
- * and another TarFS representing the dynlib directory (where dynlibs like libcrypto.so live).
- *
- * This has to work before the runtime is initialized because of memory snapshot
- * details, so even though we want these directories to be on sys.path, we
- * handle that separately in adjustSysPath.
- */
-export function mountSitePackages(Module: Module, pkgs: VirtualizedDir): void {
-  const tarFS = createTarFS(Module);
-  if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
-    // if we are not loading additional wheels, then we're done
-    // with site-packages and we can mount it here. Otherwise, we must mount it in
-    // loadPackages().
-    pkgs.mount(Module, tarFS);
-  }
-}
-
-/**
  * This mounts the metadataFS (which contains user code).
  */
-export function mountWorkerFiles(Module: Module) {
+export function mountWorkerFiles(Module: Module): void {
   Module.FS.mkdirTree('/session/metadata');
   const mdFS = createMetadataFS(Module);
   Module.FS.mount(mdFS, {}, '/session/metadata');
-  simpleRunPython(
-    Module,
-    `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`
-  );
+  invalidateCaches(Module);
 }
 
 /**
  * Add the directories created by mountLib to sys.path.
- * Has to run after the runtime is initialized.
+ * Has to run after the runtime is initialized but before memory snapshot is collected.
  */
 export function adjustSysPath(Module: Module): void {
   const site_packages = Module.FS.sessionSitePackages;
@@ -263,7 +240,4 @@ export function adjustSysPath(Module: Module): void {
   );
 }
 
-export { REQUIREMENTS };
-export const TRANSITIVE_REQUIREMENTS =
-  MetadataReader.getTransitiveRequirements();
-export const VIRTUALIZED_DIR = buildVirtualizedDir(TRANSITIVE_REQUIREMENTS);
+export const VIRTUALIZED_DIR = buildVirtualizedDir();

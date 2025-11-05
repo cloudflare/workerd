@@ -10,6 +10,7 @@
 namespace workerd::api {
 
 class ReadableStream;
+class File;
 
 // An implementation of the Web Platform Standard Blob API
 class Blob: public jsg::Object {
@@ -29,7 +30,7 @@ class Blob: public jsg::Object {
     JSG_STRUCT(type, endings);
   };
 
-  typedef kj::Array<kj::OneOf<kj::Array<const byte>, kj::String, jsg::Ref<Blob>>> Bits;
+  using Bits = kj::Array<kj::OneOf<kj::Array<const byte>, kj::String, jsg::Ref<Blob>>>;
 
   static jsg::Ref<Blob> constructor(
       jsg::Lock& js, jsg::Optional<Bits> bits, jsg::Optional<Options> options);
@@ -41,13 +42,15 @@ class Blob: public jsg::Object {
     return type;
   }
 
-  jsg::Ref<Blob> slice(
-      jsg::Optional<int> start, jsg::Optional<int> end, jsg::Optional<kj::String> type);
+  jsg::Ref<Blob> slice(jsg::Lock& js,
+      jsg::Optional<int> start,
+      jsg::Optional<int> end,
+      jsg::Optional<kj::String> type);
 
   jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
   jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
-  jsg::Ref<ReadableStream> stream();
+  jsg::Ref<ReadableStream> stream(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(Blob, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
@@ -110,7 +113,8 @@ class Blob: public jsg::Object {
   }
 
   class BlobInputStream;
-  friend class File;
+  // this could just be "friend File;", but clang-cl wants to see the qualified name here.
+  friend class ::workerd::api::File;
 };
 
 // An implementation of the Web Platform Standard File API

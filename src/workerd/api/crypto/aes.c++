@@ -772,7 +772,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(jsg::
     JSG_FAIL_REQUIRE(DOMNotSupportedError, normalizedName, " key generation not supported.");
   }
 
-  return jsg::alloc<CryptoKey>(kj::mv(keyImpl));
+  return js.alloc<CryptoKey>(kj::mv(keyImpl));
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(jsg::Lock& js,

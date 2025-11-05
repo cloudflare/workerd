@@ -38,7 +38,6 @@ wd_cc_library(
         "iterator.h",
         "struct.h",
         "value.h",
-        "web-idl.h",
     ],
     local_defines = ["JSG_IMPLEMENTATION"],
     deps = [
@@ -49,7 +48,6 @@ wd_cc_library(
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
-        "@simdutf",
         "@workerd-v8//:v8",
     ],
 )
@@ -78,7 +76,6 @@ wd_cc_library(
     srcs = [
         "async-context.c++",
         "buffersource.c++",
-        "commonjs.c++",
         "dom-exception.c++",
         "jsg.c++",
         "jsvalue.c++",
@@ -95,8 +92,8 @@ wd_cc_library(
     hdrs = [
         "async-context.h",
         "buffersource.h",
-        "commonjs.h",
         "dom-exception.h",
+        "fast-api.h",
         "function.h",
         "jsg.h",
         "jsvalue.h",
@@ -108,25 +105,31 @@ wd_cc_library(
         "setup.h",
         "util.h",
         "v8-platform-wrapper.h",
+        "web-idl.h",
         "wrappable.h",
     ],
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
+    implementation_deps = [
+        "@simdutf",
+        "@ssl",
+    ],
     local_defines = ["JSG_IMPLEMENTATION"],
+    tags = ["no-clang-tidy"],
     deps = [
         ":exception",
+        ":exception_metadata_capnp",
         ":macro-meta",
         ":memory-tracker",
         ":meta",
         ":modules_capnp",
         ":observer",
         ":url",
-        "//src/workerd/util",
+        "//src/workerd/util",  # Required for util/batch-queue.h
+        "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
-        "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
-        "@ssl",
         "@workerd-v8//:v8",
     ],
 )
@@ -155,15 +158,15 @@ wd_cc_library(
     hdrs = [
         "inspector.h",
     ],
-    local_defines = ["JSG_IMPLEMENTATION"],
-    # Some JSG headers can't be compiled on their own
-    visibility = ["//visibility:public"],
-    deps = [
+    implementation_deps = [
         ":jsg-core",
         "@capnp-cpp//src/kj",
         "@simdutf",
         "@workerd-v8//:v8",
     ],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    # Some JSG headers can't be compiled on their own
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(
@@ -194,12 +197,12 @@ wd_cc_library(
         "url.h",
     ],
     implementation_deps = [
+        "//src/workerd/util:strings",
         "@ada-url",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":memory-tracker",
-        "//src/workerd/util:strings",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -220,11 +223,23 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
 )
 
+wd_cc_capnp_library(
+    name = "exception_metadata_capnp",
+    srcs = ["exception-metadata.capnp"],
+    visibility = ["//visibility:public"],
+)
+
 js_capnp_library(
     name = "rtti_capnp_js",
     srcs = ["rtti.capnp"],
+    outs = [
+        "rtti.js",
+        "rtti.ts",
+    ],
+    data = ["//:node_modules/capnp-es"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
+        "@//build/config:no_build": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
@@ -267,16 +282,16 @@ wd_cc_library(
     hdrs = ["observer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
 [kj_test(
     src = f,
     local_defines = ["JSG_IMPLEMENTATION"],
-    deps = [
-        ":jsg",
-    ],
+    deps = [":jsg"],
 ) for f in glob(
     ["*-test.c++"],
     exclude = [
@@ -340,7 +355,7 @@ kj_test(
 kj_test(
     src = "multiple-typewrappers-test.c++",
     deps = [
+        ":jsg",
         "//src/workerd/io:compatibility-date_capnp",
-        "//src/workerd/jsg",
     ],
 )

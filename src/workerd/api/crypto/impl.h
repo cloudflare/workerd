@@ -18,7 +18,7 @@
 
 #include <kj/encoding.h>
 
-typedef struct bignum_st BIGNUM;
+using BIGNUM = struct bignum_st;
 
 // Wrap calls to OpenSSL's EVP_* interface (and similar APIs) in this macro to
 // deal with errors.
@@ -299,7 +299,7 @@ class SslArrayDisposer: public kj::ArrayDisposer {
       size_t elementSize,
       size_t elementCount,
       size_t capacity,
-      void (*destroyElement)(void*)) const;
+      void (*destroyElement)(void*)) const override;
 };
 
 template <typename T, void (*sslFree)(T*)>
@@ -384,7 +384,7 @@ struct ClearErrorOnReturn {
 // Returns ceil(a / b) for integers (std::ceil always returns a floating point result).
 template <typename T>
 static inline T integerCeilDivision(T a, T b) {
-  static_assert(std::is_unsigned<T>::value);
+  static_assert(std::is_unsigned_v<T>);
   return a == 0 ? 0 : 1 + (a - 1) / b;
 }
 

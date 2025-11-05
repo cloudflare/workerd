@@ -1,6 +1,6 @@
 declare namespace internalJaeger {
   const traceId: number | null,
-    enterSpan: (name: String, callback: () => any) => any;
+    enterSpan: <T>(name: string, callback: () => T) => T;
 }
 
 export default internalJaeger;

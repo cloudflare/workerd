@@ -14,16 +14,40 @@ using import "/capnp/compat/http-over-capnp.capnp".HttpService;
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
 using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
+using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
 
+# A 128-bit trace ID used to identify traces.
+struct TraceId {
+  high @0 :UInt64;
+  low @1 :UInt64;
+}
+
+# InvocationSpanContext used to identify the current tracing context. Only used internally so far.
 struct InvocationSpanContext {
-  struct TraceId {
-    high @0 :UInt64;
-    low @1 :UInt64;
-  }
+  # The 128-bit ID uniquely identifying a trace.
   traceId @0 :TraceId;
+  # The 128-bit ID identifying a worker stage invocation within a trace.
   invocationId @1 :TraceId;
+  # The 64-bit span ID identifying an individual span within a worker stage invocation.
   spanId @2 :UInt64;
+}
+
+# Span context for a tail event – this is provided for each tail event.
+struct SpanContext {
+  # The 128-bit ID uniquely identifying a trace.
+  traceId @0 :TraceId;
+  # spanId in which this event is handled
+  # for Onset and SpanOpen events this would be the parent span id
+  # for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
+  # For Hibernate and Mark this would be the span under which they were emitted.
+  # This is only empty if:
+  #  1. This is an Onset event
+  #  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+  info :union {
+    empty @1 :Void;
+    spanId @2 :UInt64;
+  }
 }
 
 struct Trace @0x8e8d911203762d34 {
@@ -43,7 +67,8 @@ struct Trace @0x8e8d911203762d34 {
     message @2 :Text;
   }
 
-  spans @26 :List(UserSpanData);
+  obsolete26 @26 :List(UserSpanData);
+  # spans are unavailable in full trace objects.
 
   exceptions @1 :List(Exception);
   struct Exception {
@@ -141,6 +166,7 @@ struct Trace @0x8e8d911203762d34 {
   scriptTags @14 :List(Text);
 
   entrypoint @22 :Text;
+  durableObjectId @27 :Text;
 
   diagnosticChannelEvents @17 :List(DiagnosticChannelEvent);
   struct DiagnosticChannelEvent {
@@ -169,16 +195,8 @@ struct Trace @0x8e8d911203762d34 {
     # The Attribute struct can also be used to provide arbitrary additional
     # properties for some other structs.
     # Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
-    struct Value {
-      inner :union {
-        text @0 :Text;
-        bool @1 :Bool;
-        int @2 :Int32;
-        float @3 :Float64;
-      }
-    }
     name @0 :Text;
-    value @1 :List(Value);
+    value @1 :List(TagValue);
   }
 
   struct Return {
@@ -190,19 +208,20 @@ struct Trace @0x8e8d911203762d34 {
     # the response body payload, etc). Not all spans will have a Return mark.
     info :union {
       empty @0 :Void;
-      custom @1 :List(Attribute);
-      fetch @2 :FetchResponseInfo;
+      fetch @1 :FetchResponseInfo;
     }
   }
 
   struct SpanOpen {
     # Marks the opening of a child span within the streaming tail session.
     operationName @0 :Text;
+    spanId @1 :UInt64;
+    # id for the span being opened by this SpanOpen event.
     info :union {
-      empty @1 :Void;
-      custom @2 :List(Attribute);
-      fetch @3 :FetchEventInfo;
-      jsrpc @4 :JsRpcEventInfo;
+      empty @2 :Void;
+      custom @3 :List(Attribute);
+      fetch @4 :FetchEventInfo;
+      jsRpc @5 :JsRpcEventInfo;
     }
   }
 
@@ -211,17 +230,6 @@ struct Trace @0x8e8d911203762d34 {
     # Once emitted, no further mark events should occur within the closed
     # span.
     outcome @0 :EventOutcome;
-  }
-
-  struct Resume {
-    # A resume event indicates that we are resuming a previously hibernated
-    # tail session.
-
-    attachment @0 :Data;
-    # When a tail session is hibernated, the tail worker is given the opportunity
-    # to provide some additional data that will be serialized and stored with the
-    # hibernated state. When the stream is resumed, if the tail worker has provided
-    # such data, it will be passed back to the worker in the resume event.
   }
 
   struct Onset {
@@ -233,27 +241,26 @@ struct Trace @0x8e8d911203762d34 {
     scriptName @1 :Text;
     scriptVersion @2 :ScriptVersion;
     dispatchNamespace @3 :Text;
-    scriptTags @4 :List(Text);
-    entryPoint @5 :Text;
+    scriptId @4 :Text;
+    scriptTags @5 :List(Text);
+    entryPoint @6 :Text;
 
-    trigger @6 :InvocationSpanContext;
-    # If this invocation was triggered by a different invocation that
-    # is being traced, the trigger will identify the triggering span.
-    # Propagation of the trigger context is not required, and in some
-    # cases is not desirable.
-
-    info :union {
-      fetch @7 :FetchEventInfo;
-      jsrpc @8 :JsRpcEventInfo;
-      scheduled @9 :ScheduledEventInfo;
-      alarm @10 :AlarmEventInfo;
-      queue @11 :QueueEventInfo;
-      email @12 :EmailEventInfo;
-      trace @13 :TraceEventInfo;
-      hibernatableWebSocket @14 :HibernatableWebSocketEventInfo;
-      resume @15 :Resume;
-      custom @16 :CustomEventInfo;
+    struct Info { union {
+      fetch @0 :FetchEventInfo;
+      jsRpc @1 :JsRpcEventInfo;
+      scheduled @2 :ScheduledEventInfo;
+      alarm @3 :AlarmEventInfo;
+      queue @4 :QueueEventInfo;
+      email @5 :EmailEventInfo;
+      trace @6 :TraceEventInfo;
+      hibernatableWebSocket @7 :HibernatableWebSocketEventInfo;
+      custom @8 :CustomEventInfo;
     }
+    }
+    info @7: Info;
+    spanId @8: UInt64;
+    # id for the span being opened by this Onset event.
+    attributes @9 :List(Attribute);
   }
 
   struct Outcome {
@@ -262,30 +269,24 @@ struct Trace @0x8e8d911203762d34 {
     wallTime @2 :UInt64;
   }
 
-  struct Hibernate {
-    # A hibernate event indicates that the tail session is being hibernated.
-  }
-
-  struct Link {
-    # A link to another invocation span context.
-    label @0 :Text;
-    context @1 :InvocationSpanContext;
-  }
-
   struct TailEvent {
-    # A streaming tail worker receives a series of Tail Events. Tail events always
-    # occur within an InvocationSpanContext. The first TailEvent delivered to a
-    # streaming tail session is always an Onset. The final TailEvent delivered is
-    # always an Outcome or Hibernate. Between those can be any number of SpanOpen,
-    # SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
+    # A streaming tail worker receives a series of Tail Events. Tail events always occur within an
+    # InvocationSpanContext. The first TailEvent delivered to a streaming tail session is always an
+    # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
+    # SpanOpen, SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
     # unless the stream was abruptly terminated.
-    context @0 :InvocationSpanContext;
-    timestampNs @1 :Int64;
-    sequence @2 :UInt32;
+    # Inherited spanContext for this event.
+    spanContext @0: SpanContext;
+    # invocation id of the currently invoked worker stage.
+    # invocation id will always be unique to every Onset event and will be the same until the Outcome event.
+    invocationId @1: TraceId;
+    # time for the tail event. This will be provided as I/O time from the perspective of the tail worker.
+    timestampNs @2 :Int64;
+    # unique sequence identifier for this tail event, starting at zero.
+    sequence @3 :UInt32;
     event :union {
-      onset @3 :Onset;
-      outcome @4 :Outcome;
-      hibernate @5 :Hibernate;
+      onset @4 :Onset;
+      outcome @5 :Outcome;
       spanOpen @6 :SpanOpen;
       spanClose @7 :SpanClose;
       attribute @8 :List(Attribute);
@@ -293,7 +294,6 @@ struct Trace @0x8e8d911203762d34 {
       diagnosticChannelEvent @10 :DiagnosticChannelEvent;
       exception @11 :Exception;
       log @12 :Log;
-      link @13 :Link;
     }
   }
 }
@@ -397,6 +397,30 @@ enum SerializationTag {
   # Keep this value in sync with the DOMException::SERIALIZATION_TAG in
   # /src/workerd/jsg/dom-exception (but we can't actually change this value
   # without breaking things).
+
+  abortSignal @9;
+
+  nativeError @10;
+  # A JavaScript native error, such as Error, TypeError, etc. These are typically
+  # not handled as host objects in V8 but we handle them as such in workers in
+  # order to preserve additional information that we may attach to them.
+
+  serviceStub @11;
+  # A ServiceStub aka Fetcher aka Service Binding.
+  #
+  # Such stubs are different from jsRpcStub in that they don't point to a single live object, but
+  # instead represent a service that can be instantiated anywhere. This means that they can be
+  # passed around the world and instantiated in a different location, as well as persisted in
+  # long-term storage.
+  #
+  # Also because of all this, service stubs can be embedded in the `env` and `ctx.props` of other
+  # Workers. Regular RPC stubs cannot.
+
+  actorClass @12;
+  # An actor class reference, aka DurableObjectClass. Can be used to instantiate a facet.
+  #
+  # Similar to serviceStub, this refers to the entrypoint of a Worker that can be instantiated
+  # anywhere and any time, and thus can be persisted and used in `env` and `ctx.props`, etc.
 }
 
 enum StreamEncoding {
@@ -458,6 +482,12 @@ struct JsValue {
         }
       }
 
+      abortTrigger @7 :Void;
+      # Indicates that an `AbortTrigger` is being passed, see the `AbortTrigger` interface for the
+      # mechanism used to trigger the abort later. This is modeled as a stream, since the sender is
+      # the one that will later on send the abort signal. This external will have an associated
+      # stream in the corresponding `StreamSink` with type `AbortTrigger`.
+
       # TODO(soon): WebSocket, Request, Response
     }
   }
@@ -478,6 +508,23 @@ struct JsValue {
     # of capability returned depends on the type of external. E.g. for `readableStream`, it is a
     # `ByteStream`.
   }
+}
+
+interface AbortTrigger $Cxx.allowCancellation {
+  # When an `AbortSignal` is sent over RPC, the sender initiates a "stream" with this RPC interface
+  # type which is later used to signal the abort. This is not really a "stream", since only one
+  # message is sent. But it makes sense to model this way because the message is sent in the same
+  # direction as the `JsValue` that originally transmitted the `AbortSignal` object.
+  # When an `AbortSignal` is serialized, the original signal is the client, and the deserialized
+  # clone is the server.
+
+  abort @0 (reason :JsValue) -> ();
+  # Allows a cloned abort signal to be triggered over RPC when the original signal is triggered.
+  # `reason` is an arbitrary JavaScript value which will appear in the resulting `AbortError`s.
+
+  release @1 () -> ();
+  # Informs a cloned signal that the original signal is being destroyed, and the abort will never
+  # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
 }
 
 interface JsRpcTarget $Cxx.allowCancellation {
@@ -624,12 +671,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   #
   # In C++, we use `WorkerInterface::customEvent()` to dispatch this event.
 
-  tailStreamSession @10 () -> (topLevel :TailStreamTarget) $Cxx.allowCancellation;
+  tailStreamSession @10 () -> (topLevel :TailStreamTarget, result :EventOutcome) $Cxx.allowCancellation;
   # Opens a streaming tail session. The call does not return until the session is complete.
   #
   # `topLevel` is the top-level tail session target, on which exactly one method call can
   # be made. This call must be made using pipelining since `tailStreamSession()` won't return
-  # until after the call completes.
+  # until after the call completes. result is accessed after the session is complete.
 
   obsolete5 @5();
   obsolete6 @6();

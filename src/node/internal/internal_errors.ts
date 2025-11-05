@@ -25,9 +25,6 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
-/* eslint-disable */
-
-// TODO(soon): Fill in more of the internal/errors implementation
 
 import { inspect } from 'node-internal:internal_inspect';
 import type { PeerCertificate } from 'node:tls';
@@ -53,13 +50,9 @@ export class NodeErrorAbstraction extends Error {
     super(message);
     this.code = code;
     this.name = name;
-    //This number changes depending on the name of this class
-    //20 characters as of now
-    (this as any).stack =
-      this.stack && `${name} [${this.code}]${this.stack.slice(20)}`;
   }
 
-  override toString() {
+  override toString(): string {
     return `${this.name} [${this.code}]: ${this.message}`;
   }
 }
@@ -74,7 +67,7 @@ export class NodeRangeError extends NodeErrorAbstraction {
   constructor(code: string, message: string) {
     super(RangeError.prototype.name, code, message);
     Object.setPrototypeOf(this, RangeError.prototype);
-    this.toString = function () {
+    this.toString = function (): string {
       return `${this.name} [${this.code}]: ${this.message}`;
     };
   }
@@ -84,7 +77,7 @@ export class NodeTypeError extends NodeErrorAbstraction implements TypeError {
   constructor(code: string, message: string) {
     super(TypeError.prototype.name, code, message);
     Object.setPrototypeOf(this, TypeError.prototype);
-    this.toString = function () {
+    this.toString = function (): string {
       return `${this.name} [${this.code}]: ${this.message}`;
     };
   }
@@ -97,7 +90,7 @@ export class NodeSyntaxError
   constructor(code: string, message: string) {
     super(SyntaxError.prototype.name, code, message);
     Object.setPrototypeOf(this, SyntaxError.prototype);
-    this.toString = function () {
+    this.toString = function (): string {
       return `${this.name} [${this.code}]: ${this.message}`;
     };
   }
@@ -178,8 +171,7 @@ function createInvalidArgType(
     } else if (other.length === 2) {
       msg += `one of ${other[0]} or ${other[1]}`;
     } else {
-      // @ts-ignore
-      if (other[0].toLowerCase() !== other[0]) {
+      if (other[0]?.toLowerCase() !== other[0]) {
         msg += 'an ';
       }
       msg += `${other[0]}`;
@@ -189,7 +181,7 @@ function createInvalidArgType(
   return msg;
 }
 
-function invalidArgTypeHelper(input: any) {
+function invalidArgTypeHelper(input: unknown): string {
   if (input == null) {
     return ` Received ${input}`;
   }
@@ -197,7 +189,8 @@ function invalidArgTypeHelper(input: any) {
     return ` Received function ${input.name}`;
   }
   if (typeof input === 'object') {
-    if (input.constructor && input.constructor.name) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (input.constructor?.name) {
       return ` Received an instance of ${input.constructor.name}`;
     }
     return ` Received ${inspect(input, { depth: -1 })}`;
@@ -209,7 +202,7 @@ function invalidArgTypeHelper(input: any) {
   return ` Received type ${typeof input} (${inspected})`;
 }
 
-function addNumericalSeparator(val: string) {
+function addNumericalSeparator(val: string): string {
   let res = '';
   let i = val.length;
   const start = val[0] === '-' ? 1 : 0;
@@ -333,6 +326,7 @@ export class ERR_OUT_OF_RANGE extends RangeError {
     // Add the error code to the name to include it in the stack trace.
     this.name = `${name} [${this.code}]`;
     // Access the stack to generate the error message including the error code from the name.
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     this.stack;
     // Reset the name to the actual name.
     this.name = name;
@@ -396,18 +390,20 @@ export class AbortError extends Error {
   }
 }
 
-function determineSpecificType(value: any) {
+function determineSpecificType(value: unknown): string {
   if (value == null) {
+    // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
     return '' + value;
   }
   if (typeof value === 'function' && value.name) {
     return `function ${value.name}`;
   }
   if (typeof value === 'object') {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (value.constructor?.name) {
       return `an instance of ${value.constructor.name}`;
     }
-    return `${inspect(value, { depth: -1 })}`;
+    return inspect(value, { depth: -1 });
   }
   let inspected = inspect(value, { colors: false });
   if (inspected.length > 28) inspected = `${inspected.slice(0, 25)}...`;
@@ -444,7 +440,7 @@ export class ERR_MISSING_ARGS extends NodeTypeError {
 
     const len = args.length;
 
-    const wrap = (a: unknown) => `"${a}"`;
+    const wrap = (a: unknown): string => `"${a}"`;
 
     args = args.map((a) =>
       Array.isArray(a) ? a.map(wrap).join(' or ') : wrap(a)
@@ -467,9 +463,11 @@ export class ERR_MISSING_ARGS extends NodeTypeError {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents,@typescript-eslint/no-duplicate-type-constituents
+export type Falsy = false | 0 | -0 | 0n | '' | null | undefined | typeof NaN;
 export class ERR_FALSY_VALUE_REJECTION extends NodeError {
-  reason: string;
-  constructor(reason: string) {
+  reason: Falsy;
+  constructor(reason: Falsy) {
     super('ERR_FALSY_VALUE_REJECTION', 'Promise was rejected with falsy value');
     this.reason = reason;
   }
@@ -478,7 +476,7 @@ export class ERR_FALSY_VALUE_REJECTION extends NodeError {
 export class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
   constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
-      name = (name as symbol).description!;
+      name = name.description as string;
     }
     super(
       'ERR_METHOD_NOT_IMPLEMENTED',
@@ -495,7 +493,7 @@ export class ERR_STREAM_CANNOT_PIPE extends NodeError {
 export class ERR_STREAM_DESTROYED extends NodeError {
   constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
-      name = (name as symbol).description!;
+      name = name.description as string;
     }
     super(
       'ERR_STREAM_DESTROYED',
@@ -506,7 +504,7 @@ export class ERR_STREAM_DESTROYED extends NodeError {
 export class ERR_STREAM_ALREADY_FINISHED extends NodeError {
   constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
-      name = (name as symbol).description!;
+      name = name.description as string;
     }
     super(
       'ERR_STREAM_ALREADY_FINISHED',
@@ -613,20 +611,20 @@ export class ERR_INVALID_URI extends NodeError {
 // }
 export class DnsError extends NodeError {
   errno = undefined;
+  hostname: string;
+  syscall: string;
 
-  constructor(
-    public hostname: string,
-    code: string,
-    public syscall: string
-  ) {
+  constructor(hostname: string, code: string, syscall: string) {
     super(code, `${syscall} ${code} ${hostname}`);
+    this.hostname = hostname;
+    this.syscall = syscall;
   }
 }
 
 export class ERR_OPTION_NOT_IMPLEMENTED extends NodeError {
   constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
-      name = (name as symbol).description!;
+      name = name.description as string;
     }
     super(
       'ERR_OPTION_NOT_IMPLEMENTED',
@@ -636,7 +634,7 @@ export class ERR_OPTION_NOT_IMPLEMENTED extends NodeError {
 }
 
 export class ERR_SOCKET_BAD_PORT extends NodeError {
-  constructor(name: string, port: any, allowZero: boolean) {
+  constructor(name: string, port: unknown, allowZero: boolean) {
     const operator = allowZero ? '>=' : '>';
     super(
       'ERR_SOCKET_BAD_PORT',
@@ -654,7 +652,7 @@ export class EPIPE extends NodeError {
 export class ERR_SOCKET_CLOSED_BEFORE_CONNECTION extends NodeError {
   constructor() {
     super(
-      'ERR_SOCKET_CLOSED_BEFORE_CONNETION',
+      'ERR_SOCKET_CLOSED_BEFORE_CONNECTION',
       'Socket closed before connection established'
     );
   }
@@ -762,19 +760,226 @@ export class ConnResetException extends NodeError {
   }
 }
 
-export function aggregateTwoErrors(innerError: any, outerError: any) {
+export function aggregateTwoErrors(
+  innerError: unknown,
+  outerError: Error | null | undefined
+): AggregateError {
   if (innerError && outerError && innerError !== outerError) {
-    if (Array.isArray(outerError.errors)) {
+    if ('errors' in outerError && Array.isArray(outerError.errors)) {
       // If `outerError` is already an `AggregateError`.
       outerError.errors.push(innerError);
-      return outerError;
+      return outerError as AggregateError;
     }
     const err = new AggregateError(
       [outerError, innerError],
       outerError.message
     );
-    (err as any).code = outerError.code;
+    (err as unknown as NodeError).code = (outerError as NodeError).code;
     return err;
   }
-  return innerError || outerError;
+  return (innerError || outerError) as AggregateError;
+}
+
+export class ERR_INVALID_IP_ADDRESS extends NodeTypeError {
+  constructor(ipAddress: string) {
+    super('ERR_INVALID_IP_ADDRESS', `Invalid IP address: ${ipAddress}`);
+  }
+}
+
+export class ERR_INVALID_ADDRESS extends NodeTypeError {
+  constructor() {
+    super('ERR_INVALID_ADDRESS', 'Invalid socket address');
+  }
+}
+
+export class ERR_STREAM_WRAP extends NodeError {
+  constructor() {
+    super(
+      'ERR_STREAM_WRAP',
+      'Stream has StringDecoder set or is in objectMode'
+    );
+  }
+}
+
+export class ERR_INVALID_HTTP_TOKEN extends NodeTypeError {
+  constructor(label: string, name: string | undefined) {
+    super(
+      'ERR_INVALID_HTTP_TOKEN',
+      `${label} must be a valid HTTP token ["${name}"]`
+    );
+  }
+}
+
+export class ERR_HTTP_INVALID_HEADER_VALUE extends NodeTypeError {
+  constructor(value: string | undefined, header: string | undefined) {
+    super(
+      'ERR_HTTP_INVALID_HEADER_VALUE',
+      `Invalid value "${value}" for header "${header}"`
+    );
+  }
+}
+
+export class ERR_INVALID_CHAR extends NodeTypeError {
+  constructor(name: string, field?: string) {
+    let msg = `Invalid character in ${name}`;
+    if (field !== undefined) {
+      msg += ` ["${field}"]`;
+    }
+    super('ERR_INVALID_CHAR', msg);
+  }
+}
+
+export class NodeSyscallError extends NodeError {
+  syscall: string;
+  errno?: number;
+  constructor(code: string, message: string, syscall: string) {
+    super(code, message);
+    this.syscall = syscall;
+  }
+}
+
+export class ERR_ENOENT extends NodeSyscallError {
+  path: string;
+  constructor(path: string, options: { syscall: string }) {
+    super(
+      'ENOENT',
+      `no such file or directory, ${options.syscall} '${path}'`,
+      options.syscall
+    );
+    this.path = path;
+    this.errno = -2; // ENOENT
+  }
+}
+
+export class ERR_EBADF extends NodeSyscallError {
+  constructor(options: { syscall: string }) {
+    super('EBADF', 'Bad file descriptor', options.syscall);
+    this.errno = -9; // EBADF
+  }
+}
+
+export class ERR_EINVAL extends NodeSyscallError {
+  path?: string;
+  constructor(options: { syscall: string; path?: string }) {
+    const message = options.path
+      ? `invalid argument, ${options.syscall} '${options.path}'`
+      : 'invalid argument';
+    super('EINVAL', message, options.syscall);
+    if (options.path !== undefined) {
+      this.path = options.path;
+    }
+    this.errno = -22; // EINVAL
+  }
+}
+
+export class ERR_EEXIST extends NodeSyscallError {
+  path?: string;
+  constructor(options: { syscall: string; path?: string }) {
+    const message = options.path
+      ? `file already exists, ${options.syscall} '${options.path}'`
+      : 'file already exists';
+    super('EEXIST', message, options.syscall);
+    if (options.path !== undefined) {
+      this.path = options.path;
+    }
+    this.errno = -17; // EEXIST
+  }
+}
+
+export class ERR_EPERM extends NodeSyscallError {
+  path?: string;
+  constructor(options: { syscall: string; errno?: number; path?: string }) {
+    const message = options.path
+      ? `operation not permitted, ${options.syscall} '${options.path}'`
+      : 'operation not permitted';
+    super('EPERM', message, options.syscall);
+    if (options.path !== undefined) {
+      this.path = options.path;
+    }
+    this.errno = options.errno ?? 1; // EPERM
+  }
+}
+
+export class ERR_DIR_CLOSED extends NodeError {
+  constructor() {
+    super('ERR_DIR_CLOSED', 'Directory is closed');
+  }
+}
+
+export class ERR_HTTP_HEADERS_SENT extends NodeError {
+  constructor(action: string) {
+    super(
+      'ERR_HTTP_HEADERS_SENT',
+      `Cannot ${action} headers after they are sent to the client`
+    );
+  }
+}
+
+export class ERR_HTTP_CONTENT_LENGTH_MISMATCH extends NodeError {
+  constructor(actual: number, expected: number) {
+    super(
+      'ERR_HTTP_CONTENT_LENGTH_MISMATCH',
+      `Request body length does not match content-length header. Expected: ${expected}, Actual: ${actual}`
+    );
+  }
+}
+
+export class ERR_HTTP_BODY_NOT_ALLOWED extends NodeError {
+  constructor() {
+    super(
+      'ERR_HTTP_BODY_NOT_ALLOWED',
+      'Request with GET/HEAD method cannot have body'
+    );
+  }
+}
+
+export class ERR_INVALID_PROTOCOL extends NodeTypeError {
+  constructor(actual: string, expected: string) {
+    super(
+      'ERR_INVALID_PROTOCOL',
+      `Protocol "${actual}" not supported. Expected "${expected}"`
+    );
+  }
+}
+
+export class ERR_UNESCAPED_CHARACTERS extends NodeTypeError {
+  constructor(field: string) {
+    super('ERR_UNESCAPED_CHARACTERS', `${field} contains unescaped characters`);
+  }
+}
+
+export class ERR_SYSTEM_ERROR extends NodeError {
+  constructor(message: string) {
+    super('ERR_SYSTEM_ERROR', message);
+  }
+}
+
+export class ERR_HTTP_INVALID_STATUS_CODE extends NodeRangeError {
+  constructor(statusCode: string | number) {
+    super('ERR_HTTP_INVALID_STATUS_CODE', `Invalid status code: ${statusCode}`);
+  }
+}
+
+export class ERR_SERVER_ALREADY_LISTEN extends NodeError {
+  constructor() {
+    super(
+      'ERR_SERVER_ALREADY_LISTEN',
+      'Listen method has been called more than once without closing.'
+    );
+  }
+}
+
+export class ERR_ILLEGAL_CONSTRUCTOR extends NodeTypeError {
+  constructor() {
+    super('ERR_ILLEGAL_CONSTRUCTOR', 'Illegal constructor');
+  }
+}
+
+export class ERR_PERFORMANCE_INVALID_TIMESTAMP extends NodeTypeError {
+  constructor(value: unknown) {
+    super(
+      'ERR_PERFORMANCE_INVALID_TIMESTAMP',
+      `${value} is not a valid timestamp`
+    );
+  }
 }

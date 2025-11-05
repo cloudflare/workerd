@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Corry <erikcorry@chromium.org>
+Date: Mon, 3 Mar 2025 22:30:37 +0100
+Subject: Modify where to look for fast_float and simdutf.
+
+Similar to fp16, these dependencies now needs to be downloaded by bazel.
+
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index b5e7e85d7188a2c6d9c0d558c0b2bf211e6f8d86..ac3d0f776840f18c33a5d47dafeb1436ea46cf2a 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -4496,17 +4496,19 @@ cc_library(
+     ],
+ )
+ 
+-cc_library(
+-  name = "simdutf",
+-  srcs = ["third_party/simdutf/simdutf.cpp"],
+-  hdrs = ["third_party/simdutf/simdutf.h"],
+-  copts = select({
+-        "@v8//bazel/config:is_clang": ["-std=c++20"],
+-        "@v8//bazel/config:is_gcc": ["-std=gnu++2a"],
+-        "@v8//bazel/config:is_windows": ["/std:c++20"],
+-        "//conditions:default": [],
+-    }),
+-)
++# The simdutf library is commented out to avoid conflicts with
++# the version we use in workers
++# cc_library(
++#   name = "simdutf",
++#   srcs = ["third_party/simdutf/simdutf.cpp"],
++#   hdrs = ["third_party/simdutf/simdutf.h"],
++#   copts = select({
++#         "@v8//bazel/config:is_clang": ["-std=c++20"],
++#         "@v8//bazel/config:is_gcc": ["-std=gnu++2a"],
++#         "@v8//bazel/config:is_windows": ["/std:c++20"],
++#         "//conditions:default": [],
++#     }),
++# )
+ 
+ v8_library(
+     name = "v8_libshared",
+@@ -4537,15 +4539,15 @@ v8_library(
+     ],
+     deps = [
+         ":lib_dragonbox",
+-        "//third_party/fast_float/src:fast_float",
+         ":lib_fp16",
+-        ":simdutf",
+         ":v8_libbase",
+         "@abseil-cpp//absl/container:btree",
+         "@abseil-cpp//absl/container:flat_hash_map",
+         "@abseil-cpp//absl/container:flat_hash_set",
+         "@abseil-cpp//absl/functional:overload",
+         "@highway//:hwy",
++        "@fast_float",
++        "@simdutf",
+     ],
+ )
+ 
+diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
+index 146e3f2854159cef6daa5820d25373cef07031f4..5b22cc10cdc23d3f524d63293ec20bed20874722 100644
+--- a/src/builtins/builtins-typed-array.cc
++++ b/src/builtins/builtins-typed-array.cc
+@@ -2,6 +2,7 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include "simdutf.h"
+ #include "src/base/logging.h"
+ #include "src/base/macros.h"
+ #include "src/builtins/builtins-utils-inl.h"
+@@ -14,7 +15,6 @@
+ #include "src/objects/objects-inl.h"
+ #include "src/objects/option-utils.h"
+ #include "src/objects/simd.h"
+-#include "third_party/simdutf/simdutf.h"
+ 
+ namespace v8::internal {
+ 
+diff --git a/src/objects/string-inl.h b/src/objects/string-inl.h
+index 3985369bbc065f1f203e816ebc6366f7d8f123ca..f54d769d1430842bb7bf1bc247d2514234ddb3a4 100644
+--- a/src/objects/string-inl.h
++++ b/src/objects/string-inl.h
+@@ -12,6 +12,8 @@
+ #include <type_traits>
+ 
+ #include "absl/functional/overload.h"
++#include "simdutf.h"
++#include "src/base/template-utils.h"
+ #include "src/common/assert-scope.h"
+ #include "src/common/globals.h"
+ #include "src/execution/isolate-utils.h"
+@@ -38,7 +40,6 @@
+ #include "src/torque/runtime-macro-shims.h"
+ #include "src/torque/runtime-support.h"
+ #include "src/utils/utils.h"
+-#include "third_party/simdutf/simdutf.h"
+ 
+ // Has to be the last include (doesn't have include guards):
+ #include "src/objects/object-macros.h"
+diff --git a/src/objects/string.h b/src/objects/string.h
+index 194e238a7677a5dd9439adb77993bb17544fb7ba..336d71d315881bc8602cdf4259c22e2f837ffcc4 100644
+--- a/src/objects/string.h
++++ b/src/objects/string.h
+@@ -8,6 +8,7 @@
+ #include <memory>
+ #include <optional>
+ 
++#include "simdutf.h"
+ #include "src/base/bits.h"
+ #include "src/base/export-template.h"
+ #include "src/base/small-vector.h"
+@@ -21,7 +22,6 @@
+ #include "src/objects/tagged.h"
+ #include "src/sandbox/external-pointer.h"
+ #include "src/strings/unicode-decoder.h"
+-#include "third_party/simdutf/simdutf.h"
+ 
+ // Has to be the last include (doesn't have include guards):
+ #include "src/objects/object-macros.h"
+diff --git a/src/strings/unicode-inl.h b/src/strings/unicode-inl.h
+index b210e18ebec6a6325233b8d4753ec5856250dd5c..f45cee3d7c0203ce710699668e3b280bb4f0c750 100644
+--- a/src/strings/unicode-inl.h
++++ b/src/strings/unicode-inl.h
+@@ -8,9 +8,9 @@
+ #include "src/strings/unicode.h"
+ // Include the non-inl header before the rest of the headers.
+ 
++#include "simdutf.h"
+ #include "src/base/logging.h"
+ #include "src/utils/utils.h"
+-#include "third_party/simdutf/simdutf.h"
+ 
+ namespace unibrow {
+ 
+diff --git a/src/strings/unicode.cc b/src/strings/unicode.cc
+index 3f318556787f2a5b6955191eb884392f7f3e385b..75b86513c6eb615289b24071f8691391fa0a10d3 100644
+--- a/src/strings/unicode.cc
++++ b/src/strings/unicode.cc
+@@ -21,7 +21,7 @@
+ #include "unicode/uchar.h"
+ #endif
+ 
+-#include "third_party/simdutf/simdutf.h"
++#include "simdutf.h"
+ 
+ namespace unibrow {
+ 

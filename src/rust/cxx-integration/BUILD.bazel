@@ -1,4 +1,4 @@
-load("//:build/wd_rust_crate.bzl", "rust_cxx_include", "wd_rust_crate")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "cxx-integration",
@@ -11,10 +11,4 @@ wd_rust_crate(
         "@crates_vendor//:tokio",
         "@crates_vendor//:tracing",
     ],
-)
-
-rust_cxx_include(
-    name = "cxx-include",
-    include_prefix = "rust",
-    visibility = ["//visibility:public"],
 )

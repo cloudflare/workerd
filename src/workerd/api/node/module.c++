@@ -4,6 +4,7 @@
 #include "module.h"
 
 #include <workerd/io/features.h>
+#include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api::node {
@@ -20,6 +21,22 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
   auto parsed = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path.asPtr(), "file:///"_kj), TypeError,
       "The argument must be a file URL object, "
       "a file URL string, or an absolute path string.");
+
+  if (FeatureFlags::get(js).getNewModuleRegistry()) {
+    return jsg::JsValue(js.wrapReturningFunction(js.v8Context(),
+        [referrer = parsed.clone()](jsg::Lock& js,
+            const v8::FunctionCallbackInfo<v8::Value>& args) -> v8::Local<v8::Value> {
+      auto specifier = kj::str(args[0]);
+      if (jsg::isNodeJsCompatEnabled(js)) {
+        KJ_IF_SOME(nodeSpec, jsg::checkNodeSpecifier(specifier)) {
+          specifier = kj::mv(nodeSpec);
+        }
+      }
+      return jsg::modules::ModuleRegistry::resolve(js, specifier, "default"_kj,
+          jsg::modules::ResolveContext::Type::BUNDLE, jsg::modules::ResolveContext::Source::REQUIRE,
+          referrer);
+    }));
+  }
 
   // We do not currently handle specifiers as URLs, so let's treat any
   // input that has query string params or hash fragments as errors.

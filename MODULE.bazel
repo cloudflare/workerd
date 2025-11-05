@@ -1,0 +1,78 @@
+"Bazel dependencies, see https://registry.bazel.build"
+
+module(name = "workerd")
+
+bazel_dep(name = "aspect_bazel_lib", version = "2.21.2")
+bazel_dep(name = "aspect_rules_lint", version = "1.10.2")
+bazel_dep(name = "bazel_features", version = "1.37.0")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+
+# abseil is used by protobuf and tcmalloc.
+bazel_dep(name = "abseil-cpp", version = "20250814.0")
+
+# Not pulling in platforms via bzlmod causes issues with the Windows clang-cl toolchain
+bazel_dep(name = "platforms", version = "1.0.0")
+
+# While the build should succeed with the default toolchain configuration from rules_cc,
+# apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
+# needs to be pulled in before rules_cc for this toolchain to actually be used.
+bazel_dep(name = "apple_support", version = "1.23.1")
+bazel_dep(name = "rules_cc", version = "0.2.8")
+bazel_dep(name = "zlib", version = "1.3.1.bcr.6")
+git_override(
+    module_name = "zlib",
+    build_file = "//:build/BUILD.zlib",
+    # This should match the version specified in V8 DEPS, but in practice it is generally acceptable
+    # for it to be behind – zlib is very stable and its API has not changed in a long time, most
+    # changes to the Chromium fork affect ancillary tools and not the zlib library itself.
+    commit = "85f05b0835f934e52772efc308baa80cdd491838",
+    patch_args = ["-p1"],
+    patches = ["//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"],
+    remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
+)
+
+# clang-tidy
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "clang_tidy_macos_arm64",
+    executable = True,
+    integrity = "sha256-vzU7J99wf6a/DMsLJ7/q5f3JckU0i3kbNAtck3vO5oA=",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-darwin-arm64-clang-tidy",
+)
+
+http_file(
+    name = "clang_tidy_linux_amd64",
+    executable = True,
+    integrity = "sha256-6B+qIjJhCXJpRPp9nSQxnchEzuHH7UL5mWNrcGU/3z8=",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-linux-amd64-clang-tidy",
+)
+
+http_file(
+    name = "clang_tidy_linux_arm64",
+    executable = True,
+    integrity = "sha256-o4grMwBpnxMv+291b4ZbNHvmgtzUhjJL6KlGENuq/5E=",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-linux-arm64-clang-tidy",
+)
+
+http_file(
+    name = "clang_tidy_windows_amd64",
+    executable = True,
+    integrity = "sha256-9KJLz6bHbwpj5yAkjJzUQV0oL+ZrFsI2Wo5Rpjg69vc=",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-windows-amd64-clang-tidy.exe",
+)
+
+# BoringSSL may subtly break backwards compatibility and behave differently than the latest FIPS
+# version, often by rejecting key values that it considers invalid/unsafe even though they are still
+# accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
+# downstream build.
+bazel_dep(name = "boringssl", version = "0.20251002.0", repo_name = "ssl")
+
+include("//build/deps:deps.MODULE.bazel")
+
+include("//build/deps:nodejs.MODULE.bazel")
+
+include("//build/deps:python.MODULE.bazel")
+
+include("//build/deps:v8.MODULE.bazel")

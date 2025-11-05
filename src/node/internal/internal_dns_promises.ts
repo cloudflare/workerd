@@ -1,3 +1,15 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+// Copyright Joyent and Node contributors. All rights reserved. MIT license.
+
+import type dns from 'node:dns/promises';
+import type {
+  LookupAddress,
+  LookupAllOptions,
+  LookupOneOptions,
+  LookupOptions,
+} from 'node:dns';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import {
   reverse,
@@ -20,16 +32,15 @@ import {
   lookupService,
   resolve,
   resolveAny,
-  type LookupOptions,
 } from 'node-internal:internal_dns';
-import {
+import type {
   CAA,
   MX,
   NAPTR,
   SOA,
   SRV,
   TTLResponse,
-} from 'node:internal/internal_dns_client';
+} from 'node-internal:internal_dns_client';
 
 export * from 'node-internal:internal_dns_constants';
 export {
@@ -54,95 +65,99 @@ export {
   resolveAny,
 } from 'node-internal:internal_dns';
 
-export class Resolver {
-  // eslint-disable-next-line @typescript-eslint/require-await
-  public async cancel(): Promise<void> {
+export class Resolver implements dns.Resolver {
+  cancel(): void {
     // TODO(soon): Implement this.
     throw new Error('Not implemented');
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  public async setLocalAddress(): Promise<void> {
+  setLocalAddress(): void {
     // Does not apply to workerd implementation
     throw new Error('Not implemented');
   }
 
-  public getServers(): Promise<string[]> {
+  getServers(): string[] {
     return getServers();
   }
 
-  public resolve(name: string, rrtype: string): ReturnType<typeof resolve> {
+  // @ts-expect-error TS2769 No matching overload.
+  resolve(name: string, rrtype: string): ReturnType<typeof resolve> {
     return resolve(name, rrtype);
   }
 
-  public resolve4(
+  // @ts-expect-error TS2769 No matching overload.
+  resolve4(
     input: string,
     options?: { ttl?: boolean }
   ): Promise<(string | TTLResponse)[]> {
     return resolve4(input, options);
   }
 
-  public resolve6(
+  // @ts-expect-error TS2769 No matching overload.
+  resolve6(
     input: string,
     options?: { ttl?: boolean }
   ): Promise<(string | TTLResponse)[]> {
     return resolve6(input, options);
   }
 
-  public resolveAny(): Promise<void> {
+  // @ts-expect-error TS2769 No matching overload.
+  resolveAny(): Promise<void> {
     return resolveAny();
   }
 
-  public resolveCaa(name: string): Promise<CAA[]> {
+  resolveCaa(name: string): Promise<CAA[]> {
     return resolveCaa(name);
   }
 
-  public resolveCname(name: string): Promise<string[]> {
+  resolveCname(name: string): Promise<string[]> {
     return resolveCname(name);
   }
 
-  public resolveMx(name: string): Promise<MX[]> {
+  resolveMx(name: string): Promise<MX[]> {
     return resolveMx(name);
   }
 
-  public resolveNaptr(name: string): Promise<NAPTR[]> {
+  resolveNaptr(name: string): Promise<NAPTR[]> {
     return resolveNaptr(name);
   }
 
-  public resolveNs(name: string): Promise<string[]> {
+  resolveNs(name: string): Promise<string[]> {
     return resolveNs(name);
   }
 
-  public esolvePtr(name: string): Promise<string[]> {
+  esolvePtr(name: string): Promise<string[]> {
     return resolvePtr(name);
   }
 
-  public resolveSoa(name: string): Promise<SOA> {
+  resolveSoa(name: string): Promise<SOA> {
     return resolveSoa(name);
   }
 
-  public resolveSrv(name: string): Promise<SRV[]> {
+  resolveSrv(name: string): Promise<SRV[]> {
     return resolveSrv(name);
   }
 
-  public resolveTxt(name: string): Promise<string[][]> {
+  resolveTxt(name: string): Promise<string[][]> {
     return resolveTxt(name);
   }
 
-  public reverse(name: string): Promise<string[]> {
+  reverse(name: string): Promise<string[]> {
     return reverse(name);
   }
 
-  public setServers(): Promise<void> {
-    return setServers();
+  setServers(): void {
+    setServers();
   }
 }
 
 export function lookup(
   hostname: string,
-  options?: LookupOptions
-): Promise<unknown> {
-  const { promise, resolve, reject } = Promise.withResolvers();
+  options?: LookupOptions | LookupOneOptions | LookupAllOptions
+): Promise<LookupAddress | LookupAddress[]> {
+  const { promise, resolve, reject } = Promise.withResolvers<
+    LookupAddress | LookupAddress[]
+  >();
   internalLookup(hostname, options, (error, address, family) => {
     if (error) {
       reject(error);
@@ -152,7 +167,7 @@ export function lookup(
       resolve({
         address,
         family,
-      });
+      } as LookupAddress);
     }
   });
   return promise;

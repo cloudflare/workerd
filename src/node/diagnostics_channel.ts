@@ -23,6 +23,9 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+// unsubscribe and subscribe is deprecated on types/node.
+/* eslint-disable @typescript-eslint/no-deprecated */
+
 import { default as diagnosticsChannel } from 'node-internal:diagnostics_channel';
 
 import type {
@@ -87,29 +90,29 @@ export class TracingChannel {
   private [kAsyncEnd]?: ChannelType;
   private [kError]?: ChannelType;
 
-  public constructor() {
+  constructor() {
     throw new Error(
       'Use diagnostic_channel.tracingChannels() to create TracingChannel'
     );
   }
 
-  public get start(): ChannelType | undefined {
+  get start(): ChannelType | undefined {
     return this[kStart];
   }
-  public get end(): ChannelType | undefined {
+  get end(): ChannelType | undefined {
     return this[kEnd];
   }
-  public get asyncStart(): ChannelType | undefined {
+  get asyncStart(): ChannelType | undefined {
     return this[kAsyncStart];
   }
-  public get asyncEnd(): ChannelType | undefined {
+  get asyncEnd(): ChannelType | undefined {
     return this[kAsyncEnd];
   }
-  public get error(): ChannelType | undefined {
+  get error(): ChannelType | undefined {
     return this[kError];
   }
 
-  public subscribe(subscriptions: TracingChannelSubscriptions): void {
+  subscribe(subscriptions: TracingChannelSubscriptions): void {
     if (subscriptions.start !== undefined)
       this[kStart]?.subscribe(subscriptions.start);
     if (subscriptions.end !== undefined)
@@ -122,7 +125,7 @@ export class TracingChannel {
       this[kError]?.subscribe(subscriptions.error);
   }
 
-  public unsubscribe(subscriptions: TracingChannelSubscriptions): void {
+  unsubscribe(subscriptions: TracingChannelSubscriptions): void {
     if (subscriptions.start !== undefined)
       this[kStart]?.unsubscribe(subscriptions.start);
     if (subscriptions.end !== undefined)
@@ -135,7 +138,7 @@ export class TracingChannel {
       this[kError]?.unsubscribe(subscriptions.error);
   }
 
-  public traceSync(
+  traceSync(
     fn: (...args: unknown[]) => unknown,
     context: Record<string, unknown> = {},
     thisArg: unknown = globalThis,
@@ -162,7 +165,7 @@ export class TracingChannel {
     );
   }
 
-  public tracePromise(
+  tracePromise(
     fn: (...args: unknown[]) => unknown,
     context: Record<string, unknown> = {},
     thisArg: unknown = globalThis,
@@ -207,7 +210,7 @@ export class TracingChannel {
     );
   }
 
-  public traceCallback(
+  traceCallback(
     fn: (...args: unknown[]) => unknown,
     position = -1,
     context: Record<string, unknown> = {},
@@ -284,19 +287,18 @@ export function tracingChannel(
         this[kAsyncEnd] = channel(`tracing:${nameOrChannels}:asyncEnd`);
         this[kError] = channel(`tracing:${nameOrChannels}:error`);
       } else {
-        validateObject(nameOrChannels, 'channels', {});
-        const channels = nameOrChannels as TracingChannels;
-        this[kStart] = validateChannel(channels.start, 'channels.start');
-        this[kEnd] = validateChannel(channels.end, 'channels.end');
+        validateObject(nameOrChannels, 'channels');
+        this[kStart] = validateChannel(nameOrChannels.start, 'channels.start');
+        this[kEnd] = validateChannel(nameOrChannels.end, 'channels.end');
         this[kAsyncStart] = validateChannel(
-          channels.asyncStart,
+          nameOrChannels.asyncStart,
           'channels.asyncStart'
         );
         this[kAsyncEnd] = validateChannel(
-          channels.asyncEnd,
+          nameOrChannels.asyncEnd,
           'channels.asyncEnd'
         );
-        this[kError] = validateChannel(channels.error, 'channels.error');
+        this[kError] = validateChannel(nameOrChannels.error, 'channels.error');
       }
     },
     [],

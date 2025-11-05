@@ -35,7 +35,7 @@ export class DurableObjectExample {
   }
 
   async fetch() {
-    const time = Date.now() + 100;
+    const time = Date.now() + 50;
     await this.state.storage.setAlarm(time);
     assert.equal(await this.state.storage.getAlarm(), time);
 
@@ -57,7 +57,7 @@ export class DurableObjectExample {
   }
 }
 
-export default {
+export const test = {
   async test(ctrl, env, ctx) {
     let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);

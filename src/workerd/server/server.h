@@ -9,7 +9,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/server/alarm-scheduler.h>
 #include <workerd/server/workerd.capnp.h>
-#include <workerd/util/sqlite.h>
 
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
@@ -39,7 +38,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::Timer& timer,
       kj::Network& network,
       kj::EntropySource& entropySource,
-      Worker::ConsoleMode consoleMode,
+      Worker::LoggingOptions loggingOptions,
       kj::Function<void(kj::String)> reportConfigError);
   ~Server() noexcept;
 
@@ -79,8 +78,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
   void setPythonCreateBaselineSnapshot() {
     pythonConfig.createBaselineSnapshot = true;
   }
-  void setPythonLoadSnapshot() {
-    pythonConfig.loadSnapshotFromDisk = true;
+  void setPythonLoadSnapshot(kj::String snapshot) {
+    pythonConfig.loadSnapshotFromDisk = kj::mv(snapshot);
   }
 
   // Runs the server using the given config.
@@ -102,6 +101,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
     kj::String uniqueKey;
     bool isEvictable;
     bool enableSql;
+    kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
   };
   struct Ephemeral {
     bool isEvictable;
@@ -126,11 +126,11 @@ class Server final: private kj::TaskSet::ErrorHandler {
     .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
     .createBaselineSnapshot = false,
-    .loadSnapshotFromDisk = false};
+    .loadSnapshotFromDisk = kj::none};
 
   bool experimental = false;
 
-  Worker::ConsoleMode consoleMode;
+  Worker::LoggingOptions loggingOptions;
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
@@ -154,12 +154,19 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
 
+  class ActorClass;
+  kj::Own<ActorClass> invalidConfigActorClassSingleton;
+
   // Information about all known actor namespaces. Maps serviceName -> className -> config.
   // This needs to be populated in advance of constructing any services, in order to be able to
   // correctly construct dependent services.
   kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
 
   kj::HashMap<kj::String, kj::Own<Service>> services;
+
+  class WorkerLoaderNamespace;
+  kj::HashMap<kj::String, kj::Rc<WorkerLoaderNamespace>> workerLoaderNamespaces;
+  kj::Vector<kj::Rc<WorkerLoaderNamespace>> anonymousWorkerLoaderNamespaces;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
@@ -213,20 +220,25 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Own<Service> makeDiskDirectoryService(kj::StringPtr name,
       config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Own<Service> makeWorker(kj::StringPtr name,
+  kj::Promise<kj::Own<Service>> makeWorker(kj::StringPtr name,
       config::Worker::Reader conf,
       capnp::List<config::Extension>::Reader extensions);
-  kj::Own<Service> makeService(config::Service::Reader conf,
+  kj::Promise<kj::Own<Service>> makeService(config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       capnp::List<config::Extension>::Reader extensions);
 
   // Aborts all actors in this server except those in namespaces marked with `preventEviction`.
-  void abortAllActors();
+  void abortAllActors(kj::Maybe<const kj::Exception&> reason);
 
   // Can only be called in the link stage.
   //
   // May return a new object or may return a fake-own around a long-lived object.
   kj::Own<Service> lookupService(
+      config::ServiceDesignator::Reader designator, kj::String errorContext);
+
+  // Like lookupService() but looks up an actor class (especially for use as a facet class).
+  // Returns none on a config error.
+  kj::Own<ActorClass> lookupActorClass(
       config::ServiceDesignator::Reader designator, kj::String errorContext);
 
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
@@ -235,6 +247,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::Own<HttpRewriter> rewriter);
 
   class InvalidConfigService;
+  class InvalidConfigActorClass;
   class ExternalHttpService;
   class ExternalTcpService;
   class NetworkService;
@@ -243,7 +256,16 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class WorkerEntrypointService;
   class HttpListener;
 
-  void startServices(jsg::V8System& v8System,
+  struct ErrorReporter;
+  struct ConfigErrorReporter;
+  struct DynamicErrorReporter;
+  struct WorkerDef;
+  kj::Promise<kj::Own<WorkerService>> makeWorkerImpl(kj::StringPtr name,
+      WorkerDef def,
+      capnp::List<config::Extension>::Reader extensions,
+      ErrorReporter& errorReporter);
+
+  kj::Promise<void> startServices(jsg::V8System& v8System,
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen);
@@ -255,10 +277,14 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen,
       bool forTest = false);
-};
 
-// An ActorStorage implementation which will always respond to reads as if the state is empty,
-// and will fail any writes.
-kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
+  void unlinkWorkerLoaders();
+
+  kj::Promise<void> preloadPython(
+      kj::StringPtr workerName, const WorkerDef& workerDef, ErrorReporter& errorReporter);
+
+  friend struct FutureSubrequestChannel;
+  friend struct FutureActorClassChannel;
+};
 
 }  // namespace workerd::server

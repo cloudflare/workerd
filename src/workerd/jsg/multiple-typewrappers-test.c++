@@ -19,8 +19,8 @@ struct TestApi1: public jsg::Object {
   int test2(jsg::Lock& js) {
     return 2;
   }
-  static jsg::Ref<TestApi1> constructor() {
-    return jsg::alloc<TestApi1>();
+  static jsg::Ref<TestApi1> constructor(jsg::Lock& js) {
+    return js.alloc<TestApi1>();
   }
 
   JSG_RESOURCE_TYPE(TestApi1, workerd::CompatibilityFlags::Reader flags) {
@@ -41,8 +41,8 @@ struct TestApi2: public jsg::Object {
   int test2(jsg::Lock& js) {
     return 2;
   }
-  static jsg::Ref<TestApi2> constructor() {
-    return jsg::alloc<TestApi2>();
+  static jsg::Ref<TestApi2> constructor(jsg::Lock& js) {
+    return js.alloc<TestApi2>();
   }
 
   JSG_RESOURCE_TYPE(TestApi2, workerd::CompatibilityFlags::Reader flags) {
@@ -140,7 +140,8 @@ KJ_TEST("Create a context with a configuration then create a default context wit
   capnp::MallocMessageBuilder flagsArena;
   auto flags = flagsArena.initRoot<::workerd::CompatibilityFlags>();
   auto flagsReader = flags.asReader();
-  TestIsolate isolate(v8System, Configuration(flagsReader), kj::heap<IsolateObserver>(), {}, false);
+  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), Configuration(flagsReader),
+      kj::heap<IsolateObserver>(), {}, false);
   isolate.runInLockScope([&](TestIsolate::Lock& lock) {
     jsg::JsContext<TestContext> context =
         lock.newContextWithConfiguration<TestContext>(Configuration(flagsReader), {});

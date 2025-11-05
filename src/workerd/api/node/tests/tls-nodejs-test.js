@@ -22,6 +22,7 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
+import { connect } from 'cloudflare:sockets';
 import tls from 'node:tls';
 import {
   strictEqual,
@@ -35,15 +36,26 @@ import { once } from 'node:events';
 import { inspect } from 'node:util';
 import net from 'node:net';
 import { translatePeerCertificate } from '_tls_common';
+import { mock } from 'node:test';
+import stream from 'node:stream';
+
+export const checkPortsSetCorrectly = {
+  test(ctrl, env, ctx) {
+    ok(env.ECHO_SERVER_PORT);
+    ok(env.HELLO_SERVER_PORT);
+    ok(env.JS_STREAM_SERVER_PORT);
+    ok(env.STREAM_WRAP_SERVER_PORT);
+  },
+};
 
 // Tests are taken from
 // https://github.com/nodejs/node/blob/304743655d5236c2edc39094336ee2667600b684/test/parallel/test-tls-connect-abort-controller.js
 export const tlsConnectAbortController = {
-  async test() {
+  async test(ctrl, env, ctx) {
     // Our tests differ from Node.js
     // We don't check for abortSignal listener count because it's not supported.
     const connectOptions = (signal) => ({
-      port: 8888,
+      port: env.ECHO_SERVER_PORT,
       host: 'localhost',
       signal,
     });
@@ -118,7 +130,7 @@ export const tlsConnectAbortController = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/304743655d5236c2edc39094336ee2667600b684/test/parallel/test-tls-connect-allow-half-open-option.js
 export const connectAllowHalfOpenOption = {
-  async test() {
+  async test(ctrl, env, ctx) {
     {
       const socket = tls.connect({ port: 42, lookup() {} });
       strictEqual(socket.allowHalfOpen, false);
@@ -137,7 +149,7 @@ export const connectAllowHalfOpenOption = {
       const { promise, resolve } = Promise.withResolvers();
       const socket = tls.connect(
         {
-          port: 8888,
+          port: env.ECHO_SERVER_PORT,
           allowHalfOpen: true,
         },
         () => {
@@ -167,10 +179,10 @@ export const connectAllowHalfOpenOption = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/755e4603fd1679de72d250514ea5096b272ae8d6/test/parallel/test-tls-connect-simple.js
 export const tlsConnectSimple = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const promise1 = Promise.withResolvers();
     const promise2 = Promise.withResolvers();
-    const options = { port: 8888 };
+    const options = { port: env.ECHO_SERVER_PORT };
     const client1 = tls.connect(options, function () {
       client1.end();
       promise1.resolve();
@@ -187,9 +199,9 @@ export const tlsConnectSimple = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/755e4603fd1679de72d250514ea5096b272ae8d6/test/parallel/test-tls-connect-timeout-option.js
 export const tlsConnectTimeoutOption = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const socket = tls.connect({
-      port: 8888,
+      port: env.ECHO_SERVER_PORT,
       lookup: () => {},
       timeout: 1000,
     });
@@ -201,11 +213,11 @@ export const tlsConnectTimeoutOption = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/755e4603fd1679de72d250514ea5096b272ae8d6/test/parallel/test-tls-connect-no-host.js
 export const tlsConnectNoHost = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
     const socket = tls.connect(
       {
-        port: 8888,
+        port: env.ECHO_SERVER_PORT,
         // No host set here. 'localhost' is the default,
         // but tls.checkServerIdentity() breaks before the fix with:
         // Error: Hostname/IP doesn't match certificate's altnames:
@@ -223,65 +235,66 @@ export const tlsConnectNoHost = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/755e4603fd1679de72d250514ea5096b272ae8d6/test/parallel/test-tls-connect-given-socket.js
 export const tlsConnectGivenSocket = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const promises = [];
     let waiting = 2;
-    function establish(socket, shouldNotCallCallback = false) {
-      const { promise, resolve } = Promise.withResolvers();
+    function establish(socket, calls) {
+      const { promise, resolve, reject } = Promise.withResolvers();
       promises.push(promise);
-      const client = tls.connect(
-        {
-          socket: socket,
-        },
-        () => {
-          if (shouldNotCallCallback) {
-            reject(new Error('should not have called tls.connect() callback'));
-            return;
-          }
-          let data = '';
-          client
-            .on('data', (chunk) => {
-              data += chunk.toString();
-            })
-            .on('end', () => {
-              strictEqual(data, 'Hello');
-              if (--waiting === 0) {
-                resolve();
-              }
-            });
+      const onConnectFn = mock.fn(() => {
+        if (calls === 0) {
+          reject(new Error('Should not have called onConnect callback'));
+          return;
         }
-      );
+        let data = '';
+        let dataFn = mock.fn((chunk) => {
+          data += chunk.toString();
+        });
+        client.on('data', dataFn);
+        client.on('end', () => {
+          strictEqual(data, 'Hello');
+          if (--waiting === 0) {
+            ok(dataFn.mock.callCount());
+            resolve();
+          }
+        });
+      });
+      const client = tls.connect({ socket }, onConnectFn);
+      ok(client.readable);
+      ok(client.writable);
 
-      if (shouldNotCallCallback) {
-        queueMicrotask(() => resolve());
+      if (calls === 0) {
+        queueMicrotask(resolve);
       }
 
       return client;
     }
 
-    const port = 8887;
+    const port = env.HELLO_SERVER_PORT;
     // Immediate death socket
     const immediateDeath = net.connect(port);
-    establish(immediateDeath, true).destroy();
+    establish(immediateDeath, 0).destroy();
 
     // Outliving
-    const outlivingTCPPromise = Promise.withResolvers();
-    const outlivingTCP = net.connect(port, () => {
-      outlivingTLS.destroy();
-      next();
-      outlivingTCPPromise.resolve();
-    });
-    promises.push(outlivingTCPPromise.promise);
-    const outlivingTLS = establish(outlivingTCP, true);
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      promises.push(promise);
+      const outlivingTCP = net.connect(port, () => {
+        outlivingTLS.destroy();
+        next();
+        resolve();
+      });
+      const outlivingTLS = establish(outlivingTCP, 0);
+    }
 
     function next() {
       // Already connected socket
       const { promise, resolve } = Promise.withResolvers();
+      promises.push(promise);
       const connected = net.connect(port, () => {
         establish(connected);
         resolve();
       });
-      promises.push(promise);
 
       // Connecting socket
       const connecting = net.connect(port);
@@ -711,5 +724,315 @@ export const testTlsTranslatePeerCertificate = {
     deepStrictEqual(translatePeerCertificate({ infoAccess: null }), {
       infoAccess: null,
     });
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/b1402835a512f14fa9f8dd23d3e0cee8cfe888a2/test/parallel/test-tls-basic-validations.js
+export const testConvertALPNProtocols = {
+  async test() {
+    {
+      const buffer = Buffer.from('abcd');
+      const out = {};
+      tls.convertALPNProtocols(buffer, out);
+      out.ALPNProtocols.write('efgh');
+      ok(buffer.equals(Buffer.from('abcd')));
+      ok(out.ALPNProtocols.equals(Buffer.from('efgh')));
+    }
+
+    {
+      const protocols = [new String('a').repeat(500)];
+      const out = {};
+      throws(() => tls.convertALPNProtocols(protocols, out), {
+        code: 'ERR_OUT_OF_RANGE',
+        message:
+          'The byte length of the protocol at index 0 exceeds the ' +
+          'maximum length. It must be <= 255. Received 500',
+      });
+    }
+  },
+};
+
+export const testStartTlsBehaviorOnUpgrade = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const socket = connect(`localhost:${env.HELLO_SERVER_PORT}`, {
+      secureTransport: 'starttls',
+    });
+    strictEqual(socket.secureTransport, 'starttls');
+    strictEqual(socket.upgraded, false);
+    await socket.opened;
+    strictEqual(socket.upgraded, false);
+    socket.closed
+      .then(() => {
+        strictEqual(socket.secureTransport, 'starttls');
+        strictEqual(socket.upgraded, true);
+        resolve();
+      })
+      .catch(reject);
+    const secureSocket = socket.startTls();
+    // The newly created socket instance is not upgraded.
+    strictEqual(secureSocket.upgraded, false);
+    strictEqual(secureSocket.secureTransport, 'on');
+    await promise;
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-tls-destroy-whilst-write.js
+export const testTlsDestroyWhilstWrite = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const delay = new stream.Duplex({
+      read: function read() {},
+      write: function write(data, enc, cb) {
+        queueMicrotask(cb);
+      },
+    });
+
+    const secure = tls.connect({
+      socket: delay,
+    });
+    queueMicrotask(function () {
+      secure.destroy();
+    });
+    secure.on('close', resolve);
+    await promise;
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-tls-js-stream.js
+export const testTlsJsStream = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const raw = net.connect(env.JS_STREAM_SERVER_PORT);
+
+    let pending = false;
+    raw.on('readable', function () {
+      if (pending) socket._read();
+    });
+
+    raw.on('end', function () {
+      socket.push(null);
+    });
+
+    const socket = new stream.Duplex({
+      read: function read() {
+        pending = false;
+
+        const chunk = raw.read();
+        if (chunk) {
+          this.push(chunk);
+        } else {
+          pending = true;
+        }
+      },
+      write: function write(data, enc, cb) {
+        raw.write(data, enc, cb);
+      },
+    });
+
+    const onConnectFn = mock.fn(() => {
+      socket.resume();
+      socket.end('hello');
+    });
+    const conn = tls.connect({ socket }, onConnectFn);
+    conn.once('error', reject);
+    conn.once('close', resolve);
+
+    await promise;
+    strictEqual(onConnectFn.mock.callCount(), 1);
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/b1402835a512f14fa9f8dd23d3e0cee8cfe888a2/test/parallel/test-tls-junk-closes-server.js
+export const testTlsJunkClosesServer = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const c = net.createConnection(env.HELLO_SERVER_PORT);
+
+    c.on('data', function () {
+      // We must consume all data sent by the server. Otherwise the
+      // end event will not be sent and the test will hang.
+      // For example, when compiled with OpenSSL32 we see the
+      // following response '15 03 03 00 02 02 16' which
+      // decodes as a fatal (0x02) TLS error alert number 22 (0x16),
+      // which corresponds to TLS1_AD_RECORD_OVERFLOW which matches
+      // the error we see if NODE_DEBUG is turned on.
+      // Some earlier OpenSSL versions did not seem to send a response
+      // but the TLS spec seems to indicate there should be one
+      // https://datatracker.ietf.org/doc/html/rfc8446#page-85
+      // and error handling seems to have been re-written/improved
+      // in OpenSSL32. Consuming the data allows the test to pass
+      // either way.
+    });
+
+    const onConnectFn = mock.fn(() => {
+      c.write('blah\nblah\nblah\n');
+    });
+    c.on('connect', onConnectFn);
+    c.on('end', resolve);
+    await promise;
+    strictEqual(onConnectFn.mock.callCount(), 1);
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/91d8a524ada001103a2d1c6825ca17b8393c183f/test/parallel/test-tls-on-empty-socket.js
+export const testTlsOnEmptySocket = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const socket = new net.Socket();
+    let out = '';
+
+    const s = tls.connect({ socket }, function () {
+      s.on('error', reject);
+      s.on('data', function (chunk) {
+        out += chunk;
+      });
+      s.on('end', resolve);
+    });
+
+    const onConnectFn = mock.fn();
+    socket.connect(env.HELLO_SERVER_PORT, onConnectFn);
+
+    await promise;
+    strictEqual(out, 'Hello');
+    strictEqual(onConnectFn.mock.callCount(), 1);
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/91d8a524ada001103a2d1c6825ca17b8393c183f/test/parallel/test-tls-pause.js
+export const testTlsPause = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const bufSize = 1024 * 1024;
+    let sent = 0;
+    let received = 0;
+    let resumed = false;
+    const client = tls.connect(
+      {
+        port: env.ECHO_SERVER_PORT,
+      },
+      () => {
+        client.pause();
+        const send = (() => {
+          const ret = client.write(Buffer.allocUnsafe(bufSize));
+          if (ret !== false) {
+            sent += bufSize;
+            ok(sent < 100 * 1024 * 1024); // max 100MB
+            return process.nextTick(send);
+          }
+          sent += bufSize;
+          resumed = true;
+          client.resume();
+        })();
+      }
+    );
+    client.on('data', (data) => {
+      ok(resumed);
+      received += data.length;
+      if (received >= sent) {
+        client.end();
+        resolve();
+      }
+    });
+
+    await promise;
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/cb5f671a34da32e3c2d70d7f3e7f869cda6b806b/test/parallel/test-tls-socket-allow-half-open-option.js
+export const testTlsSocketAllowHalfOpenOption = {
+  async test() {
+    {
+      // The option is ignored when the `socket` argument is a `net.Socket`.
+      const socket = new tls.TLSSocket(new net.Socket(), {
+        allowHalfOpen: true,
+      });
+      strictEqual(socket.allowHalfOpen, false);
+    }
+
+    {
+      // The option is ignored when the `socket` argument is a generic
+      // `stream.Duplex`.
+      const duplex = new stream.Duplex({
+        allowHalfOpen: false,
+        read() {},
+      });
+      const socket = new tls.TLSSocket(duplex, { allowHalfOpen: true });
+      strictEqual(socket.allowHalfOpen, false);
+    }
+
+    {
+      const socket = new tls.TLSSocket();
+      strictEqual(socket.allowHalfOpen, false);
+    }
+
+    {
+      // The option is honored when the `socket` argument is not specified.
+      const socket = new tls.TLSSocket(undefined, { allowHalfOpen: true });
+      strictEqual(socket.allowHalfOpen, true);
+    }
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-tls-streamwrap-buffersize.js
+export const testTlsStreamwrapBuffersize = {
+  async test(ctrl, env) {
+    // This test ensures that `bufferSize` also works for those tlsSockets
+    // created from `socket` of `Duplex`, with which, TLSSocket will wrap
+    // sockets in `StreamWrap`.
+    const iter = 10;
+
+    function createDuplex() {
+      const [clientSide, serverSide] = stream.duplexPair();
+      const dp = Promise.withResolvers();
+
+      const socket = net.connect(env.STREAM_WRAP_SERVER_PORT, () => {
+        clientSide.pipe(socket);
+        socket.pipe(clientSide);
+        clientSide.on('close', () => socket.destroy());
+        socket.on('close', () => clientSide.destroy());
+
+        dp.resolve(serverSide);
+      });
+
+      return dp.promise;
+    }
+
+    const socket = await createDuplex();
+    const { promise, resolve } = Promise.withResolvers();
+    const onCloseFn = mock.fn(() => {
+      // TODO(soon): This should be undefined, not 0.
+      strictEqual(client.bufferSize, 0);
+      resolve();
+    });
+    const client = tls.connect({ socket }, () => {
+      strictEqual(client.bufferSize, 0);
+
+      for (let i = 1; i < iter; i++) {
+        client.write('a');
+        strictEqual(client.bufferSize, i);
+      }
+
+      client.end();
+    });
+
+    client.on('close', onCloseFn);
+
+    await promise;
+    strictEqual(onCloseFn.mock.callCount(), 1);
+  },
+};
+
+export const testEOLMethods = {
+  async test() {
+    strictEqual(typeof tls.createSecurePair, 'function');
   },
 };

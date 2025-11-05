@@ -14,6 +14,10 @@
 #include <cstdlib>
 #include <regex>
 
+#if __linux__
+#include <unistd.h>
+#endif
+
 namespace workerd::server {
 namespace {
 
@@ -202,6 +206,10 @@ class TestStream {
         {});
   }
 
+  kj::AsyncIoStream& getStream() {
+    return *stream;
+  }
+
  private:
   kj::WaitScope& ws;
   kj::Own<kj::AsyncIoStream> stream;
@@ -309,7 +317,9 @@ class TestStream {
 
 class TestServer final: private kj::Filesystem, private kj::EntropySource, private kj::Clock {
  public:
-  TestServer(kj::StringPtr configText, kj::SourceLocation loc = {})
+  TestServer(kj::StringPtr configText,
+      Worker::ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY,
+      kj::SourceLocation loc = {})
       : ws(loop),
         config(parseConfig(configText, loc)),
         root(kj::newInMemoryDirectory(*this)),
@@ -320,7 +330,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
             timer,
             mockNetwork,
             *this,
-            Worker::ConsoleMode::INSPECTOR_ONLY,
+            Worker::LoggingOptions(consoleMode),
             [this](kj::String error) {
               if (expectedErrors.startsWith(error) && expectedErrors[error.size()] == '\n') {
                 expectedErrors = expectedErrors.slice(error.size() + 1);
@@ -408,6 +418,10 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
       timer.advanceTo(KJ_ASSERT_NONNULL(timer.nextEvent()));
     }
     delayPromise.wait(ws);
+  }
+
+  kj::WaitScope& getWaitScope() {
+    return ws;
   }
 
   kj::EventLoop loop;
@@ -1130,6 +1144,185 @@ KJ_TEST("Server: override globalOutbound") {
   conn.recvHttp200("OK");
 }
 
+KJ_TEST("Server: connect() to default outbound") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["nodejs_compat"],
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `import { connect } from 'cloudflare:sockets';
+          `import assert from 'node:assert';
+          `
+          `export default {
+          `  async fetch(request, env) {
+          `    let sock = connect("subhost:123");
+          `
+          `    let writer = sock.writable.getWriter();
+          `    await writer.write(new TextEncoder().encode("hello"));
+          `    await writer.close();
+          `
+          `    let reader = sock.readable.getReader();
+          `    let chunk = await reader.read();
+          `    assert.strictEqual(chunk.done, false);
+          `    assert.strictEqual(new TextDecoder().decode(chunk.value), "goodbye");
+          `
+          `    await sock.close();
+          `    return new Response("OK");
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost:123");
+  subreq.recv("hello");
+  subreq.send("goodbye");
+
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          globalOutbound = "outbound-worker",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import assert from 'node:assert';
+                `
+                `export default {
+                `  async fetch(request, env) {
+                `    // TODO(bug): At present this throws synchronously, which seems like a bug in
+                `    //   the implementation of connect(): errors coming from the destination
+                `    //   service really ought to be async (in prod, they always will be), showing
+                `    //   up on the first read or write. At present, though, I'm not looking to
+                `    //   fix this bug.
+                `    assert.throws(() => connect("subhost:123"), {
+                `      name: "TypeError",
+                `      message: "Incoming CONNECT on a worker not supported",
+                `    });
+                `
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "outbound-worker",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("HTTP not expected");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: connect() with Worker as outbound, with connect_pass_though") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          globalOutbound = "outbound-worker",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import assert from 'node:assert';
+                `
+                `export default {
+                `  async fetch(request, env) {
+                `    let sock = connect("subhost:123");
+                `
+                `    let writer = sock.writable.getWriter();
+                `    await writer.write(new TextEncoder().encode("hello"));
+                `    await writer.close();
+                `
+                `    let reader = sock.readable.getReader();
+                `    let chunk = await reader.read();
+                `    assert.strictEqual(chunk.done, false);
+                `    assert.strictEqual(new TextDecoder().decode(chunk.value), "goodbye");
+                `
+                `    await sock.close();
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "outbound-worker",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["connect_pass_through"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("HTTP not expected");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost:123");
+  subreq.recv("hello");
+  subreq.send("goodbye");
+
+  conn.recvHttp200("OK");
+}
+
 KJ_TEST("Server: capability bindings") {
   TestServer test(R"((
     services = [
@@ -1796,6 +1989,14 @@ KJ_TEST("Server: Durable Objects (in memory)") {
                 `  constructor(state, env) {
                 `    this.storage = state.storage;
                 `    this.id = state.id;
+                `    if (this.id.constructor.name != "DurableObjectId") {
+                `      throw new Error("durable ID should be type DurableObjectId, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
+                `    if (this.id.name) {
+                `      throw new Error("ctx.id for Durable Object should not have a .name " +
+                `                      `property, got: ${this.id.name}`);
+                `    }
                 `  }
                 `  async fetch(request) {
                 `    let count = (await this.storage.get("foo")) || 0;
@@ -1841,6 +2042,121 @@ KJ_TEST("Server: Durable Objects (in memory)") {
       "/bar", "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
 }
 
+KJ_TEST("Server: Simultaneous requests to a DO that hasn't started don't cause split brain") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {DurableObject} from "cloudflare:workers"
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName(request.url)
+                `    let actor = env.ns.get(id)
+                `    let promise1 = actor.increment()
+                `    let promise2 = actor.increment()
+                `    let promise3 = actor.increment()
+                `    return new Response(`${await promise1} ${await promise2} ${await promise3}`)
+                `  }
+                `}
+                `export class Counter extends DurableObject {
+                `  counter = 0;
+                `  async increment() {
+                `    return this.counter++;
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "Counter")],
+          durableObjectNamespaces = [
+            ( className = "Counter",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "0 1 2");
+}
+
+KJ_TEST("Server: Broken DO stays broken until stub replaced") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {DurableObject} from "cloudflare:workers"
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName(request.url)
+                `    let actor = env.ns.get(id)
+                `    let i1 = await actor.increment()
+                `    try { await actor.abort() } catch {}
+                `    try {
+                `      let i2 = await actor.increment();
+                `      throw new Error(`expected error from broken stub, got ${i2}`);
+                `    } catch (err) {
+                `      if (!err.message.includes("test abort reason")) {
+                `        throw err
+                `      }
+                `    }
+                `    actor = env.ns.get(id)
+                `    let i3 = await actor.increment()
+                `    return new Response(`${i1} ${i3}`)
+                `  }
+                `}
+                `export class Counter extends DurableObject {
+                `  counter = 0;
+                `  async increment() {
+                `    return this.counter++;
+                `  }
+                `  async abort() {
+                `    this.ctx.abort(new Error("test abort reason"));
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "Counter")],
+          durableObjectNamespaces = [
+            ( className = "Counter",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "0 0");
+}
+
 KJ_TEST("Server: Durable Objects (on disk)") {
   kj::StringPtr config = R"((
     services = [
@@ -1861,6 +2177,10 @@ KJ_TEST("Server: Durable Objects (on disk)") {
                 `  constructor(state, env) {
                 `    this.storage = state.storage;
                 `    this.id = state.id;
+                `    if (this.id.constructor.name != "DurableObjectId") {
+                `      throw new Error("durable ID should be type DurableObjectId, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
                 `  }
                 `  async fetch(request) {
                 `    let count = (await this.storage.get("foo")) || 0;
@@ -1984,6 +2304,10 @@ KJ_TEST("Server: Ephemeral Objects") {
                 `  constructor(state, env) {
                 `    if (state.storage) throw new Error("storage shouldn't be present");
                 `    this.id = state.id;
+                `    if (typeof this.id != "string") {
+                `      throw new Error("ephemeral ID should be type string, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
                 `    this.count = 0;
                 `  }
                 `  async fetch(request) {
@@ -2433,7 +2757,16 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
                 `    // 7. Wake actor by using websocket
                 `    //  - This confirms we get back hibernation manager.
                 `    //    8. Use websocket once
-                `    return await obj.fetch(request);
+                `    try {
+                `      return await obj.fetch(request);
+                `    } catch (err) {
+                `      if (request.url.endsWith("/abort")) {
+                `        // expected
+                `        return new Response("OK");
+                `      } else {
+                `        throw err;
+                `      }
+                `    }
                 `  }
                 `}
                 `
@@ -2470,6 +2803,8 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
                 `      }
                 `
                 `      return new Response("OK");
+                `    } else if (request.url.endsWith("/abort")) {
+                `      this.state.abort("test abort message");
                 `    }
                 `    return new Error("Unknown path!");
                 `  }
@@ -2542,8 +2877,10 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   // 2. Hibernate
   test.wait(10);
   // 3. Use normal connection and read from ws.
-  auto conn = test.connect("test-addr");
-  conn.httpGet200("/wakeUpAndCheckWS", "OK"_kj);
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/wakeUpAndCheckWS", "OK"_kj);
+  }
   constexpr kj::StringPtr unpromptedResponse = "Hello! Just woke up from a nap."_kj;
   wsConn.recvWebSocket(unpromptedResponse);
 
@@ -2555,6 +2892,20 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   constexpr kj::StringPtr evicted = "OK"_kj;
   wsConn.send(kj::str("\x81\x1a", confirmEviction));
   wsConn.recvWebSocket(evicted);
+
+  // 6. Hibernate again
+  test.wait(10);
+
+  // 7. Wake up the actor and have it abort itself. This should disconnect the WebSocket, even
+  // though the WebSocket itself is still hibernated.
+  KJ_EXPECT_LOG(INFO, "Error: test abort message");
+  KJ_EXPECT_LOG(INFO, "other end of WebSocketPipe was destroyed");
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/abort", "OK"_kj);
+  }
+
+  KJ_EXPECT(wsConn.isEof());
 }
 
 KJ_TEST("Server: tail workers") {
@@ -4014,12 +4365,12 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
     services = [
       ( name = "hello",
         worker = (
-          compatibilityDate = "2024-02-23",
-          compatibilityFlags = ["experimental"],
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
           modules = [
             ( name = "main.js",
               esModule =
-                `import { WorkerEntrypoint, DurableObject } from "cloudflare:workers";
+                `import { WorkerEntrypoint, DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
                 `export default {
                 `  async fetch(request, env, ctx) {
                 `    // First set the actor state the old fashion way, to make sure we get
@@ -4036,7 +4387,10 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `      await actor.baz(),
                 `      await ctx.exports.default.corge(555),
                 `      await actor.grault(456),
-                `      "UnconfiguredActor" in ctx.exports,  // should be false
+                `      ctx.exports.UnconfiguredActor.constructor.name,
+                `      await ctx.exports.MyEntrypoint.myProps(),
+                `      await ctx.exports.MyEntrypoint({props: {foo: 123, bar: "abc"}}).myProps(),
+                `      MyWorkflow in ctx.exports,
                 `    ].join(", "));
                 `  },
                 `  corge(i) { return `corge: ${i}` }
@@ -4044,6 +4398,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `export class MyEntrypoint extends WorkerEntrypoint {
                 `  foo(i) { return `foo: ${i}` }
                 `  grault(i) { return `grault: ${i}` }
+                `  myProps() { return JSON.stringify(this.ctx.props) }
                 `}
                 `export class AnotherEntrypoint extends WorkerEntrypoint {
                 `  bar(i) { return `bar: ${i}` }
@@ -4056,6 +4411,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `export class UnconfiguredActor extends DurableObject {
                 `  qux(i) { return `qux: ${i}` }
                 `}
+                `export class MyWorkflow extends WorkflowEntrypoint {}
             )
           ],
           bindings = [
@@ -4084,7 +4440,9 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
   test.start();
 
   auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, false");
+  conn.httpGet200("/",
+      "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, LoopbackDurableObjectClass, "
+      "{}, {\"foo\":123,\"bar\":\"abc\"}, false");
 }
 
 // =======================================================================================
@@ -4107,12 +4465,12 @@ KJ_TEST("Server: encodeResponseBody: manual option") {
                 `    let response = await fetch("http://subhost/foo", {
                 `      encodeResponseBody: "manual"
                 `    });
-                `    
+                `
                 `    // Get the raw bytes, which should not be decompressed
                 `    let rawBytes = await response.arrayBuffer();
                 `    let decoder = new TextDecoder();
                 `    let rawText = decoder.decode(rawBytes);
-                `    
+                `
                 `    return new Response(
                 `      "Content-Encoding: " + response.headers.get("Content-Encoding") + "\n" +
                 `      "Raw content: " + rawText
@@ -4224,5 +4582,674 @@ KJ_TEST("Server: encodeResponseBody: manual pass-through") {
     fake-gzipped-content)"_blockquote);
 }
 
+KJ_TEST("Server: Catch websocket server errors") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+               ` export default {
+               `   async fetch(request) {
+               `     try {
+               `        return await handleRequest(request)
+               `     } catch (e) {
+               `        console.log("eerrrrr", e)
+               `        return new Response("ok")
+               `     }
+               `   }
+               ` }
+               `
+               ` let lastError = "none";
+               `
+               ` async function handleRequest(request) {
+               `   const upgradeHeader = request.headers.get('Upgrade');
+               `   if (!upgradeHeader || upgradeHeader !== 'websocket') {
+               `       return new Response('Expected Upgrade: websocket' , { status: 426 });
+               `   }
+               `
+               `   const webSocketPair = new WebSocketPair();
+               `   const [client, server] = Object.values(webSocketPair);
+               `
+               `   server.accept();
+               `   server.addEventListener('message', event => {
+               `       if (event.data === "getLastError") {
+               `         server.send(lastError)
+               `       } else {
+               `         let msg = event.data
+               `         server.send(msg)
+               `       }
+               `   });
+               `
+               `   server.addEventListener('error', event => {
+               `     lastError = event.message;
+               `   });
+               `
+               `   return new Response(null, {
+               `       status: 101,
+               `       webSocket: client,
+               `   });
+               ` }
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  class NotVeryGoodEntropySource: public kj::EntropySource {
+   public:
+    void generate(kj::ArrayPtr<byte> buffer) override {
+      buffer.fill('4');
+    }
+  };
+
+  KJ_EXPECT_LOG(ERROR,
+      "jsg.Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 34603008 > 33554432");
+  test.start();
+  auto& waitScope = test.getWaitScope();
+
+  kj::HttpHeaderTable headerTable;
+  NotVeryGoodEntropySource entropySource;
+  kj::HttpHeaders headers(headerTable);
+  headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+  headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+  {
+    auto wsConn = test.connect("test-addr");
+    auto client = kj::newHttpClient(
+        headerTable, wsConn.getStream(), kj::HttpClientSettings{.entropySource = entropySource});
+    auto res = client->openWebSocket("/", headers).wait(waitScope);
+    KJ_ASSERT(res.statusCode == 101, res.statusCode, res.statusText);
+    auto ws = kj::mv(res.webSocketOrBody.get<kj::Own<kj::WebSocket>>());
+    const auto smallMessage = kj::str("hello");
+    ws->send(smallMessage).wait(waitScope);
+    auto smallResponse = ws->receive().wait(waitScope);
+    KJ_EXPECT(smallResponse.get<kj::String>() == smallMessage);
+    const auto bigMessage = kj::heapArray<kj::byte>(33 * 1024 * 1024);
+    auto sendProm =
+        kj::evalNow([&]() { return ws->send(bigMessage); }).then([]() {}, [](kj::Exception ex) {});
+    // Message is too big; we should close the connection.
+    auto msg = ws->receive().wait(waitScope);
+    sendProm.wait(waitScope);
+    auto& resp = msg.get<kj::WebSocket::Close>();
+    KJ_EXPECT(resp.code == 1009);  // WebSocket-ese for "message too large"
+  }
+  {
+    auto wsConn = test.connect("test-addr");
+    headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+    headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+    auto client = kj::newHttpClient(
+        headerTable, wsConn.getStream(), kj::HttpClientSettings{.entropySource = entropySource});
+    auto res = client->openWebSocket("/", headers).wait(waitScope);
+    KJ_ASSERT(res.statusCode == 101, res.statusCode, res.statusText);
+    auto ws = kj::mv(res.webSocketOrBody.get<kj::Own<kj::WebSocket>>());
+    const auto query = kj::str("getLastError");
+    ws->send(query).wait(waitScope);
+    auto response = ws->receive().wait(waitScope);
+
+    kj::StringPtr responseString = response.get<kj::String>();
+    KJ_EXPECT(responseString.find("1009"_kjc) != kj::none, responseString);  // Error code
+    KJ_EXPECT(responseString.find("Message is too large"_kjc) != kj::none, responseString);
+    ws->close(1000, "").wait(waitScope);
+  }
+}
+
+KJ_TEST("Server: Durable Object facets") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          compatibilityFlags = ["experimental","enable_ctx_exports"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = ctx.exports.MyActorClass.idFromName("name");
+                `    let actor = ctx.exports.MyActorClass.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async fetch(request) {
+                `    let results = [];
+                `
+                `    if (request.url.endsWith("/part1")) {
+                `      let foo = this.ctx.facets.get("foo",
+                `          () => ({class: this.ctx.exports.CounterFacet, id: "abc"}));
+                `      results.push(await foo.increment(true));  // increments foo
+                `      results.push(await foo.increment());  // increments foo
+                `      results.push(await foo.increment());  // increments foo
+                `      await foo.assertId("abc");
+                `
+                `      let bar = this.ctx.facets.get("bar", () => ({class: this.env.NESTED}));
+                `      results.push(await bar.increment("foo", true));  // increments bar.foo
+                `      results.push(await bar.increment("bar", true));  // increments bar.bar
+                `      results.push(await bar.increment("foo"));        // increments bar.foo
+                `      await bar.assertId(this.ctx.id.toString());
+                `
+                `      // Get foo again to make sure we get the same object.
+                `      let foo2 = this.ctx.facets.get("foo", () => {
+                `        throw new Error("callback should not be called when already running");
+                `      });
+                `      results.push(await foo2.increment());  // increments foo
+                `      results.push(await foo.increment());   // increments foo
+                `      await foo.assertId("abc");
+                `    } else if (request.url.endsWith("/part2")) {
+                `      let callbackCount = 0;
+                `
+                `      // Get in a different order from before to make sure ID assignment is
+                `      // consistent.
+                `      let bar = this.ctx.facets.get("bar", () => {
+                `        ++callbackCount;
+                `        return {class: this.env.NESTED};
+                `      });
+                `      results.push(await bar.increment("bar", true));  // increments bar.bar
+                `      results.push(await bar.increment("foo", true));  // increments bar.foo
+                `      let foo = this.ctx.facets.get("foo", async () => {
+                `        await Promise.resolve();  // prove that callback can be async
+                `        ++callbackCount;
+                `        return {class: this.env.COUNTER, id: "abc"};
+                `      });
+                `      results.push(await foo.increment(true));  // increments foo
+                `
+                `      if (callbackCount !== 2) {
+                `        throw new Error(`callbackCount = ${callbackCount} (expected 2)`);
+                `      }
+                `
+                `      // Force "foo" to abort, so we can start it up with a different class.
+                `      this.ctx.facets.abort("foo", new Error("test abort facet"));
+                `
+                `      let foo2 = this.ctx.facets.get(
+                `          "foo", () => ({class: this.env.EXFILTRATOR, id: "abc"}));
+                `      results.push(await foo2.exfiltrate());
+                `
+                `      try {
+                `        await foo.increment();
+                `        throw new Error("broken stub didn't throw?");
+                `      } catch (err) {
+                `        if (err.message != "test abort facet") {
+                `          throw err;
+                `        }
+                `      }
+                `
+                `      // Delete bar, which recursively deletes its children.
+                `      this.ctx.facets.delete("bar");
+                `    } else if (request.url.endsWith("/props")) {
+                `      results.push(JSON.stringify(this.ctx.props));
+                `
+                `      let prop1 = this.ctx.facets.get("prop1",
+                `          () => ({class: this.env.COUNTER, id: "abc"}));
+                `      results.push(await prop1.myProps());
+                `
+                `      let prop2 = this.ctx.facets.get("prop2",
+                `          () => ({class: this.ctx.exports.CounterFacet, id: "abc"}));
+                `      results.push(await prop2.myProps());
+                `
+                `      let prop3 = this.ctx.facets.get("prop3",
+                `          () => ({class: this.ctx.exports.CounterFacet({props: {bProp: 321}}),
+                `                  id: "abc"}));
+                `      results.push(await prop3.myProps());
+                `
+                `      let prop4 = this.ctx.facets.get("prop4",
+                `          () => ({class: this.ctx.exports.MyActorClass, id: "abc"}));
+                `      results.push(await prop4.mainClassProps());
+                `
+                `      let prop5 = this.ctx.facets.get("prop5",
+                `          () => ({class: this.ctx.exports.MyActorClass({props: {cProp: 555}}),
+                `                  id: "abc"}));
+                `      results.push(await prop5.mainClassProps());
+                `    } else {
+                `      throw new Error(`bad url: ${request.url}`);
+                `    }
+                `
+                `    return new Response(results.join(" "));
+                `  }
+                `  mainClassProps() { return JSON.stringify(this.ctx.props) }
+                `}
+                `export class CounterFacet extends DurableObject {
+                `  async increment(first) {
+                `    let storedI = (await this.ctx.storage.get("value")) || 0;
+                `    if (first) {
+                `      this.i = storedI;
+                `    } else if (this.i != storedI) {
+                `      throw new Error("inconsistent stored value ${storedI} != ${this.i}");
+                `    }
+                `    this.ctx.storage.put("value", this.i + 1);
+                `    return this.i++;
+                `  }
+                `  assertId(id) {
+                `    if (this.ctx.id.toString() != id) {
+                `      throw new Error(`Wrong ID, expected ${id}, got ${this.ctx.id}`);
+                `    }
+                `  }
+                `  myProps() { return JSON.stringify(this.ctx.props) }
+                `}
+                `export class NestedFacet extends DurableObject {
+                `  increment(name, first) {
+                `    let facet = this.ctx.facets.get(name, () => ({class: this.env.COUNTER}));
+                `    return facet.increment(first);
+                `  }
+                `  assertId(id) {
+                `    if (this.ctx.id.toString() != id) {
+                `      throw new Error(`Wrong ID, expected ${id}, got ${this.ctx.id}`);
+                `    }
+                `  }
+                `}
+                `export class ExfiltrationFacet extends DurableObject {
+                `  exfiltrate() {
+                `    return this.ctx.storage.get("value");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "COUNTER",
+              durableObjectClass = (
+                name = "hello",
+                entrypoint = "CounterFacet",
+                props = (
+                  json = `{"aProp": 123}
+                )
+              )
+            ),
+            (name = "NESTED", durableObjectClass = (name = "hello", entrypoint = "NestedFacet")),
+            ( name = "EXFILTRATOR",
+              durableObjectClass = (name = "hello", entrypoint = "ExfiltrationFacet") )
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  // Create a directory outside of the test scope which we can use across multiple TestServers.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+
+  {
+    TestServer test(config);
+
+    // Link our directory into the test filesystem.
+    test.root->transfer(
+        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/part1", "0 1 2 0 0 1 3 4");
+  }
+
+  // Verify the expected files exist.
+  auto nsDir = dir->openSubdir(kj::Path({"mykey"}));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.1.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.2.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.3.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.4.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.facets"})));
+
+  // We should only have created four child facets (foo, bar, bar.foo, bar.bar). No ID 5 should
+  // exist.
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.5.sqlite"})));
+
+  // We didn't create any other durable objects in the namespace. All files in the namespace should
+  // be prefixed with our one DO ID.
+  for (auto& name: nsDir->listNames()) {
+    KJ_EXPECT(name.startsWith("3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a."),
+        "unexpected file found in namespace storage", name);
+  }
+
+  // Start a new server, make sure it's able to load the files again.
+  {
+    TestServer test(config);
+
+    // Link our directory into the test filesystem.
+    test.root->transfer(
+        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/part2", "1 2 5 6");
+  }
+
+  // Root and foo still exist, bar does not.
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.1.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.2.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.3.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.4.sqlite"})));
+
+  // Test facets can have custom ctx.props.
+  {
+    TestServer test(config);
+
+    // We don't need the existing storage but the path does have to exist for the test to work.
+    test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/props", "{} {\"aProp\":123} {} {\"bProp\":321} {} {\"cProp\":555}");
+  }
+}
+
+KJ_TEST("Server: Pass service stubs in ctx.props.") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["enable_ctx_exports"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { WorkerEntrypoint } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let props = {
+                `      foo: ctx.exports.FooEntry({props: {greeting: "Hello"}}),
+                `      foo2: ctx.exports.FooEntry({props: {greeting: "Welcome"}}),
+                `    }
+                `    let result = await ctx.exports.BarEntry({props}).run();
+                `    return new Response(result);
+                `  },
+                `}
+                `export class FooEntry extends WorkerEntrypoint {
+                `  greet(name) { return `${this.ctx.props.greeting}, ${name}!` }
+                `}
+                `export class BarEntry extends WorkerEntrypoint {
+                `  async run() {
+                `    let greet1 = await this.ctx.props.foo.greet("Alice");
+                `    let greet2 = await this.ctx.props.foo2.greet("Bob");
+                `    return [greet1, greet2].join("\n");
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Hello, Alice!\nWelcome, Bob!");
+}
+
+#if __linux__
+// This test uses pipe2 and dup2 to capture stdout which is far easier on linux.
+
+struct FdPair {
+  kj::AutoCloseFd output;
+  kj::AutoCloseFd input;
+};
+
+auto makePipeFds() {
+  int pipeFds[2];
+  KJ_SYSCALL(pipe2(pipeFds, 0));
+
+  return FdPair{
+    .output = kj::AutoCloseFd(pipeFds[0]),
+    .input = kj::AutoCloseFd(pipeFds[1]),
+  };
+}
+
+template <typename Func>
+auto expectLogLine(int fd, Func&& f) {
+  char buffer[4096];
+  int pos = 0;
+  char c;
+  while (read(fd, &c, 1) == 1) {
+    if (c == '\n') {
+      break;
+    }
+    if (pos < sizeof(buffer) - 1) {
+      buffer[pos++] = c;
+    }
+  }
+  buffer[pos] = '\0';  // null-terminate
+
+  kj::StringPtr logline(buffer);
+  f(logline);
+}
+
+KJ_TEST("Server: structured logging with console methods") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          compatibilityFlags = [
+            "nodejs_compat",
+            "experimental",
+            "enable_nodejs_process_v2"
+          ],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    console.log("This is a log message", { key: "value" });
+                `    console.info("This is an info message");
+                `    console.warn("This is a warning message");
+                `    console.error("This is an error message");
+                `    console.debug("This is a debug message");
+                `    console.debug({a: 1});
+                `
+                `    process.stdout.write("stdout");
+                `    process.stdout.write("stdout with\nmultiple\nnewlines\nlog");
+                `    process.stdout.write("ged");
+                `    process.stderr.write("stderr");
+                `    await 0;
+                `    process.stderr.write("after await");
+                `
+                `    try {
+                `      throw new Error("Test exception for structured logging");
+                `    } catch (e) {
+                `      console.error(e);
+                `    }
+                `
+                `    return new Response("Structured logging test completed");
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ],
+    # Enable structured logging for this test
+    structuredLogging = true
+  ))"_kj,
+      Worker::ConsoleMode::STDOUT);
+  auto interceptorPipe = makePipeFds();
+  int originalStdout = dup(STDOUT_FILENO);
+  int originalStderr = dup(STDERR_FILENO);
+  KJ_SYSCALL(dup2(interceptorPipe.input.get(), STDOUT_FILENO));
+  KJ_SYSCALL(dup2(interceptorPipe.input.get(), STDERR_FILENO));
+  interceptorPipe.input = nullptr;
+  KJ_DEFER({
+    // Restore stdout/stderr
+    KJ_SYSCALL(dup2(originalStdout, STDOUT_FILENO));
+    close(originalStdout);
+    KJ_SYSCALL(dup2(originalStderr, STDERR_FILENO));
+    close(originalStderr);
+  });
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  conn.sendHttpGet("/");
+  conn.recvHttp200("Structured logging test completed");
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"({"timestamp")"), logline);
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is a log message { key: 'value' }")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"info")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is an info message")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"warn")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is a warning message")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is an error message")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"debug")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is a debug message")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"debug")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"{ a: 1 }")"), logline);
+  });
+
+  // process.stdout should be logs split by newline
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: stdoutstdout with")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: multiple")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: newlines")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: logged")"), logline);
+  });
+
+  // process.stderr should be info
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stderr: stderr")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    KJ_ASSERT(
+        logline.contains(
+            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch (main.js:18:13)")_"),
+        logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stderr: after await")"), logline);
+  });
+}
+
+KJ_TEST("Server: transpiled typescript") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    compatibilityFlags = ["typescript_strip_types"],
+    modules = [
+      ( name = "main.ts",
+        esModule =
+          `export default {
+          `  async fetch(request): Promise<Response> {
+          `    return new Response("Hello from typescript");
+          `  }
+          `} satisfies ExportedHandler<Env>;
+      )
+    ]
+  ))"_kj));
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Hello from typescript");
+}
+
+KJ_TEST("Server: transpiled typescript failure") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    compatibilityFlags = ["typescript_strip_types"],
+    modules = [
+      ( name = "main.ts",
+        esModule =
+          `enum Foo { A, B }
+          `export default {
+          `  async fetch(request): Promise<Response> {
+          `    return new Response("Hello from typescript");
+          `  }
+          `} satisfies ExportedHandler<Env>;
+      )
+    ]
+  ))"_kj));
+  test.server.allowExperimental();
+
+  test.expectErrors(R"(service hello: Error transpiling main.ts : Unsupported syntax
+    TypeScript enum is not supported in strip-only mode
+service hello: Uncaught TypeError: Main module must be an ES module.
+)");
+}
+
+#endif  // __linux__
 }  // namespace
 }  // namespace workerd::server

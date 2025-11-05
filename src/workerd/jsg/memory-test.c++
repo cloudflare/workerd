@@ -40,7 +40,6 @@ void runTest(auto callback) {
 }
 
 KJ_TEST("MemoryTracker test") {
-
   // Verifies that workerd details are included in the heapsnapshot.
   // This is not a comprehensive test of the heapsnapshot content,
   // it is designed just to make sure that we are, in fact, publishing
@@ -56,10 +55,7 @@ KJ_TEST("MemoryTracker test") {
       return true;
     });
 
-    IsolateBase& base = IsolateBase::from(js.v8Isolate);
-    base.getUuid();
-
-    auto foo = fooHandler.wrap(js, alloc<Foo>());
+    auto foo = fooHandler.wrap(js, js.alloc<Foo>());
     KJ_ASSERT(foo->IsObject());
 
     auto profiler = js.v8Isolate->GetHeapProfiler();

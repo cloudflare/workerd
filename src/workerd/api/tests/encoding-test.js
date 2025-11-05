@@ -307,7 +307,7 @@ export const encodeWptTest = {
             destinationLength
           );
           const fullView = new Uint8Array(buffer);
-          const control = new Array(bufferLength);
+          const control = Array.from({ length: bufferLength }, () => 0);
           let byte = destinationFiller;
           for (let i = 0; i < bufferLength; i++) {
             if (destinationFiller === 'random') {
@@ -348,6 +348,7 @@ export const encodeWptTest = {
         Uint16Array,
         Uint32Array,
         Uint8ClampedArray,
+        Float16Array,
         Float32Array,
         Float64Array,
       ].forEach((view) => {

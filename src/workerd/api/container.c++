@@ -47,22 +47,39 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
-  IoContext::current().addTask(req.send().ignoreResult());
+  IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
+}
+
+jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
+  JSG_REQUIRE(
+      durationMs > 0, TypeError, "setInactivityTimeout() cannot be called with a durationMs <= 0");
+
+  auto req = rpcClient->setInactivityTimeoutRequest();
+
+  req.setDurationMs(durationMs);
+  return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
   return IoContext::current()
-      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send().ignoreResult())
-      .then(js, [this](jsg::Lock& js) {
+      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
+      .then(js, [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
     running = false;
+    auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, destroyReason) {
       jsg::Value error = kj::mv(d);
       destroyReason = kj::none;
       js.throwException(kj::mv(error));
+    }
+
+    if (exitCode != 0) {
+      auto err = js.error(kj::str("Container exited with unexpected exit code: ", exitCode));
+      KJ_ASSERT_NONNULL(err.tryCast<jsg::JsObject>()).set(js, "exitCode", js.num(exitCode));
+      js.throwException(err);
     }
   }, [this](jsg::Lock& js, jsg::Value&& error) {
     running = false;
@@ -79,7 +96,7 @@ jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> e
   }
 
   return IoContext::current().awaitIo(
-      js, rpcClient->destroyRequest(capnp::MessageSize{4, 0}).send().ignoreResult());
+      js, rpcClient->destroyRequest(capnp::MessageSize{4, 0}).sendIgnoringResult());
 }
 
 void Container::signal(jsg::Lock& js, int signo) {
@@ -88,7 +105,7 @@ void Container::signal(jsg::Lock& js, int signo) {
 
   auto req = rpcClient->signalRequest(capnp::MessageSize{4, 0});
   req.setSigno(signo);
-  IoContext::current().addTask(req.send().ignoreResult());
+  IoContext::current().addTask(req.sendIgnoringResult());
 }
 
 // =======================================================================================
@@ -121,7 +138,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
     // We don't support TLS.
     JSG_REQUIRE(parsedUrl.scheme != "https", Error,
-        "Connencting to a container using HTTPS is not currently supported; use HTTP instead. "
+        "Connecting to a container using HTTPS is not currently supported; use HTTP instead. "
         "TLS is unnecessary anyway, as the connection is already secure by default.");
 
     // Schemes other than http: and https: should have been rejected earlier, but let's verify.
@@ -130,13 +147,14 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     // We need to convert the URL from proxy format (full URL in request line) to host format
     // (path in request line, hostname in Host header).
     auto newHeaders = headers.cloneShallow();
-    newHeaders.set(kj::HttpHeaderId::HOST, parsedUrl.host);
+    newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
 
     // Make a TCP connection...
     auto pipe = kj::newTwoWayPipe();
-    auto connectionPromise =
-        connectImpl(*pipe.ends[1]).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
+    kj::Maybe<kj::Exception> connectionException = kj::none;
+
+    auto connectionPromise = connectImpl(*pipe.ends[1]);
 
     // ... and then stack an HttpClient on it ...
     auto client = kj::newHttpClient(headerTable, *pipe.ends[0], {.entropySource = entropySource});
@@ -144,9 +162,29 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     // ... and then adapt that to an HttpService ...
     auto service = kj::newHttpService(*client);
 
-    // ... and now we can just forward our call to that.
-    co_await connectionPromise.exclusiveJoin(
-        service->request(method, noHostUrl, newHeaders, requestBody, response));
+    // ... fork connection promises so we can keep the original exception around ...
+    auto connectionPromiseForked = connectionPromise.fork();
+    auto connectionPromiseBranch = connectionPromiseForked.addBranch();
+    auto connectionPromiseToKeepException = connectionPromiseForked.addBranch();
+
+    // ... and now we can just forward our call to that ...
+    try {
+      co_await service->request(method, noHostUrl, newHeaders, requestBody, response)
+          .exclusiveJoin(
+              // never done as we do not want a Connection RPC exiting successfully
+              // affecting the request
+              connectionPromiseBranch.then([]() -> kj::Promise<void> { return kj::NEVER_DONE; }));
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      connectionException = kj::some(kj::mv(exception));
+    }
+
+    // ... and last but not least, if the connect() call succeeded but the connection
+    // was broken, we throw that exception.
+    KJ_IF_SOME(exception, connectionException) {
+      co_await connectionPromiseToKeepException;
+      kj::throwFatalException(kj::mv(exception));
+    }
   }
 
   // Implements connect(), i.e., forms a raw socket.
@@ -261,7 +299,7 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
       kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),
           ioctx.getHeaderTable(), req.send().getPort());
 
-  return jsg::alloc<Fetcher>(
+  return js.alloc<Fetcher>(
       ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
 }
 

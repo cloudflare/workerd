@@ -83,6 +83,8 @@ kj::String namedErrorCode(int errorCode) {
 #undef LITERAL
 }
 
+constexpr size_t RA_MAX_METRICS_QUERY_SIZE = 1024;
+
 kj::String dbErrorMessage(int errorCode, sqlite3* db) {
   kj::StringTree msg = kj::strTree(sqlite3_errmsg(db));
   if (int offset = sqlite3_error_offset(db); offset != -1) {
@@ -137,6 +139,10 @@ class SqliteCallScope {
     }
   }
 
+  kj::Maybe<const kj::Exception&> getException() {
+    return error;
+  }
+
   // Hack to allow block syntax with for(); see SQLITE_CALL_SCOPE.
   bool done = false;
 
@@ -173,16 +179,23 @@ class SqliteCallScope {
     int _ec = code;                                                                                \
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */      \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__);                      \
+    handleCriticalError(_ec, dbErrorMessage(_ec, db), sqliteCallScope.getException());             \
     if (_ec == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                    \
     SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), ##__VA_ARGS__);                 \
   } while (false)
 
 // Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
 // aren't really errors.
+//
+// Temporarily marking SQLITE_BUSY as NOSENTRY to reduce sentry volume while debugging issue.
+// TODO(soon): reenable SQLITE_BUSY sentry logging.
 #define SQLITE_CALL_FAILED(code, error, ...)                                                       \
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
+    handleCriticalError(error, dbErrorMessage(error, db), sqliteCallScope.getException());         \
     if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                  \
+    SQLITE_REQUIRE(error != SQLITE_BUSY, error, kj::str("NOSENTRY ", dbErrorMessage(error, db)),   \
+        ##__VA_ARGS__);                                                                            \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
   } while (false);
 
@@ -370,22 +383,33 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
 
   // https://www.sqlite.org/json1.html
   "json"_kj,
+  "jsonb"_kj,
   "json_array"_kj,
+  "jsonb_array"_kj,
   "json_array_length"_kj,
   "json_extract"_kj,
+  "jsonb_extract"_kj,
   "->"_kj,
   "->>"_kj,
   "json_insert"_kj,
+  "jsonb_insert"_kj,
   "json_object"_kj,
+  "jsonb_object"_kj,
   "json_patch"_kj,
+  "jsonb_patch"_kj,
   "json_remove"_kj,
+  "jsonb_remove"_kj,
   "json_replace"_kj,
+  "jsonb_replace"_kj,
   "json_set"_kj,
+  "jsonb_set"_kj,
   "json_type"_kj,
   "json_valid"_kj,
   "json_quote"_kj,
   "json_group_array"_kj,
+  "jsonb_group_array"_kj,
   "json_group_object"_kj,
+  "jsonb_group_object"_kj,
   "json_each"_kj,
   "json_tree"_kj,
 
@@ -450,16 +474,16 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
-constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
-
 SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,
-    SqliteObserver& sqliteObserver)
+    SqliteObserver& sqliteObserver,
+    kj::Maybe<const ActorAccountLimits&> actorAccountLimits)
     : vfs(vfs),
       path(kj::mv(path)),
       readOnly(maybeMode == kj::none),
-      sqliteObserver(sqliteObserver) {
+      sqliteObserver(sqliteObserver),
+      actorAccountLimits(actorAccountLimits) {
   init(maybeMode);
 }
 
@@ -527,9 +551,35 @@ SqliteDatabase::operator sqlite3*() {
   return &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 }
 
-void SqliteDatabase::notifyWrite() {
+bool SqliteDatabase::observedCriticalError() {
+  return criticalErrorOccurred;
+}
+
+void SqliteDatabase::notifyWrite(bool allowUnconfirmed) {
   KJ_IF_SOME(cb, onWriteCallback) {
-    cb();
+    cb(allowUnconfirmed);
+  }
+}
+
+void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
+    kj::StringPtr errorMessage,
+    kj::Maybe<const kj::Exception&> maybeException) {
+  KJ_IF_SOME(code, errorCode) {
+    if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_BUSY ||
+        code == SQLITE_NOMEM || code == SQLITE_INTERRUPT) {
+
+      sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
+      // We are in a transaction
+      if (inTransaction || !savepoints.empty()) {
+        // The transaction was auto-rolledback, re-enabling the auto commit mode, so we should fail
+        if (sqlite3_get_autocommit(db) != 0) {
+          criticalErrorOccurred = true;
+          KJ_IF_SOME(cb, onCriticalErrorCallback) {
+            cb(errorMessage, maybeException);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -714,13 +764,39 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
               KJ_DEFER(currentRegulator = regulator);
               currentParseContext = kj::none;
               KJ_DEFER(currentParseContext = parseContext);
-              cb();
+              cb(false);  // prepareSql doesn't have access to allowUnconfirmed, use safe default
             }
           }
 
           // This isn't the last statement in the code. Execute it immediately.
           SQLITE_CALL_SCOPE {
+            auto start = sqliteObserver.now();
+            auto dbWalSizeBefore = sqliteObserver.getDbWalSize();
+
             int err = sqlite3_step(result);
+
+            kj::Duration queryLatency = sqliteObserver.now() - start;
+            auto dbWalBytesWritten = sqliteObserver.getDbWalSize() - dbWalSizeBefore;
+            auto rowsRead = sqlite3_stmt_status(result, LIBSQL_STMTSTATUS_ROWS_READ, 0);
+            auto rowsWritten = sqlite3_stmt_status(result, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 0);
+
+            kj::Maybe<kj::String> queryStatement;
+            kj::Maybe<kj::String> queryErrorDescription;
+            try {
+              kj::StringPtr statement = sqlite3_sql(result);
+              queryStatement = kj::heapString(
+                  statement.slice(0, kj::min(statement.size(), RA_MAX_METRICS_QUERY_SIZE)));
+            } catch (kj::Exception& e) {
+              kj::StringPtr errorDescription = e.getDescription();
+              queryErrorDescription = kj::heapString(errorDescription.slice(
+                  0, kj::min(RA_MAX_METRICS_QUERY_SIZE, errorDescription.size())));
+            }
+
+            // Report queryEvent for this statement
+            sqliteObserver.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten,
+                queryLatency, dbWalBytesWritten, err, regulator.shouldAddQueryStats(),
+                kj::mv(queryErrorDescription));
+
             if (err == SQLITE_DONE) {
               // good
             } else if (err == SQLITE_ROW) {
@@ -769,7 +845,7 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
     // Slice off the next valid statement SQL
     auto nextStatement = kj::str(sqlCode.first(statementLength));
     // Create a Query object, which will prepare & execute it
-    auto q = Query(*this, regulator, nextStatement);
+    auto q = Query(*this, QueryOptions{.regulator = regulator}, nextStatement);
 
     rowsRead += q.getRowsRead();
     rowsWritten += q.getRowsWritten();
@@ -1262,25 +1338,27 @@ void SqliteDatabase::Statement::beforeSqliteReset() {
 }
 
 SqliteDatabase::Query::Query(SqliteDatabase& db,
-    const Regulator& regulator,
+    QueryOptions options,
     Statement& statement,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
-      regulator(regulator),
-      maybeStatement(statement.prepareForExecution()) {
+      regulator(options.regulator),
+      maybeStatement(statement.prepareForExecution()),
+      queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
 }
 
 SqliteDatabase::Query::Query(SqliteDatabase& db,
-    const Regulator& regulator,
+    QueryOptions options,
     kj::StringPtr sqlCode,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
-      regulator(regulator),
+      regulator(options.regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
-      maybeStatement(ownStatement) {
+      maybeStatement(ownStatement),
+      queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
@@ -1294,6 +1372,18 @@ void SqliteDatabase::Query::destroy() {
   if (regulator.shouldAddQueryStats()) {
     //Update the db stats that we have collected for the query
     db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
+  }
+
+  queryEvent.setQueryEventStats(rowsRead, rowsWritten, !(regulator.shouldAddQueryStats()));
+
+  try {
+    kj::StringPtr statement = sqlite3_sql(getStatementAndEffect().statement);
+    queryEvent.setQueryStatement(
+        kj::heapString(statement.slice(0, kj::min(statement.size(), RA_MAX_METRICS_QUERY_SIZE))));
+  } catch (kj::Exception& e) {
+    kj::StringPtr errorDescription = e.getDescription();
+    queryEvent.setQueryErrorDescription(kj::heapString(
+        errorDescription.slice(0, kj::min(RA_MAX_METRICS_QUERY_SIZE, errorDescription.size()))));
   }
 
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
@@ -1316,6 +1406,12 @@ void SqliteDatabase::Query::destroy() {
 }
 
 void SqliteDatabase::Query::checkRequirements(size_t size) {
+  if (regulator.shouldAddQueryStats()) {
+    KJ_IF_SOME(actorAccountLimits, db.actorAccountLimits) {
+      actorAccountLimits.requireActorCanExecuteQueries();
+    }
+  }
+
   sqlite3_stmt* statement = getStatement();
 
   SQLITE_REQUIRE(!sqlite3_stmt_busy(statement), kj::none,
@@ -1325,7 +1421,7 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
 
   KJ_IF_SOME(cb, db.onWriteCallback) {
     if (!sqlite3_stmt_readonly(statement)) {
-      cb();
+      cb(allowUnconfirmed);
     }
   }
 }
@@ -1413,6 +1509,7 @@ void SqliteDatabase::Query::nextRow(bool first) {
 
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
+    queryEvent.setQueryResult(err);
     // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
     // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
     // in the Dtor, and handle the case where the statement could be null when the Query gets
@@ -1631,6 +1728,11 @@ struct SqliteDatabase::Vfs::
   }
 };
 
+// clang-format off
+//
+// The code below has a lot of lambdas inside struct initializers, which clang-format does not
+// handle well, making it extremely hard to read if we leave the formatter on.
+
 const sqlite3_io_methods SqliteDatabase::Vfs::WrappedNativeFileImpl::METHOD_TABLE = {
   .iVersion = 3,
 
@@ -1650,14 +1752,14 @@ const sqlite3_io_methods SqliteDatabase::Vfs::WrappedNativeFileImpl::METHOD_TABL
   WRAP(xFileControl),
   WRAP(xSectorSize),
   .xDeviceCharacteristics = [](sqlite3_file* file) noexcept -> int {
-  auto wrapper = static_cast<WrappedNativeFileImpl*>(file);
-  file = wrapper->getWrapped();
-  KJ_ASSERT(currentVfsRoot == AT_FDCWD);
-  currentVfsRoot = wrapper->rootFd;
-  KJ_DEFER(currentVfsRoot = AT_FDCWD);
-  return (file->pMethods->xDeviceCharacteristics)(file) |
-      wrapper->vfs->options.deviceCharacteristics;
-},
+    auto wrapper = static_cast<WrappedNativeFileImpl*>(file);
+    file = wrapper->getWrapped();
+    KJ_ASSERT(currentVfsRoot == AT_FDCWD);
+    currentVfsRoot = wrapper->rootFd;
+    KJ_DEFER(currentVfsRoot = AT_FDCWD);
+    return (file->pMethods->xDeviceCharacteristics)(file) |
+        wrapper->vfs->options.deviceCharacteristics;
+  },
 
   WRAP(xShmMap),
   WRAP(xShmLock),
@@ -1701,7 +1803,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
   // wrapped so that it sets `currentVfsRoot` while running.
   return {
     .iVersion = kj::min(3, native.iVersion),
-    .szOsFile = native.szOsFile + (int)sizeof(WrappedNativeFileImpl),
+    .szOsFile = native.szOsFile + static_cast<int>(sizeof(WrappedNativeFileImpl)),
     .mxPathname = native.mxPathname,
     .pNext = nullptr,
     .zName = name.cStr(),
@@ -1709,37 +1811,37 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
 
     .xOpen = [](sqlite3_vfs* vfs, sqlite3_filename zName, sqlite3_file* file, int flags,
                  int* pOutFlags) -> int {
-    // We have to wrap xOpen explicitly because we need to further wrap each created file.
-    //
-    // My trick here is to prefix the native file with a second vtable. So the layout of the
-    // `sqlite3_file` that we construct is actually a simple `struct sqlite_file` (which just
-    // contains a single pointer to sqlite3_io_methods, i.e. the vtable pointer) _followed by_
-    // the regular native file structure.
+      // We have to wrap xOpen explicitly because we need to further wrap each created file.
+      //
+      // My trick here is to prefix the native file with a second vtable. So the layout of the
+      // `sqlite3_file` that we construct is actually a simple `struct sqlite_file` (which just
+      // contains a single pointer to sqlite3_io_methods, i.e. the vtable pointer) _followed by_
+      // the regular native file structure.
 
-    auto wrapper = static_cast<WrappedNativeFileImpl*>(file);
-    file = wrapper->getWrapped();
-    file->pMethods = nullptr;
+      auto wrapper = static_cast<WrappedNativeFileImpl*>(file);
+      file = wrapper->getWrapped();
+      file->pMethods = nullptr;
 
-    // Set up currentVfsRoot.
-    auto& self = *reinterpret_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);
-    KJ_ASSERT(currentVfsRoot == AT_FDCWD);
-    currentVfsRoot = self.rootFd;
-    KJ_DEFER(currentVfsRoot = AT_FDCWD);
+      // Set up currentVfsRoot.
+      auto& self = *reinterpret_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);
+      KJ_ASSERT(currentVfsRoot == AT_FDCWD);
+      currentVfsRoot = self.rootFd;
+      KJ_DEFER(currentVfsRoot = AT_FDCWD);
 
-    int result = self.native.xOpen(&self.native, zName, file, flags, pOutFlags);
+      int result = self.native.xOpen(&self.native, zName, file, flags, pOutFlags);
 
-    // `xOpen` setting `pMethods` to non-null indicates that `xClose` is needed, i.e. the file
-    // has been constructed. We need our wrapper to match.
-    if (file->pMethods == nullptr) {
-      wrapper->pMethods = nullptr;
-    } else {
-      wrapper->pMethods = &WrappedNativeFileImpl::METHOD_TABLE;
-      wrapper->vfs = &self;
-      wrapper->rootFd = self.rootFd;
-    }
+      // `xOpen` setting `pMethods` to non-null indicates that `xClose` is needed, i.e. the file
+      // has been constructed. We need our wrapper to match.
+      if (file->pMethods == nullptr) {
+        wrapper->pMethods = nullptr;
+      } else {
+        wrapper->pMethods = &WrappedNativeFileImpl::METHOD_TABLE;
+        wrapper->vfs = &self;
+        wrapper->rootFd = self.rootFd;
+      }
 
-    return result;
-  },
+      return result;
+    },
 
 #define WRAP(name)                                                                                 \
   .name = &MethodWrapperHack<decltype(&sqlite3_vfs::name), &sqlite3_vfs::name>::wrapper
@@ -1747,12 +1849,12 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
     WRAP(xDelete),
     WRAP(xAccess),
     .xFullPathname = [](sqlite3_vfs*, const char* zName, int nOut, char* zOut) -> int {
-    // Override xFullPathname so that it doesn't rewrite the path at all.
-    size_t len = kj::min(strlen(zName), nOut - 1);
-    memcpy(zOut, zName, len);
-    zOut[len] = 0;
-    return SQLITE_OK;
-  },
+      // Override xFullPathname so that it doesn't rewrite the path at all.
+      size_t len = kj::min(strlen(zName), nOut - 1);
+      memcpy(zOut, zName, len);
+      zOut[len] = 0;
+      return SQLITE_OK;
+    },
 
     .xDlOpen = nullptr,
     .xDlError = nullptr,
@@ -1821,200 +1923,200 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
   .iVersion = 3,
 #define WRAP_METHOD(errorCode, block)                                                              \
   auto& self KJ_UNUSED = *static_cast<FileImpl*>(file);                                            \
-  try block catch (kj::Exception & e) {                                                            \
+  try block catch (kj::Exception& e) {                                                             \
     reportVfsErrorCaught(kj::mv(e));                                                               \
     return errorCode;                                                                              \
   }
 
   .xClose = [](sqlite3_file* file) noexcept -> int {
-  WRAP_METHOD(SQLITE_OK, {
-    auto& self = *static_cast<FileImpl*>(file);
+    WRAP_METHOD(SQLITE_OK, {
+      auto& self = *static_cast<FileImpl*>(file);
 
-    // Caller will free the object's memory, but knows nothing of destructors.
-    kj::dtor(self);
+      // Caller will free the object's memory, but knows nothing of destructors.
+      kj::dtor(self);
 
-    return SQLITE_OK;  // return value is ignored by SQLite
-  });
-},
+      return SQLITE_OK;  // return value is ignored by SQLite
+    });
+  },
 
   .xRead = [](sqlite3_file* file, void* buffer, int iAmt, sqlite3_int64 iOfst) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR_READ, {
-    auto bytes = kj::arrayPtr(reinterpret_cast<byte*>(buffer), iAmt);
-    size_t actual = self.file->read(iOfst, bytes);
+    WRAP_METHOD(SQLITE_IOERR_READ, {
+      auto bytes = kj::arrayPtr(reinterpret_cast<byte*>(buffer), iAmt);
+      size_t actual = self.file->read(iOfst, bytes);
 
-    if (actual < iAmt) {
-      bytes.slice(actual).fill(0);
-      return SQLITE_IOERR_SHORT_READ;
-    } else {
-      return SQLITE_OK;
-    }
-  });
-},
+      if (actual < iAmt) {
+        bytes.slice(actual).fill(0);
+        return SQLITE_IOERR_SHORT_READ;
+      } else {
+        return SQLITE_OK;
+      }
+    });
+  },
 
   .xWrite =
       [](sqlite3_file* file, const void* buffer, int iAmt, sqlite3_int64 iOfst) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR_WRITE, {
-    KJ_IF_SOME(writableFile, self.writableFile) {
-      auto bytes = kj::arrayPtr(reinterpret_cast<const byte*>(buffer), iAmt);
-      writableFile.write(iOfst, bytes);
-      return SQLITE_OK;
-    } else {
-      return SQLITE_READONLY;
-    }
-  });
-},
+    WRAP_METHOD(SQLITE_IOERR_WRITE, {
+      KJ_IF_SOME(writableFile, self.writableFile) {
+        auto bytes = kj::arrayPtr(reinterpret_cast<const byte*>(buffer), iAmt);
+        writableFile.write(iOfst, bytes);
+        return SQLITE_OK;
+      } else {
+        return SQLITE_READONLY;
+      }
+    });
+  },
 
   .xTruncate = [](sqlite3_file* file, sqlite3_int64 size) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR_TRUNCATE, {
-    KJ_IF_SOME(writableFile, self.writableFile) {
-      writableFile.truncate(size);
-      return SQLITE_OK;
-    } else {
-      return SQLITE_READONLY;
-    }
-  });
-},
+    WRAP_METHOD(SQLITE_IOERR_TRUNCATE, {
+      KJ_IF_SOME(writableFile, self.writableFile) {
+        writableFile.truncate(size);
+        return SQLITE_OK;
+      } else {
+        return SQLITE_READONLY;
+      }
+    });
+  },
 
   .xSync = [](sqlite3_file* file, int flags) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR_FSYNC, {
-    if (flags & SQLITE_SYNC_DATAONLY) {
-      self.file->datasync();
-    } else {
-      self.file->sync();
-    }
-    return SQLITE_OK;
-  });
-},
+    WRAP_METHOD(SQLITE_IOERR_FSYNC, {
+      if (flags & SQLITE_SYNC_DATAONLY) {
+        self.file->datasync();
+      } else {
+        self.file->sync();
+      }
+      return SQLITE_OK;
+    });
+  },
 
   .xFileSize = [](sqlite3_file* file, sqlite3_int64* pSize) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR_FSTAT, {
-    *pSize = self.file->stat().size;
-    return SQLITE_OK;
-  });
-},
+    WRAP_METHOD(SQLITE_IOERR_FSTAT, {
+      *pSize = self.file->stat().size;
+      return SQLITE_OK;
+    });
+  },
 
   .xLock = [](sqlite3_file* file, int level) noexcept -> int {
-  // Verify that our enum's values match the SQLite constants. (We didn't want to include
-  // sqlite3.h in our header, so defined a parallel enum.)
-  static_assert(Lock::UNLOCKED == SQLITE_LOCK_NONE);
-  static_assert(Lock::SHARED == SQLITE_LOCK_SHARED);
-  static_assert(Lock::RESERVED == SQLITE_LOCK_RESERVED);
-  static_assert(Lock::PENDING == SQLITE_LOCK_PENDING);
-  static_assert(Lock::EXCLUSIVE == SQLITE_LOCK_EXCLUSIVE);
+    // Verify that our enum's values match the SQLite constants. (We didn't want to include
+    // sqlite3.h in our header, so defined a parallel enum.)
+    static_assert(Lock::UNLOCKED == SQLITE_LOCK_NONE);
+    static_assert(Lock::SHARED == SQLITE_LOCK_SHARED);
+    static_assert(Lock::RESERVED == SQLITE_LOCK_RESERVED);
+    static_assert(Lock::PENDING == SQLITE_LOCK_PENDING);
+    static_assert(Lock::EXCLUSIVE == SQLITE_LOCK_EXCLUSIVE);
 
-  WRAP_METHOD(SQLITE_IOERR_LOCK, {
-    auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xLock called on file that isn't main database?");
-    if (lock.tryIncreaseLevel(static_cast<Lock::Level>(level))) {
-      return SQLITE_OK;
-    } else {
-      return SQLITE_BUSY;
-    }
-  });
-},
+    WRAP_METHOD(SQLITE_IOERR_LOCK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xLock called on file that isn't main database?");
+      if (lock.tryIncreaseLevel(static_cast<Lock::Level>(level))) {
+        return SQLITE_OK;
+      } else {
+        return SQLITE_BUSY;
+      }
+    });
+  },
 
   .xUnlock = [](sqlite3_file* file, int level) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR_UNLOCK, {
-    auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xLock called on file that isn't main database?");
-    lock.decreaseLevel(static_cast<Lock::Level>(level));
-    return SQLITE_OK;
-  });
-},
+    WRAP_METHOD(SQLITE_IOERR_UNLOCK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xLock called on file that isn't main database?");
+      lock.decreaseLevel(static_cast<Lock::Level>(level));
+      return SQLITE_OK;
+    });
+  },
 
   .xCheckReservedLock = [](sqlite3_file* file, int* pResOut) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR_CHECKRESERVEDLOCK, {
-    auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xLock called on file that isn't main database?");
-    *pResOut = lock.checkReservedLock();
-    return SQLITE_OK;
-  });
-},
+    WRAP_METHOD(SQLITE_IOERR_CHECKRESERVEDLOCK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xLock called on file that isn't main database?");
+      *pResOut = lock.checkReservedLock();
+      return SQLITE_OK;
+    });
+  },
 
   .xFileControl = [](sqlite3_file* file, int op, void* pArg) noexcept -> int {
-  // Apparently we can return SQLITE_NOTFOUND for controls we don't implement.
-  return SQLITE_NOTFOUND;
-},
+    // Apparently we can return SQLITE_NOTFOUND for controls we don't implement.
+    return SQLITE_NOTFOUND;
+  },
   .xSectorSize = [](sqlite3_file* file) noexcept -> int {
-  // This function doesn't return a status code, it returns the size. It's largely a performance
-  // hint, I think. For in-memory file systems, it has no real meaning. 4096 is the value of
-  // SQLITE_DEFAULT_SECTOR_SIZE in the SQLite codebase, though the comments also say the result
-  // is "almost always 512".
-  return 4096;
-},
+    // This function doesn't return a status code, it returns the size. It's largely a performance
+    // hint, I think. For in-memory file systems, it has no real meaning. 4096 is the value of
+    // SQLITE_DEFAULT_SECTOR_SIZE in the SQLite codebase, though the comments also say the result
+    // is "almost always 512".
+    return 4096;
+  },
   .xDeviceCharacteristics = [](sqlite3_file* file) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR, { return self.vfs.options.deviceCharacteristics; });
-},
+    WRAP_METHOD(SQLITE_IOERR, { return self.vfs.options.deviceCharacteristics; });
+  },
 
   .xShmMap =
       [](sqlite3_file* file, int iRegion, int szRegion, int bExtend, void volatile** pp) noexcept
-  -> int {
-  WRAP_METHOD(SQLITE_IOERR_SHMMAP, {
-    KJ_ASSERT(iRegion >= 0);
-    KJ_ASSERT(szRegion >= 0);
-    auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xShmMap called on file that isn't main database?");
+      -> int {
+    WRAP_METHOD(SQLITE_IOERR_SHMMAP, {
+      KJ_ASSERT(iRegion >= 0);
+      KJ_ASSERT(szRegion >= 0);
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xShmMap called on file that isn't main database?");
 
-    auto bytes = lock.getSharedMemoryRegion(iRegion, szRegion, bExtend);
-    if (bytes == nullptr) {
-      *pp = nullptr;
-    } else {
-      *pp = bytes.begin();
-    }
-    return SQLITE_OK;
-  });
-},
+      auto bytes = lock.getSharedMemoryRegion(iRegion, szRegion, bExtend);
+      if (bytes == nullptr) {
+        *pp = nullptr;
+      } else {
+        *pp = bytes.begin();
+      }
+      return SQLITE_OK;
+    });
+  },
   .xShmLock = [](sqlite3_file* file, int offset, int n, int flags) noexcept -> int {
-  WRAP_METHOD(SQLITE_IOERR_SHMLOCK, {
-    auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xShmMap called on file that isn't main database?");
-    if (flags & SQLITE_SHM_LOCK) {
-      if (flags & SQLITE_SHM_EXCLUSIVE) {
-        if (!lock.tryLockWalExclusive(offset, n)) return SQLITE_BUSY;
+    WRAP_METHOD(SQLITE_IOERR_SHMLOCK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xShmMap called on file that isn't main database?");
+      if (flags & SQLITE_SHM_LOCK) {
+        if (flags & SQLITE_SHM_EXCLUSIVE) {
+          if (!lock.tryLockWalExclusive(offset, n)) return SQLITE_BUSY;
+        } else {
+          KJ_ASSERT(flags & SQLITE_SHM_SHARED);
+          if (!lock.tryLockWalShared(offset, n)) return SQLITE_BUSY;
+        }
       } else {
-        KJ_ASSERT(flags & SQLITE_SHM_SHARED);
-        if (!lock.tryLockWalShared(offset, n)) return SQLITE_BUSY;
+        KJ_ASSERT(flags & SQLITE_SHM_UNLOCK);
+        if (flags & SQLITE_SHM_EXCLUSIVE) {
+          lock.unlockWalExclusive(offset, n);
+        } else {
+          KJ_ASSERT(flags & SQLITE_SHM_SHARED);
+          lock.unlockWalShared(offset, n);
+        }
       }
-    } else {
-      KJ_ASSERT(flags & SQLITE_SHM_UNLOCK);
-      if (flags & SQLITE_SHM_EXCLUSIVE) {
-        lock.unlockWalExclusive(offset, n);
-      } else {
-        KJ_ASSERT(flags & SQLITE_SHM_SHARED);
-        lock.unlockWalShared(offset, n);
-      }
-    }
-    return SQLITE_OK;
-  });
-},
+      return SQLITE_OK;
+    });
+  },
   .xShmBarrier = [](sqlite3_file*) noexcept -> void {
-  // I don't quite get why this is virtualized. The native implementation does
-  // __sync_synchronize() (equivalent to below, I think) and also "for redundancy" locks and
-  // unlocks a mutex.
-  std::atomic_thread_fence(std::memory_order_acq_rel);
-},
+    // I don't quite get why this is virtualized. The native implementation does
+    // __sync_synchronize() (equivalent to below, I think) and also "for redundancy" locks and
+    // unlocks a mutex.
+    std::atomic_thread_fence(std::memory_order_acq_rel);
+  },
   .xShmUnmap = [](sqlite3_file* file, int deleteFlag) noexcept -> int {
-  WRAP_METHOD(SQLITE_OK, {
-    auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xShmMap called on file that isn't main database?");
-    if (deleteFlag) {
-      lock.clearSharedMemory();
-    }
-    return SQLITE_OK;  // return value is ignored by sqlite
-  });
-},
+    WRAP_METHOD(SQLITE_OK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock, "xShmMap called on file that isn't main database?");
+      if (deleteFlag) {
+        lock.clearSharedMemory();
+      }
+      return SQLITE_OK;  // return value is ignored by sqlite
+    });
+  },
 
   .xFetch = [](sqlite3_file* file, sqlite3_int64 iOfst, int iAmt, void** pp) noexcept -> int {
-  // This is essentially requesting an mmap(). kj::File supports mmap(). Great, right?
-  //
-  // Well, there's a problem. We mostly use this VFS implementation to wrap an in-memory
-  // `kj::File`. Such files support mmap by returning a pointer into the backing store. But
-  // while such a mapping exists, the backing store cannot be resized. So write()s that extend
-  // the file may fail. This does not work for SQLite's use case.
-  //
-  // So, alas, we must act like we don't support this. Luckily, SQLite has fallbacks for this.
-  *pp = nullptr;
-  return SQLITE_OK;
-},
+    // This is essentially requesting an mmap(). kj::File supports mmap(). Great, right?
+    //
+    // Well, there's a problem. We mostly use this VFS implementation to wrap an in-memory
+    // `kj::File`. Such files support mmap by returning a pointer into the backing store. But
+    // while such a mapping exists, the backing store cannot be resized. So write()s that extend
+    // the file may fail. This does not work for SQLite's use case.
+    //
+    // So, alas, we must act like we don't support this. Luckily, SQLite has fallbacks for this.
+    *pp = nullptr;
+    return SQLITE_OK;
+  },
   .xUnfetch = [](sqlite3_file* file, sqlite3_int64 iOfst, void* p) noexcept -> int {
-  // Shouldn't ever be called since xFetch() always produces null? But the native implementation
-  // return SQLITE_OK even when mmap is disabled so we will too.
-  return SQLITE_OK;
-},
+    // Shouldn't ever be called since xFetch() always produces null? But the native implementation
+    // return SQLITE_OK even when mmap is disabled so we will too.
+    return SQLITE_OK;
+  },
 #undef WRAP_METHOD
 };
 
@@ -2027,16 +2129,18 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
   return {
     .iVersion = kj::min(3, native.iVersion), .szOsFile = sizeof(FileImpl),
 
-    .mxPathname = 512,
     // We have no real limit on paths but SQLite likes to allocate buffers of this size whenever
-        // doing path stuff so making it huge would be bad. The default unix implementation uses
-        // 512 as a limit so that "should be enough for anyone".
+    // doing path stuff so making it huge would be bad. The default unix implementation uses
+    // 512 as a limit so that "should be enough for anyone".
+    .mxPathname = 512,
 
-        .pNext = nullptr, .zName = name.cStr(), .pAppData = this,
+    .pNext = nullptr,
+    .zName = name.cStr(),
+    .pAppData = this,
 
 #define WRAP_METHOD(errorCode, block)                                                              \
   auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);                  \
-  try block catch (kj::Exception & e) {                                                            \
+  try block catch (kj::Exception& e) {                                                             \
     KJ_LOG(ERROR, "SQLite VFS I/O error", e);                                                      \
     return errorCode;                                                                              \
   }
@@ -2134,22 +2238,31 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
       return SQLITE_OK;
     },
 
-    .xDlOpen = nullptr, .xDlError = nullptr, .xDlSym = nullptr, .xDlClose = nullptr,
     // We don't support loading shared libraries from virtual files.
+    .xDlOpen = nullptr,
+    .xDlError = nullptr,
+    .xDlSym = nullptr,
+    .xDlClose = nullptr,
 
-        .xRandomness = native.xRandomness, .xSleep = native.xSleep,
-    .xCurrentTime = native.xCurrentTime, .xGetLastError = nullptr,
-    .xCurrentTimeInt64 = native.xCurrentTimeInt64,
     // Use native implementations of these OS functions. I'm not sure why these are even part
-        // of the VFS. (Exception: xGetLastError is actually sensibly a VFS thing, but we are allowed
-        // to just not implement it.)
+    // of the VFS. (Exception: xGetLastError is actually sensibly a VFS thing, but we are allowed
+    // to just not implement it.)
+    .xRandomness = native.xRandomness,
+    .xSleep = native.xSleep,
+    .xCurrentTime = native.xCurrentTime,
+    .xGetLastError = nullptr,
+    .xCurrentTimeInt64 = native.xCurrentTimeInt64,
 
-        .xSetSystemCall = nullptr, .xGetSystemCall = nullptr, .xNextSystemCall = nullptr,
     // We don't support overriding any syscalls.
+    .xSetSystemCall = nullptr,
+    .xGetSystemCall = nullptr,
+    .xNextSystemCall = nullptr,
 
 #undef WRAP_METHOD
   };
 };
+
+// clang-format on
 
 // -----------------------------------------------------------------------------
 
@@ -2326,7 +2439,7 @@ class SqliteDatabase::Vfs::DefaultLockManager final: public SqliteDatabase::Lock
       auto slock = state->guarded.lockExclusive();
 
       for (uint i = start; i < start + count; i++) {
-        if (slock->walLocks[i] == (uint)kj::maxValue) {
+        if (slock->walLocks[i] == static_cast<uint>(kj::maxValue)) {
           // blocked by exclusive lock
           return false;
         }

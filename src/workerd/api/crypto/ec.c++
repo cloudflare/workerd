@@ -93,6 +93,10 @@ jsg::BufferSource Ec::getRawPublicKey(jsg::Lock& js) const {
 
   // Serialize the public key as an uncompressed point in X9.62 form.
   uint8_t* raw;
+  // The caller takes ownership of the buffer and, unless the buffer was fixed with CBB_init_fixed,
+  // must call OPENSSL_free when done.
+  // https://commondatastorage.googleapis.com/chromium-boringssl-docs/bytestring.h.html#CBB_finish
+  KJ_DEFER(if (raw != nullptr) { OPENSSL_free(raw); });
   size_t raw_len;
   CBB cbb;
 
@@ -228,7 +232,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 
     kj::Vector<kj::byte> sharedSecret;
     sharedSecret.resize(
-        integerCeilDivision<std::make_unsigned<decltype(fieldSize)>::type>(fieldSize, 8u));
+        integerCeilDivision<std::make_unsigned_t<decltype(fieldSize)>>(fieldSize, 8u));
     auto written = ECDH_compute_key(sharedSecret.begin(), sharedSecret.capacity(),
         publicEcKey.getPublicKey(), privateEcKey.getKey(), nullptr);
     JSG_REQUIRE(written > 0, DOMOperationError, "Failed to generate shared ECDH secret",
@@ -270,9 +274,10 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
     // The pattern seems pretty clearly ~(2^n - 1) where n is the number of bits to mask off. Let's
     // check the last one though (8 is not a possible boundary condition).
     // (2^7 - 1) = 0x7f => ~0x7f = 0x80 (when truncated to a byte)
-    uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
-
-    sharedSecret.back() &= mask;
+    if (numBitsToMaskOff) {
+      uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
+      sharedSecret.back() &= mask;
+    }
 
     auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sharedSecret.size());
     backing.asArrayPtr().copyFrom(sharedSecret);
@@ -385,7 +390,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
     return jsg::BufferSource(js, kj::mv(result));
   }
 
-  static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateElliptic(
+  static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateElliptic(jsg::Lock& js,
       kj::StringPtr normalizedName,
       SubtleCrypto::GenerateKeyAlgorithm&& algorithm,
       bool extractable,
@@ -446,7 +451,7 @@ EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
   return iter->second;
 }
 
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
+kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg::Lock& js,
     kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm,
     bool extractable,
@@ -493,10 +498,10 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
     .usages = publicKeyUsages,
   };
 
-  auto privateKey = jsg::alloc<CryptoKey>(
+  auto privateKey = js.alloc<CryptoKey>(
       kj::heap<EllipticKey>(kj::mv(privateKeyData), keyAlgorithm, rsSize, extractable));
-  auto publicKey = jsg::alloc<CryptoKey>(
-      kj::heap<EllipticKey>(kj::mv(publicKeyData), keyAlgorithm, rsSize, true));
+  auto publicKey =
+      js.alloc<CryptoKey>(kj::heap<EllipticKey>(kj::mv(publicKeyData), keyAlgorithm, rsSize, true));
 
   return CryptoKeyPair{.publicKey = kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
@@ -644,8 +649,12 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
       internalDescribeOpensslErrors());
 
   auto point = OSSL_NEW(EC_POINT, group);
-  OSSLCALL(EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr));
-  OSSLCALL(EC_KEY_set_public_key(ecKey, point));
+  JSG_REQUIRE(1 == EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr),
+      DOMOperationError, "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
+      tryDescribeOpensslErrors());
+  JSG_REQUIRE(1 == EC_KEY_set_public_key(ecKey, point), DOMOperationError,
+      "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
+      tryDescribeOpensslErrors());
 
   if (keyDataJwk.d != kj::none) {
     // This is a private key.
@@ -656,11 +665,15 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
     auto bigD = JSG_REQUIRE_NONNULL(toBignum(d), InternalDOMOperationError,
         "Error importing EC key", internalDescribeOpensslErrors());
 
-    OSSLCALL(EC_KEY_set_private_key(ecKey, bigD));
+    JSG_REQUIRE(1 == EC_KEY_set_private_key(ecKey, bigD), DOMOperationError,
+        "Invalid EC key; "
+        "private key component \"d\" is invalid",
+        tryDescribeOpensslErrors());
   }
 
   auto evpPkey = OSSL_NEW(EVP_PKEY);
-  OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
+  JSG_REQUIRE(1 == EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()), DOMOperationError,
+      "Error importing EC key", tryDescribeOpensslErrors());
   return evpPkey;
 }
 }  // namespace
@@ -676,7 +689,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdsa(jsg
   auto publicKeyUsages = usages & CryptoKeyUsageSet::publicKeyMask();
 
   return EllipticKey::generateElliptic(
-      normalizedName, kj::mv(algorithm), extractable, privateKeyUsages, publicKeyUsages);
+      js, normalizedName, kj::mv(algorithm), extractable, privateKeyUsages, publicKeyUsages);
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
@@ -733,7 +746,8 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdh(jsg:
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages = CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate,
       keyUsages, CryptoKeyUsageSet::derivationKeyMask());
-  return EllipticKey::generateElliptic(normalizedName, kj::mv(algorithm), extractable, usages, {});
+  return EllipticKey::generateElliptic(
+      js, normalizedName, kj::mv(algorithm), extractable, usages, {});
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
@@ -803,7 +817,8 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
       : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
-  static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKey(kj::StringPtr normalizedName,
+  static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKey(jsg::Lock& js,
+      kj::StringPtr normalizedName,
       int nid,
       CryptoKeyUsageSet privateKeyUsages,
       CryptoKeyUsageSet publicKeyUsages,
@@ -852,13 +867,12 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
 
     JSG_REQUIRE(1 == EVP_DigestSignInit(digestCtx.get(), nullptr, nullptr, nullptr, getEvpPkey()),
-        InternalDOMOperationError, "Failed to initialize Ed25519 signing digest",
-        internalDescribeOpensslErrors());
+        DOMOperationError, "Failed to initialize Ed25519 signing digest",
+        tryDescribeOpensslErrors());
     JSG_REQUIRE(1 ==
             EVP_DigestSign(digestCtx.get(), signature.asArrayPtr().begin(), &signatureLength,
                 data.begin(), data.size()),
-        InternalDOMOperationError, "Failed to sign with Ed25119 key",
-        internalDescribeOpensslErrors());
+        DOMOperationError, "Failed to sign with Ed25119 key", tryDescribeOpensslErrors());
 
     JSG_REQUIRE(signatureLength == signature.size(), InternalDOMOperationError,
         "Unexpected change in size signing Ed25519", signatureLength);
@@ -883,8 +897,8 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
     JSG_REQUIRE(1 == EVP_DigestSignInit(digestCtx.get(), nullptr, nullptr, nullptr, getEvpPkey()),
-        InternalDOMOperationError, "Failed to initialize Ed25519 verification digest",
-        internalDescribeOpensslErrors());
+        DOMOperationError, "Failed to initialize Ed25519 verification digest",
+        tryDescribeOpensslErrors());
 
     auto result = EVP_DigestVerify(
         digestCtx.get(), signature.begin(), signature.size(), data.begin(), data.size());
@@ -963,8 +977,11 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     sharedSecret.truncate(resultByteLength);
     auto numBitsToMaskOff = resultByteLength * 8 - outputBitLength;
     KJ_DASSERT(numBitsToMaskOff < 8, numBitsToMaskOff);
-    uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
-    sharedSecret.back() &= mask;
+
+    if (numBitsToMaskOff) {
+      uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
+      sharedSecret.back() &= mask;
+    }
 
     auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sharedSecret.size());
     backing.asArrayPtr().copyFrom(sharedSecret);
@@ -1048,7 +1065,8 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 };
 
 template <size_t keySize, void (*KeypairInit)(uint8_t[keySize], uint8_t[keySize * 2])>
-CryptoKeyPair generateKeyImpl(kj::StringPtr normalizedName,
+CryptoKeyPair generateKeyImpl(jsg::Lock& js,
+    kj::StringPtr normalizedName,
     int nid,
     CryptoKeyUsageSet privateKeyUsages,
     CryptoKeyUsageSet publicKeyUsages,
@@ -1080,15 +1098,16 @@ CryptoKeyPair generateKeyImpl(kj::StringPtr normalizedName,
     .usages = publicKeyUsages,
   };
 
-  auto privateKey = jsg::alloc<CryptoKey>(
+  auto privateKey = js.alloc<CryptoKey>(
       kj::heap<EdDsaKey>(kj::mv(privateKeyData), normalizedName, extractablePrivateKey));
   auto publicKey =
-      jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicKeyData), normalizedName, true));
+      js.alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicKeyData), normalizedName, true));
 
   return CryptoKeyPair{.publicKey = kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
 
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(kj::StringPtr normalizedName,
+kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(jsg::Lock& js,
+    kj::StringPtr normalizedName,
     int nid,
     CryptoKeyUsageSet privateKeyUsages,
     CryptoKeyUsageSet publicKeyUsages,
@@ -1096,10 +1115,10 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(kj::StringPt
   switch (nid) {
     // BoringSSL doesn't support ED448/X448.
     case NID_ED25519:
-      return generateKeyImpl<ED25519_PUBLIC_KEY_LEN, ED25519_keypair>(normalizedName, nid,
+      return generateKeyImpl<ED25519_PUBLIC_KEY_LEN, ED25519_keypair>(js, normalizedName, nid,
           privateKeyUsages, publicKeyUsages, extractablePrivateKey, "Ed25519"_kj);
     case NID_X25519:
-      return generateKeyImpl<X25519_PUBLIC_VALUE_LEN, X25519_keypair>(normalizedName, nid,
+      return generateKeyImpl<X25519_PUBLIC_VALUE_LEN, X25519_keypair>(js, normalizedName, nid,
           privateKeyUsages, publicKeyUsages, extractablePrivateKey, "X25519"_kj);
   }
 
@@ -1127,7 +1146,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEddsa(jsg
         "\" isn't supported.");
   }
 
-  return EdDsaKey::generateKey(normalizedName,
+  return EdDsaKey::generateKey(js, normalizedName,
       normalizedName == "X25519" ? NID_X25519 : NID_ED25519, privateKeyUsages, publicKeyUsages,
       extractable);
 }

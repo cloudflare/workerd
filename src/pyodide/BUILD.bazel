@@ -1,68 +1,66 @@
-load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
-load("//:build/capnp_embed.bzl", "capnp_embed")
-load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
-load(":helpers.bzl", "copy_and_capnp_embed", "copy_to_generated", "python_bundle")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_python//python:defs.bzl", "py_test")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+load(":helpers.bzl", "pyodide_extra", "pyodide_static", "python_bundles")
 
-copy_and_capnp_embed("python-entrypoint.js")
+pyodide_extra()
 
-copy_to_generated(
-    "pyodide_extra.capnp",
-    out_name = "pyodide_extra_tmpl.capnp",
-)
+python_bundles()
 
-expand_template(
-    name = "pyodide_extra_expand_template@rule",
-    out = "generated/pyodide_extra.capnp",
-    substitutions = {
-        "%PACKAGE_LOCKS": ",".join([
-            "(packageDate = \"" + package_date + "\", lock = embed \"pyodide-lock_" + package_date + ".json\")"
-            for package_date in PYTHON_LOCKFILES.keys()
-        ]),
-    },
-    template = "generated/pyodide_extra_tmpl.capnp",
-)
+pyodide_static()
 
-capnp_embed(
-    name = "pyodide_extra_file_embed",
-    src = "generated/pyodide_extra.capnp",
-    deps = ["pyodide_extra_expand_template@rule"],
-)
-
-[
-    copy_and_capnp_embed("@pyodide-lock_" + package_date + ".json//file")
-    for package_date in PYTHON_LOCKFILES
-]
-
-cc_capnp_library(
-    name = "pyodide_extra_capnp",
-    srcs = ["generated/pyodide_extra.capnp"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":pyodide_extra_file_embed",
-        ":python-entrypoint.js@capnp",
-    ] + [
-        ":pyodide-lock_" + package_date + ".json@capnp"
-        for package_date in PYTHON_LOCKFILES.keys()
-    ],
-)
-
-python_bundle("0.26.0a2")
+DEV_VERSION = BUNDLE_VERSION_INFO["development"]["real_pyodide_version"]
 
 alias(
     name = "pyodide.capnp.bin",
-    actual = "pyodide.capnp.bin@rule@0.26.0a2",
+    actual = "pyodide.capnp.bin@rule@" + DEV_VERSION,
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_embed(
+    name = "python-entrypoint",
+    src = "python-entrypoint.js",
+    base_name = "python-entrypoint",
+    visibility = ["//visibility:public"],
+)
+
+# In case we have a runner which doesn't support building pyodide.capnp.bin we
+# want to use a pre-built/cross-compiled artifact. This is just a bazel alias
+# serving as a redirect when referenced by other targets instead of changing
+# the output filename.
+alias(
+    name = "pyodide.capnp.bin_cross",
+    actual = select({
+        "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/pyodide/pyodide.capnp.bin.aarch64-linux-gnu",
+        "//conditions:default": "pyodide.capnp.bin",
+    }),
     visibility = ["//visibility:public"],
 )
 
 alias(
     name = "pyodide.capnp.bin@rule",
-    actual = "pyodide.capnp.bin@rule@0.26.0a2",
+    actual = "pyodide.capnp.bin@rule@" + DEV_VERSION,
     visibility = ["//visibility:public"],
 )
 
 alias(
     name = "pyodide",
-    actual = "pyodide@0.26.0a2",
+    actual = "pyodide@" + DEV_VERSION,
     visibility = ["//visibility:public"],
+)
+
+write_file(
+    name = "bundle_version_info",
+    out = "bundle_version_info.json",
+    content = [json.encode(BUNDLE_VERSION_INFO)],
+)
+
+py_test(
+    name = "unit-test-introspection",
+    srcs = [
+        "internal/introspection.py",
+        "internal/test_introspection.py",
+    ] + glob(["internal/workers-api/src/workers/*"]),
+    main = "internal/test_introspection.py",
 )

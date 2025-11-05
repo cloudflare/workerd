@@ -1,80 +1,36 @@
-load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
-load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYTHON_IMPORTS_TO_TEST", "PYTHON_LOCKFILES")
-load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests", "gen_rust_import_tests")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 
-# pyodide_dev.capnp.bin represents a custom pyodide version "dev" that is generated
-# at build time using the latest contents of the src/pyodide directory.
-# This is used to run tests to ensure that they are always run against the latest build of
-# the Pyodide bundle.
-copy_file(
-    name = "pyodide_dev.capnp.bin@rule",
-    src = "//src/pyodide:pyodide.capnp.bin",
-    out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
-    visibility = ["//visibility:public"],
-)
+python_test_setup()
 
 py_wd_test("hello")
 
 py_wd_test("env-param")
 
-py_wd_test(
-    "asgi",
-    # TODO: investigate failure!
-    make_snapshot = False,
-    skip_python_flags = ["0.27.1"],
-)
+py_wd_test("asgi")
+
+py_wd_test("asgi-sse")
 
 py_wd_test("random")
 
 py_wd_test("subdirectory")
 
-py_wd_test(
-    "sdk",
-    tags = [
-        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
-        "no-asan",
-    ],
-)
+py_wd_test("sdk")
 
 py_wd_test("seek-metadatafs")
 
-[
-    gen_import_tests(
-        PYTHON_IMPORTS_TO_TEST[info["packages"]],
-        python_version,
-        # TODO: Micropip version mismatch for 0.27.0
-        #
-        # TODO: The packages below don't currently work in the latest package/python versions. Need
-        # to fix them.
-        #
-        # TODO: pydantic_core started to fail with "no module named typing_extensions" after 0.27.1
-        # was rebuilt and backport bumped.
-        pkg_skip_versions = {
-            "0.27.1": [
-                "cryptography",  # top-level entropy
-                "soupsieve",  # Circular dependency with beautifulsoup4
-                "starlette",  # No module named 'starlette.converters'
-                # requests and dependencies have an ssl problem
-                "langchain-core",
-                "langchain_openai",
-                "langsmith",
-                "requests",
-                # aiohttp has same ssl problem
-                "aiohttp",
-            ],
-        },
-    )
-    for python_version, info in BUNDLE_VERSION_INFO.items()
-]
-
-py_wd_test(
-    "undefined-handler",
-    tags = [
-        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
-        "no-asan",
-    ],
+gen_import_tests(
+    pkg_skip_versions = {
+        "0.28.2": [
+            "micropip",  # missing lockfile
+            "soupsieve",  # Circular dependency with beautifulsoup4
+        ],
+    },
 )
+
+gen_rust_import_tests()
+
+py_wd_test("undefined-handler")
 
 py_wd_test("vendor_dir")
 
@@ -83,3 +39,40 @@ py_wd_test("dont-snapshot-pyodide")
 py_wd_test("filter-non-py-files")
 
 py_wd_test("durable-object")
+
+py_wd_test("worker-entrypoint")
+
+py_wd_test(
+    "jspi",
+    skip_python_flags = ["0.26.0a2"],
+)
+
+py_wd_test("js-import")
+
+py_wd_test(
+    "importable-env",
+    # TODO: why doesn't dedicated snapshot work with this?
+    use_snapshot = None,
+)
+
+py_wd_test("python-rpc")
+
+py_wd_test("workflow-entrypoint")
+
+py_wd_test("vendor_dir_compat_flag")
+
+py_wd_test("multiprocessing")
+
+py_wd_test("default-class-with-legacy-global-handlers")
+
+py_wd_test(
+    "fastapi",
+    make_snapshot = False,
+    use_snapshot = "fastapi",
+)
+
+py_wd_test(
+    "numpy",
+    make_snapshot = False,
+    use_snapshot = "numpy",
+)

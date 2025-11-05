@@ -1,0 +1,687 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "assert-test.wd-test",
+    args = ["--experimental"],
+    data = ["assert-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "buffer-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["buffer-nodejs-test.js"],
+)
+
+wd_test(
+    src = "cluster-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["cluster-nodejs-test.js"],
+)
+
+wd_test(
+    src = "child_process-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["child_process-nodejs-test.js"],
+)
+
+wd_test(
+    src = "console-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["console-nodejs-test.js"],
+)
+
+wd_test(
+    size = "enormous",
+    src = "crypto_dh-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_dh-test.js"],
+)
+
+wd_test(
+    src = "crypto_hash-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_hash-test.js"],
+)
+
+wd_test(
+    src = "crypto_hkdf-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_hkdf-test.js"],
+)
+
+wd_test(
+    src = "crypto_hmac-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_hmac-test.js"],
+)
+
+wd_test(
+    src = "crypto_keys-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto_keys-test.js",
+        "fixtures/agent1-cert.pem",
+        "fixtures/dh_private.pem",
+        "fixtures/dh_public.pem",
+        "fixtures/dsa_private.pem",
+        "fixtures/dsa_private_1025.pem",
+        "fixtures/dsa_private_encrypted.pem",
+        "fixtures/dsa_private_encrypted_1025.pem",
+        "fixtures/dsa_private_pkcs8.pem",
+        "fixtures/dsa_public.pem",
+        "fixtures/dsa_public_1025.pem",
+        "fixtures/ec_p256_private.pem",
+        "fixtures/ec_p256_public.pem",
+        "fixtures/ec_p384_private.pem",
+        "fixtures/ec_p384_public.pem",
+        "fixtures/ec_p521_private.pem",
+        "fixtures/ec_p521_public.pem",
+        "fixtures/ec_secp256k1_private.pem",
+        "fixtures/ec_secp256k1_public.pem",
+        "fixtures/ed25519_private.pem",
+        "fixtures/ed25519_public.pem",
+        "fixtures/ed448_private.pem",
+        "fixtures/ed448_public.pem",
+        "fixtures/rsa_private.pem",
+        "fixtures/rsa_private_2048.pem",
+        "fixtures/rsa_private_4096.pem",
+        "fixtures/rsa_private_b.pem",
+        "fixtures/rsa_private_encrypted.pem",
+        "fixtures/rsa_private_pkcs8.pem",
+        "fixtures/rsa_private_pkcs8_bad.pem",
+        "fixtures/rsa_pss_private_2048.pem",
+        "fixtures/rsa_pss_private_2048_sha1_sha1_20.pem",
+        "fixtures/rsa_pss_private_2048_sha256_sha256_16.pem",
+        "fixtures/rsa_pss_private_2048_sha512_sha256_20.pem",
+        "fixtures/rsa_pss_public_2048.pem",
+        "fixtures/rsa_pss_public_2048_sha1_sha1_20.pem",
+        "fixtures/rsa_pss_public_2048_sha256_sha256_16.pem",
+        "fixtures/rsa_pss_public_2048_sha512_sha256_20.pem",
+        "fixtures/rsa_public.pem",
+        "fixtures/rsa_public_2048.pem",
+        "fixtures/rsa_public_4096.pem",
+        "fixtures/rsa_public_b.pem",
+        "fixtures/x25519_private.pem",
+        "fixtures/x25519_public.pem",
+        "fixtures/x448_private.pem",
+        "fixtures/x448_public.pem",
+    ],
+)
+
+wd_test(
+    src = "crypto_pbkdf2-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_pbkdf2-test.js"],
+)
+
+wd_test(
+    src = "crypto_random-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_random-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "crypto_scrypt-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_scrypt-test.js"],
+)
+
+wd_test(
+    src = "crypto_spkac-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_spkac-test.js"],
+)
+
+wd_test(
+    src = "crypto_x509-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_x509-test.js"],
+)
+
+wd_test(
+    src = "diagnostics-channel-test.wd-test",
+    args = ["--experimental"],
+    data = ["diagnostics-channel-test.js"],
+)
+
+wd_test(
+    src = "mimetype-test.wd-test",
+    args = ["--experimental"],
+    data = ["mimetype-test.js"],
+)
+
+wd_test(
+    src = "node-compat-v2-test.wd-test",
+    args = ["--experimental"],
+    data = ["node-compat-v2-test.js"],
+)
+
+wd_test(
+    src = "perf-hooks-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["perf-hooks-nodejs-test.js"],
+)
+
+wd_test(
+    src = "path-test.wd-test",
+    args = ["--experimental"],
+    data = ["path-test.js"],
+)
+
+wd_test(
+    src = "punycode-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["punycode-nodejs-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-test.js"],
+)
+
+wd_test(
+    src = "string-decoder-test.wd-test",
+    args = ["--experimental"],
+    data = ["string-decoder-test.js"],
+)
+
+wd_test(
+    src = "url-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["url-nodejs-test.js"],
+)
+
+wd_test(
+    src = "util-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["util-nodejs-test.js"],
+)
+
+wd_test(
+    src = "sys-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["sys-nodejs-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "zlib-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-nodejs-test.js"],
+)
+
+wd_test(
+    src = "module-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-nodejs-test.js"],
+)
+
+wd_test(
+    src = "module-create-require-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-create-require-test.js"],
+)
+
+wd_test(
+    src = "process-exit-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-exit-test.js"],
+)
+
+wd_test(
+    src = "process-nodejs-test.wd-test",
+    data = ["process-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-legacy-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-legacy-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-stdio-nodejs-test.wd-test",
+    data = ["process-stdio-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-stdio-fs-nodejs-test.wd-test",
+    data = ["process-stdio-fs-nodejs-test.js"],
+)
+
+sh_test(
+    name = "process-stdio-sh-test",
+    srcs = ["test_process_stdio.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location process-stdio-nodejs-test.wd-test)",
+        "$(location process-stdio-nodejs-test.expected_stdout)",
+        "$(location process-stdio-nodejs-test.expected_stderr)",
+    ],
+    data = [
+        "process-stdio-nodejs-test.expected_stderr",
+        "process-stdio-nodejs-test.expected_stdout",
+        "process-stdio-nodejs-test.js",
+        "process-stdio-nodejs-test.wd-test",
+        "//src/workerd/server:workerd_cross",
+    ],
+)
+
+sh_test(
+    name = "process-stdio-fs-sh-test",
+    srcs = ["test_process_stdio.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location process-stdio-fs-nodejs-test.wd-test)",
+        "$(location process-stdio-fs-nodejs-test.expected_stdout)",
+        "$(location process-stdio-fs-nodejs-test.expected_stderr)",
+    ],
+    data = [
+        "process-stdio-fs-nodejs-test.expected_stderr",
+        "process-stdio-fs-nodejs-test.expected_stdout",
+        "process-stdio-fs-nodejs-test.js",
+        "process-stdio-fs-nodejs-test.wd-test",
+        "//src/workerd/server:workerd_cross",
+    ],
+)
+
+wd_test(
+    src = "querystring-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["querystring-nodejs-test.js"],
+)
+
+wd_test(
+    src = "readline-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["readline-nodejs-test.js"],
+)
+
+wd_test(
+    src = "repl-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["repl-nodejs-test.js"],
+)
+
+wd_test(
+    src = "sqlite-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["sqlite-nodejs-test.js"],
+)
+
+config_setting(
+    name = "debug_build",
+    values = {"compilation_mode": "dbg"},
+)
+
+wd_test(
+    size = "large",
+    src = "legacy_url-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["legacy_url-nodejs-test.js"],
+    target_compatible_with = select({
+        ":debug_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+wd_test(
+    src = "dns-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["dns-nodejs-test.js"],
+    tags = ["requires-network"],
+)
+
+js_binary(
+    name = "net-nodejs-tcp-server",
+    entry_point = "net-nodejs-tcp-server.js",
+)
+
+wd_test(
+    size = "large",
+    src = "net-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["net-nodejs-test.js"],
+    sidecar = "net-nodejs-tcp-server",
+    sidecar_port_bindings = [
+        "SERVER_PORT",
+        "ECHO_SERVER_PORT",
+        "TIMEOUT_SERVER_PORT",
+        "END_SERVER_PORT",
+        "SERVER_THAT_DIES_PORT",
+        "RECONNECT_SERVER_PORT",
+    ],
+)
+
+wd_test(
+    src = "timers-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["timers-nodejs-test.js"],
+)
+
+wd_test(
+    src = "async_hooks-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["async_hooks-nodejs-test.js"],
+)
+
+wd_test(
+    src = "crypto_sign-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto_sign-test.js",
+        "fixtures/dsa_private.pem",
+        "fixtures/dsa_public.pem",
+        "fixtures/ed25519_private.pem",
+        "fixtures/ed25519_public.pem",
+        "fixtures/rsa_private.pem",
+        "fixtures/rsa_public.pem",
+    ],
+)
+
+wd_test(
+    src = "crypto_cipher-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto_cipher-test.js",
+        "fixtures/ed25519_private.pem",
+        "fixtures/ed25519_public.pem",
+        "fixtures/rsa_private.pem",
+        "fixtures/rsa_public.pem",
+    ],
+)
+
+js_binary(
+    name = "tls-nodejs-tcp-server",
+    entry_point = "tls-nodejs-tcp-server.js",
+)
+
+wd_test(
+    size = "large",
+    src = "tls-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "fixtures/tls-nodejs-tcp-server.pem",
+        "tls-nodejs-test.js",
+    ],
+    sidecar = "tls-nodejs-tcp-server",
+    sidecar_port_bindings = [
+        "ECHO_SERVER_PORT",
+        "HELLO_SERVER_PORT",
+        "JS_STREAM_SERVER_PORT",
+        "STREAM_WRAP_SERVER_PORT",
+    ],
+    sidecar_randomize_ip = False,
+)
+
+wd_test(
+    src = "streams-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-nodejs-test.js"],
+)
+
+js_binary(
+    name = "http-nodejs-server",
+    entry_point = "http-nodejs-server.js",
+)
+
+wd_test(
+    src = "http-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-nodejs-test.js"],
+    sidecar = "http-nodejs-server",
+    sidecar_port_bindings = [
+        "PONG_SERVER_PORT",
+        "ASD_SERVER_PORT",
+        "TIMEOUT_SERVER_PORT",
+        "HELLO_WORLD_SERVER_PORT",
+        "HEADER_VALIDATION_SERVER_PORT",
+    ],
+    tags = ["requires-network"],
+)
+
+js_binary(
+    name = "http-outgoing-nodejs-server",
+    entry_point = "http-outgoing-nodejs-server.js",
+)
+
+wd_test(
+    src = "http-outgoing-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-outgoing-nodejs-test.js"],
+    sidecar = "http-outgoing-nodejs-server",
+    sidecar_port_bindings = [
+        "FINISH_WRITABLE_PORT",
+        "WRITABLE_FINISHED_PORT",
+        "PROPERTIES_PORT",
+    ],
+)
+
+wd_test(
+    src = "http-incoming-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-incoming-nodejs-test.js"],
+)
+
+js_binary(
+    name = "http-client-nodejs-server",
+    entry_point = "http-client-nodejs-server.js",
+)
+
+wd_test(
+    src = "http-client-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-client-nodejs-test.js"],
+    sidecar = "http-client-nodejs-server",
+    sidecar_port_bindings = [
+        "PONG_SERVER_PORT",
+        "ASD_SERVER_PORT",
+        "DEFAULT_HEADERS_EXIST_PORT",
+        "REQUEST_ARGUMENTS_PORT",
+        "HELLO_WORLD_SERVER_PORT",
+    ],
+)
+
+js_binary(
+    name = "http-server-nodejs-server",
+    entry_point = "http-server-nodejs-server.js",
+)
+
+wd_test(
+    src = "http-server-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-server-nodejs-test.js"],
+    sidecar = "http-server-nodejs-server",
+    sidecar_port_bindings = [
+        "PONG_SERVER_PORT",
+    ],
+)
+
+js_binary(
+    name = "http-agent-nodejs-server",
+    entry_point = "http-agent-nodejs-server.js",
+)
+
+wd_test(
+    src = "http-agent-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-agent-nodejs-test.js"],
+    sidecar = "http-agent-nodejs-server",
+    sidecar_port_bindings = [
+        "PONG_SERVER_PORT",
+    ],
+)
+
+wd_test(
+    src = "bound-als-test.wd-test",
+    args = ["--experimental"],
+    data = ["bound-als-test.js"],
+)
+
+wd_test(
+    src = "fs-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-nodejs-test.js"],
+)
+
+wd_test(
+    src = "fs-access-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-access-test.js"],
+)
+
+wd_test(
+    src = "fs-chown-chmod-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-chown-chmod-test.js"],
+)
+
+wd_test(
+    src = "fs-utimes-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-utimes-test.js"],
+)
+
+wd_test(
+    src = "fs-stat-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-stat-test.js"],
+)
+
+wd_test(
+    src = "fs-misc-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-misc-test.js"],
+)
+
+wd_test(
+    src = "fs-link-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-link-test.js"],
+)
+
+wd_test(
+    src = "fs-dir-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-dir-test.js"],
+)
+
+wd_test(
+    src = "fs-filehandle-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-filehandle-test.js"],
+)
+
+wd_test(
+    src = "fs-glob-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-glob-test.js"],
+)
+
+wd_test(
+    src = "fs-cp-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-cp-test.js"],
+)
+
+wd_test(
+    src = "fs-readstream-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-readstream-test.js"],
+)
+
+wd_test(
+    src = "fs-writestream-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-writestream-test.js"],
+)
+
+wd_test(
+    src = "os-test.wd-test",
+    args = ["--experimental"],
+    data = ["os-test.js"],
+)
+
+wd_test(
+    src = "http-server-nodejs-global-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-server-nodejs-global-test.js"],
+)
+
+wd_test(
+    src = "constants-test.wd-test",
+    args = ["--experimental"],
+    data = ["constants-test.js"],
+)
+
+wd_test(
+    src = "http2-test.wd-test",
+    args = ["--experimental"],
+    data = ["http2-test.js"],
+)
+
+wd_test(
+    src = "inspector-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["inspector-nodejs-test.js"],
+)
+
+wd_test(
+    src = "vm-test.wd-test",
+    args = ["--experimental"],
+    data = ["vm-test.js"],
+)
+
+wd_test(
+    src = "domain-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["domain-nodejs-test.js"],
+)
+
+wd_test(
+    src = "v8-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["v8-nodejs-test.js"],
+)
+
+wd_test(
+    src = "tty-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tty-nodejs-test.js"],
+)
+
+js_binary(
+    name = "sidecar-supervisor",
+    entry_point = "sidecar-supervisor.mjs",
+    visibility = ["//visibility:public"],
+)
+
+wd_test(
+    src = "worker_threads-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker_threads-nodejs-test.js"],
+)
+
+wd_test(
+    src = "wasi-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["wasi-nodejs-test.js"],
+)
+
+wd_test(
+    src = "dgram-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["dgram-nodejs-test.js"],
+)
+
+wd_test(
+    src = "trace-events-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["trace-events-nodejs-test.js"],
+)

@@ -42,7 +42,9 @@ int NoPasswordCallback(char* buf, int size, int rwflag, void* u) {
 kj::String toString(BIO* bio) {
   BUF_MEM* mem;
   BIO_get_mem_ptr(bio, &mem);
-  auto result = kj::heapArray<char>(mem->data, mem->length + 1);
+  auto result = kj::heapArray<char>(mem->length + 1);
+  kj::ArrayPtr<char> data(mem->data, mem->length);
+  result.first(data.size()).copyFrom(data);
   result[result.size() - 1] = '\0';  // NUL-terminate.
   return kj::String(kj::mv(result));
 }
@@ -510,7 +512,8 @@ struct StackOfXASN1Disposer: public kj::Disposer {
 constexpr StackOfXASN1Disposer stackOfXASN1Disposer;
 }  // namespace
 
-kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(kj::Array<const kj::byte> raw) {
+kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(
+    jsg::Lock& js, kj::Array<const kj::byte> raw) {
   ClearErrorOnReturn ClearErrorOnReturn;
   KJ_IF_SOME(bio, loadBio(raw)) {
     auto ptr = PEM_read_bio_X509_AUX(bio.get(), nullptr, NoPasswordCallback, nullptr);
@@ -522,7 +525,7 @@ kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(kj::Array<const kj::
         throwOpensslError(__FILE__, __LINE__, "X509Certificate::parse()");
       }
     }
-    return jsg::alloc<X509Certificate>(ptr);
+    return js.alloc<X509Certificate>(ptr);
   }
   return kj::none;
 }
@@ -659,7 +662,7 @@ kj::Maybe<jsg::Ref<CryptoKey>> X509Certificate::getPublicKey(jsg::Lock& js) {
   auto ptr = X509_get_pubkey(cert_.get());
   if (ptr == nullptr) return kj::none;
   auto pkey = kj::disposeWith<EVP_PKEY_free>(ptr);
-  return jsg::alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey)));
+  return js.alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey)));
 }
 
 kj::Maybe<kj::String> X509Certificate::getPem() {
@@ -837,8 +840,8 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
     obj.set(js, "fingerprint512", js.str(fingerprint512));
   }
   KJ_IF_SOME(keyUsage, getKeyUsage()) {
-    auto values = KJ_MAP(str, keyUsage) { return jsg::JsValue(js.str(str)); };
-    obj.set(js, "ext_key_usage", js.arr(values));
+    obj.set(js, "ext_key_usage",
+        js.arr(keyUsage.asPtr(), [](jsg::Lock& js, const kj::String& val) { return js.str(val); }));
   }
   KJ_IF_SOME(serialNumber, getSerialNumber()) {
     obj.set(js, "serialNumber", js.str(serialNumber));

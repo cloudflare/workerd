@@ -1,9 +1,11 @@
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
+load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
 def _out_name(src):
@@ -17,13 +19,10 @@ def _out_path(name, version):
         res = version + "/" + res
     return res
 
-def _out(src, version):
-    return _out_path(_out_name(src), version)
-
 def _ts_bundle_out(prefix, name, version):
     return ":" + _out_path(prefix + name.removeprefix("internal/").replace("/", "_"), version)
 
-def copy_to_generated(src, version = None, out_name = None, name = None):
+def _copy_to_generated(src, version = None, out_name = None, name = None):
     out_name = out_name or _out_name(src)
     if name == None:
         name = out_name + "@copy"
@@ -31,68 +30,152 @@ def copy_to_generated(src, version = None, out_name = None, name = None):
         name += "@" + version
     copy_file(name = name, src = src, out = _out_path(out_name, version))
 
-def copy_and_capnp_embed(src, version = None, out_name = None):
-    out_name = out_name or _out_name(src)
-    name = out_name + "@capnp"
-    if version:
-        name += "@" + version
-    copy_to_generated(src, out_name = out_name, version = version)
+def _copy_and_capnp_embed(src):
+    out_name = _out_name(src)
+    _copy_to_generated(src)
     capnp_embed(
-        name = name,
-        src = _out_path(out_name, version),
+        name = out_name + "@capnp",
+        src = _out_path(out_name, None),
         deps = [out_name + "@copy"],
     )
 
-def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
+def _fmt_python_snapshot_release(
+        pyodide_version,
+        pyodide_date,
+        packages,
+        backport,
+        baseline_snapshot_hash,
+        flag,
+        **_kwds):
+    content = ", ".join(
+        [
+            'pyodide = "%s"' % pyodide_version,
+            'pyodideRevision = "%s"' % pyodide_date,
+            'packages = "%s"' % packages,
+            "backport = %s" % backport,
+            'baselineSnapshotHash = "%s"' % baseline_snapshot_hash,
+            'flagName = "%s"' % flag,
+        ],
+    )
+    return "(%s)" % content
+
+def pyodide_extra():
+    _copy_to_generated(
+        "pyodide_extra.capnp",
+        out_name = "pyodide_extra_tmpl.capnp",
+    )
+
+    package_tags = [info["tag"] for info in PYTHON_LOCKFILES]
+
+    expand_template(
+        name = "pyodide_extra_expand_template@rule",
+        out = "generated/pyodide_extra.capnp",
+        substitutions = {
+            "%PACKAGE_LOCKS": ",".join(
+                [
+                    '(packageDate = "%s", lock = embed "pyodide-lock_%s.json")' %
+                    (tag, tag)
+                    for tag in package_tags
+                ],
+            ),
+            "%PYTHON_RELEASES": ", ".join(
+                [_fmt_python_snapshot_release(**info) for info in BUNDLE_VERSION_INFO.values()],
+            ),
+        },
+        template = "generated/pyodide_extra_tmpl.capnp",
+    )
+
+    for tag in package_tags:
+        _copy_and_capnp_embed("@pyodide-lock_" + tag + ".json//file")
+
+    cc_capnp_library(
+        name = "pyodide_extra_capnp",
+        srcs = ["generated/pyodide_extra.capnp"],
+        visibility = ["//visibility:public"],
+        deps = [
+        ] + [
+            ":pyodide-lock_%s.json@capnp" % tag
+            for tag in package_tags
+        ],
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
+    )
+
+def python_bundles(overrides = {}):
+    srcs = [_python_bundle_helper(info, overrides) for info in PYODIDE_VERSIONS]
+    native.filegroup(
+        name = "python_bundles",
+        srcs = srcs + [":bundle_version_info"],
+    )
+
+def _python_bundle_helper(info, overrides):
+    version = info["version"]
+    override = overrides.get(version, {})
+    return _python_bundle(version, **override)
+
+def pyodide_static():
+    internal_data_modules = native.glob([
+        "internal/*.py",
+        "internal/workers-api/src/*.py",
+        "internal/workers-api/src/workers/*.py",
+        "internal/patches/*.py",
+        "internal/topLevelEntropy/*.py",
+    ])
+    internal_modules = native.glob(
+        [
+            "internal/*.ts",
+            "internal/topLevelEntropy/*.ts",
+            "types/*.ts",
+            "types/*/*.ts",
+        ],
+    )
+    modules = ["python-entrypoint-helper.ts"]
+
+    wd_ts_bundle(
+        name = "pyodide_static",
+        eslintrc_json = "eslint.config.mjs",
+        import_name = "pyodide",
+        internal_data_modules = internal_data_modules,
+        internal_modules = internal_modules,
+        lint = True,
+        modules = modules,
+        schema_id = "0xdc8d02dfbdf14025",
+        tsconfig_json = "tsconfig.json",
+    )
+
+def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
+    pyodide_package = "@pyodide-%s//" % version
     if not pyodide_asm_wasm:
-        pyodide_asm_wasm = "@pyodide//:pyodide/pyodide.asm.wasm"
+        pyodide_asm_wasm = pyodide_package + ":pyodide/pyodide.asm.wasm"
 
     if not pyodide_asm_js:
-        pyodide_asm_js = "@pyodide//:pyodide/pyodide.asm.js"
+        pyodide_asm_js = pyodide_package + ":pyodide/pyodide.asm.js"
 
     if not python_stdlib_zip:
-        python_stdlib_zip = "@pyodide//:pyodide/python_stdlib.zip"
+        python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
 
-    copy_and_capnp_embed("python-entrypoint.js", version = version)
+    _copy_to_generated(pyodide_asm_wasm, version, out_name = "pyodide.asm.wasm")
 
-    copy_to_generated(pyodide_asm_wasm, version, out_name = "pyodide.asm.wasm")
-
-    copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
+    _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
 
     # pyodide.asm.js patches
     # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
 
     PRELUDE = """
-    import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues } from "pyodide-internal:pool/builtin_wrappers";
-
-    // Pyodide uses `new URL(some_url, location)` to resolve the path in `loadPackage`. Setting
-    // `location = undefined` makes this throw an error if some_url is not an absolute url. Which is what
-    // we want here, it doesn't make sense to load a package from a relative URL.
-    const location = undefined;
-
-    function addEventListener(){}
-
-    function reportUndefinedSymbolsPatched(Module) {
-        if (Module.API.version === "0.26.0a2") {
-            return;
-        }
-        Module.reportUndefinedSymbols(undefined);
-    }
-
-    if (typeof FinalizationRegistry === "undefined") {
-        globalThis.FinalizationRegistry = class FinalizationRegistry {
-            register(){}
-            unregister(){}
-        };
-    }
-
-    function patchDynlibLookup(Module, libName) {
-        try {
-            return Module.FS.readFile("/usr/lib/" + libName);
-        } catch(e) {
-            console.error("Failed to read ", libName, e);
-        }
-    }
+    import {
+        addEventListener,
+        getRandomValues,
+        location,
+        monotonicDateNow,
+        newWasmModule,
+        patchedApplyFunc,
+        patchDynlibLookup,
+        reportUndefinedSymbolsPatched,
+        wasmInstantiate,
+        patched_PyEM_CountFuncParams,
+    } from "pyodide-internal:pool/builtin_wrappers";
     """
 
     REPLACEMENTS = [
@@ -152,6 +235,24 @@ def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, pytho
             "getMemory(",
             "Module.getMemoryPatched(Module, libName, ",
         ],
+        # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
+        [
+            "nullToUndefined(func.apply(",
+            "nullToUndefined(patchedApplyFunc(API, func, ",
+        ],
+        [
+            "nullToUndefined(Function.prototype.apply.apply",
+            "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
+        ],
+        [
+            "function _PyEM_CountFuncParams(func){",
+            "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
+        ],
+        [
+            "var tableBase=metadata.tableSize?wasmTable.length:0;",
+            "var tableBase=metadata.tableSize?wasmTable.length:0;" +
+            "Module.snapshotDebug && console.log('loadWebAssemblyModule', libName, memoryBase, tableBase);",
+        ],
     ]
 
     expand_template(
@@ -168,13 +269,15 @@ def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, pytho
     )
 
     if emscripten_setup_override:
-        copy_to_generated(out_name = "emscriptenSetup.js", name = "emscriptenSetup", src = emscripten_setup_override, version = version)
+        _copy_to_generated(out_name = "emscriptenSetup.js", name = "emscriptenSetup", src = emscripten_setup_override, version = version)
     else:
         esbuild(
             name = "emscriptenSetup@" + version,
+            # exclude emscriptenSetup from source set so that rules_ts won't also try to create a JS output
+            # for it. The file is provided in entry_point instead.
             srcs = native.glob([
                 "internal/pool/*.ts",
-            ]) + [
+            ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
                 _out_path("pyodide.asm.js", version),
                 "internal/util.ts",
             ],
@@ -201,75 +304,34 @@ def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, pytho
             deps = ["pyodide.asm.js@rule_js@" + version],
         )
 
-    INTERNAL_MODULES = native.glob(
-        [
-            "internal/*.ts",
-            "internal/topLevelEntropy/*.ts",
-            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
-            "types/*.ts",
-            "types/*/*.ts",
-        ],
-        allow_empty = True,
-    )
-
-    MODULES = ["python-entrypoint-helper.ts"]
-
-    INTERNAL_DATA_MODULES = native.glob([
-        "internal/*.py",
-        "internal/patches/*.py",
-        "internal/topLevelEntropy/*.py",
-    ]) + [
-        _out_path("python_stdlib.zip", version),
-        _out_path("pyodide.asm.wasm", version),
-        _out_path("emscriptenSetup.js", version),
-    ]
-
-    wd_ts_bundle(
+    import_name = "pyodideRuntime"
+    wd_js_bundle(
         name = "pyodide@" + version,
-        eslintrc_json = "eslint.config.mjs",
-        import_name = "pyodide",
-        internal_data_modules = INTERNAL_DATA_MODULES,
-        internal_modules = INTERNAL_MODULES,
-        js_deps = [
+        import_name = import_name,
+        builtin_modules = [],
+        schema_id = "0xbcc8f57c63814005",
+        internal_data_modules = [
+            _out_path("python_stdlib.zip", version),
+            _out_path("pyodide.asm.wasm", version),
+            _out_path("emscriptenSetup.js", version),
+        ],
+        deps = [
             "emscriptenSetup@" + version,
             "pyodide.asm.wasm@copy@" + version,
             "python_stdlib.zip@copy@" + version,
         ],
-        lint = False,
-        modules = MODULES,
-        schema_id = "0xbcc8f57c63814005",
-        tsconfig_json = "tsconfig.json",
         out_dir = _out_path("", version),
     )
 
+    pyodide_cappn_bin_rule = "pyodide.capnp.bin@rule@" + version
     native.genrule(
-        name = "pyodide.capnp.bin@rule@" + version,
+        name = pyodide_cappn_bin_rule,
         srcs = [
             ":pyodide@%s.capnp" % version,
             "//src/workerd/jsg:modules.capnp",
-        ] + [
-            _ts_bundle_out("pyodide-internal_", m.removesuffix(".ts"), version)
-            for m in INTERNAL_MODULES
-            if not m.endswith(".d.ts")
-        ] + [
-            ":" + _out_path(m.removesuffix(".ts") + ".d.ts", version)
-            for m in INTERNAL_MODULES
-            if not m.endswith(".d.ts") and m.endswith(".ts")
-        ] + [
-            _ts_bundle_out("pyodide_", m.removesuffix(".ts"), version)
-            for m in MODULES
-        ] + [
-            ":" + _out_path(m.removesuffix(".ts") + ".d.ts", version)
-            for m in MODULES
-        ] + [
-            ":" + _out_path("pyodide-" + m.replace("/", "_"), version)
-            for m in INTERNAL_DATA_MODULES
-            if m.endswith(".py")
-        ] + [
-            _ts_bundle_out("pyodide-internal_", "emscriptenSetup.js", version),
-            _ts_bundle_out("pyodide-internal_", "pyodide.asm.wasm", version),
-            _ts_bundle_out("pyodide-internal_", "python_stdlib.zip", version),
+            _ts_bundle_out(import_name + "-internal_", "emscriptenSetup.js", version),
+            _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
+            _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
         ],
         outs = [_out_path("pyodide.capnp.bin", version)],
         cmd = " ".join([
@@ -279,11 +341,16 @@ def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, pytho
             "$(execpath @capnp-cpp//src/capnp:capnp_tool)",
             "eval",
             "$(location :pyodide@%s.capnp)" % version,
-            "pyodideBundle",
+            import_name + "Bundle",
             "-I $$INCLUDE",
             "-o binary",
             "> $@",
         ]),
         tools = ["@capnp-cpp//src/capnp:capnp_tool"],
         visibility = ["//visibility:public"],
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
+    return pyodide_cappn_bin_rule

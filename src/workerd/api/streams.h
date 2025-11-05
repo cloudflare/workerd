@@ -9,7 +9,9 @@
 
 #include "streams/compression.h"
 #include "streams/encoding.h"
+#include "streams/identity-transform-stream.h"
 #include "streams/readable.h"
+#include "streams/standard.h"
 #include "streams/transform.h"
 #include "streams/writable.h"
 

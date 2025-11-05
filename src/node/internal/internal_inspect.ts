@@ -59,7 +59,11 @@ import {
   isBigIntObject,
 } from 'node-internal:internal_types';
 // import { ALL_PROPERTIES, ONLY_ENUMERABLE, getOwnNonIndexProperties } from "node-internal:internal_utils";
-import { validateObject, validateString } from 'node-internal:validators';
+import {
+  validateObject,
+  validateString,
+  kValidateObjectAllowArray,
+} from 'node-internal:validators';
 
 // Simplified assertions to avoid `Assertions require every name in the call target to be
 // declared with an explicit type` TypeScript error
@@ -78,9 +82,9 @@ function isError(e: unknown): e is Error {
 }
 
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array).prototype;
-const typedArrayPrototypeLength: (this: internal.TypedArray) => number =
+const typedArrayPrototypeLength: (this: NodeJS.TypedArray) => number =
   Object.getOwnPropertyDescriptor(typedArrayPrototype, 'length')!.get!;
-const typedArrayPrototypeToStringTag: (this: internal.TypedArray) => string =
+const typedArrayPrototypeToStringTag: (this: NodeJS.TypedArray) => string =
   Object.getOwnPropertyDescriptor(
     typedArrayPrototype,
     Symbol.toStringTag
@@ -450,11 +454,15 @@ const meta = [
 // Adopted from https://github.com/chalk/ansi-regex/blob/HEAD/index.js
 // License: MIT, authors: @sindresorhus, Qix-, arjunmehta and LitoMore
 // Matches all ansi escape code sequences in a string
-const ansiPattern =
+const ansiPattern = new RegExp(
   '[\\u001B\\u009B][[\\]()#;?]*' +
-  '(?:(?:(?:(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]+)*' +
-  '|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)' +
-  '|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))';
+    '(?:(?:(?:(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]+)*' +
+    '|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]*)*)?' +
+    '(?:\\u0007|\\u001B\\u005C|\\u009C))' +
+    '|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?' +
+    '[\\dA-PR-TZcf-nq-uy=><~]))',
+  'g'
+);
 const ansi = new RegExp(ansiPattern, 'g');
 
 interface Context extends Required<InspectOptionsStylized> {
@@ -614,7 +622,8 @@ Object.defineProperty(inspect, 'defaultOptions', {
 // reset code as second entry.
 const defaultFG = 39;
 const defaultBG = 49;
-inspect.colors = {
+const colors: Record<string, [number, number]> = {
+  // @ts-ignore
   __proto__: null,
   reset: [0, 0],
   bold: [1, 22],
@@ -662,6 +671,7 @@ inspect.colors = {
   bgCyanBright: [106, defaultBG],
   bgWhiteBright: [107, defaultBG],
 };
+inspect.colors = colors;
 
 function defineColorAlias(target: string, alias: string) {
   Object.defineProperty(inspect.colors, alias, {
@@ -822,6 +832,29 @@ function isInstanceof(object: unknown, proto: Function): boolean {
   }
 }
 
+// Special-case for some builtin prototypes in case their `constructor` property has been tampered.
+const wellKnownPrototypes = new Map()
+  .set(Array.prototype, { name: 'Array', constructor: Array })
+  .set(ArrayBuffer.prototype, { name: 'ArrayBuffer', constructor: ArrayBuffer })
+  .set(Function.prototype, { name: 'Function', constructor: Function })
+  .set(Map.prototype, { name: 'Map', constructor: Map })
+  .set(Set.prototype, { name: 'Set', constructor: Set })
+  .set(Object.prototype, { name: 'Object', constructor: Object })
+  .set(Object.getPrototypeOf(Uint8Array).prototype, {
+    name: 'TypedArray',
+    constructor: Object.getPrototypeOf(Uint8Array),
+  })
+  .set(RegExp.prototype, { name: 'RegExp', constructor: RegExp })
+  .set(Date.prototype, { name: 'Date', constructor: Date })
+  .set(DataView.prototype, { name: 'DataView', constructor: DataView })
+  .set(Error.prototype, { name: 'Error', constructor: Error })
+  .set(Boolean.prototype, { name: 'Boolean', constructor: Boolean })
+  .set(Number.prototype, { name: 'Number', constructor: Number })
+  .set(String.prototype, { name: 'String', constructor: String })
+  .set(Promise.prototype, { name: 'Promise', constructor: Promise })
+  .set(WeakMap.prototype, { name: 'WeakMap', constructor: WeakMap })
+  .set(WeakSet.prototype, { name: 'WeakSet', constructor: WeakSet });
+
 function getConstructorName(
   obj: object,
   ctx: Context,
@@ -831,6 +864,22 @@ function getConstructorName(
   let firstProto: unknown;
   const tmp = obj;
   while (obj || isUndetectableObject(obj)) {
+    const wellKnownPrototypeNameAndConstructor = wellKnownPrototypes.get(obj);
+    if (wellKnownPrototypeNameAndConstructor !== undefined) {
+      const { name, constructor } = wellKnownPrototypeNameAndConstructor;
+      if (Function.prototype[Symbol.hasInstance].call(constructor, tmp)) {
+        if (protoProps !== undefined && firstProto !== obj) {
+          addPrototypeProperties(
+            ctx,
+            tmp,
+            firstProto || tmp,
+            recurseTimes,
+            protoProps
+          );
+        }
+        return name;
+      }
+    }
     const descriptor = Object.getOwnPropertyDescriptor(obj, 'constructor');
     if (
       descriptor !== undefined &&
@@ -1318,7 +1367,7 @@ function formatRaw(
         return `${braces[0]}}`;
       }
     } else if (typeof value === 'function') {
-      base = getFunctionBase(value, constructor, tag);
+      base = getFunctionBase(ctx, value, constructor, tag);
       if (keys.length === 0 && protoProps === undefined)
         return ctx.stylize(base, 'special');
     } else if (isRegExp(value)) {
@@ -1561,6 +1610,7 @@ function getClassBase(
 }
 
 function getFunctionBase(
+  ctx: Context,
   value: Function,
   constructor: string | null,
   tag: string
@@ -1592,7 +1642,7 @@ function getFunctionBase(
   if (value.name === '') {
     base += ' (anonymous)';
   } else {
-    base += `: ${value.name}`;
+    base += `: ${typeof value.name === 'string' ? value.name : formatValue(ctx, value.name, NaN)}`;
   }
   base += ']';
   if (constructor !== type && constructor !== null) {
@@ -1630,10 +1680,15 @@ export function identicalSequenceRange(
   return { len: 0, offset: 0 };
 }
 
-function getStackString(error: Error): string {
-  return error.stack
-    ? String(error.stack)
-    : Error.prototype.toString.call(error);
+function getStackString(ctx: Context, error: Error): string {
+  if (error.stack) {
+    if (typeof error.stack === 'string') {
+      return error.stack;
+    }
+    // This 'NaN' is a very strange Nodeism, but is necessary for correct behaviour!
+    return formatValue(ctx, error.stack, NaN);
+  }
+  return Error.prototype.toString.call(error);
 }
 
 function getStackFrames(ctx: Context, err: Error, stack: string): string[] {
@@ -1648,7 +1703,7 @@ function getStackFrames(ctx: Context, err: Error, stack: string): string[] {
 
   // Remove stack frames identical to frames in cause.
   if (cause != null && isError(cause)) {
-    const causeStack = getStackString(cause);
+    const causeStack = getStackString(ctx, cause);
     const causeStackStart = causeStack.indexOf('\n    at');
     if (causeStackStart !== -1) {
       const causeFrames = causeStack.slice(causeStackStart + 1).split('\n');
@@ -1666,18 +1721,28 @@ function getStackFrames(ctx: Context, err: Error, stack: string): string[] {
 function improveStack(
   stack: string,
   constructor: string | null,
-  name: string,
+  name: string | object,
   tag: string
 ): string {
+  if (typeof name !== 'string') {
+    stack = stack.replace(
+      `${name}`,
+      `${name} [${getPrefix(constructor, tag, 'Error').slice(0, -1)}]`
+    );
+  }
+
   // A stack trace may contain arbitrary data. Only manipulate the output
   // for "regular errors" (errors that "look normal") for now.
-  let len = name.length;
+  let len = typeof name === 'string' ? name.length : undefined;
 
   if (
     constructor === null ||
-    (name.endsWith('Error') &&
+    (typeof name === 'string' &&
+      name.endsWith('Error') &&
       stack.startsWith(name) &&
-      (stack.length === len || stack[len] === ':' || stack[len] === '\n'))
+      (stack.length === len ||
+        stack[len as number] === ':' ||
+        stack[len as number] === '\n'))
   ) {
     let fallback = 'Error';
     if (constructor === null) {
@@ -1690,7 +1755,7 @@ function improveStack(
     }
     const prefix = getPrefix(constructor, tag, fallback).slice(0, -1);
     if (name !== prefix) {
-      if (prefix.includes(name)) {
+      if (typeof name === 'string' && prefix.includes(name)) {
         if (len === 0) {
           stack = `${prefix}: ${stack}`;
         } else {
@@ -1714,7 +1779,10 @@ function removeDuplicateErrorKeys(
     for (const name of ['name', 'message', 'stack'] as const) {
       const index = keys.indexOf(name);
       // Only hide the property in case it's part of the original stack
-      if (index !== -1 && stack.includes(err[name]!)) {
+      if (
+        index !== -1 &&
+        (typeof err[name] !== 'string' || stack.includes(err[name]!))
+      ) {
         keys.splice(index, 1);
       }
     }
@@ -1744,8 +1812,8 @@ function formatError(
   ctx: Context,
   keys: PropertyKey[]
 ): string {
-  const name = err.name != null ? String(err.name) : 'Error';
-  let stack = getStackString(err);
+  const name = err.name != null ? (err.name as string | object) : 'Error';
+  let stack = getStackString(ctx, err);
 
   removeDuplicateErrorKeys(ctx, keys, err, stack);
 
@@ -1810,12 +1878,12 @@ function groupArrayElements(
     outputLength--;
   }
   const separatorSpace = 2; // Add 1 for the space and 1 for the separator.
-  const dataLen = new Array(outputLength);
+  const dataLen = Array.from<number>({ length: outputLength });
   // Calculate the total length of all output entries and the individual max
   // entries length of all output entries. We have to remove colors first,
   // otherwise the length would not be calculated properly.
   for (; i < outputLength; i++) {
-    const len = getStringWidth(output[i]!, ctx.colors);
+    const len = getStringWidth(output[i] as string, ctx.colors);
     dataLen[i] = len;
     totalLength += len + separatorSpace;
     if (maxLength < len) maxLength = len;
@@ -1865,7 +1933,9 @@ function groupArrayElements(
     for (let i = 0; i < columns; i++) {
       let lineMaxLength = 0;
       for (let j = i; j < output.length; j += columns) {
-        if (dataLen[j] > lineMaxLength) lineMaxLength = dataLen[j];
+        if ((dataLen[j] as number) > lineMaxLength) {
+          lineMaxLength = dataLen[j] as number;
+        }
       }
       lineMaxLength += separatorSpace;
       maxLineLength[i] = lineMaxLength;
@@ -1889,14 +1959,15 @@ function groupArrayElements(
         // Calculate extra color padding in case it's active. This has to be
         // done line by line as some lines might contain more colors than
         // others.
-        const padding = maxLineLength[j - i]! + output[j]!.length - dataLen[j];
+        const padding =
+          maxLineLength[j - i]! + output[j]!.length - (dataLen[j] as number);
         str += order.call(`${output[j]}, `, padding, ' ');
       }
       if (order === String.prototype.padStart) {
         const padding =
           maxLineLength[j - i]! +
           output[j]!.length -
-          dataLen[j] -
+          (dataLen[j] as number) -
           separatorSpace;
         str += output[j]!.padStart(padding, ' ');
       } else {
@@ -2163,7 +2234,7 @@ function formatArray(
 }
 
 function formatTypedArray(
-  value: internal.TypedArray,
+  value: NodeJS.TypedArray,
   length: number,
   ctx: Context,
   _ignored: unknown,
@@ -2452,16 +2523,17 @@ function formatProperty(
     const tmp = Symbol.prototype.toString
       .call(key)
       .replace(strEscapeSequencesReplacer, escapeFn);
-    name = `[${ctx.stylize(tmp, 'symbol')}]`;
-  } else if (key === '__proto__') {
-    name = "['__proto__']";
-  } else if (desc.enumerable === false) {
-    const tmp = String(key).replace(strEscapeSequencesReplacer, escapeFn);
-    name = `[${tmp}]`;
-  } else if (keyStrRegExp.exec(String(key)) !== null) {
-    name = ctx.stylize(String(key), 'name');
+    name = ctx.stylize(tmp, 'symbol');
+  } else if (keyStrRegExp.exec(key as string) !== null) {
+    name =
+      key === '__proto__'
+        ? "['__proto__']"
+        : ctx.stylize(key as string, 'name');
   } else {
-    name = ctx.stylize(strEscape(String(key)), 'string');
+    name = ctx.stylize(strEscape(key as string), 'string');
+  }
+  if (desc.enumerable === false) {
+    name = `[${name}]`;
   }
   return `${name}:${extra}${str}`;
 }
@@ -2651,7 +2723,7 @@ export function formatWithOptions(
   inspectOptions: InspectOptions,
   ...args: unknown[]
 ): string {
-  validateObject(inspectOptions, 'inspectOptions', { allowArray: true });
+  validateObject(inspectOptions, 'inspectOptions', kValidateObjectAllowArray);
   return formatWithOptionsInternal(inspectOptions, args);
 }
 
@@ -2902,11 +2974,29 @@ export function stripVTControlCharacters(str: string): string {
 
 // Called from C++ on `console.log()`s to format values
 export function formatLog(
-  ...args: [...values: unknown[], colors: boolean]
+  ...args: [
+    ...values: unknown[],
+    colors: boolean,
+    structuredLogging: boolean,
+    level: string,
+  ]
 ): string {
-  const inspectOptions: InspectOptions = { colors: args.pop() as boolean };
+  const level = args.pop() as string;
+  const structuredLogging = args.pop() as boolean;
+  const colors = args.pop() as boolean;
+  const inspectOptions: InspectOptions = { colors };
+
   try {
-    return formatWithOptions(inspectOptions, ...args);
+    const message = formatWithOptions(inspectOptions, ...args);
+    if (structuredLogging) {
+      return JSON.stringify({
+        timestamp: Date.now(),
+        level,
+        message,
+      });
+    } else {
+      return message;
+    }
   } catch (err) {
     return `<Formatting threw (${isError(err) ? err.stack : String(err)})>`;
   }

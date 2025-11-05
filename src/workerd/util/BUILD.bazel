@@ -69,6 +69,29 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "checked-queue",
+    hdrs = ["checked-queue.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "ring-buffer",
+    hdrs = ["ring-buffer.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "small-set",
+    hdrs = ["small-set.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "mimetype",
     srcs = ["mimetype.c++"],
     hdrs = ["mimetype.h"],
@@ -77,6 +100,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
@@ -98,6 +122,15 @@ wd_cc_library(
     hdrs = ["string-buffer.h"],
     visibility = ["//visibility:public"],
     deps = [":strings"],
+)
+
+wd_cc_library(
+    name = "strong-bool",
+    hdrs = ["strong-bool.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
@@ -124,6 +157,15 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "account-limits",
+    hdrs = ["account-limits.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "sqlite",
     srcs = [
         "sqlite.c++",
@@ -136,18 +178,20 @@ wd_cc_library(
         "sqlite-metadata.h",
     ],
     implementation_deps = [
+        "//src/workerd/jsg:exception",
         "@sqlite3",
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":account-limits",
         ":sentry",
-        "//src/workerd/jsg:exception",
         "@capnp-cpp//src/kj:kj-async",
     ],
 )
 
 wd_cc_library(
     name = "test-util",
+    testonly = True,
     srcs = ["capnp-mock.c++"],
     hdrs = ["capnp-mock.h"],
     visibility = ["//visibility:public"],
@@ -217,6 +261,23 @@ wd_cc_library(
     deps = ["@capnp-cpp//src/kj"],
 )
 
+wd_cc_library(
+    name = "immediate-crash",
+    hdrs = ["immediate-crash.h"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "websocket-error-handler",
+    srcs = ["websocket-error-handler.c++"],
+    hdrs = ["websocket-error-handler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg:exception",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
 exports_files(["autogate.h"])
 
 [
@@ -241,6 +302,13 @@ kj_test(
 )
 
 kj_test(
+    src = "strong-bool-test.c++",
+    deps = [
+        ":strong-bool",
+    ],
+)
+
+kj_test(
     src = "mimetype-test.c++",
     deps = [
         ":mimetype",
@@ -251,6 +319,8 @@ kj_test(
     src = "sqlite-test.c++",
     deps = [
         ":sqlite",
+        "//src/workerd/io:io-gate",
+        "@sqlite3",
     ],
 )
 
@@ -280,4 +350,19 @@ kj_test(
     deps = [
         ":uuid",
     ],
+)
+
+kj_test(
+    src = "checked-queue-test.c++",
+    deps = [":checked-queue"],
+)
+
+kj_test(
+    src = "ring-buffer-test.c++",
+    deps = [":ring-buffer"],
+)
+
+kj_test(
+    src = "small-set-test.c++",
+    deps = [":small-set"],
 )

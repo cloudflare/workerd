@@ -15,7 +15,7 @@ export default {
   'event.any.js': {},
   'timeout-shadowrealm.any.js': {
     comment: 'Enable when ShadowRealm is implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'timeout.any.js': {},
 } satisfies TestRunnerConfig;

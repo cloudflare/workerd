@@ -32,13 +32,14 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_SOCKET_BAD_PORT,
   ERR_OUT_OF_RANGE,
+  ERR_INVALID_THIS,
 } from 'node-internal:internal_errors';
 import { default as bufferUtil } from 'node-internal:buffer';
 
 // TODO(someday): Not current implementing parseFileMode
 
 export function isInt32(value: unknown): value is number {
-  // @ts-expect-error Due to value being unknown
+  if (typeof value !== 'number') return false;
   return value === (value | 0);
 }
 export function isUint32(value: unknown): value is number {
@@ -76,28 +77,51 @@ export function validateInteger(
   }
 }
 
-export interface ValidateObjectOptions {
-  allowArray?: boolean;
-  allowFunction?: boolean;
-  nullable?: boolean;
-}
-
+export function validateObject<T extends object>(
+  value: T | null | undefined,
+  name: string,
+  options?: number
+): asserts value is T;
 export function validateObject(
   value: unknown,
   name: string,
-  options?: ValidateObjectOptions
+  options?: number
+): asserts value is Record<string, unknown>;
+export function validateObject(
+  value: unknown,
+  name: string,
+  options: number = kValidateObjectNone
 ): asserts value is Record<string, unknown> {
-  const useDefaultOptions = options == null;
-  const allowArray = useDefaultOptions ? false : options.allowArray;
-  const allowFunction = useDefaultOptions ? false : options.allowFunction;
-  const nullable = useDefaultOptions ? false : options.nullable;
-  if (
-    (!nullable && value === null) ||
-    (!allowArray && Array.isArray(value)) ||
-    (typeof value !== 'object' &&
-      (!allowFunction || typeof value !== 'function'))
-  ) {
-    throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+  if (options === kValidateObjectNone) {
+    if (value === null || Array.isArray(value)) {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
+
+    if (typeof value !== 'object') {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
+  } else {
+    const throwOnNullable = (kValidateObjectAllowNullable & options) === 0;
+
+    if (throwOnNullable && value === null) {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
+
+    const throwOnArray = (kValidateObjectAllowArray & options) === 0;
+
+    if (throwOnArray && Array.isArray(value)) {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
+
+    const throwOnFunction = (kValidateObjectAllowFunction & options) === 0;
+    const typeofValue = typeof value;
+
+    if (
+      typeofValue !== 'object' &&
+      (throwOnFunction || typeofValue !== 'function')
+    ) {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
   }
 }
 
@@ -154,6 +178,20 @@ export function validateString(
   }
 }
 
+export function validateStringArray(
+  value: unknown,
+  name: string
+): asserts value is string[] {
+  validateArray(value, name);
+  for (let i = 0; i < value.length; ++i) {
+    // Don't use validateString here for performance reasons, as
+    // we would generate intermediate strings for the name.
+    if (typeof value[i] !== 'string') {
+      throw new ERR_INVALID_ARG_TYPE(`${name}[${i}]`, 'string', value[i]);
+    }
+  }
+}
+
 export function validateNumber(
   value: unknown,
   name: string,
@@ -186,11 +224,11 @@ export function validateBoolean(
   }
 }
 
-export function validateOneOf(
-  value: unknown,
+export function validateOneOf<T>(
+  value: T,
   name: string,
-  oneOf: unknown[]
-): void {
+  oneOf: T[]
+): asserts value is T {
   if (!Array.prototype.includes.call(oneOf, value)) {
     const allowed = Array.prototype.join.call(
       Array.prototype.map.call(oneOf, (v) =>
@@ -333,6 +371,53 @@ export function validatePort(
   return +port | 0;
 }
 
+const octalReg = /^[0-7]+$/;
+const modeDesc = 'must be a 32-bit unsigned integer or an octal string';
+
+export function parseFileMode(
+  value: unknown,
+  name: string,
+  def?: number
+): number {
+  if (def != null) {
+    value ??= def;
+  }
+  if (typeof value === 'string') {
+    if (!octalReg.test(value)) {
+      throw new ERR_INVALID_ARG_VALUE(name, value, modeDesc);
+    }
+    value = Number.parseInt(value, 8);
+  }
+
+  validateUint32(value, name);
+  return value;
+}
+
+export function validateThisInternalField(
+  object: object | null,
+  fieldKey: string | symbol,
+  className: string
+): void {
+  if (
+    typeof object !== 'object' ||
+    object === null ||
+    !Object.prototype.hasOwnProperty.call(object, fieldKey)
+  ) {
+    throw new ERR_INVALID_THIS(className);
+  }
+}
+
+export const kValidateObjectNone = 0;
+export const kValidateObjectAllowNullable = 1 << 0;
+export const kValidateObjectAllowArray = 1 << 1;
+export const kValidateObjectAllowFunction = 1 << 2;
+export const kValidateObjectAllowObjects =
+  kValidateObjectAllowArray | kValidateObjectAllowFunction;
+export const kValidateObjectAllowObjectsAndNull =
+  kValidateObjectAllowNullable |
+  kValidateObjectAllowArray |
+  kValidateObjectAllowFunction;
+
 export default {
   isInt32,
   isUint32,
@@ -349,8 +434,18 @@ export default {
   validateString,
   validateUint32,
   validatePort,
+  validateThisInternalField,
 
   // Zlib specific
   checkFiniteNumber,
   checkRangesOrGetDefault,
+
+  // Filesystem specific
+  parseFileMode,
+  kValidateObjectNone,
+  kValidateObjectAllowNullable,
+  kValidateObjectAllowArray,
+  kValidateObjectAllowFunction,
+  kValidateObjectAllowObjects,
+  kValidateObjectAllowObjectsAndNull,
 };

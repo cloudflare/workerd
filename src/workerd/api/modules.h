@@ -4,11 +4,15 @@
 
 #pragma once
 
+#include <workerd/api/base64.h>
+#include <workerd/api/filesystem.h>
 #include <workerd/api/node/node.h>
+#include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
+#include <workerd/api/tracing-module.h>
 #include <workerd/api/unsafe.h>
-#include <workerd/api/worker-rpc.h>
+#include <workerd/api/workers-module.h>
 #include <workerd/jsg/modules-new.h>
 
 #include <cloudflare/cloudflare.capnp.h>
@@ -36,6 +40,9 @@ template <class Registry>
 void registerModules(Registry& registry, auto featureFlags) {
   node::registerNodeJsCompatModules(registry, featureFlags);
   registerUnsafeModules(registry, featureFlags);
+  if (featureFlags.getPythonWorkers()) {
+    pyodide::registerPyodideModules(registry, featureFlags);
+  }
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
   }
@@ -43,10 +50,14 @@ void registerModules(Registry& registry, auto featureFlags) {
     registerUnsafeModule(registry);
   }
   registerSocketsModule(registry, featureFlags);
+  registerBase64Module(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
-  registerRpcModules(registry, featureFlags);
+  registerWorkersModule(registry, featureFlags);
+  registerTracingModule(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  registry.template addBuiltinModule<FileSystemModule>(
+      "cloudflare-internal:filesystem", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 template <class TypeWrapper>
@@ -54,9 +65,11 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
   builder.add(node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags));
   builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));
 
   builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalTracingModuleBundle<TypeWrapper>(featureFlags));
   if (featureFlags.getUnsafeModule()) {
     builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   }
@@ -67,15 +80,16 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
 
   {
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
-        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
     builder.add(builtinsBuilder.finish());
   }
 
   {
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
-        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
     builtinsBuilder.addObject<EnvModule, TypeWrapper>("cloudflare-internal:env"_url);
+    builtinsBuilder.addObject<FileSystemModule, TypeWrapper>("cloudflare-internal:filesystem"_url);
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
     builder.add(builtinsBuilder.finish());
   }

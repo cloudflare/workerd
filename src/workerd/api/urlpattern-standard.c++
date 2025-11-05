@@ -9,7 +9,7 @@
 namespace workerd::api::urlpattern {
 std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatternRegexEngine::
     create_instance(std::string_view pattern, bool ignore_case) {
-  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = jsg::Lock::current();
   jsg::Lock::RegExpFlags flags = jsg::Lock::RegExpFlags::kUNICODE_SETS;
   if (ignore_case) {
     flags = static_cast<jsg::Lock::RegExpFlags>(
@@ -23,13 +23,13 @@ std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatt
 
 bool URLPattern::URLPatternRegexEngine::regex_match(
     std::string_view input, const regex_type& pattern) {
-  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = jsg::Lock::current();
   return pattern.getHandle(js).match(js, kj::StringPtr(input.data(), input.size()));
 }
 
 std::optional<std::vector<std::optional<std::string>>> URLPattern::URLPatternRegexEngine::
     regex_search(std::string_view input, const regex_type& pattern) {
-  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = jsg::Lock::current();
   KJ_IF_SOME(matches, pattern.getHandle(js)(js, kj::StringPtr(input.data(), input.size()))) {
     std::vector<std::optional<std::string>> results(matches.size() - 1);
     // The first value is always the input of the exec() command. Therefore
@@ -67,17 +67,23 @@ ada::url_pattern_init URLPattern::URLPatternInit::toAdaType() const {
   return init;
 }
 
-URLPattern::URLPatternInit URLPattern::createURLPatternInit(const ada::url_pattern_init& other) {
+URLPattern::URLPatternInit URLPattern::createURLPatternInit(
+    jsg::Lock& js, const ada::url_pattern_init& other) {
+  // By converting to USVString we are asserting that these values are always valid UTF-8 data,
+  // with no unpaired surrogates, etc. This is true because these values are derived from user
+  // input that was already a USVString, and ada-url will not introduce invalid UTF-8 data when
+  // it processes input.
+
   URLPatternInit result{};
 #define V(_, name)                                                                                 \
   if (auto v = other.name) {                                                                       \
-    result.name = kj::str(kj::ArrayPtr(v->c_str(), v->size()));                                    \
+    result.name = jsg::USVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));                    \
   }
   URL_PATTERN_COMPONENTS(V)
 #undef V
 
   if (auto v = other.base_url) {
-    result.baseURL = kj::str(kj::ArrayPtr(v->c_str(), v->size()));
+    result.baseURL = jsg::USVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));
   }
   return result;
 }
@@ -85,17 +91,17 @@ URLPattern::URLPatternInit URLPattern::createURLPatternInit(const ada::url_patte
 URLPattern::URLPatternComponentResult URLPattern::createURLPatternComponentResult(
     jsg::Lock& js, const ada::url_pattern_component_result& other) {
   auto result = URLPatternComponentResult{
-    .input = js.str(kj::ArrayPtr(other.input.c_str(), other.input.size())),
-    .groups = js.obj(),
+    .input = jsg::JsRef(js, js.str(kj::ArrayPtr(other.input.c_str(), other.input.size()))),
+    .groups = jsg::JsRef(js, js.obj()),
   };
 
   for (auto& [key, value]: other.groups) {
     auto k = js.str(kj::ArrayPtr(key.c_str(), key.size()));
 
     if (value) {
-      result.groups.set(js, k, js.str(kj::ArrayPtr(value->c_str(), value->size())));
+      result.groups.getHandle(js).set(js, k, js.str(kj::ArrayPtr(value->c_str(), value->size())));
     } else {
-      result.groups.set(js, k, js.undefined());
+      result.groups.getHandle(js).set(js, k, js.undefined());
     }
   }
   return result;
@@ -113,16 +119,17 @@ URLPattern::URLPatternResult URLPattern::createURLPatternResult(
 #undef V
   };
 
-  auto vecInputs = kj::heapArray<kj::OneOf<jsg::JsString, URLPatternInit>>(other.inputs.size());
+  auto vecInputs =
+      kj::heapArray<kj::OneOf<jsg::JsRef<jsg::JsString>, URLPatternInit>>(other.inputs.size());
   size_t i = 0;
   for (const auto& input: other.inputs) {
     if (std::holds_alternative<std::string_view>(input)) {
       auto raw = std::get<std::string_view>(input);
-      vecInputs[i] = js.str(kj::ArrayPtr(raw.data(), raw.size()));
+      vecInputs[i] = jsg::JsRef(js, js.str(kj::ArrayPtr(raw.data(), raw.size())));
     } else {
       KJ_DASSERT(std::holds_alternative<ada::url_pattern_init>(input));
       auto obj = std::get<ada::url_pattern_init>(input);
-      vecInputs[i] = createURLPatternInit(obj);
+      vecInputs[i] = createURLPatternInit(js, obj);
     }
     i++;
   }
@@ -139,8 +146,8 @@ URL_PATTERN_COMPONENTS(DEFINE_GETTER)
 #undef DEFINE_GETTER
 
 jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
-    jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> maybeInput,
-    jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternOptions>> maybeBase,
+    jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> maybeInput,
+    jsg::Optional<kj::OneOf<jsg::USVString, URLPatternOptions>> maybeBase,
     jsg::Optional<URLPatternOptions> maybeOptions) {
   ada::url_pattern_input input;
   std::optional<std::string_view> base{};
@@ -148,7 +155,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
 
   KJ_IF_SOME(mi, maybeInput) {
     KJ_SWITCH_ONEOF(mi) {
-      KJ_CASE_ONEOF(str, jsg::DOMString) {
+      KJ_CASE_ONEOF(str, jsg::USVString) {
         input = std::string_view(str.begin(), str.size());
       }
       KJ_CASE_ONEOF(init, URLPatternInit) {
@@ -161,7 +168,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
 
   KJ_IF_SOME(b, maybeBase) {
     KJ_SWITCH_ONEOF(b) {
-      KJ_CASE_ONEOF(str, jsg::DOMString) {
+      KJ_CASE_ONEOF(str, jsg::USVString) {
         base = std::string_view(str.begin(), str.size());
       }
       KJ_CASE_ONEOF(o, URLPatternOptions) {
@@ -180,11 +187,11 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
   ada::url_pattern_options* options_opt = options ? &options.value() : nullptr;
   auto result = ada::parse_url_pattern<URLPatternRegexEngine>(kj::mv(input), base_opt, options_opt);
   JSG_REQUIRE(result.has_value(), TypeError, "Failed to construct URLPattern"_kj);
-  return jsg::alloc<URLPattern>(std::move(*result));
+  return js.alloc<URLPattern>(std::move(*result));
 }
 
-bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> maybeInput,
-    jsg::Optional<jsg::DOMString> maybeBase) {
+bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> maybeInput,
+    jsg::Optional<jsg::USVString> maybeBase) {
   ada::result<bool> result;
   std::optional<std::string_view> base{};
 
@@ -196,7 +203,7 @@ bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> m
 
   KJ_IF_SOME(mi, maybeInput) {
     KJ_SWITCH_ONEOF(mi) {
-      KJ_CASE_ONEOF(str, jsg::DOMString) {
+      KJ_CASE_ONEOF(str, jsg::USVString) {
         result = inner.test(std::string_view(str.begin(), str.size()), base_ptr);
       }
       KJ_CASE_ONEOF(pi, URLPattern::URLPatternInit) {
@@ -213,8 +220,8 @@ bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> m
 }
 
 kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(jsg::Lock& js,
-    jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> maybeInput,
-    jsg::Optional<jsg::DOMString> maybeBase) {
+    jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> maybeInput,
+    jsg::Optional<jsg::USVString> maybeBase) {
   ada::result<std::optional<ada::url_pattern_result>> result;
   std::optional<std::string_view> base_url{};
 
@@ -224,7 +231,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(jsg::Lock& js,
 
   KJ_IF_SOME(mi, maybeInput) {
     KJ_SWITCH_ONEOF(mi) {
-      KJ_CASE_ONEOF(str, jsg::DOMString) {
+      KJ_CASE_ONEOF(str, jsg::USVString) {
         result = inner.exec(
             std::string_view(str.begin(), str.size()), base_url ? &base_url.value() : nullptr);
       }

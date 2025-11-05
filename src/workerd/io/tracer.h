@@ -4,8 +4,10 @@
 
 #pragma once
 
+#include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
-#include <workerd/util/weak-refs.h>
+
+#include <kj/refcount.h>
 
 namespace workerd {
 namespace tracing {
@@ -17,16 +19,10 @@ class TailStreamWriter final: public kj::Refcounted {
   // closed state.
   using Reporter = kj::Function<bool(TailEvent&&)>;
 
-  // A callback that provides the timestamps for tail stream events.
-  // Ideally this uses the same time context as IoContext:now().
-  using TimeSource = kj::Function<kj::Date()>;
-  TailStreamWriter(Reporter reporter, TimeSource timeSource);
+  TailStreamWriter(Reporter reporter);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  void report(const InvocationSpanContext& context, TailEvent::Event&& event);
-  inline void report(const InvocationSpanContext& context, Mark&& event) {
-    report(context, TailEvent::Event(kj::mv(event)));
-  }
+  void report(const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date time);
 
   inline bool isClosed() const {
     return state == kj::none;
@@ -35,14 +31,12 @@ class TailStreamWriter final: public kj::Refcounted {
  private:
   struct State {
     Reporter reporter;
-    TimeSource timeSource;
     uint32_t sequence = 0;
-    bool onsetSeen = false;
-    State(Reporter reporter, TimeSource timeSource)
-        : reporter(kj::mv(reporter)),
-          timeSource(kj::mv(timeSource)) {}
+    State(Reporter reporter): reporter(kj::mv(reporter)) {}
   };
   kj::Maybe<State> state;
+  bool onsetSeen = false;
+  bool outcomeSeen = false;
 };
 }  // namespace tracing
 
@@ -51,11 +45,11 @@ class WorkerTracer;
 // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
-class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis<PipelineTracer> {
+class PipelineTracer: public kj::Refcounted {
  public:
   // Creates a pipeline tracer (with a possible parent).
   explicit PipelineTracer() = default;
-  ~PipelineTracer() noexcept(false);
+  virtual ~PipelineTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
 
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
@@ -72,6 +66,7 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
       kj::Maybe<kj::String> dispatchNamespace,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
+      kj::Maybe<kj::String> durableObjectId,
       kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
 
   // Adds a trace from the contents of `reader` this is used in sharded workers to send traces back
@@ -82,34 +77,33 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
   // tracer for a subordinate stage to add its collected traces to the parent pipeline.
   void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
 
-  void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& traces);
+  void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer);
 
  private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
+  kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
 
   friend class WorkerTracer;
-
- public:
-  // tail stream writers for worker stages in the given pipeline.
-  kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
 };
 
-// An abstract class that defines shares functionality for tracers
-// that have different characteristics.
+// An abstract class that defines shares functionality for tracers that have different
+// characteristics. This interface is used to submit both legacy and streaming tail events.
 // TODO(streaming-tail): When further consolidating the tail worker implementations, the interface
 // of the add* methods below should make more sense: The invocation span context below is currently
 // only being used in the streaming model, when we have switched the legacy model to streaming
 // there will be plenty of cleanup potential.
-class BaseTracer {
+class BaseTracer: public kj::Refcounted {
  public:
+  virtual ~BaseTracer() noexcept(false) {};
+
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) = 0;
-  // Add a span. There can be at most MAX_USER_SPANS spans in a trace.
-  virtual void addSpan(CompleteSpan&& span) = 0;
+  // Add a span.
+  virtual void addSpan(tracing::CompleteSpan&& span) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -124,36 +118,70 @@ class BaseTracer {
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
   virtual void setEventInfo(
-      const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&&) = 0;
+      IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) = 0;
 
-  // Adds info about the response. Must not be called more than once, and only
-  // after passing a FetchEventInfo to setEventInfo().
-  virtual void setFetchResponseInfo(tracing::FetchResponseInfo&&) = 0;
+  // Sets the return event for Streaming Tail Worker, including fetchResponseInfo (HTTP status code)
+  // if available. Must not be called more than once, and fetchResponseInfo should only be set for
+  // fetch events. For legacy tail worker, there is no distinct return event so we only add
+  // fetchResponseInfo to the trace if present.
+  virtual void setReturn(kj::Maybe<kj::Date> time = kj::none,
+      kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) = 0;
 
+  // Reports the outcome event of the worker invocation. For Streaming Tail Worker, this will be the
+  // final event, causing the stream to terminate.
   virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
+
+  // Report time as seen from the incoming Request when the request is complete, since it will not
+  // be available afterwards.
+  virtual void recordTimestamp(kj::Date timestamp) = 0;
+
+  SpanParent getUserRequestSpan();
+
+  // Allow setting the user request span after the tracer has been created so its observer can
+  // reference the tracer. This can only be set once.
+  void setUserRequestSpan(SpanParent&& span);
+
+  virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      const kj::ConstString& methodName) = 0;
+
+ protected:
+  // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
+  // worker must have wrapped up and reported its outcome event, we report completeTime in that case
+  // acordingly.
+  kj::Date getTime();
+
+  // helper method for addSpan() implementations
+  void adjustSpanTime(tracing::CompleteSpan& span);
+
+  // The root span for the new tracing format.
+  SpanParent userRequestSpan = SpanParent(nullptr);
+
+  // Time to be reported for the outcome event time. This will be set before the outcome is
+  // dispatched.
+  kj::Date completeTime = kj::UNIX_EPOCH;
+
+  // Weak reference to the IoContext, used to report span end time if available.
+  kj::Maybe<kj::Own<IoContext::WeakRef>> weakIoContext;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
-// Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
-// write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
-// via extractTrace.
-class WorkerTracer final: public kj::Refcounted, public BaseTracer {
+// Tracer are released, its Trace is considered complete and ready for submission.
+class WorkerTracer final: public BaseTracer {
  public:
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel,
       kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
-  ~WorkerTracer() {
-    self->invalidate();
-  }
+  virtual ~WorkerTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
   void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) override;
-  void addSpan(CompleteSpan&& span) override;
+  void addSpan(tracing::CompleteSpan&& span) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
@@ -163,29 +191,35 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
       kj::Date timestamp,
       kj::String channel,
       kj::Array<kj::byte> message) override;
-  void setEventInfo(const tracing::InvocationSpanContext& context,
-      kj::Date timestamp,
-      tracing::EventInfo&&) override;
-  void setFetchResponseInfo(tracing::FetchResponseInfo&&) override;
+  // Set event info (equivalent to Onset event under streaming). We use the incomingRequest here
+  // since the IoContext may not have the IncomingRequest linked to it yet (depending on if
+  // delivered() has been set), so it might not be possible to acquire the required timestamp and
+  // span context from it.
+  void setEventInfo(
+      IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) override;
+  // Variant for when we don't have a proper IoContext but instead provide context and timestamp
+  // directly, used internally for RPC-based tracing.
+  void setEventInfoInternal(
+      const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info);
+
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
+  virtual void recordTimestamp(kj::Date timestamp) override;
 
-  // Used only for a Trace in a process sandbox. Copies the content of this tracer's trace to the
-  // builder.
-  void extractTrace(rpc::Trace::Builder builder);
+  // Set a worker-level tag/attribute to be provided in the onset event.
+  void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
 
-  // Sets the main trace of this Tracer to match the content of `reader`. This is used in the
-  // parent process after receiving a trace from a process sandbox.
-  void setTrace(rpc::Trace::Reader reader);
+  void setReturn(kj::Maybe<kj::Date> time = kj::none,
+      kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
 
-  kj::Own<WeakRef<WorkerTracer>> addWeakRef() {
-    return self->addRef();
-  }
-
-  kj::Maybe<kj::Own<tracing::TailStreamWriter>>& getTailStreamWriter();
+  void setJsRpcInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      const kj::ConstString& methodName) override;
 
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
+  // span attributes to be added to the onset event.
+  kj::Vector<tracing::Attribute> attributes;
 
   // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
   // for trace events. This should no longer be needed after merging the existing span ID and
@@ -197,12 +231,5 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
-
-  // A weak reference for the internal span submitter. We use this so that the span submitter can
-  // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer
-  // which would interfere with span submission (traces get submitted when the worker returns its
-  // response, but with e.g. waitUntil() the worker can still be performing tasks afterwards so the
-  // span submitter may exist for longer than the tracer).
-  kj::Own<WeakRef<WorkerTracer>> self;
 };
 }  // namespace workerd

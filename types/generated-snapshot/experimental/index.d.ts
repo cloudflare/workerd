@@ -16,17 +16,26 @@ and limitations under the License.
 // noinspection JSUnusedGlobalSymbols
 declare var onmessage: never;
 /**
- * An abnormal event (called an exception) which occurs as a result of calling a method or accessing a property of a web API.
+ * The **`DOMException`** interface represents an abnormal event (called an **exception**) that occurs as a result of calling a method or accessing a property of a web API.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
  */
 declare class DOMException extends Error {
   constructor(message?: string, name?: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message) */
+  /**
+   * The **`message`** read-only property of the a message or description associated with the given error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message)
+   */
   readonly message: string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name) */
+  /**
+   * The **`name`** read-only property of the one of the strings associated with an error name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/name)
+   */
   readonly name: string;
   /**
+   * The **`code`** read-only property of the DOMException interface returns one of the legacy error code constants, or `0` if none match.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/code)
@@ -70,45 +79,121 @@ type WorkerGlobalScopeEventMap = {
 declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
   EventTarget: typeof EventTarget;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console) */
+/* The **`console`** object provides access to the debugging console (e.g., the Web console in Firefox). *
+ * The **`console`** object provides access to the debugging console (e.g., the Web console in Firefox).
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console)
+ */
 interface Console {
   "assert"(condition?: boolean, ...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/clear_static) */
+  /**
+   * The **`console.clear()`** static method clears the console if possible.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/clear_static)
+   */
   clear(): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/count_static) */
+  /**
+   * The **`console.count()`** static method logs the number of times that this particular call to `count()` has been called.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/count_static)
+   */
   count(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countreset_static) */
+  /**
+   * The **`console.countReset()`** static method resets counter used with console/count_static.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countReset_static)
+   */
   countReset(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/debug_static) */
+  /**
+   * The **`console.debug()`** static method outputs a message to the console at the 'debug' log level.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/debug_static)
+   */
   debug(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/dir_static) */
+  /**
+   * The **`console.dir()`** static method displays a list of the properties of the specified JavaScript object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/dir_static)
+   */
   dir(item?: any, options?: any): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/dirxml_static) */
+  /**
+   * The **`console.dirxml()`** static method displays an interactive tree of the descendant elements of the specified XML/HTML element.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/dirxml_static)
+   */
   dirxml(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/error_static) */
+  /**
+   * The **`console.error()`** static method outputs a message to the console at the 'error' log level.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/error_static)
+   */
   error(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/group_static) */
+  /**
+   * The **`console.group()`** static method creates a new inline group in the Web console log, causing any subsequent console messages to be indented by an additional level, until console/groupEnd_static is called.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/group_static)
+   */
   group(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupcollapsed_static) */
+  /**
+   * The **`console.groupCollapsed()`** static method creates a new inline group in the console.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupCollapsed_static)
+   */
   groupCollapsed(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupend_static) */
+  /**
+   * The **`console.groupEnd()`** static method exits the current inline group in the console.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupEnd_static)
+   */
   groupEnd(): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/info_static) */
+  /**
+   * The **`console.info()`** static method outputs a message to the console at the 'info' log level.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/info_static)
+   */
   info(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/log_static) */
+  /**
+   * The **`console.log()`** static method outputs a message to the console.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/log_static)
+   */
   log(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/table_static) */
+  /**
+   * The **`console.table()`** static method displays tabular data as a table.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/table_static)
+   */
   table(tabularData?: any, properties?: string[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/time_static) */
+  /**
+   * The **`console.time()`** static method starts a timer you can use to track how long an operation takes.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/time_static)
+   */
   time(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeend_static) */
+  /**
+   * The **`console.timeEnd()`** static method stops a timer that was previously started by calling console/time_static.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeEnd_static)
+   */
   timeEnd(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timelog_static) */
+  /**
+   * The **`console.timeLog()`** static method logs the current value of a timer that was previously started by calling console/time_static.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeLog_static)
+   */
   timeLog(label?: string, ...data: any[]): void;
   timeStamp(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/trace_static) */
+  /**
+   * The **`console.trace()`** static method outputs a stack trace to the console.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/trace_static)
+   */
   trace(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/warn_static) */
+  /**
+   * The **`console.warn()`** static method outputs a warning message to the console at the 'warning' log level.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/warn_static)
+   */
   warn(...data: any[]): void;
 }
 declare const console: Console;
@@ -200,7 +285,7 @@ declare namespace WebAssembly {
   function validate(bytes: BufferSource): boolean;
 }
 /**
- * This ServiceWorker API interface represents the global execution context of a service worker.
+ * The **`ServiceWorkerGlobalScope`** interface of the Service Worker API represents the global execution context of a service worker.
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ServiceWorkerGlobalScope)
@@ -257,6 +342,13 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
+  FileSystemHandle: typeof FileSystemHandle;
+  FileSystemFileHandle: typeof FileSystemFileHandle;
+  FileSystemDirectoryHandle: typeof FileSystemDirectoryHandle;
+  FileSystemWritableFileStream: typeof FileSystemWritableFileStream;
+  StorageManager: typeof StorageManager;
   EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
@@ -294,16 +386,13 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
-  GPUAdapter: typeof GPUAdapter;
-  GPUOutOfMemoryError: typeof GPUOutOfMemoryError;
-  GPUValidationError: typeof GPUValidationError;
-  GPUInternalError: typeof GPUInternalError;
-  GPUDeviceLostInfo: typeof GPUDeviceLostInfo;
-  GPUBufferUsage: typeof GPUBufferUsage;
-  GPUShaderStage: typeof GPUShaderStage;
-  GPUMapMode: typeof GPUMapMode;
-  GPUTextureUsage: typeof GPUTextureUsage;
-  GPUColorWrite: typeof GPUColorWrite;
+  Performance: typeof Performance;
+  PerformanceEntry: typeof PerformanceEntry;
+  PerformanceMark: typeof PerformanceMark;
+  PerformanceMeasure: typeof PerformanceMeasure;
+  PerformanceResourceTiming: typeof PerformanceResourceTiming;
+  PerformanceObserver: typeof PerformanceObserver;
+  PerformanceObserverEntryList: typeof PerformanceObserverEntryList;
 }
 declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(
   type: Type,
@@ -318,7 +407,7 @@ declare function removeEventListener<
   options?: EventTargetEventListenerOptions | boolean,
 ): void;
 /**
- * Dispatches a synthetic event event to target and returns true if either event's cancelable attribute value is false or its preventDefault() method was not invoked, and false otherwise.
+ * The **`dispatchEvent()`** method of the EventTarget sends an Event to the object, (synchronously) invoking the affected event listeners in the appropriate order.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/dispatchEvent)
  */
@@ -329,42 +418,42 @@ declare function dispatchEvent(
 declare function btoa(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/atob) */
 declare function atob(data: string): string;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
 declare function setTimeout(
   callback: (...args: any[]) => void,
   msDelay?: number,
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
 declare function setTimeout<Args extends any[]>(
   callback: (...args: Args) => void,
   msDelay?: number,
   ...args: Args
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/clearTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearTimeout) */
 declare function clearTimeout(timeoutId: number | null): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
 declare function setInterval(
   callback: (...args: any[]) => void,
   msDelay?: number,
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
 declare function setInterval<Args extends any[]>(
   callback: (...args: Args) => void,
   msDelay?: number,
   ...args: Args
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/clearInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearInterval) */
 declare function clearInterval(timeoutId: number | null): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/queueMicrotask) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 declare function queueMicrotask(task: Function): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/structuredClone) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
 declare function structuredClone<T>(
   value: T,
   options?: StructuredSerializeOptions,
 ): T;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/reportError) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 declare function reportError(error: any): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/fetch) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
 declare function fetch(
   input: RequestInfo | URL,
   init?: RequestInit<RequestInitCfProperties>,
@@ -397,11 +486,11 @@ declare const Cloudflare: Cloudflare;
 declare const origin: string;
 declare const navigator: Navigator;
 interface TestController {}
-interface ExecutionContext {
+interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
-  exports: any;
-  props: any;
+  readonly exports: Cloudflare.Exports;
+  readonly props: Props;
   abort(reason?: any): void;
 }
 type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
@@ -420,7 +509,7 @@ type ExportedHandlerTraceHandler<Env = unknown> = (
   ctx: ExecutionContext,
 ) => void | Promise<void>;
 type ExportedHandlerTailStreamHandler<Env = unknown> = (
-  event: TailStream.TailEvent,
+  event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
   ctx: ExecutionContext,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -456,13 +545,6 @@ interface ExportedHandler<
 interface StructuredSerializeOptions {
   transfer?: any[];
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent) */
-declare abstract class PromiseRejectionEvent extends Event {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/promise) */
-  readonly promise: Promise<any>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason) */
-  readonly reason: any;
-}
 declare abstract class Navigator {
   sendBeacon(
     url: string,
@@ -476,19 +558,10 @@ declare abstract class Navigator {
       | URLSearchParams,
   ): boolean;
   readonly userAgent: string;
-  readonly gpu?: GPU;
-}
-/**
- * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
- * as well as timing of subrequests and other operations.
- *
- * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
- */
-interface Performance {
-  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancetimeorigin) */
-  readonly timeOrigin: number;
-  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
-  now(): number;
+  readonly hardwareConcurrency: number;
+  readonly language: string;
+  readonly languages: string[];
+  readonly storage: StorageManager;
 }
 interface AlarmInvocationInfo {
   readonly isRetry: boolean;
@@ -496,6 +569,9 @@ interface AlarmInvocationInfo {
 }
 interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
+}
+declare abstract class ColoLocalActorNamespace {
+  get(actorId: string): Fetcher;
 }
 interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
@@ -525,8 +601,9 @@ interface DurableObjectId {
   toString(): string;
   equals(other: DurableObjectId): boolean;
   readonly name?: string;
+  readonly jurisdiction?: string;
 }
-interface DurableObjectNamespace<
+declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -538,6 +615,10 @@ interface DurableObjectNamespace<
     id: DurableObjectId,
     options?: DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStub<T>;
+  getByName(
+    name: string,
+    options?: DurableObjectNamespaceGetDurableObjectOptions,
+  ): DurableObjectStub<T>;
   getExisting(
     id: DurableObjectId,
     options?: DurableObjectNamespaceGetDurableObjectOptions,
@@ -546,7 +627,7 @@ interface DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-type DurableObjectJurisdiction = "eu" | "fedramp";
+type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
 interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -563,12 +644,17 @@ type DurableObjectLocationHint =
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
-interface DurableObjectState {
+interface DurableObjectClass<
+  _T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
+interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
-  exports: any;
+  readonly exports: Cloudflare.Exports;
+  readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
+  facets: DurableObjectFacets;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
@@ -646,6 +732,7 @@ interface DurableObjectStorage {
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
   sync(): Promise<void>;
   sql: SqlStorage;
+  kv: SyncKvStorage;
   transactionSync<T>(closure: () => T): T;
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
@@ -686,6 +773,22 @@ declare class WebSocketRequestResponsePair {
   get request(): string;
   get response(): string;
 }
+interface DurableObjectFacets {
+  get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
+    name: string,
+    getStartupOptions: () =>
+      | FacetStartupOptions<T>
+      | Promise<FacetStartupOptions<T>>,
+  ): Fetcher<T>;
+  abort(name: string, reason: any): void;
+  delete(name: string): void;
+}
+interface FacetStartupOptions<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {
+  id?: DurableObjectId | string;
+  class: DurableObjectClass<T>;
+}
 interface AnalyticsEngineDataset {
   writeDataPoint(event?: AnalyticsEngineDataPoint): void;
 }
@@ -695,116 +798,120 @@ interface AnalyticsEngineDataPoint {
   blobs?: ((ArrayBuffer | string) | null)[];
 }
 /**
- * An event which takes place in the DOM.
+ * The **`Event`** interface represents an event which takes place on an `EventTarget`.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event)
  */
 declare class Event {
   constructor(type: string, init?: EventInit);
   /**
-   * Returns the type of event, e.g. "click", "hashchange", or "submit".
+   * The **`type`** read-only property of the Event interface returns a string containing the event's type.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/type)
    */
   get type(): string;
   /**
-   * Returns the event's phase, which is one of NONE, CAPTURING_PHASE, AT_TARGET, and BUBBLING_PHASE.
+   * The **`eventPhase`** read-only property of the being evaluated.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/eventPhase)
    */
   get eventPhase(): number;
   /**
-   * Returns true or false depending on how event was initialized. True if event invokes listeners past a ShadowRoot node that is the root of its target, and false otherwise.
+   * The read-only **`composed`** property of the or not the event will propagate across the shadow DOM boundary into the standard DOM.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/composed)
    */
   get composed(): boolean;
   /**
-   * Returns true or false depending on how event was initialized. True if event goes through its target's ancestors in reverse tree order, and false otherwise.
+   * The **`bubbles`** read-only property of the Event interface indicates whether the event bubbles up through the DOM tree or not.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/bubbles)
    */
   get bubbles(): boolean;
   /**
-   * Returns true or false depending on how event was initialized. Its return value does not always carry meaning, but true can indicate that part of the operation during which event was dispatched, can be canceled by invoking the preventDefault() method.
+   * The **`cancelable`** read-only property of the Event interface indicates whether the event can be canceled, and therefore prevented as if the event never happened.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelable)
    */
   get cancelable(): boolean;
   /**
-   * Returns true if preventDefault() was invoked successfully to indicate cancelation, and false otherwise.
+   * The **`defaultPrevented`** read-only property of the Event interface returns a boolean value indicating whether or not the call to Event.preventDefault() canceled the event.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/defaultPrevented)
    */
   get defaultPrevented(): boolean;
   /**
+   * The Event property **`returnValue`** indicates whether the default action for this event has been prevented or not.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
    */
   get returnValue(): boolean;
   /**
-   * Returns the object whose event listener's callback is currently being invoked.
+   * The **`currentTarget`** read-only property of the Event interface identifies the element to which the event handler has been attached.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/currentTarget)
    */
-  get currentTarget(): EventTarget | undefined;
+  get currentTarget(): EventTarget | null;
   /**
-   * Returns the object to which event is dispatched (its target).
+   * The read-only **`target`** property of the dispatched.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
    */
   get target(): EventTarget | undefined;
   /**
+   * The deprecated **`Event.srcElement`** is an alias for the Event.target property.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/srcElement)
    */
   get srcElement(): EventTarget | undefined;
   /**
-   * Returns the event's timestamp as the number of milliseconds measured relative to the time origin.
+   * The **`timeStamp`** read-only property of the Event interface returns the time (in milliseconds) at which the event was created.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/timeStamp)
    */
   get timeStamp(): number;
   /**
-   * Returns true if event was dispatched by the user agent, and false otherwise.
+   * The **`isTrusted`** read-only property of the when the event was generated by the user agent (including via user actions and programmatic methods such as HTMLElement.focus()), and `false` when the event was dispatched via The only exception is the `click` event, which initializes the `isTrusted` property to `false` in user agents.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/isTrusted)
    */
-  get isTrusted(): boolean;
+  readonly isTrusted: boolean;
   /**
+   * The **`cancelBubble`** property of the Event interface is deprecated.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelBubble)
    */
   get cancelBubble(): boolean;
   /**
+   * The **`cancelBubble`** property of the Event interface is deprecated.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelBubble)
    */
   set cancelBubble(value: boolean);
   /**
-   * Invoking this method prevents event from reaching any registered event listeners after the current one finishes running and, when dispatched in a tree, also prevents event from reaching any other objects.
+   * The **`stopImmediatePropagation()`** method of the If several listeners are attached to the same element for the same event type, they are called in the order in which they were added.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/stopImmediatePropagation)
    */
   stopImmediatePropagation(): void;
   /**
-   * If invoked when the cancelable attribute value is true, and while executing a listener for the event with passive set to false, signals to the operation that caused event to be dispatched that it needs to be canceled.
+   * The **`preventDefault()`** method of the Event interface tells the user agent that if the event does not get explicitly handled, its default action should not be taken as it normally would be.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/preventDefault)
    */
   preventDefault(): void;
   /**
-   * When dispatched in a tree, invoking this method prevents event from reaching any objects other than the current object.
+   * The **`stopPropagation()`** method of the Event interface prevents further propagation of the current event in the capturing and bubbling phases.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/stopPropagation)
    */
   stopPropagation(): void;
   /**
-   * Returns the invocation target objects of event's path (objects on which listeners will be invoked), except for any nodes in shadow trees of which the shadow root's mode is "closed" that are not reachable from event's currentTarget.
+   * The **`composedPath()`** method of the Event interface returns the event's path which is an array of the objects on which listeners will be invoked.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/composedPath)
    */
@@ -829,7 +936,7 @@ type EventListenerOrEventListenerObject<EventType extends Event = Event> =
   | EventListener<EventType>
   | EventListenerObject<EventType>;
 /**
- * EventTarget is a DOM interface implemented by objects that can receive events and may have listeners for them.
+ * The **`EventTarget`** interface is implemented by objects that can receive events and may have listeners for them.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget)
  */
@@ -838,19 +945,7 @@ declare class EventTarget<
 > {
   constructor();
   /**
-   * Appends an event listener for events whose type attribute value is type. The callback argument sets the callback that will be invoked when the event is dispatched.
-   *
-   * The options argument sets listener-specific options. For compatibility this can be a boolean, in which case the method behaves exactly as if the value was specified as options's capture.
-   *
-   * When set to true, options's capture prevents callback from being invoked when the event's eventPhase attribute value is BUBBLING_PHASE. When false (or not present), callback will not be invoked when event's eventPhase attribute value is CAPTURING_PHASE. Either way, callback will be invoked if event's eventPhase attribute value is AT_TARGET.
-   *
-   * When set to true, options's passive indicates that the callback will not cancel the event by invoking preventDefault(). This is used to enable performance optimizations described in § 2.8 Observing event listeners.
-   *
-   * When set to true, options's once indicates that the callback will only be invoked once after which the event listener will be removed.
-   *
-   * If an AbortSignal is passed for options's signal, then the event listener will be removed when signal is aborted.
-   *
-   * The event listener is appended to target's event listener list and is not appended if it has the same type, callback, and capture.
+   * The **`addEventListener()`** method of the EventTarget interface sets up a function that will be called whenever the specified event is delivered to the target.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/addEventListener)
    */
@@ -860,7 +955,7 @@ declare class EventTarget<
     options?: EventTargetAddEventListenerOptions | boolean,
   ): void;
   /**
-   * Removes the event listener in target's event listener list with the same type, callback, and options.
+   * The **`removeEventListener()`** method of the EventTarget interface removes an event listener previously registered with EventTarget.addEventListener() from the target.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/removeEventListener)
    */
@@ -870,7 +965,7 @@ declare class EventTarget<
     options?: EventTargetEventListenerOptions | boolean,
   ): void;
   /**
-   * Dispatches a synthetic event event to target and returns true if either event's cancelable attribute value is false or its preventDefault() method was not invoked, and false otherwise.
+   * The **`dispatchEvent()`** method of the EventTarget sends an Event to the object, (synchronously) invoking the affected event listeners in the appropriate order.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/dispatchEvent)
    */
@@ -889,50 +984,70 @@ interface EventTargetHandlerObject {
   handleEvent: (event: Event) => any | undefined;
 }
 /**
- * A controller object that allows you to abort one or more DOM requests as and when desired.
+ * The **`AbortController`** interface represents a controller object that allows you to abort one or more Web requests as and when desired.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortController)
  */
 declare class AbortController {
   constructor();
   /**
-   * Returns the AbortSignal object associated with this object.
+   * The **`signal`** read-only property of the AbortController interface returns an AbortSignal object instance, which can be used to communicate with/abort an asynchronous operation as desired.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortController/signal)
    */
   get signal(): AbortSignal;
   /**
-   * Invoking this method will set this object's AbortSignal's aborted flag and signal to any observers that the associated activity is to be aborted.
+   * The **`abort()`** method of the AbortController interface aborts an asynchronous operation before it has completed.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortController/abort)
    */
   abort(reason?: any): void;
 }
 /**
- * A signal object that allows you to communicate with a DOM request (such as a Fetch) and abort it if required via an AbortController object.
+ * The **`AbortSignal`** interface represents a signal object that allows you to communicate with an asynchronous operation (such as a fetch request) and abort it if required via an AbortController object.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal)
  */
 declare abstract class AbortSignal extends EventTarget {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_static) */
+  /**
+   * The **`AbortSignal.abort()`** static method returns an AbortSignal that is already set as aborted (and which does not trigger an AbortSignal/abort_event event).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_static)
+   */
   static abort(reason?: any): AbortSignal;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/timeout_static) */
+  /**
+   * The **`AbortSignal.timeout()`** static method returns an AbortSignal that will automatically abort after a specified time.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/timeout_static)
+   */
   static timeout(delay: number): AbortSignal;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/any_static) */
+  /**
+   * The **`AbortSignal.any()`** static method takes an iterable of abort signals and returns an AbortSignal.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/any_static)
+   */
   static any(signals: AbortSignal[]): AbortSignal;
   /**
-   * Returns true if this AbortSignal's AbortController has signaled to abort, and false otherwise.
+   * The **`aborted`** read-only property returns a value that indicates whether the asynchronous operations the signal is communicating with are aborted (`true`) or not (`false`).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/aborted)
    */
   get aborted(): boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/reason) */
+  /**
+   * The **`reason`** read-only property returns a JavaScript value that indicates the abort reason.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/reason)
+   */
   get reason(): any;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_event) */
   get onabort(): any | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_event) */
   set onabort(value: any | null);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/throwIfAborted) */
+  /**
+   * The **`throwIfAborted()`** method throws the signal's abort AbortSignal.reason if the signal has been aborted; otherwise it does nothing.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/throwIfAborted)
+   */
   throwIfAborted(): void;
 }
 interface Scheduler {
@@ -942,19 +1057,27 @@ interface SchedulerWaitOptions {
   signal?: AbortSignal;
 }
 /**
- * Extends the lifetime of the install and activate events dispatched on the global scope as part of the service worker lifecycle. This ensures that any functional events (like FetchEvent) are not dispatched until it upgrades database schemas and deletes the outdated cache entries.
+ * The **`ExtendableEvent`** interface extends the lifetime of the `install` and `activate` events dispatched on the global scope as part of the service worker lifecycle.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ExtendableEvent)
  */
 declare abstract class ExtendableEvent extends Event {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ExtendableEvent/waitUntil) */
+  /**
+   * The **`ExtendableEvent.waitUntil()`** method tells the event dispatcher that work is ongoing.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ExtendableEvent/waitUntil)
+   */
   waitUntil(promise: Promise<any>): void;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CustomEvent) */
+/**
+ * The **`CustomEvent`** interface represents events initialized by an application for any purpose.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CustomEvent)
+ */
 declare class CustomEvent<T = any> extends Event {
   constructor(type: string, init?: CustomEventCustomEventInit);
   /**
-   * Returns any custom data event was created with. Typically used for synthetic events.
+   * The read-only **`detail`** property of the CustomEvent interface returns any data passed when initializing the event.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CustomEvent/detail)
    */
@@ -967,7 +1090,7 @@ interface CustomEventCustomEventInit {
   detail?: any;
 }
 /**
- * A file-like object of immutable, raw data. Blobs represent data that isn't necessarily in a JavaScript-native format. The File interface is based on Blob, inheriting blob functionality and expanding it to support files on the user's system.
+ * The **`Blob`** interface represents a blob, which is a file-like object of immutable, raw data; they can be read as text or binary data, or converted into a ReadableStream so its methods can be used for processing the data.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob)
  */
@@ -976,25 +1099,54 @@ declare class Blob {
     type?: ((ArrayBuffer | ArrayBufferView) | string | Blob)[],
     options?: BlobOptions,
   );
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/size) */
+  /**
+   * The **`size`** read-only property of the Blob interface returns the size of the Blob or File in bytes.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/size)
+   */
   get size(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/type) */
+  /**
+   * The **`type`** read-only property of the Blob interface returns the MIME type of the file.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/type)
+   */
   get type(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/slice) */
+  /**
+   * The **`slice()`** method of the Blob interface creates and returns a new `Blob` object which contains data from a subset of the blob on which it's called.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/slice)
+   */
   slice(start?: number, end?: number, type?: string): Blob;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/arrayBuffer) */
+  /**
+   * The **`arrayBuffer()`** method of the Blob interface returns a Promise that resolves with the contents of the blob as binary data contained in an ArrayBuffer.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/arrayBuffer)
+   */
   arrayBuffer(): Promise<ArrayBuffer>;
+  /**
+   * The **`bytes()`** method of the Blob interface returns a Promise that resolves with a Uint8Array containing the contents of the blob as an array of bytes.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/bytes)
+   */
   bytes(): Promise<Uint8Array>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/text) */
+  /**
+   * The **`text()`** method of the string containing the contents of the blob, interpreted as UTF-8.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/text)
+   */
   text(): Promise<string>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/stream) */
+  /**
+   * The **`stream()`** method of the Blob interface returns a ReadableStream which upon reading returns the data contained within the `Blob`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/stream)
+   */
   stream(): ReadableStream;
 }
 interface BlobOptions {
   type?: string;
 }
 /**
- * Provides information about files and allows JavaScript in a web page to access their content.
+ * The **`File`** interface provides information about files and allows JavaScript in a web page to access their content.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/File)
  */
@@ -1004,9 +1156,17 @@ declare class File extends Blob {
     name: string,
     options?: FileOptions,
   );
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/name) */
+  /**
+   * The **`name`** read-only property of the File interface returns the name of the file represented by a File object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/name)
+   */
   get name(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/lastModified) */
+  /**
+   * The **`lastModified`** read-only property of the File interface provides the last modified date of the file as the number of milliseconds since the Unix epoch (January 1, 1970 at midnight).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/lastModified)
+   */
   get lastModified(): number;
 }
 interface FileOptions {
@@ -1019,7 +1179,11 @@ interface FileOptions {
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/cache/)
  */
 declare abstract class CacheStorage {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CacheStorage/open) */
+  /**
+   * The **`open()`** method of the the Cache object matching the `cacheName`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CacheStorage/open)
+   */
   open(cacheName: string): Promise<Cache>;
   readonly default: Cache;
 }
@@ -1055,12 +1219,17 @@ interface CacheQueryOptions {
  */
 declare abstract class Crypto {
   /**
+   * The **`Crypto.subtle`** read-only property returns a cryptographic operations.
    * Available only in secure contexts.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/subtle)
    */
   get subtle(): SubtleCrypto;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/getRandomValues) */
+  /**
+   * The **`Crypto.getRandomValues()`** method lets you get cryptographically strong random values.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/getRandomValues)
+   */
   getRandomValues<
     T extends
       | Int8Array
@@ -1073,6 +1242,7 @@ declare abstract class Crypto {
       | BigUint64Array,
   >(buffer: T): T;
   /**
+   * The **`randomUUID()`** method of the Crypto interface is used to generate a v4 UUID using a cryptographically secure random number generator.
    * Available only in secure contexts.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/randomUUID)
@@ -1081,49 +1251,77 @@ declare abstract class Crypto {
   DigestStream: typeof DigestStream;
 }
 /**
- * This Web Crypto API interface provides a number of low-level cryptographic functions. It is accessed via the Crypto.subtle properties available in a window context (via Window.crypto).
+ * The **`SubtleCrypto`** interface of the Web Crypto API provides a number of low-level cryptographic functions.
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto)
  */
 declare abstract class SubtleCrypto {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/encrypt) */
+  /**
+   * The **`encrypt()`** method of the SubtleCrypto interface encrypts data.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/encrypt)
+   */
   encrypt(
     algorithm: string | SubtleCryptoEncryptAlgorithm,
     key: CryptoKey,
     plainText: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/decrypt) */
+  /**
+   * The **`decrypt()`** method of the SubtleCrypto interface decrypts some encrypted data.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/decrypt)
+   */
   decrypt(
     algorithm: string | SubtleCryptoEncryptAlgorithm,
     key: CryptoKey,
     cipherText: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/sign) */
+  /**
+   * The **`sign()`** method of the SubtleCrypto interface generates a digital signature.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/sign)
+   */
   sign(
     algorithm: string | SubtleCryptoSignAlgorithm,
     key: CryptoKey,
     data: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/verify) */
+  /**
+   * The **`verify()`** method of the SubtleCrypto interface verifies a digital signature.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/verify)
+   */
   verify(
     algorithm: string | SubtleCryptoSignAlgorithm,
     key: CryptoKey,
     signature: ArrayBuffer | ArrayBufferView,
     data: ArrayBuffer | ArrayBufferView,
   ): Promise<boolean>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/digest) */
+  /**
+   * The **`digest()`** method of the SubtleCrypto interface generates a _digest_ of the given data, using the specified hash function.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/digest)
+   */
   digest(
     algorithm: string | SubtleCryptoHashAlgorithm,
     data: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/generateKey) */
+  /**
+   * The **`generateKey()`** method of the SubtleCrypto interface is used to generate a new key (for symmetric algorithms) or key pair (for public-key algorithms).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/generateKey)
+   */
   generateKey(
     algorithm: string | SubtleCryptoGenerateKeyAlgorithm,
     extractable: boolean,
     keyUsages: string[],
   ): Promise<CryptoKey | CryptoKeyPair>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/deriveKey) */
+  /**
+   * The **`deriveKey()`** method of the SubtleCrypto interface can be used to derive a secret key from a master key.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/deriveKey)
+   */
   deriveKey(
     algorithm: string | SubtleCryptoDeriveKeyAlgorithm,
     baseKey: CryptoKey,
@@ -1131,13 +1329,21 @@ declare abstract class SubtleCrypto {
     extractable: boolean,
     keyUsages: string[],
   ): Promise<CryptoKey>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/deriveBits) */
+  /**
+   * The **`deriveBits()`** method of the key.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/deriveBits)
+   */
   deriveBits(
     algorithm: string | SubtleCryptoDeriveKeyAlgorithm,
     baseKey: CryptoKey,
     length?: number | null,
   ): Promise<ArrayBuffer>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/importKey) */
+  /**
+   * The **`importKey()`** method of the SubtleCrypto interface imports a key: that is, it takes as input a key in an external, portable format and gives you a CryptoKey object that you can use in the Web Crypto API.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/importKey)
+   */
   importKey(
     format: string,
     keyData: (ArrayBuffer | ArrayBufferView) | JsonWebKey,
@@ -1145,16 +1351,28 @@ declare abstract class SubtleCrypto {
     extractable: boolean,
     keyUsages: string[],
   ): Promise<CryptoKey>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/exportKey) */
+  /**
+   * The **`exportKey()`** method of the SubtleCrypto interface exports a key: that is, it takes as input a CryptoKey object and gives you the key in an external, portable format.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/exportKey)
+   */
   exportKey(format: string, key: CryptoKey): Promise<ArrayBuffer | JsonWebKey>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/wrapKey) */
+  /**
+   * The **`wrapKey()`** method of the SubtleCrypto interface 'wraps' a key.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/wrapKey)
+   */
   wrapKey(
     format: string,
     key: CryptoKey,
     wrappingKey: CryptoKey,
     wrapAlgorithm: string | SubtleCryptoEncryptAlgorithm,
   ): Promise<ArrayBuffer>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/unwrapKey) */
+  /**
+   * The **`unwrapKey()`** method of the SubtleCrypto interface 'unwraps' a key.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/unwrapKey)
+   */
   unwrapKey(
     format: string,
     wrappedKey: ArrayBuffer | ArrayBufferView,
@@ -1170,17 +1388,29 @@ declare abstract class SubtleCrypto {
   ): boolean;
 }
 /**
- * The CryptoKey dictionary of the Web Crypto API represents a cryptographic key.
+ * The **`CryptoKey`** interface of the Web Crypto API represents a cryptographic key obtained from one of the SubtleCrypto methods SubtleCrypto.generateKey, SubtleCrypto.deriveKey, SubtleCrypto.importKey, or SubtleCrypto.unwrapKey.
  * Available only in secure contexts.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey)
  */
 declare abstract class CryptoKey {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/type) */
+  /**
+   * The read-only **`type`** property of the CryptoKey interface indicates which kind of key is represented by the object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/type)
+   */
   readonly type: string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/extractable) */
+  /**
+   * The read-only **`extractable`** property of the CryptoKey interface indicates whether or not the key may be extracted using `SubtleCrypto.exportKey()` or `SubtleCrypto.wrapKey()`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/extractable)
+   */
   readonly extractable: boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/algorithm) */
+  /**
+   * The read-only **`algorithm`** property of the CryptoKey interface returns an object describing the algorithm for which this key can be used, and any associated extra parameters.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/algorithm)
+   */
   readonly algorithm:
     | CryptoKeyKeyAlgorithm
     | CryptoKeyAesKeyAlgorithm
@@ -1188,7 +1418,11 @@ declare abstract class CryptoKey {
     | CryptoKeyRsaKeyAlgorithm
     | CryptoKeyEllipticKeyAlgorithm
     | CryptoKeyArbitraryKeyAlgorithm;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/usages) */
+  /**
+   * The read-only **`usages`** property of the CryptoKey interface indicates what can be done with the key.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/usages)
+   */
   readonly usages: string[];
 }
 interface CryptoKeyPair {
@@ -1293,28 +1527,18 @@ declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
   constructor(algorithm: string | SubtleCryptoHashAlgorithm);
-  get digest(): Promise<ArrayBuffer | ArrayBufferView>;
+  readonly digest: Promise<ArrayBuffer>;
   get bytesWritten(): number | bigint;
 }
 /**
- * A decoder for a specific method, that is a specific character encoding, like utf-8, iso-8859-2, koi8, cp1261, gbk, etc. A decoder takes a stream of bytes as input and emits a stream of code points. For a more scalable, non-native library, see StringView – a C-like representation of strings based on typed arrays.
+ * The **`TextDecoder`** interface represents a decoder for a specific text encoding, such as `UTF-8`, `ISO-8859-2`, `KOI8-R`, `GBK`, etc.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoder)
  */
 declare class TextDecoder {
-  constructor(decoder?: string, options?: TextDecoderConstructorOptions);
+  constructor(label?: string, options?: TextDecoderConstructorOptions);
   /**
-   * Returns the result of running encoding's decoder. The method can be invoked zero or more times with options's stream set to true, and then once without options's stream (or set to false), to process a fragmented input. If the invocation without options's stream (or set to false) has no input, it's clearest to omit both arguments.
-   *
-   * ```
-   * var string = "", decoder = new TextDecoder(encoding), buffer;
-   * while(buffer = next_chunk()) {
-   *   string += decoder.decode(buffer, {stream:true});
-   * }
-   * string += decoder.decode(); // end-of-queue
-   * ```
-   *
-   * If the error mode is "fatal" and encoding's decoder returns error, throws a TypeError.
+   * The **`TextDecoder.decode()`** method returns a string containing text decoded from the buffer passed as a parameter.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoder/decode)
    */
@@ -1327,27 +1551,24 @@ declare class TextDecoder {
   get ignoreBOM(): boolean;
 }
 /**
- * TextEncoder takes a stream of code points as input and emits a stream of bytes. For a more scalable, non-native library, see StringView – a C-like representation of strings based on typed arrays.
+ * The **`TextEncoder`** interface takes a stream of code points as input and emits a stream of UTF-8 bytes.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder)
  */
 declare class TextEncoder {
   constructor();
   /**
-   * Returns the result of running UTF-8's encoder.
+   * The **`TextEncoder.encode()`** method takes a string as input, and returns a Global_Objects/Uint8Array containing the text given in parameters encoded with the specific method for that TextEncoder object.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder/encode)
    */
   encode(input?: string): Uint8Array;
   /**
-   * Runs the UTF-8 encoder on source, stores the result of that operation into destination, and returns the progress made as an object wherein read is the number of converted code units of source and written is the number of bytes modified in destination.
+   * The **`TextEncoder.encodeInto()`** method takes a string to encode and a destination Uint8Array to put resulting UTF-8 encoded text into, and returns a dictionary object indicating the progress of the encoding.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder/encodeInto)
    */
-  encodeInto(
-    input: string,
-    buffer: ArrayBuffer | ArrayBufferView,
-  ): TextEncoderEncodeIntoResult;
+  encodeInto(input: string, buffer: Uint8Array): TextEncoderEncodeIntoResult;
   get encoding(): string;
 }
 interface TextDecoderConstructorOptions {
@@ -1362,16 +1583,41 @@ interface TextEncoderEncodeIntoResult {
   written: number;
 }
 /**
- * Events providing information related to errors in scripts or in files.
+ * The **`ErrorEvent`** interface represents events providing information related to errors in scripts or in files.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent)
  */
 declare class ErrorEvent extends Event {
   constructor(type: string, init?: ErrorEventErrorEventInit);
+  /**
+   * The **`filename`** read-only property of the ErrorEvent interface returns a string containing the name of the script file in which the error occurred.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/filename)
+   */
   get filename(): string;
+  /**
+   * The **`message`** read-only property of the ErrorEvent interface returns a string containing a human-readable error message describing the problem.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/message)
+   */
   get message(): string;
+  /**
+   * The **`lineno`** read-only property of the ErrorEvent interface returns an integer containing the line number of the script file on which the error occurred.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/lineno)
+   */
   get lineno(): number;
+  /**
+   * The **`colno`** read-only property of the ErrorEvent interface returns an integer containing the column number of the script file on which the error occurred.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/colno)
+   */
   get colno(): number;
+  /**
+   * The **`error`** read-only property of the ErrorEvent interface returns a JavaScript value, such as an Error or DOMException, representing the error associated with this event.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/error)
+   */
   get error(): any;
 }
 interface ErrorEventErrorEventInit {
@@ -1382,27 +1628,119 @@ interface ErrorEventErrorEventInit {
   error?: any;
 }
 /**
- * Provides a way to easily construct a set of key/value pairs representing form fields and their values, which can then be easily sent using the XMLHttpRequest.send() method. It uses the same format a form would use if the encoding type were set to "multipart/form-data".
+ * The **`MessageEvent`** interface represents a message received by a target object.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
+ */
+declare class MessageEvent extends Event {
+  constructor(type: string, initializer: MessageEventInit);
+  /**
+   * The **`data`** read-only property of the The data sent by the message emitter; this can be any data type, depending on what originated this event.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
+   */
+  readonly data: any;
+  /**
+   * The **`origin`** read-only property of the origin of the message emitter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/origin)
+   */
+  readonly origin: string | null;
+  /**
+   * The **`lastEventId`** read-only property of the unique ID for the event.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/lastEventId)
+   */
+  readonly lastEventId: string;
+  /**
+   * The **`source`** read-only property of the a WindowProxy, MessagePort, or a `MessageEventSource` (which can be a WindowProxy, message emitter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/source)
+   */
+  readonly source: MessagePort | null;
+  /**
+   * The **`ports`** read-only property of the containing all MessagePort objects sent with the message, in order.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/ports)
+   */
+  readonly ports: MessagePort[];
+}
+interface MessageEventInit {
+  data: ArrayBuffer | string;
+}
+/**
+ * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent)
+ */
+declare abstract class PromiseRejectionEvent extends Event {
+  /**
+   * The PromiseRejectionEvent interface's **`promise`** read-only property indicates the JavaScript rejected.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/promise)
+   */
+  readonly promise: Promise<any>;
+  /**
+   * The PromiseRejectionEvent **`reason`** read-only property is any JavaScript value or Object which provides the reason passed into Promise.reject().
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason)
+   */
+  readonly reason: any;
+}
+/**
+ * The **`FormData`** interface provides a way to construct a set of key/value pairs representing form fields and their values, which can be sent using the Window/fetch, XMLHttpRequest.send() or navigator.sendBeacon() methods.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData)
  */
 declare class FormData {
   constructor();
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append) */
+  /**
+   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
+   */
   append(name: string, value: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append) */
+  /**
+   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
+   */
   append(name: string, value: Blob, filename?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/delete) */
+  /**
+   * The **`delete()`** method of the FormData interface deletes a key and its value(s) from a `FormData` object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/delete)
+   */
   delete(name: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/get) */
+  /**
+   * The **`get()`** method of the FormData interface returns the first value associated with a given key from within a `FormData` object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/get)
+   */
   get(name: string): (File | string) | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/getAll) */
+  /**
+   * The **`getAll()`** method of the FormData interface returns all the values associated with a given key from within a `FormData` object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/getAll)
+   */
   getAll(name: string): (File | string)[];
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/has) */
+  /**
+   * The **`has()`** method of the FormData interface returns whether a `FormData` object contains a certain key.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/has)
+   */
   has(name: string): boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set) */
+  /**
+   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set)
+   */
   set(name: string, value: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set) */
+  /**
+   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set)
+   */
   set(name: string, value: Blob, filename?: string): void;
   /* Returns an array of key, value pairs for every entry in the list. */
   entries(): IterableIterator<[key: string, value: File | string]>;
@@ -1528,14 +1866,22 @@ interface DocumentEnd {
   append(content: string, options?: ContentOptions): DocumentEnd;
 }
 /**
- * This is the event type for fetch events dispatched on the service worker global scope. It contains information about the fetch, including the request and how the receiver will treat the response. It provides the event.respondWith() method, which allows us to provide a response to this fetch.
+ * This is the event type for `fetch` events dispatched on the ServiceWorkerGlobalScope.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent)
  */
 declare abstract class FetchEvent extends ExtendableEvent {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent/request) */
+  /**
+   * The **`request`** read-only property of the the event handler.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent/request)
+   */
   readonly request: Request;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent/respondWith) */
+  /**
+   * The **`respondWith()`** method of allows you to provide a promise for a Response yourself.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent/respondWith)
+   */
   respondWith(promise: Response | Promise<Response>): void;
   passThroughOnException(): void;
 }
@@ -1544,24 +1890,48 @@ type HeadersInit =
   | Iterable<Iterable<string>>
   | Record<string, string>;
 /**
- * This Fetch API interface allows you to perform various actions on HTTP request and response headers. These actions include retrieving, setting, adding to, and removing. A Headers object has an associated header list, which is initially empty and consists of zero or more name and value pairs.  You can add to this using methods like append() (see Examples.) In all methods of this interface, header names are matched by case-insensitive byte sequence.
+ * The **`Headers`** interface of the Fetch API allows you to perform various actions on HTTP request and response headers.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers)
  */
 declare class Headers {
   constructor(init?: HeadersInit);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/get) */
+  /**
+   * The **`get()`** method of the Headers interface returns a byte string of all the values of a header within a `Headers` object with a given name.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/get)
+   */
   get(name: string): string | null;
   getAll(name: string): string[];
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie) */
+  /**
+   * The **`getSetCookie()`** method of the Headers interface returns an array containing the values of all Set-Cookie headers associated with a response.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie)
+   */
   getSetCookie(): string[];
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has) */
+  /**
+   * The **`has()`** method of the Headers interface returns a boolean stating whether a `Headers` object contains a certain header.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has)
+   */
   has(name: string): boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/set) */
+  /**
+   * The **`set()`** method of the Headers interface sets a new value for an existing header inside a `Headers` object, or adds the header if it does not already exist.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/set)
+   */
   set(name: string, value: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/append) */
+  /**
+   * The **`append()`** method of the Headers interface appends a new value onto an existing header inside a `Headers` object, or adds the header if it does not already exist.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/append)
+   */
   append(name: string, value: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/delete) */
+  /**
+   * The **`delete()`** method of the Headers interface deletes a header from the current `Headers` object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/delete)
+   */
   delete(name: string): void;
   forEach<This = unknown>(
     callback: (this: This, value: string, key: string, parent: Headers) => void,
@@ -1590,6 +1960,7 @@ declare abstract class Body {
   get bodyUsed(): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/arrayBuffer) */
   arrayBuffer(): Promise<ArrayBuffer>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bytes) */
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/text) */
   text(): Promise<string>;
@@ -1601,7 +1972,7 @@ declare abstract class Body {
   blob(): Promise<Blob>;
 }
 /**
- * This Fetch API interface represents the response to a request.
+ * The **`Response`** interface of the Fetch API represents the response to a request.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response)
  */
@@ -1613,28 +1984,60 @@ declare var Response: {
   json(any: any, maybeInit?: ResponseInit | Response): Response;
 };
 /**
- * This Fetch API interface represents the response to a request.
+ * The **`Response`** interface of the Fetch API represents the response to a request.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response)
  */
 interface Response extends Body {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/clone) */
+  /**
+   * The **`clone()`** method of the Response interface creates a clone of a response object, identical in every way, but stored in a different variable.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/clone)
+   */
   clone(): Response;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/status) */
+  /**
+   * The **`status`** read-only property of the Response interface contains the HTTP status codes of the response.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/status)
+   */
   status: number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/statusText) */
+  /**
+   * The **`statusText`** read-only property of the Response interface contains the status message corresponding to the HTTP status code in Response.status.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/statusText)
+   */
   statusText: string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/headers) */
+  /**
+   * The **`headers`** read-only property of the with the response.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/headers)
+   */
   headers: Headers;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/ok) */
+  /**
+   * The **`ok`** read-only property of the Response interface contains a Boolean stating whether the response was successful (status in the range 200-299) or not.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/ok)
+   */
   ok: boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/redirected) */
+  /**
+   * The **`redirected`** read-only property of the Response interface indicates whether or not the response is the result of a request you made which was redirected.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/redirected)
+   */
   redirected: boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/url) */
+  /**
+   * The **`url`** read-only property of the Response interface contains the URL of the response.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/url)
+   */
   url: string;
   webSocket: WebSocket | null;
   cf: any | undefined;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
+  /**
+   * The **`type`** read-only property of the Response interface contains the type of the response.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type)
+   */
   type: "default" | "error";
 }
 interface ResponseInit {
@@ -1649,7 +2052,7 @@ type RequestInfo<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> =
   | Request<CfHostMetadata, Cf>
   | string;
 /**
- * This Fetch API interface represents a resource request.
+ * The **`Request`** interface of the Fetch API represents a resource request.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request)
  */
@@ -1661,60 +2064,68 @@ declare var Request: {
   ): Request<CfHostMetadata, Cf>;
 };
 /**
- * This Fetch API interface represents a resource request.
+ * The **`Request`** interface of the Fetch API represents a resource request.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request)
  */
 interface Request<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>
   extends Body {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/clone) */
+  /**
+   * The **`clone()`** method of the Request interface creates a copy of the current `Request` object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/clone)
+   */
   clone(): Request<CfHostMetadata, Cf>;
   /**
-   * Returns request's HTTP method, which is "GET" by default.
+   * The **`method`** read-only property of the `POST`, etc.) A String indicating the method of the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/method)
    */
   method: string;
   /**
-   * Returns the URL of request as a string.
+   * The **`url`** read-only property of the Request interface contains the URL of the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/url)
    */
   url: string;
   /**
-   * Returns a Headers object consisting of the headers associated with request. Note that headers added in the network layer by the user agent will not be accounted for in this object, e.g., the "Host" header.
+   * The **`headers`** read-only property of the with the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/headers)
    */
   headers: Headers;
   /**
-   * Returns the redirect mode associated with request, which is a string indicating how redirects for the request will be handled during fetching. A request will follow redirects by default.
+   * The **`redirect`** read-only property of the Request interface contains the mode for how redirects are handled.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/redirect)
    */
   redirect: string;
   fetcher: Fetcher | null;
   /**
-   * Returns the signal associated with request, which is an AbortSignal object indicating whether or not request has been aborted, and its abort event handler.
+   * The read-only **`signal`** property of the Request interface returns the AbortSignal associated with the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/signal)
    */
   signal: AbortSignal;
   cf: Cf | undefined;
   /**
-   * Returns request's subresource integrity metadata, which is a cryptographic hash of the resource being fetched. Its value consists of multiple hashes separated by whitespace. [SRI]
+   * The **`integrity`** read-only property of the Request interface contains the subresource integrity value of the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/integrity)
    */
   integrity: string;
-  /* Returns a boolean indicating whether or not request can outlive the global in which it was created. */
+  /**
+   * The **`keepalive`** read-only property of the Request interface contains the request's `keepalive` setting (`true` or `false`), which indicates whether the browser will keep the associated request alive if the page that initiated it is unloaded before the request is complete.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
+   */
   keepalive: boolean;
   /**
-   * Returns the cache mode associated with request, which is a string indicating how the request will interact with the browser's cache when fetching.
+   * The **`cache`** read-only property of the Request interface contains the cache mode of the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
    */
-  cache?: "no-store" | "no-cache";
+  cache?: "no-store" | "no-cache" | "reload";
 }
 interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -1728,15 +2139,26 @@ interface RequestInit<Cf = CfProperties> {
   fetcher?: Fetcher | null;
   cf?: Cf;
   /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store" | "no-cache";
+  cache?: "no-store" | "no-cache" | "reload";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
   signal?: AbortSignal | null;
   encodeResponseBody?: "automatic" | "manual";
 }
-type Service<T extends Rpc.WorkerEntrypointBranded | undefined = undefined> =
-  Fetcher<T>;
+type Service<
+  T extends
+    | (new (...args: any[]) => Rpc.WorkerEntrypointBranded)
+    | Rpc.WorkerEntrypointBranded
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? Fetcher<InstanceType<T>>
+  : T extends Rpc.WorkerEntrypointBranded
+    ? Fetcher<T>
+    : T extends Exclude<Rpc.EntrypointBranded, Rpc.WorkerEntrypointBranded>
+      ? never
+      : Fetcher<undefined>;
 type Fetcher<
   T extends Rpc.EntrypointBranded | undefined = undefined,
   Reserved extends string = never,
@@ -1909,6 +2331,7 @@ interface KVNamespace<Key extends string = string> {
     Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
   >;
   delete(key: Key): Promise<void>;
+  deleteBulk(keys: Key | Key[]): Promise<void>;
 }
 interface KVNamespaceListOptions {
   limit?: number;
@@ -2070,6 +2493,7 @@ interface R2ObjectBody extends R2Object {
   get body(): ReadableStream;
   get bodyUsed(): boolean;
   arrayBuffer(): Promise<ArrayBuffer>;
+  bytes(): Promise<Uint8Array>;
   text(): Promise<string>;
   json<T>(): Promise<T>;
   blob(): Promise<Blob>;
@@ -2102,11 +2526,11 @@ interface R2PutOptions {
   onlyIf?: R2Conditional | Headers;
   httpMetadata?: R2HTTPMetadata | Headers;
   customMetadata?: Record<string, string>;
-  md5?: ArrayBuffer | string;
-  sha1?: ArrayBuffer | string;
-  sha256?: ArrayBuffer | string;
-  sha384?: ArrayBuffer | string;
-  sha512?: ArrayBuffer | string;
+  md5?: (ArrayBuffer | ArrayBufferView) | string;
+  sha1?: (ArrayBuffer | ArrayBufferView) | string;
+  sha256?: (ArrayBuffer | ArrayBufferView) | string;
+  sha384?: (ArrayBuffer | ArrayBufferView) | string;
+  sha512?: (ArrayBuffer | ArrayBufferView) | string;
   storageClass?: string;
   ssecKey?: ArrayBuffer | string;
 }
@@ -2153,6 +2577,11 @@ type R2Objects = {
 );
 interface R2UploadPartOptions {
   ssecKey?: ArrayBuffer | string;
+}
+declare abstract class JsRpcPromise {
+  then(handler: Function, errorHandler?: Function): any;
+  catch(errorHandler: Function): any;
+  finally(onFinally: Function): any;
 }
 declare abstract class JsRpcProperty {
   then(handler: Function, errorHandler?: Function): any;
@@ -2250,30 +2679,58 @@ type ReadableStreamReadResult<R = any> =
       value?: undefined;
     };
 /**
- * This Streams API interface represents a readable stream of byte data. The Fetch API offers a concrete instance of a ReadableStream through the body property of a Response object.
+ * The `ReadableStream` interface of the Streams API represents a readable stream of byte data.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream)
  */
 interface ReadableStream<R = any> {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/locked) */
+  /**
+   * The **`locked`** read-only property of the ReadableStream interface returns whether or not the readable stream is locked to a reader.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/locked)
+   */
   get locked(): boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/cancel) */
+  /**
+   * The **`cancel()`** method of the ReadableStream interface returns a Promise that resolves when the stream is canceled.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/cancel)
+   */
   cancel(reason?: any): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/getReader) */
+  /**
+   * The **`getReader()`** method of the ReadableStream interface creates a reader and locks the stream to it.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/getReader)
+   */
   getReader(): ReadableStreamDefaultReader<R>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/getReader) */
+  /**
+   * The **`getReader()`** method of the ReadableStream interface creates a reader and locks the stream to it.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/getReader)
+   */
   getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/pipeThrough) */
+  /**
+   * The **`pipeThrough()`** method of the ReadableStream interface provides a chainable way of piping the current stream through a transform stream or any other writable/readable pair.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/pipeThrough)
+   */
   pipeThrough<T>(
     transform: ReadableWritablePair<T, R>,
     options?: StreamPipeOptions,
   ): ReadableStream<T>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/pipeTo) */
+  /**
+   * The **`pipeTo()`** method of the ReadableStream interface pipes the current `ReadableStream` to a given WritableStream and returns a Promise that fulfills when the piping process completes successfully, or rejects if any errors were encountered.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/pipeTo)
+   */
   pipeTo(
     destination: WritableStream<R>,
     options?: StreamPipeOptions,
   ): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/tee) */
+  /**
+   * The **`tee()`** method of the two-element array containing the two resulting branches as new ReadableStream instances.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/tee)
+   */
   tee(): [ReadableStream<R>, ReadableStream<R>];
   values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
   [Symbol.asyncIterator](
@@ -2281,7 +2738,7 @@ interface ReadableStream<R = any> {
   ): AsyncIterableIterator<R>;
 }
 /**
- * This Streams API interface represents a readable stream of byte data. The Fetch API offers a concrete instance of a ReadableStream through the body property of a Response object.
+ * The `ReadableStream` interface of the Streams API represents a readable stream of byte data.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream)
  */
@@ -2296,26 +2753,50 @@ declare const ReadableStream: {
     strategy?: QueuingStrategy<R>,
   ): ReadableStream<R>;
 };
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader) */
+/**
+ * The **`ReadableStreamDefaultReader`** interface of the Streams API represents a default reader that can be used to read stream data supplied from a network (such as a fetch request).
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader)
+ */
 declare class ReadableStreamDefaultReader<R = any> {
   constructor(stream: ReadableStream);
   get closed(): Promise<void>;
   cancel(reason?: any): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader/read) */
+  /**
+   * The **`read()`** method of the ReadableStreamDefaultReader interface returns a Promise providing access to the next chunk in the stream's internal queue.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader/read)
+   */
   read(): Promise<ReadableStreamReadResult<R>>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader/releaseLock) */
+  /**
+   * The **`releaseLock()`** method of the ReadableStreamDefaultReader interface releases the reader's lock on the stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader/releaseLock)
+   */
   releaseLock(): void;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader) */
+/**
+ * The `ReadableStreamBYOBReader` interface of the Streams API defines a reader for a ReadableStream that supports zero-copy reading from an underlying byte source.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader)
+ */
 declare class ReadableStreamBYOBReader {
   constructor(stream: ReadableStream);
   get closed(): Promise<void>;
   cancel(reason?: any): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/read) */
+  /**
+   * The **`read()`** method of the ReadableStreamBYOBReader interface is used to read data into a view on a user-supplied buffer from an associated readable byte stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/read)
+   */
   read<T extends ArrayBufferView>(
     view: T,
   ): Promise<ReadableStreamReadResult<T>>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/releaseLock) */
+  /**
+   * The **`releaseLock()`** method of the ReadableStreamBYOBReader interface releases the reader's lock on the stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/releaseLock)
+   */
   releaseLock(): void;
   readAtLeast<T extends ArrayBufferView>(
     minElements: number,
@@ -2333,60 +2814,148 @@ interface ReadableStreamGetReaderOptions {
    */
   mode: "byob";
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest) */
+/**
+ * The **`ReadableStreamBYOBRequest`** interface of the Streams API represents a 'pull request' for data from an underlying source that will made as a zero-copy transfer to a consumer (bypassing the stream's internal queues).
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest)
+ */
 declare abstract class ReadableStreamBYOBRequest {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/view) */
+  /**
+   * The **`view`** getter property of the ReadableStreamBYOBRequest interface returns the current view.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/view)
+   */
   get view(): Uint8Array | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/respond) */
+  /**
+   * The **`respond()`** method of the ReadableStreamBYOBRequest interface is used to signal to the associated readable byte stream that the specified number of bytes were written into the ReadableStreamBYOBRequest.view.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/respond)
+   */
   respond(bytesWritten: number): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/respondWithNewView) */
+  /**
+   * The **`respondWithNewView()`** method of the ReadableStreamBYOBRequest interface specifies a new view that the consumer of the associated readable byte stream should write to instead of ReadableStreamBYOBRequest.view.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/respondWithNewView)
+   */
   respondWithNewView(view: ArrayBuffer | ArrayBufferView): void;
   get atLeast(): number | null;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController) */
+/**
+ * The **`ReadableStreamDefaultController`** interface of the Streams API represents a controller allowing control of a ReadableStream's state and internal queue.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController)
+ */
 declare abstract class ReadableStreamDefaultController<R = any> {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/desiredSize) */
+  /**
+   * The **`desiredSize`** read-only property of the required to fill the stream's internal queue.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/desiredSize)
+   */
   get desiredSize(): number | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/close) */
+  /**
+   * The **`close()`** method of the ReadableStreamDefaultController interface closes the associated stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/close)
+   */
   close(): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/enqueue) */
+  /**
+   * The **`enqueue()`** method of the ```js-nolint enqueue(chunk) ``` - `chunk` - : The chunk to enqueue.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/enqueue)
+   */
   enqueue(chunk?: R): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/error) */
-  error(reason: any): void;
-}
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController) */
-declare abstract class ReadableByteStreamController {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/byobRequest) */
-  get byobRequest(): ReadableStreamBYOBRequest | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/desiredSize) */
-  get desiredSize(): number | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/close) */
-  close(): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/enqueue) */
-  enqueue(chunk: ArrayBuffer | ArrayBufferView): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/error) */
+  /**
+   * The **`error()`** method of the with the associated stream to error.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/error)
+   */
   error(reason: any): void;
 }
 /**
- * This Streams API interface represents a controller allowing control of a WritableStream's state. When constructing a WritableStream, the underlying sink is given a corresponding WritableStreamDefaultController instance to manipulate.
+ * The **`ReadableByteStreamController`** interface of the Streams API represents a controller for a readable byte stream.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController)
+ */
+declare abstract class ReadableByteStreamController {
+  /**
+   * The **`byobRequest`** read-only property of the ReadableByteStreamController interface returns the current BYOB request, or `null` if there are no pending requests.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/byobRequest)
+   */
+  get byobRequest(): ReadableStreamBYOBRequest | null;
+  /**
+   * The **`desiredSize`** read-only property of the ReadableByteStreamController interface returns the number of bytes required to fill the stream's internal queue to its 'desired size'.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/desiredSize)
+   */
+  get desiredSize(): number | null;
+  /**
+   * The **`close()`** method of the ReadableByteStreamController interface closes the associated stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/close)
+   */
+  close(): void;
+  /**
+   * The **`enqueue()`** method of the ReadableByteStreamController interface enqueues a given chunk on the associated readable byte stream (the chunk is copied into the stream's internal queues).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/enqueue)
+   */
+  enqueue(chunk: ArrayBuffer | ArrayBufferView): void;
+  /**
+   * The **`error()`** method of the ReadableByteStreamController interface causes any future interactions with the associated stream to error with the specified reason.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/error)
+   */
+  error(reason: any): void;
+}
+/**
+ * The **`WritableStreamDefaultController`** interface of the Streams API represents a controller allowing control of a WritableStream's state.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController)
  */
 declare abstract class WritableStreamDefaultController {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/signal) */
+  /**
+   * The read-only **`signal`** property of the WritableStreamDefaultController interface returns the AbortSignal associated with the controller.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/signal)
+   */
   get signal(): AbortSignal;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/error) */
+  /**
+   * The **`error()`** method of the with the associated stream to error.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/error)
+   */
   error(reason?: any): void;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController) */
+/**
+ * The **`TransformStreamDefaultController`** interface of the Streams API provides methods to manipulate the associated ReadableStream and WritableStream.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController)
+ */
 declare abstract class TransformStreamDefaultController<O = any> {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/desiredSize) */
+  /**
+   * The **`desiredSize`** read-only property of the TransformStreamDefaultController interface returns the desired size to fill the queue of the associated ReadableStream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/desiredSize)
+   */
   get desiredSize(): number | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/enqueue) */
+  /**
+   * The **`enqueue()`** method of the TransformStreamDefaultController interface enqueues the given chunk in the readable side of the stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/enqueue)
+   */
   enqueue(chunk?: O): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/error) */
+  /**
+   * The **`error()`** method of the TransformStreamDefaultController interface errors both sides of the stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/error)
+   */
   error(reason: any): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/terminate) */
+  /**
+   * The **`terminate()`** method of the TransformStreamDefaultController interface closes the readable side and errors the writable side of the stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/terminate)
+   */
   terminate(): void;
 }
 interface ReadableWritablePair<R = any, W = any> {
@@ -2399,7 +2968,7 @@ interface ReadableWritablePair<R = any, W = any> {
   readable: ReadableStream<R>;
 }
 /**
- * This Streams API interface provides a standard abstraction for writing streaming data to a destination, known as a sink. This object comes with built-in backpressure and queuing.
+ * The **`WritableStream`** interface of the Streams API provides a standard abstraction for writing streaming data to a destination, known as a sink.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream)
  */
@@ -2408,47 +2977,103 @@ declare class WritableStream<W = any> {
     underlyingSink?: UnderlyingSink,
     queuingStrategy?: QueuingStrategy,
   );
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/locked) */
+  /**
+   * The **`locked`** read-only property of the WritableStream interface returns a boolean indicating whether the `WritableStream` is locked to a writer.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/locked)
+   */
   get locked(): boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/abort) */
+  /**
+   * The **`abort()`** method of the WritableStream interface aborts the stream, signaling that the producer can no longer successfully write to the stream and it is to be immediately moved to an error state, with any queued writes discarded.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/abort)
+   */
   abort(reason?: any): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/close) */
+  /**
+   * The **`close()`** method of the WritableStream interface closes the associated stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/close)
+   */
   close(): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/getWriter) */
+  /**
+   * The **`getWriter()`** method of the WritableStream interface returns a new instance of WritableStreamDefaultWriter and locks the stream to that instance.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/getWriter)
+   */
   getWriter(): WritableStreamDefaultWriter<W>;
 }
 /**
- * This Streams API interface is the object returned by WritableStream.getWriter() and once created locks the < writer to the WritableStream ensuring that no other streams can write to the underlying sink.
+ * The **`WritableStreamDefaultWriter`** interface of the Streams API is the object returned by WritableStream.getWriter() and once created locks the writer to the `WritableStream` ensuring that no other streams can write to the underlying sink.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter)
  */
 declare class WritableStreamDefaultWriter<W = any> {
   constructor(stream: WritableStream);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/closed) */
+  /**
+   * The **`closed`** read-only property of the the stream errors or the writer's lock is released.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/closed)
+   */
   get closed(): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/ready) */
+  /**
+   * The **`ready`** read-only property of the that resolves when the desired size of the stream's internal queue transitions from non-positive to positive, signaling that it is no longer applying backpressure.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/ready)
+   */
   get ready(): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/desiredSize) */
+  /**
+   * The **`desiredSize`** read-only property of the to fill the stream's internal queue.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/desiredSize)
+   */
   get desiredSize(): number | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/abort) */
+  /**
+   * The **`abort()`** method of the the producer can no longer successfully write to the stream and it is to be immediately moved to an error state, with any queued writes discarded.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/abort)
+   */
   abort(reason?: any): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/close) */
+  /**
+   * The **`close()`** method of the stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/close)
+   */
   close(): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/write) */
+  /**
+   * The **`write()`** method of the operation.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/write)
+   */
   write(chunk?: W): Promise<void>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/releaseLock) */
+  /**
+   * The **`releaseLock()`** method of the corresponding stream.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/releaseLock)
+   */
   releaseLock(): void;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream) */
+/**
+ * The **`TransformStream`** interface of the Streams API represents a concrete implementation of the pipe chain _transform stream_ concept.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream)
+ */
 declare class TransformStream<I = any, O = any> {
   constructor(
     transformer?: Transformer<I, O>,
     writableStrategy?: QueuingStrategy<I>,
     readableStrategy?: QueuingStrategy<O>,
   );
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/readable) */
+  /**
+   * The **`readable`** read-only property of the TransformStream interface returns the ReadableStream instance controlled by this `TransformStream`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/readable)
+   */
   get readable(): ReadableStream<O>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/writable) */
+  /**
+   * The **`writable`** read-only property of the TransformStream interface returns the WritableStream instance controlled by this `TransformStream`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/writable)
+   */
   get writable(): WritableStream<I>;
 }
 declare class FixedLengthStream extends IdentityTransformStream {
@@ -2469,26 +3094,42 @@ interface IdentityTransformStreamQueuingStrategy {
 interface ReadableStreamValuesOptions {
   preventCancel?: boolean;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CompressionStream) */
+/**
+ * The **`CompressionStream`** interface of the Compression Streams API is an API for compressing a stream of data.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CompressionStream)
+ */
 declare class CompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
   constructor(format: "gzip" | "deflate" | "deflate-raw");
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/DecompressionStream) */
+/**
+ * The **`DecompressionStream`** interface of the Compression Streams API is an API for decompressing a stream of data.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DecompressionStream)
+ */
 declare class DecompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
   constructor(format: "gzip" | "deflate" | "deflate-raw");
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoderStream) */
+/**
+ * The **`TextEncoderStream`** interface of the Encoding API converts a stream of strings into bytes in the UTF-8 encoding.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoderStream)
+ */
 declare class TextEncoderStream extends TransformStream<string, Uint8Array> {
   constructor();
   get encoding(): string;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoderStream) */
+/**
+ * The **`TextDecoderStream`** interface of the Encoding API converts a stream of text in a binary encoding, such as UTF-8 etc., to a stream of strings.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoderStream)
+ */
 declare class TextDecoderStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   string
@@ -2503,7 +3144,7 @@ interface TextDecoderStreamTextDecoderStreamInit {
   ignoreBOM?: boolean;
 }
 /**
- * This Streams API interface provides a built-in byte length queuing strategy that can be used when constructing streams.
+ * The **`ByteLengthQueuingStrategy`** interface of the Streams API provides a built-in byte length queuing strategy that can be used when constructing streams.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy)
  */
@@ -2511,19 +3152,27 @@ declare class ByteLengthQueuingStrategy
   implements QueuingStrategy<ArrayBufferView>
 {
   constructor(init: QueuingStrategyInit);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy/highWaterMark) */
+  /**
+   * The read-only **`ByteLengthQueuingStrategy.highWaterMark`** property returns the total number of bytes that can be contained in the internal queue before backpressure is applied.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy/highWaterMark)
+   */
   get highWaterMark(): number;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy/size) */
   get size(): (chunk?: any) => number;
 }
 /**
- * This Streams API interface provides a built-in byte length queuing strategy that can be used when constructing streams.
+ * The **`CountQueuingStrategy`** interface of the Streams API provides a built-in chunk counting queuing strategy that can be used when constructing streams.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CountQueuingStrategy)
  */
 declare class CountQueuingStrategy implements QueuingStrategy {
   constructor(init: QueuingStrategyInit);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CountQueuingStrategy/highWaterMark) */
+  /**
+   * The read-only **`CountQueuingStrategy.highWaterMark`** property returns the total number of chunks that can be contained in the internal queue before backpressure is applied.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CountQueuingStrategy/highWaterMark)
+   */
   get highWaterMark(): number;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CountQueuingStrategy/size) */
   get size(): (chunk?: any) => number;
@@ -2561,7 +3210,6 @@ interface TraceItem {
     | null;
   readonly eventTimestamp: number | null;
   readonly logs: TraceLog[];
-  readonly spans: OTelSpan[];
   readonly exceptions: TraceException[];
   readonly diagnosticsChannelEvents: TraceDiagnosticChannelEvent[];
   readonly scriptName: string | null;
@@ -2569,6 +3217,7 @@ interface TraceItem {
   readonly scriptVersion?: ScriptVersion;
   readonly dispatchNamespace?: string;
   readonly scriptTags?: string[];
+  readonly durableObjectId?: string;
   readonly outcome: string;
   readonly executionModel: string;
   readonly truncated: boolean;
@@ -2637,18 +3286,6 @@ interface TraceLog {
   readonly level: string;
   readonly message: any;
 }
-interface OTelSpan {
-  readonly spanId: string;
-  readonly parentSpanId: string;
-  readonly operation: string;
-  readonly tags: OTelSpanTag[];
-  readonly startTime: Date;
-  readonly endTime: Date;
-}
-interface OTelSpanTag {
-  key: string;
-  value: boolean | (number | bigint) | number | string;
-}
 interface TraceException {
   readonly timestamp: number;
   readonly message: string;
@@ -2668,113 +3305,233 @@ interface UnsafeTraceMetrics {
   fromTrace(item: TraceItem): TraceMetrics;
 }
 /**
- * The URL interface represents an object providing static methods used for creating object URLs.
+ * The **`URL`** interface is used to parse, construct, normalize, and encode URL.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL)
  */
 declare class URL {
   constructor(url: string | URL, base?: string | URL);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin) */
+  /**
+   * The **`origin`** read-only property of the URL interface returns a string containing the Unicode serialization of the origin of the represented URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin)
+   */
   get origin(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href) */
+  /**
+   * The **`href`** property of the URL interface is a string containing the whole URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
+   */
   get href(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href) */
+  /**
+   * The **`href`** property of the URL interface is a string containing the whole URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
+   */
   set href(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol) */
+  /**
+   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final `':'`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
+   */
   get protocol(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol) */
+  /**
+   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final `':'`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
+   */
   set protocol(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username) */
+  /**
+   * The **`username`** property of the URL interface is a string containing the username component of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
+   */
   get username(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username) */
+  /**
+   * The **`username`** property of the URL interface is a string containing the username component of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
+   */
   set username(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password) */
+  /**
+   * The **`password`** property of the URL interface is a string containing the password component of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
+   */
   get password(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password) */
+  /**
+   * The **`password`** property of the URL interface is a string containing the password component of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
+   */
   set password(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host) */
+  /**
+   * The **`host`** property of the URL interface is a string containing the host, which is the URL.hostname, and then, if the port of the URL is nonempty, a `':'`, followed by the URL.port of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
+   */
   get host(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host) */
+  /**
+   * The **`host`** property of the URL interface is a string containing the host, which is the URL.hostname, and then, if the port of the URL is nonempty, a `':'`, followed by the URL.port of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
+   */
   set host(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname) */
+  /**
+   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
+   */
   get hostname(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname) */
+  /**
+   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
+   */
   set hostname(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port) */
+  /**
+   * The **`port`** property of the URL interface is a string containing the port number of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
+   */
   get port(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port) */
+  /**
+   * The **`port`** property of the URL interface is a string containing the port number of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
+   */
   set port(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname) */
+  /**
+   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
+   */
   get pathname(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname) */
+  /**
+   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
+   */
   set pathname(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search) */
+  /**
+   * The **`search`** property of the URL interface is a search string, also called a _query string_, that is a string containing a `'?'` followed by the parameters of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
+   */
   get search(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search) */
+  /**
+   * The **`search`** property of the URL interface is a search string, also called a _query string_, that is a string containing a `'?'` followed by the parameters of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
+   */
   set search(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash) */
+  /**
+   * The **`hash`** property of the URL interface is a string containing a `'#'` followed by the fragment identifier of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
+   */
   get hash(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash) */
+  /**
+   * The **`hash`** property of the URL interface is a string containing a `'#'` followed by the fragment identifier of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
+   */
   set hash(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams) */
+  /**
+   * The **`searchParams`** read-only property of the access to the [MISSING: httpmethod('GET')] decoded query arguments contained in the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
+   */
   get searchParams(): URLSearchParams;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON) */
+  /**
+   * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as ```js-nolint toJSON() ``` None.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON)
+   */
   toJSON(): string;
   /*function toString() { [native code] }*/
   toString(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static) */
+  /**
+   * The **`URL.canParse()`** static method of the URL interface returns a boolean indicating whether or not an absolute URL, or a relative URL combined with a base URL, are parsable and valid.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static)
+   */
   static canParse(url: string, base?: string): boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static) */
+  /**
+   * The **`URL.parse()`** static method of the URL interface returns a newly created URL object representing the URL defined by the parameters.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static)
+   */
   static parse(url: string, base?: string): URL | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static) */
+  /**
+   * The **`createObjectURL()`** static method of the URL interface creates a string containing a URL representing the object given in the parameter.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static)
+   */
   static createObjectURL(object: File | Blob): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static) */
+  /**
+   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling Call this method when you've finished using an object URL to let the browser know not to keep the reference to the file any longer.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static)
+   */
   static revokeObjectURL(object_url: string): void;
 }
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams) */
+/**
+ * The **`URLSearchParams`** interface defines utility methods to work with the query string of a URL.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams)
+ */
 declare class URLSearchParams {
   constructor(
     init?: Iterable<Iterable<string>> | Record<string, string> | string,
   );
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/size) */
+  /**
+   * The **`size`** read-only property of the URLSearchParams interface indicates the total number of search parameter entries.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/size)
+   */
   get size(): number;
   /**
-   * Appends a specified key/value pair as a new search parameter.
+   * The **`append()`** method of the URLSearchParams interface appends a specified key/value pair as a new search parameter.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/append)
    */
   append(name: string, value: string): void;
   /**
-   * Deletes the given search parameter, and its associated value, from the list of all search parameters.
+   * The **`delete()`** method of the URLSearchParams interface deletes specified parameters and their associated value(s) from the list of all search parameters.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
    */
   delete(name: string, value?: string): void;
   /**
-   * Returns the first value associated to the given search parameter.
+   * The **`get()`** method of the URLSearchParams interface returns the first value associated to the given search parameter.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/get)
    */
   get(name: string): string | null;
   /**
-   * Returns all the values association with a given search parameter.
+   * The **`getAll()`** method of the URLSearchParams interface returns all the values associated with a given search parameter as an array.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/getAll)
    */
   getAll(name: string): string[];
   /**
-   * Returns a Boolean indicating if such a search parameter exists.
+   * The **`has()`** method of the URLSearchParams interface returns a boolean value that indicates whether the specified parameter is in the search parameters.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
    */
   has(name: string, value?: string): boolean;
   /**
-   * Sets the value associated to a given search parameter to the given value. If there were several values, delete the others.
+   * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/set)
    */
   set(name: string, value: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/sort) */
+  /**
+   * The **`URLSearchParams.sort()`** method sorts all key/value pairs contained in this object in place and returns `undefined`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/sort)
+   */
   sort(): void;
   /* Returns an array of key, value pairs for every entry in the search params. */
   entries(): IterableIterator<[key: string, value: string]>;
@@ -2791,15 +3548,15 @@ declare class URLSearchParams {
     ) => void,
     thisArg?: This,
   ): void;
-  /*function toString() { [native code] } Returns a string containing a query string suitable for use in a URL. Does not include the question mark. */
+  /*function toString() { [native code] }*/
   toString(): string;
   [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
 }
 declare class URLPattern {
   constructor(
-    input?: string | URLPatternURLPatternInit,
-    baseURL?: string | URLPatternURLPatternOptions,
-    patternOptions?: URLPatternURLPatternOptions,
+    input?: string | URLPatternInit,
+    baseURL?: string | URLPatternOptions,
+    patternOptions?: URLPatternOptions,
   );
   get protocol(): string;
   get username(): string;
@@ -2809,13 +3566,14 @@ declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
-  test(input?: string | URLPatternURLPatternInit, baseURL?: string): boolean;
+  get hasRegExpGroups(): boolean;
+  test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
-    input?: string | URLPatternURLPatternInit,
+    input?: string | URLPatternInit,
     baseURL?: string,
-  ): URLPatternURLPatternResult | null;
+  ): URLPatternResult | null;
 }
-interface URLPatternURLPatternInit {
+interface URLPatternInit {
   protocol?: string;
   username?: string;
   password?: string;
@@ -2826,45 +3584,45 @@ interface URLPatternURLPatternInit {
   hash?: string;
   baseURL?: string;
 }
-interface URLPatternURLPatternComponentResult {
+interface URLPatternComponentResult {
   input: string;
   groups: Record<string, string>;
 }
-interface URLPatternURLPatternResult {
-  inputs: (string | URLPatternURLPatternInit)[];
-  protocol: URLPatternURLPatternComponentResult;
-  username: URLPatternURLPatternComponentResult;
-  password: URLPatternURLPatternComponentResult;
-  hostname: URLPatternURLPatternComponentResult;
-  port: URLPatternURLPatternComponentResult;
-  pathname: URLPatternURLPatternComponentResult;
-  search: URLPatternURLPatternComponentResult;
-  hash: URLPatternURLPatternComponentResult;
+interface URLPatternResult {
+  inputs: (string | URLPatternInit)[];
+  protocol: URLPatternComponentResult;
+  username: URLPatternComponentResult;
+  password: URLPatternComponentResult;
+  hostname: URLPatternComponentResult;
+  port: URLPatternComponentResult;
+  pathname: URLPatternComponentResult;
+  search: URLPatternComponentResult;
+  hash: URLPatternComponentResult;
 }
-interface URLPatternURLPatternOptions {
+interface URLPatternOptions {
   ignoreCase?: boolean;
 }
 /**
- * A CloseEvent is sent to clients using WebSockets when the connection is closed. This is delivered to the listener indicated by the WebSocket object's onclose attribute.
+ * A `CloseEvent` is sent to clients using WebSockets when the connection is closed.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent)
  */
 declare class CloseEvent extends Event {
   constructor(type: string, initializer?: CloseEventInit);
   /**
-   * Returns the WebSocket connection close code provided by the server.
+   * The **`code`** read-only property of the CloseEvent interface returns a WebSocket connection close code indicating the reason the connection was closed.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/code)
    */
   readonly code: number;
   /**
-   * Returns the WebSocket connection close reason provided by the server.
+   * The **`reason`** read-only property of the CloseEvent interface returns the WebSocket connection close reason the server gave for closing the connection; that is, a concise human-readable prose explanation for the closure.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/reason)
    */
   readonly reason: string;
   /**
-   * Returns true if the connection closed cleanly; false otherwise.
+   * The **`wasClean`** read-only property of the CloseEvent interface returns `true` if the connection closed cleanly.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent/wasClean)
    */
@@ -2875,23 +3633,6 @@ interface CloseEventInit {
   reason?: string;
   wasClean?: boolean;
 }
-/**
- * A message received by a target object.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
- */
-declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
-  /**
-   * Returns the data of the message.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
-   */
-  readonly data: ArrayBuffer | string;
-}
-interface MessageEventInit {
-  data: ArrayBuffer | string;
-}
 type WebSocketEventMap = {
   close: CloseEvent;
   message: MessageEvent;
@@ -2899,7 +3640,7 @@ type WebSocketEventMap = {
   error: ErrorEvent;
 };
 /**
- * Provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
+ * The `WebSocket` object provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
  */
@@ -2916,20 +3657,20 @@ declare var WebSocket: {
   readonly CLOSED: number;
 };
 /**
- * Provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
+ * The `WebSocket` object provides the API for creating and managing a WebSocket connection to a server, as well as for sending and receiving data on the connection.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
  */
 interface WebSocket extends EventTarget<WebSocketEventMap> {
   accept(): void;
   /**
-   * Transmits data using the WebSocket connection. data can be a string, a Blob, an ArrayBuffer, or an ArrayBufferView.
+   * The **`WebSocket.send()`** method enqueues the specified data to be transmitted to the server over the WebSocket connection, increasing the value of `bufferedAmount` by the number of bytes needed to contain the data.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/send)
    */
   send(message: (ArrayBuffer | ArrayBufferView) | string): void;
   /**
-   * Closes the WebSocket connection, optionally using code as the the WebSocket connection close code and reason as the the WebSocket connection close reason.
+   * The **`WebSocket.close()`** method closes the already `CLOSED`, this method does nothing.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/close)
    */
@@ -2937,25 +3678,25 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
   serializeAttachment(attachment: any): void;
   deserializeAttachment(): any | null;
   /**
-   * Returns the state of the WebSocket object's connection. It can have the values described below.
+   * The **`WebSocket.readyState`** read-only property returns the current state of the WebSocket connection.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/readyState)
    */
   readyState: number;
   /**
-   * Returns the URL that was used to establish the WebSocket connection.
+   * The **`WebSocket.url`** read-only property returns the absolute URL of the WebSocket as resolved by the constructor.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/url)
    */
   url: string | null;
   /**
-   * Returns the subprotocol selected by the server, if any. It can be used in conjunction with the array form of the constructor's second argument to perform subprotocol negotiation.
+   * The **`WebSocket.protocol`** read-only property returns the name of the sub-protocol the server selected; this will be one of the strings specified in the `protocols` parameter when creating the WebSocket object, or the empty string if no connection is established.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/protocol)
    */
   protocol: string | null;
   /**
-   * Returns the extensions selected by the server, if any.
+   * The **`WebSocket.extensions`** read-only property returns the extensions selected by the server.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/extensions)
    */
@@ -2974,6 +3715,7 @@ interface SqlStorage {
   ): SqlStorageCursor<T>;
   prepare(query: string): SqlStorageStatement;
   ingest(query: string): SqlStorageIngestResult;
+  setMaxPageCountForTest(count: number): void;
   get databaseSize(): number;
   Cursor: typeof SqlStorageCursor;
   Statement: typeof SqlStorageStatement;
@@ -3012,6 +3754,8 @@ interface Socket {
   get writable(): WritableStream;
   get closed(): Promise<void>;
   get opened(): Promise<SocketInfo>;
+  get upgraded(): boolean;
+  get secureTransport(): "on" | "off" | "starttls";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
 }
@@ -3031,541 +3775,33 @@ interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
 }
-interface GPU {
-  requestAdapter(param1?: GPURequestAdapterOptions): Promise<GPUAdapter | null>;
-}
-declare abstract class GPUAdapter {
-  requestDevice(param1?: GPUDeviceDescriptor): Promise<GPUDevice>;
-  requestAdapterInfo(unmaskHints?: string[]): Promise<GPUAdapterInfo>;
-  get features(): GPUSupportedFeatures;
-  get limits(): GPUSupportedLimits;
-}
-interface GPUDevice extends EventTarget {
-  createBuffer(param1: GPUBufferDescriptor): GPUBuffer;
-  createBindGroupLayout(
-    descriptor: GPUBindGroupLayoutDescriptor,
-  ): GPUBindGroupLayout;
-  createBindGroup(descriptor: GPUBindGroupDescriptor): GPUBindGroup;
-  createSampler(descriptor: GPUSamplerDescriptor): GPUSampler;
-  createShaderModule(descriptor: GPUShaderModuleDescriptor): GPUShaderModule;
-  createPipelineLayout(
-    descriptor: GPUPipelineLayoutDescriptor,
-  ): GPUPipelineLayout;
-  createComputePipeline(
-    descriptor: GPUComputePipelineDescriptor,
-  ): GPUComputePipeline;
-  createRenderPipeline(
-    descriptor: GPURenderPipelineDescriptor,
-  ): GPURenderPipeline;
-  createCommandEncoder(
-    descriptor?: GPUCommandEncoderDescriptor,
-  ): GPUCommandEncoder;
-  createTexture(param1: GPUTextureDescriptor): GPUTexture;
-  destroy(): void;
-  createQuerySet(descriptor: GPUQuerySetDescriptor): GPUQuerySet;
-  pushErrorScope(filter: string): void;
-  popErrorScope(): Promise<GPUError | null>;
-  get queue(): GPUQueue;
-  get lost(): Promise<GPUDeviceLostInfo>;
-  get features(): GPUSupportedFeatures;
-  get limits(): GPUSupportedLimits;
-}
-interface GPUDeviceDescriptor {
-  label?: string;
-  requiredFeatures?: string[];
-  requiredLimits?: Record<string, number | bigint>;
-  defaultQueue?: GPUQueueDescriptor;
-}
-interface GPUBufferDescriptor {
-  label: string;
-  size: number | bigint;
-  usage: number;
-  mappedAtCreation: boolean;
-}
-interface GPUQueueDescriptor {
-  label?: string;
-}
-declare abstract class GPUBufferUsage {
-  static readonly MAP_READ: number;
-  static readonly MAP_WRITE: number;
-  static readonly COPY_SRC: number;
-  static readonly COPY_DST: number;
-  static readonly INDEX: number;
-  static readonly VERTEX: number;
-  static readonly UNIFORM: number;
-  static readonly STORAGE: number;
-  static readonly INDIRECT: number;
-  static readonly QUERY_RESOLVE: number;
-}
-interface GPUBuffer {
-  getMappedRange(size?: number | bigint, param2?: number | bigint): ArrayBuffer;
-  unmap(): void;
-  destroy(): void;
-  mapAsync(
-    offset: number,
-    size?: number | bigint,
-    param3?: number | bigint,
-  ): Promise<void>;
-  get size(): number | bigint;
-  get usage(): number;
-  get mapState(): string;
-}
-declare abstract class GPUShaderStage {
-  static readonly VERTEX: number;
-  static readonly FRAGMENT: number;
-  static readonly COMPUTE: number;
-}
-interface GPUBindGroupLayoutDescriptor {
-  label?: string;
-  entries: GPUBindGroupLayoutEntry[];
-}
-interface GPUBindGroupLayoutEntry {
-  binding: number;
-  visibility: number;
-  buffer?: GPUBufferBindingLayout;
-  sampler?: GPUSamplerBindingLayout;
-  texture?: GPUTextureBindingLayout;
-  storageTexture?: GPUStorageTextureBindingLayout;
-}
-interface GPUStorageTextureBindingLayout {
-  access?: string;
-  format: string;
-  viewDimension?: string;
-}
-interface GPUTextureBindingLayout {
-  sampleType?: string;
-  viewDimension?: string;
-  multisampled?: boolean;
-}
-interface GPUSamplerBindingLayout {
-  type?: string;
-}
-interface GPUBufferBindingLayout {
-  type?: string;
-  hasDynamicOffset?: boolean;
-  minBindingSize?: number | bigint;
-}
-interface GPUBindGroupLayout {}
-interface GPUBindGroup {}
-interface GPUBindGroupDescriptor {
-  label?: string;
-  layout: GPUBindGroupLayout;
-  entries: GPUBindGroupEntry[];
-}
-interface GPUBindGroupEntry {
-  binding: number;
-  resource: GPUBufferBinding | GPUSampler;
-}
-interface GPUBufferBinding {
-  buffer: GPUBuffer;
-  offset?: number | bigint;
-  size?: number | bigint;
-}
-interface GPUSampler {}
-interface GPUSamplerDescriptor {
-  label?: string;
-  addressModeU?: string;
-  addressModeV?: string;
-  addressModeW?: string;
-  magFilter?: string;
-  minFilter?: string;
-  mipmapFilter?: string;
-  lodMinClamp?: number;
-  lodMaxClamp?: number;
-  compare: string;
-  maxAnisotropy?: number;
-}
-interface GPUShaderModule {
-  getCompilationInfo(): Promise<GPUCompilationInfo>;
-}
-interface GPUShaderModuleDescriptor {
-  label?: string;
-  code: string;
-}
-interface GPUPipelineLayout {}
-interface GPUPipelineLayoutDescriptor {
-  label?: string;
-  bindGroupLayouts: GPUBindGroupLayout[];
-}
-interface GPUComputePipeline {
-  getBindGroupLayout(index: number): GPUBindGroupLayout;
-}
-interface GPUComputePipelineDescriptor {
-  label?: string;
-  compute: GPUProgrammableStage;
-  layout: string | GPUPipelineLayout;
-}
-interface GPUProgrammableStage {
-  module: GPUShaderModule;
-  entryPoint: string;
-  constants?: Record<string, number>;
-}
-interface GPUCommandEncoder {
-  get label(): string;
-  beginComputePass(
-    descriptor?: GPUComputePassDescriptor,
-  ): GPUComputePassEncoder;
-  beginRenderPass(descriptor: GPURenderPassDescriptor): GPURenderPassEncoder;
-  copyBufferToBuffer(
-    source: GPUBuffer,
-    sourceOffset: number | bigint,
-    destination: GPUBuffer,
-    destinationOffset: number | bigint,
-    size: number | bigint,
-  ): void;
-  finish(param0?: GPUCommandBufferDescriptor): GPUCommandBuffer;
-  copyTextureToBuffer(
-    source: GPUImageCopyTexture,
-    destination: GPUImageCopyBuffer,
-    copySize: Iterable<number> | GPUExtent3DDict,
-  ): void;
-  copyBufferToTexture(
-    source: GPUImageCopyBuffer,
-    destination: GPUImageCopyTexture,
-    copySize: Iterable<number> | GPUExtent3DDict,
-  ): void;
-  copyTextureToTexture(
-    source: GPUImageCopyTexture,
-    destination: GPUImageCopyTexture,
-    copySize: Iterable<number> | GPUExtent3DDict,
-  ): void;
-  clearBuffer(
-    buffer: GPUBuffer,
-    offset?: number | bigint,
-    size?: number | bigint,
-  ): void;
-}
-interface GPUCommandEncoderDescriptor {
-  label?: string;
-}
-interface GPUComputePassEncoder {
-  setPipeline(pipeline: GPUComputePipeline): void;
-  setBindGroup(
-    index: number,
-    bindGroup: GPUBindGroup | null,
-    dynamicOffsets?: Iterable<number>,
-  ): void;
-  dispatchWorkgroups(
-    workgroupCountX: number,
-    workgroupCountY?: number,
-    workgroupCountZ?: number,
-  ): void;
-  end(): void;
-}
-interface GPUComputePassDescriptor {
-  label?: string;
-  timestampWrites?: GPUComputePassTimestampWrites;
-}
-interface GPUQuerySet {}
-interface GPUQuerySetDescriptor {
-  label?: string;
-}
-interface GPUComputePassTimestampWrites {
-  querySet: GPUQuerySet;
-  beginningOfPassWriteIndex?: number;
-  endOfPassWriteIndex?: number;
-}
-interface GPUCommandBufferDescriptor {
-  label?: string;
-}
-interface GPUCommandBuffer {}
-interface GPUQueue {
-  submit(commandBuffers: GPUCommandBuffer[]): void;
-  writeBuffer(
-    buffer: GPUBuffer,
-    bufferOffset: number | bigint,
-    data: ArrayBuffer | ArrayBufferView,
-    dataOffset?: number | bigint,
-    size?: number | bigint,
-  ): void;
-}
-declare abstract class GPUMapMode {
-  static readonly READ: number;
-  static readonly WRITE: number;
-}
-interface GPURequestAdapterOptions {
-  powerPreference: string;
-  forceFallbackAdapter?: boolean;
-}
-interface GPUAdapterInfo {
-  get vendor(): string;
-  get architecture(): string;
-  get device(): string;
-  get description(): string;
-}
-interface GPUSupportedFeatures {
-  has(name: string): boolean;
-  keys(): string[];
-}
-interface GPUSupportedLimits {
-  get maxTextureDimension1D(): number;
-  get maxTextureDimension2D(): number;
-  get maxTextureDimension3D(): number;
-  get maxTextureArrayLayers(): number;
-  get maxBindGroups(): number;
-  get maxBindingsPerBindGroup(): number;
-  get maxDynamicUniformBuffersPerPipelineLayout(): number;
-  get maxDynamicStorageBuffersPerPipelineLayout(): number;
-  get maxSampledTexturesPerShaderStage(): number;
-  get maxSamplersPerShaderStage(): number;
-  get maxStorageBuffersPerShaderStage(): number;
-  get maxStorageTexturesPerShaderStage(): number;
-  get maxUniformBuffersPerShaderStage(): number;
-  get maxUniformBufferBindingSize(): number | bigint;
-  get maxStorageBufferBindingSize(): number | bigint;
-  get minUniformBufferOffsetAlignment(): number;
-  get minStorageBufferOffsetAlignment(): number;
-  get maxVertexBuffers(): number;
-  get maxBufferSize(): number | bigint;
-  get maxVertexAttributes(): number;
-  get maxVertexBufferArrayStride(): number;
-  get maxInterStageShaderComponents(): number;
-  get maxInterStageShaderVariables(): number;
-  get maxColorAttachments(): number;
-  get maxColorAttachmentBytesPerSample(): number;
-  get maxComputeWorkgroupStorageSize(): number;
-  get maxComputeInvocationsPerWorkgroup(): number;
-  get maxComputeWorkgroupSizeX(): number;
-  get maxComputeWorkgroupSizeY(): number;
-  get maxComputeWorkgroupSizeZ(): number;
-  get maxComputeWorkgroupsPerDimension(): number;
-}
-declare abstract class GPUError {
-  get message(): string;
-}
-declare abstract class GPUOutOfMemoryError extends GPUError {}
-declare abstract class GPUInternalError extends GPUError {}
-declare abstract class GPUValidationError extends GPUError {}
-declare abstract class GPUDeviceLostInfo {
-  get message(): string;
-  get reason(): string;
-}
-interface GPUCompilationMessage {
-  get message(): string;
-  get type(): string;
-  get lineNum(): number;
-  get linePos(): number;
-  get offset(): number;
-  get length(): number;
-}
-interface GPUCompilationInfo {
-  get messages(): GPUCompilationMessage[];
-}
-declare abstract class GPUTextureUsage {
-  static readonly COPY_SRC: number;
-  static readonly COPY_DST: number;
-  static readonly TEXTURE_BINDING: number;
-  static readonly STORAGE_BINDING: number;
-  static readonly RENDER_ATTACHMENT: number;
-}
-interface GPUTextureDescriptor {
-  label: string;
-  size: number[] | GPUExtent3DDict;
-  mipLevelCount?: number;
-  sampleCount?: number;
-  dimension?: string;
-  format: string;
-  usage: number;
-  viewFormats?: string[];
-}
-interface GPUExtent3DDict {
-  width: number;
-  height?: number;
-  depthOrArrayLayers?: number;
-}
-interface GPUTexture {
-  createView(descriptor?: GPUTextureViewDescriptor): GPUTextureView;
-  destroy(): void;
-  get width(): number;
-  get height(): number;
-  get depthOrArrayLayers(): number;
-  get mipLevelCount(): number;
-  get dimension(): string;
-  get format(): string;
-  get usage(): number;
-}
-interface GPUTextureView {}
-interface GPUTextureViewDescriptor {
-  label: string;
-  format: string;
-  dimension: string;
-  aspect?: string;
-  baseMipLevel?: number;
-  mipLevelCount: number;
-  baseArrayLayer?: number;
-  arrayLayerCount: number;
-}
-declare abstract class GPUColorWrite {
-  static readonly RED: number;
-  static readonly GREEN: number;
-  static readonly BLUE: number;
-  static readonly ALPHA: number;
-  static readonly ALL: number;
-}
-interface GPURenderPipeline {}
-interface GPURenderPipelineDescriptor {
-  label?: string;
-  layout: string | GPUPipelineLayout;
-  vertex: GPUVertexState;
-  primitive?: GPUPrimitiveState;
-  depthStencil?: GPUDepthStencilState;
-  multisample?: GPUMultisampleState;
-  fragment?: GPUFragmentState;
-}
-interface GPUVertexState {
-  module: GPUShaderModule;
-  entryPoint: string;
-  constants?: Record<string, number>;
-  buffers?: GPUVertexBufferLayout[];
-}
-interface GPUVertexBufferLayout {
-  arrayStride: number | bigint;
-  stepMode?: string;
-  attributes: GPUVertexAttribute[];
-}
-interface GPUVertexAttribute {
-  format: string;
-  offset: number | bigint;
-  shaderLocation: number;
-}
-interface GPUPrimitiveState {
-  topology?: string;
-  stripIndexFormat?: string;
-  frontFace?: string;
-  cullMode?: string;
-  unclippedDepth?: boolean;
-}
-interface GPUStencilFaceState {
-  compare?: string;
-  failOp?: string;
-  depthFailOp?: string;
-  passOp?: string;
-}
-interface GPUDepthStencilState {
-  format: string;
-  depthWriteEnabled: boolean;
-  depthCompare: string;
-  stencilFront?: GPUStencilFaceState;
-  stencilBack?: GPUStencilFaceState;
-  stencilReadMask?: number;
-  stencilWriteMask?: number;
-  depthBias?: number;
-  depthBiasSlopeScale?: number;
-  depthBiasClamp?: number;
-}
-interface GPUMultisampleState {
-  count?: number;
-  mask?: number;
-  alphaToCoverageEnabled?: boolean;
-}
-interface GPUFragmentState {
-  module: GPUShaderModule;
-  entryPoint: string;
-  constants?: Record<string, number>;
-  targets: GPUColorTargetState[];
-}
-interface GPUColorTargetState {
-  format: string;
-  blend: GPUBlendState;
-  writeMask?: number;
-}
-interface GPUBlendState {
-  color: GPUBlendComponent;
-  alpha: GPUBlendComponent;
-}
-interface GPUBlendComponent {
-  operation?: string;
-  srcFactor?: string;
-  dstFactor?: string;
-}
-interface GPURenderPassEncoder {
-  setPipeline(pipeline: GPURenderPipeline): void;
-  draw(
-    vertexCount: number,
-    instanceCount?: number,
-    firstVertex?: number,
-    firstInstance?: number,
-  ): void;
-  end(): void;
-}
-interface GPURenderPassDescriptor {
-  label?: string;
-  colorAttachments: GPURenderPassColorAttachment[];
-  depthStencilAttachment?: GPURenderPassDepthStencilAttachment;
-  occlusionQuerySet?: GPUQuerySet;
-  timestampWrites?: GPURenderPassTimestampWrites;
-  maxDrawCount?: number | bigint;
-}
-interface GPURenderPassColorAttachment {
-  view: GPUTextureView;
-  depthSlice?: number;
-  resolveTarget?: GPUTextureView;
-  clearValue?: number[] | GPUColorDict;
-  loadOp: string;
-  storeOp: string;
-}
-interface GPUColorDict {
-  r: number;
-  g: number;
-  b: number;
-  a: number;
-}
-interface GPURenderPassDepthStencilAttachment {
-  view: GPUTextureView;
-  depthClearValue?: number;
-  depthLoadOp?: string;
-  depthStoreOp?: string;
-  depthReadOnly?: boolean;
-  stencilClearValue?: number;
-  stencilLoadOp?: string;
-  stencilStoreOp?: string;
-  stencilReadOnly?: boolean;
-}
-interface GPURenderPassTimestampWrites {
-  querySet: GPUQuerySet;
-  beginningOfPassWriteIndex?: number;
-  endOfPassWriteIndex?: number;
-}
-interface GPUImageCopyTexture {
-  texture: GPUTexture;
-  mipLevel?: number;
-  origin?: number[] | GPUOrigin3DDict;
-  aspect?: string;
-}
-interface GPUImageCopyBuffer {
-  buffer: GPUBuffer;
-  offset?: number | bigint;
-  bytesPerRow?: number;
-  rowsPerImage?: number;
-}
-interface GPUOrigin3DDict {
-  x?: number;
-  y?: number;
-  z?: number;
-}
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource) */
+/**
+ * The **`EventSource`** interface is web content's interface to server-sent events.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource)
+ */
 declare class EventSource extends EventTarget {
   constructor(url: string, init?: EventSourceEventSourceInit);
   /**
-   * Aborts any instances of the fetch algorithm started for this EventSource object, and sets the readyState attribute to CLOSED.
+   * The **`close()`** method of the EventSource interface closes the connection, if one is made, and sets the ```js-nolint close() ``` None.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/close)
    */
   close(): void;
   /**
-   * Returns the URL providing the event stream.
+   * The **`url`** read-only property of the URL of the source.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/url)
    */
   get url(): string;
   /**
-   * Returns true if the credentials mode for connection requests to the URL providing the event stream is set to "include", and false otherwise.
+   * The **`withCredentials`** read-only property of the the `EventSource` object was instantiated with CORS credentials set.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/withCredentials)
    */
   get withCredentials(): boolean;
   /**
-   * Returns the state of this EventSource object's connection. It can have the values described below.
+   * The **`readyState`** read-only property of the connection.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource/readyState)
    */
@@ -3598,11 +3834,650 @@ interface Container {
   destroy(error?: any): Promise<void>;
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
+  setInactivityTimeout(durationMs: number | bigint): Promise<void>;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+}
+/**
+ * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle)
+ */
+declare abstract class FileSystemHandle {
+  /**
+   * The **`kind`** read-only property of the `'file'` if the associated entry is a file or `'directory'`.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/kind)
+   */
+  get kind(): string;
+  /**
+   * The **`name`** read-only property of the handle.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/name)
+   */
+  get name(): string;
+  /**
+   * The **`isSameEntry()`** method of the ```js-nolint isSameEntry(fileSystemHandle) ``` - FileSystemHandle - : The `FileSystemHandle` to match against the handle on which the method is invoked.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/isSameEntry)
+   */
+  isSameEntry(other: FileSystemHandle): Promise<boolean>;
+  getUniqueId(): Promise<string>;
+  remove(options?: FileSystemHandleRemoveOptions): Promise<void>;
+}
+/**
+ * The **`FileSystemFileHandle`** interface of the File System API represents a handle to a file system entry.
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle)
+ */
+declare abstract class FileSystemFileHandle extends FileSystemHandle {
+  /**
+   * The **`getFile()`** method of the If the file on disk changes or is removed after this method is called, the returned ```js-nolint getFile() ``` None.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/getFile)
+   */
+  getFile(): Promise<File>;
+  /**
+   * The **`createWritable()`** method of the FileSystemFileHandle interface creates a FileSystemWritableFileStream that can be used to write to a file.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/createWritable)
+   */
+  createWritable(
+    options?: FileSystemFileHandleFileSystemCreateWritableOptions,
+  ): Promise<FileSystemWritableFileStream>;
+}
+/**
+ * The **`FileSystemDirectoryHandle`** interface of the File System API provides a handle to a file system directory.
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle)
+ */
+declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
+  /**
+   * The **`getFileHandle()`** method of the directory the method is called.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/getFileHandle)
+   */
+  getFileHandle(
+    name: string,
+    options?: FileSystemDirectoryHandleFileSystemGetFileOptions,
+  ): Promise<FileSystemFileHandle>;
+  /**
+   * The **`getDirectoryHandle()`** method of the within the directory handle on which the method is called.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/getDirectoryHandle)
+   */
+  getDirectoryHandle(
+    name: string,
+    options?: FileSystemDirectoryHandleFileSystemGetDirectoryOptions,
+  ): Promise<FileSystemDirectoryHandle>;
+  /**
+   * The **`removeEntry()`** method of the directory handle contains a file or directory called the name specified.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/removeEntry)
+   */
+  removeEntry(
+    name: string,
+    options?: FileSystemDirectoryHandleFileSystemRemoveOptions,
+  ): Promise<void>;
+  /**
+   * The **`resolve()`** method of the directory names from the parent handle to the specified child entry, with the name of the child entry as the last array item.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/resolve)
+   */
+  resolve(possibleDescendant: FileSystemHandle): Promise<string[]>;
+  entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+  keys(): AsyncIterableIterator<string>;
+  values(): AsyncIterableIterator<FileSystemHandle>;
+  forEach(
+    callback: (
+      param0: string,
+      param1: FileSystemHandle,
+      param2: FileSystemDirectoryHandle,
+    ) => void,
+    thisArg?: any,
+  ): void;
+  [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
+}
+/**
+ * The **`FileSystemWritableFileStream`** interface of the File System API is a WritableStream object with additional convenience methods, which operates on a single file on disk.
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream)
+ */
+declare abstract class FileSystemWritableFileStream extends WritableStream {
+  /**
+   * The **`write()`** method of the FileSystemWritableFileStream interface writes content into the file the method is called on, at the current file cursor offset.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/write)
+   */
+  write(
+    data:
+      | Blob
+      | (ArrayBuffer | ArrayBufferView)
+      | string
+      | FileSystemFileWriteParams,
+  ): Promise<void>;
+  /**
+   * The **`seek()`** method of the FileSystemWritableFileStream interface updates the current file cursor offset to the position (in bytes) specified when calling the method.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/seek)
+   */
+  seek(position: number): Promise<void>;
+  /**
+   * The **`truncate()`** method of the FileSystemWritableFileStream interface resizes the file associated with the stream to the specified size in bytes.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/truncate)
+   */
+  truncate(size: number): Promise<void>;
+}
+/**
+ * The **`StorageManager`** interface of the Storage API provides an interface for managing persistence permissions and estimating available storage.
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/StorageManager)
+ */
+declare abstract class StorageManager {
+  /**
+   * The **`getDirectory()`** method of the StorageManager interface is used to obtain a reference to a FileSystemDirectoryHandle object allowing access to a directory and its contents, stored in the origin private file system (OPFS).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/StorageManager/getDirectory)
+   */
+  getDirectory(): Promise<FileSystemDirectoryHandle>;
+}
+interface FileSystemFileHandleFileSystemCreateWritableOptions {
+  keepExistingData?: boolean;
+}
+interface FileSystemDirectoryHandleFileSystemGetFileOptions {
+  create: boolean;
+}
+interface FileSystemDirectoryHandleFileSystemGetDirectoryOptions {
+  create: boolean;
+}
+interface FileSystemDirectoryHandleFileSystemRemoveOptions {
+  recursive: boolean;
+}
+interface FileSystemFileWriteParams {
+  type: string;
+  size?: number;
+  position?: number;
+  data?: (Blob | (ArrayBuffer | ArrayBufferView) | string) | null;
+}
+interface FileSystemHandleRemoveOptions {
+  recursive?: boolean;
+}
+/**
+ * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+declare abstract class MessagePort extends EventTarget {
+  /**
+   * The **`postMessage()`** method of the transfers ownership of objects to other browsing contexts.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * The **`close()`** method of the MessagePort interface disconnects the port, so it is no longer active.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * The **`start()`** method of the MessagePort interface starts the sending of messages queued on the port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+declare class MessageChannel {
+  constructor();
+  /**
+   * The **`port1`** read-only property of the the port attached to the context that originated the channel.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * The **`port2`** read-only property of the the port attached to the context at the other end of the channel, which the message is initially sent to.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+interface MessagePortPostMessageOptions {
+  transfer?: any[];
+}
+type LoopbackForExport<
+  T extends
+    | (new (...args: any[]) => Rpc.EntrypointBranded)
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? LoopbackServiceStub<InstanceType<T>>
+  : T extends new (...args: any[]) => Rpc.DurableObjectBranded
+    ? LoopbackDurableObjectClass<InstanceType<T>>
+    : T extends ExportedHandler<any, any, any>
+      ? LoopbackServiceStub<undefined>
+      : undefined;
+type LoopbackServiceStub<
+  T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
+> = Fetcher<T> &
+  (T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props>
+    ? (opts: { props?: Props }) => Fetcher<T>
+    : (opts: { props?: any }) => Fetcher<T>);
+type LoopbackDurableObjectClass<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> = DurableObjectClass<T> &
+  (T extends CloudflareWorkersModule.DurableObject<any, infer Props>
+    ? (opts: { props?: Props }) => DurableObjectClass<T>
+    : (opts: { props?: any }) => DurableObjectClass<T>);
+interface LoopbackDurableObjectNamespace extends DurableObjectNamespace {}
+interface LoopbackColoLocalActorNamespace extends ColoLocalActorNamespace {}
+interface SyncKvStorage {
+  get<T = unknown>(key: string): T | undefined;
+  list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
+  put<T>(key: string, value: T): void;
+  delete(key: string): boolean;
+}
+interface SyncKvListOptions {
+  start?: string;
+  startAfter?: string;
+  end?: string;
+  prefix?: string;
+  reverse?: boolean;
+  limit?: number;
+}
+interface WorkerStub {
+  getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+    name?: string,
+    options?: WorkerStubEntrypointOptions,
+  ): Fetcher<T>;
+  getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>(
+    name?: string,
+    options?: WorkerStubEntrypointOptions,
+  ): DurableObjectClass<T>;
+}
+interface WorkerStubEntrypointOptions {
+  props?: any;
+}
+interface WorkerLoader {
+  get(
+    name: string,
+    getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
+  ): WorkerStub;
+}
+interface WorkerLoaderModule {
+  js?: string;
+  cjs?: string;
+  text?: string;
+  data?: ArrayBuffer;
+  json?: any;
+  py?: string;
+  wasm?: ArrayBuffer;
+}
+interface WorkerLoaderWorkerCode {
+  compatibilityDate: string;
+  compatibilityFlags?: string[];
+  allowExperimental?: boolean;
+  mainModule: string;
+  modules: Record<string, WorkerLoaderModule | string>;
+  env?: any;
+  globalOutbound?: Fetcher | null;
+  tails?: Fetcher[];
+  streamingTails?: Fetcher[];
+}
+/**
+ * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
+ * as well as timing of subrequests and other operations.
+ *
+ * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
+ */
+declare abstract class Performance extends EventTarget {
+  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancetimeorigin) */
+  get timeOrigin(): number;
+  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
+  now(): number;
+  get eventCounts(): EventCounts;
+  /**
+   * The **`clearMarks()`** method removes all or specific PerformanceMark objects from the browser's performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearMarks)
+   */
+  clearMarks(name?: string): void;
+  /**
+   * The **`clearMeasures()`** method removes all or specific PerformanceMeasure objects from the browser's performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearMeasures)
+   */
+  clearMeasures(name?: string): void;
+  /**
+   * The **`clearResourceTimings()`** method removes all performance entries with an PerformanceEntry.entryType of `'resource'` from the browser's performance timeline and sets the size of the performance resource data buffer to zero.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearResourceTimings)
+   */
+  clearResourceTimings(): void;
+  /**
+   * The **`getEntries()`** method returns an array of all PerformanceEntry objects currently present in the performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntries)
+   */
+  getEntries(): PerformanceEntry[];
+  /**
+   * The **`getEntriesByName()`** method returns an array of PerformanceEntry objects currently present in the performance timeline with the given _name_ and _type_.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByName)
+   */
+  getEntriesByName(name: string, type?: string): PerformanceEntry[];
+  /**
+   * The **`getEntriesByType()`** method returns an array of PerformanceEntry objects currently present in the performance timeline for a given _type_.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByType)
+   */
+  getEntriesByType(type: string): PerformanceEntry[];
+  /**
+   * The **`mark()`** method creates a named PerformanceMark object representing a high resolution timestamp marker in the browser's performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/mark)
+   */
+  mark(name: string, options?: PerformanceMarkOptions): PerformanceMark;
+  /**
+   * The **`measure()`** method creates a named PerformanceMeasure object representing a time measurement between two marks in the browser's performance timeline.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/measure)
+   */
+  measure(
+    measureName: string,
+    measureOptionsOrStartMark: PerformanceMeasureOptions | string,
+    maybeEndMark?: string,
+  ): PerformanceMeasure;
+  /**
+   * The **`setResourceTimingBufferSize()`** method sets the desired size of the browser's resource timing buffer which stores the `'resource'` performance entries.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/setResourceTimingBufferSize)
+   */
+  setResourceTimingBufferSize(size: number): void;
+  eventLoopUtilization(): void;
+  markResourceTiming(): void;
+  timerify(fn: () => void): () => void;
+}
+/**
+ * **`PerformanceMark`** is an interface for PerformanceEntry objects with an PerformanceEntry.entryType of `'mark'`.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark)
+ */
+declare class PerformanceMark extends PerformanceEntry {
+  constructor(name: string, maybeOptions?: PerformanceMarkOptions);
+  /**
+   * The read-only **`detail`** property returns arbitrary metadata that was included in the mark upon construction (either when using Performance.mark or the PerformanceMark.PerformanceMark constructor).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark/detail)
+   */
+  get detail(): any | undefined;
+  toJSON(): any;
+}
+/**
+ * **`PerformanceMeasure`** is an _abstract_ interface for PerformanceEntry objects with an PerformanceEntry.entryType of `'measure'`.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure)
+ */
+declare abstract class PerformanceMeasure extends PerformanceEntry {
+  /**
+   * The read-only **`detail`** property returns arbitrary metadata that was included in the mark upon construction (when using Performance.measure.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure/detail)
+   */
+  get detail(): any | undefined;
+  toJSON(): any;
+}
+interface PerformanceMarkOptions {
+  detail?: any;
+  startTime?: number;
+}
+interface PerformanceMeasureOptions {
+  detail?: any;
+  start?: number;
+  duration?: number;
+  end?: number;
+}
+/**
+ * The **`PerformanceObserverEntryList`** interface is a list of PerformanceEntry that were explicitly observed via the PerformanceObserver.observe method.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList)
+ */
+declare abstract class PerformanceObserverEntryList {
+  /**
+   * The **`getEntries()`** method of the PerformanceObserverEntryList interface returns a list of explicitly observed PerformanceEntry objects.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntries)
+   */
+  getEntries(): PerformanceEntry[];
+  /**
+   * The **`getEntriesByType()`** method of the PerformanceObserverEntryList returns a list of explicitly _observed_ PerformanceEntry objects for a given PerformanceEntry.entryType.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByType)
+   */
+  getEntriesByType(type: string): PerformanceEntry[];
+  /**
+   * The **`getEntriesByName()`** method of the PerformanceObserverEntryList interface returns a list of explicitly observed PerformanceEntry objects for a given PerformanceEntry.name and PerformanceEntry.entryType.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByName)
+   */
+  getEntriesByName(name: string, type?: string): PerformanceEntry[];
+}
+/**
+ * The **`PerformanceEntry`** object encapsulates a single performance metric that is part of the browser's performance timeline.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry)
+ */
+declare abstract class PerformanceEntry {
+  /**
+   * The read-only **`name`** property of the PerformanceEntry interface is a string representing the name for a performance entry.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/name)
+   */
+  get name(): string;
+  /**
+   * The read-only **`entryType`** property returns a string representing the type of performance metric that this entry represents.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/entryType)
+   */
+  get entryType(): string;
+  /**
+   * The read-only **`startTime`** property returns the first DOMHighResTimeStamp recorded for this PerformanceEntry.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/startTime)
+   */
+  get startTime(): number;
+  /**
+   * The read-only **`duration`** property returns a DOMHighResTimeStamp that is the duration of the PerformanceEntry.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/duration)
+   */
+  get duration(): number;
+  /**
+   * The **`toJSON()`** method is a Serialization; it returns a JSON representation of the PerformanceEntry object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/toJSON)
+   */
+  toJSON(): any;
+}
+/**
+ * The **`PerformanceResourceTiming`** interface enables retrieval and analysis of detailed network timing data regarding the loading of an application's resources.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming)
+ */
+declare abstract class PerformanceResourceTiming extends PerformanceEntry {
+  /**
+   * The **`connectEnd`** read-only property returns the DOMHighResTimeStamp immediately after the browser finishes establishing the connection to the server to retrieve the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectEnd)
+   */
+  get connectEnd(): number;
+  /**
+   * The **`connectStart`** read-only property returns the DOMHighResTimeStamp immediately before the user agent starts establishing the connection to the server to retrieve the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectStart)
+   */
+  get connectStart(): number;
+  /**
+   * The **`decodedBodySize`** read-only property returns the size (in octets) received from the fetch (HTTP or cache) of the message body after removing any applied content encoding (like gzip or Brotli).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/decodedBodySize)
+   */
+  get decodedBodySize(): number;
+  /**
+   * The **`domainLookupEnd`** read-only property returns the DOMHighResTimeStamp immediately after the browser finishes the domain-name lookup for the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupEnd)
+   */
+  get domainLookupEnd(): number;
+  /**
+   * The **`domainLookupStart`** read-only property returns the DOMHighResTimeStamp immediately before the browser starts the domain name lookup for the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupStart)
+   */
+  get domainLookupStart(): number;
+  /**
+   * The **`encodedBodySize`** read-only property represents the size (in octets) received from the fetch (HTTP or cache) of the payload body before removing any applied content encodings (like gzip or Brotli).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/encodedBodySize)
+   */
+  get encodedBodySize(): number;
+  /**
+   * The **`fetchStart`** read-only property represents a DOMHighResTimeStamp immediately before the browser starts to fetch the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/fetchStart)
+   */
+  get fetchStart(): number;
+  /**
+   * The **`initiatorType`** read-only property is a string representing web platform feature that initiated the resource load.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/initiatorType)
+   */
+  get initiatorType(): string;
+  /**
+   * The **`nextHopProtocol`** read-only property is a string representing the network protocol used to fetch the resource, as identified by the ALPN Protocol ID (RFC7301).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/nextHopProtocol)
+   */
+  get nextHopProtocol(): string;
+  /**
+   * The **`redirectEnd`** read-only property returns a DOMHighResTimeStamp immediately after receiving the last byte of the response of the last redirect.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectEnd)
+   */
+  get redirectEnd(): number;
+  /**
+   * The **`redirectStart`** read-only property returns a DOMHighResTimeStamp representing the start time of the fetch which that initiates the redirect.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectStart)
+   */
+  get redirectStart(): number;
+  /**
+   * The **`requestStart`** read-only property returns a DOMHighResTimeStamp of the time immediately before the browser starts requesting the resource from the server, cache, or local resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/requestStart)
+   */
+  get requestStart(): number;
+  /**
+   * The **`responseEnd`** read-only property returns a DOMHighResTimeStamp immediately after the browser receives the last byte of the resource or immediately before the transport connection is closed, whichever comes first.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseEnd)
+   */
+  get responseEnd(): number;
+  /**
+   * The **`responseStart`** read-only property returns a DOMHighResTimeStamp immediately after the browser receives the first byte of the response from the server, cache, or local resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStart)
+   */
+  get responseStart(): number;
+  /**
+   * The **`responseStatus`** read-only property represents the HTTP response status code returned when fetching the resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStatus)
+   */
+  get responseStatus(): number;
+  /**
+   * The **`secureConnectionStart`** read-only property returns a DOMHighResTimeStamp immediately before the browser starts the handshake process to secure the current connection.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/secureConnectionStart)
+   */
+  get secureConnectionStart(): number | undefined;
+  /**
+   * The **`transferSize`** read-only property represents the size (in octets) of the fetched resource.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/transferSize)
+   */
+  get transferSize(): number;
+  /**
+   * The **`workerStart`** read-only property of the PerformanceResourceTiming interface returns a The `workerStart` property can have the following values: - A DOMHighResTimeStamp.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/workerStart)
+   */
+  get workerStart(): number;
+}
+/**
+ * The **`PerformanceObserver`** interface is used to observe performance measurement events and be notified of new PerformanceEntry as they are recorded in the browser's _performance timeline_.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver)
+ */
+declare class PerformanceObserver {
+  constructor(callback: any);
+  /**
+   * The **`disconnect()`** method of the PerformanceObserver interface is used to stop the performance observer from receiving any PerformanceEntry events.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/disconnect)
+   */
+  disconnect(): void;
+  /**
+   * The **`observe()`** method of the **PerformanceObserver** interface is used to specify the set of performance entry types to observe.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/observe)
+   */
+  observe(options?: PerformanceObserverObserveOptions): void;
+  /**
+   * The **`takeRecords()`** method of the PerformanceObserver interface returns the current list of PerformanceEntry objects stored in the performance observer, emptying it out.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/takeRecords)
+   */
+  takeRecords(): PerformanceEntry[];
+  readonly supportedEntryTypes: string[];
+}
+interface PerformanceObserverObserveOptions {
+  buffered?: boolean;
+  durationThreshold?: number;
+  entryTypes?: string[];
+  type?: string;
+}
+interface EventCounts {
+  get size(): number;
+  get(eventType: string): number | undefined;
+  has(eventType: string): boolean;
+  entries(): IterableIterator<string[]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<number>;
+  forEach(
+    param1: (param0: number, param1: string, param2: EventCounts) => void,
+    param2?: any,
+  ): void;
+  [Symbol.iterator](): IterableIterator<string[]>;
 }
 type AiImageClassificationInput = {
   image: number[];
@@ -3655,6 +4530,18 @@ type AiImageTextToTextOutput = {
   description: string;
 };
 declare abstract class BaseAiImageTextToText {
+  inputs: AiImageTextToTextInput;
+  postProcessedOutputs: AiImageTextToTextOutput;
+}
+type AiMultimodalEmbeddingsInput = {
+  image: string;
+  text: string[];
+};
+type AiIMultimodalEmbeddingsOutput = {
+  data: number[][];
+  shape: number[];
+};
+declare abstract class BaseAiMultimodalEmbeddings {
   inputs: AiImageTextToTextInput;
   postProcessedOutputs: AiImageTextToTextOutput;
 }
@@ -3796,15 +4683,29 @@ type AiTextGenerationInput = {
     | (object & NonNullable<unknown>);
   functions?: AiTextGenerationFunctionsInput[];
 };
-type AiTextGenerationOutput =
-  | {
-      response?: string;
-      tool_calls?: {
-        name: string;
-        arguments: unknown;
-      }[];
-    }
-  | ReadableStream;
+type AiTextGenerationToolLegacyOutput = {
+  name: string;
+  arguments: unknown;
+};
+type AiTextGenerationToolOutput = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+type UsageTags = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+type AiTextGenerationOutput = {
+  response?: string;
+  tool_calls?: AiTextGenerationToolLegacyOutput[] &
+    AiTextGenerationToolOutput[];
+  usage?: UsageTags;
+};
 declare abstract class BaseAiTextGeneration {
   inputs: AiTextGenerationInput;
   postProcessedOutputs: AiTextGenerationOutput;
@@ -3852,6 +4753,49 @@ declare abstract class BaseAiTranslation {
   inputs: AiTranslationInput;
   postProcessedOutputs: AiTranslationOutput;
 }
+type Ai_Cf_Baai_Bge_Base_En_V1_5_Input =
+  | {
+      text: string | string[];
+      /**
+       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: {
+        text: string | string[];
+        /**
+         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+         */
+        pooling?: "mean" | "cls";
+      }[];
+    };
+type Ai_Cf_Baai_Bge_Base_En_V1_5_Output =
+  | {
+      shape?: number[];
+      /**
+       * Embeddings of the requested text values
+       */
+      data?: number[][];
+      /**
+       * The pooling method used in the embedding process.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | AsyncResponse;
+interface AsyncResponse {
+  /**
+   * The async request id that can be used to obtain the results.
+   */
+  request_id?: string;
+}
+declare abstract class Base_Ai_Cf_Baai_Bge_Base_En_V1_5 {
+  inputs: Ai_Cf_Baai_Bge_Base_En_V1_5_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Base_En_V1_5_Output;
+}
 type Ai_Cf_Openai_Whisper_Input =
   | string
   | {
@@ -3882,6 +4826,126 @@ interface Ai_Cf_Openai_Whisper_Output {
 declare abstract class Base_Ai_Cf_Openai_Whisper {
   inputs: Ai_Cf_Openai_Whisper_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Output;
+}
+type Ai_Cf_Meta_M2M100_1_2B_Input =
+  | {
+      /**
+       * The text to be translated
+       */
+      text: string;
+      /**
+       * The language code of the source text (e.g., 'en' for English). Defaults to 'en' if not specified
+       */
+      source_lang?: string;
+      /**
+       * The language code to translate the text into (e.g., 'es' for Spanish)
+       */
+      target_lang: string;
+    }
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: {
+        /**
+         * The text to be translated
+         */
+        text: string;
+        /**
+         * The language code of the source text (e.g., 'en' for English). Defaults to 'en' if not specified
+         */
+        source_lang?: string;
+        /**
+         * The language code to translate the text into (e.g., 'es' for Spanish)
+         */
+        target_lang: string;
+      }[];
+    };
+type Ai_Cf_Meta_M2M100_1_2B_Output =
+  | {
+      /**
+       * The translated text in the target language
+       */
+      translated_text?: string;
+    }
+  | AsyncResponse;
+declare abstract class Base_Ai_Cf_Meta_M2M100_1_2B {
+  inputs: Ai_Cf_Meta_M2M100_1_2B_Input;
+  postProcessedOutputs: Ai_Cf_Meta_M2M100_1_2B_Output;
+}
+type Ai_Cf_Baai_Bge_Small_En_V1_5_Input =
+  | {
+      text: string | string[];
+      /**
+       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: {
+        text: string | string[];
+        /**
+         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+         */
+        pooling?: "mean" | "cls";
+      }[];
+    };
+type Ai_Cf_Baai_Bge_Small_En_V1_5_Output =
+  | {
+      shape?: number[];
+      /**
+       * Embeddings of the requested text values
+       */
+      data?: number[][];
+      /**
+       * The pooling method used in the embedding process.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | AsyncResponse;
+declare abstract class Base_Ai_Cf_Baai_Bge_Small_En_V1_5 {
+  inputs: Ai_Cf_Baai_Bge_Small_En_V1_5_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Small_En_V1_5_Output;
+}
+type Ai_Cf_Baai_Bge_Large_En_V1_5_Input =
+  | {
+      text: string | string[];
+      /**
+       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: {
+        text: string | string[];
+        /**
+         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+         */
+        pooling?: "mean" | "cls";
+      }[];
+    };
+type Ai_Cf_Baai_Bge_Large_En_V1_5_Output =
+  | {
+      shape?: number[];
+      /**
+       * Embeddings of the requested text values
+       */
+      data?: number[][];
+      /**
+       * The pooling method used in the embedding process.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | AsyncResponse;
+declare abstract class Base_Ai_Cf_Baai_Bge_Large_En_V1_5 {
+  inputs: Ai_Cf_Baai_Bge_Large_En_V1_5_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Large_En_V1_5_Output;
 }
 type Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input =
   | string
@@ -3978,7 +5042,7 @@ interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
   /**
    * Preprocess the audio with a voice activity detection model.
    */
-  vad_filter?: string;
+  vad_filter?: boolean;
   /**
    * A text prompt to help provide context to the model on the contents of the audio.
    */
@@ -4068,7 +5132,15 @@ declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
   inputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output;
 }
-type Ai_Cf_Baai_Bge_M3_Input = BGEM3InputQueryAndContexts | BGEM3InputEmbedding;
+type Ai_Cf_Baai_Bge_M3_Input =
+  | BGEM3InputQueryAndContexts
+  | BGEM3InputEmbedding
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: (BGEM3InputQueryAndContexts1 | BGEM3InputEmbedding1)[];
+    };
 interface BGEM3InputQueryAndContexts {
   /**
    * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
@@ -4095,10 +5167,37 @@ interface BGEM3InputEmbedding {
    */
   truncate_inputs?: boolean;
 }
+interface BGEM3InputQueryAndContexts1 {
+  /**
+   * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
+   */
+  query?: string;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+interface BGEM3InputEmbedding1 {
+  text: string | string[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
 type Ai_Cf_Baai_Bge_M3_Output =
   | BGEM3OuputQuery
   | BGEM3OutputEmbeddingForContexts
-  | BGEM3OuputEmbedding;
+  | BGEM3OuputEmbedding
+  | AsyncResponse;
 interface BGEM3OuputQuery {
   response?: {
     /**
@@ -4214,13 +5313,41 @@ interface Messages {
     /**
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
-    role: string;
+    role?: string;
     /**
-     * The content of the message as a string.
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
      */
-    content: string;
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
   }[];
-  image?: number[] | string;
+  image?: number[] | (string & NonNullable<unknown>);
   functions?: {
     name: string;
     code: string;
@@ -4352,12 +5479,306 @@ interface Messages {
    */
   presence_penalty?: number;
 }
-type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output =
+type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response?: string;
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
+  inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
+}
+type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input =
+  | Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt
+  | Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages
+  | AsyncBatch;
+interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * Name of the LoRA (Low-Rank Adaptation) model to fine-tune the base model.
+   */
+  lora?: string;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface JSONMode {
+  type?: "json_object" | "json_schema";
+  json_schema?: unknown;
+}
+interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role: string;
+    /**
+     * The content of the message as a string.
+     */
+    content: string;
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface AsyncBatch {
+  requests?: {
+    /**
+     * User-supplied reference. This field will be present in the response as well it can be used to reference the request and response. It's NOT validated to be unique.
+     */
+    external_reference?: string;
+    /**
+     * Prompt for the text generation model
+     */
+    prompt?: string;
+    /**
+     * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+     */
+    stream?: boolean;
+    /**
+     * The maximum number of tokens to generate in the response.
+     */
+    max_tokens?: number;
+    /**
+     * Controls the randomness of the output; higher values produce more random results.
+     */
+    temperature?: number;
+    /**
+     * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+     */
+    top_p?: number;
+    /**
+     * Random seed for reproducibility of the generation.
+     */
+    seed?: number;
+    /**
+     * Penalty for repeated tokens; higher values discourage repetition.
+     */
+    repetition_penalty?: number;
+    /**
+     * Decreases the likelihood of the model repeating the same lines verbatim.
+     */
+    frequency_penalty?: number;
+    /**
+     * Increases the likelihood of the model introducing new topics.
+     */
+    presence_penalty?: number;
+    response_format?: JSONMode;
+  }[];
+}
+type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output =
   | {
       /**
        * The generated text response from the model
        */
-      response?: string;
+      response: string;
+      /**
+       * Usage statistics for the inference request
+       */
+      usage?: {
+        /**
+         * Total number of tokens in input
+         */
+        prompt_tokens?: number;
+        /**
+         * Total number of tokens in output
+         */
+        completion_tokens?: number;
+        /**
+         * Total number of input and output tokens
+         */
+        total_tokens?: number;
+      };
       /**
        * An array of tool calls requests made during the response generation
        */
@@ -4372,10 +5793,11 @@ type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output =
         name?: string;
       }[];
     }
-  | ReadableStream;
-declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
-  inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
-  postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
+  | string
+  | AsyncResponse;
+declare abstract class Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast {
+  inputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output;
 }
 interface Ai_Cf_Meta_Llama_Guard_3_8B_Input {
   /**
@@ -4478,6 +5900,2032 @@ declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
   inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
   postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
 }
+type Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input =
+  | Qwen2_5_Coder_32B_Instruct_Prompt
+  | Qwen2_5_Coder_32B_Instruct_Messages;
+interface Qwen2_5_Coder_32B_Instruct_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * Name of the LoRA (Low-Rank Adaptation) model to fine-tune the base model.
+   */
+  lora?: string;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface Qwen2_5_Coder_32B_Instruct_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role: string;
+    /**
+     * The content of the message as a string.
+     */
+    content: string;
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+type Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+declare abstract class Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct {
+  inputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output;
+}
+type Ai_Cf_Qwen_Qwq_32B_Input = Qwen_Qwq_32B_Prompt | Qwen_Qwq_32B_Messages;
+interface Qwen_Qwq_32B_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface Qwen_Qwq_32B_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+type Ai_Cf_Qwen_Qwq_32B_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+declare abstract class Base_Ai_Cf_Qwen_Qwq_32B {
+  inputs: Ai_Cf_Qwen_Qwq_32B_Input;
+  postProcessedOutputs: Ai_Cf_Qwen_Qwq_32B_Output;
+}
+type Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input =
+  | Mistral_Small_3_1_24B_Instruct_Prompt
+  | Mistral_Small_3_1_24B_Instruct_Messages;
+interface Mistral_Small_3_1_24B_Instruct_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface Mistral_Small_3_1_24B_Instruct_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+type Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+declare abstract class Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct {
+  inputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output;
+}
+type Ai_Cf_Google_Gemma_3_12B_It_Input =
+  | Google_Gemma_3_12B_It_Prompt
+  | Google_Gemma_3_12B_It_Messages;
+interface Google_Gemma_3_12B_It_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface Google_Gemma_3_12B_It_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+type Ai_Cf_Google_Gemma_3_12B_It_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+declare abstract class Base_Ai_Cf_Google_Gemma_3_12B_It {
+  inputs: Ai_Cf_Google_Gemma_3_12B_It_Input;
+  postProcessedOutputs: Ai_Cf_Google_Gemma_3_12B_It_Output;
+}
+type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input =
+  | Ai_Cf_Meta_Llama_4_Prompt
+  | Ai_Cf_Meta_Llama_4_Messages
+  | Ai_Cf_Meta_Llama_4_Async_Batch;
+interface Ai_Cf_Meta_Llama_4_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface Ai_Cf_Meta_Llama_4_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface Ai_Cf_Meta_Llama_4_Async_Batch {
+  requests: (
+    | Ai_Cf_Meta_Llama_4_Prompt_Inner
+    | Ai_Cf_Meta_Llama_4_Messages_Inner
+  )[];
+}
+interface Ai_Cf_Meta_Llama_4_Prompt_Inner {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface Ai_Cf_Meta_Llama_4_Messages_Inner {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The tool call id.
+     */
+    id?: string;
+    /**
+     * Specifies the type of tool (e.g., 'function').
+     */
+    type?: string;
+    /**
+     * Details of the function tool.
+     */
+    function?: {
+      /**
+       * The name of the tool to be called
+       */
+      name?: string;
+      /**
+       * The arguments passed to be passed to the tool call request
+       */
+      arguments?: object;
+    };
+  }[];
+};
+declare abstract class Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct {
+  inputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output;
+}
+interface Ai_Cf_Deepgram_Nova_3_Input {
+  audio: {
+    body: object;
+    contentType: string;
+  };
+  /**
+   * Sets how the model will interpret strings submitted to the custom_topic param. When strict, the model will only return topics submitted using the custom_topic param. When extended, the model will return its own detected topics in addition to those submitted using the custom_topic param.
+   */
+  custom_topic_mode?: "extended" | "strict";
+  /**
+   * Custom topics you want the model to detect within your input audio or text if present Submit up to 100
+   */
+  custom_topic?: string;
+  /**
+   * Sets how the model will interpret intents submitted to the custom_intent param. When strict, the model will only return intents submitted using the custom_intent param. When extended, the model will return its own detected intents in addition those submitted using the custom_intents param
+   */
+  custom_intent_mode?: "extended" | "strict";
+  /**
+   * Custom intents you want the model to detect within your input audio if present
+   */
+  custom_intent?: string;
+  /**
+   * Identifies and extracts key entities from content in submitted audio
+   */
+  detect_entities?: boolean;
+  /**
+   * Identifies the dominant language spoken in submitted audio
+   */
+  detect_language?: boolean;
+  /**
+   * Recognize speaker changes. Each word in the transcript will be assigned a speaker number starting at 0
+   */
+  diarize?: boolean;
+  /**
+   * Identify and extract key entities from content in submitted audio
+   */
+  dictation?: boolean;
+  /**
+   * Specify the expected encoding of your submitted audio
+   */
+  encoding?:
+    | "linear16"
+    | "flac"
+    | "mulaw"
+    | "amr-nb"
+    | "amr-wb"
+    | "opus"
+    | "speex"
+    | "g729";
+  /**
+   * Arbitrary key-value pairs that are attached to the API response for usage in downstream processing
+   */
+  extra?: string;
+  /**
+   * Filler Words can help transcribe interruptions in your audio, like 'uh' and 'um'
+   */
+  filler_words?: boolean;
+  /**
+   * Key term prompting can boost or suppress specialized terminology and brands.
+   */
+  keyterm?: string;
+  /**
+   * Keywords can boost or suppress specialized terminology and brands.
+   */
+  keywords?: string;
+  /**
+   * The BCP-47 language tag that hints at the primary spoken language. Depending on the Model and API endpoint you choose only certain languages are available.
+   */
+  language?: string;
+  /**
+   * Spoken measurements will be converted to their corresponding abbreviations.
+   */
+  measurements?: boolean;
+  /**
+   * Opts out requests from the Deepgram Model Improvement Program. Refer to our Docs for pricing impacts before setting this to true. https://dpgr.am/deepgram-mip.
+   */
+  mip_opt_out?: boolean;
+  /**
+   * Mode of operation for the model representing broad area of topic that will be talked about in the supplied audio
+   */
+  mode?: "general" | "medical" | "finance";
+  /**
+   * Transcribe each audio channel independently.
+   */
+  multichannel?: boolean;
+  /**
+   * Numerals converts numbers from written format to numerical format.
+   */
+  numerals?: boolean;
+  /**
+   * Splits audio into paragraphs to improve transcript readability.
+   */
+  paragraphs?: boolean;
+  /**
+   * Profanity Filter looks for recognized profanity and converts it to the nearest recognized non-profane word or removes it from the transcript completely.
+   */
+  profanity_filter?: boolean;
+  /**
+   * Add punctuation and capitalization to the transcript.
+   */
+  punctuate?: boolean;
+  /**
+   * Redaction removes sensitive information from your transcripts.
+   */
+  redact?: string;
+  /**
+   * Search for terms or phrases in submitted audio and replaces them.
+   */
+  replace?: string;
+  /**
+   * Search for terms or phrases in submitted audio.
+   */
+  search?: string;
+  /**
+   * Recognizes the sentiment throughout a transcript or text.
+   */
+  sentiment?: boolean;
+  /**
+   * Apply formatting to transcript output. When set to true, additional formatting will be applied to transcripts to improve readability.
+   */
+  smart_format?: boolean;
+  /**
+   * Detect topics throughout a transcript or text.
+   */
+  topics?: boolean;
+  /**
+   * Segments speech into meaningful semantic units.
+   */
+  utterances?: boolean;
+  /**
+   * Seconds to wait before detecting a pause between words in submitted audio.
+   */
+  utt_split?: number;
+  /**
+   * The number of channels in the submitted audio
+   */
+  channels?: number;
+  /**
+   * Specifies whether the streaming endpoint should provide ongoing transcription updates as more audio is received. When set to true, the endpoint sends continuous updates, meaning transcription results may evolve over time. Note: Supported only for webosockets.
+   */
+  interim_results?: boolean;
+  /**
+   * Indicates how long model will wait to detect whether a speaker has finished speaking or pauses for a significant period of time. When set to a value, the streaming endpoint immediately finalizes the transcription for the processed time range and returns the transcript with a speech_final parameter set to true. Can also be set to false to disable endpointing
+   */
+  endpointing?: string;
+  /**
+   * Indicates that speech has started. You'll begin receiving Speech Started messages upon speech starting. Note: Supported only for webosockets.
+   */
+  vad_events?: boolean;
+  /**
+   * Indicates how long model will wait to send an UtteranceEnd message after a word has been transcribed. Use with interim_results. Note: Supported only for webosockets.
+   */
+  utterance_end_ms?: boolean;
+}
+interface Ai_Cf_Deepgram_Nova_3_Output {
+  results?: {
+    channels?: {
+      alternatives?: {
+        confidence?: number;
+        transcript?: string;
+        words?: {
+          confidence?: number;
+          end?: number;
+          start?: number;
+          word?: string;
+        }[];
+      }[];
+    }[];
+    summary?: {
+      result?: string;
+      short?: string;
+    };
+    sentiments?: {
+      segments?: {
+        text?: string;
+        start_word?: number;
+        end_word?: number;
+        sentiment?: string;
+        sentiment_score?: number;
+      }[];
+      average?: {
+        sentiment?: string;
+        sentiment_score?: number;
+      };
+    };
+  };
+}
+declare abstract class Base_Ai_Cf_Deepgram_Nova_3 {
+  inputs: Ai_Cf_Deepgram_Nova_3_Input;
+  postProcessedOutputs: Ai_Cf_Deepgram_Nova_3_Output;
+}
+type Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input =
+  | {
+      /**
+       * readable stream with audio data and content-type specified for that data
+       */
+      audio: {
+        body: object;
+        contentType: string;
+      };
+      /**
+       * type of data PCM data that's sent to the inference server as raw array
+       */
+      dtype?: "uint8" | "float32" | "float64";
+    }
+  | {
+      /**
+       * base64 encoded audio data
+       */
+      audio: string;
+      /**
+       * type of data PCM data that's sent to the inference server as raw array
+       */
+      dtype?: "uint8" | "float32" | "float64";
+    };
+interface Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output {
+  /**
+   * if true, end-of-turn was detected
+   */
+  is_complete?: boolean;
+  /**
+   * probability of the end-of-turn detection
+   */
+  probability?: number;
+}
+declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
+  inputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input;
+  postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
+}
+type Ai_Cf_Openai_Gpt_Oss_120B_Input =
+  | GPT_OSS_120B_Responses
+  | GPT_OSS_120B_Responses_Async;
+interface GPT_OSS_120B_Responses {
+  /**
+   * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+   */
+  input: string | unknown[];
+  reasoning?: {
+    /**
+     * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+     */
+    effort?: "low" | "medium" | "high";
+    /**
+     * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+     */
+    summary?: "auto" | "concise" | "detailed";
+  };
+}
+interface GPT_OSS_120B_Responses_Async {
+  requests: {
+    /**
+     * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+     */
+    input: string | unknown[];
+    reasoning?: {
+      /**
+       * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+       */
+      effort?: "low" | "medium" | "high";
+      /**
+       * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+       */
+      summary?: "auto" | "concise" | "detailed";
+    };
+  }[];
+}
+type Ai_Cf_Openai_Gpt_Oss_120B_Output = {} | (string & NonNullable<unknown>);
+declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
+  inputs: Ai_Cf_Openai_Gpt_Oss_120B_Input;
+  postProcessedOutputs: Ai_Cf_Openai_Gpt_Oss_120B_Output;
+}
+type Ai_Cf_Openai_Gpt_Oss_20B_Input =
+  | GPT_OSS_20B_Responses
+  | GPT_OSS_20B_Responses_Async;
+interface GPT_OSS_20B_Responses {
+  /**
+   * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+   */
+  input: string | unknown[];
+  reasoning?: {
+    /**
+     * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+     */
+    effort?: "low" | "medium" | "high";
+    /**
+     * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+     */
+    summary?: "auto" | "concise" | "detailed";
+  };
+}
+interface GPT_OSS_20B_Responses_Async {
+  requests: {
+    /**
+     * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+     */
+    input: string | unknown[];
+    reasoning?: {
+      /**
+       * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+       */
+      effort?: "low" | "medium" | "high";
+      /**
+       * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+       */
+      summary?: "auto" | "concise" | "detailed";
+    };
+  }[];
+}
+type Ai_Cf_Openai_Gpt_Oss_20B_Output = {} | (string & NonNullable<unknown>);
+declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
+  inputs: Ai_Cf_Openai_Gpt_Oss_20B_Input;
+  postProcessedOutputs: Ai_Cf_Openai_Gpt_Oss_20B_Output;
+}
+interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
+  /**
+   * A text description of the image you want to generate.
+   */
+  prompt: string;
+  /**
+   * Controls how closely the generated image should adhere to the prompt; higher values make the image more aligned with the prompt
+   */
+  guidance?: number;
+  /**
+   * Random seed for reproducibility of the image generation
+   */
+  seed?: number;
+  /**
+   * The height of the generated image in pixels
+   */
+  height?: number;
+  /**
+   * The width of the generated image in pixels
+   */
+  width?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  num_steps?: number;
+  /**
+   * Specify what to exclude from the generated images
+   */
+  negative_prompt?: string;
+}
+/**
+ * The generated image in JPEG format
+ */
+type Ai_Cf_Leonardo_Phoenix_1_0_Output = string;
+declare abstract class Base_Ai_Cf_Leonardo_Phoenix_1_0 {
+  inputs: Ai_Cf_Leonardo_Phoenix_1_0_Input;
+  postProcessedOutputs: Ai_Cf_Leonardo_Phoenix_1_0_Output;
+}
+interface Ai_Cf_Leonardo_Lucid_Origin_Input {
+  /**
+   * A text description of the image you want to generate.
+   */
+  prompt: string;
+  /**
+   * Controls how closely the generated image should adhere to the prompt; higher values make the image more aligned with the prompt
+   */
+  guidance?: number;
+  /**
+   * Random seed for reproducibility of the image generation
+   */
+  seed?: number;
+  /**
+   * The height of the generated image in pixels
+   */
+  height?: number;
+  /**
+   * The width of the generated image in pixels
+   */
+  width?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  num_steps?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  steps?: number;
+}
+interface Ai_Cf_Leonardo_Lucid_Origin_Output {
+  /**
+   * The generated image in Base64 format.
+   */
+  image?: string;
+}
+declare abstract class Base_Ai_Cf_Leonardo_Lucid_Origin {
+  inputs: Ai_Cf_Leonardo_Lucid_Origin_Input;
+  postProcessedOutputs: Ai_Cf_Leonardo_Lucid_Origin_Output;
+}
+interface Ai_Cf_Deepgram_Aura_1_Input {
+  /**
+   * Speaker used to produce the audio.
+   */
+  speaker?:
+    | "angus"
+    | "asteria"
+    | "arcas"
+    | "orion"
+    | "orpheus"
+    | "athena"
+    | "luna"
+    | "zeus"
+    | "perseus"
+    | "helios"
+    | "hera"
+    | "stella";
+  /**
+   * Encoding of the output audio.
+   */
+  encoding?: "linear16" | "flac" | "mulaw" | "alaw" | "mp3" | "opus" | "aac";
+  /**
+   * Container specifies the file format wrapper for the output audio. The available options depend on the encoding type..
+   */
+  container?: "none" | "wav" | "ogg";
+  /**
+   * The text content to be converted to speech
+   */
+  text: string;
+  /**
+   * Sample Rate specifies the sample rate for the output audio. Based on the encoding, different sample rates are supported. For some encodings, the sample rate is not configurable
+   */
+  sample_rate?: number;
+  /**
+   * The bitrate of the audio in bits per second. Choose from predefined ranges or specific values based on the encoding type.
+   */
+  bit_rate?: number;
+}
+/**
+ * The generated audio in MP3 format
+ */
+type Ai_Cf_Deepgram_Aura_1_Output = string;
+declare abstract class Base_Ai_Cf_Deepgram_Aura_1 {
+  inputs: Ai_Cf_Deepgram_Aura_1_Input;
+  postProcessedOutputs: Ai_Cf_Deepgram_Aura_1_Output;
+}
 interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -4486,11 +7934,8 @@ interface AiModels {
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
   "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
-  "@cf/baai/bge-base-en-v1.5": BaseAiTextEmbeddings;
-  "@cf/baai/bge-small-en-v1.5": BaseAiTextEmbeddings;
-  "@cf/baai/bge-large-en-v1.5": BaseAiTextEmbeddings;
+  "@cf/google/embeddinggemma-300m": BaseAiTextEmbeddings;
   "@cf/microsoft/resnet-50": BaseAiImageClassification;
-  "@cf/facebook/detr-resnet-50": BaseAiObjectDetection;
   "@cf/meta/llama-2-7b-chat-int8": BaseAiTextGeneration;
   "@cf/mistral/mistral-7b-instruct-v0.1": BaseAiTextGeneration;
   "@cf/meta/llama-2-7b-chat-fp16": BaseAiTextGeneration;
@@ -4525,38 +7970,54 @@ interface AiModels {
   "@cf/fblgit/una-cybertron-7b-v2-bf16": BaseAiTextGeneration;
   "@cf/meta/llama-3-8b-instruct-awq": BaseAiTextGeneration;
   "@hf/meta-llama/meta-llama-3-8b-instruct": BaseAiTextGeneration;
-  "@cf/meta/llama-3.1-8b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.1-8b-instruct-fp8": BaseAiTextGeneration;
   "@cf/meta/llama-3.1-8b-instruct-awq": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-3b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-1b-instruct": BaseAiTextGeneration;
-  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": BaseAiTextGeneration;
   "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": BaseAiTextGeneration;
-  "@cf/meta/m2m100-1.2b": BaseAiTranslation;
   "@cf/facebook/bart-large-cnn": BaseAiSummarization;
   "@cf/llava-hf/llava-1.5-7b-hf": BaseAiImageToText;
+  "@cf/baai/bge-base-en-v1.5": Base_Ai_Cf_Baai_Bge_Base_En_V1_5;
   "@cf/openai/whisper": Base_Ai_Cf_Openai_Whisper;
+  "@cf/meta/m2m100-1.2b": Base_Ai_Cf_Meta_M2M100_1_2B;
+  "@cf/baai/bge-small-en-v1.5": Base_Ai_Cf_Baai_Bge_Small_En_V1_5;
+  "@cf/baai/bge-large-en-v1.5": Base_Ai_Cf_Baai_Bge_Large_En_V1_5;
   "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
   "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
   "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
+  "@cf/qwen/qwen2.5-coder-32b-instruct": Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct;
+  "@cf/qwen/qwq-32b": Base_Ai_Cf_Qwen_Qwq_32B;
+  "@cf/mistralai/mistral-small-3.1-24b-instruct": Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct;
+  "@cf/google/gemma-3-12b-it": Base_Ai_Cf_Google_Gemma_3_12B_It;
+  "@cf/meta/llama-4-scout-17b-16e-instruct": Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
+  "@cf/deepgram/nova-3": Base_Ai_Cf_Deepgram_Nova_3;
+  "@cf/pipecat-ai/smart-turn-v2": Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2;
+  "@cf/openai/gpt-oss-120b": Base_Ai_Cf_Openai_Gpt_Oss_120B;
+  "@cf/openai/gpt-oss-20b": Base_Ai_Cf_Openai_Gpt_Oss_20B;
+  "@cf/leonardo/phoenix-1.0": Base_Ai_Cf_Leonardo_Phoenix_1_0;
+  "@cf/leonardo/lucid-origin": Base_Ai_Cf_Leonardo_Lucid_Origin;
+  "@cf/deepgram/aura-1": Base_Ai_Cf_Deepgram_Aura_1;
 }
 type AiOptions = {
+  /**
+   * Send requests as an asynchronous batch job, only works for supported models
+   * https://developers.cloudflare.com/workers-ai/features/batch-api
+   */
+  queueRequest?: boolean;
+  /**
+   * Establish websocket connections, only works for supported models
+   */
+  websocket?: boolean;
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
-};
-type ConversionResponse = {
-  name: string;
-  mimeType: string;
-  format: "markdown";
-  tokens: number;
-  data: string;
 };
 type AiModelsSearchParams = {
   author?: string;
@@ -4590,18 +8051,31 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
   autorag(autoragId: string): AutoRAG;
-  run<Name extends keyof AiModelList, Options extends AiOptions>(
+  run<
+    Name extends keyof AiModelList,
+    Options extends AiOptions,
+    InputOptions extends AiModelList[Name]["inputs"],
+  >(
     model: Name,
-    inputs: AiModelList[Name]["inputs"],
+    inputs: InputOptions,
     options?: Options,
   ): Promise<
-    Options extends {
-      returnRawResponse: true;
-    }
+    Options extends
+      | {
+          returnRawResponse: true;
+        }
+      | {
+          websocket: true;
+        }
       ? Response
-      : AiModelList[Name]["postProcessedOutputs"]
+      : InputOptions extends {
+            stream: true;
+          }
+        ? ReadableStream
+        : AiModelList[Name]["postProcessedOutputs"]
   >;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  toMarkdown(): ToMarkdownService;
   toMarkdown(
     files: {
       name: string;
@@ -4623,6 +8097,11 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
     },
   ): Promise<ConversionResponse>;
 }
+type GatewayRetries = {
+  maxAttempts?: 1 | 2 | 3 | 4 | 5;
+  retryDelayMs?: number;
+  backoff?: "constant" | "linear" | "exponential";
+};
 type GatewayOptions = {
   id: string;
   cacheKey?: string;
@@ -4630,6 +8109,15 @@ type GatewayOptions = {
   skipCache?: boolean;
   metadata?: Record<string, number | string | boolean | null | bigint>;
   collectLog?: boolean;
+  eventId?: string;
+  requestTimeoutMs?: number;
+  retries?: GatewayRetries;
+};
+type UniversalGatewayOptions = Exclude<GatewayOptions, "id"> & {
+  /**
+   ** @deprecated
+   */
+  id?: string;
 };
 type AiGatewayPatchLog = {
   score?: number | null;
@@ -4700,6 +8188,11 @@ type AIGatewayHeaders = {
   "cf-aig-cache-ttl": number | string;
   "cf-aig-skip-cache": boolean | string;
   "cf-aig-cache-key": string;
+  "cf-aig-event-id": string;
+  "cf-aig-request-timeout": number | string;
+  "cf-aig-max-attempts": number | string;
+  "cf-aig-retry-delay": number | string;
+  "cf-aig-backoff": string;
   "cf-aig-collect-log": boolean | string;
   Authorization: string;
   "Content-Type": string;
@@ -4718,20 +8211,49 @@ declare abstract class AiGateway {
   getLog(logId: string): Promise<AiGatewayLog>;
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
+    options?: {
+      gateway?: UniversalGatewayOptions;
+      extraHeaders?: object;
+    },
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
 interface AutoRAGInternalError extends Error {}
 interface AutoRAGNotFoundError extends Error {}
 interface AutoRAGUnauthorizedError extends Error {}
+interface AutoRAGNameNotSetError extends Error {}
+type ComparisonFilter = {
+  key: string;
+  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+  value: string | number | boolean;
+};
+type CompoundFilter = {
+  type: "and" | "or";
+  filters: ComparisonFilter[];
+};
 type AutoRagSearchRequest = {
   query: string;
+  filters?: CompoundFilter | ComparisonFilter;
   max_num_results?: number;
   ranking_options?: {
     ranker?: string;
     score_threshold?: number;
   };
+  reranking?: {
+    enabled?: boolean;
+    model?: string;
+  };
   rewrite_query?: boolean;
+};
+type AutoRagAiSearchRequest = AutoRagSearchRequest & {
+  stream?: boolean;
+  system_prompt?: string;
+};
+type AutoRagAiSearchRequestStreaming = Omit<
+  AutoRagAiSearchRequest,
+  "stream"
+> & {
+  stream: true;
 };
 type AutoRagSearchResponse = {
   object: "vector_store.search_results.page";
@@ -4749,12 +8271,26 @@ type AutoRagSearchResponse = {
   has_more: boolean;
   next_page: string | null;
 };
+type AutoRagListResponse = {
+  id: string;
+  enable: boolean;
+  type: string;
+  source: string;
+  vectorize_name: string;
+  paused: boolean;
+  status: string;
+}[];
 type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 declare abstract class AutoRAG {
+  list(): Promise<AutoRagListResponse>;
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
-  aiSearch(params: AutoRagSearchRequest): Promise<AutoRagAiSearchResponse>;
+  aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
+  aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
+  aiSearch(
+    params: AutoRagAiSearchRequest,
+  ): Promise<AutoRagAiSearchResponse | Response>;
 }
 interface BasicImageTransformations {
   /**
@@ -4793,6 +8329,12 @@ interface BasicImageTransformations {
    */
   fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
   /**
+   * Image segmentation using artificial intelligence models. Sets pixels not
+   * within selected segment area to transparent e.g "foreground" sets every
+   * background pixel as transparent.
+   */
+  segment?: "foreground";
+  /**
    * When cropping with fit: "cover", this defines the side or point that should
    * be left uncropped. The value is either a string
    * "left", "right", "top", "bottom", "auto", or "center" (the default),
@@ -4805,6 +8347,7 @@ interface BasicImageTransformations {
    * source image.
    */
   gravity?:
+    | "face"
     | "left"
     | "right"
     | "top"
@@ -5118,13 +8661,13 @@ interface IncomingRequestCfPropertiesBase extends Record<string, unknown> {
    *
    * @example 395747
    */
-  asn: number;
+  asn?: number;
   /**
    * The organization which owns the ASN of the incoming request.
    *
    * @example "Google Cloud"
    */
-  asOrganization: string;
+  asOrganization?: string;
   /**
    * The original value of the `Accept-Encoding` header if Cloudflare modified it.
    *
@@ -5249,7 +8792,7 @@ interface IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<HostMetadata> {
    * This field is only present if you have Cloudflare for SaaS enabled on your account
    * and you have followed the [required steps to enable it]((https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/domain-support/custom-metadata/)).
    */
-  hostMetadata: HostMetadata;
+  hostMetadata?: HostMetadata;
 }
 interface IncomingRequestCfPropertiesCloudflareAccessOrApiShield {
   /**
@@ -5795,6 +9338,11 @@ interface D1Meta {
      */
     sql_duration_ms: number;
   };
+  /**
+   * Number of total attempts to execute the query, due to automatic retries.
+   * Note: All other fields in the response like `timings` only apply to the last attempt.
+   */
+  total_attempts?: number;
 }
 interface D1Response {
   success: true;
@@ -5934,6 +9482,22 @@ declare module "cloudflare:email" {
   };
   export { _EmailMessage as EmailMessage };
 }
+/**
+ * Hello World binding to serve as an explanatory example. DO NOT USE
+ */
+interface HelloWorldBinding {
+  /**
+   * Retrieve the current stored value
+   */
+  get(): Promise<{
+    value: string;
+    ms?: number;
+  }>;
+  /**
+   * Set a new stored value
+   */
+  set(value: string): Promise<void>;
+}
 interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
@@ -6015,7 +9579,9 @@ type ImageTransform = {
   fit?: "scale-down" | "contain" | "pad" | "squeeze" | "cover" | "crop";
   flip?: "h" | "v" | "hv";
   gamma?: number;
+  segment?: "foreground";
   gravity?:
+    | "face"
     | "left"
     | "right"
     | "top"
@@ -6057,6 +9623,9 @@ type ImageDrawOptions = {
   bottom?: number;
   right?: number;
 };
+type ImageInputOptions = {
+  encoding?: "base64";
+};
 type ImageOutputOptions = {
   format:
     | "image/jpeg"
@@ -6068,6 +9637,7 @@ type ImageOutputOptions = {
     | "rgba";
   quality?: number;
   background?: string;
+  anim?: boolean;
 };
 interface ImagesBinding {
   /**
@@ -6075,13 +9645,19 @@ interface ImagesBinding {
    * @throws {@link ImagesError} with code 9412 if input is not an image
    * @param stream The image bytes
    */
-  info(stream: ReadableStream<Uint8Array>): Promise<ImageInfoResponse>;
+  info(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): Promise<ImageInfoResponse>;
   /**
    * Begin applying a series of transformations to an image
    * @param stream The image bytes
    * @returns A transform handle
    */
-  input(stream: ReadableStream<Uint8Array>): ImageTransformer;
+  input(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): ImageTransformer;
 }
 interface ImageTransformer {
   /**
@@ -6107,6 +9683,9 @@ interface ImageTransformer {
    */
   output(options: ImageOutputOptions): Promise<ImageTransformationResult>;
 }
+type ImageTransformationOutputOptions = {
+  encoding?: "base64";
+};
 interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
@@ -6119,12 +9698,131 @@ interface ImageTransformationResult {
   /**
    * The bytes of the response
    */
-  image(): ReadableStream<Uint8Array>;
+  image(options?: ImageTransformationOutputOptions): ReadableStream<Uint8Array>;
 }
 interface ImagesError extends Error {
   readonly code: number;
   readonly message: string;
   readonly stack?: string;
+}
+/**
+ * Media binding for transforming media streams.
+ * Provides the entry point for media transformation operations.
+ */
+interface MediaBinding {
+  /**
+   * Creates a media transformer from an input stream.
+   * @param media - The input media bytes
+   * @returns A MediaTransformer instance for applying transformations
+   */
+  input(media: ReadableStream<Uint8Array>): MediaTransformer;
+}
+/**
+ * Media transformer for applying transformation operations to media content.
+ * Handles sizing, fitting, and other input transformation parameters.
+ */
+interface MediaTransformer {
+  /**
+   * Applies transformation options to the media content.
+   * @param transform - Configuration for how the media should be transformed
+   * @returns A generator for producing the transformed media output
+   */
+  transform(
+    transform: MediaTransformationInputOptions,
+  ): MediaTransformationGenerator;
+}
+/**
+ * Generator for producing media transformation results.
+ * Configures the output format and parameters for the transformed media.
+ */
+interface MediaTransformationGenerator {
+  /**
+   * Generates the final media output with specified options.
+   * @param output - Configuration for the output format and parameters
+   * @returns The final transformation result containing the transformed media
+   */
+  output(output: MediaTransformationOutputOptions): MediaTransformationResult;
+}
+/**
+ * Result of a media transformation operation.
+ * Provides multiple ways to access the transformed media content.
+ */
+interface MediaTransformationResult {
+  /**
+   * Returns the transformed media as a readable stream of bytes.
+   * @returns A stream containing the transformed media data
+   */
+  media(): ReadableStream<Uint8Array>;
+  /**
+   * Returns the transformed media as an HTTP response object.
+   * @returns The transformed media as a Response, ready to store in cache or return to users
+   */
+  response(): Response;
+  /**
+   * Returns the MIME type of the transformed media.
+   * @returns The content type string (e.g., 'image/jpeg', 'video/mp4')
+   */
+  contentType(): string;
+}
+/**
+ * Configuration options for transforming media input.
+ * Controls how the media should be resized and fitted.
+ */
+type MediaTransformationInputOptions = {
+  /** How the media should be resized to fit the specified dimensions */
+  fit?: "contain" | "cover" | "scale-down";
+  /** Target width in pixels */
+  width?: number;
+  /** Target height in pixels */
+  height?: number;
+};
+/**
+ * Configuration options for Media Transformations output.
+ * Controls the format, timing, and type of the generated output.
+ */
+type MediaTransformationOutputOptions = {
+  /**
+   * Output mode determining the type of media to generate
+   */
+  mode?: "video" | "spritesheet" | "frame" | "audio";
+  /** Whether to include audio in the output */
+  audio?: boolean;
+  /**
+   * Starting timestamp for frame extraction or start time for clips. (e.g. '2s').
+   */
+  time?: string;
+  /**
+   * Duration for video clips, audio extraction, and spritesheet generation (e.g. '5s').
+   */
+  duration?: string;
+  /**
+   * Number of frames in the spritesheet.
+   */
+  imageCount?: number;
+  /**
+   * Output format for the generated media.
+   */
+  format?: "jpg" | "png" | "m4a";
+};
+/**
+ * Error object for media transformation operations.
+ * Extends the standard Error interface with additional media-specific information.
+ */
+interface MediaError extends Error {
+  readonly code: number;
+  readonly message: string;
+  readonly stack?: string;
+}
+declare module "cloudflare:node" {
+  interface NodeStyleServer {
+    listen(...args: unknown[]): this;
+    address(): {
+      port?: number | null | undefined;
+    };
+  }
+  export function httpServerHandler(port: number): ExportedHandler;
+  export function httpServerHandler(options: { port: number }): ExportedHandler;
+  export function httpServerHandler(server: NodeStyleServer): ExportedHandler;
 }
 type Params<P extends string = any> = Record<P, string | string[]>;
 type EventContext<Env, P extends string, Data> = {
@@ -6423,9 +10121,55 @@ declare namespace Rpc {
   };
 }
 declare namespace Cloudflare {
+  // Type of `env`.
+  //
+  // The specific project can extend `Env` by redeclaring it in project-specific files. Typescript
+  // will merge all declarations.
+  //
+  // You can use `wrangler types` to generate the `Env` type automatically.
   interface Env {}
+  // Project-specific parameters used to inform types.
+  //
+  // This interface is, again, intended to be declared in project-specific files, and then that
+  // declaration will be merged with this one.
+  //
+  // A project should have a declaration like this:
+  //
+  //     interface GlobalProps {
+  //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // of `ctx.exports`.
+  //       mainModule: typeof import("my-main-module");
+  //
+  //       // Declares which of the main module's exports are configured with durable storage, and
+  //       // thus should behave as Durable Object namsepace bindings.
+  //       durableNamespaces: "MyDurableObject" | "AnotherDurableObject";
+  //     }
+  //
+  // You can use `wrangler types` to generate `GlobalProps` automatically.
+  interface GlobalProps {}
+  // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
+  // present.
+  type GlobalProp<K extends string, Default> = K extends keyof GlobalProps
+    ? GlobalProps[K]
+    : Default;
+  // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
+  // `mainModule` property.
+  type MainModule = GlobalProp<"mainModule", {}>;
+  // The type of ctx.exports, which contains loopback bindings for all top-level exports.
+  type Exports = {
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]> &
+      // If the export is listed in `durableNamespaces`, then it is also a
+      // DurableObjectNamespace.
+      (K extends GlobalProp<"durableNamespaces", never>
+        ? MainModule[K] extends new (...args: any[]) => infer DoInstance
+          ? DoInstance extends Rpc.DurableObjectBranded
+            ? DurableObjectNamespace<DoInstance>
+            : DurableObjectNamespace<undefined>
+          : DurableObjectNamespace<undefined>
+        : {});
+  };
 }
-declare module "cloudflare:workers" {
+declare namespace CloudflareWorkersModule {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
     new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
@@ -6434,25 +10178,30 @@ declare module "cloudflare:workers" {
     [Rpc.__RPC_TARGET_BRAND]: never;
   }
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
-  export abstract class WorkerEntrypoint<Env = unknown>
+  export abstract class WorkerEntrypoint<Env = Cloudflare.Env, Props = {}>
     implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
-    protected ctx: ExecutionContext;
+    protected ctx: ExecutionContext<Props>;
     protected env: Env;
     constructor(ctx: ExecutionContext, env: Env);
     fetch?(request: Request): Response | Promise<Response>;
     tail?(events: TraceItem[]): void | Promise<void>;
+    tailStream?(
+      event: TailStream.TailEvent<TailStream.Onset>,
+    ):
+      | TailStream.TailEventHandlerType
+      | Promise<TailStream.TailEventHandlerType>;
     trace?(traces: TraceItem[]): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     test?(controller: TestController): void | Promise<void>;
   }
-  export abstract class DurableObject<Env = unknown>
+  export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
     implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
-    protected ctx: DurableObjectState;
+    protected ctx: DurableObjectState<Props>;
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
     fetch?(request: Request): Response | Promise<Response>;
@@ -6482,6 +10231,7 @@ declare module "cloudflare:workers" {
     | number;
   export type WorkflowDelayDuration = WorkflowSleepDuration;
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
+  export type WorkflowRetentionDuration = WorkflowSleepDuration;
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
   export type WorkflowStepConfig = {
     retries?: {
@@ -6496,6 +10246,11 @@ declare module "cloudflare:workers" {
     timestamp: Date;
     instanceId: string;
   };
+  export type WorkflowStepEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    type: string;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
@@ -6508,6 +10263,13 @@ declare module "cloudflare:workers" {
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
+    waitForEvent<T extends Rpc.Serializable<T>>(
+      name: string,
+      options: {
+        type: string;
+        timeout?: WorkflowTimeoutDuration | number;
+      },
+    ): Promise<WorkflowStepEvent<T>>;
   }
   export abstract class WorkflowEntrypoint<
     Env = unknown,
@@ -6523,7 +10285,11 @@ declare module "cloudflare:workers" {
       step: WorkflowStep,
     ): Promise<unknown>;
   }
+  export function waitUntil(promise: Promise<unknown>): void;
   export const env: Cloudflare.Env;
+}
+declare module "cloudflare:workers" {
+  export = CloudflareWorkersModule;
 }
 interface SecretsStoreSecret {
   /**
@@ -6539,6 +10305,47 @@ declare module "cloudflare:sockets" {
   ): Socket;
   export { _connect as connect };
 }
+type ConversionResponse = {
+  name: string;
+  mimeType: string;
+} & (
+  | {
+      format: "markdown";
+      tokens: number;
+      data: string;
+    }
+  | {
+      format: "error";
+      error: string;
+    }
+);
+type SupportedFileFormat = {
+  mimeType: string;
+  extension: string;
+};
+declare abstract class ToMarkdownService {
+  transform(
+    files: {
+      name: string;
+      blob: Blob;
+    }[],
+    options?: {
+      gateway?: GatewayOptions;
+      extraHeaders?: object;
+    },
+  ): Promise<ConversionResponse[]>;
+  transform(
+    files: {
+      name: string;
+      blob: Blob;
+    },
+    options?: {
+      gateway?: GatewayOptions;
+      extraHeaders?: object;
+    },
+  ): Promise<ConversionResponse>;
+  supported(): Promise<SupportedFileFormat[]>;
+}
 declare namespace TailStream {
   interface Header {
     readonly name: string;
@@ -6548,12 +10355,11 @@ declare namespace TailStream {
     readonly type: "fetch";
     readonly method: string;
     readonly url: string;
-    readonly cfJson: string;
+    readonly cfJson?: object;
     readonly headers: Header[];
   }
   interface JsRpcEventInfo {
     readonly type: "jsrpc";
-    readonly methodName: string;
   }
   interface ScheduledEventInfo {
     readonly type: "scheduled";
@@ -6597,10 +10403,6 @@ declare namespace TailStream {
       | HibernatableWebSocketEventInfoError
       | HibernatableWebSocketEventInfoMessage;
   }
-  interface Resume {
-    readonly type: "resume";
-    readonly attachment?: any;
-  }
   interface CustomEventInfo {
     readonly type: "custom";
   }
@@ -6625,19 +10427,17 @@ declare namespace TailStream {
     readonly tag?: string;
     readonly message?: string;
   }
-  interface Trigger {
-    readonly traceId: string;
-    readonly invocationId: string;
-    readonly spanId: string;
-  }
   interface Onset {
     readonly type: "onset";
+    readonly attributes: Attribute[];
+    // id for the span being opened by this Onset event.
+    readonly spanId: string;
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
+    readonly executionModel: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
-    readonly trigger?: Trigger;
     readonly info:
       | FetchEventInfo
       | JsRpcEventInfo
@@ -6647,7 +10447,6 @@ declare namespace TailStream {
       | EmailEventInfo
       | TraceEventInfo
       | HibernatableWebSocketEventInfo
-      | Resume
       | CustomEventInfo;
   }
   interface Outcome {
@@ -6656,13 +10455,12 @@ declare namespace TailStream {
     readonly cpuTime: number;
     readonly wallTime: number;
   }
-  interface Hibernate {
-    readonly type: "hibernate";
-  }
   interface SpanOpen {
     readonly type: "spanOpen";
-    readonly op?: string;
-    readonly info?: FetchEventInfo | JsRpcEventInfo | Attribute[];
+    readonly name: string;
+    // id for the span being opened by this SpanOpen event.
+    readonly spanId: string;
+    readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
   }
   interface SpanClose {
     readonly type: "spanClose";
@@ -6682,53 +10480,81 @@ declare namespace TailStream {
   interface Log {
     readonly type: "log";
     readonly level: "debug" | "error" | "info" | "log" | "warn";
-    readonly message: string;
+    readonly message: object;
   }
+  // This marks the worker handler return information.
+  // This is separate from Outcome because the worker invocation can live for a long time after
+  // returning. For example - Websockets that return an http upgrade response but then continue
+  // streaming information or SSE http connections.
   interface Return {
     readonly type: "return";
-    readonly info?: FetchResponseInfo | Attribute[];
-  }
-  interface Link {
-    readonly type: "link";
-    readonly label?: string;
-    readonly traceId: string;
-    readonly invocationId: string;
-    readonly spanId: string;
+    readonly info?: FetchResponseInfo;
   }
   interface Attribute {
-    readonly type: "attribute";
     readonly name: string;
-    readonly value: string | string[] | boolean | boolean[] | number | number[];
+    readonly value:
+      | string
+      | string[]
+      | boolean
+      | boolean[]
+      | number
+      | number[]
+      | bigint
+      | bigint[];
   }
-  type Mark =
+  interface Attributes {
+    readonly type: "attributes";
+    readonly info: Attribute[];
+  }
+  type EventType =
+    | Onset
+    | Outcome
+    | SpanOpen
+    | SpanClose
     | DiagnosticChannelEvent
     | Exception
     | Log
     | Return
-    | Link
-    | Attribute[];
-  interface TailEvent {
+    | Attributes;
+  // Context in which this trace event lives.
+  interface SpanContext {
+    // Single id for the entire top-level invocation
+    // This should be a new traceId for the first worker stage invoked in the eyeball request and then
+    // same-account service-bindings should reuse the same traceId but cross-account service-bindings
+    // should use a new traceId.
     readonly traceId: string;
+    // spanId in which this event is handled
+    // for Onset and SpanOpen events this would be the parent span id
+    // for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
+    // For Hibernate and Mark this would be the span under which they were emitted.
+    // spanId is not set ONLY if:
+    //  1. This is an Onset event
+    //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    readonly spanId?: string;
+  }
+  interface TailEvent<Event extends EventType> {
+    // invocation id of the currently invoked worker stage.
+    // invocation id will always be unique to every Onset event and will be the same until the Outcome event.
     readonly invocationId: string;
-    readonly spanId: string;
+    // Inherited spanContext for this event.
+    readonly spanContext: SpanContext;
     readonly timestamp: Date;
     readonly sequence: number;
-    readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | Mark;
+    readonly event: Event;
   }
-  type TailEventHandler = (event: TailEvent) => void | Promise<void>;
-  type TailEventHandlerName =
-    | "onset"
-    | "outcome"
-    | "hibernate"
-    | "spanOpen"
-    | "spanClose"
-    | "diagnosticChannel"
-    | "exception"
-    | "log"
-    | "return"
-    | "link"
-    | "attribute";
-  type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
+  type TailEventHandler<Event extends EventType = EventType> = (
+    event: TailEvent<Event>,
+  ) => void | Promise<void>;
+  type TailEventHandlerObject = {
+    outcome?: TailEventHandler<Outcome>;
+    spanOpen?: TailEventHandler<SpanOpen>;
+    spanClose?: TailEventHandler<SpanClose>;
+    diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
+    exception?: TailEventHandler<Exception>;
+    log?: TailEventHandler<Log>;
+    return?: TailEventHandler<Return>;
+    attributes?: TailEventHandler<Attributes>;
+  };
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.
@@ -6754,7 +10580,14 @@ interface VectorizeError {
  *
  * This list is expected to grow as support for more operations are released.
  */
-type VectorizeVectorMetadataFilterOp = "$eq" | "$ne";
+type VectorizeVectorMetadataFilterOp =
+  | "$eq"
+  | "$ne"
+  | "$lt"
+  | "$lte"
+  | "$gt"
+  | "$gte";
+type VectorizeVectorMetadataFilterCollectionOp = "$in" | "$nin";
 /**
  * Filter criteria for vector metadata used to limit the retrieved query result set.
  */
@@ -6767,6 +10600,12 @@ type VectorizeVectorMetadataFilter = {
           VectorizeVectorMetadataValue,
           string[]
         > | null;
+      }
+    | {
+        [Op in VectorizeVectorMetadataFilterCollectionOp]?: Exclude<
+          VectorizeVectorMetadataValue,
+          string[]
+        >[];
       };
 };
 /**
@@ -7069,6 +10908,18 @@ declare abstract class Workflow<PARAMS = unknown> {
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
   ): Promise<WorkflowInstance[]>;
 }
+type WorkflowDurationLabel =
+  | "second"
+  | "minute"
+  | "hour"
+  | "day"
+  | "week"
+  | "month"
+  | "year";
+type WorkflowSleepDuration =
+  | `${number} ${WorkflowDurationLabel}${"s" | ""}`
+  | number;
+type WorkflowRetentionDuration = WorkflowSleepDuration;
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -7078,6 +10929,14 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
    * The event payload the Workflow instance is triggered with
    */
   params?: PARAMS;
+  /**
+   * The retention policy for Workflow instance.
+   * Defaults to the maximum retention period available for the owner's account.
+   */
+  retention?: {
+    successRetention?: WorkflowRetentionDuration;
+    errorRetention?: WorkflowRetentionDuration;
+  };
 }
 type InstanceStatus = {
   status:
@@ -7119,4 +10978,14 @@ declare abstract class WorkflowInstance {
    * Returns the current status of the instance.
    */
   public status(): Promise<InstanceStatus>;
+  /**
+   * Send an event to this instance.
+   */
+  public sendEvent({
+    type,
+    payload,
+  }: {
+    type: string;
+    payload: unknown;
+  }): Promise<void>;
 }

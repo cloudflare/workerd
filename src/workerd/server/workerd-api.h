@@ -4,8 +4,10 @@
 
 #pragma once
 
+#include "workerd/api/pyodide/pyodide.h"
+
+#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
-#include <workerd/jsg/modules-new.h>
 #include <workerd/server/workerd.capnp.h>
 
 namespace workerd {
@@ -18,7 +20,10 @@ struct PythonConfig;
 namespace workerd {
 namespace jsg {
 class V8System;
+namespace modules {
+class ModuleRegistry;
 }
+}  // namespace jsg
 }  // namespace workerd
 
 namespace workerd::api {
@@ -34,18 +39,20 @@ class WorkerdApi final: public Worker::Api {
  public:
   WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
+      capnp::List<config::Extension>::Reader extensions,
       v8::Isolate::CreateParams createParams,
+      v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
-      const PythonConfig& pythonConfig,
-      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry);
+      const PythonConfig& pythonConfig);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
-  jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const override;
+  jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(
+      jsg::Lock& lock, Worker::Api::NewContextOptions options = {}) const override;
   jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
   NamedExport unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> exportVal) const override;
@@ -61,8 +68,18 @@ class WorkerdApi final: public Worker::Api {
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      capnp::List<config::Extension>::Reader extensions);
+      CompatibilityFlags::Reader featureFlags,
+      Worker::ValidationErrorReporter& errorReporter);
+
+  void compileModules(jsg::Lock& lock,
+      const Worker::Script::ModulesSource& source,
+      const Worker::Isolate& isolate,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+      SpanParent parentSpan) const override;
+
+  kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
+      const Worker::Script::ScriptSource& source,
+      const Worker::Isolate& isolate) const override;
 
   // A pipeline-level binding.
   struct Global {
@@ -85,18 +102,33 @@ class WorkerdApi final: public Worker::Api {
         return *this;
       }
     };
+    struct LoopbackServiceStub {
+      uint channel;
+
+      LoopbackServiceStub clone() const {
+        return *this;
+      }
+    };
     struct KvNamespace {
       uint subrequestChannel;
+      kj::String bindingName;
 
       KvNamespace clone() const {
-        return *this;
+        return KvNamespace{
+          .subrequestChannel = subrequestChannel, .bindingName = kj::str(bindingName)};
       }
     };
     struct R2Bucket {
       uint subrequestChannel;
+      kj::String bucket;
+      kj::String bindingName;
 
       R2Bucket clone() const {
-        return *this;
+        return R2Bucket{
+          .subrequestChannel = subrequestChannel,
+          .bucket = kj::str(bucket),
+          .bindingName = kj::str(bindingName),
+        };
       }
     };
     struct R2Admin {
@@ -163,11 +195,28 @@ class WorkerdApi final: public Worker::Api {
         return *this;
       }
     };
+    struct LoopbackEphemeralActorNamespace {
+      uint actorChannel;
+      uint classChannel;
+
+      LoopbackEphemeralActorNamespace clone() const {
+        return *this;
+      }
+    };
     struct DurableActorNamespace {
       uint actorChannel;
       kj::StringPtr uniqueKey;
 
       DurableActorNamespace clone() const {
+        return *this;
+      }
+    };
+    struct LoopbackDurableActorNamespace {
+      uint actorChannel;
+      kj::StringPtr uniqueKey;
+      uint classChannel;
+
+      LoopbackDurableActorNamespace clone() const {
         return *this;
       }
     };
@@ -210,15 +259,43 @@ class WorkerdApi final: public Worker::Api {
       }
     };
     struct UnsafeEval {};
+
+    struct ActorClass {
+      uint channel;
+
+      ActorClass clone() const {
+        return *this;
+      }
+    };
+
+    struct LoopbackActorClass {
+      uint channel;
+
+      LoopbackActorClass clone() const {
+        return *this;
+      }
+    };
+
+    struct WorkerLoader {
+      uint channel;
+
+      WorkerLoader clone() const {
+        return *this;
+      }
+    };
+
     kj::String name;
     kj::OneOf<Json,
         Fetcher,
+        LoopbackServiceStub,
         KvNamespace,
         R2Bucket,
         R2Admin,
         CryptoKey,
         EphemeralActorNamespace,
+        LoopbackEphemeralActorNamespace,
         DurableActorNamespace,
+        LoopbackDurableActorNamespace,
         QueueBinding,
         kj::String,
         kj::Array<byte>,
@@ -226,7 +303,10 @@ class WorkerdApi final: public Worker::Api {
         AnalyticsEngine,
         Hyperdrive,
         UnsafeEval,
-        MemoryCache>
+        MemoryCache,
+        ActorClass,
+        LoopbackActorClass,
+        WorkerLoader>
         value;
 
     Global clone() const;
@@ -240,34 +320,38 @@ class WorkerdApi final: public Worker::Api {
   // Part of the original module registry API.
   static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
       config::Worker::Module::Reader conf,
-      jsg::CompilationObserver& observer,
+      const jsg::CompilationObserver& observer,
       CompatibilityFlags::Reader featureFlags);
+
+  // Convert a module definition from workerd config to a Worker::Script::Module (which may contain
+  // string pointers into the config).
+  static Worker::Script::Module readModuleConf(config::Worker::Module::Reader conf,
+      CompatibilityFlags::Reader featureFlags,
+      kj::Maybe<Worker::ValidationErrorReporter&> errorReporter = kj::none);
 
   using ModuleFallbackCallback = Worker::Api::ModuleFallbackCallback;
   void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const override;
 
-  static kj::Own<jsg::modules::ModuleRegistry> initializeBundleModuleRegistry(
+  // Create the ModuleRegistry instance for the worker.
+  static kj::Arc<jsg::modules::ModuleRegistry> newWorkerdModuleRegistry(
       const jsg::ResolveObserver& resolveObserver,
-      const config::Worker::Reader& conf,
+      kj::Maybe<const Worker::Script::ModulesSource&> source,
       const CompatibilityFlags::Reader& featureFlags,
-      const PythonConfig& pythonConfig);
+      const PythonConfig& pythonConfig,
+      const jsg::Url& bundleBase,
+      capnp::List<config::Extension>::Reader extensions,
+      kj::Maybe<kj::String> fallbackService = kj::none,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none);
 
  private:
   struct Impl;
   kj::Own<Impl> impl;
-
-  kj::Array<Worker::Script::CompiledGlobal> compileScriptGlobals(jsg::Lock& lock,
-      config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      const jsg::CompilationObserver& observer) const;
-
-  void compileModules(jsg::Lock& lock,
-      config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      capnp::List<config::Extension>::Reader extensions) const;
 };
 
-kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
-    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
+kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
+
+// An ActorStorage implementation which will always respond to reads as if the state is empty,
+// and will fail any writes. Defined here to be used by test-fixture and server.
+kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
 
 }  // namespace workerd::server

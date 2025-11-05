@@ -7,6 +7,8 @@ Previously, ValueSerializer would always refuse to serialize functions. This com
 
 This is intended for use in an RPC system, where a function can be "serialized" by replacing it with a stub which, when invoked, performs an RPC back to the originating isolate in order to execute the original function there.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
 index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643b9e40c70 100644
 --- a/include/v8-value-serializer.h
@@ -28,10 +30,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 10b0957774479a5f7afd04b28fb50f37e5dfded4..b582c2f699bbf1a081be1c1e37ea5674bb52562b 100644
+index 73c875def0126423653b63935fa7de67af8746ab..f1c13696d9f23e62cf0f4733360f13d0bd617322 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3337,6 +3337,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3358,6 +3358,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -41,12 +43,12 @@ index 10b0957774479a5f7afd04b28fb50f37e5dfded4..b582c2f699bbf1a081be1c1e37ea5674
 +
  Maybe<bool> ValueSerializer::WriteValue(Local<Context> context,
                                          Local<Value> value) {
-   auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
+   auto i_isolate = i::Isolate::Current();
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 9bd318b43b7ac3a9ef54af0be077e29155cdcfa0..f003465b77be950dad901fd776eb38c63deb14fa 100644
+index 0e3aa9cb10bafcf0528adf43500c426773b46ec5..aa845a25942f0916eee38ba36a294a22626a415c 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
-@@ -328,6 +328,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -334,6 +334,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    treat_array_buffer_views_as_host_objects_ = mode;
  }
  
@@ -57,19 +59,24 @@ index 9bd318b43b7ac3a9ef54af0be077e29155cdcfa0..f003465b77be950dad901fd776eb38c6
  void ValueSerializer::WriteTag(SerializationTag tag) {
    uint8_t raw_tag = static_cast<uint8_t>(tag);
    WriteRawBytes(&raw_tag, sizeof(raw_tag));
-@@ -597,8 +601,13 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
+@@ -603,13 +607,17 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
  
    // Eliminate callable and exotic objects, which should not be serialized.
    InstanceType instance_type = receiver->map()->instance_type();
--  if (IsCallable(*receiver) || (IsSpecialReceiverInstanceType(instance_type) &&
--                                instance_type != JS_SPECIAL_API_OBJECT_TYPE)) {
+-  if (IsCallable(*receiver) ||
+-      (IsSpecialReceiverInstanceType(instance_type) &&
 +  if (IsCallable(*receiver)) {
 +    if (treat_functions_as_host_objects_) {
 +      return WriteHostObject(Cast<JSObject>(receiver));
 +    }
 +    return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
 +  } else if (IsSpecialReceiverInstanceType(instance_type) &&
-+             instance_type != JS_SPECIAL_API_OBJECT_TYPE) {
+        instance_type != JS_SPECIAL_API_OBJECT_TYPE
+ #if V8_ENABLE_WEBASSEMBLY
+        && instance_type != WASM_STRUCT_TYPE && instance_type != WASM_ARRAY_TYPE
+ #endif
+-       )) {
++       ) {
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    }
  

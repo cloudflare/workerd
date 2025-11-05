@@ -1,16 +1,7 @@
 import {
-  deepEqual,
   deepStrictEqual,
-  doesNotMatch,
-  doesNotReject,
-  doesNotThrow,
-  equal,
   fail,
   ifError,
-  match,
-  notDeepEqual,
-  notDeepStrictEqual,
-  notEqual,
   notStrictEqual,
   ok,
   rejects,
@@ -1319,7 +1310,7 @@ export const duplexReadableEnd = {
 
     const src = new Readable({
       read() {
-        if (loops--) this.push(Buffer.alloc(20000));
+        if (loops--) this.push(Buffer.alloc(80000));
       },
     });
 
@@ -2349,10 +2340,7 @@ export const writable2Writable = {
         );
       }
     }
-    const chunks = new Array(50);
-    for (let i = 0; i < chunks.length; i++) {
-      chunks[i] = 'x'.repeat(i);
-    }
+    const chunks = Array.from({ length: 50 }, (_, i) => 'x'.repeat(i));
     {
       // Verify fast writing
       const tw = new TestWriter({
@@ -3730,13 +3718,12 @@ export const readable_wrap_destroy = {
 };
 
 export const readable_non_empty_end = {
-  async test(ctrl, env, ctx) {
+  async test(_ctrl, _env, _ctx) {
     let len = 0;
-    const chunks = new Array(10);
-    for (let i = 1; i <= 10; i++) {
-      chunks[i - 1] = Buffer.allocUnsafe(i);
-      len += i;
-    }
+    const chunks = Array.from({ length: 10 }, (_el, i) => {
+      len += i + 1;
+      return Buffer.allocUnsafe(i + 1);
+    });
     const test = new Readable();
     let n = 0;
     test._read = function (size) {
@@ -6079,7 +6066,7 @@ export const writable_end_cb_error = {
       const finishCalled = Promise.withResolvers();
       writable.end('asd', (err) => {
         called = true;
-        strictEqual(err, undefined);
+        strictEqual(err, null);
         endCalled.resolve();
       });
       writable.on('error', (err) => {
@@ -7207,7 +7194,7 @@ export const uint8array = {
           ok(!(chunk instanceof Buffer));
           ok(chunk instanceof Uint8Array);
           strictEqual(chunk, ABC);
-          strictEqual(encoding, 'utf8');
+          strictEqual(encoding, undefined);
           cb();
           writeCalled.resolve();
         },
@@ -7275,7 +7262,7 @@ export const transform_split_objectmode = {
     ok(parser._readableState.objectMode);
     ok(!parser._writableState.objectMode);
     strictEqual(parser.readableHighWaterMark, 16);
-    strictEqual(parser.writableHighWaterMark, 16 * 1024);
+    strictEqual(parser.writableHighWaterMark, 64 * 1024);
     strictEqual(
       parser.readableHighWaterMark,
       parser._readableState.highWaterMark
@@ -7300,7 +7287,7 @@ export const transform_split_objectmode = {
     });
     ok(!serializer._readableState.objectMode);
     ok(serializer._writableState.objectMode);
-    strictEqual(serializer.readableHighWaterMark, 16 * 1024);
+    strictEqual(serializer.readableHighWaterMark, 64 * 1024);
     strictEqual(serializer.writableHighWaterMark, 16);
     strictEqual(
       parser.readableHighWaterMark,
@@ -7328,7 +7315,7 @@ export const transform_split_objectmode = {
 
 export const transform_split_highwatermark = {
   async test(ctrl, env, ctx) {
-    const DEFAULT = 16 * 1024;
+    const DEFAULT = 64 * 1024;
     function testTransform(expectedReadableHwm, expectedWritableHwm, options) {
       const t = new Transform(options);
       strictEqual(t._readableState.highWaterMark, expectedReadableHwm);
@@ -7898,9 +7885,7 @@ export const toarray = {
           [],
           [1],
           [1, 2, 3],
-          Array(100)
-            .fill()
-            .map((_, i) => i),
+          Array.from({ length: 100 }, (_, i) => i),
         ];
         for (const test of tests) {
           const stream = Readable.from(test);
@@ -7929,9 +7914,7 @@ export const toarray = {
           [],
           [1],
           [1, 2, 3],
-          Array(100)
-            .fill()
-            .map((_, i) => i),
+          Array.from({ length: 100 }, (_, i) => i),
         ];
         for (const test of tests) {
           const stream = Readable.from(test).map((x) => Promise.resolve(x));
@@ -8544,7 +8527,7 @@ export const readable_unshift = {
             highWaterMark,
           });
           // The error happened only when pushing above hwm
-          this.buffer = new Array(highWaterMark * 2).fill(0).map(String);
+          this.buffer = Array.from({ length: highWaterMark * 2 }, () => '0');
         }
         _read(size) {
           while (this.buffer.length) {

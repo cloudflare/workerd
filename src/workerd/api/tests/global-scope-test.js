@@ -134,7 +134,7 @@ export const queueMicrotask = {
       throws(() => globalThis.queueMicrotask(i), {
         message:
           "Failed to execute 'queueMicrotask' on 'ServiceWorkerGlobalScope': " +
-          "parameter 1 is not of type 'Function'.",
+          "parameter 1 is not of type 'function'.",
       });
     });
     let resolve;
@@ -762,5 +762,50 @@ export const webSocketUrlValidation = {
       name: 'SyntaxError',
       message: /invalid/,
     });
+  },
+};
+
+export const reuseCtx = {
+  async test(controller, env, ctx) {
+    ctx.reused = true;
+    await ctx.exports.reuseCtx.check(null);
+    await ctx.exports.reuseCtx.check(null);
+  },
+
+  check(_, env, ctx) {
+    strictEqual(ctx.reused, undefined);
+    ctx.reused = true;
+  },
+};
+
+export const structuredCloneError = {
+  test() {
+    // If it doesn't crash, we're good.
+    var globalProp = {
+      get p1() {
+        return this;
+      },
+      get trigger() {
+        function createSab() {
+          var sab = new SharedArrayBuffer(4096);
+          return sab;
+        }
+        var prop = {};
+        Object.defineProperty(prop, 'constructor', {
+          writable: true,
+          value: createSab,
+        });
+        return prop.constructor();
+      },
+      get p2() {
+        var gTCtor = globalThis.Intl.constructor;
+        var returnVal;
+        try {
+          returnVal = gTCtor.entries(this);
+        } catch (e) {}
+        return returnVal;
+      },
+    };
+    globalThis.structuredClone(globalProp);
   },
 };

@@ -29,7 +29,9 @@ import { default as urlUtil } from 'node-internal:url';
 import {
   ERR_TLS_CERT_ALTNAME_INVALID,
   ERR_TLS_CERT_ALTNAME_FORMAT,
+  ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
+import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
 
 // String#toLowerCase() is locale-sensitive so we use
 // a conservative version that only lowercases A-Z.
@@ -148,6 +150,7 @@ export function checkServerIdentity(
   const dnsNames: string[] = [];
   const ips: string[] = [];
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-conversion
   hostname = '' + hostname;
 
   if (altNames) {
@@ -198,4 +201,69 @@ export function checkServerIdentity(
     return new ERR_TLS_CERT_ALTNAME_INVALID(reason, hostname, cert);
   }
   return undefined;
+}
+
+// Convert protocols array into valid OpenSSL protocols list
+// ("\x06spdy/2\x08http/1.1\x08http/1.0")
+function convertProtocols(protocols: string[]): Buffer {
+  const lens = Array.from({ length: protocols.length }, () => 0);
+  const buff = Buffer.allocUnsafe(
+    protocols.reduce((p, c, i) => {
+      const len = Buffer.byteLength(c);
+      if (len > 255) {
+        throw new ERR_OUT_OF_RANGE(
+          'The byte length of the protocol at index ' +
+            `${i} exceeds the maximum length.`,
+          '<= 255',
+          len,
+          true
+        );
+      }
+      lens[i] = len;
+      return p + 1 + len;
+    }, 0)
+  );
+
+  let offset = 0;
+  for (let i = 0, c = protocols.length; i < c; i++) {
+    buff[offset++] = lens[i] as number;
+    buff.write(protocols[i] as string, offset);
+    offset += lens[i] as number;
+  }
+
+  return buff;
+}
+
+export function convertALPNProtocols(
+  protocols: unknown,
+  out: {
+    ALPNProtocols: Buffer;
+  }
+): void {
+  // If protocols is Array - translate it into buffer
+  if (Array.isArray(protocols)) {
+    out.ALPNProtocols = convertProtocols(protocols as string[]);
+  } else if (isUint8Array(protocols)) {
+    // Copy new buffer not to be modified by user.
+    out.ALPNProtocols = Buffer.from(protocols);
+  } else if (isArrayBufferView(protocols)) {
+    out.ALPNProtocols = Buffer.from(
+      protocols.buffer.slice(
+        protocols.byteOffset,
+        protocols.byteOffset + protocols.byteLength
+      )
+    );
+  }
+}
+
+export function createServer(): void {
+  throw new Error('Not implemented');
+}
+
+export function Server(): void {
+  throw new Error('Not implemented');
+}
+
+export function getCiphers(): void {
+  throw new Error('Not implemented');
 }

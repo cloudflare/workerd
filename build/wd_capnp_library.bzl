@@ -5,7 +5,6 @@ def wd_capnp_library(
         src,
         deps = [],
         tags = [],
-        target_compatible_with = None,
         visibility = ["//visibility:public"]):
     """Generates capnp library for multiple languages.
 
@@ -14,6 +13,10 @@ def wd_capnp_library(
     - `file-name_capnp_rust` rust library
     """
     base_name = src.removesuffix(".capnp")
+    target_compatible_with = select({
+        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    })
 
     # json.capnp is available implicitly for c++ targets
     cc_deps = [dep for dep in deps if dep != "@capnp-cpp//src/capnp/compat:json_capnp"]

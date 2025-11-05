@@ -1,8 +1,8 @@
-FROM mcr.microsoft.com/vscode/devcontainers/base:dev-bookworm
+FROM mcr.microsoft.com/vscode/devcontainers/javascript-node:22
 
 # Install dependencies, including clang via through LLVM APT repository. Note that this
 # will also install lldb and clangd alongside dependencies.
-ARG LLVM_VERSION=18
+ARG LLVM_VERSION=19
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get -y install software-properties-common python3 python3-distutils tclsh nodejs npm \
     && curl -fSsL -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && bash /tmp/llvm.sh ${LLVM_VERSION} \
@@ -11,3 +11,6 @@ ENV PATH /usr/lib/llvm-${LLVM_VERSION}/bin:$PATH
 
 # Install Bazel (via Bazelisk)
 RUN npm install -g @bazel/bazelisk
+
+# Install Just
+RUN npm install -g rust-just

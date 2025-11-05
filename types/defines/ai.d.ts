@@ -52,6 +52,18 @@ export declare abstract class BaseAiImageTextToText {
   inputs: AiImageTextToTextInput;
   postProcessedOutputs: AiImageTextToTextOutput;
 }
+export type AiMultimodalEmbeddingsInput = {
+  image: string;
+  text: string[];
+};
+export type AiIMultimodalEmbeddingsOutput = {
+  data: number[][];
+  shape: number[];
+};
+export declare abstract class BaseAiMultimodalEmbeddings {
+  inputs: AiImageTextToTextInput;
+  postProcessedOutputs: AiImageTextToTextOutput;
+}
 export type AiObjectDetectionInput = {
   image: number[];
 };
@@ -182,15 +194,28 @@ export type AiTextGenerationInput = {
   tools?: AiTextGenerationToolInput[] | AiTextGenerationToolLegacyInput[] | (object & NonNullable<unknown>);
   functions?: AiTextGenerationFunctionsInput[];
 };
-export type AiTextGenerationOutput =
-  | {
-      response?: string;
-      tool_calls?: {
-        name: string;
-        arguments: unknown;
-      }[];
-    }
-  | ReadableStream;
+export type AiTextGenerationToolLegacyOutput = {
+  name: string;
+  arguments: unknown;
+};
+export type AiTextGenerationToolOutput = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+export type UsageTags = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+export type AiTextGenerationOutput = {
+  response?: string;
+  tool_calls?: AiTextGenerationToolLegacyOutput[] & AiTextGenerationToolOutput[];
+  usage?: UsageTags;
+};
 export declare abstract class BaseAiTextGeneration {
   inputs: AiTextGenerationInput;
   postProcessedOutputs: AiTextGenerationOutput;
@@ -238,6 +263,49 @@ export declare abstract class BaseAiTranslation {
   inputs: AiTranslationInput;
   postProcessedOutputs: AiTranslationOutput;
 }
+export type Ai_Cf_Baai_Bge_Base_En_V1_5_Input =
+  | {
+      text: string | string[];
+      /**
+       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: {
+        text: string | string[];
+        /**
+         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+         */
+        pooling?: "mean" | "cls";
+      }[];
+    };
+export type Ai_Cf_Baai_Bge_Base_En_V1_5_Output =
+  | {
+      shape?: number[];
+      /**
+       * Embeddings of the requested text values
+       */
+      data?: number[][];
+      /**
+       * The pooling method used in the embedding process.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | AsyncResponse;
+export interface AsyncResponse {
+  /**
+   * The async request id that can be used to obtain the results.
+   */
+  request_id?: string;
+}
+export declare abstract class Base_Ai_Cf_Baai_Bge_Base_En_V1_5 {
+  inputs: Ai_Cf_Baai_Bge_Base_En_V1_5_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Base_En_V1_5_Output;
+}
 export type Ai_Cf_Openai_Whisper_Input =
   | string
   | {
@@ -268,6 +336,126 @@ export interface Ai_Cf_Openai_Whisper_Output {
 export declare abstract class Base_Ai_Cf_Openai_Whisper {
   inputs: Ai_Cf_Openai_Whisper_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Output;
+}
+export type Ai_Cf_Meta_M2M100_1_2B_Input =
+  | {
+      /**
+       * The text to be translated
+       */
+      text: string;
+      /**
+       * The language code of the source text (e.g., 'en' for English). Defaults to 'en' if not specified
+       */
+      source_lang?: string;
+      /**
+       * The language code to translate the text into (e.g., 'es' for Spanish)
+       */
+      target_lang: string;
+    }
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: {
+        /**
+         * The text to be translated
+         */
+        text: string;
+        /**
+         * The language code of the source text (e.g., 'en' for English). Defaults to 'en' if not specified
+         */
+        source_lang?: string;
+        /**
+         * The language code to translate the text into (e.g., 'es' for Spanish)
+         */
+        target_lang: string;
+      }[];
+    };
+export type Ai_Cf_Meta_M2M100_1_2B_Output =
+  | {
+      /**
+       * The translated text in the target language
+       */
+      translated_text?: string;
+    }
+  | AsyncResponse;
+export declare abstract class Base_Ai_Cf_Meta_M2M100_1_2B {
+  inputs: Ai_Cf_Meta_M2M100_1_2B_Input;
+  postProcessedOutputs: Ai_Cf_Meta_M2M100_1_2B_Output;
+}
+export type Ai_Cf_Baai_Bge_Small_En_V1_5_Input =
+  | {
+      text: string | string[];
+      /**
+       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: {
+        text: string | string[];
+        /**
+         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+         */
+        pooling?: "mean" | "cls";
+      }[];
+    };
+export type Ai_Cf_Baai_Bge_Small_En_V1_5_Output =
+  | {
+      shape?: number[];
+      /**
+       * Embeddings of the requested text values
+       */
+      data?: number[][];
+      /**
+       * The pooling method used in the embedding process.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | AsyncResponse;
+export declare abstract class Base_Ai_Cf_Baai_Bge_Small_En_V1_5 {
+  inputs: Ai_Cf_Baai_Bge_Small_En_V1_5_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Small_En_V1_5_Output;
+}
+export type Ai_Cf_Baai_Bge_Large_En_V1_5_Input =
+  | {
+      text: string | string[];
+      /**
+       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: {
+        text: string | string[];
+        /**
+         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
+         */
+        pooling?: "mean" | "cls";
+      }[];
+    };
+export type Ai_Cf_Baai_Bge_Large_En_V1_5_Output =
+  | {
+      shape?: number[];
+      /**
+       * Embeddings of the requested text values
+       */
+      data?: number[][];
+      /**
+       * The pooling method used in the embedding process.
+       */
+      pooling?: "mean" | "cls";
+    }
+  | AsyncResponse;
+export declare abstract class Base_Ai_Cf_Baai_Bge_Large_En_V1_5 {
+  inputs: Ai_Cf_Baai_Bge_Large_En_V1_5_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Large_En_V1_5_Output;
 }
 export type Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input =
   | string
@@ -364,7 +552,7 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
   /**
    * Preprocess the audio with a voice activity detection model.
    */
-  vad_filter?: string;
+  vad_filter?: boolean;
   /**
    * A text prompt to help provide context to the model on the contents of the audio.
    */
@@ -454,7 +642,15 @@ export declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
   inputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output;
 }
-export type Ai_Cf_Baai_Bge_M3_Input = BGEM3InputQueryAndContexts | BGEM3InputEmbedding;
+export type Ai_Cf_Baai_Bge_M3_Input =
+  | BGEM3InputQueryAndContexts
+  | BGEM3InputEmbedding
+  | {
+      /**
+       * Batch of the embeddings requests to run using async-queue
+       */
+      requests: (BGEM3InputQueryAndContexts1 | BGEM3InputEmbedding1)[];
+    };
 export interface BGEM3InputQueryAndContexts {
   /**
    * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
@@ -481,7 +677,37 @@ export interface BGEM3InputEmbedding {
    */
   truncate_inputs?: boolean;
 }
-export type Ai_Cf_Baai_Bge_M3_Output = BGEM3OuputQuery | BGEM3OutputEmbeddingForContexts | BGEM3OuputEmbedding;
+export interface BGEM3InputQueryAndContexts1 {
+  /**
+   * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
+   */
+  query?: string;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+export interface BGEM3InputEmbedding1 {
+  text: string | string[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+export type Ai_Cf_Baai_Bge_M3_Output =
+  | BGEM3OuputQuery
+  | BGEM3OutputEmbeddingForContexts
+  | BGEM3OuputEmbedding
+  | AsyncResponse;
 export interface BGEM3OuputQuery {
   response?: {
     /**
@@ -597,13 +823,41 @@ export interface Messages {
     /**
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
-    role: string;
+    role?: string;
     /**
-     * The content of the message as a string.
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
      */
-    content: string;
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
   }[];
-  image?: number[] | string;
+  image?: number[] | (string & NonNullable<unknown>);
   functions?: {
     name: string;
     code: string;
@@ -735,12 +989,306 @@ export interface Messages {
    */
   presence_penalty?: number;
 }
-export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output =
+export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response?: string;
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+export declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
+  inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
+}
+export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input =
+  | Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt
+  | Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages
+  | AsyncBatch;
+export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * Name of the LoRA (Low-Rank Adaptation) model to fine-tune the base model.
+   */
+  lora?: string;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface JSONMode {
+  type?: "json_object" | "json_schema";
+  json_schema?: unknown;
+}
+export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role: string;
+    /**
+     * The content of the message as a string.
+     */
+    content: string;
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface AsyncBatch {
+  requests?: {
+    /**
+     * User-supplied reference. This field will be present in the response as well it can be used to reference the request and response. It's NOT validated to be unique.
+     */
+    external_reference?: string;
+    /**
+     * Prompt for the text generation model
+     */
+    prompt?: string;
+    /**
+     * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+     */
+    stream?: boolean;
+    /**
+     * The maximum number of tokens to generate in the response.
+     */
+    max_tokens?: number;
+    /**
+     * Controls the randomness of the output; higher values produce more random results.
+     */
+    temperature?: number;
+    /**
+     * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+     */
+    top_p?: number;
+    /**
+     * Random seed for reproducibility of the generation.
+     */
+    seed?: number;
+    /**
+     * Penalty for repeated tokens; higher values discourage repetition.
+     */
+    repetition_penalty?: number;
+    /**
+     * Decreases the likelihood of the model repeating the same lines verbatim.
+     */
+    frequency_penalty?: number;
+    /**
+     * Increases the likelihood of the model introducing new topics.
+     */
+    presence_penalty?: number;
+    response_format?: JSONMode;
+  }[];
+}
+export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output =
   | {
       /**
        * The generated text response from the model
        */
-      response?: string;
+      response: string;
+      /**
+       * Usage statistics for the inference request
+       */
+      usage?: {
+        /**
+         * Total number of tokens in input
+         */
+        prompt_tokens?: number;
+        /**
+         * Total number of tokens in output
+         */
+        completion_tokens?: number;
+        /**
+         * Total number of input and output tokens
+         */
+        total_tokens?: number;
+      };
       /**
        * An array of tool calls requests made during the response generation
        */
@@ -755,10 +1303,11 @@ export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output =
         name?: string;
       }[];
     }
-  | ReadableStream;
-export declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
-  inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
-  postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
+  | string
+  | AsyncResponse;
+export declare abstract class Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast {
+  inputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output;
 }
 export interface Ai_Cf_Meta_Llama_Guard_3_8B_Input {
   /**
@@ -861,6 +1410,2015 @@ export declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
   inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
   postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
 }
+export type Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input =
+  | Qwen2_5_Coder_32B_Instruct_Prompt
+  | Qwen2_5_Coder_32B_Instruct_Messages;
+export interface Qwen2_5_Coder_32B_Instruct_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * Name of the LoRA (Low-Rank Adaptation) model to fine-tune the base model.
+   */
+  lora?: string;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Qwen2_5_Coder_32B_Instruct_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role: string;
+    /**
+     * The content of the message as a string.
+     */
+    content: string;
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export type Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+export declare abstract class Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct {
+  inputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output;
+}
+export type Ai_Cf_Qwen_Qwq_32B_Input = Qwen_Qwq_32B_Prompt | Qwen_Qwq_32B_Messages;
+export interface Qwen_Qwq_32B_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Qwen_Qwq_32B_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export type Ai_Cf_Qwen_Qwq_32B_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+export declare abstract class Base_Ai_Cf_Qwen_Qwq_32B {
+  inputs: Ai_Cf_Qwen_Qwq_32B_Input;
+  postProcessedOutputs: Ai_Cf_Qwen_Qwq_32B_Output;
+}
+export type Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input =
+  | Mistral_Small_3_1_24B_Instruct_Prompt
+  | Mistral_Small_3_1_24B_Instruct_Messages;
+export interface Mistral_Small_3_1_24B_Instruct_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Mistral_Small_3_1_24B_Instruct_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export type Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+export declare abstract class Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct {
+  inputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output;
+}
+export type Ai_Cf_Google_Gemma_3_12B_It_Input = Google_Gemma_3_12B_It_Prompt | Google_Gemma_3_12B_It_Messages;
+export interface Google_Gemma_3_12B_It_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Google_Gemma_3_12B_It_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export type Ai_Cf_Google_Gemma_3_12B_It_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The arguments passed to be passed to the tool call request
+     */
+    arguments?: object;
+    /**
+     * The name of the tool to be called
+     */
+    name?: string;
+  }[];
+};
+export declare abstract class Base_Ai_Cf_Google_Gemma_3_12B_It {
+  inputs: Ai_Cf_Google_Gemma_3_12B_It_Input;
+  postProcessedOutputs: Ai_Cf_Google_Gemma_3_12B_It_Output;
+}
+export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input =
+  | Ai_Cf_Meta_Llama_4_Prompt
+  | Ai_Cf_Meta_Llama_4_Messages
+  | Ai_Cf_Meta_Llama_4_Async_Batch;
+export interface Ai_Cf_Meta_Llama_4_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Ai_Cf_Meta_Llama_4_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Ai_Cf_Meta_Llama_4_Async_Batch {
+  requests: (Ai_Cf_Meta_Llama_4_Prompt_Inner | Ai_Cf_Meta_Llama_4_Messages_Inner)[];
+}
+export interface Ai_Cf_Meta_Llama_4_Prompt_Inner {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Ai_Cf_Meta_Llama_4_Messages_Inner {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output = {
+  /**
+   * The generated text response from the model
+   */
+  response: string;
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+  /**
+   * An array of tool calls requests made during the response generation
+   */
+  tool_calls?: {
+    /**
+     * The tool call id.
+     */
+    id?: string;
+    /**
+     * Specifies the type of tool (e.g., 'function').
+     */
+    type?: string;
+    /**
+     * Details of the function tool.
+     */
+    function?: {
+      /**
+       * The name of the tool to be called
+       */
+      name?: string;
+      /**
+       * The arguments passed to be passed to the tool call request
+       */
+      arguments?: object;
+    };
+  }[];
+};
+export declare abstract class Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct {
+  inputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output;
+}
+export interface Ai_Cf_Deepgram_Nova_3_Input {
+  audio: {
+    body: object;
+    contentType: string;
+  };
+  /**
+   * Sets how the model will interpret strings submitted to the custom_topic param. When strict, the model will only return topics submitted using the custom_topic param. When extended, the model will return its own detected topics in addition to those submitted using the custom_topic param.
+   */
+  custom_topic_mode?: "extended" | "strict";
+  /**
+   * Custom topics you want the model to detect within your input audio or text if present Submit up to 100
+   */
+  custom_topic?: string;
+  /**
+   * Sets how the model will interpret intents submitted to the custom_intent param. When strict, the model will only return intents submitted using the custom_intent param. When extended, the model will return its own detected intents in addition those submitted using the custom_intents param
+   */
+  custom_intent_mode?: "extended" | "strict";
+  /**
+   * Custom intents you want the model to detect within your input audio if present
+   */
+  custom_intent?: string;
+  /**
+   * Identifies and extracts key entities from content in submitted audio
+   */
+  detect_entities?: boolean;
+  /**
+   * Identifies the dominant language spoken in submitted audio
+   */
+  detect_language?: boolean;
+  /**
+   * Recognize speaker changes. Each word in the transcript will be assigned a speaker number starting at 0
+   */
+  diarize?: boolean;
+  /**
+   * Identify and extract key entities from content in submitted audio
+   */
+  dictation?: boolean;
+  /**
+   * Specify the expected encoding of your submitted audio
+   */
+  encoding?: "linear16" | "flac" | "mulaw" | "amr-nb" | "amr-wb" | "opus" | "speex" | "g729";
+  /**
+   * Arbitrary key-value pairs that are attached to the API response for usage in downstream processing
+   */
+  extra?: string;
+  /**
+   * Filler Words can help transcribe interruptions in your audio, like 'uh' and 'um'
+   */
+  filler_words?: boolean;
+  /**
+   * Key term prompting can boost or suppress specialized terminology and brands.
+   */
+  keyterm?: string;
+  /**
+   * Keywords can boost or suppress specialized terminology and brands.
+   */
+  keywords?: string;
+  /**
+   * The BCP-47 language tag that hints at the primary spoken language. Depending on the Model and API endpoint you choose only certain languages are available.
+   */
+  language?: string;
+  /**
+   * Spoken measurements will be converted to their corresponding abbreviations.
+   */
+  measurements?: boolean;
+  /**
+   * Opts out requests from the Deepgram Model Improvement Program. Refer to our Docs for pricing impacts before setting this to true. https://dpgr.am/deepgram-mip.
+   */
+  mip_opt_out?: boolean;
+  /**
+   * Mode of operation for the model representing broad area of topic that will be talked about in the supplied audio
+   */
+  mode?: "general" | "medical" | "finance";
+  /**
+   * Transcribe each audio channel independently.
+   */
+  multichannel?: boolean;
+  /**
+   * Numerals converts numbers from written format to numerical format.
+   */
+  numerals?: boolean;
+  /**
+   * Splits audio into paragraphs to improve transcript readability.
+   */
+  paragraphs?: boolean;
+  /**
+   * Profanity Filter looks for recognized profanity and converts it to the nearest recognized non-profane word or removes it from the transcript completely.
+   */
+  profanity_filter?: boolean;
+  /**
+   * Add punctuation and capitalization to the transcript.
+   */
+  punctuate?: boolean;
+  /**
+   * Redaction removes sensitive information from your transcripts.
+   */
+  redact?: string;
+  /**
+   * Search for terms or phrases in submitted audio and replaces them.
+   */
+  replace?: string;
+  /**
+   * Search for terms or phrases in submitted audio.
+   */
+  search?: string;
+  /**
+   * Recognizes the sentiment throughout a transcript or text.
+   */
+  sentiment?: boolean;
+  /**
+   * Apply formatting to transcript output. When set to true, additional formatting will be applied to transcripts to improve readability.
+   */
+  smart_format?: boolean;
+  /**
+   * Detect topics throughout a transcript or text.
+   */
+  topics?: boolean;
+  /**
+   * Segments speech into meaningful semantic units.
+   */
+  utterances?: boolean;
+  /**
+   * Seconds to wait before detecting a pause between words in submitted audio.
+   */
+  utt_split?: number;
+  /**
+   * The number of channels in the submitted audio
+   */
+  channels?: number;
+  /**
+   * Specifies whether the streaming endpoint should provide ongoing transcription updates as more audio is received. When set to true, the endpoint sends continuous updates, meaning transcription results may evolve over time. Note: Supported only for webosockets.
+   */
+  interim_results?: boolean;
+  /**
+   * Indicates how long model will wait to detect whether a speaker has finished speaking or pauses for a significant period of time. When set to a value, the streaming endpoint immediately finalizes the transcription for the processed time range and returns the transcript with a speech_final parameter set to true. Can also be set to false to disable endpointing
+   */
+  endpointing?: string;
+  /**
+   * Indicates that speech has started. You'll begin receiving Speech Started messages upon speech starting. Note: Supported only for webosockets.
+   */
+  vad_events?: boolean;
+  /**
+   * Indicates how long model will wait to send an UtteranceEnd message after a word has been transcribed. Use with interim_results. Note: Supported only for webosockets.
+   */
+  utterance_end_ms?: boolean;
+}
+export interface Ai_Cf_Deepgram_Nova_3_Output {
+  results?: {
+    channels?: {
+      alternatives?: {
+        confidence?: number;
+        transcript?: string;
+        words?: {
+          confidence?: number;
+          end?: number;
+          start?: number;
+          word?: string;
+        }[];
+      }[];
+    }[];
+    summary?: {
+      result?: string;
+      short?: string;
+    };
+    sentiments?: {
+      segments?: {
+        text?: string;
+        start_word?: number;
+        end_word?: number;
+        sentiment?: string;
+        sentiment_score?: number;
+      }[];
+      average?: {
+        sentiment?: string;
+        sentiment_score?: number;
+      };
+    };
+  };
+}
+export declare abstract class Base_Ai_Cf_Deepgram_Nova_3 {
+  inputs: Ai_Cf_Deepgram_Nova_3_Input;
+  postProcessedOutputs: Ai_Cf_Deepgram_Nova_3_Output;
+}
+export type Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input =
+  | {
+      /**
+       * readable stream with audio data and content-type specified for that data
+       */
+      audio: {
+        body: object;
+        contentType: string;
+      };
+      /**
+       * type of data PCM data that's sent to the inference server as raw array
+       */
+      dtype?: "uint8" | "float32" | "float64";
+    }
+  | {
+      /**
+       * base64 encoded audio data
+       */
+      audio: string;
+      /**
+       * type of data PCM data that's sent to the inference server as raw array
+       */
+      dtype?: "uint8" | "float32" | "float64";
+    };
+export interface Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output {
+  /**
+   * if true, end-of-turn was detected
+   */
+  is_complete?: boolean;
+  /**
+   * probability of the end-of-turn detection
+   */
+  probability?: number;
+}
+export declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
+  inputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input;
+  postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
+}
+export type Ai_Cf_Openai_Gpt_Oss_120B_Input = GPT_OSS_120B_Responses | GPT_OSS_120B_Responses_Async;
+export interface GPT_OSS_120B_Responses {
+  /**
+   * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+   */
+  input: string | unknown[];
+  reasoning?: {
+    /**
+     * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+     */
+    effort?: "low" | "medium" | "high";
+    /**
+     * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+     */
+    summary?: "auto" | "concise" | "detailed";
+  };
+}
+export interface GPT_OSS_120B_Responses_Async {
+  requests: {
+    /**
+     * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+     */
+    input: string | unknown[];
+    reasoning?: {
+      /**
+       * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+       */
+      effort?: "low" | "medium" | "high";
+      /**
+       * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+       */
+      summary?: "auto" | "concise" | "detailed";
+    };
+  }[];
+}
+export type Ai_Cf_Openai_Gpt_Oss_120B_Output = {} | (string & NonNullable<unknown>);
+export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
+  inputs: Ai_Cf_Openai_Gpt_Oss_120B_Input;
+  postProcessedOutputs: Ai_Cf_Openai_Gpt_Oss_120B_Output;
+}
+export type Ai_Cf_Openai_Gpt_Oss_20B_Input = GPT_OSS_20B_Responses | GPT_OSS_20B_Responses_Async;
+export interface GPT_OSS_20B_Responses {
+  /**
+   * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+   */
+  input: string | unknown[];
+  reasoning?: {
+    /**
+     * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+     */
+    effort?: "low" | "medium" | "high";
+    /**
+     * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+     */
+    summary?: "auto" | "concise" | "detailed";
+  };
+}
+export interface GPT_OSS_20B_Responses_Async {
+  requests: {
+    /**
+     * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+     */
+    input: string | unknown[];
+    reasoning?: {
+      /**
+       * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+       */
+      effort?: "low" | "medium" | "high";
+      /**
+       * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+       */
+      summary?: "auto" | "concise" | "detailed";
+    };
+  }[];
+}
+export type Ai_Cf_Openai_Gpt_Oss_20B_Output = {} | (string & NonNullable<unknown>);
+export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
+  inputs: Ai_Cf_Openai_Gpt_Oss_20B_Input;
+  postProcessedOutputs: Ai_Cf_Openai_Gpt_Oss_20B_Output;
+}
+export interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
+  /**
+   * A text description of the image you want to generate.
+   */
+  prompt: string;
+  /**
+   * Controls how closely the generated image should adhere to the prompt; higher values make the image more aligned with the prompt
+   */
+  guidance?: number;
+  /**
+   * Random seed for reproducibility of the image generation
+   */
+  seed?: number;
+  /**
+   * The height of the generated image in pixels
+   */
+  height?: number;
+  /**
+   * The width of the generated image in pixels
+   */
+  width?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  num_steps?: number;
+  /**
+   * Specify what to exclude from the generated images
+   */
+  negative_prompt?: string;
+}
+/**
+ * The generated image in JPEG format
+ */
+export type Ai_Cf_Leonardo_Phoenix_1_0_Output = string;
+export declare abstract class Base_Ai_Cf_Leonardo_Phoenix_1_0 {
+  inputs: Ai_Cf_Leonardo_Phoenix_1_0_Input;
+  postProcessedOutputs: Ai_Cf_Leonardo_Phoenix_1_0_Output;
+}
+export interface Ai_Cf_Leonardo_Lucid_Origin_Input {
+  /**
+   * A text description of the image you want to generate.
+   */
+  prompt: string;
+  /**
+   * Controls how closely the generated image should adhere to the prompt; higher values make the image more aligned with the prompt
+   */
+  guidance?: number;
+  /**
+   * Random seed for reproducibility of the image generation
+   */
+  seed?: number;
+  /**
+   * The height of the generated image in pixels
+   */
+  height?: number;
+  /**
+   * The width of the generated image in pixels
+   */
+  width?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  num_steps?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  steps?: number;
+}
+export interface Ai_Cf_Leonardo_Lucid_Origin_Output {
+  /**
+   * The generated image in Base64 format.
+   */
+  image?: string;
+}
+export declare abstract class Base_Ai_Cf_Leonardo_Lucid_Origin {
+  inputs: Ai_Cf_Leonardo_Lucid_Origin_Input;
+  postProcessedOutputs: Ai_Cf_Leonardo_Lucid_Origin_Output;
+}
+export interface Ai_Cf_Deepgram_Aura_1_Input {
+  /**
+   * Speaker used to produce the audio.
+   */
+  speaker?:
+    | "angus"
+    | "asteria"
+    | "arcas"
+    | "orion"
+    | "orpheus"
+    | "athena"
+    | "luna"
+    | "zeus"
+    | "perseus"
+    | "helios"
+    | "hera"
+    | "stella";
+  /**
+   * Encoding of the output audio.
+   */
+  encoding?: "linear16" | "flac" | "mulaw" | "alaw" | "mp3" | "opus" | "aac";
+  /**
+   * Container specifies the file format wrapper for the output audio. The available options depend on the encoding type..
+   */
+  container?: "none" | "wav" | "ogg";
+  /**
+   * The text content to be converted to speech
+   */
+  text: string;
+  /**
+   * Sample Rate specifies the sample rate for the output audio. Based on the encoding, different sample rates are supported. For some encodings, the sample rate is not configurable
+   */
+  sample_rate?: number;
+  /**
+   * The bitrate of the audio in bits per second. Choose from predefined ranges or specific values based on the encoding type.
+   */
+  bit_rate?: number;
+}
+/**
+ * The generated audio in MP3 format
+ */
+export type Ai_Cf_Deepgram_Aura_1_Output = string;
+export declare abstract class Base_Ai_Cf_Deepgram_Aura_1 {
+  inputs: Ai_Cf_Deepgram_Aura_1_Input;
+  postProcessedOutputs: Ai_Cf_Deepgram_Aura_1_Output;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -869,11 +3427,8 @@ export interface AiModels {
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
   "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
-  "@cf/baai/bge-base-en-v1.5": BaseAiTextEmbeddings;
-  "@cf/baai/bge-small-en-v1.5": BaseAiTextEmbeddings;
-  "@cf/baai/bge-large-en-v1.5": BaseAiTextEmbeddings;
+  "@cf/google/embeddinggemma-300m": BaseAiTextEmbeddings;
   "@cf/microsoft/resnet-50": BaseAiImageClassification;
-  "@cf/facebook/detr-resnet-50": BaseAiObjectDetection;
   "@cf/meta/llama-2-7b-chat-int8": BaseAiTextGeneration;
   "@cf/mistral/mistral-7b-instruct-v0.1": BaseAiTextGeneration;
   "@cf/meta/llama-2-7b-chat-fp16": BaseAiTextGeneration;
@@ -908,38 +3463,54 @@ export interface AiModels {
   "@cf/fblgit/una-cybertron-7b-v2-bf16": BaseAiTextGeneration;
   "@cf/meta/llama-3-8b-instruct-awq": BaseAiTextGeneration;
   "@hf/meta-llama/meta-llama-3-8b-instruct": BaseAiTextGeneration;
-  "@cf/meta/llama-3.1-8b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.1-8b-instruct-fp8": BaseAiTextGeneration;
   "@cf/meta/llama-3.1-8b-instruct-awq": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-3b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-1b-instruct": BaseAiTextGeneration;
-  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": BaseAiTextGeneration;
   "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": BaseAiTextGeneration;
-  "@cf/meta/m2m100-1.2b": BaseAiTranslation;
   "@cf/facebook/bart-large-cnn": BaseAiSummarization;
   "@cf/llava-hf/llava-1.5-7b-hf": BaseAiImageToText;
+  "@cf/baai/bge-base-en-v1.5": Base_Ai_Cf_Baai_Bge_Base_En_V1_5;
   "@cf/openai/whisper": Base_Ai_Cf_Openai_Whisper;
+  "@cf/meta/m2m100-1.2b": Base_Ai_Cf_Meta_M2M100_1_2B;
+  "@cf/baai/bge-small-en-v1.5": Base_Ai_Cf_Baai_Bge_Small_En_V1_5;
+  "@cf/baai/bge-large-en-v1.5": Base_Ai_Cf_Baai_Bge_Large_En_V1_5;
   "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
   "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
   "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
+  "@cf/qwen/qwen2.5-coder-32b-instruct": Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct;
+  "@cf/qwen/qwq-32b": Base_Ai_Cf_Qwen_Qwq_32B;
+  "@cf/mistralai/mistral-small-3.1-24b-instruct": Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct;
+  "@cf/google/gemma-3-12b-it": Base_Ai_Cf_Google_Gemma_3_12B_It;
+  "@cf/meta/llama-4-scout-17b-16e-instruct": Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
+  "@cf/deepgram/nova-3": Base_Ai_Cf_Deepgram_Nova_3;
+  "@cf/pipecat-ai/smart-turn-v2": Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2;
+  "@cf/openai/gpt-oss-120b": Base_Ai_Cf_Openai_Gpt_Oss_120B;
+  "@cf/openai/gpt-oss-20b": Base_Ai_Cf_Openai_Gpt_Oss_20B;
+  "@cf/leonardo/phoenix-1.0": Base_Ai_Cf_Leonardo_Phoenix_1_0;
+  "@cf/leonardo/lucid-origin": Base_Ai_Cf_Leonardo_Lucid_Origin;
+  "@cf/deepgram/aura-1": Base_Ai_Cf_Deepgram_Aura_1;
 }
 export type AiOptions = {
+  /**
+   * Send requests as an asynchronous batch job, only works for supported models
+   * https://developers.cloudflare.com/workers-ai/features/batch-api
+   */
+  queueRequest?: boolean;
+  /**
+   * Establish websocket connections, only works for supported models
+   */
+  websocket?: boolean;
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
-};
-export type ConversionResponse = {
-  name: string;
-  mimeType: string;
-  format: "markdown";
-  tokens: number;
-  data: string;
 };
 export type AiModelsSearchParams = {
   author?: string;
@@ -973,18 +3544,27 @@ export declare abstract class Ai<AiModelList extends AiModelListType = AiModels>
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
   autorag(autoragId: string): AutoRAG;
-  run<Name extends keyof AiModelList, Options extends AiOptions>(
+  run<Name extends keyof AiModelList, Options extends AiOptions, InputOptions extends AiModelList[Name]["inputs"]>(
     model: Name,
-    inputs: AiModelList[Name]["inputs"],
+    inputs: InputOptions,
     options?: Options,
   ): Promise<
-    Options extends {
-      returnRawResponse: true;
-    }
+    Options extends
+      | {
+          returnRawResponse: true;
+        }
+      | {
+          websocket: true;
+        }
       ? Response
-      : AiModelList[Name]["postProcessedOutputs"]
+      : InputOptions extends {
+            stream: true;
+          }
+        ? ReadableStream
+        : AiModelList[Name]["postProcessedOutputs"]
   >;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  toMarkdown(): ToMarkdownService;
   toMarkdown(
     files: {
       name: string;

@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-typedef struct env_md_st EVP_MD;
+using EVP_MD = struct env_md_st;
 
 namespace workerd::api {
 

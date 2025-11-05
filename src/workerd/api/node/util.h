@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
+#include <workerd/api/performance.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/mimetype.h>
 
@@ -36,7 +37,7 @@ class MIMEParams final: public jsg::Object {
  public:
   MIMEParams(kj::Maybe<MimeType&> mimeType = kj::none);
 
-  static jsg::Ref<MIMEParams> constructor();
+  static jsg::Ref<MIMEParams> constructor(jsg::Lock& js);
 
   void delete_(kj::String name);
   kj::Maybe<kj::StringPtr> get(kj::String name);
@@ -88,9 +89,9 @@ class MIMEParams final: public jsg::Object {
 
 class MIMEType final: public jsg::Object {
  public:
-  explicit MIMEType(MimeType inner);
+  explicit MIMEType(jsg::Lock& js, MimeType inner);
   ~MIMEType() noexcept(false);
-  static jsg::Ref<MIMEType> constructor(kj::String input);
+  static jsg::Ref<MIMEType> constructor(jsg::Lock& js, kj::String input);
 
   kj::StringPtr getType();
   void setType(kj::String type);
@@ -126,6 +127,7 @@ class MIMEType final: public jsg::Object {
   V(DataView)                                                                                      \
   V(Date)                                                                                          \
   V(External)                                                                                      \
+  V(Float16Array)                                                                                  \
   V(Float32Array)                                                                                  \
   V(Float64Array)                                                                                  \
   V(GeneratorFunction)                                                                             \
@@ -161,16 +163,6 @@ class UtilModule final: public jsg::Object {
 
   jsg::Name getResourceTypeInspect(jsg::Lock& js);
 
-#ifdef _WIN32
-  static constexpr kj::StringPtr processPlatform = "win32"_kj;
-#elif defined(__linux__)
-  static constexpr kj::StringPtr processPlatform = "linux"_kj;
-#elif defined(__APPLE__)
-  static constexpr kj::StringPtr processPlatform = "darwin"_kj;
-#else
-  static constexpr kj::StringPtr processPlatform = "unsupported-platform"_kj;
-#endif
-
   // `getOwnNonIndexProperties()` `filter`s
   static constexpr int ALL_PROPERTIES = jsg::PropertyFilter::ALL_PROPERTIES;
   static constexpr int ONLY_ENUMERABLE = jsg::PropertyFilter::ONLY_ENUMERABLE;
@@ -184,27 +176,27 @@ class UtilModule final: public jsg::Object {
 
   struct PromiseDetails {
     int state;  // TODO: can we make this a `jsg::PromiseState`
-    jsg::Optional<jsg::JsValue> result;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> result;
 
     JSG_STRUCT(state, result);
   };
-  jsg::Optional<PromiseDetails> getPromiseDetails(jsg::JsValue value);
+  jsg::Optional<PromiseDetails> getPromiseDetails(jsg::Lock& js, jsg::JsValue value);
 
   struct ProxyDetails {
-    jsg::JsValue target;
-    jsg::JsValue handler;
+    jsg::JsRef<jsg::JsValue> target;
+    jsg::JsRef<jsg::JsValue> handler;
 
     JSG_STRUCT(target, handler);
   };
-  jsg::Optional<ProxyDetails> getProxyDetails(jsg::JsValue value);
+  jsg::Optional<ProxyDetails> getProxyDetails(jsg::Lock& js, jsg::JsValue value);
 
   struct PreviewedEntries {
-    jsg::JsArray entries;
+    jsg::JsRef<jsg::JsArray> entries;
     bool isKeyValue;
 
     JSG_STRUCT(entries, isKeyValue);
   };
-  jsg::Optional<PreviewedEntries> previewEntries(jsg::JsValue value);
+  jsg::Optional<PreviewedEntries> previewEntries(jsg::Lock& js, jsg::JsValue value);
 
   jsg::JsString getConstructorName(jsg::Lock& js, jsg::JsObject value);
 
@@ -229,23 +221,6 @@ class UtilModule final: public jsg::Object {
   bool isAnyArrayBuffer(jsg::JsValue value);
   bool isBoxedPrimitive(jsg::JsValue value);
 
-  jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
-
-  // This is used in the implementation of process.exit(...). Contrary
-  // to what the name suggests, it does not actually exit the process.
-  // Instead, it will cause the IoContext, if any, and will stop javascript
-  // from further executing in that request. If there is no active IoContext,
-  // then it becomes a non-op.
-  void processExitImpl(jsg::Lock& js, int code);
-
-  // IMPORTANT: This function will always return "linux" on production.
-  // This is only added for Node.js compatibility and running OS specific tests
-  kj::StringPtr getProcessPlatform() const {
-    return processPlatform;
-  }
-
-  jsg::JsObject getEnvObject(jsg::Lock& js);
-
   JSG_RESOURCE_TYPE(UtilModule) {
     JSG_NESTED_TYPE(MIMEType);
     JSG_NESTED_TYPE(MIMEParams);
@@ -265,19 +240,20 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
     JSG_METHOD(getCallSites);
-    // TODO(cleanup): It might be about time to separate some of these out
-    // to a different module.
-    JSG_METHOD(getEnvObject);
+
+    JSG_NESTED_TYPE(Performance);
+    JSG_NESTED_TYPE(PerformanceEntry);
+    JSG_NESTED_TYPE(PerformanceMeasure);
+    JSG_NESTED_TYPE(PerformanceMark);
+    JSG_NESTED_TYPE(PerformanceObserver);
+    JSG_NESTED_TYPE(PerformanceObserverEntryList);
+    JSG_NESTED_TYPE(PerformanceResourceTiming);
 
 #define V(Type) JSG_METHOD(is##Type);
     JS_UTIL_IS_TYPES(V)
 #undef V
     JSG_METHOD(isAnyArrayBuffer);
     JSG_METHOD(isBoxedPrimitive);
-
-    JSG_METHOD(getBuiltinModule);
-    JSG_METHOD(processExitImpl);
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(processPlatform, getProcessPlatform);
   }
 };
 

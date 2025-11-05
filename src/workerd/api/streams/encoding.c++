@@ -11,22 +11,15 @@
 
 namespace workerd::api {
 
-namespace {
-class TextEncoderStreamController: public kj::Refcounted {
- public:
- private:
-  jsg::Ref<TextEncoder> encoder = jsg::alloc<TextEncoder>();
-};
-}  // namespace
-
 jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   auto transformer = TransformStream::constructor(js,
       Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>(
                       [](jsg::Lock& js, auto chunk, auto controller) {
     auto str = jsg::check(chunk->ToString(js.v8Context()));
-    auto maybeBuffer = v8::ArrayBuffer::MaybeNew(js.v8Isolate, str->Utf8LengthV2(js.v8Isolate));
-    JSG_ASSERT(!maybeBuffer.IsEmpty(), RangeError, "Cannot allocate space for TextEncoder.encode");
-    auto buffer = maybeBuffer.ToLocalChecked();
+    v8::Local<v8::ArrayBuffer> buffer;
+    JSG_REQUIRE(
+        v8::ArrayBuffer::MaybeNew(js.v8Isolate, str->Utf8LengthV2(js.v8Isolate)).ToLocal(&buffer),
+        RangeError, "Cannot allocate space for TextEncoder.encode");
 
     auto bytes = jsg::asBytes(buffer).releaseAsChars();
     [[maybe_unused]] auto written = str->WriteUtf8V2(
@@ -38,7 +31,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   })},
       StreamQueuingStrategy{}, StreamQueuingStrategy{});
 
-  return jsg::alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
+  return js.alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
 }
 
 TextDecoderStream::TextDecoderStream(jsg::Ref<TextDecoder> decoder,
@@ -50,7 +43,7 @@ TextDecoderStream::TextDecoderStream(jsg::Ref<TextDecoder> decoder,
 jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<TextDecoderStreamInit> options) {
 
-  auto decoder = TextDecoder::constructor(kj::mv(label), options.map([](auto& opts) {
+  auto decoder = TextDecoder::constructor(js, kj::mv(label), options.map([](auto& opts) {
     return TextDecoder::ConstructorOptions{
       .fatal = opts.fatal.orDefault(true),
       .ignoreBOM = opts.ignoreBOM.orDefault(false),
@@ -79,7 +72,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
                 }))},
       StreamQueuingStrategy{}, StreamQueuingStrategy{});
 
-  return jsg::alloc<TextDecoderStream>(
+  return js.alloc<TextDecoderStream>(
       kj::mv(decoder), transformer->getReadable(), transformer->getWritable());
 }
 

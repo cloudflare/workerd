@@ -25,16 +25,20 @@
 
 import {
   Socket,
-  SocketOptions,
+  type SocketOptions,
   _normalizeArgs,
+  onConnectionOpened,
+  onConnectionClosed,
+  tryReadStart,
 } from 'node-internal:internal_net';
+import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
 import { checkServerIdentity } from 'node-internal:internal_tls';
 import type {
   ConnectionOptions,
   TlsOptions,
   TLSSocket as TLSSocketType,
 } from 'node:tls';
-import type { Duplex } from 'node:stream';
+import type { Duplex } from 'node-internal:streams_duplex';
 import type { OnReadOpts, TcpSocketConnectOpts } from 'node:net';
 import {
   validateBuffer,
@@ -52,6 +56,7 @@ import {
   ERR_TLS_INVALID_CONTEXT,
 } from 'node-internal:internal_errors';
 import { SecureContext } from 'node-internal:internal_tls_common';
+import { ok } from 'node-internal:internal_assert';
 
 const kConnectOptions = Symbol('connect-options');
 const kErrorEmitted = Symbol('error-emitted');
@@ -61,10 +66,10 @@ const kIsVerified = Symbol('verified');
 
 // @ts-expect-error TS2323 Cannot redeclare error.
 export declare class TLSSocket extends Socket {
-  public _hadError: boolean;
-  public _handle: Socket['_handle'];
-  public _init(): void;
-  public _tlsOptions: TlsOptions &
+  _hadError: boolean;
+  _handle: Socket['_handle'];
+  _init(): void;
+  _tlsOptions: TlsOptions &
     ConnectionOptions &
     SocketOptions &
     TcpSocketConnectOpts & {
@@ -73,63 +78,56 @@ export declare class TLSSocket extends Socket {
       server?: unknown;
       onread?: OnReadOpts;
     };
-  public _secureEstablished: boolean;
-  public _securePending: boolean;
-  public _newSessionPending: boolean;
-  public _controlReleased: boolean;
-  public _parent: Socket;
-  public authorized: boolean;
-  public encrypted: boolean;
-  public handle: ReturnType<TLSSocket['_wrapHandle']>;
-  public servername: null | string;
-  public secureConnecting: boolean;
-  public ssl: TLSSocket['_handle'];
-  public [kRes]: null | Socket['_handle'];
-  public [kIsVerified]: boolean;
-  public [kPendingSession]: null | Buffer;
-  public [kErrorEmitted]: boolean;
-  public [kConnectOptions]?: NormalizedConnectionOptions;
+  _secureEstablished: boolean;
+  _securePending: boolean;
+  _newSessionPending: boolean;
+  _controlReleased: boolean;
+  authorized: boolean;
+  encrypted: boolean;
+  handle: ReturnType<TLSSocket['_wrapHandle']>;
+  servername: null | string;
+  secureConnecting: boolean;
+  ssl: TLSSocket['_handle'];
+  [kRes]: null | Socket['_handle'];
+  [kIsVerified]: boolean;
+  [kPendingSession]: null | Buffer;
+  [kErrorEmitted]: boolean;
+  [kConnectOptions]?: NormalizedConnectionOptions;
 
-  public constructor(
+  constructor(
     socket: Socket | Duplex | undefined,
     opts: TLSSocket['_tlsOptions']
   );
-  public prototype: TLSSocket;
+  prototype: TLSSocket;
 
-  public _destroySSL(): void;
-  public _emitTLSError(error: Error): void;
-  public _finishInit(): void;
-  public _handleTimeout(): void;
-  public _releaseControl(): boolean;
-  public _start(): void;
-  public _tlsError(error: Error): Error | null;
-  public _wrapHandle(
+  _destroySSL(): void;
+  _emitTLSError(error: Error): void;
+  _finishInit(): void;
+  _handleTimeout(): void;
+  _releaseControl(): boolean;
+  _start(): void;
+  _tlsError(error: Error): Error | null;
+  _wrapHandle(
     wrap: null | Socket,
     handle: Socket['_handle'] | null | undefined,
     wrapHasActiveWriteFromPrevOwner: boolean
   ): unknown;
-  public disableRenegotiation(): void;
-  public getX509Certificate(): ReturnType<TLSSocketType['getX509Certificate']>;
-  public setKeyCert(context: unknown): void;
-  public setServername(name: string): void;
-  public setSession(session: string | Buffer): void;
-  public setMaxSendFragment(size: number): boolean;
-  public getCertificate(): ReturnType<TLSSocketType['getCertificate']>;
-  public getPeerX509Certificate(): ReturnType<
-    TLSSocketType['getPeerX509Certificate']
-  >;
-  public renegotiate(
+  disableRenegotiation(): void;
+  getX509Certificate(): ReturnType<TLSSocketType['getX509Certificate']>;
+  setKeyCert(context: unknown): void;
+  setServername(name: string): void;
+  setSession(session: string | Buffer): void;
+  setMaxSendFragment(size: number): boolean;
+  getCertificate(): ReturnType<TLSSocketType['getCertificate']>;
+  getPeerX509Certificate(): ReturnType<TLSSocketType['getPeerX509Certificate']>;
+  renegotiate(
     options: {
       rejectUnauthorized?: boolean | undefined;
       requestCert?: boolean | undefined;
     },
     callback?: (error: Error | null) => void
   ): boolean;
-  public exportKeyingMaterial(
-    length: number,
-    label: string,
-    context?: Buffer
-  ): Buffer;
+  exportKeyingMaterial(length: number, label: string, context?: Buffer): Buffer;
 }
 
 function onnewsessionclient(
@@ -190,9 +188,8 @@ export function TLSSocket(
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.requestCert');
   }
 
-  if (tlsOptions.rejectUnauthorized) {
-    // Used by servers to reject unauthorized connections.
-    // Does not apply to Cloudflare Workers.
+  if (tlsOptions.rejectUnauthorized === false) {
+    // TODO(soon): We don't support rejectUnauthorized=false
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.rejectUnauthorized');
   }
 
@@ -250,12 +247,10 @@ export function TLSSocket(
   let wrapHasActiveWriteFromPrevOwner = false;
 
   if (socket) {
-    if (socket instanceof Socket && socket._handle) {
+    if (socket instanceof Socket) {
       wrap = socket;
-      // TODO(soon): Check TLS connection type and call starttls() if needed.
     } else {
-      // Cloudflare Workers does not support any other socket type.
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.socket');
+      wrap = new JSStreamSocket(socket);
     }
 
     handle = wrap._handle;
@@ -279,10 +274,15 @@ export function TLSSocket(
     } as SocketOptions,
   ]);
 
+  this._parent = handle;
+  this._parentWrap = wrap;
+
   // Proxy for API compatibility
   this.ssl = this._handle; // C++ TLSWrap object
 
   this.on('error', this._tlsError.bind(this));
+
+  this._init();
 }
 Object.setPrototypeOf(TLSSocket.prototype, Socket.prototype);
 Object.setPrototypeOf(TLSSocket, Socket);
@@ -343,9 +343,25 @@ TLSSocket.prototype._init = function _init(this: TLSSocket): void {
   if (options.handshakeTimeout && options.handshakeTimeout > 0)
     this.setTimeout(options.handshakeTimeout, this._handleTimeout.bind(this));
 
-  this.on('error', (err: Error): void => {
-    this._emitTLSError(err);
-  });
+  // TLSSocket can be initialized with 2 different handles.
+  //
+  // 1. Socket instance created by "node:net". In this scenario, we need
+  //    to wait for 'connect' event to be emitted in order to trigger _finishInit().
+  // 2. Duplex stream. Duplex streams are initialized through JSStreamSocket class.
+  //    If that's the scenario, we can trigger _finishInit() immediately. Since, there
+  //    is no async calls required to wait.
+  if (this._parentWrap != null && this._parentWrap instanceof JSStreamSocket) {
+    queueMicrotask(() => {
+      this._finishInit();
+      ok(this._parentWrap instanceof JSStreamSocket);
+      this._parentWrap.readStart();
+      tryReadStart(this);
+    });
+  } else {
+    this.on('connect', () => {
+      this._finishInit();
+    });
+  }
 };
 
 TLSSocket.prototype.renegotiate = function (
@@ -443,7 +459,77 @@ TLSSocket.prototype._finishInit = function _finishInit(this: TLSSocket): void {
 };
 
 TLSSocket.prototype._start = function _start(this: TLSSocket): void {
-  // Do nothing.
+  if (this.connecting) {
+    this.once('connect', this._start.bind(this));
+    return;
+  }
+
+  // If a user calls tls.connect({ socket }) with a socket that is not initialized
+  // and the socket is not connected, we need to wait for the socket to connect
+  // before we can complete the process.
+  //
+  // Take a look at the following test for this particular edge case:
+  // https://github.com/nodejs/node/blob/91d8a524ada001103a2d1c6825ca17b8393c183f/test/parallel/test-tls-on-empty-socket.js
+  if (this._parentWrap != null && this._parentWrap._handle == null) {
+    this._parentWrap.once('connect', () => {
+      // We need to update the Socket handle of this TLSSocket
+      // since it was created after TLSSocket is initialized.
+      if (this._parentWrap?._handle != null) {
+        this._handle = this._parentWrap._handle;
+      }
+      this._start();
+    });
+    return;
+  }
+
+  // Guard against the following cases:
+  // - Socket was destroyed before the connection was established
+  // - TLSSocket can not be upgraded if the secureTransport does not support 'starttls'
+  if (this._handle?.socket.secureTransport !== 'starttls') {
+    return;
+  }
+
+  // We first need to release the lock
+  this._handle.writer.releaseLock();
+  this._handle.reader.releaseLock();
+
+  try {
+    const { host, port, addressType } = this._handle.options;
+    const socket = this._handle.socket.startTls();
+
+    this._handle = {
+      socket: socket,
+      writer: socket.writable.getWriter(),
+      reader: socket.readable.getReader({ mode: 'byob' }),
+      bytesRead: 0,
+      bytesWritten: 0,
+      reading: true,
+      options: this._handle.options,
+    };
+
+    // This is now an encrypted connection.
+    // There are cases where in node:net we have to distinguish between
+    // encrypted and unencrypted connections.
+    this.encrypted = true;
+
+    this._handle.socket.opened.then(
+      onConnectionOpened.bind(this),
+      (err: unknown) => {
+        this.emit('connectionAttemptFailed', host, port, addressType, err);
+        this.destroy(err as Error);
+      }
+    );
+
+    this._handle.socket.closed.then(
+      onConnectionClosed.bind(this),
+      (error: unknown): void => {
+        // Do not call this.destroy.bind(this) since user can override it.
+        this.destroy(error as Error);
+      }
+    );
+  } catch (error) {
+    this.destroy(error as Error);
+  }
 };
 
 TLSSocket.prototype.setServername = function setServername(
@@ -598,8 +684,8 @@ export function connect(...args: unknown[]): TLSSocket {
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.minDHSize');
   }
 
-  if (options.rejectUnauthorized) {
-    // Not supported.
+  if (options.rejectUnauthorized === false) {
+    // TODO(soon): We don't support rejectUnauthorized=false
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.rejectUnauthorized');
   }
 
@@ -616,19 +702,22 @@ export function connect(...args: unknown[]): TLSSocket {
     );
   }
 
+  // @ts-expect-error TS2345 Type incompatibility between Node.js Duplex and internal Duplex
   const tlssock = new TLSSocket(options.socket, {
     allowHalfOpen: options.allowHalfOpen,
     pipe: !!options.path,
-    session: options.session,
     ALPNProtocols: options.ALPNProtocols,
     enableTrace: options.enableTrace,
     highWaterMark: options.highWaterMark,
     secureContext: options.secureContext,
     checkServerIdentity: options.checkServerIdentity ?? checkServerIdentity,
-    // @ts-expect-error TS2412 Type inconsistencies between types/node
     onread: options.onread,
     signal: options.signal,
     lookup: options.lookup,
+    rejectUnauthorized:
+      options.rejectUnauthorized !== undefined
+        ? Boolean(options.rejectUnauthorized) // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
+        : true,
   });
 
   tlssock[kConnectOptions] = options;

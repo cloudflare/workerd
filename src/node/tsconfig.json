@@ -1,24 +1,6 @@
 {
+  "extends": "../../tools/base.tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": ["ESNext", "dom"],
-    "alwaysStrict": true,
-    "strict": true,
-    "allowJs": true,
-    "allowUnreachableCode": false,
-    "allowUnusedLabels": false,
-    "exactOptionalPropertyTypes": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noPropertyAccessFromIndexSignature": false,
-    "noUncheckedIndexedAccess": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "strictNullChecks": true,
-    "esModuleInterop": true,
-    "moduleResolution": "node",
     "declaration": true,
     "types": ["@types/node"],
     "paths": {
@@ -29,11 +11,13 @@
       "node:path/*": ["./*"],
       "node:stream/*": ["./*"],
       "node:timers/*": ["./*"],
+      "node:sqlite/*": ["./*"],
       "node-internal:*": ["./internal/*"],
+      "cloudflare-internal:http": ["./internal/http.d.ts"],
       "cloudflare-internal:sockets": ["./internal/sockets.d.ts"],
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],
-      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
+      "cloudflare-internal:tracing": ["./internal/tracing.d.ts"],
+      "cloudflare-internal:filesystem": ["./internal/filesystem.d.ts"]
     }
-  },
-  "exclude": []
+  }
 }

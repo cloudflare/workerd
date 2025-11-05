@@ -1,4 +1,4 @@
-declare module "cloudflare:workflows" {
+declare module 'cloudflare:workflows' {
   /**
    * NonRetryableError allows for a user to throw a fatal error
    * that makes a Workflow instance fail immediately without triggering a retry
@@ -36,6 +36,21 @@ declare abstract class Workflow<PARAMS = unknown> {
   ): Promise<WorkflowInstance[]>;
 }
 
+type WorkflowDurationLabel =
+  | 'second'
+  | 'minute'
+  | 'hour'
+  | 'day'
+  | 'week'
+  | 'month'
+  | 'year';
+
+type WorkflowSleepDuration =
+  | `${number} ${WorkflowDurationLabel}${'s' | ''}`
+  | number;
+
+type WorkflowRetentionDuration = WorkflowSleepDuration;
+
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -45,19 +60,27 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
    * The event payload the Workflow instance is triggered with
    */
   params?: PARAMS;
+  /**
+   * The retention policy for Workflow instance.
+   * Defaults to the maximum retention period available for the owner's account.
+   */
+  retention?: {
+    successRetention?: WorkflowRetentionDuration,
+    errorRetention?: WorkflowRetentionDuration,
+  };
 }
 
 type InstanceStatus = {
   status:
-    | "queued" // means that instance is waiting to be started (see concurrency limits)
-    | "running"
-    | "paused"
-    | "errored"
-    | "terminated" // user terminated the instance while it was running
-    | "complete"
-    | "waiting" // instance is hibernating and waiting for sleep or event to finish
-    | "waitingForPause" // instance is finishing the current work to pause
-    | "unknown";
+    | 'queued' // means that instance is waiting to be started (see concurrency limits)
+    | 'running'
+    | 'paused'
+    | 'errored'
+    | 'terminated' // user terminated the instance while it was running
+    | 'complete'
+    | 'waiting' // instance is hibernating and waiting for sleep or event to finish
+    | 'waitingForPause' // instance is finishing the current work to pause
+    | 'unknown';
   error?: string;
   output?: object;
 };
@@ -94,4 +117,15 @@ declare abstract class WorkflowInstance {
    * Returns the current status of the instance.
    */
   public status(): Promise<InstanceStatus>;
+
+  /**
+   * Send an event to this instance.
+   */
+  public sendEvent({
+    type,
+    payload,
+  }: {
+    type: string;
+    payload: unknown;
+  }): Promise<void>;
 }

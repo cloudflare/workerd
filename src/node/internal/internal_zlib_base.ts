@@ -22,7 +22,7 @@ import {
   NodeError,
 } from 'node-internal:internal_errors';
 import { Transform, type DuplexOptions } from 'node-internal:streams_transform';
-import { eos as finished } from 'node-internal:streams_util';
+import { eos as finished } from 'node-internal:streams_end_of_stream';
 import {
   isArrayBufferView,
   isAnyArrayBuffer,
@@ -342,22 +342,24 @@ const zlibDefaultOptions = {
 };
 
 export class ZlibBase extends Transform {
-  public bytesWritten: number = 0;
+  bytesWritten: number = 0;
 
-  public _maxOutputLength: number;
-  public _outBuffer: Buffer;
-  public _outOffset: number = 0;
-  public _chunkSize: number;
-  public _defaultFlushFlag: number;
-  public _finishFlushFlag: number;
-  public _defaultFullFlushFlag: number;
-  public _info: boolean;
-  public _handle: ZlibHandleType | null = null;
-  public _writeState = new Uint32Array(2);
+  _maxOutputLength: number;
+  _outBuffer: Buffer;
+  _outOffset: number = 0;
+  _chunkSize: number;
+  _defaultFlushFlag: number;
+  _finishFlushFlag: number;
+  _defaultFullFlushFlag: number;
+  _info: boolean;
+  _handle: ZlibHandleType | null = null;
+  _writeState = new Uint32Array(2);
+  _writesInProgress: number = 0;
+  _hadWrites: boolean = false;
 
-  public [kError]: NodeError | undefined;
+  [kError]: NodeError | undefined;
 
-  public constructor(
+  constructor(
     opts: ZlibOptions & DuplexOptions,
     mode: number,
     handle: ZlibHandleType,
@@ -437,39 +439,60 @@ export class ZlibBase extends Transform {
     this._maxOutputLength = maxOutputLength;
   }
 
-  public get _closed(): boolean {
+  // Note: This is intentionally a getter that shadows the property from Transform
+  // @ts-expect-error TS2611 Property/accessor mismatch with Transform._closed
+  get _closed(): boolean {
     return this._handle == null;
   }
 
   // @deprecated Use `bytesWritten` instead.
-  public get bytesRead(): number {
+  get bytesRead(): number {
     return this.bytesWritten;
   }
 
   // @deprecated Use `bytesWritten` instead.
-  public set bytesRead(value: number) {
+  set bytesRead(value: number) {
     this.bytesWritten = value;
   }
 
-  public reset(): void {
+  reset(): void {
     ok(this._handle, 'zlib binding closed');
     this._handle.reset();
   }
 
   // This is the _flush function called by the transform class,
   // internally, when the last chunk has been written.
-  public override _flush(callback: () => void): void {
-    this._transform(Buffer.alloc(0), 'utf8', callback);
+  override _flush(callback: () => void): void {
+    // If there are writes in progress, wait for them to complete
+    if (this._writesInProgress > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
+      queueMicrotask(() => this._flush(callback));
+      return;
+    }
+
+    // If there were writes, add extra microtask to ensure data from processCallback has been pushed
+    if (this._hadWrites) {
+      queueMicrotask(() => {
+        const chunk = Buffer.alloc(0) as Buffer & { [kFlushFlag]?: number };
+        chunk[kFlushFlag] = this._finishFlushFlag;
+        this._transform(chunk, 'utf8', callback);
+      });
+    } else {
+      // No writes occurred, flush immediately
+      const chunk = Buffer.alloc(0) as Buffer & { [kFlushFlag]?: number };
+      chunk[kFlushFlag] = this._finishFlushFlag;
+      this._transform(chunk, 'utf8', callback);
+    }
   }
 
   // Force Transform compat behavior.
-  public override _final(callback: () => void): void {
+  override _final(callback: () => void): void {
     callback();
   }
 
-  public flush(kind: number, callback: () => void): void;
-  public flush(callback?: () => void): void;
-  public flush(
+  flush(kind: number, callback: () => void): void;
+  flush(callback?: () => void): void;
+  flush(
     kind?: number | (() => void),
     callback: (() => void) | undefined = undefined
   ): void {
@@ -491,14 +514,14 @@ export class ZlibBase extends Transform {
     }
   }
 
-  public close(callback?: () => void): void {
+  close(callback?: () => void): void {
     if (callback) {
       finished(this, callback);
     }
     this.destroy();
   }
 
-  public override _destroy<T extends Error>(
+  override _destroy<T extends Error>(
     err: T,
     callback: (err: T) => never
   ): void {
@@ -506,7 +529,7 @@ export class ZlibBase extends Transform {
     callback(err);
   }
 
-  public override _transform(
+  override _transform(
     chunk: Buffer & { [kFlushFlag]?: number },
     _encoding: BufferEncoding,
     cb: () => void
@@ -526,17 +549,9 @@ export class ZlibBase extends Transform {
   }
 
   // This function is left for backwards compatibility.
-  public _processChunk(
-    chunk: Buffer,
-    flushFlag: number,
-    cb?: undefined
-  ): Buffer;
-  public _processChunk(
-    chunk: Buffer,
-    flushFlag: number,
-    cb: () => void
-  ): undefined;
-  public _processChunk(
+  _processChunk(chunk: Buffer, flushFlag: number, cb?: undefined): Buffer;
+  _processChunk(chunk: Buffer, flushFlag: number, cb: () => void): undefined;
+  _processChunk(
     chunk: Buffer,
     flushFlag: number,
     cb?: () => void
@@ -554,8 +569,19 @@ export class ZlibBase extends Transform {
       return;
     }
 
+    // Track that we have a write in progress
+    if (chunk.byteLength > 0) {
+      this._hadWrites = true;
+    }
+    this._writesInProgress++;
+    const originalCb = cb;
+    const wrappedCb = (): void => {
+      this._writesInProgress--;
+      originalCb();
+    };
+
     this._handle.buffer = chunk;
-    this._handle.cb = cb;
+    this._handle.cb = wrappedCb;
     this._handle.availOutBefore = this._chunkSize - this._outOffset;
     this._handle.availInBefore = chunk.byteLength;
     this._handle.inOff = 0;
@@ -574,10 +600,10 @@ export class ZlibBase extends Transform {
 }
 
 export class Zlib extends ZlibBase {
-  public _level = CONST_Z_DEFAULT_COMPRESSION;
-  public _strategy = CONST_Z_DEFAULT_STRATEGY;
+  _level = CONST_Z_DEFAULT_COMPRESSION;
+  _strategy = CONST_Z_DEFAULT_STRATEGY;
 
-  public constructor(options: ZlibOptions | null | undefined, mode: number) {
+  constructor(options: ZlibOptions | null | undefined, mode: number) {
     let windowBits = CONST_Z_DEFAULT_WINDOWBITS;
     let level = CONST_Z_DEFAULT_COMPRESSION;
     let memLevel = CONST_Z_DEFAULT_MEMLEVEL;
@@ -666,7 +692,7 @@ export class Zlib extends ZlibBase {
     this._writeState = writeState;
   }
 
-  public params(level: number, strategy: number, callback: () => void): void {
+  params(level: number, strategy: number, callback: () => void): void {
     checkRangesOrGetDefault(
       level,
       'level',
@@ -722,7 +748,7 @@ const brotliDefaultOptions: ZlibDefaultOptions = {
 };
 
 export class Brotli extends ZlibBase {
-  public constructor(options: BrotliOptions | undefined | null, mode: number) {
+  constructor(options: BrotliOptions | undefined | null, mode: number) {
     ok(mode === CONST_BROTLI_DECODE || mode === CONST_BROTLI_ENCODE);
     brotliInitParamsArray.fill(-1);
 

@@ -6,16 +6,15 @@ import assert from 'node:assert';
 import util from 'node:util';
 
 export default {
-  async fetch(request: any, env: any, ctx: any) {
-    const { pathname } = new URL(request.url);
+  async fetch() {
     return new Response(null, { status: 404 });
   },
 };
 
 async function assertRequestCacheThrowsError(
   cacheHeader: RequestCache,
-  errorName: String = 'Error',
-  errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented."
+  errorName: string = 'Error',
+  errorMessage: string = "The 'cache' field on 'RequestInitializerDict' is not implemented."
 ) {
   assert.throws(
     () => {
@@ -32,8 +31,8 @@ async function assertRequestCacheThrowsError(
 
 async function assertFetchCacheRejectsError(
   cacheHeader: RequestCache,
-  errorName: String = 'Error',
-  errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented."
+  errorName: string = 'Error',
+  errorMessage: string = "The 'cache' field on 'RequestInitializerDict' is not implemented."
 ) {
   await assert.rejects(
     (async () => {
@@ -49,7 +48,7 @@ async function assertFetchCacheRejectsError(
 }
 
 export const cacheMode = {
-  async test(ctrl: any, env: any, ctx: any) {
+  async test(_ctrl: any, env: any, _ctx: any) {
     const allowedCacheModes: Set<RequestCache> = new Set([
       'default',
       'force-cache',
@@ -71,6 +70,9 @@ export const cacheMode = {
     }
     if (env.NO_CACHE_ENABLED) {
       enabledCacheModes.add('no-cache');
+    }
+    if (env.RELOAD_ENABLED) {
+      enabledCacheModes.add('reload');
     }
 
     const failureCacheModes = allowedCacheModes.difference(enabledCacheModes);

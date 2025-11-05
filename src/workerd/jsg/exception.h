@@ -25,6 +25,7 @@ namespace workerd::jsg {
 #define JSG_ERROR_DOMTypeMismatchError JSG_DOM_EXCEPTION("TypeMismatchError")
 #define JSG_ERROR_DOMQuotaExceededError JSG_DOM_EXCEPTION("QuotaExceededError")
 #define JSG_ERROR_DOMAbortError JSG_DOM_EXCEPTION("AbortError")
+#define JSG_ERROR_DOMNotFoundError JSG_DOM_EXCEPTION("NotFoundError")
 
 #define JSG_ERROR_TypeError "jsg.TypeError"
 #define JSG_ERROR_Error "jsg.Error"
@@ -38,6 +39,10 @@ namespace workerd::jsg {
 
 #define JSG_ASSERT(cond, jsErrorType, ...)                                                         \
   KJ_ASSERT(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
+
+// Asserts if the method is compatible with v8 fast api
+#define JSG_ASSERT_FASTAPI(Method)                                                                 \
+  static_assert(isFastApiCompatible<Method>, "Method is not v8 fast api compatible");
 
 #define JSG_REQUIRE(cond, jsErrorType, ...)                                                        \
   KJ_REQUIRE(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
@@ -108,7 +113,7 @@ namespace workerd::jsg {
 kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
 
 // Given a KJ exception's description, returns whether it contains a tunneled exception that could
-// be converted back to JavaScript via makeInternalError().
+// be converted back to JavaScript via exceptionToJs().
 bool isTunneledException(kj::StringPtr internalMessage);
 
 // Given a KJ exception's description, returns whether it contains the magic constant that indicates
@@ -138,6 +143,9 @@ struct TunneledErrorType {
 
   // Was the error created because a durable object is broken?
   bool isDurableObjectReset;
+
+  // Does the error contain the "worker_do_not_log" magic constant?
+  bool isDoNotLogException;
 };
 
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
@@ -146,5 +154,22 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
 kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennessReason);
 
 constexpr kj::Exception::DetailTypeId EXCEPTION_IS_USER_ERROR = 0x82aff7d637c30e47ull;
+
+struct ExceptionToJsOptions {
+  // When ignoreDetail is true, tells kjExceptionToJs() to ignore any serialized
+  // exception detail in the kj::Exception.
+  bool ignoreDetail = false;
+
+  // When trusted is true and the kj::Exception has a serialized exception detail, the
+  // stack will be included in the deserialized error if it is available. When false,
+  // the stack will be omitted.
+  bool trusted = false;
+
+  // If the deserialized exception detail is not an object, then it will be ignored
+  // and we will fall back to constructing a new error object. The default is true
+  // to preserve existing behavior, but setting this to false may be useful in some
+  // cases. When false, the kjExceptionToJs() might return a non-object value.
+  bool allowNonObjects = false;
+};
 
 }  // namespace workerd::jsg

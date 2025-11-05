@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { pipeline } from 'node-internal:streams_pipeline';
 import { Duplex } from 'node-internal:streams_duplex';
 import {
@@ -36,8 +33,8 @@ import {
   isNodeStream,
   isReadable,
   isWritable,
-  destroyer,
 } from 'node-internal:streams_util';
+import { destroyer } from 'node-internal:streams_destroy';
 import {
   AbortError,
   ERR_INVALID_ARG_VALUE,

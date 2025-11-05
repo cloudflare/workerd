@@ -5,6 +5,10 @@
 import * as assert from 'node:assert';
 import { DurableObject } from 'cloudflare:workers';
 
+// A collection of functions that can be triggered by name from the DO, to make
+// it easier to keep the DO and test functions together in the test file:
+let actorFuncs = {};
+
 async function test(state) {
   const storage = state.storage;
   const sql = storage.sql;
@@ -1420,6 +1424,23 @@ export class DurableObjectExample extends DurableObject {
     }
     return bookmark;
   }
+
+  async createStringTable() {
+    this.state.storage.sql.exec(
+      'CREATE TABLE IF NOT EXISTS string_table (id INTEGER PRIMARY KEY, data BLOB)'
+    );
+  }
+
+  async getStringTableIds() {
+    return Array.from(
+      this.state.storage.sql.exec('SELECT id FROM string_table'),
+      (x) => x.id
+    );
+  }
+
+  async runActorFunc(name) {
+    return actorFuncs[name](this.state);
+  }
 }
 
 export default {
@@ -1472,6 +1493,14 @@ export default {
     await assert.rejects(async () => {
       await doReq('sql-test-foreign-keys');
     }, /constraints were violated: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT/);
+
+    // Since the DO was exploded, reusing the stub dosen't work.
+    await assert.rejects(async () => {
+      await doReq('increment');
+    }, /constraints were violated: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT/);
+
+    // Get a new stub.
+    obj = env.ns.get(id);
 
     // Some increments.
     assert.equal(await doReq('increment'), 1);
@@ -1530,4 +1559,193 @@ export let testSessionsAPIBookmark = {
       bookmark = await stub.testSessionsAPIBookmark(bookmark);
     }
   },
+};
+
+export let testAutoRollBackOnCriticalError = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName('auto-rollback-on-critical-error-test');
+    let stub = env.ns.get(id);
+    await stub.createStringTable();
+
+    // Even though the DO function catches and handles all exceptions, we still expect it to fail
+    // with the critical exception, due to the output gate being broken with it.
+    await assert.rejects(async () => {
+      await stub.runActorFunc('doAutoRollBackOnCriticalError');
+    }, /^Error: database or disk is full: SQLITE_FULL/);
+
+    // Get a new stub since the old stub is broken due to critical error
+    stub = env.ns.get(id);
+    // We expect only the first, committed row to be present:
+    assert.deepStrictEqual(await stub.getStringTableIds(), [1]);
+  },
+};
+actorFuncs.doAutoRollBackOnCriticalError = async (state) => {
+  // Limit size of db so we can trigger a SQLITE_FULL error
+  state.storage.sql.setMaxPageCountForTest(10);
+
+  // Add a row as part of an implicit transaction, and wait for it to commit.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 1, 'a');
+  await state.storage.sync();
+
+  // Add another row as part of a new implicit transaction
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 2, 'a');
+
+  // Try to add a row that is too big for the database.  We expect this to fail with a critical
+  // error that rolls back the current implicit transaction and breaks the output gate:
+  assert.throws(() => {
+    state.storage.sql.exec(
+      'INSERT INTO string_table VALUES (?, ?)',
+      3,
+      'a'.repeat(1000000)
+    );
+  }, /^Error: database or disk is full: SQLITE_FULL/);
+
+  // Further storage ops are expected to fail because we've cached the critical error:
+  assert.throws(() => {
+    state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 4, 'a');
+  }, /^Error: database or disk is full: SQLITE_FULL/);
+};
+
+export let testCriticalErrorOnTransactionSyncRollback = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName('critical-error-on-transaction-sync-rollback');
+    let stub = env.ns.get(id);
+    await stub.createStringTable();
+
+    await assert.rejects(async () => {
+      await stub.runActorFunc('doCriticalErrorOnTransactionSyncRollback');
+    }, /^Error: database or disk is full: SQLITE_FULL/);
+
+    // Get a new stub since the old stub is broken due to critical error
+    stub = env.ns.get(id);
+    // We expect only the first, committed row to be present:
+    assert.deepStrictEqual(await stub.getStringTableIds(), [1]);
+  },
+};
+actorFuncs.doCriticalErrorOnTransactionSyncRollback = async (state) => {
+  // Limit size of db so we can trigger a SQLITE_FULL error
+  state.storage.sql.setMaxPageCountForTest(10);
+
+  // Add a row as part of an implicit transaction, and wait for it to commit.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 1, 'a');
+  await state.storage.sync();
+
+  // Add another row as part of a new implicit transaction.  We expect this to also get rolled
+  // back when the subsequent transactionSync() fails.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 2, 'a');
+
+  // Try to add a row that is too big for the database, within an explicit synchronous
+  // transaction.  We expect this to fail with a critical error that rolls back the explicit
+  // transaction and breaks the output gate.  Earlier versions of the code failed here with
+  // an internal error "no such savepoint: _cf_sync_savepoint_0" when trying to roll back.
+  assert.throws(() => {
+    state.storage.transactionSync(() => {
+      assert.throws(() => {
+        state.storage.sql.exec(
+          'INSERT INTO string_table VALUES (?, ?)',
+          3,
+          'a'.repeat(1000000)
+        );
+      }, /^Error: database or disk is full: SQLITE_FULL/);
+
+      // Throw an exception to make transactionSync() attempt to roll back the transaction:
+      throw new Error('an_escaping_exception_to_trigger_rollback');
+    });
+  }, /^Error: an_escaping_exception_to_trigger_rollback/);
+};
+
+export let testCriticalErrorOnTransactionSyncCommit = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName('critical-error-on-transaction-sync-commit');
+    let stub = env.ns.get(id);
+    await stub.createStringTable();
+
+    await assert.rejects(async () => {
+      await stub.runActorFunc('doCriticalErrorOnTransactionSyncCommit');
+    }, /^Error: database or disk is full: SQLITE_FULL/);
+
+    // Get a new stub since the old stub is broken due to critical error
+    stub = env.ns.get(id);
+    // We expect only the first, committed row to be present:
+    assert.deepStrictEqual(await stub.getStringTableIds(), [1]);
+  },
+};
+actorFuncs.doCriticalErrorOnTransactionSyncCommit = async (state) => {
+  // Limit size of db so we can trigger a SQLITE_FULL error
+  state.storage.sql.setMaxPageCountForTest(10);
+
+  // Add a row as part of an implicit transaction, and wait for it to commit.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 1, 'a');
+  await state.storage.sync();
+
+  // Add another row as part of a new implicit transaction.  We expect this to also get rolled
+  // back when the subsequent transactionSync() fails.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 2, 'a');
+
+  // Try to add a row that is too big for the database, within an explicit synchronous
+  // transaction.  We expect this to fail with a critical error that rolls back the explicit
+  // transaction and breaks the output gate.  Earlier versions of the code failed here with
+  // internal errors "no such savepoint: _cf_sync_savepoint_0" when trying to commit, then roll
+  // back.
+  assert.throws(() => {
+    state.storage.transactionSync(() => {
+      assert.throws(() => {
+        state.storage.sql.exec(
+          'INSERT INTO string_table VALUES (?, ?)',
+          3,
+          'a'.repeat(1000000)
+        );
+      }, /^Error: database or disk is full: SQLITE_FULL/);
+      // Because the lambda completes successfully, transactionSync() will still try to commit the
+      // transaction.
+    });
+  }, /^Error: Cannot commit transaction due to an earlier SQL critical error/);
+};
+
+export let testCriticalErrorOnTransactionRollback = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName('critical-error-on-transaction-rollback');
+    let stub = env.ns.get(id);
+    await stub.createStringTable();
+
+    await assert.rejects(async () => {
+      await stub.runActorFunc('doCriticalErrorOnTransactionRollback');
+    }, /^Error: database or disk is full: SQLITE_FULL/);
+
+    // Get a new stub since the old stub is broken due to critical error
+    stub = env.ns.get(id);
+    // We expect only the first two committed rows to be present:
+    assert.deepStrictEqual(await stub.getStringTableIds(), [1, 2]);
+  },
+};
+actorFuncs.doCriticalErrorOnTransactionRollback = async (state) => {
+  // Limit size of db so we can trigger a SQLITE_FULL error
+  state.storage.sql.setMaxPageCountForTest(10);
+
+  // Add a row as part of an implicit transaction, and wait for it to commit.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 1, 'a');
+  await state.storage.sync();
+
+  // Add another row as part of a new implicit transaction.  We expect this to be committed
+  // prior to the failing explicit transaction.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 2, 'a');
+
+  // Try to add a row that is too big for the database, within an explicit asynchronous
+  // transaction.  We expect this to fail with a critical error that rolls back the explicit
+  // transaction and breaks the output gate.
+  await assert.rejects(async () => {
+    await state.storage.transaction(async (txn) => {
+      assert.throws(() => {
+        state.storage.sql.exec(
+          'INSERT INTO string_table VALUES (?, ?)',
+          3,
+          'a'.repeat(1000000)
+        );
+      }, /^Error: database or disk is full: SQLITE_FULL/);
+
+      // Explicitly roll back transaction.  In earlier versions of the code, this could throw
+      // "no such savepoint: _cf_savepoint_0" due to a missing brokenness check.
+      txn.rollback();
+    });
+  }, /^Error: database or disk is full: SQLITE_FULL/);
 };

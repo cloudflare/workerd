@@ -37,7 +37,7 @@ Ref<DOMException> DOMException::constructor(const v8::FunctionCallbackInfo<v8::V
   v8::Local<v8::String> stackName = js.str("stack"_kjc);
   jsg::check(args.This()->DefineProperty(js.v8Context(), stackName, prop));
 
-  return jsg::alloc<DOMException>(
+  return js.alloc<DOMException>(
       kj::mv(errMessage), kj::mv(name).orDefault([] { return kj::str("Error"); }));
 }
 
