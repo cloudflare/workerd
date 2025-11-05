@@ -42,6 +42,7 @@ const authTagTests = [
   { name: 'aes-128-gcm', size: 16, iv: 16 },
   { name: 'aes-192-gcm', size: 24, iv: 16 },
   { name: 'aes-256-gcm', size: 32, iv: 16 },
+  { name: 'chacha20-poly1305', size: 32, iv: 12 },
 ];
 
 export const cipheriv = {
