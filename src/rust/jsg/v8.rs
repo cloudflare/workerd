@@ -70,36 +70,40 @@ trait IsolateMember: Drop {
 }
 
 #[derive(Debug)]
-pub(crate) struct Handle(usize);
+pub(crate) struct Handle {
+    ptr: usize,
+    isolate: *mut ffi::Isolate,
+}
 
 impl Handle {
+    pub unsafe fn new(ptr: usize, isolate: *mut ffi::Isolate) -> Self {
+        Handle { ptr, isolate }
+    }
+
     pub fn to_ffi(self) -> usize {
-        self.0
+        self.ptr
     }
 
     pub unsafe fn as_ref(&self) -> usize {
-        self.0
+        self.ptr
+    }
+
+    pub fn isolate(&self) -> *mut ffi::Isolate {
+        self.isolate
     }
 }
 
-impl Into<Handle> for usize {
-    fn into(self) -> Handle {
-        Handle(self)
-    }
-}
-
+// TODO: Make it Local<T>
 #[derive(Debug)]
 pub struct LocalValue<'a> {
     pub(crate) handle: Handle,
-    isolate: *mut ffi::Isolate,
     _marker: PhantomData<&'a ()>,
 }
 
 impl<'a> LocalValue<'a> {
     pub unsafe fn from_ffi(isolate: *mut ffi::Isolate, value: usize) -> Self {
         LocalValue {
-            handle: value.into(),
-            isolate,
+            handle: unsafe { Handle::new(value, isolate) },
             _marker: PhantomData,
         }
     }
@@ -122,8 +126,8 @@ impl Clone for LocalValue<'_> {
     fn clone(&self) -> Self {
         unsafe {
             Self::from_ffi(
-                self.isolate,
-                ffi::clone_local_value(self.isolate, self.handle.as_ref()),
+                self.handle.isolate(),
+                ffi::clone_local_value(self.handle.isolate(), self.handle.as_ref()),
             )
         }
     }
@@ -139,7 +143,6 @@ impl<'a> From<LocalObject<'a>> for LocalValue<'a> {
     fn from(value: LocalObject<'a>) -> Self {
         LocalValue {
             handle: value.handle,
-            isolate: value.isolate,
             _marker: PhantomData,
         }
     }
@@ -147,7 +150,6 @@ impl<'a> From<LocalObject<'a>> for LocalValue<'a> {
 
 pub struct LocalObject<'a> {
     handle: Handle,
-    isolate: *mut ffi::Isolate,
     _marker: PhantomData<&'a ()>,
 }
 
@@ -165,8 +167,7 @@ impl<'a> LocalObject<'a> {
 
     pub unsafe fn from_ffi(isolate: *mut ffi::Isolate, val: usize) -> Self {
         LocalObject {
-            handle: val.into(),
-            isolate,
+            handle: unsafe { Handle::new(val, isolate) },
             _marker: PhantomData,
         }
     }
@@ -176,8 +177,8 @@ impl Clone for LocalObject<'_> {
     fn clone(&self) -> Self {
         unsafe {
             Self::from_ffi(
-                self.isolate,
-                ffi::clone_local_value(self.isolate, self.handle.as_ref()),
+                self.handle.isolate(),
+                ffi::clone_local_value(self.handle.isolate(), self.handle.as_ref()),
             )
         }
     }
@@ -185,14 +186,12 @@ impl Clone for LocalObject<'_> {
 
 pub struct GlobalValue {
     handle: Handle,
-    isolate: *mut ffi::Isolate,
 }
 
 impl GlobalValue {
     pub unsafe fn from_ffi(isolate: *mut ffi::Isolate, val: usize) -> Self {
         GlobalValue {
-            handle: val.into(),
-            isolate,
+            handle: unsafe { Handle::new(val, isolate) },
         }
     }
 
@@ -210,8 +209,8 @@ impl Clone for GlobalValue {
     fn clone(&self) -> Self {
         unsafe {
             Self::from_ffi(
-                self.isolate,
-                ffi::clone_global_value(self.isolate, self.handle.as_ref()),
+                self.handle.isolate(),
+                ffi::clone_global_value(self.handle.isolate(), self.handle.as_ref()),
             )
         }
     }
