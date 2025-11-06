@@ -303,6 +303,7 @@ void reportStartupError(kj::StringPtr id,
               auto trace = kj::strArray(lines, "; ");
               auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
               auto span = parentSpan.newChild("script_startup_exception"_kjc);
+              span.setTag("error"_kjc, true);
               span.addLog(kj::systemPreciseCalendarClock().now(), "exception"_kjc,
                   kj::ConstString(
                       kj::str("script startup threw exception", id, description, trace)));
