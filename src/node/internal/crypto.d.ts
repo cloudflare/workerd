@@ -107,13 +107,6 @@ export function verifyOneShot(
 ): boolean;
 
 export class CipherHandle {
-  constructor(
-    mode: 'cipher' | 'decipher',
-    algorithm: string,
-    key: CryptoKey,
-    iv: ArrayBuffer | ArrayBufferView,
-    authTagLength?: number
-  );
   update(data: ArrayBuffer | ArrayBufferView): ArrayBuffer;
   final(): ArrayBuffer;
   setAAD(data: ArrayBuffer | ArrayBufferView, plaintextLength?: number): void;
@@ -122,6 +115,27 @@ export class CipherHandle {
   setAuthTag(tag: ArrayBuffer | ArrayBufferView): void;
 }
 
+export class AeadHandle {
+  update(data: ArrayBuffer | ArrayBufferView): ArrayBuffer;
+  final(): ArrayBuffer;
+  setAAD(data: ArrayBuffer | ArrayBufferView, plaintextLength?: number): void;
+  setAutoPadding(autoPadding: boolean): void;
+  getAuthTag(): ArrayBuffer | undefined;
+  setAuthTag(tag: ArrayBuffer | ArrayBufferView): void;
+}
+
+export type CipherMode = {
+  CIPHER: 0;
+  DECIPHER: 1;
+};
+
+export function newHandle(
+  mode: (typeof CipherMode)[keyof typeof CipherMode],
+  algorithm: string,
+  key: CryptoKey,
+  iv: ArrayBuffer | ArrayBufferView,
+  authTagLength?: number
+): CipherHandle | AeadHandle;
 export interface PublicPrivateCipherOptions {
   padding: number;
   oaepHash: string;
@@ -178,6 +192,8 @@ export function getCipherInfo(
   nameOrId: string | number,
   options: GetCipherInfoOptions
 ): CipherInfo | undefined;
+
+export function getCiphers(): string[];
 
 export type ArrayLike = ArrayBuffer | string | Buffer | ArrayBufferView;
 

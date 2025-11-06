@@ -68,11 +68,19 @@ http_file(
 # accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
 # downstream build.
 bazel_dep(name = "boringssl", version = "0.20251002.0", repo_name = "ssl")
+archive_override(
+    module_name = "boringssl",
+    patch_strip = 1,
+    patches = [
+        "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
+    ],
+    sha256 = "f96733fc3df03d4195db656d1b7b8c174c33f95d052f811f0ecc8f4e4e3db332",
+    strip_prefix = "boringssl-0.20251002.0",
+    type = "tgz",
+    urls = ["https://github.com/google/boringssl/archive/refs/tags/0.20251002.0.tar.gz"],
+)
 
 include("//build/deps:deps.MODULE.bazel")
-
 include("//build/deps:nodejs.MODULE.bazel")
-
 include("//build/deps:python.MODULE.bazel")
-
 include("//build/deps:v8.MODULE.bazel")

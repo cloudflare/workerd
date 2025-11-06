@@ -313,24 +313,24 @@ class CryptoImpl final: public jsg::Object {
       jsg::Optional<int> dsaSigEnc);
 
   // Cipher/Decipher
+  enum class CipherMode { CIPHER, DECIPHER };
   class CipherHandle final: public jsg::Object {
    public:
-    enum class Mode { CIPHER, DECIPHER };
-
     struct AuthenticatedInfo {
       unsigned int auth_tag_len = 0;
       unsigned int max_message_size = INT_MAX;
     };
 
-    CipherHandle(Mode mode,
+    CipherHandle(CipherMode mode,
         ncrypto::CipherCtxPointer ctx,
         jsg::Ref<CryptoKey> key,
         jsg::BufferSource iv,
         kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
 
-    static jsg::Ref<CipherHandle> constructor(jsg::Lock& js,
-        kj::String mode,
-        kj::String algorithm,
+    static jsg::Ref<CipherHandle> construct(jsg::Lock& js,
+        CipherMode mode,
+        kj::StringPtr algorithm,
+        ncrypto::Cipher cipher,
         jsg::Ref<CryptoKey> key,
         jsg::BufferSource iv,
         jsg::Optional<uint32_t> maybeAuthTagLength);
@@ -352,7 +352,7 @@ class CryptoImpl final: public jsg::Object {
     };
 
    private:
-    Mode mode;
+    CipherMode mode;
     ncrypto::CipherCtxPointer ctx;
     jsg::Ref<CryptoKey> key;
     jsg::BufferSource iv;
@@ -361,6 +361,91 @@ class CryptoImpl final: public jsg::Object {
     bool authTagPassed = false;
     bool pendingAuthFailed = false;
   };
+
+  /*
+  * AeadHandle implements a public interface matching CipherHandle, based on the BoringSSL-specific
+  * EVP_AEAD API instead of the EVP_CIPHER API.
+  *
+  * It's essential to note that BoringSSL's EVP_AEAD API is *one-shot*, and will encrypt or decrypt
+  * the entire ciphertext at once, and doesn't provide support for streaming operations. This is
+  * for good reason, as it prevents a dangerous mistake from being made. Consider a decryption
+  * operation: While it's technically possible to begin streaming chunks of decrypted data, it
+  * is not safe to act on any of the data until the entire message is decrypted, validated and
+  * released. If any part of the message is invalid, all of that decrypted data must be discarded.
+  *
+  * As a result, it's only possible to call update() once when using an AEAD algorithm, followed
+  * by final(). If using the streaming interface, it is permitted to either call write() once
+  * followed by end() without data; or to call end() once with a chunk of data.
+  *
+  * This restriction applies for certain algorithms even in the original NodeJS implementation
+  * backed by OpenSSL. For example, see the note in the original documentation about CCM modes
+  * of operation: <https://nodejs.org/api/crypto.html#ccm-mode>
+  *
+  * However, in our implementation, this restriction applies for *all* AEAD algorithms, which
+  * differs from the behaviour of NodeJS.
+  *
+  * In principle, it's possible to allow multiple update() calls if required for a particular use
+  * case, by buffering all the data supplied in memory, then invoking BoringSSL when final() is
+  * called. This might not be as troubling as it sounds, as AEADs are usually used to protect
+  * reasonably-sized messages used by an application, and aren't used to handle large quantities
+  * of data. However, this is not yet implemented, until we see a convincing use case.
+  */
+  class AeadHandle final: public jsg::Object {
+   public:
+    struct AuthenticatedInfo {
+      unsigned int auth_tag_len = 0;
+      unsigned int max_message_size = INT_MAX;
+    };
+
+    AeadHandle(CipherMode mode,
+        ncrypto::Aead aead,
+        ncrypto::AeadCtxPointer ctx,
+        jsg::Ref<CryptoKey> key,
+        jsg::BufferSource iv,
+        kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
+
+    static jsg::Ref<AeadHandle> construct(jsg::Lock& js,
+        CipherMode mode,
+        kj::StringPtr algorithm,
+        ncrypto::Aead aead,
+        jsg::Ref<CryptoKey> key,
+        jsg::BufferSource iv,
+        jsg::Optional<uint32_t> maybeAuthTagLength);
+
+    jsg::BufferSource update(jsg::Lock& js, jsg::BufferSource data);
+    jsg::BufferSource final(jsg::Lock& js);
+    void setAAD(jsg::Lock& js, jsg::BufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength);
+    void setAutoPadding(jsg::Lock&, bool);
+    void setAuthTag(jsg::Lock& js, jsg::BufferSource authTag);
+    jsg::BufferSource getAuthTag(jsg::Lock& js);
+
+    JSG_RESOURCE_TYPE(AeadHandle) {
+      JSG_METHOD(update);
+      JSG_METHOD(final);
+      JSG_METHOD(setAAD);
+      JSG_METHOD(setAutoPadding);
+      JSG_METHOD(setAuthTag);
+      JSG_METHOD(getAuthTag);
+    };
+
+   private:
+    CipherMode mode;
+    ncrypto::Aead aead;
+    ncrypto::AeadCtxPointer ctx;
+    jsg::Ref<CryptoKey> key;
+    jsg::BufferSource iv;
+    kj::Maybe<jsg::BufferSource> maybeAuthTag;
+    kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
+    kj::Maybe<jsg::BufferSource> maybeAad;
+    bool updated = false;
+  };
+
+  kj::OneOf<jsg::Ref<CipherHandle>, jsg::Ref<AeadHandle>> newHandle(jsg::Lock& js,
+      kj::uint mode,
+      kj::String algorithm,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource iv,
+      jsg::Optional<uint32_t> maybeAuthTagLength);
 
   struct PublicPrivateCipherOptions {
     int padding;
@@ -405,6 +490,8 @@ class CryptoImpl final: public jsg::Object {
 
   jsg::Optional<CipherInfo> getCipherInfo(
       kj::OneOf<kj::String, int> nameOrNid, GetCipherInfoOptions options);
+
+  kj::ArrayPtr<kj::StringPtr> getCiphers();
 
   // SPKAC
   bool verifySpkac(kj::Array<const kj::byte> input);
@@ -486,11 +573,14 @@ class CryptoImpl final: public jsg::Object {
     JSG_METHOD(verifyOneShot);
     // Cipher/Decipher
     JSG_NESTED_TYPE(CipherHandle);
+    JSG_NESTED_TYPE(AeadHandle);
+    JSG_METHOD(newHandle);
     JSG_METHOD(publicEncrypt);
     JSG_METHOD(publicDecrypt);
     JSG_METHOD(privateEncrypt);
     JSG_METHOD(privateDecrypt);
     JSG_METHOD(getCipherInfo);
+    JSG_METHOD(getCiphers);
   }
 };
 
@@ -504,5 +594,6 @@ class CryptoImpl final: public jsg::Object {
       api::node::CryptoImpl::SignHandle, api::node::CryptoImpl::VerifyHandle,                      \
       api::node::CryptoImpl::CipherHandle, api::node::CryptoImpl::PublicPrivateCipherOptions,      \
       api::node::CryptoImpl::CipherInfo, api::node::CryptoImpl::GetCipherInfoOptions,              \
-      api::node::CryptoImpl::ECDHHandle, EW_CRYPTO_X509_ISOLATE_TYPES
+      api::node::CryptoImpl::ECDHHandle, api::node::CryptoImpl::AeadHandle,                        \
+      EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node
