@@ -479,6 +479,7 @@ export interface TestController {}
 export interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  readonly exports: Cloudflare.Exports;
   readonly props: Props;
 }
 export type ExportedHandlerFetchHandler<
@@ -631,6 +632,7 @@ export interface DurableObjectClass<
 > {}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
+  readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
@@ -3745,6 +3747,7 @@ export interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+  hardTimeout?: number | bigint;
 }
 /**
  * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
@@ -3859,6 +3862,7 @@ export interface WorkerLoaderModule {
   data?: ArrayBuffer;
   json?: any;
   py?: string;
+  wasm?: ArrayBuffer;
 }
 export interface WorkerLoaderWorkerCode {
   compatibilityDate: string;

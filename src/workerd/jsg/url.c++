@@ -845,7 +845,7 @@ struct Token {
 
   Type type = Type::INVALID_CHAR;
   size_t index = 0;
-  kj::OneOf<char, kj::ArrayPtr<const char>> value = (char)0;
+  kj::OneOf<char, kj::ArrayPtr<const char>> value = static_cast<char>(0);
   Part::Modifier modifier = Part::Modifier::NONE;
 
   operator kj::String() const {

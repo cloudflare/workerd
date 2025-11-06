@@ -3851,6 +3851,7 @@ export interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+  hardTimeout?: number | bigint;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
@@ -4143,6 +4144,7 @@ export interface WorkerLoaderModule {
   data?: ArrayBuffer;
   json?: any;
   py?: string;
+  wasm?: ArrayBuffer;
 }
 export interface WorkerLoaderWorkerCode {
   compatibilityDate: string;

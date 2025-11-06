@@ -111,6 +111,7 @@ wd_cc_library(
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
     implementation_deps = [
+        "//src/workerd/util:entropy",
         "@simdutf",
         "@ssl",
     ],
@@ -118,6 +119,7 @@ wd_cc_library(
     tags = ["no-clang-tidy"],
     deps = [
         ":exception",
+        ":exception_metadata_capnp",
         ":macro-meta",
         ":memory-tracker",
         ":meta",
@@ -219,6 +221,12 @@ wd_cc_library(
 wd_cc_capnp_library(
     name = "rtti_capnp",
     srcs = ["rtti.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_capnp_library(
+    name = "exception_metadata_capnp",
+    srcs = ["exception-metadata.capnp"],
     visibility = ["//visibility:public"],
 )
 

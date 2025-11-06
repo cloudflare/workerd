@@ -14,6 +14,10 @@
 #include <cstdlib>
 #include <regex>
 
+#if __linux__
+#include <unistd.h>
+#endif
+
 namespace workerd::server {
 namespace {
 
@@ -5019,7 +5023,6 @@ KJ_TEST("Server: Pass service stubs in ctx.props.") {
 
 #if __linux__
 // This test uses pipe2 and dup2 to capture stdout which is far easier on linux.
-#include <unistd.h>
 
 struct FdPair {
   kj::AutoCloseFd output;

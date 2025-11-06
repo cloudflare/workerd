@@ -3,9 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/trace.h>
+#include <workerd/util/entropy.h>
 #include <workerd/util/thread-scopes.h>
-
-#include <openssl/rand.h>
 
 #include <capnp/message.h>
 #include <capnp/schema.h>
@@ -136,7 +135,7 @@ uint64_t getRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
     KJ_IF_SOME(entropy, entropySource) {
       entropy.generate(kj::asBytes(ret));
     } else {
-      KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&ret), sizeof(ret)) == 1);
+      getEntropy(kj::asBytes(ret));
     }
     // On the extreme off chance that we ended with with zeroes
     // let's try again, but only up to three times.
@@ -926,7 +925,7 @@ void Attribute::copyTo(rpc::Trace::Attribute::Builder builder) const {
 }
 
 Attribute Attribute::clone() const {
-  return Attribute(kj::ConstString(kj::str(name)), KJ_MAP(v, value) { return spanTagClone(v); });
+  return Attribute(name.clone(), KJ_MAP(v, value) { return spanTagClone(v); });
 }
 
 kj::String Attribute::toString() const {
@@ -950,7 +949,7 @@ Return Return::clone() const {
   return Return();
 }
 
-SpanOpen::SpanOpen(SpanId spanId, kj::String operationName, kj::Maybe<Info> info)
+SpanOpen::SpanOpen(SpanId spanId, kj::ConstString operationName, kj::Maybe<Info> info)
     : operationName(kj::mv(operationName)),
       info(kj::mv(info)),
       spanId(spanId) {}
@@ -1020,7 +1019,7 @@ SpanOpen SpanOpen::clone() const {
       KJ_UNREACHABLE;
     });
   };
-  return SpanOpen(spanId, kj::str(operationName), cloneInfo(info));
+  return SpanOpen(spanId, operationName.clone(), cloneInfo(info));
 }
 
 kj::String KJ_STRINGIFY(const SpanOpen::Info& info) {
@@ -1478,11 +1477,10 @@ CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
 }
 
 CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(
-      spanId, parentSpanId, kj::ConstString(kj::str(operationName)), startTime, endTime);
+  CompleteSpan copy(spanId, parentSpanId, operationName.clone(), startTime, endTime);
   copy.tags.reserve(tags.size());
   for (auto& tag: tags) {
-    copy.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+    copy.tags.insert(tag.key.clone(), spanTagClone(tag.value));
   }
   return copy;
 }
@@ -1536,11 +1534,39 @@ void SpanBuilder::setOperationName(kj::ConstString operationName) {
   }
 }
 
-void SpanBuilder::setTag(kj::ConstString key, TagValue value) {
+void SpanBuilder::setTag(kj::ConstString key, TagInitValue value) {
   KJ_IF_SOME(s, span) {
+    // We allow passing a LiteralStringConst or StringPtr so that we don't have to allocate memory
+    // if we're not being observed.
+    TagValue v = [](TagInitValue value) -> Span::TagValue {
+      KJ_SWITCH_ONEOF(value) {
+        KJ_CASE_ONEOF(str, kj::StringPtr) {
+          return kj::ConstString(kj::str(str));
+        }
+        KJ_CASE_ONEOF(str, kj::LiteralStringConst) {
+          return kj::ConstString(str);
+        }
+        KJ_CASE_ONEOF(str, kj::ConstString) {
+          return kj::mv(str);
+        }
+        KJ_CASE_ONEOF(str, kj::String) {
+          return kj::ConstString(kj::mv(str));
+        }
+        KJ_CASE_ONEOF(val, int64_t) {
+          return val;
+        }
+        KJ_CASE_ONEOF(val, double) {
+          return val;
+        }
+        KJ_CASE_ONEOF(val, bool) {
+          return val;
+        }
+      }
+      KJ_UNREACHABLE;
+    }(kj::mv(value));
+
     auto keyPtr = key.asPtr();
-    s.tags.upsert(
-        kj::mv(key), kj::mv(value), [keyPtr](TagValue& existingValue, TagValue&& newValue) {
+    s.tags.upsert(kj::mv(key), kj::mv(v), [keyPtr](TagValue& existingValue, TagValue&& newValue) {
       // This is a programming error, but not a serious one. We could alternatively just emit
       // duplicate tags and leave the Jaeger UI in charge of warning about them.
       [[maybe_unused]] static auto logged = [keyPtr]() {
@@ -1573,8 +1599,8 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
 
 Span::TagValue spanTagClone(const Span::TagValue& tag) {
   KJ_SWITCH_ONEOF(tag) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return kj::str(str);
+    KJ_CASE_ONEOF(str, kj::ConstString) {
+      return str.clone();
     }
     KJ_CASE_ONEOF(val, int64_t) {
       return val;
@@ -1584,24 +1610,6 @@ Span::TagValue spanTagClone(const Span::TagValue& tag) {
     }
     KJ_CASE_ONEOF(val, bool) {
       return val;
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-kj::String spanTagStr(const Span::TagValue& tag) {
-  KJ_SWITCH_ONEOF(tag) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return kj::str(str);
-    }
-    KJ_CASE_ONEOF(val, int64_t) {
-      return kj::str(val);
-    }
-    KJ_CASE_ONEOF(val, double) {
-      return kj::str(val);
-    }
-    KJ_CASE_ONEOF(val, bool) {
-      return kj::str(val);
     }
   }
   KJ_UNREACHABLE;
@@ -1619,8 +1627,8 @@ void serializeTagValue(RpcValue::Builder builder, const Span::TagValue& value) {
     KJ_CASE_ONEOF(d, double) {
       builder.setFloat64(d);
     }
-    KJ_CASE_ONEOF(s, kj::String) {
-      builder.setString(s);
+    KJ_CASE_ONEOF(s, kj::ConstString) {
+      builder.setString(s.asPtr());
     }
   }
 }
@@ -1634,7 +1642,7 @@ Span::TagValue deserializeTagValue(RpcValue::Reader value) {
     case RpcValue::INT64:
       return value.getInt64();
     case RpcValue::STRING:
-      return kj::heapString(value.getString());
+      return kj::ConstString(kj::heapString(value.getString()));
     default:
       KJ_UNREACHABLE;
   }

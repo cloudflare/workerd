@@ -46,6 +46,18 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
 
   TimeoutId setTimeout(
       IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) override {
+    // Verify the generator is from the correct ServiceWorkerGlobalScope. If we have been passed a
+    // different `timeoutIdGenerator`, then that means this IoContext is active at a time when
+    // JavaScript in a different V8 context is executing. This _should_ be impossible, but we're
+    // occasionally seeing timeout ID collision assertion failures in `addState()`, and one possible
+    // explanation is that an IoContext is somehow current for a different V8 context.
+    //
+    // TODO(cleanup): Find a more general way to assert that the JS API surface is being used under
+    //   the correct IoContext, get rid of this function's `generator` parameter, and instead rely
+    //   on the IoContext to provide the generator.
+    KJ_ASSERT(&generator == &context.getCurrentLock().getTimeoutIdGenerator(),
+        "TimeoutId Generator mismatch - using a generator from wrong ServiceWorkerGlobalScope");
+
     auto [id, it] = addState(generator, kj::mv(params));
     setTimeoutImpl(context, it);
     return id;
@@ -881,10 +893,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   SpanBuilder userSpan = nullptr;
 
   KJ_IF_SOME(n, options.operationName) {
-    // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
-    // a memory allocation here, but there might be use cases for dynamically allocated strings.
-    span = makeTraceSpan(kj::ConstString(kj::str(n)));
-    userSpan = makeUserTraceSpan(kj::ConstString(kj::mv(n)));
+    span = makeTraceSpan(n.clone());
+    userSpan = makeUserTraceSpan(n.clone());
   }
 
   TraceContext tracing(kj::mv(span), kj::mv(userSpan));

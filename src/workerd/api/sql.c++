@@ -29,7 +29,8 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   userSpan.setTag("db.system.name"_kjc, kj::str("cloudflare-durable-object-sql"_kjc));
   userSpan.setTag("db.operation.name"_kjc, kj::str("exec"_kjc));
   userSpan.setTag("db.query.text"_kjc, kj::str(querySql));
-  userSpan.setTag("cloudflare.durable_object.query.bindings"_kjc, int64_t(bindings.size()));
+  userSpan.setTag(
+      "cloudflare.durable_object.query.bindings"_kjc, static_cast<int64_t>(bindings.size()));
 
   // Internalize the string, so that the cache can be keyed by string identity rather than content.
   // Any string we put into the cache is expected to live there for a while anyway, so even if it
@@ -74,10 +75,10 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     KJ_ASSERT(statementCache.map.eraseMatch(oldQuery));
   }
 
-  userSpan.setTag(
-      "cloudflare.durable_object.response.rows_read"_kjc, int64_t(result->getRowsRead()));
-  userSpan.setTag(
-      "cloudflare.durable_object.response.rows_written"_kjc, int64_t(result->getRowsWritten()));
+  userSpan.setTag("cloudflare.durable_object.response.rows_read"_kjc,
+      static_cast<int64_t>(result->getRowsRead()));
+  userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc,
+      static_cast<int64_t>(result->getRowsWritten()));
   return result;
 }
 
@@ -85,11 +86,12 @@ SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) 
   auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_ingest"_kjc);
   SqliteDatabase::Regulator& regulator = *this;
   auto result = getDb(js).ingestSql(regulator, querySql);
-  userSpan.setTag("cloudflare.durable_object.response.rows_read"_kjc, int64_t(result.rowsRead));
   userSpan.setTag(
-      "cloudflare.durable_object.response.rows_written"_kjc, int64_t(result.rowsWritten));
-  userSpan.setTag(
-      "cloudflare.durable_object.response.statement_count"_kjc, int64_t(result.statementCount));
+      "cloudflare.durable_object.response.rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
+  userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc,
+      static_cast<int64_t>(result.rowsWritten));
+  userSpan.setTag("cloudflare.durable_object.response.statement_count"_kjc,
+      static_cast<int64_t>(result.statementCount));
   return IngestResult(
       kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
@@ -112,7 +114,7 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
       "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
                       .getInt64(0);
   auto dbSize = pages * getPageSize(db);
-  userSpan.setTag("cloudflare.durable_object.response.db_size"_kjc, int64_t(dbSize));
+  userSpan.setTag("cloudflare.durable_object.response.db_size"_kjc, static_cast<int64_t>(dbSize));
   return dbSize;
 }
 

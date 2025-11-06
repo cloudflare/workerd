@@ -17,6 +17,7 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
+#include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
@@ -46,11 +47,10 @@ void warnIfBadHeaderString(const jsg::ByteString& byteString) {
         // spec correctly, and the string that is actually going get serialized onto the wire.
         auto rawHex = kj::strArray(KJ_MAP(b, fastEncodeUtf16(byteString.asArray())) {
           KJ_ASSERT(b < 256);  // Guaranteed by StringWrapper having set CONTAINS_EXTENDED_ASCII.
-          return kj::str("\\x", kj::hex(kj::byte(b)));
+          return kj::str("\\x", kj::hex(static_cast<kj::byte>(b)));
         }, "");
-        auto utf8Hex =
-            kj::strArray(
-                KJ_MAP(b, byteString) { return kj::str("\\x", kj::hex(kj::byte(b))); }, "");
+        auto utf8Hex = kj::strArray(
+            KJ_MAP(b, byteString) { return kj::str("\\x", kj::hex(static_cast<kj::byte>(b))); }, "");
 
         context.logWarning(kj::str("Problematic header name or value: \"", byteString,
             "\" (raw bytes: \"", rawHex,
@@ -638,18 +638,6 @@ class BodyBufferInputStream final: public ReadableStreamSource {
 
 }  // namespace
 
-// Make an array of characters containing random hexadecimal digits.
-//
-// Note: Rather than use random hex digits, we could generate the hex digits by hashing the
-//   form-data content itself! This would give us pleasing assurance that our boundary string is
-//   not present in the content being divided. The downside is CPU usage if, say, a user uploads
-//   an enormous file.
-kj::String makeRandomBoundaryCharacters() {
-  kj::FixedArray<kj::byte, 16> buffer;
-  IoContext::current().getEntropySource().generate(buffer);
-  return kj::encodeHex(buffer);
-}
-
 Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
   Buffer result;
   result.view = view;
@@ -705,7 +693,15 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       buffer = kj::mv(blob);
     }
     KJ_CASE_ONEOF(formData, jsg::Ref<FormData>) {
-      auto boundary = makeRandomBoundaryCharacters();
+      // Make an array of characters containing random hexadecimal digits.
+      //
+      // Note: Rather than use random hex digits, we could generate the hex digits by hashing the
+      //   form-data content itself! This would give us pleasing assurance that our boundary string
+      //   is not present in the content being divided. The downside is CPU usage if, say, a user
+      //   uploads an enormous file.
+      kj::FixedArray<kj::byte, 16> boundaryBuffer;
+      workerd::getEntropy(boundaryBuffer);
+      auto boundary = kj::encodeHex(boundaryBuffer);
       contentType = MimeType::formDataWithBoundary(boundary);
       buffer = formData->serialize(boundary);
     }
@@ -1703,7 +1699,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
     return jsBody->pumpTo(js, kj::mv(stream), true);
   } else {
-    outer.send(statusCode, statusText, outHeaders, uint64_t(0));
+    outer.send(statusCode, statusText, outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
   }
 }
@@ -1997,7 +1993,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       auto maybeLength = jsBody->tryGetLength(StreamEncoding::IDENTITY);
       KJ_IF_SOME(ctx, traceContext) {
         KJ_IF_SOME(length, maybeLength) {
-          ctx.userSpan.setTag("http.request.body.size"_kjc, int64_t(length));
+          ctx.userSpan.setTag("http.request.body.size"_kjc, static_cast<int64_t>(length));
         }
       }
 
@@ -2049,7 +2045,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
               js, signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true))),
           jsBody.addRef()));
     } else {
-      nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
+      nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));
     }
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(js, signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
@@ -2066,9 +2062,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(client));
       KJ_IF_SOME(ctx, traceContext) {
-        ctx.userSpan.setTag("http.response.status_code"_kjc, int64_t(response.statusCode));
+        ctx.userSpan.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
         KJ_IF_SOME(length, response.body->tryGetLength()) {
-          ctx.userSpan.setTag("http.response.body.size"_kjc, int64_t(length));
+          ctx.userSpan.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
         }
       }
       return handleHttpResponse(
@@ -2709,15 +2705,15 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       // For channels, create trace context
-      auto userSpan = ioContext.makeUserTraceSpan(kj::ConstString(kj::str(operationName)));
-      auto traceSpan = ioContext.makeTraceSpan(kj::ConstString(kj::str(operationName)));
+      auto userSpan = ioContext.makeUserTraceSpan(operationName.clone());
+      auto traceSpan = ioContext.makeTraceSpan(operationName.clone());
       auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto userSpan = ioContext.makeUserTraceSpan(kj::ConstString(kj::str(operationName)));
-      auto traceSpan = ioContext.makeTraceSpan(kj::ConstString(kj::str(operationName)));
+      auto userSpan = ioContext.makeUserTraceSpan(operationName.clone());
+      auto traceSpan = ioContext.makeTraceSpan(operationName.clone());
       auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {

@@ -33,8 +33,8 @@ static kj::Maybe<Signature> tryGetGeneratorFunction(
     Lock& js, JsObject& object, kj::StringPtr name) {
   auto value = object.get(js, name);
   return TypeWrapper::from(js.v8Isolate)
-      .tryUnwrap(
-          js, js.v8Context(), value, (Signature*)nullptr, kj::Maybe<v8::Local<v8::Object>>(object));
+      .tryUnwrap(js, js.v8Context(), value, static_cast<Signature*>(nullptr),
+          kj::Maybe<v8::Local<v8::Object>>(object));
 }
 
 template <typename T>
@@ -43,7 +43,7 @@ class Generator final {
  public:
   template <typename TypeWrapper>
   Generator(Lock& js, JsObject object, TypeWrapper*)
-      : maybeActive(Active(js, object, (TypeWrapper*)nullptr)) {}
+      : maybeActive(Active(js, object, static_cast<TypeWrapper*>(nullptr))) {}
   Generator(Generator&&) = default;
   Generator& operator=(Generator&&) = default;
   KJ_DISALLOW_COPY(Generator);
@@ -143,7 +143,7 @@ class AsyncGenerator final {
  public:
   template <typename TypeWrapper>
   AsyncGenerator(Lock& js, JsObject object, TypeWrapper*)
-      : maybeActive(Active(js, object, (TypeWrapper*)nullptr)),
+      : maybeActive(Active(js, object, static_cast<TypeWrapper*>(nullptr))),
         maybeSelfRef(kj::rc<WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {}
   AsyncGenerator(AsyncGenerator&& other)
       : maybeActive(kj::mv(other.maybeActive)),
@@ -365,7 +365,8 @@ class GeneratorWrapper {
         } else {
           return GeneratorNext<T>{
             .done = true,
-            .value = typeWrapper.tryUnwrap(js, context, value, (T*)nullptr, parentObject),
+            .value =
+                typeWrapper.tryUnwrap(js, context, value, static_cast<T*>(nullptr), parentObject),
           };
         }
       }
@@ -376,7 +377,8 @@ class GeneratorWrapper {
           .value = kj::mv(v),
         };
       } else {
-        throwTypeError(js.v8Isolate, TypeErrorContext::other(), TypeWrapper::getName((T*)nullptr));
+        throwTypeError(js.v8Isolate, TypeErrorContext::other(),
+            TypeWrapper::getName(static_cast<T*>(nullptr)));
       }
     }
 
@@ -404,7 +406,8 @@ class GeneratorWrapper {
         auto func = iter.As<v8::Function>();
         auto iterObj = check(func->Call(context, object, 0, nullptr));
         if (iterObj->IsObject()) {
-          return Generator<T>(js, JsObject(iterObj.As<v8::Object>()), (TypeWrapper*)nullptr);
+          return Generator<T>(
+              js, JsObject(iterObj.As<v8::Object>()), static_cast<TypeWrapper*>(nullptr));
         }
       }
     }
@@ -436,7 +439,8 @@ class GeneratorWrapper {
         auto func = iter.As<v8::Function>();
         auto iterObj = check(func->Call(context, object, 0, nullptr));
         if (iterObj->IsObject()) {
-          return AsyncGenerator<T>(js, JsObject(iterObj.As<v8::Object>()), (TypeWrapper*)nullptr);
+          return AsyncGenerator<T>(
+              js, JsObject(iterObj.As<v8::Object>()), static_cast<TypeWrapper*>(nullptr));
         }
       }
     }

@@ -11,6 +11,7 @@
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
+#include <workerd/io/io-timers.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace.h>
@@ -125,8 +126,8 @@ class Worker: public kj::AtomicRefcounted {
     ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY;
     StructuredLogging structuredLogging = StructuredLogging::NO;
     ProcessStdioPrefixed processStdioPrefixed = ProcessStdioPrefixed::YES;
-    kj::String stdoutPrefix = kj::str("stdout:"_kj);
-    kj::String stderrPrefix = kj::str("stderr:"_kj);
+    kj::ConstString stdoutPrefix = "stdout:"_kjc;
+    kj::ConstString stderrPrefix = "stderr:"_kjc;
 
     LoggingOptions() = default;
     LoggingOptions(LoggingOptions&&) = default;
@@ -138,15 +139,15 @@ class Worker: public kj::AtomicRefcounted {
         : consoleMode(other.consoleMode),
           structuredLogging(other.structuredLogging),
           processStdioPrefixed(other.processStdioPrefixed),
-          stdoutPrefix(kj::str(other.stdoutPrefix)),
-          stderrPrefix(kj::str(other.stderrPrefix)) {}
+          stdoutPrefix(other.stdoutPrefix.clone()),
+          stderrPrefix(other.stderrPrefix.clone()) {}
 
     LoggingOptions& operator=(const LoggingOptions& other) {
       consoleMode = other.consoleMode;
       structuredLogging = other.structuredLogging;
       processStdioPrefixed = other.processStdioPrefixed;
-      stdoutPrefix = kj::str(other.stdoutPrefix);
-      stderrPrefix = kj::str(other.stderrPrefix);
+      stdoutPrefix = other.stdoutPrefix.clone();
+      stderrPrefix = other.stderrPrefix.clone();
       return *this;
     }
   };
@@ -747,6 +748,9 @@ class Worker::Lock {
 
   // Get the C++ object representing the global scope.
   api::ServiceWorkerGlobalScope& getGlobalScope();
+
+  // Get the timeout ID generator from this worker's ServiceWorkerGlobalScope.
+  TimeoutId::Generator& getTimeoutIdGenerator();
 
   // Get the opaque storage key to use for recording trace information in async contexts.
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();

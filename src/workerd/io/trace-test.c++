@@ -427,7 +427,7 @@ KJ_TEST("Read/Write SpanOpen works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanOpen>();
 
-  SpanOpen info(0x2a2a2a2a2a2a2a2a, kj::str("foo"), kj::none);
+  SpanOpen info(0x2a2a2a2a2a2a2a2a, "foo"_kjc, kj::none);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -549,7 +549,7 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   // An attribute event can have one or more Attributes specified.
   kj::Vector<Attribute> attrs(2);
   attrs.add(Attribute("foo"_kjc, true));
-  attrs.add(Attribute("bar"_kjc, (int64_t)123));
+  attrs.add(Attribute("bar"_kjc, static_cast<int64_t>(123)));
 
   TailEvent info(kj::mv(context), traceId, kj::UNIX_EPOCH, 0, attrs.releaseAsArray());
   info.copyTo(infoBuilder);

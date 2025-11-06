@@ -245,7 +245,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
           // the GC visitation callback.
           instance->SetInternalFieldCount(jsg::Wrappable::INTERNAL_FIELD_COUNT);
 
-          constructor->Inherit(wrapper.getTemplate(js.v8Isolate, (CapnpCapability*)nullptr));
+          constructor->Inherit(
+              wrapper.getTemplate(js.v8Isolate, static_cast<CapnpCapability*>(nullptr)));
           kj::HashSet<uint64_t> seen;
           addAllMethods(js, prototype, signature, schema.asInterface(), seen);
           break;
@@ -384,7 +385,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
   }
   kj::Maybe<capnp::DynamicCapability::Client> tryUnwrapCap(
       jsg::Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> value) override {
-    return tryUnwrap(js, context, value, (capnp::DynamicCapability::Client*)nullptr, kj::none);
+    return tryUnwrap(
+        js, context, value, static_cast<capnp::DynamicCapability::Client*>(nullptr), kj::none);
   }
 
   v8::Local<v8::Promise> wrapPromise(jsg::Lock& js,
@@ -396,7 +398,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
   kj::Maybe<jsg::Promise<jsg::Value>> tryUnwrapPromise(
       jsg::Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> value) override {
     return static_cast<TypeWrapper&>(*this).tryUnwrap(
-        js, context, value, (jsg::Promise<jsg::Value>*)nullptr, kj::none);
+        js, context, value, static_cast<jsg::Promise<jsg::Value>*>(nullptr), kj::none);
   }
 };
 

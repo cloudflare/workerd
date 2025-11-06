@@ -567,7 +567,7 @@ using EventInfo = kj::OneOf<FetchEventInfo,
 EventInfo cloneEventInfo(const EventInfo& info);
 
 template <typename T>
-concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() ||
+concept AttributeValue = kj::isSameType<kj::ConstString, T>() || kj::isSameType<bool, T>() ||
     kj::isSameType<double, T>() || kj::isSameType<int64_t, T>();
 
 // An Attribute mark is used to add detail to a span over its lifetime.
@@ -575,7 +575,7 @@ concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool,
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::String, bool, double, int64_t>;
+  using Value = kj::OneOf<kj::ConstString, bool, double, int64_t>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::ConstString name, Value&& value);
@@ -664,13 +664,13 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(SpanId spanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(SpanId spanId, kj::ConstString operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
   KJ_DISALLOW_COPY(SpanOpen);
 
-  kj::String operationName;
+  kj::ConstString operationName;
   kj::Maybe<Info> info = kj::none;
   SpanId spanId;
 
@@ -954,9 +954,7 @@ struct Span {
 void serializeTagValue(rpc::TagValue::Builder builder, const Span::TagValue& value);
 Span::TagValue deserializeTagValue(rpc::TagValue::Reader value);
 
-// Stringify and clone for span tags, getting this to work with KJ_STRINGIFY() appears exceedingly
-// difficult.
-kj::String spanTagStr(const Span::TagValue& tag);
+// Clone function for span tags, avoids memory allocation for string literals and non-string values.
 Span::TagValue spanTagClone(const Span::TagValue& tag);
 
 // An opaque token which can be used to create child spans of some parent. This is typically
@@ -1063,7 +1061,18 @@ class SpanBuilder {
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
-  void setTag(kj::ConstString key, TagValue value);
+  // Allow setting tags with an extended set of types to elide string allocations when we have a
+  // string literal or are not being observed. We include String/LiteralStringConst here to avoid
+  // having to manually cast them to ConstString each time.
+  using TagInitValue = kj::OneOf<kj::StringPtr,
+      kj::String,
+      kj::LiteralStringConst,
+      kj::ConstString,
+      bool,
+      double,
+      int64_t>;
+
+  void setTag(kj::ConstString key, TagInitValue value);
 
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.

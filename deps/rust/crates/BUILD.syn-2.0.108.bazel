@@ -57,6 +57,6 @@ rust_library(
     deps = [
         "@crates_vendor__proc-macro2-1.0.103//:proc_macro2",
         "@crates_vendor__quote-1.0.41//:quote",
-        "@crates_vendor__unicode-ident-1.0.20//:unicode_ident",
+        "@crates_vendor__unicode-ident-1.0.22//:unicode_ident",
     ],
 )

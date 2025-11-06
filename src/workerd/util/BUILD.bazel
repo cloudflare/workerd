@@ -138,6 +138,7 @@ wd_cc_library(
     srcs = ["uuid.c++"],
     hdrs = ["uuid.h"],
     implementation_deps = [
+        ":entropy",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
     ],
@@ -248,6 +249,18 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "entropy",
+    srcs = ["entropy.c++"],
+    hdrs = ["entropy.h"],
+    implementation_deps = [
+        "@ncrypto",
+        "@ssl",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "completion-membrane",
     hdrs = ["completion-membrane.h"],
     visibility = ["//visibility:public"],
@@ -259,6 +272,12 @@ wd_cc_library(
     hdrs = ["exception.h"],
     visibility = ["//visibility:public"],
     deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "immediate-crash",
+    hdrs = ["immediate-crash.h"],
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(

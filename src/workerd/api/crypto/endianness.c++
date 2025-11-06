@@ -14,7 +14,7 @@
 
 #include <endian.h>
 
-#elif defined(__APPLE__)
+#elifdef __APPLE__
 
 #include <libkern/OSByteOrder.h>
 
@@ -57,7 +57,7 @@ uint64_t le64toh(uint64_t x) {
   return OSSwapLittleToHostInt64(x);
 }
 
-#elif defined(__OpenBSD__)
+#elifdef __OpenBSD__
 
 #include <sys/endian.h>
 
@@ -86,7 +86,7 @@ uint64_t le64toh(uint64_t x) {
   return letoh64(x);
 }
 
-#elif defined(__WINDOWS__)
+#elifdef __WINDOWS__
 
 #include <winsock2.h>
 
