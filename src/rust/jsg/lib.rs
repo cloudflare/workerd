@@ -124,10 +124,11 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
         None => {
             let constructor = wrapper.get_constructor(lock);
             let instance = unsafe {
-                v8::LocalValue::from_ffi(
-                    lock,
-                    ffi::wrap_resource(lock.get_isolate(), resource as usize, constructor.to_ffi()),
-                )
+                v8::LocalValue::from_ffi(ffi::wrap_resource(
+                    lock.get_isolate(),
+                    resource as usize,
+                    constructor.to_ffi(),
+                ))
             };
             r.set_js_instance(lock, &instance);
             instance
@@ -276,14 +277,15 @@ pub trait Resource: Type {
     fn members() -> Vec<Member<Self>>
     where
         Self: Sized;
-    fn js_instance<'a>(&self, lock: &'a mut v8::Lock) -> Option<v8::LocalValue<'a>>;
-    fn set_js_instance<'a>(&mut self, lock: &'a mut v8::Lock, instance: &v8::LocalValue<'a>);
+    fn js_instance<'a>(&self, lock: &mut v8::Lock) -> Option<v8::LocalValue<'a>>;
+
+    fn set_js_instance<'a>(&mut self, lock: &mut v8::Lock, instance: &v8::LocalValue<'a>);
 }
 
 pub trait ResourceWrapper {
-    fn get_constructor<'a>(&self, isolate: &'a mut v8::Lock) -> v8::LocalFunctionTemplate;
+    fn get_constructor<'a>(&self, lock: &'a mut v8::Lock) -> v8::LocalFunctionTemplate;
 }
 
 pub trait Struct: Type {
-    fn wrap(&self, lock: &v8::Lock) -> v8::LocalValue;
+    fn wrap<'a, 'b>(&self, lock: &'a mut v8::Lock) -> v8::LocalValue<'b> where 'b: 'a;
 }

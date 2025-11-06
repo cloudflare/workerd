@@ -58,20 +58,12 @@ trait IsolateMember: Drop {
 pub struct LocalValue<'a>(usize, PhantomData<&'a ()>);
 
 impl<'a> LocalValue<'a> {
-    pub unsafe fn from_ffi(lock: &'a mut Lock, value: usize) -> Self {
+    pub unsafe fn from_ffi(value: usize) -> Self {
         LocalValue(value, PhantomData)
     }
 
     pub unsafe fn to_ffi(self) -> usize {
         self.0
-    }
-
-    pub fn from_string(lock: &'a mut Lock, value: &str) -> Self {
-        unsafe { Self::from_ffi(lock, ffi::new_local_string(lock.get_isolate(), value)) }
-    }
-
-    pub fn from_f64(lock: &'a mut Lock, value: f64) -> Self {
-        unsafe { Self::from_ffi(lock, ffi::new_local_number(lock.get_isolate(), value)) }
     }
 
     pub fn to_global(&self, lock: &'a mut Lock) -> GlobalValue {
@@ -88,14 +80,7 @@ impl<'a> From<LocalObject<'a>> for LocalValue<'a> {
 pub struct LocalObject<'a>(usize, PhantomData<&'a ()>);
 
 impl<'a> LocalObject<'a> {
-    pub unsafe fn new(lock: &'a Lock) -> Self {
-        LocalObject(
-            unsafe { ffi::new_local_object(lock.get_isolate()) },
-            PhantomData,
-        )
-    }
-
-    pub unsafe fn set(&mut self, lock: &'a Lock, key: &str, value: LocalValue) {
+    pub unsafe fn set(&mut self, lock: &mut Lock, key: &str, value: LocalValue) {
         unsafe { ffi::set_local_object_property(lock.get_isolate(), self.0, key, value.0) }
     }
 }
@@ -107,32 +92,66 @@ impl GlobalValue {
         GlobalValue(value)
     }
 
-    pub fn to_local<'a>(&self, lock: &'a mut Lock) -> LocalValue<'a> {
+    pub fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
         unsafe {
-            LocalValue::from_ffi(lock, ffi::global_to_local_value(lock.get_isolate(), self.0))
+            LocalValue::from_ffi(ffi::global_to_local_value(lock.get_isolate(), self.0))
         }
     }
 }
 
 pub struct Lock {
-    ptr: *mut ffi::Isolate,
+    isolate: *mut ffi::Isolate,
 }
 
 impl Lock {
     pub unsafe fn from_args(args: *mut ffi::FunctionCallbackInfo) -> Self {
         unsafe {
-            Lock {
-                ptr: ffi::get_isolate(args),
-            }
+           Self::from_isolate(ffi::get_isolate(args))
         }
     }
 
     pub unsafe fn from_isolate(isolate: *mut ffi::Isolate) -> Self {
-        Lock { ptr: isolate }
+        Self { isolate: unsafe { &mut *isolate } }
     }
 
-    pub unsafe fn get_isolate(&self) -> *mut ffi::Isolate {
-        self.ptr
+    pub unsafe fn get_isolate(&mut self) -> *mut ffi::Isolate {
+        self.isolate
+    }
+
+    pub fn new_object<'a>(&mut self) -> LocalObject<'a> {
+        LocalObject(
+            unsafe { ffi::new_local_object(self.isolate) },
+            PhantomData,
+        )
+    }
+}
+
+pub trait ToLocalValue {
+    fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a>;
+}
+
+impl ToLocalValue for u8 {
+    fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
+        unsafe { LocalValue::from_ffi(ffi::new_local_number(lock.get_isolate(), *self as f64))}
+    }
+}
+
+impl ToLocalValue for u32 {
+    fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
+        unsafe { LocalValue::from_ffi(ffi::new_local_number(lock.get_isolate(), *self as f64))}
+    }
+}
+
+
+impl ToLocalValue for String {
+    fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
+        self.as_str().to_local(lock)
+    }
+}
+
+impl ToLocalValue for &str {
+    fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
+        unsafe { LocalValue::from_ffi(ffi::new_local_string(lock.get_isolate(), self))}
     }
 }
 
@@ -172,8 +191,8 @@ impl FunctionCallbackInfo {
         FunctionCallbackInfo(info)
     }
 
-    pub fn get_this<'a>(&self, lock: &'a mut Lock) -> LocalValue<'a> {
-        unsafe { LocalValue::from_ffi(lock, ffi::get_this(self.0)) }
+    pub fn get_this<'a>(&self, _lock: &mut Lock) -> LocalValue<'a> {
+        unsafe { LocalValue::from_ffi(ffi::get_this(self.0)) }
     }
 
     pub fn set_return_value(&self, value: LocalValue) {

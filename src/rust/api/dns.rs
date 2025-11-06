@@ -1,5 +1,6 @@
 use jsg::Struct;
 use jsg::v8;
+use jsg::v8::ToLocalValue;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -31,24 +32,18 @@ pub struct CaaRecord {
 impl jsg::Type for CaaRecord {}
 
 impl jsg::Struct for CaaRecord {
-    fn wrap(&self, lock: &v8::Lock) -> v8::LocalValue {
+    fn wrap<'a, 'b>(&self, lock: &'a mut v8::Lock) -> v8::LocalValue<'b>
+    where
+        'b: 'a,
+    {
         unsafe {
-            let mut obj = v8::LocalObject::new(lock);
-            obj.set(
-                lock,
-                "critical",
-                v8::LocalValue::from_f64(&lock, self.critical as f64),
-            );
-            obj.set(
-                lock,
-                "field",
-                v8::LocalValue::from_string(&lock, &self.field),
-            );
-            obj.set(
-                lock,
-                "value",
-                v8::LocalValue::from_string(&lock, &self.value),
-            );
+            let mut obj = lock.new_object();
+            let critical = self.critical.to_local(lock);
+            obj.set(lock, "critical", critical);
+            let field = self.field.to_local(lock);
+            obj.set(lock, "field", field);
+            let value = self.value.to_local(lock);
+            obj.set(lock, "value", value);
             obj.into()
         }
     }
@@ -68,39 +63,24 @@ pub struct NaptrRecord {
 impl jsg::Type for NaptrRecord {}
 
 impl jsg::Struct for NaptrRecord {
-    fn wrap(&self, lock: &v8::Lock) -> v8::LocalValue {
+    fn wrap<'a, 'b>(&self, lock: &'a mut v8::Lock) -> v8::LocalValue<'b>
+    where
+        'b: 'a,
+    {
         unsafe {
-            let mut obj = v8::LocalObject::new(lock);
-            obj.set(
-                lock,
-                "flags",
-                v8::LocalValue::from_string(&lock, &self.flags),
-            );
-            obj.set(
-                lock,
-                "service",
-                v8::LocalValue::from_string(&lock, &self.service),
-            );
-            obj.set(
-                lock,
-                "regexp",
-                v8::LocalValue::from_string(&lock, &self.regexp),
-            );
-            obj.set(
-                lock,
-                "replacement",
-                v8::LocalValue::from_string(&lock, &self.replacement),
-            );
-            obj.set(
-                lock,
-                "order",
-                v8::LocalValue::from_f64(&lock, self.order as f64),
-            );
-            obj.set(
-                lock,
-                "preference",
-                v8::LocalValue::from_f64(&lock, self.preference as f64),
-            );
+            let mut obj = lock.new_object();
+            let flags = self.flags.to_local(lock);
+            obj.set(lock, "flags", flags);
+            let service = self.service.to_local(lock);
+            obj.set(lock, "service", service);
+            let regexp = self.regexp.to_local(lock);
+            obj.set(lock, "regexp", regexp);
+            let replacement = self.replacement.to_local(lock);
+            obj.set(lock, "replacement", replacement);
+            let order = self.order.to_local(lock);
+            obj.set(lock, "order", order);
+            let preference = self.preference.to_local(lock);
+            obj.set(lock, "preference", preference);
             obj.into()
         }
     }
@@ -177,8 +157,8 @@ pub struct DnsUtilWrapper {
 }
 
 impl jsg::ResourceWrapper for DnsUtilWrapper {
-    fn get_constructor(&self, isolate: &mut v8::Lock) -> v8::LocalFunctionTemplate {
-        self.constructor.as_local(isolate)
+    fn get_constructor(&self, lock: &mut v8::Lock) -> v8::LocalFunctionTemplate {
+        self.constructor.as_local(lock)
     }
 }
 
@@ -303,9 +283,10 @@ impl DnsUtil {
         let arg0 = unsafe { jsg::v8::ffi::get_arg(args, 0) };
         let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), arg0) };
         let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-        let self_ = jsg::unwrap_resource::<DnsUtil>(&mut lock, args.get_this());
+        let this = args.get_this(&mut lock);
+        let self_ = jsg::unwrap_resource::<DnsUtil>(&mut lock, this);
         match self_.parse_caa_record(&arg0) {
-            Ok(record) => args.set_return_value(record.wrap(&lock)),
+            Ok(record) => args.set_return_value(record.wrap(&mut lock)),
             Err(err) => {
                 dbg!(err);
             }
@@ -319,9 +300,10 @@ impl DnsUtil {
         let arg0 = unsafe { jsg::v8::ffi::get_arg(args, 0) };
         let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), arg0) };
         let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-        let self_ = jsg::unwrap_resource::<DnsUtil>(&mut lock, args.get_this());
+        let this = args.get_this(&mut lock);
+        let self_ = jsg::unwrap_resource::<DnsUtil>(&mut lock, this);
         match self_.parse_naptr_record(&arg0) {
-            Ok(record) => args.set_return_value(record.wrap(&lock)),
+            Ok(record) => args.set_return_value(record.wrap(&mut lock)),
             Err(err) => {
                 dbg!(err);
             }
@@ -351,8 +333,11 @@ impl jsg::Resource for DnsUtil {
         "DnsUtil"
     }
 
-    fn js_instance(&self, lock: &mut v8::Lock) -> Option<v8::LocalValue> {
-        self.js.as_ref().map(|val| val.to_local(lock))
+    fn js_instance<'a>(&self, lock: &mut v8::Lock) -> Option<v8::LocalValue<'a>> {
+        match self.js.as_ref() {
+            Some(val) => Some(val.to_local(lock)),
+            None => None,
+        }
     }
 
     fn set_js_instance(&mut self, lock: &mut v8::Lock, instance: &v8::LocalValue) {
