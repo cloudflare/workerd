@@ -1354,9 +1354,128 @@ jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
 
 // =======================================================================================
 
+namespace {
+constexpr kj::StringPtr defaultStatusText(uint statusCode) {
+  // RFC 7231 recommendations, unless otherwise specified.
+  // https://tools.ietf.org/html/rfc7231#section-6.1
+#define STATUS(code, text) case code: return text##_kj
+  switch (statusCode) {
+    // Status code 0 is used exclusively with error responses
+    // created using Response.error()
+    STATUS(0, "");
+    STATUS(100, "Continue");
+    STATUS(101, "Switching Protocols");
+    STATUS(102, "Processing");   // RFC 2518, WebDAV
+    STATUS(103, "Early Hints");  // RFC 8297
+    STATUS(200, "OK");
+    STATUS(201, "Created");
+    STATUS(202, "Accepted");
+    STATUS(203, "Non-Authoritative Information");
+    STATUS(204, "No Content");
+    STATUS(205, "Reset Content");
+    STATUS(206, "Partial Content");
+    STATUS(207, "Multi-Status");      // RFC 4918, WebDAV
+    STATUS(208, "Already Reported");  // RFC 5842, WebDAV
+    STATUS(226, "IM Used");           // RFC 3229
+    STATUS(300, "Multiple Choices");
+    STATUS(301, "Moved Permanently");
+    STATUS(302, "Found");
+    STATUS(303, "See Other");
+    STATUS(304, "Not Modified");
+    STATUS(305, "Use Proxy");
+
+    STATUS(307, "Temporary Redirect");
+    STATUS(308, "Permanent Redirect");  // RFC 7538
+    STATUS(400, "Bad Request");
+    STATUS(401, "Unauthorized");
+    STATUS(402, "Payment Required");
+    STATUS(403, "Forbidden");
+    STATUS(404, "Not Found");
+    STATUS(405, "Method Not Allowed");
+    STATUS(406, "Not Acceptable");
+    STATUS(407, "Proxy Authentication Required");
+    STATUS(408, "Request Timeout");
+    STATUS(409, "Conflict");
+    STATUS(410, "Gone");
+    STATUS(411, "Length Required");
+    STATUS(412, "Precondition Failed");
+    STATUS(413, "Payload Too Large");
+    STATUS(414, "URI Too Long");
+    STATUS(415, "Unsupported Media Type");
+    STATUS(416, "Range Not Satisfiable");
+    STATUS(417, "Expectation Failed");
+    STATUS(418, "I'm a teapot");          // RFC 2324
+    STATUS(421, "Misdirected Request");   // RFC 7540
+    STATUS(422, "Unprocessable Entity");  // RFC 4918, WebDAV
+    STATUS(423, "Locked");                // RFC 4918, WebDAV
+    STATUS(424, "Failed Dependency");     // RFC 4918, WebDAV
+    STATUS(426, "Upgrade Required");
+    STATUS(428, "Precondition Required");            // RFC 6585
+    STATUS(429, "Too Many Requests");                // RFC 6585
+    STATUS(431, "Request Header Fields Too Large");  // RFC 6585
+    STATUS(451, "Unavailable For Legal Reasons");    // RFC 7725
+    STATUS(500, "Internal Server Error");
+    STATUS(501, "Not Implemented");
+    STATUS(502, "Bad Gateway");
+    STATUS(503, "Service Unavailable");
+    STATUS(504, "Gateway Timeout");
+    STATUS(505, "HTTP Version Not Supported");
+    STATUS(506, "Variant Also Negotiates");          // RFC 2295
+    STATUS(507, "Insufficient Storage");             // RFC 4918, WebDAV
+    STATUS(508, "Loop Detected");                    // RFC 5842, WebDAV
+    STATUS(510, "Not Extended");                     // RFC 2774
+    STATUS(511, "Network Authentication Required");  // RFC 6585
+    default:
+      // If we don't recognize the status code, check which range it falls into and use the status
+      // code class defined by RFC 7231, section 6, as the status text.
+      if (statusCode >= 200 && statusCode < 300) {
+        return "Successful"_kj;
+      } else if (statusCode >= 300 && statusCode < 400) {
+        return "Redirection"_kj;
+      } else if (statusCode >= 400 && statusCode < 500) {
+        return "Client Error"_kj;
+      } else if (statusCode >= 500 && statusCode < 600) {
+        return "Server Error"_kj;
+      } else {
+        return ""_kj;
+      }
+  }
+#undef STATUS
+}
+
+constexpr bool isNullBodyStatusCode(uint statusCode) {
+  switch (statusCode) {
+    // Fetch spec section 2.2.3 defines these status codes as null body statuses:
+    // https://fetch.spec.whatwg.org/#null-body-status
+    case 101:
+    case 204:
+    case 205:
+    case 304:
+      return true;
+    default:
+      return false;
+  }
+}
+
+constexpr bool isRedirectStatusCode(uint statusCode) {
+  switch (statusCode) {
+    // Fetch spec section 2.2.3 defines these status codes as redirect statuses:
+    // https://fetch.spec.whatwg.org/#redirect-status
+    case 301:
+    case 302:
+    case 303:
+    case 307:
+    case 308:
+      return true;
+    default:
+      return false;
+  }
+}
+}  // namespace
+
 Response::Response(jsg::Lock& js,
     int statusCode,
-    kj::String statusText,
+    kj::Maybe<kj::String> statusText,
     jsg::Ref<Headers> headers,
     CfProperty&& cf,
     kj::Maybe<Body::ExtractedBody> body,
@@ -1373,11 +1492,8 @@ Response::Response(jsg::Lock& js,
       bodyEncoding(bodyEncoding),
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
-// Defined later in this file.
-static kj::StringPtr defaultStatusText(uint statusCode);
-
 jsg::Ref<Response> Response::error(jsg::Lock& js) {
-  return js.alloc<Response>(js, 0, kj::String(), js.alloc<Headers>(), CfProperty(), kj::none);
+  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(), CfProperty(), kj::none);
 };
 
 jsg::Ref<Response> Response::constructor(jsg::Lock& js,
@@ -1439,7 +1555,10 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
 
       statusCode = otherResponse->statusCode;
       bodyEncoding = otherResponse->bodyEncoding;
-      statusText = kj::str(otherResponse->statusText);
+      kj::StringPtr otherStatusText = otherResponse->getStatusText();
+      if (otherStatusText != defaultStatusText(statusCode)) {
+        statusText = kj::str(otherStatusText);
+      }
       headers = js.alloc<Headers>(js, *otherResponse->headers);
       cf = otherResponse->cf.deepClone(js);
       KJ_IF_SOME(otherWs, otherResponse->webSocket) {
@@ -1466,8 +1585,6 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
         JSG_FAIL_REQUIRE(TypeError, "Invalid statusText");
       }
     }
-  } else {
-    statusText = kj::str(defaultStatusText(statusCode));
   }
 
   KJ_IF_SOME(bi, bodyInit) {
@@ -1504,7 +1621,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     }
   }
 
-  return js.alloc<Response>(js, statusCode, KJ_ASSERT_NONNULL(kj::mv(statusText)), kj::mv(headers),
+  return js.alloc<Response>(js, statusCode, kj::mv(statusText), kj::mv(headers),
       kj::mv(cf), kj::mv(body), nullptr, kj::mv(webSocket), bodyEncoding);
 }
 
@@ -1543,10 +1660,7 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
   kjHeaders.set(kj::HttpHeaderId::LOCATION, kj::mv(parsedUrl));
   auto headers = js.alloc<Headers>(js, kjHeaders, Headers::Guard::IMMUTABLE);
 
-  auto statusText = defaultStatusText(statusCode);
-
-  return js.alloc<Response>(
-      js, statusCode, kj::str(statusText), kj::mv(headers), nullptr, kj::none);
+  return js.alloc<Response>(js, statusCode, kj::none, kj::mv(headers), nullptr, kj::none);
 }
 
 jsg::Ref<Response> Response::json_(
@@ -1579,9 +1693,12 @@ jsg::Ref<Response> Response::json_(
         }
       }
       KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
+        auto otherStatusText = res->getStatusText();
         auto newInit = InitializerDict{
           .status = res->statusCode,
-          .statusText = kj::str(res->statusText),
+          .statusText = otherStatusText == nullptr ||
+                        otherStatusText == defaultStatusText(res->statusCode)
+                        ? jsg::Optional<kj::String>() : kj::str(otherStatusText),
           .headers = maybeSetContentType(js, Headers::constructor(js, res->headers.addRef())),
           .cf = res->cf.getRef(js),
           .encodeBody =
@@ -1615,8 +1732,9 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
 
   auto urlListClone = KJ_MAP(url, urlList) { return kj::str(url); };
 
-  return js.alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(headersClone),
-      kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
+  return js.alloc<Response>(js, statusCode,
+      statusText.map([](auto& str) { return kj::str(str); }),
+      kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
 }
 
 kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
@@ -1693,13 +1811,13 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
     auto maybeLength = jsBody->tryGetLength(encoding);
     auto stream =
-        newSystemStream(outer.send(statusCode, statusText, outHeaders, maybeLength), encoding);
+        newSystemStream(outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
     return jsBody->pumpTo(js, kj::mv(stream), true);
   } else {
-    outer.send(statusCode, statusText, outHeaders, static_cast<uint64_t>(0));
+    outer.send(statusCode, getStatusText(), outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
   }
 }
@@ -1708,7 +1826,10 @@ int Response::getStatus() {
   return statusCode;
 }
 kj::StringPtr Response::getStatusText() {
-  return statusText;
+  KJ_IF_SOME(text, statusText) {
+    return text;
+  }
+  return defaultStatusText(statusCode);
 }
 jsg::Ref<Headers> Response::getHeaders(jsg::Lock& js) {
   return headers.addRef();
@@ -1751,8 +1872,7 @@ void Response::serialize(jsg::Lock& js,
       jsg::JsValue(initDictHandler.wrap(js,
           InitializerDict{
             .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
-            .statusText = statusText == defaultStatusText(statusCode) ? jsg::Optional<kj::String>()
-                                                                      : kj::str(statusText),
+            .statusText = statusText.map([](auto& txt) { return kj::str(txt); }),
             .headers = headers.addRef(),
             .cf = cf.getRef(js),
 
@@ -2299,8 +2419,11 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
   }
 
   // TODO(someday): Fill response CF blob from somewhere?
-  return js.alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(responseHeaders), nullptr,
-      kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket), bodyEncoding);
+  kj::Maybe<kj::String> maybeStatusText = statusText == defaultStatusText(statusCode)
+      ? kj::Maybe<kj::String>()
+      : kj::str(statusText);
+  return js.alloc<Response>(js, statusCode, kj::mv(maybeStatusText), kj::mv(responseHeaders),
+      nullptr, kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket), bodyEncoding);
 }
 
 namespace {
@@ -2366,7 +2489,6 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,
-            .statusText = kj::str("OK"),
             .headers = kj::mv(headers),
           }));
     }
@@ -2825,124 +2947,4 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Fetch API cannot load: ", url));
   }
 }
-
-static kj::StringPtr defaultStatusText(uint statusCode) {
-  // RFC 7231 recommendations, unless otherwise specified.
-  // https://tools.ietf.org/html/rfc7231#section-6.1
-#define STATUS(code, text)                                                                         \
-  case code:                                                                                       \
-    return text##_kj
-  switch (statusCode) {
-    STATUS(100, "Continue");
-    STATUS(101, "Switching Protocols");
-    STATUS(102, "Processing");   // RFC 2518, WebDAV
-    STATUS(103, "Early Hints");  // RFC 8297
-    STATUS(200, "OK");
-    STATUS(201, "Created");
-    STATUS(202, "Accepted");
-    STATUS(203, "Non-Authoritative Information");
-    STATUS(204, "No Content");
-    STATUS(205, "Reset Content");
-    STATUS(206, "Partial Content");
-    STATUS(207, "Multi-Status");      // RFC 4918, WebDAV
-    STATUS(208, "Already Reported");  // RFC 5842, WebDAV
-    STATUS(226, "IM Used");           // RFC 3229
-    STATUS(300, "Multiple Choices");
-    STATUS(301, "Moved Permanently");
-    STATUS(302, "Found");
-    STATUS(303, "See Other");
-    STATUS(304, "Not Modified");
-    STATUS(305, "Use Proxy");
-    STATUS(307, "Temporary Redirect");
-    STATUS(308, "Permanent Redirect");  // RFC 7538
-    STATUS(400, "Bad Request");
-    STATUS(401, "Unauthorized");
-    STATUS(402, "Payment Required");
-    STATUS(403, "Forbidden");
-    STATUS(404, "Not Found");
-    STATUS(405, "Method Not Allowed");
-    STATUS(406, "Not Acceptable");
-    STATUS(407, "Proxy Authentication Required");
-    STATUS(408, "Request Timeout");
-    STATUS(409, "Conflict");
-    STATUS(410, "Gone");
-    STATUS(411, "Length Required");
-    STATUS(412, "Precondition Failed");
-    STATUS(413, "Payload Too Large");
-    STATUS(414, "URI Too Long");
-    STATUS(415, "Unsupported Media Type");
-    STATUS(416, "Range Not Satisfiable");
-    STATUS(417, "Expectation Failed");
-    STATUS(418, "I'm a teapot");          // RFC 2324
-    STATUS(421, "Misdirected Request");   // RFC 7540
-    STATUS(422, "Unprocessable Entity");  // RFC 4918, WebDAV
-    STATUS(423, "Locked");                // RFC 4918, WebDAV
-    STATUS(424, "Failed Dependency");     // RFC 4918, WebDAV
-    STATUS(426, "Upgrade Required");
-    STATUS(428, "Precondition Required");            // RFC 6585
-    STATUS(429, "Too Many Requests");                // RFC 6585
-    STATUS(431, "Request Header Fields Too Large");  // RFC 6585
-    STATUS(451, "Unavailable For Legal Reasons");    // RFC 7725
-    STATUS(500, "Internal Server Error");
-    STATUS(501, "Not Implemented");
-    STATUS(502, "Bad Gateway");
-    STATUS(503, "Service Unavailable");
-    STATUS(504, "Gateway Timeout");
-    STATUS(505, "HTTP Version Not Supported");
-    STATUS(506, "Variant Also Negotiates");          // RFC 2295
-    STATUS(507, "Insufficient Storage");             // RFC 4918, WebDAV
-    STATUS(508, "Loop Detected");                    // RFC 5842, WebDAV
-    STATUS(510, "Not Extended");                     // RFC 2774
-    STATUS(511, "Network Authentication Required");  // RFC 6585
-    default:
-      // If we don't recognize the status code, check which range it falls into and use the status
-      // code class defined by RFC 7231, section 6, as the status text.
-      if (statusCode >= 200 && statusCode < 300) {
-        return "Successful"_kj;
-      } else if (statusCode >= 300 && statusCode < 400) {
-        return "Redirection"_kj;
-      } else if (statusCode >= 400 && statusCode < 500) {
-        return "Client Error"_kj;
-      } else if (statusCode >= 500 && statusCode < 600) {
-        return "Server Error"_kj;
-      } else if (statusCode == 0) {
-        // Status code 0 is used exclusively with error responses
-        // created using Response.error()
-        return ""_kj;
-      } else {
-        KJ_UNREACHABLE;
-      }
-  }
-#undef STATUS
-}
-
-bool isNullBodyStatusCode(uint statusCode) {
-  switch (statusCode) {
-    // Fetch spec section 2.2.3 defines these status codes as null body statuses:
-    // https://fetch.spec.whatwg.org/#null-body-status
-    case 101:
-    case 204:
-    case 205:
-    case 304:
-      return true;
-    default:
-      return false;
-  }
-}
-
-bool isRedirectStatusCode(uint statusCode) {
-  switch (statusCode) {
-    // Fetch spec section 2.2.3 defines these status codes as redirect statuses:
-    // https://fetch.spec.whatwg.org/#redirect-status
-    case 301:
-    case 302:
-    case 303:
-    case 307:
-    case 308:
-      return true;
-    default:
-      return false;
-  }
-}
-
 }  // namespace workerd::api
