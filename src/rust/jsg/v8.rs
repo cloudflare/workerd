@@ -63,12 +63,6 @@ pub mod ffi {
     }
 }
 
-trait IsolateMember: Drop {
-    /// Initialize the member with the given isolate.
-    /// Nit: It will call something like "register()"
-    fn init(&mut self, isolate: &mut Lock);
-}
-
 #[derive(Debug)]
 pub(crate) struct Handle {
     ptr: usize,

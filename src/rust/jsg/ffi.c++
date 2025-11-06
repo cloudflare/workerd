@@ -15,10 +15,9 @@ size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
   // v8::EscapableHandleScope scope(isolate);
 
   v8::Local<v8::FunctionTemplate> constructor;
-  KJ_IF_SOME(c, descriptor.constructor) {
-    KJ_UNIMPLEMENTED("constructors are not implemented yet");
-    // constructor =
-    // v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback);
+  KJ_IF_SOME(descriptor, descriptor.constructor) {
+    constructor = v8::FunctionTemplate::New(isolate,
+        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)));
   } else {
     constructor = v8::FunctionTemplate::New(isolate, &workerd::jsg::throwIllegalConstructor);
   }
