@@ -12,7 +12,7 @@ namespace workerd::rust::jsg {
 
 size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor) {
   // Construct lazily.
-  // v8::EscapableHandleScope scope(isolate);
+  v8::EscapableHandleScope scope(isolate);
 
   v8::Local<v8::FunctionTemplate> constructor;
   KJ_IF_SOME(descriptor, descriptor.constructor) {
@@ -25,7 +25,7 @@ size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
   auto prototype = constructor->PrototypeTemplate();
 
   // Signatures protect our methods from being invoked with the wrong `this`.
-  // auto signature = v8::Signature::New(isolate, constructor);
+  auto signature = v8::Signature::New(isolate, constructor);
 
   auto instance = constructor->InstanceTemplate();
 
@@ -74,13 +74,13 @@ size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
   for (const auto& method: descriptor.methods) {
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
-        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
+        v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow);
     prototype->Set(::workerd::jsg::v8StrIntern(isolate, kj::str(method.name)), functionTemplate);
   }
 
-  // auto result = scope.Escape(constructor);
+  auto result = scope.Escape(constructor);
   // slot.Reset(isolate, result);
-  return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, constructor));
+  return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }
 
 LocalValue wrap_resource(Isolate* isolate, size_t resource, LocalFunctionTemplate tmpl) {
