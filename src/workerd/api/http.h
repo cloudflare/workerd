@@ -1109,8 +1109,8 @@ public:
   // Alias to the global Response_BodyEncoding enum for backward compatibility
   using BodyEncoding = Response_BodyEncoding;
 
-  Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
-           CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
+  Response(jsg::Lock& js, int statusCode, kj::Maybe<kj::String> statusText,
+           jsg::Ref<Headers> headers, CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
            kj::Array<kj::String> urlList = {},
            kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
            BodyEncoding bodyEncoding = BodyEncoding::AUTO);
@@ -1277,7 +1277,9 @@ public:
 
 private:
   int statusCode;
-  kj::String statusText;
+  // If the statusText is empty, we will derive it from the statusCode. If there's no
+  // match, it will be empty.
+  kj::Maybe<kj::String> statusText;
   jsg::Ref<Headers> headers;
   CfProperty cf;
 
@@ -1374,9 +1376,6 @@ jsg::Ref<Response> makeHttpResponse(
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = kj::none);
-
-bool isNullBodyStatusCode(uint statusCode);
-bool isRedirectStatusCode(uint statusCode);
 
 #define EW_HTTP_ISOLATE_TYPES         \
   api::FetchEvent,                    \
