@@ -29,6 +29,7 @@ from functools import wraps
 from . import entropy_import_context  # noqa: F401
 from .allow_entropy import _set_in_request_context, raise_unless_entropy_allowed
 from .import_patch_manager import (
+    after_snapshot_handlers,
     before_first_request_handlers,
     install_import_patch_manager,
     remove_import_patch_manager,
@@ -68,6 +69,12 @@ def restore_urandom():
 def before_top_level():
     disable_urandom()
     install_import_patch_manager()
+
+
+def after_snapshot():
+    remove_import_patch_manager()
+    for cb in after_snapshot_handlers:
+        cb()
 
 
 def before_first_request():

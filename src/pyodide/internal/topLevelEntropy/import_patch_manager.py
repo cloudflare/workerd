@@ -23,11 +23,11 @@ if TYPE_CHECKING:
 
     CreateImportContext = Callable[[ModuleSpec], AbstractContextManager]
     ExecImportContext = Callable[[ModuleType], AbstractContextManager]
-    BeforeFirstRequest = Callable[[ModuleType], None]
+    Handler = Callable[[ModuleType], None]
 else:
     from typing import Any
 
-    BeforeFirstRequest = Any
+    Handler = Any
     CreateImportContext = Any
     ExecImportContext = Any
     Loader = Any
@@ -39,7 +39,8 @@ else:
 class PatchInfo:
     create: CreateImportContext = nullcontext
     exec: ExecImportContext = nullcontext
-    before_first_request: BeforeFirstRequest | None = None
+    after_snapshot: Handler | None = None
+    before_first_request: Handler | None = None
 
 
 patches: dict[str, PatchInfo] = {}
@@ -90,9 +91,15 @@ def register_exec_patch(
 # by trial and error.
 
 
-def register_before_first_request(
-    name: str, handler: BeforeFirstRequest | None = None
-) -> None:
+def register_after_snapshot(name: str, handler: Handler | None = None):
+    if handler is None:
+        return partial(register_after_snapshot, name)
+    d = patches.setdefault(name, PatchInfo())
+    d.after_snapshot = handler
+    return handler
+
+
+def register_before_first_request(name: str, handler: Handler | None = None) -> None:
     """This registers a callback that will be called before the first request if the package named
     "name" was imported. Used for reseeding rng for instance.
     """
@@ -103,7 +110,8 @@ def register_before_first_request(
     return handler
 
 
-before_first_request_handlers: list[BeforeFirstRequest] = []
+after_snapshot_handlers: list[Handler] = []
+before_first_request_handlers: list[Handler] = []
 
 
 class PatchLoader:
@@ -121,10 +129,10 @@ class PatchLoader:
             return self.orig_loader.create_module(spec)
 
     def exec_module(self, module: ModuleType) -> None:
-        if self.patch_info.before_first_request:
-            before_first_request_handlers.append(
-                partial(self.patch_info.before_first_request, module)
-            )
+        if handler := self.patch_info.after_snapshot:
+            after_snapshot_handlers.append(partial(handler, module))
+        if handler := self.patch_info.before_first_request:
+            before_first_request_handlers.append(partial(handler, module))
         with self.patch_info.exec(module):
             self.orig_loader.exec_module(module)
 

@@ -5,6 +5,7 @@ declare namespace MetadataReader {
     python_workers_force_new_vendor_path?: boolean;
     python_dedicated_snapshot?: boolean;
     enable_python_external_sdk?: boolean;
+    python_check_rng_state?: boolean;
   }
 
   const isWorkerd: () => boolean;

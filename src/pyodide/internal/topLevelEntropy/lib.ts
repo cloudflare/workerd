@@ -11,6 +11,7 @@ import { default as entropyImportContext } from 'pyodide-internal:topLevelEntrop
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
 import { default as allowEntropy } from 'pyodide-internal:topLevelEntropy/allow_entropy.py';
 import { simpleRunPython, PythonUserError } from 'pyodide-internal:util';
+import { CHECK_RNG_STATE } from 'pyodide-internal:metadata';
 
 let allowed_entropy_calls_addr: number;
 
@@ -131,6 +132,24 @@ del before_top_level
   );
 }
 
+/**
+ * Called to check that random number generator state was not advanced by top level calls. We
+ * manually install overlays that crash when they are called in order to prevent this situation.
+ */
+export function entropyAfterSnapshot(Module: Module): void {
+  if (!CHECK_RNG_STATE) {
+    return;
+  }
+  simpleRunPython(
+    Module,
+    `
+from _cloudflare.entropy_patches import after_snapshot
+after_snapshot()
+del after_snapshot
+    `
+  );
+}
+
 let isReady = false;
 /**
  * Called to reseed rngs and turn off blocks that prevent access to rng APIs.
@@ -148,6 +167,6 @@ export function entropyBeforeRequest(Module: Module): void {
 from _cloudflare.entropy_patches import before_first_request
 before_first_request()
 del before_first_request
-  `
+    `
   );
 }
