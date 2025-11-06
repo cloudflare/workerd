@@ -6,7 +6,7 @@
 
 #include "sockets.h"
 
-#include <openssl/rand.h>
+#include <workerd/util/entropy.h>
 
 #include <kj/compat/http.h>
 #include <kj/encoding.h>
@@ -20,8 +20,8 @@ Hyperdrive::Hyperdrive(
       user(kj::mv(user)),
       password(kj::mv(password)),
       scheme(kj::mv(scheme)) {
-  kj::byte randomBytes[16]{};
-  KJ_ASSERT(RAND_bytes(randomBytes, sizeof(randomBytes)) == 1);
+  kj::FixedArray<kj::byte, 16> randomBytes;
+  getEntropy(randomBytes.asPtr());
   randomHost = kj::str(kj::encodeHex(randomBytes), ".hyperdrive.local");
 }
 

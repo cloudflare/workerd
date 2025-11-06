@@ -105,6 +105,7 @@ wd_cc_library(
     deps = [
         "//src/workerd/io:actor-id",
         "//src/workerd/jsg:exception",
+        "//src/workerd/util:entropy",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj:kj",
         "@ssl",
