@@ -149,4 +149,26 @@ LocalValue global_to_local_value(Isolate* isolate, GlobalValue value) {
   return to_ffi(kj::mv(local));
 }
 
+LocalValue clone_local_value(Isolate* isolate, LocalValue value) {
+  auto ptr_void = reinterpret_cast<void*>(&value);
+  auto local = *reinterpret_cast<v8::Local<v8::Value>*>(ptr_void);
+  auto copy = v8::Local<v8::Value>::New(isolate, local);
+  // Forget local so it doesn't get destroyed when the scope is finished.
+  [[maybe_unused]] auto forgot = to_ffi(kj::mv(local));
+  return to_ffi(kj::mv(copy));
+}
+
+GlobalValue clone_global_value(Isolate* isolate, GlobalValue value) {
+  auto ptr_void = reinterpret_cast<void*>(&value);
+  auto glbl = kj::mv(*reinterpret_cast<v8::Global<v8::Value>*>(ptr_void));
+  auto copy = v8::Global<v8::Value>(isolate, glbl);
+  // Forget glbl so it doesn't get destroyed when the scope is finished.
+  [[maybe_unused]] auto forgot = to_ffi(kj::mv(glbl));
+  return to_ffi(kj::mv(copy));
+}
+
+bool eq_local_value(LocalValue lhs, LocalValue rhs) {
+  return local_from_ffi<v8::Value>(lhs) == local_from_ffi<v8::Value>(rhs);
+}
+
 }  // namespace workerd::rust::jsg

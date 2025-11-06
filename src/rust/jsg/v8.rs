@@ -46,6 +46,20 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: usize, /* GlobalValue */
         ) -> usize /* LocalValue */;
+
+        pub unsafe fn clone_local_value(
+            isolate: *mut Isolate,
+            value: usize, /* LocalValue */
+        ) -> usize /* LocalValue */;
+        pub unsafe fn clone_global_value(
+            isolate: *mut Isolate,
+            value: usize, /* GlobalValue */
+        ) -> usize /* GlobalValue */;
+
+        pub unsafe fn eq_local_value(
+            lhs: usize, /* LocalValue */
+            rhs: usize, /* LocalValue */
+        ) -> bool;
     }
 }
 
@@ -55,46 +69,150 @@ trait IsolateMember: Drop {
     fn init(&mut self, isolate: &mut Lock);
 }
 
-pub struct LocalValue<'a>(usize, PhantomData<&'a ()>);
+#[derive(Debug)]
+pub(crate) struct Handle(usize);
 
-impl<'a> LocalValue<'a> {
-    pub unsafe fn from_ffi(value: usize) -> Self {
-        LocalValue(value, PhantomData)
-    }
-
-    pub unsafe fn to_ffi(self) -> usize {
+impl Handle {
+    pub fn to_ffi(self) -> usize {
         self.0
     }
 
-    pub fn to_global(&self, lock: &'a mut Lock) -> GlobalValue {
-        unsafe { GlobalValue::from_ffi(ffi::local_to_global_value(lock.get_isolate(), self.0)) }
+    pub unsafe fn as_ref(&self) -> usize {
+        self.0
+    }
+}
+
+impl Into<Handle> for usize {
+    fn into(self) -> Handle {
+        Handle(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct LocalValue<'a> {
+    pub(crate) handle: Handle,
+    isolate: *mut ffi::Isolate,
+    _marker: PhantomData<&'a ()>,
+}
+
+impl<'a> LocalValue<'a> {
+    pub unsafe fn from_ffi(isolate: *mut ffi::Isolate, value: usize) -> Self {
+        LocalValue {
+            handle: value.into(),
+            isolate,
+            _marker: PhantomData,
+        }
+    }
+
+    pub unsafe fn into_ffi(self) -> usize {
+        self.handle.to_ffi()
+    }
+
+    pub fn to_global(self, lock: &'a mut Lock) -> GlobalValue {
+        unsafe {
+            GlobalValue::from_ffi(
+                lock.get_isolate(),
+                ffi::local_to_global_value(lock.get_isolate(), self.handle.to_ffi()),
+            )
+        }
+    }
+}
+
+impl Clone for LocalValue<'_> {
+    fn clone(&self) -> Self {
+        unsafe {
+            Self::from_ffi(
+                self.isolate,
+                ffi::clone_local_value(self.isolate, self.handle.as_ref()),
+            )
+        }
+    }
+}
+
+impl PartialEq for LocalValue<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe { ffi::eq_local_value(self.clone().handle.to_ffi(), other.clone().handle.to_ffi()) }
     }
 }
 
 impl<'a> From<LocalObject<'a>> for LocalValue<'a> {
     fn from(value: LocalObject<'a>) -> Self {
-        LocalValue(value.0, PhantomData)
+        LocalValue {
+            handle: value.handle,
+            isolate: value.isolate,
+            _marker: PhantomData,
+        }
     }
 }
 
-pub struct LocalObject<'a>(usize, PhantomData<&'a ()>);
+pub struct LocalObject<'a> {
+    handle: Handle,
+    isolate: *mut ffi::Isolate,
+    _marker: PhantomData<&'a ()>,
+}
 
 impl<'a> LocalObject<'a> {
     pub unsafe fn set(&mut self, lock: &mut Lock, key: &str, value: LocalValue) {
-        unsafe { ffi::set_local_object_property(lock.get_isolate(), self.0, key, value.0) }
+        unsafe {
+            ffi::set_local_object_property(
+                lock.get_isolate(),
+                self.clone().handle.to_ffi(),
+                key,
+                value.handle.to_ffi(),
+            )
+        }
+    }
+
+    pub unsafe fn from_ffi(isolate: *mut ffi::Isolate, val: usize) -> Self {
+        LocalObject {
+            handle: val.into(),
+            isolate,
+            _marker: PhantomData,
+        }
     }
 }
 
-pub struct GlobalValue(usize);
+impl Clone for LocalObject<'_> {
+    fn clone(&self) -> Self {
+        unsafe {
+            Self::from_ffi(
+                self.isolate,
+                ffi::clone_local_value(self.isolate, self.handle.as_ref()),
+            )
+        }
+    }
+}
+
+pub struct GlobalValue {
+    handle: Handle,
+    isolate: *mut ffi::Isolate,
+}
 
 impl GlobalValue {
-    pub unsafe fn from_ffi(value: usize) -> Self {
-        GlobalValue(value)
+    pub unsafe fn from_ffi(isolate: *mut ffi::Isolate, val: usize) -> Self {
+        GlobalValue {
+            handle: val.into(),
+            isolate,
+        }
     }
 
     pub fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
         unsafe {
-            LocalValue::from_ffi(ffi::global_to_local_value(lock.get_isolate(), self.0))
+            LocalValue::from_ffi(
+                lock.get_isolate(),
+                ffi::global_to_local_value(lock.get_isolate(), self.clone().handle.to_ffi()),
+            )
+        }
+    }
+}
+
+impl Clone for GlobalValue {
+    fn clone(&self) -> Self {
+        unsafe {
+            Self::from_ffi(
+                self.isolate,
+                ffi::clone_global_value(self.isolate, self.handle.as_ref()),
+            )
         }
     }
 }
@@ -105,13 +223,13 @@ pub struct Lock {
 
 impl Lock {
     pub unsafe fn from_args(args: *mut ffi::FunctionCallbackInfo) -> Self {
-        unsafe {
-           Self::from_isolate(ffi::get_isolate(args))
-        }
+        unsafe { Self::from_isolate(ffi::get_isolate(args)) }
     }
 
     pub unsafe fn from_isolate(isolate: *mut ffi::Isolate) -> Self {
-        Self { isolate: unsafe { &mut *isolate } }
+        Self {
+            isolate: unsafe { &mut *isolate },
+        }
     }
 
     pub unsafe fn get_isolate(&mut self) -> *mut ffi::Isolate {
@@ -119,10 +237,12 @@ impl Lock {
     }
 
     pub fn new_object<'a>(&mut self) -> LocalObject<'a> {
-        LocalObject(
-            unsafe { ffi::new_local_object(self.isolate) },
-            PhantomData,
-        )
+        unsafe {
+            LocalObject::from_ffi(
+                self.get_isolate(),
+                ffi::new_local_object(self.get_isolate()),
+            )
+        }
     }
 }
 
@@ -132,16 +252,25 @@ pub trait ToLocalValue {
 
 impl ToLocalValue for u8 {
     fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
-        unsafe { LocalValue::from_ffi(ffi::new_local_number(lock.get_isolate(), *self as f64))}
+        unsafe {
+            LocalValue::from_ffi(
+                lock.get_isolate(),
+                ffi::new_local_number(lock.get_isolate(), *self as f64),
+            )
+        }
     }
 }
 
 impl ToLocalValue for u32 {
     fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
-        unsafe { LocalValue::from_ffi(ffi::new_local_number(lock.get_isolate(), *self as f64))}
+        unsafe {
+            LocalValue::from_ffi(
+                lock.get_isolate(),
+                ffi::new_local_number(lock.get_isolate(), *self as f64),
+            )
+        }
     }
 }
-
 
 impl ToLocalValue for String {
     fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
@@ -151,7 +280,12 @@ impl ToLocalValue for String {
 
 impl ToLocalValue for &str {
     fn to_local<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
-        unsafe { LocalValue::from_ffi(ffi::new_local_string(lock.get_isolate(), self))}
+        unsafe {
+            LocalValue::from_ffi(
+                lock.get_isolate(),
+                ffi::new_local_string(lock.get_isolate(), self),
+            )
+        }
     }
 }
 
@@ -191,13 +325,13 @@ impl FunctionCallbackInfo {
         FunctionCallbackInfo(info)
     }
 
-    pub fn get_this<'a>(&self, _lock: &mut Lock) -> LocalValue<'a> {
-        unsafe { LocalValue::from_ffi(ffi::get_this(self.0)) }
+    pub fn get_this<'a>(&self, lock: &mut Lock) -> LocalValue<'a> {
+        unsafe { LocalValue::from_ffi(lock.get_isolate(), ffi::get_this(self.0)) }
     }
 
     pub fn set_return_value(&self, value: LocalValue) {
         unsafe {
-            ffi::set_return_value(self.0, value.0);
+            ffi::set_return_value(self.0, value.handle.to_ffi());
         }
     }
 }

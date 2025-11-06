@@ -313,7 +313,7 @@ impl DnsUtil {
 
 // Generated code.
 impl jsg::Resource for DnsUtil {
-    fn members() -> Vec<jsg::Member<Self>>
+    fn members() -> Vec<jsg::Member>
     where
         Self: Sized,
     {
@@ -340,15 +340,9 @@ impl jsg::Resource for DnsUtil {
         }
     }
 
-    fn set_js_instance(&mut self, lock: &mut v8::Lock, instance: &v8::LocalValue) {
+    fn set_js_instance(&mut self, lock: &mut v8::Lock, instance: v8::LocalValue) {
         self.js = Some(instance.to_global(lock));
     }
 }
 
 impl jsg::Type for DnsUtil {}
-
-pub fn register_types(r: &mut jsg::TypeRegistrar) {
-    r.register_module::<crate::dns::DnsUtil>("node-internal:dns", jsg::modules::Type::INTERNAL);
-    r.register_struct::<crate::dns::NaptrRecord>();
-    r.register_struct::<crate::dns::CaaRecord>();
-}

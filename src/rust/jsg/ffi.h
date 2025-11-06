@@ -120,4 +120,10 @@ GlobalValue local_to_global_value(Isolate* isolate, LocalValue value);
 
 LocalValue global_to_local_value(Isolate* isolate, GlobalValue value);
 
+LocalValue clone_local_value(Isolate* isolate, LocalValue value);
+
+GlobalValue clone_global_value(Isolate* isolate, GlobalValue value);
+
+bool eq_local_value(LocalValue lhs, LocalValue rhs);
+
 }  // namespace workerd::rust::jsg

@@ -2,7 +2,6 @@
 #![warn(must_not_suspend)]
 
 use std::cell::Cell;
-use std::marker::PhantomData;
 use std::num::ParseIntError;
 use std::rc::Rc;
 
@@ -19,8 +18,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub mod ffi {
 
     pub struct ConstructorDescriptor {
-        // todo: remove this
-        name: String,
+        callback: usize,
     }
 
     pub struct MethodDescriptor {
@@ -74,9 +72,9 @@ fn get_resource_descriptor<R: Resource>() -> ffi::ResourceDescriptor {
 
     for m in R::members() {
         match m {
-            Member::Constructor(_) => {
+            Member::Constructor { callback } => {
                 descriptor.constructor = KjMaybe::Some(ffi::ConstructorDescriptor {
-                    name: String::new(),
+                    callback: callback as usize,
                 });
             }
             Member::Method { name, callback } => {
@@ -86,9 +84,9 @@ fn get_resource_descriptor<R: Resource>() -> ffi::ResourceDescriptor {
                 });
             }
             Member::Property {
-                name,
-                getter_callback,
-                setter_callback,
+                name: _,
+                getter_callback: _,
+                setter_callback: _,
             } => todo!(),
             Member::StaticMethod { name, callback } => {
                 descriptor.static_methods.push(ffi::StaticMethodDescriptor {
@@ -113,7 +111,7 @@ pub fn create_resource_constructor<R: Resource>(lock: &mut v8::Lock) -> v8::Glob
 
 // TODO: R needs to be a non-empty struct.
 pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
-    lock: &'a mut v8::Lock,
+    lock: &mut v8::Lock,
     resource: *mut R,
     wrapper: &W,
 ) -> v8::LocalValue<'a> {
@@ -124,13 +122,13 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
         None => {
             let constructor = wrapper.get_constructor(lock);
             let instance = unsafe {
-                v8::LocalValue::from_ffi(ffi::wrap_resource(
+                v8::LocalValue::from_ffi(
                     lock.get_isolate(),
-                    resource as usize,
-                    constructor.to_ffi(),
-                ))
+                    ffi::wrap_resource(lock.get_isolate(), resource as usize, constructor.to_ffi()),
+                )
             };
-            r.set_js_instance(lock, &instance);
+            let cached_instance = instance.clone();
+            r.set_js_instance(lock, cached_instance);
             instance
         }
     }
@@ -141,7 +139,7 @@ pub fn unwrap_resource<'a, R: Resource>(
     lock: &'a mut v8::Lock,
     value: v8::LocalValue,
 ) -> &'a mut R {
-    let ptr = unsafe { ffi::unwrap_resource(lock.get_isolate(), value.to_ffi()) as *mut R };
+    let ptr = unsafe { ffi::unwrap_resource(lock.get_isolate(), value.handle.to_ffi()) as *mut R };
     unsafe { &mut *ptr }
 }
 
@@ -221,25 +219,6 @@ impl<T> Clone for Ref<T> {
     }
 }
 
-pub struct TypeRegistrar {}
-
-impl TypeRegistrar {
-    pub fn register_module<T>(&mut self, name: &str, module_type: modules::Type)
-    where
-        T: Resource,
-    {
-        for _member in &T::members() {
-            // register the member in v8
-        }
-    }
-
-    pub fn register_struct<T>(&mut self)
-    where
-        T: Struct,
-    {
-    }
-}
-
 /// TODO: Implement `memory_info(jsg::MemoryTracker)`
 pub trait Type {
     /// Same as jsgGetMemoryName
@@ -255,8 +234,10 @@ pub trait Type {
     }
 }
 
-pub enum Member<S: Sized> {
-    Constructor(PhantomData<S>),
+pub enum Member {
+    Constructor {
+        callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
+    },
     Method {
         name: &'static str,
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
@@ -274,12 +255,12 @@ pub enum Member<S: Sized> {
 
 pub trait Resource: Type {
     fn class_name() -> &'static str;
-    fn members() -> Vec<Member<Self>>
+    fn members() -> Vec<Member>
     where
         Self: Sized;
     fn js_instance<'a>(&self, lock: &mut v8::Lock) -> Option<v8::LocalValue<'a>>;
 
-    fn set_js_instance<'a>(&mut self, lock: &mut v8::Lock, instance: &v8::LocalValue<'a>);
+    fn set_js_instance<'a>(&mut self, lock: &mut v8::Lock, instance: v8::LocalValue<'a>);
 }
 
 pub trait ResourceWrapper {
@@ -287,5 +268,7 @@ pub trait ResourceWrapper {
 }
 
 pub trait Struct: Type {
-    fn wrap<'a, 'b>(&self, lock: &'a mut v8::Lock) -> v8::LocalValue<'b> where 'b: 'a;
+    fn wrap<'a, 'b>(&self, lock: &'a mut v8::Lock) -> v8::LocalValue<'b>
+    where
+        'b: 'a;
 }
