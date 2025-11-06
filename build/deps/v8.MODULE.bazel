@@ -52,6 +52,7 @@ PATCHES = [
     "0027-Export-icudata-file-to-facilitate-embedding-it.patch",
     "0028-bind-icu-to-googlesource.patch",
     "0029-optimize-ascii-fast-path-in-WriteUtf8V2.patch",
+    "0030-Add-v8-String-IsFlat-API.patch",
 ]
 
 http_archive(
