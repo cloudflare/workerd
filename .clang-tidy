@@ -11,6 +11,7 @@ Checks: >
   bugprone-capturing-this-in-member-variable,
   bugprone-forward-declaration-namespace,
   bugprone-move-forwarding-reference,
+  bugprone-return-const-ref-from-parameter,
   bugprone-undefined-memory-manipulation,
   bugprone-unhandled-self-assignment,
   bugprone-unused-raii,
@@ -24,6 +25,7 @@ Checks: >
   misc-redundant-expression,
   misc-throw-by-value-catch-by-reference,
   misc-unused-alias-decls,
+  misc-unused-using-decls,
   modernize-avoid-variadic-functions,
   modernize-macro-to-enum,
   modernize-redundant-void-arg,
@@ -41,9 +43,9 @@ Checks: >
   -performance-noexcept-move-constructor,
   -performance-noexcept-swap,
   -performance-unnecessary-value-param,
-  performance-for-range-copy,
-  performance-move-constructor-init,
+  readability-avoid-const-params-in-decls,
   readability-container-contains,
+  readability-container-size-empty,
   readability-delete-null-pointer,
   readability-duplicate-include,
   readability-redundant-*,
@@ -59,9 +61,7 @@ Checks: >
 # cppcoreguidelines-missing-std-forward
 # modernize-use-override
 # modernize-use-ranges
-# readability-avoid-const-params-in-decls
 # readability-avoid-return-with-void-value
-# readability-container-size-empty
 # readability-redundant-smartptr-get
 # readability-use-anyofallof
 

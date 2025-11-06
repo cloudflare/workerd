@@ -262,8 +262,7 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
     // assumes droppable references are not roots. This way V8 only calls ResetRoot() on droppable
     // references, and doesn't even call `IsRoot()` on anything else. See comment about droppable
     // references in Wrappable::attachWrapper() for details.
-    : v8::EmbedderRootsHandler(),
-      isolate(isolate) {
+    : isolate(isolate) {
   isolate->AddGCPrologueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
     // We can expect that any freelisted shims will be collected during a major GC, because

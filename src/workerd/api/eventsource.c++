@@ -177,7 +177,7 @@ class EventSourceSink final: public WritableStreamSink {
   }
 
   void release() {
-    if (pendingMessages.size() == 0) return;
+    if (pendingMessages.empty()) return;
     auto pending = pendingMessages.releaseAsArray();
     // If the event source is gone, just drop the messages on the floor.
     KJ_IF_SOME(es, eventSource) {

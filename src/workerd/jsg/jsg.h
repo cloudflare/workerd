@@ -2144,6 +2144,9 @@ static constexpr JsgConfig DEFAULT_JSG_CONFIG = {};
 template <typename Config>
 static const JsgConfig& getConfig(const Config& config) {
   if constexpr (kj::isSameType<Config, JsgConfig>() || kj::canConvert<Config, JsgConfig>()) {
+    // Returning a reference to a parameter is harmless here since call sites pass in a reference to
+    // config, which they can continue to use if returned here.
+    // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
     return config;
   } else {
     return DEFAULT_JSG_CONFIG;

@@ -45,10 +45,12 @@ void UnhandledRejectionHandler::report(
   js.tryCatch([&] {
     switch (event) {
       case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler: {
-        return rejectedWithNoHandler(js, kj::mv(promise), kj::mv(value));
+        rejectedWithNoHandler(js, kj::mv(promise), kj::mv(value));
+        return;
       }
       case v8::PromiseRejectEvent::kPromiseHandlerAddedAfterReject: {
-        return handledAfterRejection(js, kj::mv(promise));
+        handledAfterRejection(js, kj::mv(promise));
+        return;
       }
       case v8::PromiseRejectEvent::kPromiseRejectAfterResolved: {
         break;

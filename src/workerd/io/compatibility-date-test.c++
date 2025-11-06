@@ -528,7 +528,7 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
     }
   }
 
-  if (violations.size() > 0) {
+  if (!violations.empty()) {
     KJ_FAIL_ASSERT("Compatibility date violations found:\n", kj::strArray(violations, "\n"));
   }
 }

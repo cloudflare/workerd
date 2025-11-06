@@ -137,10 +137,8 @@ wd_cc_library(
     srcs = ["libreprl/libreprl.c"],
     hdrs = ["libreprl/libreprl.h"],
     copts = [
-        "-Ilibreprl",
         "-std=c23",
     ],
-    includes = ["libreprl"],
 )
 
 kj_test(

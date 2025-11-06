@@ -2161,7 +2161,7 @@ class Server::WorkerService final: public Service,
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
 
-    if (bufferedTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
+    if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
       // Setting up buffered tail workers support, but only if we actually have tail workers
       // configured.
       auto tracer = kj::rc<PipelineTracer>();

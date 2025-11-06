@@ -150,7 +150,7 @@ class ReadableSourceWrapper: public ReadableSource {
   }
 
   void cancel(kj::Exception reason) override {
-    return getInner().cancel(kj::mv(reason));
+    getInner().cancel(kj::mv(reason));
   }
 
   Tee tee(size_t limit) override {

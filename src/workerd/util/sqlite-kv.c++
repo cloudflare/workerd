@@ -139,7 +139,7 @@ kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
 }
 
 void SqliteKv::put(KeyPtr key, ValuePtr value) {
-  return put(key, value, {});
+  put(key, value, {});
 }
 
 void SqliteKv::put(KeyPtr key, ValuePtr value, WriteOptions options) {

@@ -72,7 +72,7 @@ kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
   std::vector<std::string> parts;
 
   while (true) {
-    if (input.size() == 0) {
+    if (input.empty()) {
       parts.emplace_back("");
       break;
     }

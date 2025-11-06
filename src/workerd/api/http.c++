@@ -2440,7 +2440,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
   // The Fetch spec defines "response URLs" as having no fragments. Since the last URL in the list
   // is the one reported by Response::getUrl(), we nullify its fragment before serialization.
   kj::Array<kj::String> urlList;
-  if (urlListParam.size() > 0) {
+  if (!urlListParam.empty()) {
     urlListParam.back().fragment = kj::none;
     urlList = KJ_MAP(url, urlListParam) { return url.toString(); };
   }

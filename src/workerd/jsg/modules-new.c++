@@ -1738,7 +1738,7 @@ Module::EvaluateCallback Module::newJsonModuleHandler(kj::ArrayPtr<const char> d
 
 Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byte> data) {
   struct Cache final {
-    kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex{};
+    kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex;
   };
   return [data, cache = kj::heap<Cache>()](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver& observer) mutable -> bool {

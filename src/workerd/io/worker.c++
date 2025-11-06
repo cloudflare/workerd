@@ -2346,7 +2346,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
           handlers.add(kj::str(name));
         }
       }
-      if (handlers.size() == 0) {
+      if (handlers.empty()) {
         errorReporter.addError(
             kj::str("No event handlers were registered. This script does nothing."));
       }

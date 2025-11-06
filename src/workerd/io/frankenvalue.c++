@@ -19,7 +19,7 @@ Frankenvalue Frankenvalue::cloneImpl() const {
     }
   }
 
-  if (properties.size() > 0) {
+  if (!properties.empty()) {
     result.properties.reserve(properties.size());
 
     for (auto& property: properties) {
@@ -83,7 +83,7 @@ void Frankenvalue::toCapnpImpl(rpc::Frankenvalue::Builder builder, uint capTable
     }
   }
 
-  if (properties.size() == 0) {
+  if (properties.empty()) {
     builder.setCapTableSize(capTableSize);
   } else {
     uint capTablePos = properties[0].capTableOffset;
@@ -175,7 +175,7 @@ jsg::JsValue Frankenvalue::toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTable
       KJ_UNREACHABLE;
     }();
 
-    if (properties.size() > 0) {
+    if (!properties.empty()) {
       jsg::JsObject obj = KJ_REQUIRE_NONNULL(
           result.tryCast<jsg::JsObject>(), "non-object Frankenvalue can't have properties");
 
