@@ -1378,10 +1378,6 @@ jsg::Ref<Response> makeHttpResponse(
 bool isNullBodyStatusCode(uint statusCode);
 bool isRedirectStatusCode(uint statusCode);
 
-kj::String makeRandomBoundaryCharacters();
-// Make a boundary string for FormData serialization.
-// TODO(cleanup): Move to form-data.{h,c++}?
-
 #define EW_HTTP_ISOLATE_TYPES         \
   api::FetchEvent,                    \
   api::Headers,                       \
