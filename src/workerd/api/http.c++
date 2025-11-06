@@ -17,6 +17,7 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
+#include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
@@ -637,18 +638,6 @@ class BodyBufferInputStream final: public ReadableStreamSource {
 
 }  // namespace
 
-// Make an array of characters containing random hexadecimal digits.
-//
-// Note: Rather than use random hex digits, we could generate the hex digits by hashing the
-//   form-data content itself! This would give us pleasing assurance that our boundary string is
-//   not present in the content being divided. The downside is CPU usage if, say, a user uploads
-//   an enormous file.
-kj::String makeRandomBoundaryCharacters() {
-  kj::FixedArray<kj::byte, 16> buffer;
-  IoContext::current().getEntropySource().generate(buffer);
-  return kj::encodeHex(buffer);
-}
-
 Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
   Buffer result;
   result.view = view;
@@ -704,7 +693,15 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       buffer = kj::mv(blob);
     }
     KJ_CASE_ONEOF(formData, jsg::Ref<FormData>) {
-      auto boundary = makeRandomBoundaryCharacters();
+      // Make an array of characters containing random hexadecimal digits.
+      //
+      // Note: Rather than use random hex digits, we could generate the hex digits by hashing the
+      //   form-data content itself! This would give us pleasing assurance that our boundary string
+      //   is not present in the content being divided. The downside is CPU usage if, say, a user
+      //   uploads an enormous file.
+      kj::FixedArray<kj::byte, 16> boundaryBuffer;
+      workerd::getEntropy(boundaryBuffer);
+      auto boundary = kj::encodeHex(boundaryBuffer);
       contentType = MimeType::formDataWithBoundary(boundary);
       buffer = formData->serialize(boundary);
     }
