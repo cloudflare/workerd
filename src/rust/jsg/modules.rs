@@ -4,6 +4,7 @@ pub enum Type {
     INTERNAL,
 }
 
+#[expect(clippy::missing_safety_doc)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
     unsafe extern "C++" {

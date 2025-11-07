@@ -2,6 +2,7 @@
 #![warn(must_not_suspend)]
 
 use std::cell::Cell;
+use std::future::Future;
 use std::num::ParseIntError;
 use std::rc::Rc;
 
@@ -10,10 +11,9 @@ use kj_rs::KjMaybe;
 pub mod modules;
 pub mod v8;
 
-pub use crate::v8::LocalValue;
-
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+#[expect(clippy::missing_safety_doc)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
 
@@ -47,13 +47,13 @@ pub mod ffi {
         unsafe fn create_resource_template(
             isolate: *mut Isolate,
             descriptor: &ResourceDescriptor,
-        ) -> usize /* v8::GlobalFunctionTemplate */;
+        ) -> usize /* v8::Global<FunctionTemplate> */;
 
         unsafe fn wrap_resource(
             isolate: *mut Isolate,
             resource: usize,    /* R* */
-            constructor: usize, /* v8::LocalFunctionTemplate */
-        ) -> usize /* v8::LocalValue */;
+            constructor: usize, /* v8::Local<FunctionTemplate> */
+        ) -> usize /* v8::Local<Value> */;
 
         unsafe fn unwrap_resource(
             isolate: *mut Isolate,
@@ -79,7 +79,7 @@ fn get_resource_descriptor<R: Resource>() -> ffi::ResourceDescriptor {
             }
             Member::Method { name, callback } => {
                 descriptor.methods.push(ffi::MethodDescriptor {
-                    name: name.to_string(),
+                    name: name.to_owned(),
                     callback: callback as usize,
                 });
             }
@@ -90,7 +90,7 @@ fn get_resource_descriptor<R: Resource>() -> ffi::ResourceDescriptor {
             } => todo!(),
             Member::StaticMethod { name, callback } => {
                 descriptor.static_methods.push(ffi::StaticMethodDescriptor {
-                    name: name.to_string(),
+                    name: name.to_owned(),
                     callback: callback as usize,
                 });
             }
@@ -100,44 +100,48 @@ fn get_resource_descriptor<R: Resource>() -> ffi::ResourceDescriptor {
     descriptor
 }
 
-pub fn create_resource_constructor<R: Resource>(lock: &mut v8::Lock) -> v8::GlobalFunctionTemplate {
+pub fn create_resource_constructor<R: Resource>(
+    lock: &mut Lock,
+) -> v8::Global<v8::FunctionTemplate> {
     unsafe {
-        v8::GlobalFunctionTemplate::from_ffi(ffi::create_resource_template(
+        v8::Global::from_ffi(
             lock.get_isolate(),
-            &get_resource_descriptor::<R>(),
-        ))
+            ffi::create_resource_template(lock.get_isolate(), &get_resource_descriptor::<R>()),
+        )
     }
 }
 
 // TODO: R needs to be a non-empty struct.
+///
+/// # Safety
+/// The caller must ensure that `resource` points to a valid R instance.
 pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
-    lock: &mut v8::Lock,
+    lock: &mut Lock,
     resource: *mut R,
     wrapper: &W,
-) -> v8::LocalValue<'a> {
+) -> v8::Local<'a, v8::Value> {
     let r = unsafe { &mut *resource };
     let instance = r.js_instance(lock);
-    match instance {
-        Some(val) => val,
-        None => {
-            let constructor = wrapper.get_constructor(lock);
-            let instance = unsafe {
-                v8::LocalValue::from_ffi(
-                    lock.get_isolate(),
-                    ffi::wrap_resource(lock.get_isolate(), resource as usize, constructor.to_ffi()),
-                )
-            };
-            let cached_instance = instance.clone();
-            r.set_js_instance(lock, cached_instance);
-            instance
-        }
+    if let Some(val) = instance {
+        val
+    } else {
+        let constructor = wrapper.get_constructor(lock);
+        let constructor_ffi = unsafe { constructor.to_ffi() };
+        let instance = unsafe {
+            v8::Local::from_ffi(
+                lock.get_isolate(),
+                ffi::wrap_resource(lock.get_isolate(), resource as usize, constructor_ffi),
+            )
+        };
+        let cached_instance = instance.clone();
+        r.set_js_instance(lock, cached_instance);
+        instance
     }
 }
 
-// TODO: Take a look at the lifecycle.
 pub fn unwrap_resource<'a, R: Resource>(
-    lock: &'a mut v8::Lock,
-    value: v8::LocalValue,
+    lock: &'a mut Lock,
+    value: v8::Local<v8::Value>,
 ) -> &'a mut R {
     let ptr = unsafe { ffi::unwrap_resource(lock.get_isolate(), value.handle.to_ffi()) as *mut R };
     unsafe { &mut *ptr }
@@ -173,9 +177,40 @@ impl From<ParseIntError> for Error {
 }
 
 #[must_not_suspend]
-pub struct Lock {}
+pub struct Lock {
+    isolate: *mut v8::ffi::Isolate,
+}
 
 impl Lock {
+    /// # Safety
+    /// The caller must ensure that `args` is a valid pointer to `FunctionCallbackInfo`.
+    pub unsafe fn from_args(args: *mut v8::ffi::FunctionCallbackInfo) -> Self {
+        unsafe { Self::from_isolate(v8::ffi::get_isolate(args)) }
+    }
+
+    /// # Safety
+    /// The caller must ensure that `isolate` is a valid pointer to an `Isolate`.
+    pub unsafe fn from_isolate(isolate: *mut v8::ffi::Isolate) -> Self {
+        Self {
+            isolate: &raw mut *isolate,
+        }
+    }
+
+    /// # Safety
+    /// Returns a raw pointer to the isolate. The caller must ensure proper usage.
+    pub unsafe fn get_isolate(&mut self) -> *mut v8::ffi::Isolate {
+        self.isolate
+    }
+
+    pub fn new_object<'a>(&mut self) -> v8::Local<'a, v8::Object> {
+        unsafe {
+            v8::Local::from_ffi(
+                self.get_isolate(),
+                v8::ffi::new_local_object(self.get_isolate()),
+            )
+        }
+    }
+
     // todo: Result?
     pub fn alloc<T>(&mut self, t: T) -> Ref<T> {
         Ref {
@@ -197,7 +232,7 @@ pub struct Ref<T> {
 }
 
 impl<T> Ref<T> {
-    pub fn as_mut<'a, 'b>(&'a mut self, _lock: &'b Lock) -> &'b mut T {
+    pub fn as_mut<'b>(&mut self, _lock: &'b Lock) -> &'b mut T {
         todo!()
     }
 
@@ -258,17 +293,17 @@ pub trait Resource: Type {
     fn members() -> Vec<Member>
     where
         Self: Sized;
-    fn js_instance<'a>(&self, lock: &mut v8::Lock) -> Option<v8::LocalValue<'a>>;
+    fn js_instance<'a>(&self, lock: &mut Lock) -> Option<v8::Local<'a, v8::Value>>;
 
-    fn set_js_instance<'a>(&mut self, lock: &mut v8::Lock, instance: v8::LocalValue<'a>);
+    fn set_js_instance(&mut self, lock: &mut Lock, instance: v8::Local<'_, v8::Value>);
 }
 
 pub trait ResourceWrapper {
-    fn get_constructor<'a>(&self, lock: &'a mut v8::Lock) -> v8::LocalFunctionTemplate;
+    fn get_constructor<'a>(&self, lock: &'a mut Lock) -> v8::Local<'a, v8::FunctionTemplate>;
 }
 
 pub trait Struct: Type {
-    fn wrap<'a, 'b>(&self, lock: &'a mut v8::Lock) -> v8::LocalValue<'b>
+    fn wrap<'a, 'b>(&self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
         'b: 'a;
 }
