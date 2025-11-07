@@ -42,12 +42,14 @@ struct ApiHeaders: public benchmark::Fixture {
         "Connection: keep-alive\r\n"
         "\r\n");
     KJ_EXPECT(kjHeaders->tryParseRequest(in.asArray()).is<kj::HttpHeaders::Request>());
+    original = kj::mv(in);
   }
 
   void TearDown(benchmark::State& state) noexcept(true) override {
     fixture = nullptr;
   }
 
+  kj::Maybe<kj::String> original;
   kj::Own<TestFixture> fixture;
   kj::Own<kj::HttpHeaderTable> table;
   kj::Own<kj::HttpHeaders> kjHeaders;
