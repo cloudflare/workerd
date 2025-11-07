@@ -501,6 +501,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
 
         context.getMetrics().reportFailure(e);
 
+        auto description = kj::str(e.getDescription());
+        auto log = !jsg::isTunneledException(description) && !jsg::isDoNotLogException(description);
+        auto isUserError = e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none;
+
         // This will include the error in inspector/tracers and log to syslog if internal.
         context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
 
@@ -524,11 +528,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         auto shouldRetryCountsAgainstLimits = !context.isOutputGateBroken();
 
         // We want to alert if we aren't going to count this alarm retry against limits
-        if (auto desc = e.getDescription(); !jsg::isTunneledException(desc) &&
-            !jsg::isDoNotLogException(desc) && context.isOutputGateBroken()) {
-          LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, e);
+        if (log && context.isOutputGateBroken()) {
+          LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, description);
         } else if (context.isOutputGateBroken()) {
-          if (e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
+          if (isUserError) {
             // The handler failed because the user overloaded the object. It's their fault, we'll not
             // retry forever.
             shouldRetryCountsAgainstLimits = true;
@@ -538,7 +541,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           // to correctly investigate stuck alarms.
           LOG_NOSENTRY(ERROR,
               "output lock broke during alarm execution without an interesting error description",
-              actorId, e, shouldRetryCountsAgainstLimits);
+              actorId, description, shouldRetryCountsAgainstLimits);
         }
         return WorkerInterface::AlarmResult{.retry = true,
           .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
