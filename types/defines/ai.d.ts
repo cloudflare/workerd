@@ -3566,23 +3566,11 @@ export declare abstract class Ai<AiModelList extends AiModelListType = AiModels>
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   toMarkdown(): ToMarkdownService;
   toMarkdown(
-    files: {
-      name: string;
-      blob: Blob;
-    }[],
-    options?: {
-      gateway?: GatewayOptions;
-      extraHeaders?: object;
-    },
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions,
   ): Promise<ConversionResponse[]>;
   toMarkdown(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: {
-      gateway?: GatewayOptions;
-      extraHeaders?: object;
-    },
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions,
   ): Promise<ConversionResponse>;
 }

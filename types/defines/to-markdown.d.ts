@@ -1,14 +1,49 @@
+export type MarkdownDocument = {
+  name: string;
+  blob: Blob;
+}
+
 export type ConversionResponse = {
   name: string;
   mimeType: string;
-} & ({
-  format: "markdown";
+  format: 'markdown';
   tokens: number;
   data: string;
 } | {
-  format: "error",
-  error: string,
-});
+  name: string;
+  mimeType: string;
+  format: 'error';
+  error: string;
+};
+
+export type ImageConversionOptions = {
+  descriptionLanguage?: 'en' | 'es' | 'fr' | 'it' | 'pt' | 'de';
+}
+
+export type EmbeddedImageConversionOptions = ImageConversionOptions & {
+  convert?: boolean;
+  maxConvertedImages?: number;
+};
+
+export type ConversionOptions = {
+  html?: {
+    images?: EmbeddedImageConversionOptions & { convertOGImage?: boolean };
+  },
+  docx?: {
+    images?: EmbeddedImageConversionOptions;
+  },
+  image?: ImageConversionOptions;
+  pdf?: {
+    images?: EmbeddedImageConversionOptions;
+    metadata?: boolean;
+  },
+};
+
+export type ConversionRequestOptions = {
+  gateway?: GatewayOptions;
+  extraHeaders?: object;
+  conversionOptions?: ConversionOptions;
+};
 
 export type SupportedFileFormat = {
   mimeType: string;
@@ -17,15 +52,12 @@ export type SupportedFileFormat = {
 
 export declare abstract class ToMarkdownService {
   transform(
-    files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse[]>;
   transform(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse>;
   supported(): Promise<SupportedFileFormat[]>
 }
