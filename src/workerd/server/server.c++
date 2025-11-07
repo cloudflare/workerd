@@ -2196,8 +2196,8 @@ class Server::WorkerService final: public Service,
           kj::coCapture([tailWorkers = legacyTailWorkers.releaseAsArray()](
                             kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
         for (auto& worker: tailWorkers) {
-          auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
-              workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
+          auto event = kj::heap<workerd::api::TraceCustomEvent>(
+              workerd::api::TraceCustomEvent::TYPE, mapAddRef(traces));
           co_await worker->customEvent(kj::mv(event)).ignoreResult();
         }
         co_return;
@@ -4923,8 +4923,7 @@ class Server::HttpListener final: public kj::Refcounted {
     kj::Promise<void> sendTraces(SendTracesContext context) override {
       auto traces =
           KJ_MAP(trace, context.getParams().getTraces()){ return kj::refcounted<Trace>(trace); };
-      auto event =
-          kj::heap<api::TraceCustomEventImpl>(api::TraceCustomEventImpl::TYPE, kj::mv(traces));
+      auto event = kj::heap<api::TraceCustomEvent>(api::TraceCustomEvent::TYPE, kj::mv(traces));
       auto worker = getWorker();
       auto result = co_await worker->customEvent(kj::mv(event));
       auto resp = context.getResults().getResult();
@@ -4948,8 +4947,8 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
-      auto customEvent = kj::heap<api::JsRpcSessionCustomEventImpl>(
-          api::JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
+      auto customEvent = kj::heap<api::JsRpcSessionCustomEvent>(
+          api::JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
       auto cap = customEvent->getCap();
       capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
@@ -4962,7 +4961,7 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
-      auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
+      auto customEvent = kj::heap<tracing::TailStreamCustomEvent>();
       auto cap = customEvent->getCap();
       capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
       pipelineBuilder.setTopLevel(cap);

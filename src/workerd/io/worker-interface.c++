@@ -84,7 +84,7 @@ class PromisedWorkerInterface final: public WorkerInterface {
         co_await promise;
       } catch (...) {
         // Due to the exception, we're going to discard our CustomEvent. But we should tell it
-        // about why it failed first. This is important for JsRpcSessionCustomEventImpl in
+        // about why it failed first. This is important for JsRpcSessionCustomEvent in
         // particular, as it needs to resolve the RPC client to the correct error.
         auto exception = kj::getCaughtExceptionAsKj();
         event->failed(exception);

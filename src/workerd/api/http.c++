@@ -2578,8 +2578,8 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();
   auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
-  auto event = kj::heap<api::JsRpcSessionCustomEventImpl>(
-      JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
+  auto event = kj::heap<api::JsRpcSessionCustomEvent>(
+      JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
   auto result = event->getCap();
 
@@ -2771,7 +2771,7 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
 
   // Only create worker interface after the error checks above to reduce overhead in case of errors.
   auto worker = getClient(ioContext, kj::none, "queue"_kjc);
-  auto event = kj::refcounted<api::QueueCustomEventImpl>(QueueEvent::Params{
+  auto event = kj::refcounted<api::QueueCustomEvent>(QueueEvent::Params{
     .queueName = kj::mv(queueName),
     .messages = encodedMessages.finish(),
   });
