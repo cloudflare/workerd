@@ -119,7 +119,10 @@ pub struct Local<'a, T> {
 
 impl<'a, T> Drop for Local<'a, T> {
     fn drop(&mut self) {
-        todo!()
+        if self.handle.ptr == 0 {
+            return;
+        }
+        todo!("This means we have an unnecessary copy somewhere");
     }
 }
 
@@ -224,7 +227,10 @@ impl<T> Global<T> {
 
 impl<T> Drop for Global<T> {
     fn drop(&mut self) {
-        todo!()
+        let handle = ffi::Global { ptr: self.handle.ptr };
+        unsafe {
+            ffi::global_drop(handle);
+        }
     }
 }
 

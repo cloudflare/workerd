@@ -72,7 +72,7 @@ void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
 // Global<T>
 
 void global_drop(Global value) {
-  KJ_UNIMPLEMENTED("global_drop");
+  // TODO: Implement global_drop
 }
 
 Global global_clone(const Global& value) {
