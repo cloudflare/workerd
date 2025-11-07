@@ -281,9 +281,7 @@ impl DnsUtil {
     extern "C" fn parse_caa_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
         let mut lock = unsafe { jsg::Lock::from_args(args) };
         let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-        assert!(args.len() > 0);
-        let arg0 = args.get(&mut lock, 0);
-        let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), arg0.to_ffi()) };
+        let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), args.get(0).to_ffi()) };
         let this = args.this(&mut lock);
         let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
         match self_.parse_caa_record(&arg0) {
@@ -297,9 +295,7 @@ impl DnsUtil {
     extern "C" fn parse_naptr_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
         let mut lock = unsafe { jsg::Lock::from_args(args) };
         let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-        assert!(args.len() > 0);
-        let arg0 = args.get(&mut lock, 0);
-        let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), arg0.to_ffi()) };
+        let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), args.get(0).to_ffi()) };
         let this = args.this(&mut lock);
         let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
         match self_.parse_naptr_record(&arg0) {

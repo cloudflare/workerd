@@ -295,16 +295,16 @@ impl GlobalFunctionTemplate {
     }
 }
 
-pub struct FunctionCallbackInfo(*mut ffi::FunctionCallbackInfo);
+pub struct FunctionCallbackInfo<'a>(*mut ffi::FunctionCallbackInfo, PhantomData<&'a ()>);
 
-impl FunctionCallbackInfo {
+impl<'a> FunctionCallbackInfo<'a> {
     /// # Safety
     /// The caller must ensure that `info` is a valid pointer to `FunctionCallbackInfo`.
     pub unsafe fn from_ffi(info: *mut ffi::FunctionCallbackInfo) -> Self {
-        Self(info)
+        Self(info, PhantomData)
     }
 
-    pub fn this<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+    pub fn this(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe { Local::from_ffi(lock.get_isolate(), ffi::get_this(self.0)) }
     }
 
@@ -312,8 +312,14 @@ impl FunctionCallbackInfo {
         unsafe { ffi::get_length(self.0) }
     }
 
-    pub fn get<'a>(&self, lock: &mut Lock, index: usize) -> Local<'a, Value> {
-        unsafe { Local::from_ffi(lock.get_isolate(), ffi::get_arg(self.0, index)) }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn get(&self, index: usize) -> Local<'a, Value> {
+        let isolate = unsafe { ffi::get_isolate(self.0) };
+        debug_assert!(index <= self.len());
+        unsafe { Local::from_ffi(isolate, ffi::get_arg(self.0, index)) }
     }
 
     pub fn set_return_value(&self, value: Local<Value>) {
