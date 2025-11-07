@@ -123,22 +123,6 @@ wd_test(
     data = ["performance-test.js"],
 )
 
-filegroup(
-    name = "all_benchmarks",
-    srcs = [
-        ":bench-api-headers",
-        ":bench-global-scope",
-        ":bench-json",
-        ":bench-kj-headers",
-        ":bench-mimetype",
-        ":bench-regex",
-        ":bench-response",
-        ":bench-text-encoder",
-        ":bench-util",
-    ],
-    visibility = ["//visibility:public"],
-)
-
 # REPRL tests using KJ test framework
 wd_cc_library(
     name = "libreprl",
