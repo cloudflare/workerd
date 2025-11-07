@@ -82,20 +82,7 @@ archive_override(
     url = "https://sqlite.org/2024/sqlite-src-3470000.zip",
 )
 
-bazel_dep(name = "tcmalloc", repo_name = "com_google_tcmalloc")
-archive_override(
-    module_name = "tcmalloc",
-    integrity = "sha256-29cSZUwbEyiW8Y7FneaAzNNYLHeBmAPqBuIciHeE/u0=",
-    remote_file_integrity = {
-        "MODULE.bazel": "sha384-yOIZPSA2AN4Fnlo43D677Up7bTjiB+y1xFzwvLgQH6QIS3eGncWqjo6dTda+Vad2",
-    },
-    remote_file_urls = {
-        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/tcmalloc/0.0.0-20250331-43fcf6e/MODULE.bazel"],
-    },
-    strip_prefix = "google-tcmalloc-cf3dc2d",
-    type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/cf3dc2d98bd64cb43f4f98db0acaf5028a7b81eb",
-)
+bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
 
 ########################################################
 # Libraries which are not on the BCR

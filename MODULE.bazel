@@ -4,7 +4,7 @@ module(name = "workerd")
 
 bazel_dep(name = "aspect_bazel_lib", version = "2.21.2")
 bazel_dep(name = "aspect_rules_lint", version = "1.10.2")
-bazel_dep(name = "bazel_features", version = "1.37.0")
+bazel_dep(name = "bazel_features", version = "1.38.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.2")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 

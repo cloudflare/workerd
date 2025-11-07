@@ -104,14 +104,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.44",
-    actual = "@crates_vendor__cc-1.2.44//:cc",
+    name = "cc-1.2.45",
+    actual = "@crates_vendor__cc-1.2.45//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.44//:cc",
+    actual = "@crates_vendor__cc-1.2.45//:cc",
     tags = ["manual"],
 )
 
@@ -236,14 +236,14 @@ alias(
 )
 
 alias(
-    name = "quote-1.0.41",
-    actual = "@crates_vendor__quote-1.0.41//:quote",
+    name = "quote-1.0.42",
+    actual = "@crates_vendor__quote-1.0.42//:quote",
     tags = ["manual"],
 )
 
 alias(
     name = "quote",
-    actual = "@crates_vendor__quote-1.0.41//:quote",
+    actual = "@crates_vendor__quote-1.0.42//:quote",
     tags = ["manual"],
 )
 
@@ -356,14 +356,14 @@ alias(
 )
 
 alias(
-    name = "syn-2.0.108",
-    actual = "@crates_vendor__syn-2.0.108//:syn",
+    name = "syn-2.0.109",
+    actual = "@crates_vendor__syn-2.0.109//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.108//:syn",
+    actual = "@crates_vendor__syn-2.0.109//:syn",
     tags = ["manual"],
 )
 
