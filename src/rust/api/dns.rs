@@ -16,9 +16,9 @@ pub enum DnsParserError {
     Unknown,
 }
 
-impl Into<jsg::Error> for DnsParserError {
-    fn into(self) -> jsg::Error {
-        jsg::Error::new("Error".to_string(), self.to_string())
+impl From<DnsParserError> for jsg::Error {
+    fn from(val: DnsParserError) -> Self {
+        Self::new("Error".to_owned(), val.to_string())
     }
 }
 
@@ -276,39 +276,38 @@ impl DnsUtil {
 }
 
 // Generated code.
+#[expect(clippy::similar_names)]
 impl DnsUtil {
     extern "C" fn parse_caa_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
         let mut lock = unsafe { jsg::Lock::from_args(args) };
         let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-        let len = args.get_length();
-        assert!(len > 0);
-        let arg0 = args.get_arg(&mut lock, 0);
+        assert!(args.len() > 0);
+        let arg0 = args.get(&mut lock, 0);
         let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), arg0.to_ffi()) };
-        let this = args.get_this(&mut lock);
-        let self_ = jsg::unwrap_resource::<DnsUtil>(&mut lock, this);
+        let this = args.this(&mut lock);
+        let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
         match self_.parse_caa_record(&arg0) {
             Ok(record) => args.set_return_value(record.wrap(&mut lock)),
             Err(err) => {
-                dbg!(err);
+                todo!("{err}");
             }
-        };
+        }
     }
 
     extern "C" fn parse_naptr_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
         let mut lock = unsafe { jsg::Lock::from_args(args) };
         let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-        let len = args.get_length();
-        assert!(len > 0);
-        let arg0 = args.get_arg(&mut lock, 0);
+        assert!(args.len() > 0);
+        let arg0 = args.get(&mut lock, 0);
         let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), arg0.to_ffi()) };
-        let this = args.get_this(&mut lock);
-        let self_ = jsg::unwrap_resource::<DnsUtil>(&mut lock, this);
+        let this = args.this(&mut lock);
+        let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
         match self_.parse_naptr_record(&arg0) {
             Ok(record) => args.set_return_value(record.wrap(&mut lock)),
             Err(err) => {
-                dbg!(err);
+                todo!("{err}");
             }
-        };
+        }
     }
 }
 
@@ -335,10 +334,7 @@ impl jsg::Resource for DnsUtil {
     }
 
     fn js_instance<'a>(&self, lock: &mut Lock) -> Option<v8::Local<'a, v8::Value>> {
-        match self.js.as_ref() {
-            Some(val) => Some(val.to_local(lock)),
-            None => None,
-        }
+        self.js.as_ref().map(|val| val.to_local(lock))
     }
 
     fn set_js_instance(&mut self, lock: &mut Lock, instance: v8::Local<v8::Value>) {

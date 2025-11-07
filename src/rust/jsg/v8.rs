@@ -304,15 +304,15 @@ impl FunctionCallbackInfo {
         Self(info)
     }
 
-    pub fn get_this<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+    pub fn this<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe { Local::from_ffi(lock.get_isolate(), ffi::get_this(self.0)) }
     }
 
-    pub fn get_length(&self) -> usize {
+    pub fn len(&self) -> usize {
         unsafe { ffi::get_length(self.0) }
     }
 
-    pub fn get_arg<'a>(&self, lock: &mut Lock, index: usize) -> Local<'a, Value> {
+    pub fn get<'a>(&self, lock: &mut Lock, index: usize) -> Local<'a, Value> {
         unsafe { Local::from_ffi(lock.get_isolate(), ffi::get_arg(self.0, index)) }
     }
 
