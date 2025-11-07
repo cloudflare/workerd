@@ -256,7 +256,8 @@ public:
   // the POST will successfully retransmit.
   using Initializer = kj::OneOf<jsg::Ref<ReadableStream>, kj::String, kj::Array<byte>,
                                 jsg::Ref<Blob>, jsg::Ref<FormData>,
-                                jsg::Ref<URLSearchParams>, jsg::Ref<url::URLSearchParams>>;
+                                jsg::Ref<URLSearchParams>, jsg::Ref<url::URLSearchParams>,
+                                jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
@@ -382,7 +383,11 @@ public:
     JSG_METHOD(formData);
     JSG_METHOD(blob);
 
-    JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData);
+    if (flags.getFetchIterableTypeSupport()) {
+      JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData | Iterable<ArrayBuffer|ArrayBufferView> | AsyncIterable<ArrayBuffer|ArrayBufferView>);
+    } else {
+      JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData);
+    }
     // All type aliases get inlined when exporting RTTI, but this type alias is included by
     // the official TypeScript types, so users might be depending on it.
     JSG_TS_OVERRIDE({

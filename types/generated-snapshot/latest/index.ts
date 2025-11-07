@@ -538,17 +538,7 @@ export interface StructuredSerializeOptions {
   transfer?: any[];
 }
 export declare abstract class Navigator {
-  sendBeacon(
-    url: string,
-    body?:
-      | ReadableStream
-      | string
-      | (ArrayBuffer | ArrayBufferView)
-      | Blob
-      | FormData
-      | URLSearchParams
-      | URLSearchParams,
-  ): boolean;
+  sendBeacon(url: string, body?: BodyInit): boolean;
   readonly userAgent: string;
   readonly hardwareConcurrency: number;
   readonly language: string;
@@ -1914,7 +1904,9 @@ export type BodyInit =
   | ArrayBufferView
   | Blob
   | URLSearchParams
-  | FormData;
+  | FormData
+  | Iterable<ArrayBuffer | ArrayBufferView>
+  | AsyncIterable<ArrayBuffer | ArrayBufferView>;
 export declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
   get body(): ReadableStream | null;

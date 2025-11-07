@@ -22,3 +22,24 @@ export const test = {
     });
   },
 };
+
+export const fetchGen = {
+  async test() {
+    const enc = new TextEncoder();
+    async function* gen() {
+      yield enc.encode('Hello ');
+      yield enc.encode('World!');
+    }
+    const resp = new Response(gen());
+    strictEqual(await resp.text(), 'Hello World!');
+
+    const req = new Request('http://example.com', {
+      method: 'POST',
+      body: gen(),
+    });
+    strictEqual(await req.text(), 'Hello World!');
+
+    const resp2 = new Response([enc.encode('Hello '), enc.encode('World!')]);
+    strictEqual(await resp2.text(), 'Hello World!');
+  },
+};

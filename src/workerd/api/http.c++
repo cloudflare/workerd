@@ -671,6 +671,9 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       return kj::mv(stream);
     }
+    KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
+      return ReadableStream::from(js, gen.release());
+    }
     KJ_CASE_ONEOF(text, kj::String) {
       contentType = kj::str(MimeType::PLAINTEXT_STRING);
       buffer = kj::mv(text);
