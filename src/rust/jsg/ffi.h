@@ -6,16 +6,81 @@
 
 #include <kj/function.h>
 
+// Forward declarations needed by v8.rs.h
 namespace workerd::rust::jsg {
-
-using GlobalValue = size_t;
-using LocalValue = size_t;
-using LocalObject = size_t;
 using Isolate = v8::Isolate;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
-using ModuleCallback = ::rust::Fn<LocalValue(v8::Isolate*)>;
-using LocalFunctionTemplate = size_t;
-using GlobalFunctionTemplate = size_t;
+struct ModuleRegistry;
+struct Local;
+// Define ModuleCallback before v8.rs.h using forward-declared Local
+using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
+}  // namespace workerd::rust::jsg
+
+// Include after forward declarations
+#include <workerd/rust/jsg/v8.rs.h>
+
+namespace workerd::rust::jsg {
+
+// Local<T>
+static_assert(sizeof(v8::Local<v8::Value>) == 8, "Size should match");
+static_assert(alignof(v8::Local<v8::Value>) == 8, "Alignment should match");
+
+template <typename T>
+inline Local to_ffi(v8::Local<T>&& value) {
+  size_t result;
+  auto ptr_void = reinterpret_cast<void*>(&result);
+  new (ptr_void) v8::Local<T>(kj::mv(value));
+  return Local{result};
+}
+
+template <typename T>
+inline v8::Local<T> local_from_ffi(Local value) {
+  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
+  return *reinterpret_cast<v8::Local<T>*>(ptr_void);
+}
+
+void local_drop(Local value);
+Local local_clone(const Local& value);
+Global local_to_global(Isolate* isolate, Local value);
+Local local_new_number(Isolate* isolate, double value);
+Local local_new_string(Isolate* isolate, ::rust::Str value);
+Local local_new_object(Isolate* isolate);
+bool local_eq(const Local& lhs, const Local& rhs);
+
+// Local<Object>
+void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
+
+// Global<T>
+static_assert(sizeof(v8::Global<v8::Value>) == sizeof(Global), "Size should match");
+static_assert(alignof(v8::Global<v8::Value>) == alignof(Global), "Alignment should match");
+
+void global_drop(Global value);
+Global global_clone(const Global& value);
+Local global_to_local(Isolate* isolate, const Global& value);
+
+template <typename T>
+inline Global to_ffi(v8::Global<T>&& value) {
+  size_t result;
+  auto ptr_void = reinterpret_cast<void*>(&result);
+  new (ptr_void) v8::Global<T>(kj::mv(value));
+  return Global{result};
+}
+
+template <typename T>
+inline v8::Global<T> global_from_ffi(Global value) {
+  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
+  return kj::mv(*reinterpret_cast<v8::Global<T>*>(ptr_void));
+}
+
+// Unwrappers
+::rust::String unwrap_string(Isolate* isolate, Local value);
+
+// FunctionCallbackInfo
+v8::Isolate* fci_get_isolate(FunctionCallbackInfo* args);
+Local fci_get_this(FunctionCallbackInfo* args);
+size_t fci_get_length(FunctionCallbackInfo* args);
+Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
+void fci_set_return_value(FunctionCallbackInfo* args, Local value);
 
 struct ModuleRegistry {
   virtual ~ModuleRegistry() = default;
@@ -27,103 +92,9 @@ inline void register_add_builtin_module(
   registry.addBuiltinModule(specifier, kj::mv(callback));
 }
 
-static_assert(sizeof(v8::Local<v8::Value>) == 8, "Size should match");
-static_assert(alignof(v8::Local<v8::Value>) == 8, "Alignment should match");
-
-static_assert(sizeof(v8::Global<v8::Value>) == sizeof(GlobalFunctionTemplate), "Size should match");
-static_assert(
-    alignof(v8::Global<v8::Value>) == alignof(GlobalFunctionTemplate), "Alignment should match");
-
-template <typename T>
-inline GlobalValue to_ffi(v8::Global<T>&& value) {
-  size_t result;
-  auto ptr_void = reinterpret_cast<void*>(&result);
-  new (ptr_void) v8::Global<T>(kj::mv(value));
-  return result;
-}
-
-template <typename T>
-inline LocalValue to_ffi(v8::Local<T>&& value) {
-  size_t result;
-  auto ptr_void = reinterpret_cast<void*>(&result);
-  new (ptr_void) v8::Local<T>(kj::mv(value));
-  return result;
-}
-
-template <typename T>
-inline v8::Local<T> local_from_ffi(LocalValue value) {
-  auto ptr_void = reinterpret_cast<void*>(&value);
-  return *reinterpret_cast<v8::Local<T>*>(ptr_void);
-}
-
-template <typename T>
-inline v8::Global<T> global_from_ffi(GlobalValue value) {
-  auto ptr_void = reinterpret_cast<void*>(&value);
-  return kj::mv(*reinterpret_cast<v8::Global<T>*>(ptr_void));
-}
-
 struct ResourceDescriptor;
-size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);
-
-inline v8::Isolate* get_isolate(FunctionCallbackInfo* args) {
-  return args->GetIsolate();
-}
-
-inline LocalObject get_this(FunctionCallbackInfo* args) {
-  return to_ffi(args->This());
-}
-
-inline size_t get_length(FunctionCallbackInfo* args) {
-  return args->Length();
-}
-
-inline LocalValue get_arg(FunctionCallbackInfo* args, size_t index) {
-  return to_ffi((*args)[index]);
-}
-
-inline ::rust::String unwrap_string(Isolate* isolate, LocalValue value) {
-  v8::Local<v8::String> v8Str;
-  if (!local_from_ffi<v8::Value>(value)->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
-    KJ_UNIMPLEMENTED("wrong");
-  }
-  v8::String::ValueView view(isolate, v8Str);
-  if (!view.is_one_byte()) {
-    return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
-  }
-  return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
-}
-
-inline LocalFunctionTemplate global_function_template_as_local(
-    Isolate* isolate, GlobalFunctionTemplate tmpl) {
-  v8::Global<v8::FunctionTemplate> glbl = global_from_ffi<v8::FunctionTemplate>(tmpl);
-  auto local = v8::Local<v8::FunctionTemplate>::New(isolate, glbl);
-  KJ_REQUIRE(tmpl == to_ffi(kj::mv(glbl)));  // We need to forget global and not to destroy it.
-  return to_ffi(kj::mv(local));
-}
-
-LocalValue wrap_resource(Isolate* isolate, size_t resource, LocalFunctionTemplate tmpl);
-
-size_t unwrap_resource(Isolate* isolate, LocalValue value);
-
-LocalObject new_local_object(Isolate* isolate);
-
-void set_local_object_property(
-    Isolate* isolate, LocalObject object, ::rust::Str key, LocalValue value);
-
-void set_return_value(FunctionCallbackInfo* args, LocalValue value);
-
-LocalValue new_local_number(Isolate* isolate, double value);
-
-LocalValue new_local_string(Isolate* isolate, ::rust::Str value);
-
-GlobalValue local_to_global_value(Isolate* isolate, LocalValue value);
-
-LocalValue global_to_local_value(Isolate* isolate, GlobalValue value);
-
-LocalValue clone_local_value(Isolate* isolate, LocalValue value);
-
-GlobalValue clone_global_value(Isolate* isolate, GlobalValue value);
-
-bool eq_local_value(LocalValue lhs, LocalValue rhs);
+Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);
+Local wrap_resource(Isolate* isolate, size_t resource, const Local& tmpl);
+size_t unwrap_resource(Isolate* isolate, Local value);
 
 }  // namespace workerd::rust::jsg

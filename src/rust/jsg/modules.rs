@@ -1,31 +1,15 @@
 use std::pin::Pin;
 
+use crate::v8::ffi;
+
 pub enum Type {
     INTERNAL,
-}
-
-#[expect(clippy::missing_safety_doc)]
-#[cxx::bridge(namespace = "workerd::rust::jsg")]
-pub mod ffi {
-    unsafe extern "C++" {
-        include!("workerd/rust/jsg/ffi.h");
-
-        type ModuleRegistry;
-        type ModuleCallback;
-        type Isolate = crate::v8::ffi::Isolate;
-
-        pub unsafe fn register_add_builtin_module(
-            registry: Pin<&mut ModuleRegistry>,
-            specifier: &str,
-            callback: unsafe fn(*mut Isolate) -> usize,
-        );
-    }
 }
 
 pub fn add_builtin(
     registry: Pin<&mut ffi::ModuleRegistry>,
     specifier: &str,
-    callback: fn(*mut ffi::Isolate) -> usize,
+    callback: fn(*mut ffi::Isolate) -> ffi::Local,
 ) {
     unsafe {
         ffi::register_add_builtin_module(registry, specifier, callback);

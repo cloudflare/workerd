@@ -20,7 +20,7 @@ mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
 
-        type ModuleRegistry = jsg::modules::ffi::ModuleRegistry;
+        type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
     extern "Rust" {
         pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>);
@@ -38,6 +38,6 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
         // let lhs = jsg::wrap_resource(&mut isolate, dns_util, &dns_util_wrapper);
         // let rhs = jsg::wrap_resource(&mut isolate, dns_util, &dns_util_wrapper);
         // assert_eq!(lhs, rhs);
-        jsg::wrap_resource(&mut isolate, dns_util, &dns_util_wrapper).to_ffi()
+        jsg::wrap_resource(&mut isolate, dns_util, &dns_util_wrapper).into_ffi()
     });
 }

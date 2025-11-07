@@ -2,7 +2,7 @@
 
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
-#include <workerd/rust/jsg/lib.rs.h>
+#include <workerd/rust/jsg/v8.rs.h>
 
 #include <kj/common.h>
 
@@ -10,7 +10,104 @@ using namespace kj_rs;
 
 namespace workerd::rust::jsg {
 
-size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor) {
+// Local<T>
+
+void local_drop(Local value) {
+  KJ_UNIMPLEMENTED("local_drop");
+}
+
+Local local_clone(const Local& value) {
+  KJ_UNIMPLEMENTED("local_clone");
+}
+
+Global local_to_global(Isolate* isolate, Local value) {
+  v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(value));
+  return to_ffi(kj::mv(global));
+}
+
+Local local_new_number(Isolate* isolate, double value) {
+  v8::Local<v8::Number> val = v8::Number::New(isolate, value);
+  return to_ffi(kj::mv(val));
+}
+
+Local local_new_string(Isolate* isolate, ::rust::Str value) {
+  v8::Local<v8::String> val =
+      v8::String::NewFromUtf8(isolate, value.cbegin(), v8::NewStringType::kNormal, value.size())
+          .ToLocalChecked();
+  return to_ffi(kj::mv(val));
+}
+
+Local local_new_object(Isolate* isolate) {
+  v8::Local<v8::Object> object = v8::Object::New(isolate);
+  return to_ffi(kj::mv(object));
+}
+
+bool local_eq(const Local& lhs, const Local& rhs) {
+  return local_from_ffi<v8::Value>(lhs) == local_from_ffi<v8::Value>(rhs);
+}
+
+// Local<Object>
+
+void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
+  auto v8_obj = local_from_ffi<v8::Object>(object);
+  [[maybe_unused]] auto result = v8_obj->Set(isolate->GetCurrentContext(),
+      v8::String::NewFromUtf8(isolate, key.cbegin(), v8::NewStringType::kInternalized, key.size())
+          .ToLocalChecked(),
+      local_from_ffi<v8::Value>(value));
+}
+
+// Unwrappers
+::rust::String unwrap_string(Isolate* isolate, Local value) {
+  v8::Local<v8::String> v8Str;
+  if (!local_from_ffi<v8::Value>(value)->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
+    KJ_UNIMPLEMENTED("wrong");
+  }
+  v8::String::ValueView view(isolate, v8Str);
+  if (!view.is_one_byte()) {
+    return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+  }
+  return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+}
+
+// Global<T>
+
+void global_drop(Global value) {
+  KJ_UNIMPLEMENTED("global_drop");
+}
+
+Global global_clone(const Global& value) {
+  KJ_UNIMPLEMENTED("global_clone");
+}
+
+Local global_to_local(Isolate* isolate, const Global& value) {
+  v8::Global<v8::Value> glbl = global_from_ffi<v8::Value>(value);
+  v8::Local<v8::Value> local = v8::Local<v8::Value>::New(isolate, glbl);
+  return to_ffi(kj::mv(local));
+}
+
+// FunctionCallbackInfo
+
+v8::Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
+  return args->GetIsolate();
+}
+
+Local fci_get_this(FunctionCallbackInfo* args) {
+  return to_ffi(args->This());
+}
+
+size_t fci_get_length(FunctionCallbackInfo* args) {
+  return args->Length();
+}
+
+Local fci_get_arg(FunctionCallbackInfo* args, size_t index) {
+  return to_ffi((*args)[index]);
+}
+
+void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
+  args->GetReturnValue().Set(local_from_ffi<v8::Value>(value));
+}
+
+Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor) {
   // Construct lazily.
   v8::EscapableHandleScope scope(isolate);
 
@@ -83,7 +180,7 @@ size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }
 
-LocalValue wrap_resource(Isolate* isolate, size_t resource, LocalFunctionTemplate tmpl) {
+Local wrap_resource(Isolate* isolate, size_t resource, const Local& tmpl) {
   auto self = reinterpret_cast<void*>(resource);
   auto local_tmpl = local_from_ffi<v8::FunctionTemplate>(tmpl);
   v8::Local<v8::Object> object = workerd::jsg::check(
@@ -98,76 +195,13 @@ LocalValue wrap_resource(Isolate* isolate, size_t resource, LocalFunctionTemplat
   return to_ffi(kj::mv(object));
 }
 
-size_t unwrap_resource(Isolate* isolate, LocalValue value) {
+size_t unwrap_resource(Isolate* isolate, Local value) {
   auto v8_obj = local_from_ffi<v8::Object>(value);
   KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
                 ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX) ==
       const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
   return reinterpret_cast<size_t>(v8_obj->GetAlignedPointerFromInternalField(
       ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-}
-
-LocalObject new_local_object(Isolate* isolate) {
-  v8::Local<v8::Object> object = v8::Object::New(isolate);
-  return to_ffi(kj::mv(object));
-}
-
-void set_local_object_property(
-    Isolate* isolate, LocalObject object, ::rust::Str key, LocalValue value) {
-  auto v8_obj = local_from_ffi<v8::Object>(object);
-  [[maybe_unused]] auto result = v8_obj->Set(isolate->GetCurrentContext(),
-      v8::String::NewFromUtf8(isolate, key.cbegin(), v8::NewStringType::kInternalized, key.size())
-          .ToLocalChecked(),
-      local_from_ffi<v8::Value>(value));
-}
-
-void set_return_value(FunctionCallbackInfo* args, LocalValue value) {
-  args->GetReturnValue().Set(local_from_ffi<v8::Value>(value));
-}
-
-LocalValue new_local_number(Isolate* isolate, double value) {
-  v8::Local<v8::Number> val = v8::Number::New(isolate, value);
-  return to_ffi(kj::mv(val));
-}
-
-LocalValue new_local_string(Isolate* isolate, ::rust::Str value) {
-  v8::Local<v8::String> val =
-      v8::String::NewFromUtf8(isolate, value.cbegin(), v8::NewStringType::kNormal, value.size())
-          .ToLocalChecked();
-  return to_ffi(kj::mv(val));
-}
-
-GlobalValue local_to_global_value(Isolate* isolate, LocalValue value) {
-  v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(value));
-  return to_ffi(kj::mv(global));
-}
-
-LocalValue global_to_local_value(Isolate* isolate, GlobalValue value) {
-  v8::Global<v8::Value> glbl = global_from_ffi<v8::Value>(value);
-  v8::Local<v8::Value> local = v8::Local<v8::Value>::New(isolate, glbl);
-  return to_ffi(kj::mv(local));
-}
-
-LocalValue clone_local_value(Isolate* isolate, LocalValue value) {
-  auto ptr_void = reinterpret_cast<void*>(&value);
-  auto local = *reinterpret_cast<v8::Local<v8::Value>*>(ptr_void);
-  auto copy = v8::Local<v8::Value>::New(isolate, local);
-  // Forget local so it doesn't get destroyed when the scope is finished.
-  [[maybe_unused]] auto forgot = to_ffi(kj::mv(local));
-  return to_ffi(kj::mv(copy));
-}
-
-GlobalValue clone_global_value(Isolate* isolate, GlobalValue value) {
-  auto ptr_void = reinterpret_cast<void*>(&value);
-  auto glbl = kj::mv(*reinterpret_cast<v8::Global<v8::Value>*>(ptr_void));
-  auto copy = v8::Global<v8::Value>(isolate, glbl);
-  // Forget glbl so it doesn't get destroyed when the scope is finished.
-  [[maybe_unused]] auto forgot = to_ffi(kj::mv(glbl));
-  return to_ffi(kj::mv(copy));
-}
-
-bool eq_local_value(LocalValue lhs, LocalValue rhs) {
-  return local_from_ffi<v8::Value>(lhs) == local_from_ffi<v8::Value>(rhs);
 }
 
 }  // namespace workerd::rust::jsg
