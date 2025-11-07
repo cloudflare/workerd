@@ -96,7 +96,7 @@ cargo_build_script(
     visibility = ["//visibility:private"],
     deps = [
         "@crates_vendor__ar_archive_writer-0.2.0//:ar_archive_writer",
-        "@crates_vendor__cc-1.2.44//:cc",
+        "@crates_vendor__cc-1.2.45//:cc",
     ],
 )
 
