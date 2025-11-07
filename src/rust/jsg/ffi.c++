@@ -17,7 +17,7 @@ void local_drop(Local value) {
 }
 
 Local local_clone(const Local& value) {
-  KJ_UNIMPLEMENTED("local_clone");
+  return Local{.ptr = value.ptr};
 }
 
 Global local_to_global(Isolate* isolate, Local value) {
@@ -76,7 +76,7 @@ void global_drop(Global value) {
 }
 
 Global global_clone(const Global& value) {
-  KJ_UNIMPLEMENTED("global_clone");
+  return Global{.ptr = value.ptr};
 }
 
 Local global_to_local(Isolate* isolate, const Global& value) {
