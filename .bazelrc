@@ -69,19 +69,19 @@ build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2
 # canonical V8 build and improves code size.
 build:unix --per_file_copt=external/abseil-cpp@-fno-exceptions
 build:unix --per_file_copt=external/protobuf@-fno-exceptions
-build:unix --per_file_copt=external/com_google_tcmalloc@-fno-exceptions
+build:unix --per_file_copt=external/tcmalloc@-fno-exceptions
 build:unix --per_file_copt=external/com_googlesource_chromium_icu@-fno-exceptions
 build:unix --per_file_copt=external/perfetto@-fno-exceptions
-build:unix --per_file_copt=external/ssl@-fno-exceptions
+build:unix --per_file_copt=external/boringssl@-fno-exceptions
 build:unix --per_file_copt=external/v8@-fno-exceptions
 build:unix --per_file_copt=external/ada-url@-fno-exceptions
 build:unix --per_file_copt=external/simdutf@-fno-exceptions
 build:windows --per_file_copt=external/abseil-cpp@/clang:-fno-exceptions
 build:windows --per_file_copt=external/protobuf@/clang:-fno-exceptions
-build:windows --per_file_copt=external/com_google_tcmalloc@/clang:-fno-exceptions
+build:windows --per_file_copt=external/tcmalloc@/clang:-fno-exceptions
 build:windows --per_file_copt=external/com_googlesource_chromium_icu@/clang:-fno-exceptions
 build:windows --per_file_copt=external/perfetto@/clang:-fno-exceptions
-build:windows --per_file_copt=external/ssl@/clang:-fno-exceptions
+build:windows --per_file_copt=external/boringssl@/clang:-fno-exceptions
 build:windows --per_file_copt=external/v8@/clang:-fno-exceptions
 build:windows --per_file_copt=external/ada-url@/clang:-fno-exceptions
 build:windows --per_file_copt=external/simdutf@/clang:-fno-exceptions
@@ -113,9 +113,9 @@ common --@aspect_rules_ts//ts:skipLibCheck=honor_tsconfig
 # Use "tsc" as the transpiler when ts_project has no `transpiler` set.
 common --@aspect_rules_ts//ts:default_to_tsc_transpiler
 
-# optimized LTO build. you'll need a fairly recent clang for this to work
+# optimized LTO build.
 build:thin-lto --config=opt
-build:thin-lto --cxxopt='-flto=thin'
+build:thin-lto --copt='-flto=thin'
 build:thin-lto --linkopt='-flto=thin'
 
 # configuration used for performance profiling
@@ -392,7 +392,7 @@ build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILT
 build:windows --copt='/DWIN32_LEAN_AND_MEAN' --host_copt='/DWIN32_LEAN_AND_MEAN'
 # The `/std:c++23preview` argument is unused during BoringSSL compilation and we don't
 # want a warning when compiling each file.
-build:windows --per_file_copt=external/ssl@-Wno-unused-command-line-argument --host_per_file_copt=external/ssl@-Wno-unused-command-line-argument
+build:windows --per_file_copt=external/boringssl@-Wno-unused-command-line-argument --host_per_file_copt=external/boringssl@-Wno-unused-command-line-argument
 
 # MSVC disappointingly sets __cplusplus to 199711L by default. Defining /Zc:__cplusplus makes it
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
