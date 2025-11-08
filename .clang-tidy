@@ -43,6 +43,7 @@ Checks: >
   -performance-unnecessary-value-param,
   performance-for-range-copy,
   performance-move-constructor-init,
+  readability-avoid-const-params-in-decls,
   readability-container-contains,
   readability-delete-null-pointer,
   readability-duplicate-include,
@@ -59,7 +60,6 @@ Checks: >
 # cppcoreguidelines-missing-std-forward
 # modernize-use-override
 # modernize-use-ranges
-# readability-avoid-const-params-in-decls
 # readability-avoid-return-with-void-value
 # readability-container-size-empty
 # readability-redundant-smartptr-get

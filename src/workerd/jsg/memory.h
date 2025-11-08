@@ -312,8 +312,8 @@ class MemoryTracker final {
   explicit MemoryTracker(v8::Isolate* isolate, v8::EmbedderGraph* graph);
 
   KJ_NOINLINE MemoryRetainerNode* addNode(const void* retainer,
-      const kj::StringPtr name,
-      const size_t size,
+      kj::StringPtr name,
+      size_t size,
       v8::Local<v8::Object> obj,
       kj::Maybe<kj::Function<bool()>> checkIsRootNode,
       MemoryInfoDetachedState detachedness,

@@ -408,13 +408,11 @@ class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
 
   explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
       const Trace& trace,
-      const tracing::HibernatableWebSocketEventInfo::Message eventInfo);
-  explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
-      const Trace& trace,
-      const tracing::HibernatableWebSocketEventInfo::Close eventInfo);
-  explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
-      const Trace& trace,
-      const tracing::HibernatableWebSocketEventInfo::Error eventInfo);
+      tracing::HibernatableWebSocketEventInfo::Message eventInfo);
+  explicit HibernatableWebSocketEventInfo(
+      jsg::Lock& js, const Trace& trace, tracing::HibernatableWebSocketEventInfo::Close eventInfo);
+  explicit HibernatableWebSocketEventInfo(
+      jsg::Lock& js, const Trace& trace, tracing::HibernatableWebSocketEventInfo::Error eventInfo);
 
   using Type = kj::OneOf<jsg::Ref<Message>, jsg::Ref<Close>, jsg::Ref<Error>>;
 
@@ -432,8 +430,7 @@ class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
 
 class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Object {
  public:
-  explicit Message(
-      const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Message eventInfo)
+  explicit Message(const Trace& trace, tracing::HibernatableWebSocketEventInfo::Message eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "message"_kj;
@@ -451,7 +448,7 @@ class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Obje
 
 class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object {
  public:
-  explicit Close(const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Close eventInfo)
+  explicit Close(const Trace& trace, tracing::HibernatableWebSocketEventInfo::Close eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "close"_kj;
@@ -474,7 +471,7 @@ class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object
 
 class TraceItem::HibernatableWebSocketEventInfo::Error final: public jsg::Object {
  public:
-  explicit Error(const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Error eventInfo)
+  explicit Error(const Trace& trace, tracing::HibernatableWebSocketEventInfo::Error eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "error"_kj;
