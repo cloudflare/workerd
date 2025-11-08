@@ -6,13 +6,15 @@
 
 #include "basics.h"
 #include "filesystem.h"
-#include "hibernation-event-params.h"
 #include "http.h"
 #include "messagechannel.h"
 #include "performance.h"
+
+#include <workerd/api/hibernation-event-params.h>
 #ifdef WORKERD_FUZZILLI
-#include "fuzzilli.h"
 #include "unsafe.h"
+
+#include <workerd/api/fuzzilli.h>
 #endif
 
 #include <workerd/io/io-timers.h>

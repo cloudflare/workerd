@@ -29,6 +29,17 @@ filegroup(
             "urlpattern.c++",
             "urlpattern-standard.c++",
             "util.c++",
+            "base64.c++",
+            "commonjs.c++",
+            "fuzzilli.c++",
+            "crypto/crc-impl.c++",
+            "streams/encoding.c++",
+            "streams/compression.c++",
+            "capnp.c++",
+            "workers-module.c++",
+            "kv.c++",
+            "analytics-engine.c++",
+            "worker-loader.c++",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -52,14 +63,200 @@ filegroup(
             "modules.h",
             "r2*.h",
             "rtti.h",
+            "crypto/crc-impl.h",
             "tracing-module.h",
             "url.h",
             "urlpattern.h",
             "urlpattern-standard.h",
             "util.h",
+            "base64.h",
+            "commonjs.h",
+            "fuzzilli.h",
+            "streams/encoding.h",
+            "streams.h",
+            "streams/compression.h",
+            "capnp.h",
+            "workers-module.h",
+            "kv.h",
+            "analytics-engine-impl.h",
+            "analytics-engine.h",
+            "hibernation-event-params.h",
+            "worker-loader.h",
         ],
     ),
     visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "analytics-engine",
+    srcs = [
+        "analytics-engine.c++",
+    ],
+    hdrs = [
+        "analytics-engine.h",
+        "analytics-engine-impl.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "capnp",
+    srcs = [
+        "capnp.c++",
+    ],
+    hdrs = [
+        "capnp.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "worker-loader",
+    srcs = [
+        "worker-loader.c++",
+    ],
+    hdrs = [
+        "worker-loader.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "workers-module",
+    srcs = [
+        "workers-module.c++",
+    ],
+    hdrs = [
+        "workers-module.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "base64",
+    srcs = [
+        "base64.c++",
+    ],
+    hdrs = [
+        "base64.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@simdutf",
+    ],
+)
+
+wd_cc_library(
+    name = "commonjs",
+    srcs = [
+        "commonjs.c++",
+    ],
+    hdrs = [
+        "commonjs.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "crypto-crc-impl",
+    srcs = [
+        "crypto/crc-impl.c++",
+    ],
+    hdrs = [
+        "crypto/crc-impl.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "fuzzilli",
+    srcs = [
+        "fuzzilli.c++",
+    ],
+    hdrs = [
+        "fuzzilli.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/api:util",
+        "//src/workerd/util:immediate-crash",
+    ],
+)
+
+wd_cc_library(
+    name = "kv",
+    srcs = [
+        "kv.c++",
+    ],
+    hdrs = [
+        "kv.h",
+    ],
+    implementation_deps = [
+        "//src/workerd/util:mimetype",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+# for using EW_STREAMS_ISOLATE_TYPES with workerd-api etc. To use the different streams APIs,
+# include the headers you need directly.
+wd_cc_library(
+    name = "streams",
+    hdrs = ["streams.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":streams-compression",
+        ":streams-encoding",
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "streams-compression",
+    srcs = ["streams/compression.c++"],
+    hdrs = ["streams/compression.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "@nbytes",
+    ],
+)
+
+wd_cc_library(
+    name = "streams-encoding",
+    srcs = ["streams/encoding.c++"],
+    hdrs = ["streams/encoding.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "hibernation-event-params",
+    hdrs = ["hibernation-event-params.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
@@ -113,18 +310,26 @@ wd_cc_library(
         "rtti.h",
     ],
     implementation_deps = [
+        ":analytics-engine",
+        ":kv",
         ":pyodide",
-        "//src/workerd/api:urlpattern",
-        "//src/workerd/api:urlpattern-standard",
+        ":streams",
+        ":streams-compression",
+        ":streams-encoding",
+        ":urlpattern",
+        ":urlpattern-standard",
+        ":worker-loader",
         "//src/workerd/jsg:rtti",
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":base64",
         ":html-rewriter",
         ":hyperdrive",
         ":memory-cache",
         ":r2",
         ":tracing-module",
+        ":workers-module",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
@@ -302,6 +507,7 @@ wd_cc_library(
         src = f,
         deps = [
             "//src/workerd/io",
+            "//src/workerd/io:promise-wrapper",
         ],
     )
     for f in [
@@ -311,7 +517,6 @@ wd_cc_library(
         "crypto/impl-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
-        "util-test.c++",
     ]
 ]
 
@@ -319,6 +524,13 @@ kj_test(
     src = "data-url-test.c++",
     deps = [
         ":data-url",
+    ],
+)
+
+kj_test(
+    src = "util-test.c++",
+    deps = [
+        ":util",
     ],
 )
 
@@ -350,8 +562,9 @@ kj_test(
     deps = [
         ":encoding",
         ":html-rewriter",
-        "//src/workerd/api:urlpattern",
-        "//src/workerd/api:urlpattern-standard",
+        ":streams",
+        ":urlpattern",
+        ":urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
     ],

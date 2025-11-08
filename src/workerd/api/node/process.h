@@ -7,7 +7,6 @@
 #include <workerd/api/node/node-version.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/mimetype.h>
 
 namespace workerd::api::node {
 

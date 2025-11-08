@@ -6,8 +6,11 @@
 
 #include <workerd/api/basics.h>
 #include <workerd/io/compatibility-date.capnp.h>
-#include <workerd/io/limit-enforcer.h>
 #include <workerd/jsg/jsg.h>
+
+namespace workerd {
+class IsolateLimitEnforcer;
+};
 
 namespace workerd::api {
 

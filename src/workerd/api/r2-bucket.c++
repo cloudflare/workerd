@@ -10,7 +10,7 @@
 
 #include <workerd/api/http.h>
 #include <workerd/api/r2-api.capnp.h>
-#include <workerd/api/streams.h>
+#include <workerd/api/streams/readable.h>
 #include <workerd/util/http-util.h>
 
 #include <capnp/compat/json.h>

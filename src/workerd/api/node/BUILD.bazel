@@ -46,7 +46,9 @@ wd_cc_library(
     deps = [
         ":node-core",
         "//src/node",
+        "//src/workerd/api:streams-compression",
         "//src/workerd/io",
+        "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@ncrypto",
     ],
@@ -86,7 +88,6 @@ wd_cc_library(
         # need to be rebuilt if there are changes to io.
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/util:mimetype",
         ":exceptions",
     ],
 )

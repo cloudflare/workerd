@@ -49,7 +49,6 @@ wd_cc_library(
     # IoContext -> Worker -> ServiceWorkerGlobalScope -> (various api targets) dependency chain.
     # TODO(cleanup): Fix this.
     srcs = [
-        "bundle-fs.c++",
         "compatibility-date.c++",
         "features.c++",
         "hibernation-manager.c++",
@@ -62,7 +61,6 @@ wd_cc_library(
         "worker-fs.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
-        "bundle-fs.h",
         "compatibility-date.h",
         "features.h",
         "hibernation-manager.h",
@@ -70,11 +68,9 @@ wd_cc_library(
         "io-context.h",
         "io-own.h",
         "io-util.h",
-        "promise-wrapper.h",
         "tracer.h",
         "worker.h",
         "worker-fs.h",
-        "worker-source.h",
     ] + ["//src/workerd/api:hdrs"],
     # global CPU-specific options are inconvenient to specify with bazel – just set the options we
     # need for CRC32C in this target for now.
@@ -87,6 +83,7 @@ wd_cc_library(
         ],
     }),
     implementation_deps = [
+        "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
         "//src/workerd/util:completion-membrane",
@@ -114,17 +111,19 @@ wd_cc_library(
         ":supported-compatibility-date",
         ":trace",
         ":worker-interface",
+        ":worker-source",
         "//src/rust/cxx-integration",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:deferred-proxy",
         "//src/workerd/api:encoding",
+        "//src/workerd/api:fuzzilli",
+        "//src/workerd/api:hibernation-event-params",
         "//src/workerd/api:url",
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
         "//src/workerd/util:checked-queue",
         "//src/workerd/util:exception",
-        "//src/workerd/util:immediate-crash",
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:small-set",
         "//src/workerd/util:sqlite",
@@ -150,9 +149,40 @@ wd_cc_library(
     deps = [
         ":io",
         "//src/pyodide:python-entrypoint",
+        "//src/workerd/api:commonjs",
         "//src/workerd/api:rtti",
         "//src/workerd/jsg",
         "//src/workerd/util:strong-bool",
+    ],
+)
+
+wd_cc_library(
+    name = "bundle-fs",
+    srcs = ["bundle-fs.c++"],
+    hdrs = ["bundle-fs.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+    ],
+)
+
+wd_cc_library(
+    name = "promise-wrapper",
+    hdrs = ["promise-wrapper.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_library(
+    name = "worker-source",
+    hdrs = ["worker-source.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx-integration",
+        "@capnp-cpp//src/capnp",
     ],
 )
 
@@ -380,7 +410,10 @@ kj_test(
 
 kj_test(
     src = "promise-wrapper-test.c++",
-    deps = [":io"],
+    deps = [
+        ":io",
+        ":promise-wrapper",
+    ],
 )
 
 kj_test(
@@ -432,6 +465,7 @@ wd_test(
 kj_test(
     src = "bundle-fs-test.c++",
     deps = [
+        ":bundle-fs",
         ":io",
         "//src/workerd/tests:test-fixture",
     ],
