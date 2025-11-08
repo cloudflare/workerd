@@ -872,6 +872,14 @@ size_t IoContext::getTimeoutCount() {
 }
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
+  if (getWorker().getScript().getIsolate().getApi().getFeatureFlags().getPreciseTimers()) {
+    auto now = kj::systemPreciseCalendarClock().now();
+    // Round to 3ms granularity
+    int64_t ms = (now - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+    int64_t roundedMs = (ms / 3) * 3;
+    return kj::UNIX_EPOCH + roundedMs * kj::MILLISECONDS;
+  }
+
   kj::Date adjustedTime = incomingRequest.now();
 
   KJ_IF_SOME(maybeNextTimeout, timeoutManager->getNextTimeout()) {

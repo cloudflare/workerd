@@ -1250,4 +1250,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # undefined values, they will be returned instead of falling through to the worker
   # env/exports. This allows more explicit control over env and exports values in async
   # contexts.
+
+  preciseTimers @148 :Bool
+    $compatEnableFlag("precise_timers")
+    $compatDisableFlag("no_precise_timers")
+    $experimental;
+  # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
+  # measurements and time-sensitive operations.
 }
