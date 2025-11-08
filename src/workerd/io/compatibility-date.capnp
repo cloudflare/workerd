@@ -1216,4 +1216,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("disable_streams_nodejs_v24_compat")
     $impliedByAfterDate(name = "nodeJsCompat", date = "2025-11-15");
   # Enables breaking changes to Node.js streams done with the release of Node.js v24.
+
+  preciseTimers @144 :Bool
+    $compatEnableFlag("precise_timers")
+    $compatDisableFlag("no_precise_timers")
+    $experimental;
+  # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
+  # measurements and time-sensitive operations.
 }
