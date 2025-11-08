@@ -182,7 +182,7 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
         if (statInfo.type != FsType::DIRECTORY) {
           node::THROW_ERR_UV_ENOTDIR(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
         }
-        if (!setCurrentWorkingDirectory(kj::mv(resolvedPath))) {
+        if (!setCurrentWorkingDirectory(resolvedPath.clone())) {
           node::THROW_ERR_UV_EPERM(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
         }
       }
