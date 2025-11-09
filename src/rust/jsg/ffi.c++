@@ -180,9 +180,10 @@ Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }
 
-Local wrap_resource(Isolate* isolate, size_t resource, const Local& tmpl) {
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl) {
   auto self = reinterpret_cast<void*>(resource);
-  auto local_tmpl = local_from_ffi<v8::FunctionTemplate>(tmpl);
+  auto global_tmpl = global_from_ffi<v8::FunctionTemplate>(tmpl);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
   v8::Local<v8::Object> object = workerd::jsg::check(
       local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);

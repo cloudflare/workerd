@@ -77,14 +77,12 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
     if let Some(val) = instance {
         val
     } else {
-        let constructor = wrapper.get_constructor(lock);
-        let constructor_ffi = unsafe { constructor.as_ffi_ref() };
-        let isolate = unsafe { lock.get_isolate() };
+        let constructor = wrapper.get_constructor();
         let instance = unsafe {
             v8::Local::from_ffi(ffi::wrap_resource(
-                isolate,
+                lock.get_isolate(),
                 resource as usize,
-                constructor_ffi,
+                constructor.as_ffi_ref(),
             ))
         };
         let cached_instance = instance.clone();
@@ -248,7 +246,7 @@ pub trait Resource: Type {
 }
 
 pub trait ResourceWrapper {
-    fn get_constructor<'a>(&self, lock: &mut Lock) -> v8::Local<'a, v8::FunctionTemplate>;
+    fn get_constructor(&self) -> &v8::Global<v8::FunctionTemplate>;
 }
 
 pub trait Struct: Type {

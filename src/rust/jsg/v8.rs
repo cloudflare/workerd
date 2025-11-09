@@ -83,8 +83,8 @@ pub mod ffi {
 
         unsafe fn wrap_resource(
             isolate: *mut Isolate,
-            resource: usize,     /* R* */
-            constructor: &Local, /* v8::Local<FunctionTemplate> */
+            resource: usize,      /* R* */
+            constructor: &Global, /* v8::Global<FunctionTemplate> */
         ) -> Local /* v8::Local<Value> */;
 
         unsafe fn unwrap_resource(
@@ -131,7 +131,7 @@ impl<'a, T> Drop for Local<'a, T> {
 impl<'a, T> Local<'a, T> {
     pub unsafe fn from_ffi(handle: ffi::Local) -> Self {
         Local {
-            handle: handle,
+            handle,
             _marker: PhantomData,
         }
     }
@@ -220,6 +220,10 @@ impl<T> Global<T> {
         }
     }
 
+    pub unsafe fn as_ffi_ref(&self) -> &ffi::Global {
+        &self.handle
+    }
+
     pub fn as_local<'a>(&self, lock: &mut Lock) -> Local<'a, FunctionTemplate> {
         unsafe { Local::from_ffi(ffi::global_to_local(lock.get_isolate(), &self.handle)) }
     }
@@ -227,7 +231,9 @@ impl<T> Global<T> {
 
 impl<T> Drop for Global<T> {
     fn drop(&mut self) {
-        let handle = ffi::Global { ptr: self.handle.ptr };
+        let handle = ffi::Global {
+            ptr: self.handle.ptr,
+        };
         unsafe {
             ffi::global_drop(handle);
         }

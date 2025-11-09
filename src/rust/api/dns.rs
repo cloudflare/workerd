@@ -158,8 +158,8 @@ pub struct DnsUtilWrapper {
 }
 
 impl jsg::ResourceWrapper for DnsUtilWrapper {
-    fn get_constructor<'a>(&self, lock: &mut Lock) -> v8::Local<'a, v8::FunctionTemplate> {
-        self.constructor.as_local(lock)
+    fn get_constructor(&self) -> &v8::Global<v8::FunctionTemplate> {
+        &self.constructor
     }
 }
 

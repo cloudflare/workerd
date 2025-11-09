@@ -94,7 +94,7 @@ inline void register_add_builtin_module(
 
 struct ResourceDescriptor;
 Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);
-Local wrap_resource(Isolate* isolate, size_t resource, const Local& tmpl);
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl);
 size_t unwrap_resource(Isolate* isolate, Local value);
 
 }  // namespace workerd::rust::jsg
