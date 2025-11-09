@@ -56,10 +56,7 @@ pub fn create_resource_constructor<R: Resource>(
     lock: &mut Lock,
 ) -> v8::Global<v8::FunctionTemplate> {
     unsafe {
-        v8::Global::from_ffi(ffi::create_resource_template(
-            lock.get_isolate(),
-            &get_resource_descriptor::<R>(),
-        ))
+        ffi::create_resource_template(lock.get_isolate(), &get_resource_descriptor::<R>()).into()
     }
 }
 
@@ -78,12 +75,13 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
         val
     } else {
         let constructor = wrapper.get_constructor();
-        let instance = unsafe {
-            v8::Local::from_ffi(ffi::wrap_resource(
+        let instance: v8::Local<'a, v8::Value> = unsafe {
+            ffi::wrap_resource(
                 lock.get_isolate(),
                 resource as usize,
                 constructor.as_ffi_ref(),
-            ))
+            )
+            .into()
         };
         let cached_instance = instance.clone();
         r.set_js_instance(lock, cached_instance);
@@ -155,7 +153,7 @@ impl Lock {
     }
 
     pub fn new_object<'a>(&mut self) -> v8::Local<'a, v8::Object> {
-        unsafe { v8::Local::from_ffi(v8::ffi::local_new_object(self.get_isolate())) }
+        unsafe { v8::ffi::local_new_object(self.get_isolate()).into() }
     }
 
     // todo: Result?

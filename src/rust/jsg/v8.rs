@@ -117,7 +117,7 @@ pub struct Local<'a, T> {
     _marker: PhantomData<(&'a (), T)>,
 }
 
-impl<'a, T> Drop for Local<'a, T> {
+impl<T> Drop for Local<'_, T> {
     fn drop(&mut self) {
         if self.handle.ptr == 0 {
             return;
@@ -129,6 +129,10 @@ impl<'a, T> Drop for Local<'a, T> {
 // Common implementations for all Local<'a, T>
 #[expect(clippy::elidable_lifetime_names)]
 impl<'a, T> Local<'a, T> {
+    /// Creates a `Local` from an FFI handle.
+    ///
+    /// # Safety
+    /// The caller must ensure that the handle is valid and properly constructed from V8.
     pub unsafe fn from_ffi(handle: ffi::Local) -> Self {
         Local {
             handle,
@@ -136,6 +140,11 @@ impl<'a, T> Local<'a, T> {
         }
     }
 
+    /// Consumes this `Local` and returns the underlying FFI handle.
+    ///
+    /// # Safety
+    /// After calling this method, the `Local` must not be used again as its ownership
+    /// has been transferred to the returned FFI handle.
     pub unsafe fn into_ffi(mut self) -> ffi::Local {
         let handle = ffi::Local {
             ptr: self.handle.ptr,
@@ -144,21 +153,35 @@ impl<'a, T> Local<'a, T> {
         handle
     }
 
+    /// Returns a reference to the underlying FFI handle.
+    ///
+    /// # Safety
+    /// The caller must ensure the returned reference is not used after this `Local` is dropped.
     pub unsafe fn as_ffi_ref(&self) -> &ffi::Local {
         &self.handle
     }
 }
 
+// Allow implicit conversion from ffi::Local
+impl<T> From<ffi::Local> for Local<'_, T> {
+    fn from(handle: ffi::Local) -> Self {
+        Local {
+            handle,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<T> Clone for Local<'_, T> {
     fn clone(&self) -> Self {
-        unsafe { Self::from_ffi(ffi::local_clone(&self.handle)) }
+        unsafe { ffi::local_clone(&self.handle).into() }
     }
 }
 
 // Value-specific implementations
 impl<'a> Local<'a, Value> {
     pub fn to_global(self, lock: &'a mut Lock) -> Global<Value> {
-        unsafe { Global::from_ffi(ffi::local_to_global(lock.get_isolate(), self.into_ffi())) }
+        unsafe { ffi::local_to_global(lock.get_isolate(), self.into_ffi()).into() }
     }
 }
 
@@ -211,8 +234,10 @@ pub struct Global<T> {
 
 // Common implementations for all Global<T>
 impl<T> Global<T> {
+    /// Creates a `Global` from an FFI handle.
+    ///
     /// # Safety
-    /// The caller must ensure that `isolate` and `value` are valid.
+    /// The caller must ensure that the handle is valid and properly constructed from V8.
     pub unsafe fn from_ffi(handle: ffi::Global) -> Self {
         Self {
             handle,
@@ -220,12 +245,26 @@ impl<T> Global<T> {
         }
     }
 
+    /// Returns a reference to the underlying FFI handle.
+    ///
+    /// # Safety
+    /// The caller must ensure the returned reference is not used after this `Global` is dropped.
     pub unsafe fn as_ffi_ref(&self) -> &ffi::Global {
         &self.handle
     }
 
     pub fn as_local<'a>(&self, lock: &mut Lock) -> Local<'a, FunctionTemplate> {
-        unsafe { Local::from_ffi(ffi::global_to_local(lock.get_isolate(), &self.handle)) }
+        unsafe { ffi::global_to_local(lock.get_isolate(), &self.handle).into() }
+    }
+}
+
+// Allow implicit conversion from ffi::Global
+impl<T> From<ffi::Global> for Global<T> {
+    fn from(handle: ffi::Global) -> Self {
+        Self {
+            handle,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -242,7 +281,7 @@ impl<T> Drop for Global<T> {
 
 impl<T> Clone for Global<T> {
     fn clone(&self) -> Self {
-        unsafe { Self::from_ffi(ffi::global_clone(&self.handle)) }
+        unsafe { ffi::global_clone(&self.handle).into() }
     }
 }
 
@@ -252,13 +291,13 @@ pub trait ToLocalValue {
 
 impl ToLocalValue for u8 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        unsafe { Local::from_ffi(ffi::local_new_number(lock.get_isolate(), f64::from(*self))) }
+        unsafe { ffi::local_new_number(lock.get_isolate(), f64::from(*self)).into() }
     }
 }
 
 impl ToLocalValue for u32 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        unsafe { Local::from_ffi(ffi::local_new_number(lock.get_isolate(), f64::from(*self))) }
+        unsafe { ffi::local_new_number(lock.get_isolate(), f64::from(*self)).into() }
     }
 }
 
@@ -270,7 +309,7 @@ impl ToLocalValue for String {
 
 impl ToLocalValue for &str {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        unsafe { Local::from_ffi(ffi::local_new_string(lock.get_isolate(), self)) }
+        unsafe { ffi::local_new_string(lock.get_isolate(), self).into() }
     }
 }
 
@@ -284,7 +323,7 @@ impl<'a> FunctionCallbackInfo<'a> {
     }
 
     pub fn this(&self) -> Local<'a, Value> {
-        unsafe { Local::from_ffi(ffi::fci_get_this(self.0)) }
+        unsafe { ffi::fci_get_this(self.0).into() }
     }
 
     pub fn len(&self) -> usize {
@@ -297,7 +336,7 @@ impl<'a> FunctionCallbackInfo<'a> {
 
     pub fn get(&self, index: usize) -> Local<'a, Value> {
         debug_assert!(index <= self.len());
-        unsafe { Local::from_ffi(ffi::fci_get_arg(self.0, index)) }
+        unsafe { ffi::fci_get_arg(self.0, index).into() }
     }
 
     pub fn set_return_value(&self, value: Local<Value>) {
