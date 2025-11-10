@@ -1,0 +1,13 @@
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+
+rust_proc_macro(
+    name = "jsg-macros",
+    srcs = glob(["**/*.rs"]),
+    crate_name = "jsg_macros",
+    edition = "2021",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:quote",
+        "@crates_vendor//:syn",
+    ],
+)

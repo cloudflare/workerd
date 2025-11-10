@@ -23,6 +23,7 @@ impl From<DnsParserError> for jsg::Error {
 }
 
 /// CAA record representation
+#[jsg::r#struct]
 #[derive(Debug)]
 pub struct CaaRecord {
     pub critical: u8,
@@ -32,25 +33,8 @@ pub struct CaaRecord {
 
 impl jsg::Type for CaaRecord {}
 
-impl jsg::Struct for CaaRecord {
-    fn wrap<'a, 'b>(&self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        unsafe {
-            let mut obj = lock.new_object();
-            let critical = self.critical.to_local(lock);
-            obj.set(lock, "critical", critical);
-            let field = self.field.to_local(lock);
-            obj.set(lock, "field", field);
-            let value = self.value.to_local(lock);
-            obj.set(lock, "value", value);
-            obj.into()
-        }
-    }
-}
-
 /// NAPTR record representation
+#[jsg::r#struct]
 #[derive(Debug)]
 pub struct NaptrRecord {
     pub flags: String,
@@ -62,30 +46,6 @@ pub struct NaptrRecord {
 }
 
 impl jsg::Type for NaptrRecord {}
-
-impl jsg::Struct for NaptrRecord {
-    fn wrap<'a, 'b>(&self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        unsafe {
-            let mut obj = lock.new_object();
-            let flags = self.flags.to_local(lock);
-            obj.set(lock, "flags", flags);
-            let service = self.service.to_local(lock);
-            obj.set(lock, "service", service);
-            let regexp = self.regexp.to_local(lock);
-            obj.set(lock, "regexp", regexp);
-            let replacement = self.replacement.to_local(lock);
-            obj.set(lock, "replacement", replacement);
-            let order = self.order.to_local(lock);
-            obj.set(lock, "order", order);
-            let preference = self.preference.to_local(lock);
-            obj.set(lock, "preference", preference);
-            obj.into()
-        }
-    }
-}
 
 /// Given a vector of strings, converts each slice to UTF-8 from HEX.
 ///
@@ -188,6 +148,7 @@ impl DnsUtil {
     /// # Errors
     /// `DnsParserError::InvalidHexString`
     /// `DnsParserError::ParseIntError`
+    #[jsg::method(name = "parseCaaRecord")]
     pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
         // Let's remove "\\#" and the length of data from the beginning of the record
         let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
@@ -242,6 +203,7 @@ impl DnsUtil {
     /// # Errors
     /// `DnsParserError::InvalidHexString`
     /// `DnsParserError::ParseIntError`
+    #[jsg::method(name = "parseNaptrRecord")]
     pub fn parse_naptr_record(&self, record: &str) -> jsg::Result<NaptrRecord, DnsParserError> {
         let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
 
@@ -272,40 +234,6 @@ impl DnsUtil {
             order,
             preference,
         })
-    }
-}
-
-// Generated code.
-#[expect(clippy::similar_names)]
-impl DnsUtil {
-    extern "C" fn parse_caa_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
-        let mut lock = unsafe { jsg::Lock::from_args(args) };
-        let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-        let arg0 =
-            unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), args.get(0).into_ffi()) };
-        let this = args.this();
-        let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
-        match self_.parse_caa_record(&arg0) {
-            Ok(record) => args.set_return_value(record.wrap(&mut lock)),
-            Err(err) => {
-                todo!("{err}");
-            }
-        }
-    }
-
-    extern "C" fn parse_naptr_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
-        let mut lock = unsafe { jsg::Lock::from_args(args) };
-        let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-        let arg0 =
-            unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), args.get(0).into_ffi()) };
-        let this = args.this();
-        let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
-        match self_.parse_naptr_record(&arg0) {
-            Ok(record) => args.set_return_value(record.wrap(&mut lock)),
-            Err(err) => {
-                todo!("{err}");
-            }
-        }
     }
 }
 

@@ -7,6 +7,9 @@ wd_rust_crate(
     cxx_bridge_srcs = [
         "v8.rs",
     ],
+    proc_macro_deps = [
+        "//src/rust/jsg-macros",
+    ],
     visibility = ["//visibility:public"],
     deps = [":ffi"],
 )

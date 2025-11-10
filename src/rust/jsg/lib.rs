@@ -6,6 +6,8 @@ use std::future::Future;
 use std::num::ParseIntError;
 use std::rc::Rc;
 
+pub use jsg_macros::method;
+pub use jsg_macros::r#struct;
 use kj_rs::KjMaybe;
 use v8::ffi;
 
