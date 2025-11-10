@@ -18,8 +18,8 @@ prepare:
   just prepare-rust
 
 prepare-rust:
-  rustup install 1.90.0
-  rustup component add rust-analyzer --toolchain 1.90.0
+  rustup install 1.91.0
+  rustup component add rust-analyzer --toolchain 1.91.0
 
 prepare-ubuntu:
   sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
