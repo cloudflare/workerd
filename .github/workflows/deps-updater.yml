@@ -32,6 +32,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
         run: bazel run //deps/rust:crates_vendor -- --repin full
+      - name: Reformat changed files
+        run: ./tools/cross/format.py git
       - name: Open pull request
         id: create-pr
         uses: peter-evans/create-pull-request@v7
