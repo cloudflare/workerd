@@ -1213,7 +1213,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   streamsNodejsV24Compat @143 :Bool
     $compatEnableFlag("enable_streams_nodejs_v24_compat")
-    $compatDisableFlag("disable_streams_nodejs_v24_compat")
-    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-11-15");
+    $compatDisableFlag("disable_streams_nodejs_v24_compat");
   # Enables breaking changes to Node.js streams done with the release of Node.js v24.
 }
