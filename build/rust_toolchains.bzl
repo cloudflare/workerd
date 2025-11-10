@@ -3,9 +3,9 @@ load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_regi
 load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
 load("//deps/rust/crates:crates.bzl", "crate_repositories")
 
-RUST_STABLE_VERSION = "1.90.0"  # LLVM 20
+RUST_STABLE_VERSION = "1.91.0"  # LLVM 21
 
-RUST_NIGHTLY_VERSION = "nightly/2025-09-18"
+RUST_NIGHTLY_VERSION = "nightly/2025-10-30"
 
 # List of additional triples to be configured on top of the local platform triple
 RUST_TARGET_TRIPLES = [
