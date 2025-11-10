@@ -12,7 +12,7 @@ using Isolate = v8::Isolate;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
 struct ModuleRegistry;
 struct Local;
-// Define ModuleCallback before v8.rs.h using forward-declared Local
+struct Global;
 using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
 }  // namespace workerd::rust::jsg
 
