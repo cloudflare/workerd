@@ -46,10 +46,7 @@ void HeapTracer::clearWrappers() {
   }
 
   while (!rustWrappers.empty()) {
-    auto [wrapper, callback] = rustWrappers.front();
-    rustWrappers.pop_front();
-    // Call the type-specific drop callback
-    callback(wrapper);
+    rustWrappers.front().dropCallback(isolate, rustWrappers.front().wrapper);
   }
 
   clearFreelistedShims();

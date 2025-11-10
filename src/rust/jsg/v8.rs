@@ -43,20 +43,8 @@ pub mod ffi {
         pub unsafe fn global_clone(value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
 
-        // Wrappers
-        pub unsafe fn wrap_resource(
-            isolate: *mut Isolate,
-            resource: usize,      /* R* */
-            constructor: &Global, /* v8::Global<FunctionTemplate> */
-            drop_callback: usize, /* R* -> () */
-        ) -> Local /* v8::Local<Value> */;
-
         // Unwrappers
         pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> String;
-        pub unsafe fn unwrap_resource(
-            isolate: *mut Isolate,
-            value: Local, /* v8::LocalValue */
-        ) -> usize /* R* */;
 
         // FunctionCallbackInfo
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
@@ -87,11 +75,26 @@ pub mod ffi {
         pub static_methods: Vec<StaticMethodDescriptor>,
     }
 
+    // Resources
     unsafe extern "C++" {
+        type ResourceShim;
+
         unsafe fn create_resource_template(
             isolate: *mut Isolate,
             descriptor: &ResourceDescriptor,
         ) -> Global /* v8::Global<FunctionTemplate> */;
+
+        pub unsafe fn wrap_resource(
+            isolate: *mut Isolate,
+            resource: usize,      /* R* */
+            constructor: &Global, /* v8::Global<FunctionTemplate> */
+            drop_callback: usize, /* R* -> () */
+        ) -> Local /* v8::Local<Value> */;
+
+        pub unsafe fn unwrap_resource(
+            isolate: *mut Isolate,
+            value: Local, /* v8::LocalValue */
+        ) -> usize /* R* */;
     }
 
     unsafe extern "C++" {
@@ -103,11 +106,6 @@ pub mod ffi {
             specifier: &str,
             callback: unsafe fn(*mut Isolate) -> Local,
         );
-    }
-
-    extern "Rust" {
-        // Resource
-        pub unsafe fn resource_drop(isolate: *mut Isolate, resource: usize);
     }
 }
 
@@ -350,9 +348,4 @@ impl<'a> FunctionCallbackInfo<'a> {
             ffi::fci_set_return_value(self.0, value.into_ffi());
         }
     }
-}
-
-pub unsafe fn resource_drop(isolate: *mut ffi::Isolate, resource: usize) {
-    // TODO: Rc<T>::from_raw of resource and then drop it.
-    todo!()
 }

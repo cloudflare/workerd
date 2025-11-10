@@ -12,19 +12,19 @@ using namespace kj_rs;
 
 namespace workerd::rust::jsg {
 
-void detach_rust_wrapper(v8::Isolate* isolate, void* wrapper) {
-  // TODO:
-  // - If not ccpgcShim, return
-  // - Unpoison ASAN
-  // - Maybe add shim to free list, otherwise mark it as dead.
-  // - Clear wrapper CPPGC shim
-  // - Reset strong wrapper
-  // - If strong ref count more than zero, visit children for gc.
+// void detach_rust_wrapper(v8::Isolate* isolate, void* wrapper) {
+//   // TODO:
+//   // - If not ccpgcShim, return
+//   // - Unpoison ASAN
+//   // - Maybe add shim to free list, otherwise mark it as dead.
+//   // - Clear wrapper CPPGC shim
+//   // - Reset strong wrapper
+//   // - If strong ref count more than zero, visit children for gc.
 
-  auto& tracer = ::workerd::jsg::HeapTracer::getTracer(isolate);
-  tracer.removeRustWrapper(wrapper);
-  resource_drop(isolate, reinterpret_cast<size_t>(wrapper));
-}
+//   auto& tracer = ::workerd::jsg::HeapTracer::getTracer(isolate);
+//   tracer.removeRustWrapper(wrapper);
+//   resource_drop(isolate, reinterpret_cast<size_t>(wrapper));
+// }
 
 // Local<T>
 

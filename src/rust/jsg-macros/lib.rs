@@ -375,19 +375,15 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
         _ => "Unknown".to_string(),
     };
     let drop_callback_name =
-        syn::Ident::new(&format!("JsgDrop{}", type_name), impl_block.self_ty.span());
+        syn::Ident::new(&format!("drop_{}", type_name), impl_block.self_ty.span());
 
     let expanded = quote! {
         #impl_block
 
+        #[allow(non_snake_case)]
         #[automatically_derived]
-        unsafe extern "C" fn #drop_callback_name(this: *mut std::os::raw::c_void) {
-            // Reconstruct the Rc<UnsafeCell<T>> from the raw pointer and drop it
-            let ptr = this as *const std::cell::UnsafeCell<#self_ty>;
-            if !ptr.is_null() {
-                let _rc = std::rc::Rc::from_raw(ptr);
-                // _rc will be dropped here, decrementing the reference count
-            }
+        unsafe extern "C" fn #drop_callback_name(isolate: *mut jsg::v8::ffi::Isolate, this: *mut std::os::raw::c_void) {
+            jsg::drop_resource::<#self_ty>(isolate, this);
         }
 
         #[automatically_derived]
@@ -403,6 +399,10 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 
             fn get_drop_callback(&self) -> usize {
                 #drop_callback_name as usize
+            }
+
+            fn get_state(&self) -> &jsg::ResourceState {
+                &self._state
             }
         }
     };

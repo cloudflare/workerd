@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::UnsafeCell;
 use std::future::Future;
 use std::num::ParseIntError;
 use std::os::raw::c_void;
@@ -152,13 +152,6 @@ impl Lock {
         unsafe { v8::ffi::local_new_object(self.get_isolate()).into() }
     }
 
-    // todo: Result?
-    pub fn alloc<T>(&mut self, t: T) -> Ref<T> {
-        Ref {
-            t: Rc::new(Cell::new(t)),
-        }
-    }
-
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
     where
         F: Future<Output = I>,
@@ -168,11 +161,21 @@ impl Lock {
     }
 }
 
-pub struct Ref<T> {
-    t: Rc<Cell<T>>,
+pub struct Ref<T: Resource> {
+    val: Rc<UnsafeCell<T>>,
 }
 
-impl<T> Ref<T> {
+impl<T: Resource> Ref<T> {
+    pub fn new(t: T) -> Self {
+        Self {
+            val: Rc::new(UnsafeCell::new(t)),
+        }
+    }
+
+    pub fn into_raw(r: Self) -> *mut T {
+        UnsafeCell::raw_get(Rc::into_raw(r.val))
+    }
+
     pub fn as_mut<'b>(&mut self, _lock: &'b Lock) -> &'b mut T {
         todo!()
     }
@@ -187,11 +190,19 @@ impl<T> Ref<T> {
     {
         todo!()
     }
+
+    pub unsafe fn from_raw(this: *mut T) -> Self {
+        Self {
+            val: unsafe { Rc::from_raw(UnsafeCell::from_mut(&mut *this)) },
+        }
+    }
 }
 
-impl<T> Clone for Ref<T> {
+impl<T: Resource> Clone for Ref<T> {
     fn clone(&self) -> Self {
-        Self { t: self.t.clone() }
+        Self {
+            val: self.val.clone(),
+        }
     }
 }
 
@@ -232,6 +243,7 @@ pub enum Member {
 
 pub struct ResourceState {
     pub this: *mut c_void,
+    pub shim: Option<v8::ffi::ResourceShim>,
 }
 
 pub trait Resource: Type {
@@ -239,6 +251,8 @@ pub trait Resource: Type {
     where
         Self: Sized;
     fn get_drop_callback(&self) -> usize;
+
+    fn get_state(&self) -> &ResourceState;
 }
 
 pub trait ResourceWrapper {
@@ -252,4 +266,10 @@ pub trait Struct: Type {
     fn wrap<'a, 'b>(&self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
         'b: 'a;
+}
+
+pub unsafe fn drop_resource<R: Resource>(_isolate: *mut ffi::Isolate, this: *mut c_void) {
+    let this = this.cast::<R>();
+    let this = unsafe { Ref::from_raw(this) };
+    drop(this);
 }

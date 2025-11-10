@@ -60,4 +60,6 @@ inline void register_add_builtin_module(
 
 Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);
 
+class ResourceShim: public v8::Object::Wrappable {};
+
 }  // namespace workerd::rust::jsg

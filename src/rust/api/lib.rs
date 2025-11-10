@@ -1,7 +1,5 @@
-use std::cell::UnsafeCell;
 use std::pin::Pin;
 use std::ptr::null_mut;
-use std::rc::Rc;
 
 use jsg::ResourceState;
 use jsg::ResourceWrapper;
@@ -33,11 +31,13 @@ mod ffi {
 pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(registry, "node-internal:dns", |isolate| unsafe {
         let mut lock = jsg::Lock::from_isolate(isolate);
-        let dns_util = DnsUtil {
-            _state: ResourceState { this: null_mut() },
-        };
-        let dns_util = Rc::new(UnsafeCell::new(dns_util));
-        let dns_util = Rc::into_raw(dns_util);
+        let dns_util = jsg::Ref::new(DnsUtil {
+            _state: ResourceState {
+                this: null_mut(),
+                shim: None,
+            },
+        });
+        let dns_util = jsg::Ref::into_raw(dns_util);
         // let dns_util = UnsafeCell::raw_get(dns_util);
         // (*dns_util)._state.this = dns_util.cast();
         let mut dns_util_wrapper = DnsUtilWrapper::new(&mut lock);
