@@ -66,7 +66,8 @@ struct ActorSqliteTest final {
    public:
     explicit ActorSqliteTestHooks(ActorSqliteTest& parent): parent(parent) {}
 
-    kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
+    kj::Promise<void> scheduleRun(
+        kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
       KJ_IF_SOME(h, parent.scheduleRunHandler) {
         return h(newAlarmTime);
       }
@@ -1062,40 +1063,18 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
 
   // Fulfill 3ms db commit.  Expect 3ms alarm to be scheduled and 3ms gate to be unblocked.
   KJ_ASSERT(!gateWait3Ms.poll(test.ws));
+
   commit3MsFulfiller->fulfill();
   KJ_ASSERT(gateWait3Ms.poll(test.ws));
+
+  // The 3ms scheduleRun waits for the 2ms scheduleRun to complete first, since we chain
+  // "move later" operations to ensure they execute in order at the alarm manager.
+  fulfiller2Ms->fulfill();
+
   auto fulfiller3Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]);
   test.pollAndExpectCalls({});
 
-  // Outstanding alarm scheduling can complete asynchronously.
-  fulfiller2Ms->fulfill();
   fulfiller3Ms->fulfill();
-}
-
-KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
-  ActorSqliteTest test;
-
-  // Initialize alarm state to 1ms.
-  test.setAlarm(oneMs);
-  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({});
-  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
-
-  // Set alarm to 5ms.  Expect 5ms db commit and scheduling to start.
-  test.setAlarm(fiveMs);
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  auto fulfiller5Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(5ms)"})[0]);
-
-  // While 5ms scheduling is still in-flight, set alarm to 2ms.  Even though the last-confirmed
-  // alarm value was 1ms, we expect that setting the alarm to 2ms will be interpreted as setting
-  // the alarm earlier, so it will issue the schedule request before the commit request.
-  test.setAlarm(twoMs);
-  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
-  auto commit2MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-
-  fulfiller5Ms->fulfill();
-  commit2MsFulfiller->fulfill();
 }
 
 KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {
