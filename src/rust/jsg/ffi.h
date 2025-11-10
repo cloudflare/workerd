@@ -72,8 +72,12 @@ inline v8::Global<T> global_from_ffi(Global value) {
   return kj::mv(*reinterpret_cast<v8::Global<T>*>(ptr_void));
 }
 
+// Wrappers
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl);
+
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value);
+size_t unwrap_resource(Isolate* isolate, Local value);
 
 // FunctionCallbackInfo
 v8::Isolate* fci_get_isolate(FunctionCallbackInfo* args);
@@ -94,7 +98,5 @@ inline void register_add_builtin_module(
 
 struct ResourceDescriptor;
 Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl);
-size_t unwrap_resource(Isolate* isolate, Local value);
 
 }  // namespace workerd::rust::jsg

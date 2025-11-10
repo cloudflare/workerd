@@ -43,8 +43,19 @@ pub mod ffi {
         pub unsafe fn global_clone(value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
 
+        // Wrappers
+        pub unsafe fn wrap_resource(
+            isolate: *mut Isolate,
+            resource: usize,      /* R* */
+            constructor: &Global, /* v8::Global<FunctionTemplate> */
+        ) -> Local /* v8::Local<Value> */;
+
         // Unwrappers
         pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> String;
+        pub unsafe fn unwrap_resource(
+            isolate: *mut Isolate,
+            value: Local, /* v8::LocalValue */
+        ) -> usize /* R* */;
 
         // FunctionCallbackInfo
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
@@ -80,17 +91,6 @@ pub mod ffi {
             isolate: *mut Isolate,
             descriptor: &ResourceDescriptor,
         ) -> Global /* v8::Global<FunctionTemplate> */;
-
-        unsafe fn wrap_resource(
-            isolate: *mut Isolate,
-            resource: usize,      /* R* */
-            constructor: &Global, /* v8::Global<FunctionTemplate> */
-        ) -> Local /* v8::Local<Value> */;
-
-        unsafe fn unwrap_resource(
-            isolate: *mut Isolate,
-            value: Local, /* v8::LocalValue */
-        ) -> usize /* R* */;
     }
 
     unsafe extern "C++" {

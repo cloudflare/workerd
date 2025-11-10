@@ -47,13 +47,29 @@ bool local_eq(const Local& lhs, const Local& rhs) {
 }
 
 // Local<Object>
-
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
   auto v8_obj = local_from_ffi<v8::Object>(object);
   [[maybe_unused]] auto result = v8_obj->Set(isolate->GetCurrentContext(),
       v8::String::NewFromUtf8(isolate, key.cbegin(), v8::NewStringType::kInternalized, key.size())
           .ToLocalChecked(),
       local_from_ffi<v8::Value>(value));
+}
+
+// Wrappers
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl) {
+  auto self = reinterpret_cast<void*>(resource);
+  auto global_tmpl = global_from_ffi<v8::FunctionTemplate>(tmpl);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
+  v8::Local<v8::Object> object = workerd::jsg::check(
+      local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
+  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+      tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+      self,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+  return to_ffi(kj::mv(object));
 }
 
 // Unwrappers
@@ -67,6 +83,15 @@ void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
     return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
   }
   return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+}
+
+size_t unwrap_resource(Isolate* isolate, Local value) {
+  auto v8_obj = local_from_ffi<v8::Object>(value);
+  KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
+                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX) ==
+      const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
+  return reinterpret_cast<size_t>(v8_obj->GetAlignedPointerFromInternalField(
+      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 }
 
 // Global<T>
@@ -86,7 +111,6 @@ Local global_to_local(Isolate* isolate, const Global& value) {
 }
 
 // FunctionCallbackInfo
-
 v8::Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
   return args->GetIsolate();
 }
@@ -178,31 +202,6 @@ Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
   auto result = scope.Escape(constructor);
   // slot.Reset(isolate, result);
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
-}
-
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl) {
-  auto self = reinterpret_cast<void*>(resource);
-  auto global_tmpl = global_from_ffi<v8::FunctionTemplate>(tmpl);
-  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
-  v8::Local<v8::Object> object = workerd::jsg::check(
-      local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
-  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-      tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
-      self,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-  return to_ffi(kj::mv(object));
-}
-
-size_t unwrap_resource(Isolate* isolate, Local value) {
-  auto v8_obj = local_from_ffi<v8::Object>(value);
-  KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
-                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX) ==
-      const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
-  return reinterpret_cast<size_t>(v8_obj->GetAlignedPointerFromInternalField(
-      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 }
 
 }  // namespace workerd::rust::jsg
