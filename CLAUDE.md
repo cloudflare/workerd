@@ -23,6 +23,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `just build` or `just b` - Build the project
 - `just test` or `just t` - Run all tests
 - `just format` or `just f` - Format code (uses clang-format + Python formatter)
+- `just clippy <package>` - Run Rust clippy linter (e.g., `just clippy jsg-macros`)
+- `just clang-tidy <target>` - Run clang-tidy on C++ code (e.g., `just clang-tidy //src/rust/jsg:ffi`)
 - `just stream-test <target>` - Stream test output for debugging
 - `just node-test <name>` - Run specific Node.js compatibility tests (e.g., `just node-test zlib`)
 - `just wpt-test <name>` - Run Web Platform Tests (e.g., `just wpt-test urlpattern`)

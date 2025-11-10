@@ -14,31 +14,10 @@ struct ModuleRegistry;
 struct Local;
 struct Global;
 using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
-}  // namespace workerd::rust::jsg
 
-// Include after forward declarations
-#include <workerd/rust/jsg/v8.rs.h>
+struct ResourceDescriptor;
 
-namespace workerd::rust::jsg {
-
-// Local<T>
-static_assert(sizeof(v8::Local<v8::Value>) == 8, "Size should match");
-static_assert(alignof(v8::Local<v8::Value>) == 8, "Alignment should match");
-
-template <typename T>
-inline Local to_ffi(v8::Local<T>&& value) {
-  size_t result;
-  auto ptr_void = reinterpret_cast<void*>(&result);
-  new (ptr_void) v8::Local<T>(kj::mv(value));
-  return Local{result};
-}
-
-template <typename T>
-inline v8::Local<T> local_from_ffi(Local value) {
-  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
-  return *reinterpret_cast<v8::Local<T>*>(ptr_void);
-}
-
+// Function declarations
 void local_drop(Local value);
 Local local_clone(const Local& value);
 Global local_to_global(Isolate* isolate, Local value);
@@ -51,26 +30,9 @@ bool local_eq(const Local& lhs, const Local& rhs);
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
 
 // Global<T>
-static_assert(sizeof(v8::Global<v8::Value>) == sizeof(Global), "Size should match");
-static_assert(alignof(v8::Global<v8::Value>) == alignof(Global), "Alignment should match");
-
 void global_drop(Global value);
 Global global_clone(const Global& value);
 Local global_to_local(Isolate* isolate, const Global& value);
-
-template <typename T>
-inline Global to_ffi(v8::Global<T>&& value) {
-  size_t result;
-  auto ptr_void = reinterpret_cast<void*>(&result);
-  new (ptr_void) v8::Global<T>(kj::mv(value));
-  return Global{result};
-}
-
-template <typename T>
-inline v8::Global<T> global_from_ffi(Global value) {
-  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
-  return kj::mv(*reinterpret_cast<v8::Global<T>*>(ptr_void));
-}
 
 // Wrappers
 Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl);
@@ -96,7 +58,6 @@ inline void register_add_builtin_module(
   registry.addBuiltinModule(specifier, kj::mv(callback));
 }
 
-struct ResourceDescriptor;
 Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);
 
 }  // namespace workerd::rust::jsg

@@ -2,6 +2,7 @@
 
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
 #include <kj/common.h>

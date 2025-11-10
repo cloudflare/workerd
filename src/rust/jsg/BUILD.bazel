@@ -25,7 +25,10 @@ wd_cc_library(
 wd_cc_library(
     name = "ffi",
     srcs = ["ffi.c++"],
-    hdrs = ["ffi.h"],
+    hdrs = [
+        "ffi.h",
+        "ffi-inl.h",
+    ],
     implementation_deps = [
         ":v8.rs@cxx",
     ],
