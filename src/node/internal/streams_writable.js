@@ -573,11 +573,15 @@ function writeOrBuffer(stream, state, chunk, encoding, callback) {
 
   state.length += len;
 
-  // stream._write resets state.length
-  const ret = state.length < state.highWaterMark || state.length === 0;
-
   // This is a semver-major change. Ref: https://github.com/nodejs/node/commit/557044af407376aff28a0a0800f3053bb58e9239
+  //
+  // The timing of backpressure (ret) calculation relative to _write() execution is critical.
+  // When _write() completes synchronously and modifies state.length, calculating ret before
+  // the write uses stale buffer state, leading to incorrect needDrain signaling and stream hangs.
+  // v24+ calculates ret after _write() to ensure backpressure reflects post-write buffer state.
+  let ret;
   if (!streamsNodejsV24Compat) {
+    ret = state.length < state.highWaterMark || state.length === 0;
     // We must ensure that previous needDrain will not be reset to false.
     if (!ret) {
       state[kState] |= kNeedDrain;
@@ -611,7 +615,9 @@ function writeOrBuffer(stream, state, chunk, encoding, callback) {
   }
 
   // This is a semver-major change. Ref: https://github.com/nodejs/node/commit/557044af407376aff28a0a0800f3053bb58e9239
+  // For v24+, calculate ret after _write() to observe post-write buffer state.
   if (streamsNodejsV24Compat) {
+    ret = state.length < state.highWaterMark || state.length === 0;
     // We must ensure that previous needDrain will not be reset to false.
     if (!ret) {
       state[kState] |= kNeedDrain;
