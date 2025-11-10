@@ -15,7 +15,7 @@
 #include <unistd.h>
 #endif
 
-#include "fuzzilli.h"
+#include <workerd/api/fuzzilli.h>
 
 namespace workerd::api {
 
