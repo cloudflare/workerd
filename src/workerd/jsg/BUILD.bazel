@@ -21,6 +21,7 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         ":url",
+        "//src/rust/jsg",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
@@ -111,12 +112,14 @@ wd_cc_library(
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
     implementation_deps = [
+        "//src/rust/jsg:foo",
         "//src/workerd/util:entropy",
         "@simdutf",
         "@ssl",
     ],
     local_defines = ["JSG_IMPLEMENTATION"],
     tags = ["no-clang-tidy"],
+    visibility = ["//src/rust/jsg:__pkg__"],
     deps = [
         ":exception",
         ":exception_metadata_capnp",

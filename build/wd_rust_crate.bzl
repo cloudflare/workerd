@@ -146,5 +146,5 @@ def wd_rust_crate(
         rust_unpretty(
             name = name + "@expand",
             deps = [":" + name],
-            tags = ["manual", "off-by-default"],
+            tags = ["manual"],
         )

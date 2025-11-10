@@ -9,6 +9,7 @@
 
 #include <cppgc/allocation.h>
 #include <cppgc/garbage-collected.h>
+#include <rust/jsg/foo.h>
 #include <v8-cppgc.h>
 
 #include <kj/async.h>
@@ -43,6 +44,14 @@ void HeapTracer::clearWrappers() {
     // Don't freelist the shim because we're shutting down anyway.
     wrappers.front().detachWrapper(false);
   }
+
+  while (!rustWrappers.empty()) {
+    auto [wrapper, callback] = rustWrappers.front();
+    rustWrappers.pop_front();
+    // Call the type-specific drop callback
+    callback(wrapper);
+  }
+
   clearFreelistedShims();
 }
 

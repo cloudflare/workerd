@@ -1,11 +1,9 @@
 use std::cell::Cell;
 use std::future::Future;
 use std::num::ParseIntError;
+use std::os::raw::c_void;
 use std::rc::Rc;
 
-pub use jsg_macros::method;
-pub use jsg_macros::resource;
-pub use jsg_macros::r#struct;
 use kj_rs::KjMaybe;
 use v8::ffi;
 
@@ -78,6 +76,7 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
                 lock.get_isolate(),
                 resource as usize,
                 constructor.as_ffi_ref(),
+                (*resource).get_drop_callback(),
             )
             .into()
         };
@@ -231,13 +230,19 @@ pub enum Member {
     },
 }
 
+pub struct ResourceState {
+    pub this: *mut c_void,
+}
+
 pub trait Resource: Type {
     fn members() -> Vec<Member>
     where
         Self: Sized;
+    fn get_drop_callback(&self) -> usize;
 }
 
 pub trait ResourceWrapper {
+    fn new(lock: &mut Lock) -> Self;
     fn get_constructor(&self) -> &v8::Global<v8::FunctionTemplate>;
     fn js_instance<'a>(&self, lock: &mut Lock) -> Option<v8::Local<'a, v8::Value>>;
     fn set_js_instance(&mut self, lock: &mut Lock, instance: v8::Local<'_, v8::Value>);

@@ -3,12 +3,9 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "jsg",
-    cxx_bridge_deps = ["//src/workerd/jsg"],
+    cxx_bridge_deps = ["//src/workerd/jsg:jsg-core"],
     cxx_bridge_srcs = [
         "v8.rs",
-    ],
-    proc_macro_deps = [
-        "//src/rust/jsg-macros",
     ],
     visibility = ["//visibility:public"],
     deps = [":ffi"],
@@ -34,8 +31,20 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/workerd/jsg",
+        "//src/workerd/jsg:jsg-core",
         "@workerd-cxx//kj-rs",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "foo",
+    srcs = [],
+    hdrs = [
+        "foo.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
         "@workerd-v8//:v8",
     ],
 )

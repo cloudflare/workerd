@@ -1,5 +1,9 @@
+use jsg::ResourceState;
 use jsg::Struct;
 use jsg::v8::ToLocalValue;
+use jsg_macros::jsg_method;
+use jsg_macros::jsg_resource;
+use jsg_macros::jsg_struct;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,7 +25,7 @@ impl From<DnsParserError> for jsg::Error {
 }
 
 /// CAA record representation
-#[jsg::r#struct]
+#[jsg_struct]
 #[derive(Debug)]
 pub struct CaaRecord {
     pub critical: u8,
@@ -30,7 +34,7 @@ pub struct CaaRecord {
 }
 
 /// NAPTR record representation
-#[jsg::r#struct]
+#[jsg_struct]
 #[derive(Debug)]
 pub struct NaptrRecord {
     pub flags: String,
@@ -100,13 +104,13 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
     Ok(output.join("."))
 }
 
-#[jsg::resource]
+#[jsg_resource]
 pub struct DnsUtil {
-    #[expect(clippy::pub_underscore_fields)]
-    pub _private: u8,
+    // Generated code.
+    pub _state: ResourceState,
 }
 
-#[jsg::resource]
+#[jsg_resource]
 impl DnsUtil {
     /// Parses an unknown RR format returned from Cloudflare DNS.
     /// Specification is available at
@@ -132,7 +136,7 @@ impl DnsUtil {
     /// # Errors
     /// `DnsParserError::InvalidHexString`
     /// `DnsParserError::ParseIntError`
-    #[jsg::method]
+    #[jsg_method]
     pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
         // Let's remove "\\#" and the length of data from the beginning of the record
         let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
@@ -187,7 +191,7 @@ impl DnsUtil {
     /// # Errors
     /// `DnsParserError::InvalidHexString`
     /// `DnsParserError::ParseIntError`
-    #[jsg::method]
+    #[jsg_method]
     pub fn parse_naptr_record(&self, record: &str) -> jsg::Result<NaptrRecord, DnsParserError> {
         let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
 

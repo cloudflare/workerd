@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use quote::ToTokens;
 use syn::parse_macro_input;
+use syn::spanned::Spanned;
 use syn::Data;
 use syn::DeriveInput;
 use syn::Fields;
@@ -33,7 +34,7 @@ use syn::Type;
 /// # Panics
 /// Panics if applied to non-struct items or structs without named fields.
 #[proc_macro_attribute]
-pub fn r#struct(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let name = &input.ident;
 
@@ -128,7 +129,7 @@ pub fn r#struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn method(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
     let fn_vis = &input_fn.vis;
@@ -180,6 +181,7 @@ pub fn method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             #fn_block
         }
 
+        #[automatically_derived]
         extern "C" fn #callback_name(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
             let mut lock = unsafe { jsg::Lock::from_args(args) };
             let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
@@ -258,7 +260,7 @@ fn generate_unwrap_code(
 /// # Panics
 /// Panics if applied to items other than structs or impl blocks.
 #[proc_macro_attribute]
-pub fn resource(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Try to parse as an impl block first
     if let Ok(impl_block) = syn::parse::<ItemImpl>(item.clone()) {
         return generate_resource_impl(&impl_block);
@@ -289,18 +291,28 @@ pub fn resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     let expanded = quote! {
         #input
 
+        #[automatically_derived]
         impl jsg::Type for #name {
             fn class_name() -> &'static str {
                 #class_name
             }
         }
 
+        #[automatically_derived]
         pub struct #wrapper_name {
             pub js: Option<jsg::v8::Global<jsg::v8::Value>>,
             pub constructor: jsg::v8::Global<jsg::v8::FunctionTemplate>,
         }
 
+        #[automatically_derived]
         impl jsg::ResourceWrapper for #wrapper_name {
+            fn new(lock: &mut jsg::Lock) -> Self {
+                Self {
+                    js: None,
+                    constructor: jsg::create_resource_constructor::<#name>(lock),
+                }
+            }
+
             fn get_constructor(&self) -> &jsg::v8::Global<jsg::v8::FunctionTemplate> {
                 &self.constructor
             }
@@ -325,10 +337,10 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
     for item in &impl_block.items {
         if let syn::ImplItem::Fn(method) = item {
             for attr in &method.attrs {
+                // TODO: More reliable way to detect jsg_method attribute
                 if attr.path().is_ident("jsg")
-                    || (attr.path().segments.len() == 2
-                        && attr.path().segments[0].ident == "jsg"
-                        && attr.path().segments[1].ident == "method")
+                    || (attr.path().segments.len() == 1
+                        && attr.path().segments[0].ident == "jsg_method")
                 {
                     let rust_method_name = &method.sig.ident;
 
@@ -352,9 +364,33 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
         }
     }
 
+    // Create a unique drop callback function name based on the type
+    let type_name = match &**self_ty {
+        syn::Type::Path(type_path) => type_path
+            .path
+            .segments
+            .last()
+            .map(|seg| seg.ident.to_string())
+            .unwrap_or_else(|| "Unknown".to_string()),
+        _ => "Unknown".to_string(),
+    };
+    let drop_callback_name =
+        syn::Ident::new(&format!("JsgDrop{}", type_name), impl_block.self_ty.span());
+
     let expanded = quote! {
         #impl_block
 
+        #[automatically_derived]
+        unsafe extern "C" fn #drop_callback_name(this: *mut std::os::raw::c_void) {
+            // Reconstruct the Rc<UnsafeCell<T>> from the raw pointer and drop it
+            let ptr = this as *const std::cell::UnsafeCell<#self_ty>;
+            if !ptr.is_null() {
+                let _rc = std::rc::Rc::from_raw(ptr);
+                // _rc will be dropped here, decrementing the reference count
+            }
+        }
+
+        #[automatically_derived]
         impl jsg::Resource for #self_ty {
             fn members() -> Vec<jsg::Member>
             where
@@ -363,6 +399,10 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                 vec![
                     #(#method_registrations,)*
                 ]
+            }
+
+            fn get_drop_callback(&self) -> usize {
+                #drop_callback_name as usize
             }
         }
     };

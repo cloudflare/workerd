@@ -35,7 +35,7 @@ Global global_clone(const Global& value);
 Local global_to_local(Isolate* isolate, const Global& value);
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl);
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback);
 
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value);

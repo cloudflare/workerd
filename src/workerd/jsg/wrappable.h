@@ -18,6 +18,8 @@
 #include <kj/refcount.h>
 #include <kj/vector.h>
 
+#include <list>
+
 namespace cppgc {
 class Visitor;
 }
@@ -251,11 +253,21 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // object, which implies that we are collecting unreachable objects.
   static bool isInCppgcDestructor();
 
+  using RustDropCallback = void (*)(void*);
+
+  void addRustWrapper(void* wrapper, RustDropCallback callback) {
+    rustWrappers.push_back({wrapper, callback});
+  }
   void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
     wrappers.add(wrappable);
   }
   void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
     wrappers.remove(wrappable);
+  }
+  void removeRustWrapper(void* wrapper) {
+    rustWrappers.erase(std::remove_if(rustWrappers.begin(), rustWrappers.end(),
+                           [wrapper](const auto& pair) { return pair.first == wrapper; }),
+        rustWrappers.end());
   }
   void clearWrappers();
 
@@ -287,6 +299,7 @@ class HeapTracer: public v8::EmbedderRootsHandler {
 
   // List of all Wrappables for which a JavaScript wrapper exists.
   kj::List<Wrappable, &Wrappable::link> wrappers;
+  std::list<std::pair<void*, RustDropCallback>> rustWrappers;
 
   // List of shim objects for wrappers that were collected during a minor GC. The shim objects
   // can be reused for future allocations.
