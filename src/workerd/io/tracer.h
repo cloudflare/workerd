@@ -48,7 +48,7 @@ class WorkerTracer;
 class PipelineTracer: public kj::Refcounted {
  public:
   // Creates a pipeline tracer (with a possible parent).
-  explicit PipelineTracer() = default;
+  PipelineTracer(bool buffered): buffered(buffered) {};
   virtual ~PipelineTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
 
@@ -78,6 +78,15 @@ class PipelineTracer: public kj::Refcounted {
   void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
 
   void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer);
+
+  inline bool hasBuffered() {
+    return buffered;
+  }
+
+ protected:
+  // Indicates that buffered tail workers may be present. There may also be streaming tail workers
+  // present at the same time.
+  bool buffered;
 
  private:
   kj::Vector<kj::Own<Trace>> traces;
@@ -174,8 +183,8 @@ class WorkerTracer final: public BaseTracer {
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel,
-      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
-  explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
+      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter,
+      bool buffered);
   virtual ~WorkerTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
@@ -233,5 +242,8 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+  // Whether any BTWs are present. Note that this serves as an optimization – it is legal for BTWs
+  // to be absent even when this is true.
+  bool buffered;
 };
 }  // namespace workerd
