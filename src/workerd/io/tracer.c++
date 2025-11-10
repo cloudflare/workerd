@@ -123,32 +123,35 @@ WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel exe
           kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)) {}
 
 WorkerTracer::~WorkerTracer() noexcept(false) {
-  // Report the outcome event, which should have been delivered by now. Note that this can happen
-  // when there are no tail events delivered to the tracer at all (such as when a worker interface
-  // gets set up without being used for an event), so this may not indicate an error.
-  if (trace->outcome == EventOutcome::UNKNOWN) {
-    return;
-  }
+  // Report the outcome event, which should have been delivered by now.
 
   // Do not attempt to report an outcome event if logging is disabled, as with other event types.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
 
-  // For worker events where we never set the event info (such as WorkerEntrypoint::test() used in
-  // wd_test), we never set up a tail stream and accordingly should not report an outcome
-  // event. Worker events that should be traced need to set the event info at the start of the
-  // invocation to submit the onset event before any other tail events.
+  // Report the outcome event if STWs are present. All worker events need to call setEventInfo at
+  // the start of the invocation to submit the onset event before any other tail events.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
-
-    if (isPredictableModeForTest()) {
-      writer->report(spanContext,
-          tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS),
-          completeTime);
+    KJ_IF_SOME(spanContext, topLevelInvocationSpanContext) {
+      if (isPredictableModeForTest()) {
+        writer->report(spanContext,
+            tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS),
+            completeTime);
+      } else {
+        writer->report(spanContext,
+            tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime), completeTime);
+      }
     } else {
-      writer->report(spanContext, tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime),
-          completeTime);
+      // If no span context is available, we have a streaming tail worker set up but shut down the
+      // worker tracer without ever sending an Onset event. In that case we either failed to set up
+      // the Onset properly (indicating a bug – all event types are required to report an Onset at
+      // the start – although this is more likely to manifest as a "Tail stream onset was not
+      // reported" error) or we created a WorkerInterface with WorkerTracer without ever invoking it
+      // (which is not incorrect behavior, but likely indicates inefficient code that sets up
+      // WorkerInterfaces and then ends up not using it due to an error/incorrect parameters; such
+      // error checking should be done beforehand to ). Log such cases.
+      KJ_LOG(WARNING, "NOSENTRY destructed WorkerTracer with STW without reporting Onset event");
     }
   }
 };
