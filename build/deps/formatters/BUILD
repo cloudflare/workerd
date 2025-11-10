@@ -1,3 +1,4 @@
+load("@aspect_bazel_lib//lib:copy_file.bzl", "copy_file")
 load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 load("@npm//:prettier/package_json.bzl", prettier = "bin")
@@ -68,19 +69,10 @@ native_binary(
     visibility = ["//visibility:public"],
 )
 
-native_binary(
+copy_file(
     name = "buildifier@rule",
-    src = select({
-        ":linux_amd64": "@buildifier-linux-amd64//file:file",
-        ":linux_arm64": "@buildifier-linux-arm64//file:file",
-        ":darwin_amd64": "@buildifier-darwin-amd64//file:file",
-        ":darwin_arm64": "@buildifier-darwin-arm64//file:file",
-        ":windows_amd64": "@buildifier-windows-amd64//file:file",
-        "//conditions:default": "@buildifier-linux-amd64//file:file",
-    }),
+    src = "@buildifier_prebuilt//:buildifier",
     out = "buildifier",
-    tags = ["manual"],
-    visibility = ["//visibility:public"],
 )
 
 prettier.prettier_binary(
@@ -105,4 +97,9 @@ format_multirun(
     python = ":ruff@rule",
     starlark = ":buildifier@rule",
     visibility = ["//:__pkg__"],
+)
+
+alias(
+    name = "run_clang_format",
+    actual = ":format_C++_with_clang-format",
 )
