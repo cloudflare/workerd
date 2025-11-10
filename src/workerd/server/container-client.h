@@ -49,6 +49,7 @@ class ContainerClient final: public rpc::Container::Server {
   kj::String containerName;
   kj::String imageName;
   kj::TaskSet& waitUntilTasks;
+  kj::Maybe<kj::TimePoint> inactivityTimeout;
 
   static constexpr kj::StringPtr defaultEnv[] = {"CLOUDFLARE_COUNTRY_A2=XX"_kj,
     "CLOUDFLARE_DEPLOYMENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
