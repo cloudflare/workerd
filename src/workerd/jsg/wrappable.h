@@ -109,6 +109,7 @@ class Wrappable: public kj::Refcounted {
   //
   // This value was chosen randomly.
   static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
+  static constexpr uint16_t WORKERD_RUST_WRAPPABLE_TAG = 0xeb05;
 
   static bool isWorkerdApiObject(v8::Local<v8::Object> object) {
     return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX,

@@ -20,6 +20,7 @@ prepare:
 prepare-rust:
   rustup install 1.90.0
   rustup component add rust-analyzer --toolchain 1.90.0
+  rustup update
 
 prepare-ubuntu:
   sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
@@ -52,7 +53,7 @@ test-asan *args="//...":
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:
-  bazel test {{args}} --test_output=streamed --nocache_test_results --config=debug --test_tag_filters= --test_size_filters=
+  bazel test {{args}} --test_output=streamed --nocache_test_results --test_tag_filters= --test_size_filters=
 
 # e.g. just node-test zlib
 node-test test_name *args:
@@ -103,6 +104,10 @@ bench path:
 # example: just clippy dns
 clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
+
+# example: just clang-tidy //src/rust/jsg:ffi
+clang-tidy target="//...":
+  bazel build {{target}} --config=clang-tidy
 
 generate-types:
   bazel build //types
