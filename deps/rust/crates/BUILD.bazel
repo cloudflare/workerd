@@ -356,14 +356,14 @@ alias(
 )
 
 alias(
-    name = "syn-2.0.109",
-    actual = "@crates_vendor__syn-2.0.109//:syn",
+    name = "syn-2.0.110",
+    actual = "@crates_vendor__syn-2.0.110//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.109//:syn",
+    actual = "@crates_vendor__syn-2.0.110//:syn",
     tags = ["manual"],
 )
 

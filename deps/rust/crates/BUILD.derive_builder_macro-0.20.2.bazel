@@ -46,6 +46,6 @@ rust_proc_macro(
     version = "0.20.2",
     deps = [
         "@crates_vendor__derive_builder_core-0.20.2//:derive_builder_core",
-        "@crates_vendor__syn-2.0.109//:syn",
+        "@crates_vendor__syn-2.0.110//:syn",
     ],
 )
