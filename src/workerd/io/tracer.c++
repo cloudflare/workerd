@@ -34,24 +34,28 @@ kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
 WorkerTracer::WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
-    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter)
+    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter,
+    bool hasBufferedTailWorkers)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
-      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {}
+      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {
+  // If logLevel is none, we should not be creating an STW (we don't provide automated tracing in
+  // that case, so the tail stream writer is redundant), and we should have BTW tracers available
+  // (otherwise we should have skipped setting up a WorkerTracer entirely).
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    KJ_ASSERT(maybeTailStreamWriter == kj::none);
+    KJ_ASSERT(hasBufferedTailWorkers);
+  }
+}
 
 WorkerTracer::~WorkerTracer() noexcept(false) {
   // Report the outcome event, which should have been delivered by now.
 
-  // Do not attempt to report an outcome event if logging is disabled, as with other event types.
-  if (pipelineLogLevel == PipelineLogLevel::NONE) {
-    return;
-  }
-
   // Report the outcome event if STWs are present. All worker events need to call setEventInfo at
   // the start of the invocation to submit the onset event before any other tail events.
-  KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    KJ_IF_SOME(spanContext, topLevelInvocationSpanContext) {
+  KJ_IF_SOME(spanContext, topLevelInvocationSpanContext) {
+    KJ_IF_SOME(writer, maybeTailStreamWriter) {
       if (markedUnused) {
         LOG_WARNING_PERIODICALLY("WorkerTracer was marked unused but actually was used");
       }
@@ -63,20 +67,20 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
         writer->report(spanContext,
             tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime), completeTime);
       }
-    } else if (!markedUnused) {
-      // If no span context is available, we have a streaming tail worker set up but shut down the
-      // worker tracer without ever sending an Onset event. In that case we either failed to set up
-      // the Onset properly (indicating a bug – all event types are required to report an Onset at
-      // the start – although this is more likely to manifest as a "Tail stream onset was not
-      // reported" error) or we created a WorkerInterface with WorkerTracer without ever invoking it
-      // (which is not incorrect behavior, but likely indicates inefficient code that sets up
-      // WorkerInterfaces and then ends up not using it due to an error/incorrect parameters; such
-      // error checking should be done beforehand to avoid unused allocations). Report such cases.
-      // Note: If markedUnused is true, this tracer was intentionally not used (e.g., duplicate
-      // alarm request deduplication) and the warning should be suppressed.
-      LOG_ERROR_PERIODICALLY(
-          "destructed WorkerTracer with STW without reporting Onset event", kj::getStackTrace());
     }
+  } else if (!markedUnused) {
+    // If no span context is available, we have a streaming tail worker set up but shut down the
+    // worker tracer without ever sending an Onset event. In that case we either failed to set up
+    // the Onset properly (indicating a bug – all event types are required to report an Onset at
+    // the start – although this is more likely to manifest as a "Tail stream onset was not
+    // reported" error) or we created a WorkerInterface with WorkerTracer without ever invoking it
+    // (which is not incorrect behavior, but likely indicates inefficient code that sets up
+    // WorkerInterfaces and then ends up not using it due to an error/incorrect parameters; such
+    // error checking should be done beforehand to avoid unused allocations). Report such cases.
+    // Note: If markedUnused is true, this tracer was intentionally not used (e.g., duplicate alarm
+    // request deduplication) and the warning should be suppressed.
+    LOG_ERROR_PERIODICALLY(
+        "destructed WorkerTracer without reporting Onset event", kj::getStackTrace());
   }
 
   // Report the completed trace, if fulfiller is set up.
@@ -102,8 +106,8 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     // If message is too big on its own, truncate it.
     writer->report(context,
-        {(tracing::Log(timestamp, logLevel,
-            kj::str(message.first(kj::min(message.size(), MAX_TRACE_BYTES)))))},
+        {tracing::Log(
+            timestamp, logLevel, kj::str(message.first(kj::min(message.size(), MAX_TRACE_BYTES))))},
         timestamp);
   }
 
@@ -124,14 +128,9 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
 }
 
 void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
-  // This is where we'll actually encode the span.
-  if (pipelineLogLevel == PipelineLogLevel::NONE) {
-    return;
-  }
-
-  // Note: spans are not available in the buffered tail worker, so we don't need an exceededSpanLimit
-  // variable for it and it can't cause truncation.
-  auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  // This is where we'll actually encode the span. This function should never be invoked if STW is
+  // inactive as span tracing is only used in STW.
+  auto& tailStreamWriter = KJ_ASSERT_NONNULL(maybeTailStreamWriter);
 
   adjustSpanTime(span);
 
@@ -274,6 +273,9 @@ void WorkerTracer::setEventInfoInternal(
     const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info) {
   KJ_ASSERT(trace->eventInfo == kj::none, "tracer can only be used for a single event");
 
+  // Always set up span context to indicate that the Onset has been set.
+  this->topLevelInvocationSpanContext = context.clone();
+
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for event info vs.
   //   logs.
@@ -284,7 +286,6 @@ void WorkerTracer::setEventInfoInternal(
   }
 
   trace->eventTimestamp = timestamp;
-  this->topLevelInvocationSpanContext = context.clone();
 
   size_t eventSize = 0;
   KJ_SWITCH_ONEOF(info) {
@@ -447,7 +448,7 @@ void WorkerTracer::setReturn(
   }
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
+    auto& spanContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
 
     // Fall back to weak IoContext if no timestamp is available
     writer->report(spanContext,
