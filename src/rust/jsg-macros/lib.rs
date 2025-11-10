@@ -1,16 +1,20 @@
 use proc_macro::TokenStream;
 use quote::quote;
+use quote::ToTokens;
 use syn::parse_macro_input;
 use syn::Data;
 use syn::DeriveInput;
 use syn::Fields;
 use syn::FnArg;
 use syn::ItemFn;
+use syn::ItemImpl;
 use syn::Type;
 
-/// Generates `jsg::Struct` implementation for data structures.
+/// Generates `jsg::Struct` and `jsg::Type` implementations for data structures.
 ///
 /// Only public fields are included in the generated JavaScript object.
+/// Automatically implements `jsg::Type::class_name()` using the struct name,
+/// or a custom name if provided via the `name` parameter.
 ///
 /// # Example
 /// ```rust
@@ -19,14 +23,25 @@ use syn::Type;
 ///     pub critical: u8,
 ///     pub field: String,
 /// }
+///
+/// #[jsg::struct(name = "CustomName")]
+/// pub struct MyRecord {
+///     pub value: String,
+/// }
 /// ```
 ///
 /// # Panics
 /// Panics if applied to non-struct items or structs without named fields.
 #[proc_macro_attribute]
-pub fn r#struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn r#struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let name = &input.ident;
+
+    let class_name = if attr.is_empty() {
+        name.to_string()
+    } else {
+        extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string())
+    };
 
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
@@ -70,6 +85,12 @@ pub fn r#struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let expanded = quote! {
         #input
 
+        impl jsg::Type for #name {
+            fn class_name() -> &'static str {
+                #class_name
+            }
+        }
+
         impl jsg::Struct for #name {
             fn wrap<'a, 'b>(&self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
@@ -90,27 +111,24 @@ pub fn r#struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Generates FFI callback for JSG methods.
 ///
 /// Creates a `{method_name}_callback` extern "C" function that bridges JavaScript and Rust.
+/// If no name is provided, automatically converts `snake_case` to `camelCase`.
 ///
 /// # Example
 /// ```rust
+/// // With explicit name
 /// #[jsg::method(name = "parseRecord")]
 /// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
 ///     // implementation
 /// }
-/// ```
 ///
-/// # Panics
-/// Panics if attribute format is invalid.
+/// // Without name - automatically becomes "parseRecord"
+/// #[jsg::method]
+/// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
+///     // implementation
+/// }
+/// ```
 #[proc_macro_attribute]
-pub fn method(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr_str = attr.to_string();
-    let _js_name = attr_str
-        .trim()
-        .strip_prefix("name =")
-        .and_then(|s| s.trim().strip_prefix('"'))
-        .and_then(|s| s.strip_suffix('"'))
-        .expect("Expected attribute format: #[jsg::method(name = \"methodName\")]");
-
+pub fn method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
     let fn_vis = &input_fn.vis;
@@ -205,4 +223,184 @@ fn generate_unwrap_code(
             compile_error!("Unsupported parameter type for jsg::method. Currently only &str is supported.");
         }
     }
+}
+
+/// Generates boilerplate code for JSG resources.
+///
+/// Works in two contexts:
+/// 1. On a struct - generates `jsg::Type`, Wrapper, and `ResourceWrapper` implementations
+/// 2. On an impl block - scans for `#[jsg::method]` and generates `Resource` trait implementation
+///
+/// Automatically implements `jsg::Type::class_name()` using the struct name,
+/// or a custom name if provided via the `name` parameter.
+///
+/// # Example
+/// ```rust
+/// #[jsg::resource]
+/// pub struct DnsUtil {
+///     pub _private: u8,
+/// }
+///
+/// #[jsg::resource(name = "CustomUtil")]
+/// pub struct MyUtil {
+///     pub _private: u8,
+/// }
+///
+/// #[jsg::resource]
+/// impl DnsUtil {
+///     #[jsg::method(name = "parseRecord")]
+///     pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
+///         // implementation
+///     }
+/// }
+/// ```
+///
+/// # Panics
+/// Panics if applied to items other than structs or impl blocks.
+#[proc_macro_attribute]
+pub fn resource(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Try to parse as an impl block first
+    if let Ok(impl_block) = syn::parse::<ItemImpl>(item.clone()) {
+        return generate_resource_impl(&impl_block);
+    }
+
+    // Otherwise, parse as a struct
+    let input = parse_macro_input!(item as DeriveInput);
+    let name = &input.ident;
+
+    let class_name = if attr.is_empty() {
+        name.to_string()
+    } else {
+        extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string())
+    };
+
+    let wrapper_name = syn::Ident::new(&format!("{name}Wrapper"), name.span());
+
+    // Ensure it's a struct
+    if !matches!(&input.data, Data::Struct(_)) {
+        return syn::Error::new_spanned(
+            &input,
+            "#[jsg::resource] can only be applied to structs or impl blocks",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    let expanded = quote! {
+        #input
+
+        impl jsg::Type for #name {
+            fn class_name() -> &'static str {
+                #class_name
+            }
+        }
+
+        pub struct #wrapper_name {
+            pub js: Option<jsg::v8::Global<jsg::v8::Value>>,
+            pub constructor: jsg::v8::Global<jsg::v8::FunctionTemplate>,
+        }
+
+        impl jsg::ResourceWrapper for #wrapper_name {
+            fn get_constructor(&self) -> &jsg::v8::Global<jsg::v8::FunctionTemplate> {
+                &self.constructor
+            }
+
+            fn js_instance<'a>(&self, lock: &mut jsg::Lock) -> Option<jsg::v8::Local<'a, jsg::v8::Value>> {
+                self.js.as_ref().map(|val| val.as_local(lock).into())
+            }
+
+            fn set_js_instance(&mut self, lock: &mut jsg::Lock, instance: jsg::v8::Local<jsg::v8::Value>) {
+                self.js = Some(instance.to_global(lock));
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
+    let self_ty = &impl_block.self_ty;
+    let mut method_registrations = vec![];
+
+    for item in &impl_block.items {
+        if let syn::ImplItem::Fn(method) = item {
+            for attr in &method.attrs {
+                if attr.path().is_ident("jsg")
+                    || (attr.path().segments.len() == 2
+                        && attr.path().segments[0].ident == "jsg"
+                        && attr.path().segments[1].ident == "method")
+                {
+                    let rust_method_name = &method.sig.ident;
+
+                    let attr_str = attr.meta.to_token_stream().to_string();
+                    let js_name = extract_name_attribute(&attr_str)
+                        .unwrap_or_else(|| snake_to_camel_case(&rust_method_name.to_string()));
+
+                    let callback_name = syn::Ident::new(
+                        &format!("{rust_method_name}_callback"),
+                        rust_method_name.span(),
+                    );
+
+                    method_registrations.push(quote! {
+                        jsg::Member::Method {
+                            name: #js_name,
+                            callback: Self::#callback_name,
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    let expanded = quote! {
+        #impl_block
+
+        impl jsg::Resource for #self_ty {
+            fn members() -> Vec<jsg::Member>
+            where
+                Self: Sized,
+            {
+                vec![
+                    #(#method_registrations,)*
+                ]
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+fn extract_name_attribute(attr_str: &str) -> Option<String> {
+    if !attr_str.contains("name") {
+        return None;
+    }
+
+    attr_str
+        .split('=')
+        .nth(1)?
+        .trim()
+        .trim_matches(|c| c == '"' || c == ')' || c == ' ')
+        .split('"')
+        .next()
+        .map(str::to_owned)
+}
+
+fn snake_to_camel_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = false;
+
+    for (i, ch) in s.chars().enumerate() {
+        if ch == '_' {
+            capitalize_next = true;
+        } else if i == 0 {
+            result.push(ch);
+        } else if capitalize_next {
+            result.push(ch.to_ascii_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
 }

@@ -1,12 +1,10 @@
-// #![feature(must_not_suspend)]
-// #![warn(must_not_suspend)]
-
 use std::cell::Cell;
 use std::future::Future;
 use std::num::ParseIntError;
 use std::rc::Rc;
 
 pub use jsg_macros::method;
+pub use jsg_macros::resource;
 pub use jsg_macros::r#struct;
 use kj_rs::KjMaybe;
 use v8::ffi;
@@ -126,7 +124,6 @@ impl From<ParseIntError> for Error {
     }
 }
 
-// #[must_not_suspend]
 pub struct Lock {
     isolate: *mut v8::ffi::Isolate,
 }
@@ -201,6 +198,7 @@ impl<T> Clone for Ref<T> {
 
 /// TODO: Implement `memory_info(jsg::MemoryTracker)`
 pub trait Type {
+    fn class_name() -> &'static str;
     /// Same as jsgGetMemoryName
     fn memory_name() -> &'static str {
         std::any::type_name::<Self>()
@@ -234,7 +232,6 @@ pub enum Member {
 }
 
 pub trait Resource: Type {
-    fn class_name() -> &'static str;
     fn members() -> Vec<Member>
     where
         Self: Sized;

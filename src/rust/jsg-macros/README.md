@@ -4,7 +4,7 @@ Procedural macros for JSG (JavaScript Glue) Rust bindings. These macros reduce b
 
 ## `#[jsg::r#struct]`
 
-Automatically generates the `jsg::Struct` implementation for data structures. Only public fields are exposed to JavaScript as properties on the resulting object.
+Generates the `jsg::Struct` and `jsg::Type` implementations for data structures. Only public fields are exposed to JavaScript. Automatically implements `class_name()` using the struct name, or a custom name if provided via the `name` parameter.
 
 ```rust
 #[jsg::r#struct]
@@ -14,25 +14,15 @@ pub struct CaaRecord {
     pub value: String,
 }
 
-impl jsg::Type for CaaRecord {}
-```
-
-This macro generates code equivalent to manually implementing:
-
-```rust
-impl jsg::Struct for CaaRecord {
-    fn wrap<'a, 'b>(&self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
-    where
-        'b: 'a,
-    {
-        // conversion implementation
-    }
+#[jsg::r#struct(name = "CustomName")]
+pub struct MyRecord {
+    pub value: String,
 }
 ```
 
 ## `#[jsg::method]`
 
-Generates FFI callback functions for JSG resource methods. Creates a `{method_name}_callback` extern "C" function that handles marshalling between JavaScript and Rust.
+Generates FFI callback functions for JSG resource methods. The `name` parameter is optional and defaults to converting the method name from `snake_case` to `camelCase`.
 
 ```rust
 impl DnsUtil {
@@ -40,26 +30,36 @@ impl DnsUtil {
     pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
         // implementation
     }
+
+    #[jsg::method]
+    pub fn parse_naptr_record(&self, record: &str) -> Result<NaptrRecord, DnsParserError> {
+        // Exposed as "parseNaptrRecord" in JavaScript
+    }
 }
 ```
 
-The generated callback must be registered in the resource's `members()` implementation:
+## `#[jsg::resource]`
+
+Generates boilerplate for JSG resources. Applied to both struct definitions and impl blocks. Automatically implements `jsg::Type::class_name()` using the struct name, or a custom name if provided via the `name` parameter.
 
 ```rust
-impl Resource for DnsUtil {
-    fn members() -> Vec<Member> {
-        vec![Member::Method {
-            name: "parseCaaRecord",
-            callback: Self::parse_caa_record_callback,
-        }]
+#[jsg::resource]
+pub struct DnsUtil {
+    pub _private: u8,
+}
+
+#[jsg::resource(name = "CustomUtil")]
+pub struct MyUtil {
+    pub _private: u8,
+}
+
+#[jsg::resource]
+impl DnsUtil {
+    #[jsg::method]
+    pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
+        // implementation
     }
-    // ...
 }
 ```
 
-### Supported Parameter Types
-
-Currently, the `#[jsg::method]` macro supports:
-- `&str` - Automatically unwrapped from JavaScript strings
-
-Additional type support will be added as needed.
+On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceWrapper` implementations. On impl blocks, scans for `#[jsg::method]` attributes and generates the `Resource` trait implementation.
