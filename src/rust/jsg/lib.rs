@@ -1,5 +1,5 @@
-#![feature(must_not_suspend)]
-#![warn(must_not_suspend)]
+// #![feature(must_not_suspend)]
+// #![warn(must_not_suspend)]
 
 use std::cell::Cell;
 use std::future::Future;
@@ -62,17 +62,15 @@ pub fn create_resource_constructor<R: Resource>(
     }
 }
 
-// TODO: R needs to be a non-empty struct.
 ///
 /// # Safety
 /// The caller must ensure that `resource` points to a valid R instance.
 pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
     lock: &mut Lock,
     resource: *mut R,
-    wrapper: &W,
+    wrapper: &mut W,
 ) -> v8::Local<'a, v8::Value> {
-    let r = unsafe { &mut *resource };
-    let instance = r.js_instance(lock);
+    let instance = wrapper.js_instance(lock);
     if let Some(val) = instance {
         val
     } else {
@@ -86,7 +84,7 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
             .into()
         };
         let cached_instance = instance.clone();
-        r.set_js_instance(lock, cached_instance);
+        wrapper.set_js_instance(lock, cached_instance);
         instance
     }
 }
@@ -128,7 +126,7 @@ impl From<ParseIntError> for Error {
     }
 }
 
-#[must_not_suspend]
+// #[must_not_suspend]
 pub struct Lock {
     isolate: *mut v8::ffi::Isolate,
 }
@@ -240,13 +238,12 @@ pub trait Resource: Type {
     fn members() -> Vec<Member>
     where
         Self: Sized;
-    fn js_instance<'a>(&self, lock: &mut Lock) -> Option<v8::Local<'a, v8::Value>>;
-
-    fn set_js_instance(&mut self, lock: &mut Lock, instance: v8::Local<'_, v8::Value>);
 }
 
 pub trait ResourceWrapper {
     fn get_constructor(&self) -> &v8::Global<v8::FunctionTemplate>;
+    fn js_instance<'a>(&self, lock: &mut Lock) -> Option<v8::Local<'a, v8::Value>>;
+    fn set_js_instance(&mut self, lock: &mut Lock, instance: v8::Local<'_, v8::Value>);
 }
 
 pub trait Struct: Type {

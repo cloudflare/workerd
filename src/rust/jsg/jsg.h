@@ -2,7 +2,9 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/ffi.h>
+#include <workerd/rust/jsg/v8.rs.h>
 
 #include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
