@@ -41,6 +41,7 @@ namespace {
   V(HIBERNATABLEWEBSOCKET, "hibernatableWebSocket")                                                \
   V(ID, "id")                                                                                      \
   V(INFO, "info")                                                                                  \
+  V(INTERNALEXCEPTION, "internalException")                                                        \
   V(INVOCATIONID, "invocationId")                                                                  \
   V(JSRPC, "jsrpc")                                                                                \
   V(KILLSWITCH, "killSwitch")                                                                      \
@@ -81,6 +82,7 @@ namespace {
   V(TYPE, "type")                                                                                  \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
+  V(USEREXCEPTION, "userException")                                                                \
   V(VALUE, "value")                                                                                \
   V(WALLTIME, "wallTime")                                                                          \
   V(WASCLEAN, "wasClean")
@@ -312,6 +314,10 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
       return cache.get(js, SCRIPTNOTFOUND_STR);
     case EventOutcome::UNKNOWN:
       return cache.get(js, UNKNOWN_STR);
+    case EventOutcome::USER_EXCEPTION:
+      return cache.get(js, USEREXCEPTION_STR);
+    case EventOutcome::INTERNAL_EXCEPTION:
+      return cache.get(js, INTERNALEXCEPTION_STR);
   }
   KJ_UNREACHABLE;
 }

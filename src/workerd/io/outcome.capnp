@@ -27,4 +27,6 @@ enum EventOutcome {
   exceededMemory @8;
   loadShed @9;
   responseStreamDisconnected @10;
+  userException @11;
+  internalException @12;
 }
