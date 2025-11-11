@@ -211,8 +211,26 @@ jobs:
           EOF
           pnpm add /tmp/test-types -w
 
-      - name: Run Wrangler, Miniflare, Vitest, Vite unit tests
-        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
+      - name: Run Wrangler unit tests
+        # Run all the wrangler unit tests besides the ConfigController ones since those
+        # are currently very flaky (the ANT team will look into stabilizing them and
+        # re-enabling them here as soon as possible, ref: https://jira.cfdata.org/browse/DEVX-2309)
+        run: pnpm test:ci --filter wrangler -- -t '^((?!(ConfigController)).)*$'
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Miniflare unit tests
+        run: pnpm test:ci --filter miniflare
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Vite unit tests
+        run: pnpm test:ci --filter @cloudflare/vite-plugin
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Vitest unit tests
+        run: pnpm test:ci --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
 
