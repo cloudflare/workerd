@@ -13,6 +13,7 @@ using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
 struct ModuleRegistry;
 struct Local;
 struct Global;
+struct TracedReference;
 using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
 
 struct ResourceDescriptor;
@@ -25,6 +26,9 @@ Local local_new_number(Isolate* isolate, double value);
 Local local_new_string(Isolate* isolate, ::rust::Str value);
 Local local_new_object(Isolate* isolate);
 bool local_eq(const Local& lhs, const Local& rhs);
+
+// TracedReference<T>
+TracedReference traced_reference_from_local(Isolate* isolate, Local value);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);

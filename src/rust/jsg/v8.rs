@@ -15,11 +15,22 @@ pub mod ffi {
         ptr: usize,
     }
 
+    #[derive(Debug)]
+    struct TracedReference {
+        ptr: usize,
+    }
+
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
 
         type Isolate;
         type FunctionCallbackInfo;
+
+        // TracedReference<T>
+        pub unsafe fn traced_reference_from_local(
+            isolate: *mut Isolate,
+            value: Local,
+        ) -> TracedReference;
 
         // Local<T>
         pub unsafe fn local_drop(value: Local);
@@ -118,6 +129,7 @@ pub struct FunctionTemplate;
 #[derive(Debug)]
 pub struct Local<'a, T> {
     handle: ffi::Local,
+    isolate: *mut ffi::Isolate,
     _marker: PhantomData<(&'a (), T)>,
 }
 
@@ -137,9 +149,10 @@ impl<'a, T> Local<'a, T> {
     ///
     /// # Safety
     /// The caller must ensure that the handle is valid and properly constructed from V8.
-    pub unsafe fn from_ffi(handle: ffi::Local) -> Self {
+    pub unsafe fn from_ffi(isolate: *mut ffi::Isolate, handle: ffi::Local) -> Self {
         Local {
             handle,
+            isolate,
             _marker: PhantomData,
         }
     }
@@ -166,19 +179,13 @@ impl<'a, T> Local<'a, T> {
     }
 }
 
-// Allow implicit conversion from ffi::Local
-impl<T> From<ffi::Local> for Local<'_, T> {
-    fn from(handle: ffi::Local) -> Self {
-        Local {
-            handle,
-            _marker: PhantomData,
-        }
-    }
-}
-
 impl<T> Clone for Local<'_, T> {
     fn clone(&self) -> Self {
-        unsafe { ffi::local_clone(&self.handle).into() }
+        unsafe {
+            Self::from_ffi(self.isolate, unsafe {
+                ffi::local_clone(&self.handle).into()
+            })
+        }
     }
 }
 
@@ -197,20 +204,14 @@ impl PartialEq for Local<'_, Value> {
 
 impl<'a> From<Local<'a, Object>> for Local<'a, Value> {
     fn from(value: Local<'a, Object>) -> Self {
-        Local {
-            handle: unsafe { value.into_ffi() },
-            _marker: PhantomData,
-        }
+        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
     }
 }
 
 // TODO: We need to figure out a smart way of avoiding duplication.
 impl<'a> From<Local<'a, FunctionTemplate>> for Local<'a, Value> {
     fn from(value: Local<'a, FunctionTemplate>) -> Self {
-        Local {
-            handle: unsafe { value.into_ffi() },
-            _marker: PhantomData,
-        }
+        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
     }
 }
 
@@ -227,6 +228,26 @@ impl<'a> Local<'a, Object> {
                 value.into_ffi(),
             );
         }
+    }
+}
+
+pub struct TracedReference<T> {
+    handle: ffi::TracedReference,
+    _marker: PhantomData<T>,
+}
+
+impl<T> From<Local<'_, T>> for TracedReference<T> {
+    fn from(local: Local<'_, T>) -> Self {
+        Self {
+            handle: unsafe { ffi::traced_reference_from_local(local.isolate, local.into_ffi()) },
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> Drop for TracedReference<T> {
+    fn drop(&mut self) {
+        todo!()
     }
 }
 
@@ -258,7 +279,21 @@ impl<T> Global<T> {
     }
 
     pub fn as_local<'a>(&self, lock: &mut Lock) -> Local<'a, FunctionTemplate> {
-        unsafe { ffi::global_to_local(lock.get_isolate(), &self.handle).into() }
+        unsafe {
+            Local::from_ffi(
+                lock.get_isolate(),
+                ffi::global_to_local(lock.get_isolate(), &self.handle),
+            )
+        }
+    }
+}
+
+impl<T> From<Local<'_, T>> for Global<T> {
+    fn from(local: Local<'_, T>) -> Self {
+        Self {
+            handle: unsafe { ffi::local_to_global(local.isolate, local.into_ffi()) },
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -295,13 +330,23 @@ pub trait ToLocalValue {
 
 impl ToLocalValue for u8 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        unsafe { ffi::local_new_number(lock.get_isolate(), f64::from(*self)).into() }
+        unsafe {
+            Local::from_ffi(
+                lock.get_isolate(),
+                ffi::local_new_number(lock.get_isolate(), f64::from(*self)).into(),
+            )
+        }
     }
 }
 
 impl ToLocalValue for u32 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        unsafe { ffi::local_new_number(lock.get_isolate(), f64::from(*self)).into() }
+        unsafe {
+            Local::from_ffi(
+                lock.get_isolate(),
+                ffi::local_new_number(lock.get_isolate(), f64::from(*self)).into(),
+            )
+        }
     }
 }
 
@@ -313,7 +358,12 @@ impl ToLocalValue for String {
 
 impl ToLocalValue for &str {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        unsafe { ffi::local_new_string(lock.get_isolate(), self).into() }
+        unsafe {
+            Local::from_ffi(
+                lock.get_isolate(),
+                ffi::local_new_string(lock.get_isolate(), self).into(),
+            )
+        }
     }
 }
 
@@ -326,8 +376,12 @@ impl<'a> FunctionCallbackInfo<'a> {
         Self(info, PhantomData)
     }
 
+    pub unsafe fn get_isolate(&self) -> *mut ffi::Isolate {
+        unsafe { ffi::fci_get_isolate(self.0) }
+    }
+
     pub fn this(&self) -> Local<'a, Value> {
-        unsafe { ffi::fci_get_this(self.0).into() }
+        unsafe { Local::from_ffi(self.get_isolate(), ffi::fci_get_this(self.0)) }
     }
 
     pub fn len(&self) -> usize {
@@ -340,7 +394,7 @@ impl<'a> FunctionCallbackInfo<'a> {
 
     pub fn get(&self, index: usize) -> Local<'a, Value> {
         debug_assert!(index <= self.len());
-        unsafe { ffi::fci_get_arg(self.0, index).into() }
+        unsafe { Local::from_ffi(self.get_isolate(), ffi::fci_get_arg(self.0, index)) }
     }
 
     pub fn set_return_value(&self, value: Local<Value>) {

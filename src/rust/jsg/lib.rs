@@ -70,19 +70,20 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
     if let Some(val) = instance {
         val
     } else {
-        let constructor = wrapper.get_constructor();
-        let instance: v8::Local<'a, v8::Value> = unsafe {
-            ffi::wrap_resource(
-                lock.get_isolate(),
-                resource as usize,
-                constructor.as_ffi_ref(),
-                (*resource).get_drop_callback(),
-            )
-            .into()
-        };
-        let cached_instance = instance.clone();
-        wrapper.set_js_instance(lock, cached_instance);
-        instance
+        todo!();
+        // let constructor = wrapper.get_constructor();
+        // let instance: v8::Local<'a, v8::Value> = unsafe {
+        //     ffi::wrap_resource(
+        //         lock.get_isolate(),
+        //         resource as usize,
+        //         constructor.as_ffi_ref(),
+        //         (*resource).get_drop_callback(),
+        //     )
+        //     .into()
+        // };
+        // let cached_instance = instance.clone();
+        // wrapper.set_js_instance(lock, cached_instance);
+        // instance
     }
 }
 
@@ -149,7 +150,12 @@ impl Lock {
     }
 
     pub fn new_object<'a>(&mut self) -> v8::Local<'a, v8::Object> {
-        unsafe { v8::ffi::local_new_object(self.get_isolate()).into() }
+        unsafe {
+            v8::Local::from_ffi(
+                self.get_isolate(),
+                v8::ffi::local_new_object(self.get_isolate()),
+            )
+        }
     }
 
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
@@ -244,6 +250,43 @@ pub enum Member {
 pub struct ResourceState {
     pub this: *mut c_void,
     pub shim: Option<v8::ffi::ResourceShim>,
+    pub strong_wrapper: Option<v8::Global<v8::Object>>,
+    pub isolate: *mut v8::ffi::Isolate,
+    pub strong_ref_count: usize,
+    pub wrapper: Option<v8::TracedReference<v8::Object>>,
+}
+
+impl ResourceState {
+    pub unsafe fn attach_wrapper(
+        &mut self,
+        isolate: *mut v8::ffi::Isolate,
+        object: v8::Local<v8::Object>,
+        needs_gc_tracing: bool,
+    ) {
+        assert!(self.wrapper.is_none());
+        assert!(self.strong_wrapper.is_none());
+
+        self.wrapper = Some(object.into());
+        self.isolate = isolate;
+
+        // auto& tracer = HeapTracer::getTracer(isolate);
+        // tracer.addWrapper({}, *this);
+
+        // Deal with tags.
+
+        // v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
+        //
+        todo!();
+
+        if self.strong_ref_count > 0 {
+            self.strong_wrapper = Some(object.into());
+
+            todo!()
+
+            // GcVisitor visitor(*this, kj::none);
+            // jsgVisitForGc(visitor);
+        }
+    }
 }
 
 pub trait Resource: Type {

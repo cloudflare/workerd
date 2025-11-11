@@ -26,6 +26,12 @@ namespace workerd::rust::jsg {
 //   resource_drop(isolate, reinterpret_cast<size_t>(wrapper));
 // }
 
+// TracedReference<T>
+TracedReference traced_reference_from_local(Isolate* isolate, Local value) {
+  v8::TracedReference<v8::Value> ref(isolate, local_from_ffi<v8::Value>(value));
+  return to_ffi(kj::mv(ref));
+}
+
 // Local<T>
 
 void local_drop(Local value) {

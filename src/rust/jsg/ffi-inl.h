@@ -8,6 +8,18 @@
 
 namespace workerd::rust::jsg {
 
+// TracedReference<T>
+static_assert(sizeof(v8::TracedReference<v8::Object>) == 8, "Size should match");
+static_assert(alignof(v8::TracedReference<v8::Object>) == 8, "Alignment should match");
+
+template <typename T>
+inline TracedReference to_ffi(v8::TracedReference<T>&& value) {
+  size_t result;
+  auto ptr_void = reinterpret_cast<void*>(&result);
+  new (ptr_void) v8::TracedReference<T>(kj::mv(value));
+  return TracedReference{result};
+}
+
 // Local<T>
 static_assert(sizeof(v8::Local<v8::Value>) == 8, "Size should match");
 static_assert(alignof(v8::Local<v8::Value>) == 8, "Alignment should match");

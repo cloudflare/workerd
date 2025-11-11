@@ -35,6 +35,10 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
             _state: ResourceState {
                 this: null_mut(),
                 shim: None,
+                isolate,
+                strong_ref_count: 0,
+                strong_wrapper: None,
+                wrapper: None,
             },
         });
         let dns_util = jsg::Ref::into_raw(dns_util);
