@@ -1078,7 +1078,10 @@ struct TailStreamWriterState {
   }
 
   // Delivers the queued tail events to a streaming tail worker.
-  kj::Promise<void> pump(kj::Own<Active> current) {
+  //
+  // Note: An invocation of pump() may outlive the TailStreamWriterState, as it is placed in
+  //   `waitUntilTasks`. Hence, it is declared `static`, and owns a strong ref to its `Active`.
+  static kj::Promise<void> pump(kj::Own<Active> current) {
     current->pumping = true;
     KJ_DEFER(current->pumping = false);
 
