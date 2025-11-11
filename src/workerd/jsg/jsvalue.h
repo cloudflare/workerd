@@ -5,6 +5,7 @@
 #include <v8-container.h>
 #include <v8-date.h>
 #include <v8-external.h>
+#include <v8.h>
 
 namespace workerd::jsg {
 
@@ -986,10 +987,6 @@ inline void JsObject::delete_(Lock& js, kj::StringPtr name) {
 
 inline int JsString::length(jsg::Lock& js) const {
   return inner->Length();
-}
-
-inline size_t JsString::utf8Length(jsg::Lock& js) const {
-  return inner->Utf8LengthV2(js.v8Isolate);
 }
 
 }  // namespace workerd::jsg

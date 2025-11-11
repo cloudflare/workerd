@@ -4,8 +4,6 @@
 #include "ser.h"
 #include "simdutf.h"
 
-#include <v8.h>
-
 #include <kj/string-tree.h>
 #include <kj/string.h>
 
@@ -379,6 +377,32 @@ jsg::DOMString JsString::toDOMString(Lock& js) const {
   auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
   inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
   return jsg::DOMString(kj::mv(buf));
+}
+
+// Custom implementation for UTF-8 length calculation using simdutf.
+//
+// TODO: Once V8 improves its UTF-8 length handling for invalid UTF-16, we should revert to
+// using inner->Utf8LengthV2() directly. This requires simdutf to implement
+// utf8_length_from_invalid_utf16() and for those changes to be upstreamed to V8. Currently,
+// this implementation ensures correct handling of both valid and invalid UTF-16 sequences.
+//
+// See: https://chromium-review.googlesource.com/c/v8/v8/+/7142019
+//      https://github.com/simdutf/simdutf/issues/849
+size_t JsString::utf8Length(jsg::Lock& js) const {
+  v8::String::ValueView view(js.v8Isolate, inner);
+  auto len = view.length();
+
+  if (view.is_one_byte()) {
+    return simdutf::utf8_length_from_latin1(reinterpret_cast<const char*>(view.data8()), len);
+  }
+
+  auto data = reinterpret_cast<const char16_t*>(view.data16());
+  if (simdutf::validate_utf16(data, len)) {
+    return simdutf::utf8_length_from_utf16(data, len);
+  }
+  kj::SmallArray<char16_t, 4096> wellFormed(len);
+  simdutf::to_well_formed_utf16(data, len, wellFormed.begin());
+  return simdutf::utf8_length_from_utf16(wellFormed.begin(), len);
 }
 
 int JsString::hashCode() const {
