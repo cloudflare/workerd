@@ -232,4 +232,37 @@ class WorkerTracer final: public BaseTracer {
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
 };
+
+class SpanSubmitter: public kj::Refcounted {
+ public:
+  virtual void submitSpan(
+      tracing::SpanId context, tracing::SpanId parentSpanId, const Span& span) = 0;
+  virtual tracing::SpanId makeSpanId() = 0;
+};
+
+// The user tracing observer
+class UserObserver final: public SpanObserver {
+ public:
+  // constructor for top-level observer
+  UserObserver(kj::Own<SpanSubmitter> submitter)
+      : submitter(kj::mv(submitter)),
+        spanId(tracing::SpanId::nullId),
+        parentSpanId(tracing::SpanId::nullId) {}
+  // constructor for subsequent observers attached to a span
+  UserObserver(kj::Own<SpanSubmitter> submitter, tracing::SpanId parentSpanId)
+      : submitter(kj::mv(submitter)),
+        spanId(this->submitter->makeSpanId()),
+        parentSpanId(parentSpanId) {}
+  KJ_DISALLOW_COPY(UserObserver);
+
+  kj::Own<SpanObserver> newChild() override;
+  void report(const Span& span) override;
+  kj::Date getTime() override;
+
+ private:
+  kj::Own<SpanSubmitter> submitter;
+  tracing::SpanId spanId;
+  tracing::SpanId parentSpanId;
+};
+
 }  // namespace workerd
