@@ -304,6 +304,19 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
 }
 
 void EncodedAsyncOutputStream::abort(kj::Exception reason) {
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
+      stream->abortWrite(kj::mv(reason));
+    }
+    KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+      gz->abortWrite(kj::mv(reason));
+    }
+    KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+      br->abortWrite(kj::mv(reason));
+    }
+    KJ_CASE_ONEOF(e, Ended) {}
+  }
+
   inner.init<Ended>();
 }
 
