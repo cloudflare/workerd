@@ -839,7 +839,10 @@ jsg::Ref<SyncKvStorage> DurableObjectStorage::getKv(jsg::Lock& js) {
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
-  return cache->getCurrentBookmark();
+  auto& context = IoContext::current();
+  auto span = context.makeTraceSpan("durable_object_storage_getCurrentBookmark"_kjc);
+
+  return cache->getCurrentBookmark(span).attach(kj::mv(span));
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getBookmarkForTime(kj::Date timestamp) {
