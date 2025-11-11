@@ -69,7 +69,7 @@ For Resource Types, all methods declared with `JSG_METHOD` and similar macros (d
 optionally take a `jsg::Lock&` as the first parameter, for instance:
 
 ```cpp
-const Foo: public jsg::Object {
+class Foo: public jsg::Object {
 public:
   void foo(jsg::Lock& js, int x, int y) {
     // ...
@@ -652,7 +652,6 @@ when the application passes the same value later.
 struct Foo {
   int value;
   JSG_STRUCT(value);
-};
 };
 
 void doSomething(jsg::Identified<Foo> obj) {

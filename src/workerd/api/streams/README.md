@@ -110,7 +110,7 @@ has been fully consumed.
 
 The flow here is simple enough at the API level, but what is happening under the covers? That's
 where things get quite a bit more complex. It also varies depending on whether it is an
-***Internal** stream or a ***Standard*** stream.
+***Internal*** stream or a ***Standard*** stream.
 
 Let's start with the explanation of the ***Standard*** stream.
 
@@ -257,7 +257,7 @@ issue.
 
 Each branch maintains its own data buffer. But instead of those buffers containing a
 copy of the data, they contain a collection of refcounted references to the data. The
-backpressure signaling to the trunk is based on the branch wait the most unconsumed data
+backpressure signaling to the trunk is based on the branch with the most unconsumed data
 in its buffer.
 
 ```
