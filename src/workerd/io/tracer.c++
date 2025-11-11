@@ -504,4 +504,17 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
   }
 }
 
+kj::Own<SpanObserver> UserSpanObserver::newChild() {
+  return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId);
+}
+
+void UserSpanObserver::report(const Span& span) {
+  submitter->submitSpan(spanId, parentSpanId, span);
+}
+
+// Provide I/O time to the tracing system for user spans.
+kj::Date UserSpanObserver::getTime() {
+  return IoContext::current().now();
+}
+
 }  // namespace workerd
