@@ -11,6 +11,9 @@
 #include <kj/debug.h>
 #include <kj/test.h>
 
+#include <chrono>
+#include <format>
+
 namespace workerd {
 namespace {
 
@@ -363,6 +366,170 @@ KJ_TEST("encode to flag list for FL") {
     auto strings = decompileCompatibilityFlagsForFl(featureFlags);
     KJ_EXPECT(strings.size() == 1);
     KJ_EXPECT(strings[0] == "minimal_subrequests"_kj);
+  }
+}
+
+KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
+  // List of specific flags that are allowed to use non-conformant dates
+  // (already deployed and can't be changed for compatibility reasons)
+  kj::HashSet<kj::StringPtr> allowedFlagExceptions;
+  allowedFlagExceptions.insertAll(std::initializer_list<kj::StringPtr>{
+    // Existing non-conformant dates that are already deployed
+    "jsgPropertyOnPrototypeTemplate"_kj,           // 2022-01-31 (Monday)
+    "specCompliantUrl"_kj,                         // 2022-10-31 (Monday)
+    "globalNavigator"_kj,                          // 2022-03-21 (Monday)
+    "captureThrowsAsRejections"_kj,                // 2022-10-31 (Monday)
+    "exportCommonJsDefaultNamespace"_kj,           // 2022-10-31 (Monday)
+    "urlSearchParamsDeleteHasValueArg"_kj,         // 2023-07-01 (Saturday)
+    "brotliContentEncoding"_kj,                    // 2024-04-29 (Monday)
+    "cryptoPreservePublicExponent"_kj,             // 2023-12-01 (Friday)
+    "noImportScripts"_kj,                          // 2024-03-04 (Monday)
+    "queuesJsonMessages"_kj,                       // 2024-03-18 (Monday)
+    "unwrapCustomThenables"_kj,                    // 2024-04-01 (Monday)
+    "internalStreamByobReturn"_kj,                 // 2024-05-13 (Monday)
+    "blobStandardMimeType"_kj,                     // 2024-06-03 (Monday)
+    "fetchStandardUrl"_kj,                         // 2024-06-03 (Monday)
+    "cacheOptionEnabled"_kj,                       // 2024-11-11 (Monday)
+    "allowCustomPorts"_kj,                         // 2024-09-02 (Monday)
+    "internalWritableStreamAbortClearsQueue"_kj,   // 2024-09-02 (Monday)
+    "handleCrossRequestPromiseResolution"_kj,      // 2024-10-14 (Monday)
+    "upperCaseAllHttpMethods"_kj,                  // 2024-10-14 (Monday)
+    "noTopLevelAwaitInRequire"_kj,                 // 2024-12-02 (Monday)
+    "fixupTransformStreamBackpressure"_kj,         // 2024-12-16 (Monday)
+    "obsolete74"_kj,                               // 2025-03-10 (Monday)
+    "cacheApiRequestCfOverridesCacheRules"_kj,     // 2025-05-19 (Monday)
+    "cacheApiCompatFlags"_kj,                      // 2025-04-19 (Saturday)
+    "jsWeakRef"_kj,                                // 2025-05-05 (Monday)
+    "enableNavigatorLanguage"_kj,                  // 2025-05-19 (Monday)
+    "allowEvalDuringStartup"_kj,                   // 2025-06-01 (Sunday)
+    "bindAsyncLocalStorageSnapshot"_kj,            // 2025-06-16 (Monday)
+    "throwOnUnrecognizedImportAssertion"_kj,       // 2025-06-16 (Monday)
+    "setEventTargetThis"_kj,                       // 2025-08-01 (Friday)
+    "enableForwardableEmailFullHeaders"_kj,        // 2025-08-01 (Friday)
+    "exposeGlobalMessageChannel"_kj,               // 2025-08-15 (Friday)
+    "pythonWorkersForceNewVendorPath"_kj,          // 2025-08-11 (Monday)
+    "enableWorkflowScriptValidation"_kj,           // 2025-09-20 (Saturday)
+    "stripAuthorizationOnCrossOriginRedirect"_kj,  // 2025-09-01 (Monday)
+    "enableCtxExports"_kj,                         // 2025-11-17 (Monday)
+
+    // Non-conformant dates via impliedByAfterDate
+    "pythonWorkers"_kj,                  // 2000-01-01 (Saturday) via impliedByAfterDate
+    "nodeJsCompatV2"_kj,                 // 2024-09-23 (Monday) via impliedByAfterDate
+    "nodeJsZlib"_kj,                     // 2024-09-23 (Monday) via impliedByAfterDate
+    "enableNodejsHttpModules"_kj,        // 2025-08-15 (Friday) via impliedByAfterDate
+    "enableNodejsHttpServerModules"_kj,  // 2025-09-01 (Monday) via impliedByAfterDate
+    "removeNodejsCompatEOL"_kj,          // 2025-09-01 (Monday) via impliedByAfterDate
+    "enableNodeJsHttp2Module"_kj,        // 2025-09-01 (Monday) via impliedByAfterDate
+    "removeNodejsCompatEOLv23"_kj,       // 2025-09-01 (Monday) via impliedByAfterDate
+    "enableNodeJsProcessV2"_kj,          // 2025-09-15 (Monday) via impliedByAfterDate
+    "enableNodeJsFsModule"_kj,           // 2025-09-15 (Monday) via impliedByAfterDate
+    "enableNodeJsOsModule"_kj,           // 2025-09-15 (Monday) via impliedByAfterDate
+    "pythonWorkflows"_kj,                // 2025-09-20 (Saturday) via impliedByAfterDate
+    "enableNodeJsConsoleModule"_kj,      // 2025-09-21 (Sunday) via impliedByAfterDate
+    "pythonWorkers20250116"_kj,          // 2025-09-29 (Monday) via impliedByAfterDate
+    "removeNodejsCompatEOLv22"_kj,       // 2027-04-30 (Friday) via impliedByAfterDate
+    "removeNodejsCompatEOLv24"_kj,       // 2028-04-30 (Sunday) via impliedByAfterDate
+  });
+
+  // Helper function to suggest the next valid date (Tuesday, Wednesday, or Thursday)
+  auto suggestNextValidDate =
+      [](const std::chrono::year_month_day& ymd) -> std::chrono::year_month_day {
+    auto currentDate = std::chrono::sys_days{ymd};
+    auto wd = std::chrono::weekday{currentDate};
+
+    // Calculate days until next Tuesday (2), Wednesday (3), or Thursday (4)
+    int currentDay = wd.c_encoding();  // 0 = Sunday, 1 = Monday, etc.
+    int daysToAdd;
+
+    if (currentDay <= 1) {
+      // Sunday (0) or Monday (1): next valid day is Tuesday
+      daysToAdd = 2 - currentDay;
+    } else if (currentDay >= 5) {
+      // Friday (5) or Saturday (6): next valid day is Tuesday of next week
+      daysToAdd = (7 - currentDay) + 2;
+    } else {
+      // Already Tuesday/Wednesday/Thursday - this shouldn't happen
+      daysToAdd = 0;
+    }
+
+    return std::chrono::year_month_day{currentDate + std::chrono::days{daysToAdd}};
+  };
+
+  // Helper function to parse and validate date
+  auto parseDate = [](kj::StringPtr dateStr) -> kj::Maybe<std::chrono::year_month_day> {
+    // First validate the date using normalizeCompatDate
+    KJ_IF_SOME(normalized, normalizeCompatDate(dateStr)) {
+      // Parse the validated date string
+      int year, month, day;
+      KJ_ASSERT(sscanf(normalized.cStr(), "%d-%d-%d", &year, &month, &day) == 3);
+
+      // Create year_month_day
+      auto ymd = std::chrono::year_month_day{
+        std::chrono::year{year},
+        std::chrono::month{static_cast<unsigned>(month)},
+        std::chrono::day{static_cast<unsigned>(day)},
+      };
+      KJ_ASSERT(ymd.ok());
+
+      return ymd;
+    } else {
+      return kj::none;
+    }
+  };
+
+  // Check all compatibility flag fields
+  auto schema = capnp::Schema::from<CompatibilityFlags>();
+  auto fields = schema.getFields();
+
+  kj::Vector<kj::String> violations;
+
+  for (auto field: fields) {
+    auto fieldName = field.getProto().getName();
+
+    // Skip if this specific flag is in the allowed exceptions list
+    if (allowedFlagExceptions.contains(fieldName)) {
+      continue;
+    }
+
+    for (auto annotation: field.getProto().getAnnotations()) {
+      kj::Maybe<kj::StringPtr> maybeDateStr;
+
+      if (annotation.getId() == COMPAT_ENABLE_DATE_ANNOTATION_ID) {
+        maybeDateStr = annotation.getValue().getText();
+      } else if (annotation.getId() == IMPLIED_BY_AFTER_DATE_ANNOTATION_ID) {
+        auto value = annotation.getValue();
+        auto s = value.getStruct().getAs<workerd::ImpliedByAfterDate>();
+        maybeDateStr = s.getDate();
+      }
+
+      KJ_IF_SOME(dateStr, maybeDateStr) {
+        auto ymd = KJ_REQUIRE_NONNULL(
+            parseDate(dateStr), "Invalid compatibility flag date format: ", dateStr);
+        auto suggestedYmd = suggestNextValidDate(ymd);
+
+        // If suggestNextValidDate returns a different date, the original date was invalid
+        if (ymd != suggestedYmd) {
+          static const char* dayNames[] = {
+            "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
+          auto wd = std::chrono::weekday{std::chrono::sys_days{ymd}};
+          int dayOfWeek = wd.c_encoding();
+
+          auto suggestedWd = std::chrono::weekday{std::chrono::sys_days{suggestedYmd}};
+          int suggestedDayOfWeek = suggestedWd.c_encoding();
+
+          auto suggestedDateStr = std::format("{:%F}", suggestedYmd);
+          violations.add(kj::str("Field '", fieldName, "' has date ", dateStr, " which is a ",
+              dayNames[dayOfWeek], ". Dates must be Tuesday, Wednesday, or Thursday. ",
+              "Suggestion: use ", suggestedDateStr.c_str(), " (", dayNames[suggestedDayOfWeek],
+              ") instead."));
+        }
+      }
+    }
+  }
+
+  if (violations.size() > 0) {
+    KJ_FAIL_ASSERT("Compatibility date violations found:\n", kj::strArray(violations, "\n"));
   }
 }
 
