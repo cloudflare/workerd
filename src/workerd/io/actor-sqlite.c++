@@ -10,8 +10,6 @@
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
-#include <sqlite3.h>
-
 #include <kj/exception.h>
 #include <kj/function.h>
 
@@ -873,6 +871,10 @@ kj::Promise<void> ActorSqlite::waitForBookmark(kj::StringPtr bookmark) {
 void ActorSqlite::TxnCommitRegulator::onError(
     kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const {
   KJ_IF_SOME(c, sqliteErrorCode) {
+    // We cannot `#include <sqlite3.h>` in the same compilation unit as `#include
+    // <workerd/io/trace.h>` because the latter includes v8 and v8 seems to conflict with sqlite.
+    // So we copy the value of SQLITE_CONSTRAINT from sqlite3.h
+    constexpr int SQLITE_CONSTRAINT = 19;
     if (c == SQLITE_CONSTRAINT) {
       JSG_ASSERT(false, Error,
           "Durable Object was reset and rolled back to its last known good state because the "
