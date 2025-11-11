@@ -1871,7 +1871,7 @@ jsg::Ref<Blob> FileSystemModule::openAsBlob(
   KJ_IF_SOME(item, vfs.resolve(js, normalizedSrc, {})) {
     KJ_SWITCH_ONEOF(item) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
-        node::THROW_ERR_UV_ENOENT(js, "open"_kj, kj::str(normalizedSrc.url.getPathname()));
+        node::THROW_ERR_UV_ENOENT(js, "open"_kj, nullptr, kj::str(normalizedSrc.url.getPathname()));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
