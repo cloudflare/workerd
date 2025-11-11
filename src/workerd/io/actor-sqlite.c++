@@ -824,7 +824,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   return kj::joinPromisesFailFast(kj::arr(lastCommit.addBranch(), outputGate.wait()));
 }
 
-kj::Promise<kj::String> ActorSqlite::getCurrentBookmark() {
+kj::Promise<kj::String> ActorSqlite::getCurrentBookmark(SpanParent parentSpan) {
   // This is an ersatz implementation that's good enough for local dev with D1's Session API.
   //
   // The returned bookmark satisfies the properties that D1 cares about:

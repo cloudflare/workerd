@@ -6,6 +6,7 @@
 
 #include "actor-cache.h"
 
+#include <workerd/io/trace.h>
 #include <workerd/util/sqlite-kv.h>
 #include <workerd/util/sqlite-metadata.h>
 
@@ -92,7 +93,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
-  kj::Promise<kj::String> getCurrentBookmark() override;
+  kj::Promise<kj::String> getCurrentBookmark(SpanParent parentSpan) override;
   kj::Promise<void> waitForBookmark(kj::StringPtr bookmark) override;
   // See ActorCacheInterface
 

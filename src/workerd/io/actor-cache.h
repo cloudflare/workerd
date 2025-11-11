@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/actor-storage.capnp.h>
+#include <workerd/io/trace.h>
 #include <workerd/jsg/exception.h>
 
 #include <kj/async.h>
@@ -242,7 +243,7 @@ class ActorCacheInterface: public ActorCacheOps {
 
   // Implements the respective PITR API calls. The default implementations throw JSG errors saying
   // PITR is not implemented. These methods are meant to be implemented internally.
-  virtual kj::Promise<kj::String> getCurrentBookmark() {
+  virtual kj::Promise<kj::String> getCurrentBookmark(SpanParent parentSpan) {
     JSG_FAIL_REQUIRE(
         Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
   }
