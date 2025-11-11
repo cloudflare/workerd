@@ -421,10 +421,6 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
 
-  // Free the userRequestSpan – no more traces should come after this point (and thus the observer
-  // and the reference to WorkerTracer it holds, unless there are more open spans)
-  userRequestSpan = nullptr;
-
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
   // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans
   // continuing to exist beyond that point. By the time the WorkerTracer is deallocated, the
@@ -538,18 +534,22 @@ void WorkerTracer::setReturn(
   }
 }
 
-void BaseTracer::setUserRequestSpan(SpanParent&& span) {
-  KJ_ASSERT(span.isObserved(), "span argument must be observed");
-  KJ_ASSERT(!userRequestSpan.isObserved(), "setUserRequestSpan can only be called once");
-  userRequestSpan = kj::mv(span);
+void BaseTracer::setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func) {
+  KJ_ASSERT(
+      makeUserRequestSpanFunc == kj::none, "setMakeUserRequestSpanFunc can only be called once");
+  makeUserRequestSpanFunc = kj::mv(func);
 }
 
 void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value) {
   attributes.add(tracing::Attribute{kj::mv(key), kj::mv(value)});
 }
 
-SpanParent BaseTracer::getUserRequestSpan() {
-  return userRequestSpan.addRef();
+SpanParent BaseTracer::makeUserRequestSpan() {
+  KJ_IF_SOME(func, makeUserRequestSpanFunc) {
+    return func();
+  } else {
+    return SpanParent(nullptr);
+  }
 }
 
 void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,

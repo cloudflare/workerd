@@ -135,11 +135,13 @@ class BaseTracer: public kj::Refcounted {
   // be available afterwards.
   virtual void recordTimestamp(kj::Date timestamp) = 0;
 
-  SpanParent getUserRequestSpan();
+  SpanParent makeUserRequestSpan();
+
+  using MakeUserRequestSpanFunc = kj::Function<SpanParent()>;
 
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
-  void setUserRequestSpan(SpanParent&& span);
+  void setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func);
 
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -154,8 +156,8 @@ class BaseTracer: public kj::Refcounted {
   // helper method for addSpan() implementations
   void adjustSpanTime(tracing::CompleteSpan& span);
 
-  // The root span for the new tracing format.
-  SpanParent userRequestSpan = SpanParent(nullptr);
+  // Function to create the root span for the new tracing format.
+  kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
 
   // Time to be reported for the outcome event time. This will be set before the outcome is
   // dispatched.
