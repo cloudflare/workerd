@@ -426,6 +426,12 @@ wd_test(
     data = ["streams-nodejs-test.js"],
 )
 
+wd_test(
+    src = "streams-v24-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-v24-nodejs-test.js"],
+)
+
 js_binary(
     name = "http-nodejs-server",
     entry_point = "http-nodejs-server.js",
