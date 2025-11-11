@@ -1085,58 +1085,67 @@ struct TailStreamWriterState {
     current->pumping = true;
     KJ_DEFER(current->pumping = false);
 
-    if (!current->onsetSeen) {
-      // Our first event... yay! Our first job here will be to dispatch
-      // the onset event to the tail worker. If the tail worker wishes
-      // to handle the remaining events in the stream, then it will return
-      // a new capability to which those would be reported. This is done
-      // via the "result.getPipeline()" API below. If hasPipeline()
-      // returns false then that means the tail worker did not return
-      // a handler for this stream and no further attempts to deliver
-      // events should be made for this stream.
-      current->onsetSeen = true;
-      auto onsetEvent = KJ_ASSERT_NONNULL(current->queue.pop());
-      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
-      auto eventsBuilder = builder.initEvents(1);
-      // When sending the onset event to the tail worker, the receiving end
-      // requires that the onset event be delivered separately, without any
-      // other events in the bundle. So here we'll separate it out and deliver
-      // just the one event...
-      onsetEvent.copyTo(eventsBuilder[0]);
-      auto result = co_await builder.send();
-      if (result.getStop()) {
-        // If our call to send returns a stop signal, then we'll clear
-        // the capability and be done.
-        current->queue.clear();
-        current->capability = kj::none;
-        co_return;
+    try {
+      if (!current->onsetSeen) {
+        // Our first event... yay! Our first job here will be to dispatch
+        // the onset event to the tail worker. If the tail worker wishes
+        // to handle the remaining events in the stream, then it will return
+        // a new capability to which those would be reported. This is done
+        // via the "result.getPipeline()" API below. If hasPipeline()
+        // returns false then that means the tail worker did not return
+        // a handler for this stream and no further attempts to deliver
+        // events should be made for this stream.
+        current->onsetSeen = true;
+        auto onsetEvent = KJ_ASSERT_NONNULL(current->queue.pop());
+        auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+        auto eventsBuilder = builder.initEvents(1);
+        // When sending the onset event to the tail worker, the receiving end
+        // requires that the onset event be delivered separately, without any
+        // other events in the bundle. So here we'll separate it out and deliver
+        // just the one event...
+        onsetEvent.copyTo(eventsBuilder[0]);
+        auto result = co_await builder.send();
+        if (result.getStop()) {
+          // If our call to send returns a stop signal, then we'll clear
+          // the capability and be done.
+          current->queue.clear();
+          current->capability = kj::none;
+          co_return;
+        }
       }
-    }
 
-    // If we got this far then we have a handler for all of our events.
-    // Deliver remaining streaming tail events in batches if possible.
-    while (!current->queue.empty()) {
-      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
-      auto eventsBuilder = builder.initEvents(current->queue.size());
-      size_t n = 0;
-      current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
+      // If we got this far then we have a handler for all of our events.
+      // Deliver remaining streaming tail events in batches if possible.
+      while (!current->queue.empty()) {
+        auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+        auto eventsBuilder = builder.initEvents(current->queue.size());
+        size_t n = 0;
+        current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
 
-      auto result = co_await builder.send();
+        auto result = co_await builder.send();
 
-      // Note that although we cleared the current.queue above, it is
-      // possible/likely that additional events were added to the queue
-      // while the above builder.send() was being awaited. If the result
-      // comes back indicating that we should stop, then we'll stop here
-      // without any further processing. We'll defensively clear the
-      // queue again and drop the client stub. Otherwise, if result.getStop()
-      // is false, we'll loop back around to send any items that have since
-      // been added to the queue or exit this loop if there are no additional
-      // events waiting to be sent.
-      if (result.getStop()) {
-        current->queue.clear();
-        current->capability = kj::none;
-        co_return;
+        // Note that although we cleared the current.queue above, it is
+        // possible/likely that additional events were added to the queue
+        // while the above builder.send() was being awaited. If the result
+        // comes back indicating that we should stop, then we'll stop here
+        // without any further processing. We'll defensively clear the
+        // queue again and drop the client stub. Otherwise, if result.getStop()
+        // is false, we'll loop back around to send any items that have since
+        // been added to the queue or exit this loop if there are no additional
+        // events waiting to be sent.
+        if (result.getStop()) {
+          current->queue.clear();
+          current->capability = kj::none;
+          co_return;
+        }
       }
+    } catch (...) {
+      // If any RPC throws an exception, we should treat it as a stop signal, as this suggests
+      // the connection to the STW itself has been lost. (An excpetion thrown within the STW
+      // itself would have resulted in a `stop` return value instead of an exception over RPC.)
+      current->queue.clear();
+      current->capability = kj::none;
+      throw;
     }
   }
 };
