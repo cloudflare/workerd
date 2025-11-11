@@ -120,7 +120,7 @@ class AbortableWebSocket final: public kj::WebSocket, public kj::Refcounted {
     return impl.wrap(&kj::WebSocket::whenAborted);
   }
 
-  kj::Promise<Message> receive(size_t maxSize = SUGGESTED_MAX_MESSAGE_SIZE) override {
+  kj::Promise<Message> receive(size_t maxSize) override {
     return impl.wrap(&kj::WebSocket::receive, maxSize);
   }
 

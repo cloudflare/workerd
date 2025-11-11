@@ -406,9 +406,6 @@ class WebSocket: public EventTarget {
   // `close()`, thereby preventing calls to `send()` even after we wake from hibernation.
   bool closedOutgoingForHib = false;
 
-  // Maximum allowed size for WebSocket messages
-  inline static const size_t SUGGESTED_MAX_MESSAGE_SIZE = 1u << 20;
-
   // Maximum size of a WebSocket attachment.
   inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 2;
 

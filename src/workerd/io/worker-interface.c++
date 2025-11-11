@@ -157,12 +157,12 @@ class RevocableWebSocket final: public kj::WebSocket {
     return wrap<Message>(getInner().receive(maxSize));
   }
 
-  kj::Promise<void> pumpTo(WebSocket& other) override {
-    return wrap<void>(getInner().pumpTo(other));
+  kj::Promise<void> pumpTo(WebSocket& other, PumpOptions options) override {
+    return wrap<void>(getInner().pumpTo(other, options));
   }
 
-  kj::Maybe<kj::Promise<void>> tryPumpFrom(WebSocket& other) override {
-    return wrap<void>(other.pumpTo(getInner()));
+  kj::Maybe<kj::Promise<void>> tryPumpFrom(WebSocket& other, PumpOptions options) override {
+    return wrap<void>(other.pumpTo(getInner(), options));
   }
 
   kj::Maybe<kj::String> getPreferredExtensions(ExtensionsContext ctx) override {
