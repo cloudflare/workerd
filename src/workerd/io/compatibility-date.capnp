@@ -1215,4 +1215,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableFlag("enable_streams_nodejs_v24_compat")
     $compatDisableFlag("disable_streams_nodejs_v24_compat");
   # Enables breaking changes to Node.js streams done with the release of Node.js v24.
+
+  pythonCheckRngState @144 : Bool
+    $compatEnableFlag("python_check_rng_state")
+    $compatDisableFlag("disable_python_check_rng_state")
+    $experimental;
+
 }
