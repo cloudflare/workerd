@@ -304,7 +304,7 @@ _NORMAL_DEPENDENCIES = {
             "cc": Label("@crates_vendor//:cc-1.2.45"),
             "clang-ast": Label("@crates_vendor//:clang-ast-0.1.35"),
             "clap": Label("@crates_vendor//:clap-4.5.51"),
-            "codespan-reporting": Label("@crates_vendor//:codespan-reporting-0.12.0"),
+            "codespan-reporting": Label("@crates_vendor//:codespan-reporting-0.13.1"),
             "flate2": Label("@crates_vendor//:flate2-1.1.5"),
             "foldhash": Label("@crates_vendor//:foldhash-0.2.0"),
             "futures": Label("@crates_vendor//:futures-0.3.31"),
@@ -831,12 +831,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__codespan-reporting-0.12.0",
-        sha256 = "fe6d2e5af09e8c8ad56c969f2157a3d4238cebc7c55f0a517728c38f7b200f81",
+        name = "crates_vendor__codespan-reporting-0.13.1",
+        sha256 = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/codespan-reporting/0.12.0/download"],
-        strip_prefix = "codespan-reporting-0.12.0",
-        build_file = Label("//deps/rust/crates:BUILD.codespan-reporting-0.12.0.bazel"),
+        urls = ["https://static.crates.io/crates/codespan-reporting/0.13.1/download"],
+        strip_prefix = "codespan-reporting-0.13.1",
+        build_file = Label("//deps/rust/crates:BUILD.codespan-reporting-0.13.1.bazel"),
     )
 
     maybe(
@@ -3188,7 +3188,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__cc-1.2.45", is_dev_dep = False),
         struct(repo = "crates_vendor__clang-ast-0.1.35", is_dev_dep = False),
         struct(repo = "crates_vendor__clap-4.5.51", is_dev_dep = False),
-        struct(repo = "crates_vendor__codespan-reporting-0.12.0", is_dev_dep = False),
+        struct(repo = "crates_vendor__codespan-reporting-0.13.1", is_dev_dep = False),
         struct(repo = "crates_vendor__flate2-1.1.5", is_dev_dep = False),
         struct(repo = "crates_vendor__foldhash-0.2.0", is_dev_dep = False),
         struct(repo = "crates_vendor__futures-0.3.31", is_dev_dep = False),
