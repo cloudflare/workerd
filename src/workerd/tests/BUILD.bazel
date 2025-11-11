@@ -102,6 +102,15 @@ wd_cc_benchmark(
     deps = [":test-fixture"],
 )
 
+wd_cc_benchmark(
+    name = "bench-jsstring",
+    srcs = ["bench-jsstring.c++"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],
