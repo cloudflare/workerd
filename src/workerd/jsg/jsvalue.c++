@@ -430,6 +430,10 @@ JsString::WriteIntoStatus JsString::writeInto(
   return result;
 }
 
+bool JsString::isFlat() const {
+  return inner->IsFlat();
+}
+
 bool JsString::containsOnlyOneByte() const {
   return inner->ContainsOnlyOneByte();
 }

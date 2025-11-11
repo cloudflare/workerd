@@ -279,6 +279,7 @@ class JsString final: public JsBase<v8::String, JsString> {
 
   int hashCode() const;
 
+  bool isFlat() const;
   bool containsOnlyOneByte() const;
 
   bool operator==(const JsString& other) const;
