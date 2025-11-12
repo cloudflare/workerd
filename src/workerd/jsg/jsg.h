@@ -1098,17 +1098,22 @@ class ByteString: public kj::String {
   explicit ByteString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {}
 
   enum class Warning {
+    UNINITIALIZED,            // Warning check has not been performed yet
     NONE,                     // Contains 7-bit code points -- semantics won't change
     CONTAINS_EXTENDED_ASCII,  // Contains 8-bit code points -- semantics WILL change
     CONTAINS_UNICODE,         // Contains 16-bit code points -- semantics WILL change
   };
-  Warning warning = Warning::NONE;
+  mutable Warning warning = Warning::UNINITIALIZED;
   // HACK: ByteString behaves just like a kj::String, but has this crappy enum to tell the code that
   //   consumes it that it contains a value which a real Web IDL ByteString would have encoded
   //   differently. We can't usefully do anything about the information in JSG, because we don't
   //   have access to the IoContext to print a warning in the inspector.
   //
-  //   We default the enum to NONE so that ByteString(kj::str(otherHeader)) works as expected.
+  //   We default the enum to UNINITIALIZED so validation happens on first use.
+
+  // Validates the ByteString and sets the warning field if not already validated.
+  // This is called lazily when the string is used in contexts that need validation.
+  void validateIfNeeded() const;
 };
 
 // A USVString has the exact same representation as a kj::String, but we guarantee that it meets

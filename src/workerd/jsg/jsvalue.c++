@@ -356,23 +356,7 @@ jsg::USVString JsString::toUSVString(Lock& js) const {
 }
 
 jsg::ByteString JsString::toByteString(Lock& js) const {
-  auto result = jsg::ByteString(toString(js));
-
-  if (!simdutf::validate_ascii(result.begin(), result.size())) {
-    // If storage is one-byte or the string contains only one-byte
-    // characters, we know that it contains extended ASCII characters.
-    //
-    // The order of execution matters, since ContainsOnlyOneByte()
-    // will scan the whole string for two-byte storage.
-    if (inner->ContainsOnlyOneByte()) {
-      result.warning = ByteString::Warning::CONTAINS_EXTENDED_ASCII;
-    } else {
-      // Storage is two-bytes and it contains two-byte characters.
-      result.warning = ByteString::Warning::CONTAINS_UNICODE;
-    }
-  }
-
-  return kj::mv(result);
+  return jsg::ByteString(toString(js));
 }
 
 jsg::DOMString JsString::toDOMString(Lock& js) const {

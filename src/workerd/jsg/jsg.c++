@@ -28,6 +28,40 @@ kj::String stringifyHandle(v8::Local<v8::Value> value) {
   });
 }
 
+void ByteString::validateIfNeeded() const {
+  if (warning != Warning::UNINITIALIZED) {
+    return;  // Already validated
+  }
+
+  if (!simdutf::validate_ascii(begin(), size())) {
+    // If storage is one-byte or the string contains only one-byte
+    // characters, we know that it contains extended ASCII characters.
+    //
+    // Check if all UTF-8 code points are < 0x100 (extended ASCII) or >= 0x100 (Unicode)
+    auto utf32_length = simdutf::utf32_length_from_utf8(begin(), size());
+    auto utf32_buf = kj::heapArray<char32_t>(utf32_length);
+    auto result = simdutf::convert_utf8_to_utf32(begin(), size(), utf32_buf.begin());
+    KJ_ASSERT(result == utf32_length);
+
+    bool hasUnicode = false;
+    for (auto c: utf32_buf) {
+      if (c >= 0x100) {
+        hasUnicode = true;
+        break;
+      }
+    }
+
+    if (hasUnicode) {
+      warning = Warning::CONTAINS_UNICODE;
+    } else {
+      warning = Warning::CONTAINS_EXTENDED_ASCII;
+    }
+  } else {
+    // String is valid ASCII
+    warning = Warning::NONE;
+  }
+}
+
 JsExceptionThrown::JsExceptionThrown() {
   tracePtr = kj::getStackTrace(trace, 0);
 }

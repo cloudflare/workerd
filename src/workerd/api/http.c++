@@ -37,9 +37,17 @@ namespace workerd::api {
 namespace {
 
 void warnIfBadHeaderString(const jsg::ByteString& byteString) {
+  // Fast path. Don't need to check anything if the string is already validated.
+  if (byteString.warning == jsg::ByteString::Warning::NONE) {
+    return;
+  }
+
   if (IoContext::hasCurrent()) {
     auto& context = IoContext::current();
     if (context.isInspectorEnabled()) {
+      // Validate the string if not already validated
+      byteString.validateIfNeeded();
+
       if (byteString.warning == jsg::ByteString::Warning::CONTAINS_EXTENDED_ASCII) {
         // We're in a bit of a pickle: the script author is using our API correctly, but we're doing
         // the wrong thing by UTF-8-encoding their bytes. To help the author understand the issue,
