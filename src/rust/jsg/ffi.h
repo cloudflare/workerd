@@ -26,9 +26,11 @@ Local local_new_number(Isolate* isolate, double value);
 Local local_new_string(Isolate* isolate, ::rust::Str value);
 Local local_new_object(Isolate* isolate);
 bool local_eq(const Local& lhs, const Local& rhs);
+bool local_has_value(const Local& val);
 
 // TracedReference<T>
 TracedReference traced_reference_from_local(Isolate* isolate, Local value);
+Local traced_reference_to_local(Isolate* isolate, const TracedReference& value);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);

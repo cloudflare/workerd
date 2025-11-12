@@ -28,8 +28,13 @@ namespace workerd::rust::jsg {
 
 // TracedReference<T>
 TracedReference traced_reference_from_local(Isolate* isolate, Local value) {
-  v8::TracedReference<v8::Value> ref(isolate, local_from_ffi<v8::Value>(value));
+  v8::TracedReference<v8::Value> ref(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
   return to_ffi(kj::mv(ref));
+}
+
+Local traced_reference_to_local(Isolate* isolate, const TracedReference& value) {
+  auto ref = traced_reference_as_ref_from_ffi<v8::Value>(value);
+  return to_ffi(ref.Get(isolate));
 }
 
 // Local<T>
@@ -43,7 +48,7 @@ Local local_clone(const Local& value) {
 }
 
 Global local_to_global(Isolate* isolate, Local value) {
-  v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(value));
+  v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
   return to_ffi(kj::mv(global));
 }
 
@@ -65,24 +70,27 @@ Local local_new_object(Isolate* isolate) {
 }
 
 bool local_eq(const Local& lhs, const Local& rhs) {
-  return local_from_ffi<v8::Value>(lhs) == local_from_ffi<v8::Value>(rhs);
+  return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
+}
+
+bool local_has_value(const Local& val) {
+  return *local_as_ref_from_ffi<v8::Value>(val) != nullptr;
 }
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
-  auto v8_obj = local_from_ffi<v8::Object>(object);
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   [[maybe_unused]] auto result = v8_obj->Set(isolate->GetCurrentContext(),
       v8::String::NewFromUtf8(isolate, key.cbegin(), v8::NewStringType::kInternalized, key.size())
           .ToLocalChecked(),
-      local_from_ffi<v8::Value>(value));
+      local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
 // Wrappers
 Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
   auto& tracer = ::workerd::jsg::HeapTracer::getTracer(isolate);
-
   auto self = reinterpret_cast<void*>(resource);
-  auto global_tmpl = global_from_ffi<v8::FunctionTemplate>(tmpl);
+  auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
   v8::Local<v8::Object> object = workerd::jsg::check(
       local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
@@ -103,7 +111,9 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
   v8::Local<v8::String> v8Str;
-  if (!local_from_ffi<v8::Value>(value)->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
+  if (!local_from_ffi<v8::Value>(kj::mv(value))
+           ->ToString(isolate->GetCurrentContext())
+           .ToLocal(&v8Str)) {
     KJ_UNIMPLEMENTED("wrong");
   }
   v8::String::ValueView view(isolate, v8Str);
@@ -114,7 +124,7 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
 }
 
 size_t unwrap_resource(Isolate* isolate, Local value) {
-  auto v8_obj = local_from_ffi<v8::Object>(value);
+  auto v8_obj = local_from_ffi<v8::Object>(kj::mv(value));
   KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
                 ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX) ==
       const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
@@ -133,7 +143,7 @@ Global global_clone(const Global& value) {
 }
 
 Local global_to_local(Isolate* isolate, const Global& value) {
-  v8::Global<v8::Value> glbl = global_from_ffi<v8::Value>(value);
+  auto& glbl = global_as_ref_from_ffi<v8::Value>(value);
   v8::Local<v8::Value> local = v8::Local<v8::Value>::New(isolate, glbl);
   return to_ffi(kj::mv(local));
 }
@@ -156,7 +166,7 @@ Local fci_get_arg(FunctionCallbackInfo* args, size_t index) {
 }
 
 void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
-  args->GetReturnValue().Set(local_from_ffi<v8::Value>(value));
+  args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
 Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor) {

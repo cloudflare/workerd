@@ -21,6 +21,7 @@
 #include <workerd/jsg/wrappable.h>
 
 #include <v8-template.h>
+#include <v8.h>
 
 #include <kj/debug.h>
 #include <kj/map.h>

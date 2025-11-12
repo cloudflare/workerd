@@ -230,7 +230,7 @@ fn generate_unwrap_code(
 /// Generates boilerplate code for JSG resources.
 ///
 /// Works in two contexts:
-/// 1. On a struct - generates `jsg::Type`, Wrapper, and `ResourceWrapper` implementations
+/// 1. On a struct - generates `jsg::Type`, Wrapper, and `ResourceTemplate` implementations
 /// 2. On an impl block - scans for `#[jsg::method]` and generates `Resource` trait implementation
 ///
 /// Automatically implements `jsg::Type::class_name()` using the struct name,
@@ -276,7 +276,7 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
         extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string())
     };
 
-    let wrapper_name = syn::Ident::new(&format!("{name}Wrapper"), name.span());
+    let template_name = syn::Ident::new(&format!("{name}Template"), name.span());
 
     // Ensure it's a struct
     if !matches!(&input.data, Data::Struct(_)) {
@@ -299,30 +299,20 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #[automatically_derived]
-        pub struct #wrapper_name {
-            pub js: Option<jsg::v8::Global<jsg::v8::Value>>,
+        pub struct #template_name {
             pub constructor: jsg::v8::Global<jsg::v8::FunctionTemplate>,
         }
 
         #[automatically_derived]
-        impl jsg::ResourceWrapper for #wrapper_name {
+        impl jsg::ResourceTemplate for #template_name {
             fn new(lock: &mut jsg::Lock) -> Self {
                 Self {
-                    js: None,
                     constructor: jsg::create_resource_constructor::<#name>(lock),
                 }
             }
 
             fn get_constructor(&self) -> &jsg::v8::Global<jsg::v8::FunctionTemplate> {
                 &self.constructor
-            }
-
-            fn js_instance<'a>(&self, lock: &mut jsg::Lock) -> Option<jsg::v8::Local<'a, jsg::v8::Value>> {
-                self.js.as_ref().map(|val| val.as_local(lock).into())
-            }
-
-            fn set_js_instance(&mut self, lock: &mut jsg::Lock, instance: jsg::v8::Local<jsg::v8::Value>) {
-                self.js = Some(instance.to_global(lock));
             }
         }
     };

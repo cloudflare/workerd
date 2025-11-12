@@ -33,9 +33,15 @@ inline Local to_ffi(v8::Local<T>&& value) {
 }
 
 template <typename T>
-inline v8::Local<T> local_from_ffi(Local value) {
+inline v8::Local<T> local_from_ffi(Local&& value) {
   auto ptr_void = reinterpret_cast<void*>(&value.ptr);
   return *reinterpret_cast<v8::Local<T>*>(ptr_void);
+}
+
+template <typename T>
+inline const v8::Local<T>& local_as_ref_from_ffi(const Local& value) {
+  auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
+  return *reinterpret_cast<const v8::Local<T>*>(ptr_void);
 }
 
 // Global<T>
@@ -51,9 +57,29 @@ inline Global to_ffi(v8::Global<T>&& value) {
 }
 
 template <typename T>
-inline v8::Global<T> global_from_ffi(Global value) {
+inline v8::Global<T> global_from_ffi(Global&& value) {
   auto ptr_void = reinterpret_cast<void*>(&value.ptr);
   return kj::mv(*reinterpret_cast<v8::Global<T>*>(ptr_void));
+}
+
+template <typename T>
+inline const v8::Global<T>& global_as_ref_from_ffi(const Global& value) {
+  auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
+  return kj::mv(*reinterpret_cast<const v8::Global<T>*>(ptr_void));
+}
+
+// TracedReference<T>
+template <typename T>
+inline v8::TracedReference<T> traced_reference_from_ffi(TracedReference&& value) {
+  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
+  return kj::mv(*reinterpret_cast<v8::TracedReference<T>*>(ptr_void));
+}
+
+template <typename T>
+inline const v8::TracedReference<T>& traced_reference_as_ref_from_ffi(
+    const TracedReference& value) {
+  auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
+  return kj::mv(*reinterpret_cast<const v8::TracedReference<T>*>(ptr_void));
 }
 
 }  // namespace workerd::rust::jsg

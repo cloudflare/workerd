@@ -1,11 +1,10 @@
 use std::pin::Pin;
-use std::ptr::null_mut;
 
 use jsg::ResourceState;
-use jsg::ResourceWrapper;
+use jsg::ResourceTemplate;
 
 use crate::dns::DnsUtil;
-use crate::dns::DnsUtilWrapper;
+use crate::dns::DnsUtilTemplate;
 
 pub mod dns;
 
@@ -32,21 +31,13 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(registry, "node-internal:dns", |isolate| unsafe {
         let mut lock = jsg::Lock::from_isolate(isolate);
         let dns_util = jsg::Ref::new(DnsUtil {
-            _state: ResourceState {
-                this: null_mut(),
-                shim: None,
-                isolate,
-                strong_ref_count: 0,
-                strong_wrapper: None,
-                wrapper: None,
-            },
+            _state: ResourceState::default(),
         });
-        let dns_util = jsg::Ref::into_raw(dns_util);
         // let dns_util = UnsafeCell::raw_get(dns_util);
         // (*dns_util)._state.this = dns_util.cast();
-        let mut dns_util_wrapper = DnsUtilWrapper::new(&mut lock);
+        let mut dns_util_template = DnsUtilTemplate::new(&mut lock);
 
-        jsg::wrap_resource(&mut lock, dns_util as *mut DnsUtil, &mut dns_util_wrapper).into_ffi()
+        jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template).into_ffi()
     });
 }
 

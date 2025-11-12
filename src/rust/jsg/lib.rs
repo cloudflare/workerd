@@ -1,6 +1,8 @@
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::num::ParseIntError;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::os::raw::c_void;
 use std::rc::Rc;
 
@@ -61,29 +63,39 @@ pub fn create_resource_constructor<R: Resource>(
 ///
 /// # Safety
 /// The caller must ensure that `resource` points to a valid R instance.
-pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
+pub unsafe fn wrap_resource<'a, R: Resource + 'a, RT: ResourceTemplate>(
     lock: &mut Lock,
-    resource: *mut R,
-    wrapper: &mut W,
+    resource: Ref<R>,
+    resource_template: &mut RT,
 ) -> v8::Local<'a, v8::Value> {
-    let instance = wrapper.js_instance(lock);
-    if let Some(val) = instance {
-        val
-    } else {
-        todo!();
-        // let constructor = wrapper.get_constructor();
-        // let instance: v8::Local<'a, v8::Value> = unsafe {
-        //     ffi::wrap_resource(
-        //         lock.get_isolate(),
-        //         resource as usize,
-        //         constructor.as_ffi_ref(),
-        //         (*resource).get_drop_callback(),
-        //     )
-        //     .into()
-        // };
-        // let cached_instance = instance.clone();
-        // wrapper.set_js_instance(lock, cached_instance);
-        // instance
+    let state = resource.get_state();
+    let handle = state.wrapper.as_ref().map(|val| val.into_local(lock));
+
+    match handle {
+        Some(value) if value.has_value() => {
+            todo!()
+        }
+        _ => {
+            let constructor = resource_template.get_constructor();
+            let instance: v8::Local<'a, v8::Value> = unsafe {
+                // todo: can we get rid of this from_ffi call?
+                v8::Local::from_ffi(
+                    lock.get_isolate(),
+                    ffi::wrap_resource(
+                        lock.get_isolate(),
+                        state.this as usize, // todo: who sets state.this?
+                        constructor.as_ffi_ref(),
+                        (*resource).get_drop_callback(),
+                    ),
+                )
+            };
+            unsafe { state.attach_wrapper(lock.get_isolate(), instance.clone().into(), false) };
+
+            // state.wrapper = Some(instance.into_trace_reference(lock));
+            // let cached_instance = instance.clone();
+            // wrapper.set_js_instance(lock, cached_instance);
+            instance
+        }
     }
 }
 
@@ -168,7 +180,24 @@ impl Lock {
 }
 
 pub struct Ref<T: Resource> {
+    // todo: use SafeCell (maybe?)
     val: Rc<UnsafeCell<T>>,
+}
+
+impl<T: Resource> Deref for Ref<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        let ptr = self.val.get();
+        unsafe { &*ptr }
+    }
+}
+
+impl<T: Resource> DerefMut for Ref<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let ptr = self.val.get();
+        unsafe { &mut *ptr }
+    }
 }
 
 impl<T: Resource> Ref<T> {
@@ -180,21 +209,6 @@ impl<T: Resource> Ref<T> {
 
     pub fn into_raw(r: Self) -> *mut T {
         UnsafeCell::raw_get(Rc::into_raw(r.val))
-    }
-
-    pub fn as_mut<'b>(&mut self, _lock: &'b Lock) -> &'b mut T {
-        todo!()
-    }
-
-    // self could potentially exist during all isolate lifetime, while
-    // lock is created anew every time.
-    // The resulting reference is bound by a lock lifetime to make
-    // it impossible to hold across different invocations.
-    pub fn as_ref<'a, 'b>(&'a self, _lock: &'b Lock) -> &'b T
-    where
-        'a: 'b,
-    {
-        todo!()
     }
 
     pub unsafe fn from_raw(this: *mut T) -> Self {
@@ -247,6 +261,7 @@ pub enum Member {
     },
 }
 
+#[derive(Default)]
 pub struct ResourceState {
     pub this: *mut c_void,
     pub shim: Option<v8::ffi::ResourceShim>,
@@ -294,15 +309,12 @@ pub trait Resource: Type {
     where
         Self: Sized;
     fn get_drop_callback(&self) -> usize;
-
-    fn get_state(&self) -> &ResourceState;
+    fn get_state(&self) -> &mut ResourceState;
 }
 
-pub trait ResourceWrapper {
+pub trait ResourceTemplate {
     fn new(lock: &mut Lock) -> Self;
     fn get_constructor(&self) -> &v8::Global<v8::FunctionTemplate>;
-    fn js_instance<'a>(&self, lock: &mut Lock) -> Option<v8::Local<'a, v8::Value>>;
-    fn set_js_instance(&mut self, lock: &mut Lock, instance: v8::Local<'_, v8::Value>);
 }
 
 pub trait Struct: Type {

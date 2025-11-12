@@ -31,6 +31,10 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: Local,
         ) -> TracedReference;
+        pub unsafe fn traced_reference_to_local(
+            isolate: *mut Isolate,
+            value: &TracedReference,
+        ) -> Local;
 
         // Local<T>
         pub unsafe fn local_drop(value: Local);
@@ -40,6 +44,7 @@ pub mod ffi {
         pub unsafe fn local_new_string(isolate: *mut Isolate, value: &str) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
+        pub unsafe fn local_has_value(value: &Local) -> bool;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -177,15 +182,15 @@ impl<'a, T> Local<'a, T> {
     pub unsafe fn as_ffi_ref(&self) -> &ffi::Local {
         &self.handle
     }
+
+    pub fn has_value(&self) -> bool {
+        unsafe { ffi::local_has_value(&self.handle) }
+    }
 }
 
 impl<T> Clone for Local<'_, T> {
     fn clone(&self) -> Self {
-        unsafe {
-            Self::from_ffi(self.isolate, unsafe {
-                ffi::local_clone(&self.handle).into()
-            })
-        }
+        unsafe { Self::from_ffi(self.isolate, ffi::local_clone(&self.handle).into()) }
     }
 }
 
@@ -231,9 +236,26 @@ impl<'a> Local<'a, Object> {
     }
 }
 
+impl<'a> From<Local<'a, Value>> for Local<'a, Object> {
+    fn from(value: Local<'a, Value>) -> Self {
+        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
+    }
+}
+
 pub struct TracedReference<T> {
     handle: ffi::TracedReference,
     _marker: PhantomData<T>,
+}
+
+impl<T> TracedReference<T> {
+    pub fn into_local(&self, lock: &mut Lock) -> Local<'_, T> {
+        unsafe {
+            Local::from_ffi(
+                lock.get_isolate(),
+                ffi::traced_reference_to_local(lock.get_isolate(), &self.handle),
+            )
+        }
+    }
 }
 
 impl<T> From<Local<'_, T>> for TracedReference<T> {
