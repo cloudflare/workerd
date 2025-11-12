@@ -21,15 +21,28 @@ export function withEnv(newEnv: unknown, fn: () => unknown): unknown {
   return innerEnv.withEnv(newEnv, fn);
 }
 
-// A proxy for the workers env/bindings. The proxy is io-context
-// aware in that it will only return values when there is an active
-// IoContext. Mutations to the env via this proxy propagate to the
-// underlying env and do not follow the async context.
+export function withExports(newExports: unknown, fn: () => unknown): unknown {
+  return innerEnv.withExports(newExports, fn);
+}
+
+export function withEnvAndExports(
+  newEnv: unknown,
+  newExports: unknown,
+  fn: () => unknown
+): unknown {
+  return innerEnv.withEnvAndExports(newEnv, newExports, fn);
+}
+
+// A proxy for the workers env/bindings. Since env is imported as a module-level
+// reference, the object identity cannot be changed. The proxy provides indirection,
+// delegating to different underlying env objects based on async context (see withEnv()).
+// Mutations via this proxy modify the current underlying env object in-place - if you're
+// inside a withEnv() scope, mutations affect the override object, not the base environment.
 export const env = new Proxy(
   {},
   {
     get(_: unknown, prop: string | symbol): unknown {
-      const inner = innerEnv.getCurrent();
+      const inner = innerEnv.getCurrentEnv();
       if (inner) {
         return Reflect.get(inner, prop);
       }
@@ -37,7 +50,7 @@ export const env = new Proxy(
     },
 
     set(_: unknown, prop: string | symbol, newValue: unknown): boolean {
-      const inner = innerEnv.getCurrent();
+      const inner = innerEnv.getCurrentEnv();
       if (inner) {
         return Reflect.set(inner, prop, newValue);
       }
@@ -45,7 +58,7 @@ export const env = new Proxy(
     },
 
     has(_: unknown, prop: string | symbol): boolean {
-      const inner = innerEnv.getCurrent();
+      const inner = innerEnv.getCurrentEnv();
       if (inner) {
         return Reflect.has(inner, prop);
       }
@@ -53,7 +66,7 @@ export const env = new Proxy(
     },
 
     ownKeys(_: unknown): ArrayLike<string | symbol> {
-      const inner = innerEnv.getCurrent();
+      const inner = innerEnv.getCurrentEnv();
       if (inner) {
         return Reflect.ownKeys(inner);
       }
@@ -61,7 +74,7 @@ export const env = new Proxy(
     },
 
     deleteProperty(_: unknown, prop: string | symbol): boolean {
-      const inner = innerEnv.getCurrent();
+      const inner = innerEnv.getCurrentEnv();
       if (inner) {
         return Reflect.deleteProperty(inner, prop);
       }
@@ -73,7 +86,7 @@ export const env = new Proxy(
       prop: string | symbol,
       attr: PropertyDescriptor
     ): boolean {
-      const inner = innerEnv.getCurrent();
+      const inner = innerEnv.getCurrentEnv();
       if (inner) {
         return Reflect.defineProperty(inner, prop, attr);
       }
@@ -84,7 +97,51 @@ export const env = new Proxy(
       _: unknown,
       prop: string | symbol
     ): PropertyDescriptor | undefined {
-      const inner = innerEnv.getCurrent();
+      const inner = innerEnv.getCurrentEnv();
+      if (inner) {
+        return Reflect.getOwnPropertyDescriptor(inner, prop);
+      }
+      return undefined;
+    },
+  }
+);
+
+// A proxy for the worker exports. Since exports is imported as a module-level
+// reference, the object identity cannot be changed. The proxy provides indirection,
+// delegating to different underlying exports objects based on async context (see
+// withExports()). This proxy is read-only - mutations are not supported.
+export const exports = new Proxy(
+  {},
+  {
+    get(_: unknown, prop: string | symbol): unknown {
+      const inner = innerEnv.getCurrentExports();
+      if (inner) {
+        return Reflect.get(inner, prop);
+      }
+      return undefined;
+    },
+
+    has(_: unknown, prop: string | symbol): boolean {
+      const inner = innerEnv.getCurrentExports();
+      if (inner) {
+        return Reflect.has(inner, prop);
+      }
+      return false;
+    },
+
+    ownKeys(_: unknown): ArrayLike<string | symbol> {
+      const inner = innerEnv.getCurrentExports();
+      if (inner) {
+        return Reflect.ownKeys(inner);
+      }
+      return [];
+    },
+
+    getOwnPropertyDescriptor(
+      _: unknown,
+      prop: string | symbol
+    ): PropertyDescriptor | undefined {
+      const inner = innerEnv.getCurrentExports();
       if (inner) {
         return Reflect.getOwnPropertyDescriptor(inner, prop);
       }

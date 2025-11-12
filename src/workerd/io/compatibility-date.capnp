@@ -710,7 +710,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("disallow_importable_env")
       $compatDisableFlag("allow_importable_env");
   # When allowed, `import { env } from 'cloudflare:workers'` will provide access
-  # to the per-request environment/bindings.
+  # to the per-request environment/bindings. This flag also disables importable exports
+  # (the exports proxy) since both features are conceptually related.
 
   assetsSecFetchModeNavigateHeaderPrefersAssetServing @79 :Bool
       $compatEnableFlag("assets_navigation_prefers_asset_serving")
@@ -1220,5 +1221,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableFlag("python_check_rng_state")
     $compatDisableFlag("disable_python_check_rng_state")
     $experimental;
+
+  enableImportableExports @145 :Bool
+      $compatEnableFlag("enable_importable_exports")
+      $compatDisableFlag("disable_importable_exports")
+      $compatEnableDate("2025-12-16");
+  # When enabled, `import { exports } from 'cloudflare:workers'` will provide access
+  # to the worker's module exports.
 
 }
