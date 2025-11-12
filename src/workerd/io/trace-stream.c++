@@ -1029,7 +1029,7 @@ struct TailStreamWriterState {
   // Once closing is true, no further events will be accepted and the state
   // will transition to closed once the currently active pump completes.
   bool closing = false;
-  kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
+  kj::OneOf<Pending, kj::Vector<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
 
   TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
@@ -1039,8 +1039,8 @@ struct TailStreamWriterState {
 
   void reportImpl(TailEvent&& event) {
     // In reportImpl, our inner state must be active.
-    kj::Array<kj::Own<Active>>& actives =
-        KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+    kj::Vector<kj::Own<Active>>& actives =
+        KJ_ASSERT_NONNULL(inner.tryGet<kj::Vector<kj::Own<Active>>>());
 
     // Only rebuild when some but not all tail workers have died, optimizing the common case.
     // We only care about sessions that are currently active.
@@ -1063,30 +1063,15 @@ struct TailStreamWriterState {
     }
 
     if (num_actives < actives.size()) {
-      kj::Vector<kj::Own<Active>> alive(num_actives);
-      for (auto& active: actives) {
-        if (active->capability != kj::none) {
-          alive.add(kj::mv(active));
+      unsigned offset = 0;
+      for (int i = 0; i < actives.size(); i++) {
+        if (actives[i]->capability == kj::none) {
+          offset++;
+        } else if (offset != 0) {
+          actives[i - offset] = kj::mv(actives[i]);
         }
       }
-      inner = alive.releaseAsArray();
-      kj::Array<kj::Own<Active>>& actives =
-          KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
-
-      // If we're already closing, no further events should be reported.
-      if (closing) return;
-      if (event.event.is<Outcome>()) {
-        closing = true;
-      }
-
-      // Deliver the event to the queue and make sure we are processing.
-      for (auto& active: actives) {
-        active->queue.push(event.clone());
-        if (!active->pumping) {
-          waitUntilTasks.add(pump(kj::addRef(*active)));
-        }
-      }
-      return;
+      actives.truncate(num_actives);
     }
 
     // If we're already closing, no further events should be reported.
@@ -1207,7 +1192,7 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
         KJ_ASSERT(event.event.is<Onset>(), "First event must be an onset.");
 
         // Transitions into the active state by grabbing the pending client capability.
-        state.inner = KJ_MAP(wi, pending) {
+        state.inner = kj::Vector<kj::Own<TailStreamWriterState::Active>>(KJ_MAP(wi, pending) {
           auto customEvent = kj::heap<TailStreamCustomEvent>();
           auto result = customEvent->getCap();
           auto active = kj::refcounted<TailStreamWriterState::Active>(kj::mv(result));
@@ -1219,13 +1204,13 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
                                  .attach(kj::mv(wi), kj::addRef(*active))
                                  .ignoreResult());
           return active;
-        };
+        });
 
         // At this point our writer state is "active", which means the state
         // consists of one or more streaming tail worker client stubs to which
         // the event will be dispatched.
       }
-      KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
+      KJ_CASE_ONEOF(active, kj::Vector<kj::Own<TailStreamWriterState::Active>>) {
         // Event cannot be a onset, which should have been validated by the writer.
         KJ_ASSERT(!event.event.is<Onset>(), "Only the first event can be an onset");
       }
