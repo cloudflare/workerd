@@ -607,10 +607,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
-      kj::Vector<TailEvent> events(eventReaders.size());
-      for (auto reader: eventReaders) {
-        events.add(TailEvent(reader));
-      }
+      kj::Array<TailEvent> events = KJ_MAP(reader, eventReaders) { return TailEvent(reader); };
 
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.
@@ -619,15 +616,14 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         KJ_IF_SOME(handler, maybeHandler) {
           KJ_IF_SOME(h, handler.tryGet()) {
             auto handle = h.getHandle(lock);
-            return handleEvents(
-                lock, handle, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
+            return handleEvents(lock, handle, ioContext, kj::mv(events), kj::mv(sharedResults));
           } else {
             KJ_LOG(ERROR, "tail stream handler was destroyed while processing events");
             JSG_FAIL_REQUIRE(Error, "Tail stream handler became invalid during event processing");
             KJ_UNREACHABLE;
           }
         } else {
-          return handleOnset(lock, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
+          return handleOnset(lock, ioContext, kj::mv(events), kj::mv(sharedResults));
         }
       })();
 
