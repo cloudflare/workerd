@@ -9639,7 +9639,15 @@ export declare namespace CloudflareWorkersModule {
     ): Promise<unknown>;
   }
   export function waitUntil(promise: Promise<unknown>): void;
+  export function withEnv(newEnv: unknown, fn: () => unknown): unknown;
+  export function withExports(newExports: unknown, fn: () => unknown): unknown;
+  export function withEnvAndExports(
+    newEnv: unknown,
+    newExports: unknown,
+    fn: () => unknown,
+  ): unknown;
   export const env: Cloudflare.Env;
+  export const exports: Cloudflare.Exports;
 }
 export interface SecretsStoreSecret {
   /**

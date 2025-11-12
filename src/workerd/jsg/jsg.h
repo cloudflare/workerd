@@ -2831,6 +2831,12 @@ class Lock {
   // Retrieve the worker environment.
   virtual kj::Maybe<V8Ref<v8::Object>> getWorkerEnv() = 0;
 
+  // Store the worker exports.
+  virtual void setWorkerExports(V8Ref<v8::Object> value) = 0;
+
+  // Retrieve the worker exports.
+  virtual kj::Maybe<V8Ref<v8::Object>> getWorkerExports() = 0;
+
   // Resolve an internal module namespace from the given specifier.
   // This variation can be used only for internal built-ins.
   kj::Maybe<JsObject> resolveInternalModule(kj::StringPtr specifier);
