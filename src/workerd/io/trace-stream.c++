@@ -1044,14 +1044,18 @@ struct TailStreamWriterState {
 
     // Only rebuild when some but not all tail workers have died, optimizing the common case.
     // We only care about sessions that are currently active.
-    auto num_actives = 0;
-    for (auto& active: actives) {
-      if (active->capability != kj::none) {
-        num_actives++;
+
+    // Remove any inactive sessions. This allows us to avoid memory allocations
+    unsigned numInactive = 0;
+    for (int i = 0; i < actives.size(); i++) {
+      if (actives[i]->capability == kj::none) {
+        numInactive++;
+      } else if (numInactive != 0) {
+        actives[i - numInactive] = kj::mv(actives[i]);
       }
     }
 
-    if (num_actives == 0) {
+    if (numInactive == actives.size()) {
       // Oh! We have no active sessions. Well, never mind then, let's
       // transition to a closed state and drop everything on the floor.
       inner = Closed{};
@@ -1062,16 +1066,9 @@ struct TailStreamWriterState {
       return;
     }
 
-    if (num_actives < actives.size()) {
-      unsigned offset = 0;
-      for (int i = 0; i < actives.size(); i++) {
-        if (actives[i]->capability == kj::none) {
-          offset++;
-        } else if (offset != 0) {
-          actives[i - offset] = kj::mv(actives[i]);
-        }
-      }
-      actives.truncate(num_actives);
+    // We have at least some active sessions. Truncate the array to get rid of the inactive ones.
+    if (numInactive != 0) {
+      actives.truncate(actives.size() - numInactive);
     }
 
     // If we're already closing, no further events should be reported.
