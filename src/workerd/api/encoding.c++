@@ -13,6 +13,9 @@
 
 #include <unicode/ucnv.h>
 #include <unicode/utf8.h>
+#include <v8.h>
+
+#include <kj/string.h>
 
 #include <algorithm>
 
@@ -690,13 +693,141 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   return jsg::JsUint8Array(array);
 }
 
+namespace {
+
+// Binary search to find how many Latin-1 characters fit when converted to UTF-8.
+// Latin-1 bytes 0x00-0x7F encode as 1 UTF-8 byte, 0x80-0xFF encode as 2 UTF-8 bytes.
+size_t findBestFitLatin1(const char* data, size_t length, size_t bufferSize) {
+  size_t left = 0;
+  size_t right = length;
+  size_t bestFit = 0;
+
+  while (left <= right) {
+    size_t mid = left + (right - left) / 2;
+    if (mid == 0) break;
+
+    size_t midUtf8Length = simdutf::utf8_length_from_latin1(data, mid);
+    if (midUtf8Length <= bufferSize) {
+      bestFit = mid;
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+
+  return bestFit;
+}
+
+// Binary search to find how many UTF-16 code units fit when converted to UTF-8.
+// Ensures surrogate pairs (0xD800-0xDFFF) are never split across the boundary.
+size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) {
+  size_t left = 0;
+  size_t right = length;
+  size_t bestFit = 0;
+
+  while (left <= right) {
+    size_t mid = left + (right - left) / 2;
+    if (mid == 0) break;
+
+    // Don't split surrogate pairs - adjust backwards if mid lands after a high surrogate
+    size_t adjustedMid = mid;
+    if (adjustedMid > 0 && adjustedMid < length) {
+      char16_t prev = data[adjustedMid - 1];
+      if (prev >= 0xD800 && prev < 0xDC00) {
+        adjustedMid--;
+      }
+    }
+
+    if (adjustedMid == 0) {
+      right = 0;
+      break;
+    }
+
+    size_t midUtf8Length = simdutf::utf8_length_from_utf16(data, adjustedMid);
+    if (midUtf8Length <= bufferSize) {
+      bestFit = adjustedMid;
+      left = adjustedMid + 1;
+    } else {
+      right = adjustedMid - 1;
+    }
+  }
+
+  return bestFit;
+}
+
+}  // namespace
+
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer) {
-  auto result = input.writeInto(
-      js, buffer.asArrayPtr<char>(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+  auto outputBuf = buffer.asArrayPtr<char>();
+  size_t bufferSize = outputBuf.size();
+
+  // ValueView provides zero-copy access to V8's internal string representation.
+  // V8 stores strings as either Latin-1 (one byte per character) or UTF-16.
+  v8::String::ValueView view(js.v8Isolate, input);
+  uint32_t length = view.length();
+
+  if (view.is_one_byte()) {
+    // Latin-1 path: characters 0x00-0x7F encode as 1 UTF-8 byte, 0x80-0xFF as 2 bytes
+    auto data = reinterpret_cast<const char*>(view.data8());
+    size_t utf8Length = simdutf::utf8_length_from_latin1(data, length);
+
+    if (utf8Length <= bufferSize) {
+      size_t written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
+      return TextEncoder::EncodeIntoResult{
+        .read = static_cast<int>(length),
+        .written = static_cast<int>(written),
+      };
+    }
+
+    // Buffer too small - find how many characters fit
+    size_t bestFit = findBestFitLatin1(data, length, bufferSize);
+    size_t written = simdutf::convert_latin1_to_utf8(data, bestFit, outputBuf.begin());
+    return TextEncoder::EncodeIntoResult{
+      .read = static_cast<int>(bestFit),
+      .written = static_cast<int>(written),
+    };
+  }
+
+  // UTF-16 path: check for invalid surrogate pairs first
+  auto data = reinterpret_cast<const char16_t*>(view.data16());
+
+  if (simdutf::validate_utf16(data, length)) {
+    size_t utf8Length = simdutf::utf8_length_from_utf16(data, length);
+    if (utf8Length <= bufferSize) {
+      size_t written = simdutf::convert_utf16_to_utf8(data, length, outputBuf.begin());
+      return TextEncoder::EncodeIntoResult{
+        .read = static_cast<int>(length),
+        .written = static_cast<int>(written),
+      };
+    }
+
+    size_t bestFit = findBestFitUtf16(data, length, bufferSize);
+    size_t written = simdutf::convert_utf16_to_utf8(data, bestFit, outputBuf.begin());
+    return TextEncoder::EncodeIntoResult{
+      .read = static_cast<int>(bestFit),
+      .written = static_cast<int>(written),
+    };
+  }
+
+  // Invalid UTF-16: normalize unpaired surrogates to U+FFFD before converting
+  kj::SmallArray<char16_t, 4096> tempBuf(length);
+  simdutf::to_well_formed_utf16(data, length, tempBuf.begin());
+
+  size_t utf8Length = simdutf::utf8_length_from_utf16(tempBuf.begin(), length);
+  if (utf8Length <= bufferSize) {
+    size_t written = simdutf::convert_utf16_to_utf8(tempBuf.begin(), length, outputBuf.begin());
+    return TextEncoder::EncodeIntoResult{
+      .read = static_cast<int>(length),
+      .written = static_cast<int>(written),
+    };
+  }
+
+  size_t bestFit = findBestFitUtf16(tempBuf.begin(), length, bufferSize);
+  size_t written = simdutf::convert_utf16_to_utf8(tempBuf.begin(), bestFit, outputBuf.begin());
   return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(result.read),
-    .written = static_cast<int>(result.written),
+    .read = static_cast<int>(bestFit),
+    .written = static_cast<int>(written),
   };
 }
 
