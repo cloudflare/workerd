@@ -2205,9 +2205,10 @@ class Server::WorkerService final: public Service,
     }
 
     KJ_IF_SOME(w, workerTracer) {
-      auto tracerSpanObserver =
-          kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(*w)));
-      w->setUserRequestSpan({kj::mv(tracerSpanObserver)});
+      w->setMakeUserRequestSpanFunc([&w = *w]() {
+        return SpanParent(
+            kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(w))));
+      });
     }
     kj::Own<RequestObserver> observer =
         kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);

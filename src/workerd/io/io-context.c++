@@ -258,6 +258,10 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   deliveredLocation = location;
   metrics->delivered();
 
+  KJ_IF_SOME(workerTracer, workerTracer) {
+    currentUserTraceSpan = workerTracer->makeUserRequestSpan();
+  }
+
   KJ_IF_SOME(a, context->actor) {
     // Re-synchronize the timer and top up limits for every new incoming request to an actor.
     ioChannelFactory->getTimer().syncTime();
@@ -1082,10 +1086,12 @@ SpanParent IoContext::getCurrentTraceSpan() {
 SpanParent IoContext::getCurrentUserTraceSpan() {
   // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
   // context, as with Jaeger spans.
-  KJ_IF_SOME(workerTracer, getWorkerTracer()) {
-    return workerTracer.getUserRequestSpan();
-  }
-  return SpanParent(nullptr);
+  if (incomingRequests.empty()) SpanParent(nullptr);
+  return getCurrentIncomingRequest().getCurrentUserTraceSpan();
+}
+
+SpanParent IoContext_IncomingRequest::getCurrentUserTraceSpan() {
+  return currentUserTraceSpan.addRef();
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {

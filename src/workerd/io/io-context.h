@@ -174,6 +174,8 @@ class IoContext_IncomingRequest final {
     return workerTracer;
   }
 
+  SpanParent getCurrentUserTraceSpan();
+
   // The invocation span context is a unique identifier for a specific
   // worker invocation.
   tracing::InvocationSpanContext& getInvocationSpanContext();
@@ -183,6 +185,8 @@ class IoContext_IncomingRequest final {
   kj::Own<RequestObserver> metrics;
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
+
+  SpanParent currentUserTraceSpan = nullptr;
 
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
