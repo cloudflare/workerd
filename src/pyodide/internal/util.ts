@@ -65,7 +65,9 @@ export function simpleRunPython(
     // PyRun_SimpleString will have written a Python traceback to stderr.
     console.warn('Command failed:', code);
     console.warn(cause);
-    throw new PythonWorkersInternalError('Failed to run Python code');
+    throw new PythonWorkersInternalError(
+      'Failed to run Python code:\n' + code + '\n\nError:\n' + cause
+    );
   }
   return cause;
 }
