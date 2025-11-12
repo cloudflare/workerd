@@ -1039,17 +1039,19 @@ struct TailStreamWriterState {
 
   void reportImpl(TailEvent&& event) {
     // In reportImpl, our inner state must be active.
-    auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+    kj::Array<kj::Own<Active>>& actives =
+        KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
 
+    // Only rebuild when some but not all tail workers have died, optimizing the common case.
     // We only care about sessions that are currently active.
-    kj::Vector<kj::Own<Active>> alive(actives.size());
+    auto num_actives = 0;
     for (auto& active: actives) {
       if (active->capability != kj::none) {
-        alive.add(kj::mv(active));
+        num_actives++;
       }
     }
 
-    if (alive.size() == 0) {
+    if (num_actives == 0) {
       // Oh! We have no active sessions. Well, never mind then, let's
       // transition to a closed state and drop everything on the floor.
       inner = Closed{};
@@ -1060,6 +1062,33 @@ struct TailStreamWriterState {
       return;
     }
 
+    if (num_actives < actives.size()) {
+      kj::Vector<kj::Own<Active>> alive(num_actives);
+      for (auto& active: actives) {
+        if (active->capability != kj::none) {
+          alive.add(kj::mv(active));
+        }
+      }
+      inner = alive.releaseAsArray();
+      kj::Array<kj::Own<Active>>& actives =
+          KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+
+      // If we're already closing, no further events should be reported.
+      if (closing) return;
+      if (event.event.is<Outcome>()) {
+        closing = true;
+      }
+
+      // Deliver the event to the queue and make sure we are processing.
+      for (auto& active: actives) {
+        active->queue.push(event.clone());
+        if (!active->pumping) {
+          waitUntilTasks.add(pump(kj::addRef(*active)));
+        }
+      }
+      return;
+    }
+
     // If we're already closing, no further events should be reported.
     if (closing) return;
     if (event.event.is<Outcome>()) {
@@ -1067,14 +1096,12 @@ struct TailStreamWriterState {
     }
 
     // Deliver the event to the queue and make sure we are processing.
-    for (auto& active: alive) {
+    for (auto& active: actives) {
       active->queue.push(event.clone());
       if (!active->pumping) {
         waitUntilTasks.add(pump(kj::addRef(*active)));
       }
     }
-
-    inner = alive.releaseAsArray();
   }
 
   // Delivers the queued tail events to a streaming tail worker.
