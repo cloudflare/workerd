@@ -534,10 +534,10 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     kj::StringPtr url,
     kj::Maybe<jsg::ByteString> cacheControl,
     bool enableCompatFlags) {
-  auto span = context.makeTraceSpan(operationName);
-  auto userSpan = context.makeUserTraceSpan(operationName);
+  TraceContext traceContext(
+      context.makeTraceSpan(operationName), context.makeUserTraceSpan(operationName));
 
-  userSpan.setTag("url.full"_kjc, kj::str(url));
+  traceContext.setTag("url.full"_kjc, kj::str(url));
   // TODO(o11y): Can we parse cacheControl more cleanly? For example, if tags are duplicated in the
   // same category we should choose the last value. We should also support these tags for
   // cache_match (where we should pull them from the returned response and need to keep the span
@@ -545,25 +545,26 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
   KJ_IF_SOME(c, cacheControl) {
     // cacheability
     if (c.contains("no-store")) {
-      userSpan.setTag("cache_control.cacheability"_kjc, kj::str("no-store"));
+      traceContext.setTag("cache_control.cacheability"_kjc, kj::str("no-store"));
     } else if (c.contains("private")) {
-      userSpan.setTag("cache_control.cacheability"_kjc, kj::str("private"));
+      traceContext.setTag("cache_control.cacheability"_kjc, kj::str("private"));
     } else if (c.contains("public")) {
-      userSpan.setTag("cache_control.cacheability"_kjc, kj::str("public"));
+      traceContext.setTag("cache_control.cacheability"_kjc, kj::str("public"));
     }
 
     // expiration
     if (c.contains("no-cache")) {
-      userSpan.setTag("cache_control.expiration"_kjc, kj::str("no-cache"));
+      traceContext.setTag("cache_control.expiration"_kjc, kj::str("no-cache"));
     } else KJ_IF_SOME(idx, c.find("max-age="_kj)) {
       auto maybeNum = c.slice(idx + "max-age="_kj.size()).tryParseAs<double>();
       KJ_IF_SOME(num, maybeNum) {
-        userSpan.setTag("cache_control.expiration"_kjc, kj::str(kj::str("max-age="), kj::str(num)));
+        traceContext.setTag(
+            "cache_control.expiration"_kjc, kj::str(kj::str("max-age="), kj::str(num)));
       }
     } else KJ_IF_SOME(idx, c.find("s-maxage="_kj)) {
       auto maybeNum = c.slice(idx + "s-maxage="_kj.size()).tryParseAs<double>();
       KJ_IF_SOME(num, maybeNum) {
-        userSpan.setTag(
+        traceContext.setTag(
             "cache_control.expiration"_kjc, kj::str(kj::str("s-maxage="), kj::str(num)));
       }
     }
@@ -571,15 +572,15 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     // revalidation. Note: There are also stale-while-revalidate and stale-if-error directives, but
     // they are ignored by the Workers Cache API and we do not set them as tags accordingly.
     if (c.contains("must-revalidate")) {
-      userSpan.setTag("cache_control.revalidation"_kjc, kj::str("must-revalidate"));
+      traceContext.setTag("cache_control.revalidation"_kjc, kj::str("must-revalidate"));
     } else if (c.contains("proxy-revalidate")) {
-      userSpan.setTag("cache_control.revalidation"_kjc, kj::str("proxy-revalidate"));
+      traceContext.setTag("cache_control.revalidation"_kjc, kj::str("proxy-revalidate"));
     }
   }
   auto cacheClient = context.getCacheClient();
   auto metadata = CacheClient::SubrequestMetadata{
     .cfBlobJson = kj::mv(cfBlobJson),
-    .parentSpan = span,
+    .parentSpan = traceContext.span,
     .featureFlagsForFl = kj::none,
   };
   if (enableCompatFlags) {
@@ -589,7 +590,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
       cacheName.map([&](kj::String& n) {
     return cacheClient->getNamespace(n, kj::mv(metadata));
   }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
-  httpClient = httpClient.attach(kj::mv(span), kj::mv(userSpan), kj::mv(cacheClient));
+  httpClient = httpClient.attach(kj::mv(traceContext), kj::mv(cacheClient));
   return httpClient;
 }
 
