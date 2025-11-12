@@ -2170,9 +2170,6 @@ class Server::WorkerService final: public Service,
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
       auto tailStreamWriter = tracing::initializeTailStreamWriter(
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
-      KJ_IF_SOME(t, tailStreamWriter) {
-        tracer->addTailStreamWriter(kj::addRef(*t));
-      }
       workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
           kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
@@ -5374,9 +5371,10 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
     kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
     auto tlsNetwork = tls->wrapNetwork(*publicNetwork);
 
+    // Attaching to refcounted NetworkService is safe since services map is long-lived
     auto service = kj::refcounted<NetworkService>(globalContext->headerTable, timer, entropySource,
         kj::mv(publicNetwork), kj::mv(tlsNetwork), *tls)
-                       .attach(kj::mv(tls));
+                       .attachToThisReference(kj::mv(tls));
 
     return decltype(services)::Entry{kj::str("internet"_kj), kj::mv(service)};
   });
