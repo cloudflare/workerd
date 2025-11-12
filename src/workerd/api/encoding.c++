@@ -474,49 +474,48 @@ constexpr inline bool isTrailSurrogate(char16_t c) {
   return 0xDC00 <= c && c <= 0xDFFF;
 }
 
-// Calculate the number of UTF-8 bytes needed for a single UTF-16 code unit
-constexpr inline size_t utf8BytesForCodeUnit(char16_t c) {
-  if (c < 0x80) return 1;
-  if (c < 0x800) return 2;
-  return 3;
-}
-
 // Calculate UTF-8 length from UTF-16 with potentially invalid surrogates.
 // Invalid surrogates are counted as U+FFFD (3 bytes in UTF-8).
+// Uses SIMD for valid portions and falls back to scalar for invalid surrogates.
 size_t utf8LengthFromInvalidUtf16(kj::ArrayPtr<const char16_t> input) {
+  size_t inputPos = 0;
   size_t utf8Length = 0;
-  bool pendingSurrogate = false;
 
-  for (size_t i = 0; i < input.size(); i++) {
-    char16_t c = input[i];
+  while (inputPos < input.size()) {
+    // Find the next invalid surrogate using SIMD validation
+    auto result =
+        simdutf::validate_utf16_with_errors(input.begin() + inputPos, input.size() - inputPos);
 
-    if (pendingSurrogate) {
-      if (isTrailSurrogate(c)) {
+    if (result.error == simdutf::error_code::SUCCESS) {
+      // Remaining input is valid - calculate length with SIMD
+      utf8Length +=
+          simdutf::utf8_length_from_utf16(input.begin() + inputPos, input.size() - inputPos);
+      break;
+    }
+
+    if (result.error == simdutf::error_code::SURROGATE) {
+      // Calculate length for the valid portion before the error with SIMD
+      if (result.count > 0) {
+        utf8Length += simdutf::utf8_length_from_utf16(input.begin() + inputPos, result.count);
+        inputPos += result.count;
+      }
+
+      // Handle the invalid surrogate at inputPos
+      char16_t c = input[inputPos];
+      if (isLeadSurrogate(c) && inputPos + 1 < input.size() &&
+          isTrailSurrogate(input[inputPos + 1])) {
         // Valid surrogate pair = 4 bytes in UTF-8
         utf8Length += 4;
-        pendingSurrogate = false;
+        inputPos += 2;
       } else {
-        // Unpaired lead surrogate = U+FFFD (3 bytes)
+        // Invalid surrogate = U+FFFD (3 bytes)
         utf8Length += 3;
-        if (!isLeadSurrogate(c)) {
-          utf8Length += utf8BytesForCodeUnit(c);
-          pendingSurrogate = false;
-        }
+        inputPos++;
       }
-    } else if (isLeadSurrogate(c)) {
-      pendingSurrogate = true;
     } else {
-      if (isTrailSurrogate(c)) {
-        // Unpaired trail surrogate = U+FFFD (3 bytes)
-        utf8Length += 3;
-      } else {
-        utf8Length += utf8BytesForCodeUnit(c);
-      }
+      // Unexpected error - fall back to scalar calculation for safety
+      break;
     }
-  }
-
-  if (pendingSurrogate) {
-    utf8Length += 3;  // Trailing unpaired lead surrogate
   }
 
   return utf8Length;
@@ -551,41 +550,51 @@ inline void encodeSurrogatePair(char16_t lead, char16_t trail, kj::ArrayPtr<char
 // Convert UTF-16 with potentially invalid surrogates to UTF-8.
 // Invalid surrogates are replaced with U+FFFD.
 // Returns the number of UTF-8 bytes written.
+// Uses SIMD for valid portions and falls back to scalar for invalid surrogates.
 size_t convertInvalidUtf16ToUtf8(kj::ArrayPtr<const char16_t> input, kj::ArrayPtr<char> out) {
-  size_t position = 0;
-  bool pendingSurrogate = false;
+  size_t inputPos = 0;
+  size_t outputPos = 0;
 
-  for (size_t i = 0; i < input.size(); i++) {
-    char16_t c = input[i];
+  while (inputPos < input.size()) {
+    // Find the next invalid surrogate using SIMD validation
+    auto result =
+        simdutf::validate_utf16_with_errors(input.begin() + inputPos, input.size() - inputPos);
 
-    if (pendingSurrogate) {
-      if (isTrailSurrogate(c)) {
-        encodeSurrogatePair(input[i - 1], c, out.slice(position, out.size()));
-        position += 4;
-        pendingSurrogate = false;
-      } else {
-        position += encodeUtf8CodeUnit(0xFFFD, out.slice(position, out.size()));
-        if (!isLeadSurrogate(c)) {
-          position += encodeUtf8CodeUnit(c, out.slice(position, out.size()));
-          pendingSurrogate = false;
-        }
+    if (result.error == simdutf::error_code::SUCCESS) {
+      // Remaining input is valid - convert it all with SIMD
+      outputPos += simdutf::convert_utf16_to_utf8(
+          input.begin() + inputPos, input.size() - inputPos, out.begin() + outputPos);
+      break;
+    }
+
+    if (result.error == simdutf::error_code::SURROGATE) {
+      // Convert the valid portion before the error with SIMD
+      if (result.count > 0) {
+        outputPos += simdutf::convert_valid_utf16_to_utf8(
+            input.begin() + inputPos, result.count, out.begin() + outputPos);
+        inputPos += result.count;
       }
-    } else if (isLeadSurrogate(c)) {
-      pendingSurrogate = true;
+
+      // Handle the invalid surrogate at inputPos
+      char16_t c = input[inputPos];
+      if (isLeadSurrogate(c) && inputPos + 1 < input.size() &&
+          isTrailSurrogate(input[inputPos + 1])) {
+        // Valid surrogate pair - encode it (this shouldn't happen if SURROGATE error)
+        encodeSurrogatePair(c, input[inputPos + 1], out.slice(outputPos, out.size()));
+        outputPos += 4;
+        inputPos += 2;
+      } else {
+        // Invalid surrogate - replace with U+FFFD (3 bytes)
+        outputPos += encodeUtf8CodeUnit(0xFFFD, out.slice(outputPos, out.size()));
+        inputPos++;
+      }
     } else {
-      if (isTrailSurrogate(c)) {
-        position += encodeUtf8CodeUnit(0xFFFD, out.slice(position, out.size()));
-      } else {
-        position += encodeUtf8CodeUnit(c, out.slice(position, out.size()));
-      }
+      // Unexpected error - fall back to scalar processing for safety
+      break;
     }
   }
 
-  if (pendingSurrogate) {
-    position += encodeUtf8CodeUnit(0xFFFD, out.slice(position, out.size()));
-  }
-
-  return position;
+  return outputPos;
 }
 
 }  // namespace
@@ -806,37 +815,30 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
   if (simdutf::validate_utf16(data, length)) {
     // Valid UTF-16: use fast SIMD conversion
     // Fast path: skip length calculation if worst-case UTF-8 size fits (3 bytes per code unit)
-    if (length * 3 <= bufferSize || simdutf::utf8_length_from_utf16(data, length) <= bufferSize) {
-      size_t written = simdutf::convert_utf16_to_utf8(data, length, outputBuf.begin());
-      return TextEncoder::EncodeIntoResult{
-        .read = static_cast<int>(length),
-        .written = static_cast<int>(written),
-      };
+    size_t read = length;
+    if (!(length * 3 <= bufferSize ||
+            simdutf::utf8_length_from_utf16(data, length) <= bufferSize)) {
+      read = findBestFitUtf16(data, length, bufferSize);
     }
 
-    size_t bestFit = findBestFitUtf16(data, length, bufferSize);
-    size_t written = simdutf::convert_utf16_to_utf8(data, bestFit, outputBuf.begin());
+    size_t written = simdutf::convert_utf16_to_utf8(data, read, outputBuf.begin());
     return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(bestFit),
+      .read = static_cast<int>(read),
       .written = static_cast<int>(written),
     };
   }
 
   // Invalid UTF-16: convert directly to UTF-8, replacing unpaired surrogates with U+FFFD
   // Fast path: skip length calculation if worst-case UTF-8 size fits (3 bytes per code unit)
-  if (length * 3 <= bufferSize ||
-      utf8LengthFromInvalidUtf16(kj::arrayPtr(data, length)) <= bufferSize) {
-    size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, length), outputBuf);
-    return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(length),
-      .written = static_cast<int>(written),
-    };
+  size_t read = length;
+  if (!(length * 3 <= bufferSize ||
+          utf8LengthFromInvalidUtf16(kj::arrayPtr(data, length)) <= bufferSize)) {
+    read = findBestFitInvalidUtf16(data, length, bufferSize);
   }
 
-  size_t bestFit = findBestFitInvalidUtf16(data, length, bufferSize);
-  size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, bestFit), outputBuf);
+  size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, read), outputBuf);
   return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(bestFit),
+    .read = static_cast<int>(read),
     .written = static_cast<int>(written),
   };
 }
