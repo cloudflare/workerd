@@ -805,7 +805,8 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
 
   if (simdutf::validate_utf16(data, length)) {
     // Valid UTF-16: use fast SIMD conversion
-    if (simdutf::utf8_length_from_utf16(data, length) <= bufferSize) {
+    // Fast path: skip length calculation if worst-case UTF-8 size fits (3 bytes per code unit)
+    if (length * 3 <= bufferSize || simdutf::utf8_length_from_utf16(data, length) <= bufferSize) {
       size_t written = simdutf::convert_utf16_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
         .read = static_cast<int>(length),
@@ -822,7 +823,9 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
   }
 
   // Invalid UTF-16: convert directly to UTF-8, replacing unpaired surrogates with U+FFFD
-  if (utf8LengthFromInvalidUtf16(kj::arrayPtr(data, length)) <= bufferSize) {
+  // Fast path: skip length calculation if worst-case UTF-8 size fits (3 bytes per code unit)
+  if (length * 3 <= bufferSize ||
+      utf8LengthFromInvalidUtf16(kj::arrayPtr(data, length)) <= bufferSize) {
     size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, length), outputBuf);
     return TextEncoder::EncodeIntoResult{
       .read = static_cast<int>(length),
