@@ -5378,7 +5378,7 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
 
     auto service = kj::refcounted<NetworkService>(globalContext->headerTable, timer, entropySource,
         kj::mv(publicNetwork), kj::mv(tlsNetwork), *tls)
-                       .attach(kj::mv(tls));
+                       .attachToThisReference(kj::mv(tls));
 
     return decltype(services)::Entry{kj::str("internet"_kj), kj::mv(service)};
   });

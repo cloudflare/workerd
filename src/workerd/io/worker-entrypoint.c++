@@ -217,7 +217,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     auto actorRef = actor.map([](kj::Own<Worker::Actor>& ptr) -> Worker::Actor& { return *ptr; });
 
     return kj::refcounted<IoContext>(threadContext, kj::mv(worker), actorRef, kj::mv(limitEnforcer))
-        .attach(kj::mv(ioContextDependency));
+        .attachToThisReference(kj::mv(ioContextDependency));
   };
 
   kj::Own<IoContext> context;
