@@ -37,9 +37,9 @@ class MemoryInputStream final: public kj::AsyncInputStream {
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     auto ptr = kj::arrayPtr<kj::byte>(static_cast<kj::byte*>(buffer), maxBytes);
     size_t toRead = kj::min(data.size(), ptr.size());
-    KJ_DEFER(advance(toRead));
     if (toRead == 0) return toRead;
     ptr.first(toRead).copyFrom(data.first(toRead));
+    data = data.slice(toRead);
     return toRead;
   }
 
@@ -51,8 +51,11 @@ class MemoryInputStream final: public kj::AsyncInputStream {
     // An optimized pumpTo... we know we have all the data right here. We can
     // just write it all at once up to `amount`.
     uint64_t toRead = kj::min(data.size(), amount);
-    KJ_DEFER(advance(toRead));
+    if (toRead == 0) {
+      co_return toRead;
+    }
     co_await output.write(data.first(toRead));
+    data = data.slice(toRead);
     co_return toRead;
   }
 
@@ -74,14 +77,6 @@ class MemoryInputStream final: public kj::AsyncInputStream {
  private:
   kj::ArrayPtr<const kj::byte> data;
   kj::Maybe<kj::Rc<OwnedBacking>> ownedBacking;
-
-  void advance(size_t amount) {
-    data = data.slice(amount);
-    // If we've consumed all the data, drop our reference to the backing storage eagerly.
-    if (data.size() == 0) {
-      ownedBacking = kj::none;
-    }
-  }
 };
 
 class NeuterableInputStreamImpl final: public NeuterableInputStream {
