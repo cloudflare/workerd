@@ -2164,41 +2164,34 @@ class Server::WorkerService final: public Service,
     if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
       // Setting up buffered tail workers support, but only if we actually have tail workers
       // configured.
-      auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
       auto tailStreamWriter = tracing::initializeTailStreamWriter(
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
-      KJ_IF_SOME(t, tailStreamWriter) {
-        tracer->addTailStreamWriter(kj::addRef(*t));
-      }
-      workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
-          kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
-          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
-          mapCopyString(entrypointName) /* entrypoint */, kj::none /* durableObjectId */,
-          kj::mv(tailStreamWriter));
+      auto trace = kj::refcounted<Trace>(kj::none /* stableId */, kj::none /* scriptName */,
+          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, kj::none /* scriptId */,
+          nullptr /* scriptTags */, mapCopyString(entrypointName), executionModel,
+          kj::none /* durableObjectId */);
+      kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(
+          kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::mv(tailStreamWriter));
 
-      // When the tracer is complete, deliver the traces to both the parent
-      // and the buffered tail workers. We do NOT want to attach the tracer to the
-      // tracer->onComplete() promise here because it is the destructor of
-      // the PipelineTracer that resolves the onComplete promise. If we attach
-      // the tracer to the promise the tracer won't be destroyed while the
-      // promise is still pending! Fortunately, the WorkerTracer we created
-      // will hold a strong reference to the worker tracer for as long as it
-      // is needed. As long as the WorkerTracer is still alive, the PipelineTracer
-      // will be. See below, we end up creating two references to the WorkerTracer,
-      // one held by the observer and one that will be passed to the IoContext.
-      // The PipelineTracer will be destroyed once both of those are freed.
-      waitUntilTasks.add(tracer->onComplete().then(
-          kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
-                            kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
-        for (auto& worker: tailWorkers) {
-          auto event = kj::heap<workerd::api::TraceCustomEvent>(
-              workerd::api::TraceCustomEvent::TYPE, mapAddRef(traces));
-          co_await worker->customEvent(kj::mv(event)).ignoreResult();
-        }
-        co_return;
-      })));
+      // When the tracer is complete, deliver traces to any buffered tail workers. We end up
+      // creating two references to the WorkerTracer, one held by the observer and one that will be
+      // passed to the IoContext. This ensures that the tracer lives long enough to receive all
+      // events.
+      if (!bufferedTailWorkers.empty()) {
+        waitUntilTasks.add(tracer->onComplete().then(
+            kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
+                              kj::Own<Trace> trace) mutable -> kj::Promise<void> {
+          for (auto& worker: tailWorkers) {
+            auto event = kj::heap<workerd::api::TraceCustomEvent>(
+                workerd::api::TraceCustomEvent::TYPE, kj::arr(kj::addRef(*trace)));
+            co_await worker->customEvent(kj::mv(event)).ignoreResult();
+          }
+          co_return;
+        })));
+      }
+      workerTracer = kj::mv(tracer);
     }
 
     KJ_IF_SOME(w, workerTracer) {

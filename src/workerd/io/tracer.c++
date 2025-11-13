@@ -61,50 +61,15 @@ void TailStreamWriter::report(
 }
 }  // namespace tracing
 
-PipelineTracer::~PipelineTracer() noexcept(false) {
-  KJ_IF_SOME(f, completeFulfiller) {
-    f.get()->fulfill(traces.releaseAsArray());
-  }
-}
-
-void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces) {
-  for (auto& t: traces) {
-    this->traces.add(kj::addRef(*t));
-  }
-}
-
-kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
+kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == kj::none, "onComplete() can only be called once");
 
-  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::Own<Trace>>>();
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<Trace>>();
   completeFulfiller = kj::mv(paf.fulfiller);
   return kj::mv(paf.promise);
 }
 
-kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
-    ExecutionModel executionModel,
-    kj::Maybe<kj::String> scriptId,
-    kj::Maybe<kj::String> stableId,
-    kj::Maybe<kj::String> scriptName,
-    kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-    kj::Maybe<kj::String> dispatchNamespace,
-    kj::Array<kj::String> scriptTags,
-    kj::Maybe<kj::String> entrypoint,
-    kj::Maybe<kj::String> durableObjectId,
-    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter) {
-  auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
-      kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
-      executionModel, kj::mv(durableObjectId));
-  traces.add(kj::addRef(*trace));
-  return kj::refcounted<WorkerTracer>(
-      addRefToThis(), kj::mv(trace), pipelineLogLevel, kj::mv(maybeTailStreamWriter));
-}
-
-void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
-  traces.add(kj::refcounted<Trace>(reader));
-}
-
-WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
+WorkerTracer::WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
     kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter)
@@ -145,6 +110,11 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
       LOG_ERROR_PERIODICALLY(
           "destructed WorkerTracer with STW without reporting Onset event", kj::getStackTrace());
     }
+  }
+
+  // Report the completed trace, if fulfiller is set up.
+  KJ_IF_SOME(f, completeFulfiller) {
+    f.get()->fulfill(kj::mv(trace));
   }
 };
 
