@@ -9932,6 +9932,7 @@ export declare namespace Rpc {
   export const __WORKER_ENTRYPOINT_BRAND: "__WORKER_ENTRYPOINT_BRAND";
   export const __DURABLE_OBJECT_BRAND: "__DURABLE_OBJECT_BRAND";
   export const __WORKFLOW_ENTRYPOINT_BRAND: "__WORKFLOW_ENTRYPOINT_BRAND";
+  export const __CONTAINER_ENTRYPOINT_BRAND: "__CONTAINER_ENTRYPOINT_BRAND";
   export interface RpcTargetBranded {
     [__RPC_TARGET_BRAND]: never;
   }
@@ -9944,10 +9945,14 @@ export declare namespace Rpc {
   export interface WorkflowEntrypointBranded {
     [__WORKFLOW_ENTRYPOINT_BRAND]: never;
   }
+  export interface ContainerEntrypointBranded {
+    [__CONTAINER_ENTRYPOINT_BRAND]: never;
+  }
   export type EntrypointBranded =
     | WorkerEntrypointBranded
     | DurableObjectBranded
-    | WorkflowEntrypointBranded;
+    | WorkflowEntrypointBranded
+    | ContainerEntrypointBranded;
   // Types that can be used through `Stub`s
   export type Stubable = RpcTargetBranded | ((...args: any[]) => any);
   // Types that can be passed over RPC
@@ -10250,6 +10255,70 @@ export declare namespace CloudflareWorkersModule {
       event: Readonly<WorkflowEvent<T>>,
       step: WorkflowStep,
     ): Promise<unknown>;
+  }
+  export abstract class ContainerEntrypoint<Env = Cloudflare.Env, Props = {}>
+    extends DurableObject<Env, Props>
+    implements Rpc.ContainerEntrypointBranded
+  {
+    [Rpc.__CONTAINER_ENTRYPOINT_BRAND]: never;
+    protected ctx: DurableObjectState<Props>;
+    protected env: Env;
+    constructor(ctx: DurableObjectState, env: Env);
+    /**
+     * Gets the current state of the container
+     */
+    getState(): {
+      status: "running" | "stopped";
+    };
+    /**
+     * Starts container.
+     * If the container is already started, and waitForReady is false, this will resolve immediately if the container accepts the ping.
+     */
+    start(options?: {
+      /** Environment variables to pass to the container */
+      envVars?: Record<string, string>;
+      /** Custom entrypoint to override container default */
+      entrypoint?: string[];
+      signal?: AbortSignal;
+      /**
+       * Whether to enable internet access for the container
+       * @default true
+       */
+      enableInternet?: boolean;
+      /**
+       * Whether to wait for the application inside the container to be ready
+       * @default true
+       */
+      waitForReady?: boolean;
+      /**
+       * Number of retries to check we have got a container
+       * and if waitForReady is true, that it's ready
+       * @default 10
+       */
+      retries?: number;
+      /**
+       * Timeout in milliseconds for each ping attempt
+       * @default 5000
+       */
+      pingTimeoutMs?: number;
+      /** Port to check for readiness, defaults to `defaultPort` or 33 if not set */
+      portToCheck?: number;
+    }): Promise<void>;
+    /**
+     * Send a signal to the container.
+     * @param signal - The signal to send to the container (default: 'SIGTERM')
+     */
+    stop(signal?: "SIGKILL" | "SIGINT" | "SIGTERM" | number): Promise<void>;
+    /**
+     * Destroys the container with a SIGKILL.
+     */
+    destroy(): Promise<void>;
+    /**
+     * Lifecycle method called when container starts successfully
+     * Override this method in subclasses to handle container start events
+     */
+    onStart?(): void | Promise<void>;
+    fetch(request: Request): Response | Promise<Response>;
   }
   export function waitUntil(promise: Promise<unknown>): void;
   export const env: Cloudflare.Env;
