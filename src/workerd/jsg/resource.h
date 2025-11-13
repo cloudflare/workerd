@@ -1896,6 +1896,10 @@ class ResourceWrapper {
           static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
               v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
 
+      if (getShouldSetImmutablePrototype(isolate)) {
+        constructor->ReadOnlyPrototype();
+      }
+
       constructor->SetClassName(classname);
 
       static_assert(kj::isSameType<typename T::jsgThis, T>(),

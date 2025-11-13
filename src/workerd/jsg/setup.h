@@ -178,6 +178,14 @@ class IsolateBase {
     setToStringTag = true;
   }
 
+  inline bool shouldSetImmutablePrototype() const {
+    return shouldSetImmutablePrototypeFlag;
+  }
+
+  void enableSetImmutablePrototype() {
+    shouldSetImmutablePrototypeFlag = true;
+  }
+
   inline void disableTopLevelAwait() {
     allowTopLevelAwait = false;
   }
@@ -324,6 +332,7 @@ class IsolateBase {
   bool nodeJsCompatEnabled = false;
   bool nodeJsProcessV2Enabled = false;
   bool setToStringTag = false;
+  bool shouldSetImmutablePrototypeFlag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;

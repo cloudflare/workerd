@@ -1221,4 +1221,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("disable_python_check_rng_state")
     $experimental;
 
+  shouldSetImmutablePrototype @145 :Bool
+    $compatEnableFlag("immutable_api_prototypes")
+    $compatDisableFlag("mutable_api_prototypes");
+  # When set, tells JSG to make the prototype of all jsg::Objects immutable.
+  # TODO(soon): Add the default on date once the flag is verified to be
+  # generally safe.
 }
