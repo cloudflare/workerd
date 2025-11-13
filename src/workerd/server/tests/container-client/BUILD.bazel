@@ -7,3 +7,11 @@ wd_test(
     data = ["test.js"],
     tags = ["off-by-default"],
 )
+
+wd_test(
+    size = "enormous",
+    src = "test-entrypoint.wd-test",
+    args = ["--experimental"],
+    data = ["test-entrypoint.js"],
+    tags = ["off-by-default"],
+)
