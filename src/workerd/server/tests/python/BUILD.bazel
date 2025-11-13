@@ -40,6 +40,13 @@ py_wd_test("filter-non-py-files")
 
 py_wd_test("durable-object")
 
+py_wd_test(
+    "durable-object-websocket",
+    make_snapshot = False,
+    # TODO: enabling this will reproduce a strange issue, see comment in EW-9767.
+    use_snapshot = None,
+)
+
 py_wd_test("worker-entrypoint")
 
 py_wd_test(

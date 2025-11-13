@@ -502,10 +502,10 @@ async def response_unit_tests(env):
         assert str(err) == "Unsupported type in Response: Test"
 
     response_ws = Response(
-        "test", status=201, web_socket=js.WebSocket.new("ws://example.com/ignore")
+        None, status=101, web_socket=js.WebSocket.new("ws://example.com/ignore")
     )
     # TODO: it doesn't seem possible to access webSocket even in JS
-    assert response_ws.status == 201
+    assert response_ws.status == 101
 
 
 async def can_fetch_python_request():
