@@ -485,6 +485,14 @@ function describeValue(val: any): string {
     const isObject = type === 'object';
     out.push(`Value: ${val}`);
     out.push(`Type: ${type}`);
+    try {
+      const constructorName = val?.constructor?.name; // eslint-disable-line
+      if (constructorName) {
+        out.push(`Constructor name: ${constructorName}`);
+      }
+    } catch {
+      // Ignore errors when getting keys
+    }
 
     if (val && isObject) {
       try {
@@ -507,7 +515,7 @@ function describeValue(val: any): string {
     }
 
     try {
-      out.push(`Prototype: ${Object.prototype.toString.call(val)}`);
+      out.push(`toStringTag: ${Object.prototype.toString.call(val)}`);
     } catch {
       // Ignore errors when getting object type
     }
