@@ -1165,8 +1165,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
             "Unable to wait on a promise created within a request when not running within a "
             "request.");
 
-        return js.wrapSimplePromise(
-            addCrossThreadPromiseWaiter(js, promise)
+        return js.wrapSimplePromise(addCrossThreadPromiseWaiter(js, promise)
                 .then(js, [promise = js.v8Ref(promise.As<v8::Value>())](auto& js) mutable {
           // Once the waiter has been resolved, return the now settled promise.
           // Since the promise has been settled, it is now safe to access from
@@ -2430,7 +2429,8 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
             collectMethodsFromPrototypeChain(proto, seenNames);
           });
 
-          errorReporter.addWorkflowClass(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
+          errorReporter.addWorkflowClass(entrypointName,
+              KJ_MAP(n, seenNames) { return kj::mv(n); });
         } else {
         }
       }
@@ -3171,12 +3171,12 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
     State(InspectorChannelImpl* self, kj::Own<const Worker::Isolate> isolateParam)
         : isolate(kj::mv(isolateParam)),
           session(KJ_ASSERT_NONNULL(isolate->impl->inspector)
-                      ->connect(1,
-                          self,
-                          v8_inspector::StringView(),
-                          isolate->impl->inspectorPolicy == InspectorPolicy::ALLOW_UNTRUSTED
-                              ? v8_inspector::V8Inspector::kUntrusted
-                              : v8_inspector::V8Inspector::kFullyTrusted)) {}
+                  ->connect(1,
+                      self,
+                      v8_inspector::StringView(),
+                      isolate->impl->inspectorPolicy == InspectorPolicy::ALLOW_UNTRUSTED
+                          ? v8_inspector::V8Inspector::kUntrusted
+                          : v8_inspector::V8Inspector::kFullyTrusted)) {}
     ~State() noexcept(false) {
       if (session != nullptr) {
         KJ_LOG(ERROR,
