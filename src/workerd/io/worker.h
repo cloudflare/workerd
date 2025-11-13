@@ -242,9 +242,6 @@ class Worker: public kj::AtomicRefcounted, private kj::TaskSet::ErrorHandler {
   // TaskSet for tracking async unload handlers.
   mutable kj::TaskSet unloadTasks;
 
-  // Note when tearing down so we don't add unload handlers while teardown is happening.
-  mutable bool tearingDown;
-
   // TaskSet::ErrorHandler implementation
   void taskFailed(kj::Exception&& exception) override;
 

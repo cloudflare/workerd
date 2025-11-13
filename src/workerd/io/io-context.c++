@@ -586,6 +586,9 @@ class IoContext::PendingEvent: public kj::Refcounted {
 
 IoContext::~IoContext() noexcept(false) {
   // Dispatch unload event on ExecutionContext if it was attached and still alive.
+  // Just like for DurableObjectState, there is no strong reference and therefore no
+  // guarantee that finalizers will run - if the GC runs first, unload will not be
+  // triggered by design.
   if (hasUnloadHandlers) {
     KJ_IF_SOME(weakCtx, executionContext) {
       worker->runInUnloadScope([weakCtx = weakCtx.addRef()](jsg::Lock& js) mutable {

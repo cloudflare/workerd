@@ -1854,9 +1854,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 }
 
 void Worker::runInUnloadScope(kj::Function<void(jsg::Lock&)> func) const {
-  if (tearingDown) {
-    return;
-  }
   auto workerWeakRef = kj::atomicAddRefWeak(*this);
   unloadTasks.add(takeAsyncLockWithoutRequest(nullptr).then(
       [workerWeakRef = kj::mv(workerWeakRef), func = kj::mv(func)](
@@ -1865,7 +1862,8 @@ void Worker::runInUnloadScope(kj::Function<void(jsg::Lock&)> func) const {
     KJ_IF_SOME(worker, workerWeakRef) {
       worker->runInLockScope(asyncLock, [&](Lock& lock) {
         JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-          // Run the unload handler without an IoContext.
+          // Ensure we run the unload handler without an IoContext
+          // (although by definition there should be none?).
           {
             SuppressIoContextScope suppressIo;
             js.tryCatch([&] { func(js); }, [&](jsg::Value exception) {
@@ -1894,7 +1892,6 @@ void Worker::taskFailed(kj::Exception&& exception) {
 
 void Worker::clearUnloadTasks() const {
   unloadTasks.clear();
-  tearingDown = true;
 }
 
 Worker::~Worker() noexcept(false) {
@@ -3813,20 +3810,24 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
   // capability server should have triggered this (potentially indirectly) via its destructor.
   KJ_IF_SOME(r, impl->ioContext) {
     impl->metrics->shutdown(reasonCode, r.get()->getLimitEnforcer());
-
-    // Dispatch unload event on DurableObjectState if it was attached and still alive.
-    KJ_IF_SOME(state, durableObjectState) {
-      if (state->hasUnloadHandlers) {
-        worker->runInUnloadScope([weakState = state->weakThis.addRef()](jsg::Lock& js) mutable {
-          weakState->runIfAlive([&](api::DurableObjectState& state) {
-            state.dispatchEvent(js, js.alloc<api::Event>("unload"_kjc));
-          });
-        });
-      }
-    }
   } else {
     // The actor was shut down before the IoContext was even constructed, so no metrics are
     // written.
+  }
+
+  // Dispatch unload event on DurableObjectState if it was attached.
+  // We do not maintain a strong reference to DurableObjectState here.
+  // This means THERE ARE NO GUARANTEES AT ALL that unload will run if the GC runs first.
+  // In that case, finalizers should run, defeating the need for unload. This is the tradeoff
+  // of the design - unload does not remove the need for finalization.
+  KJ_IF_SOME(state, durableObjectState) {
+    if (state->hasUnloadHandlers) {
+      worker->runInUnloadScope([weakState = state->weakThis.addRef()](jsg::Lock& js) mutable {
+        weakState->runIfAlive([&](api::DurableObjectState& state) {
+          state.dispatchEvent(js, js.alloc<api::Event>("unload"_kjc));
+        });
+      });
+    }
   }
 
   shutdownActorCache(error);
