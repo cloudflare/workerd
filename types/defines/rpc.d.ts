@@ -11,6 +11,7 @@ declare namespace Rpc {
   export const __WORKER_ENTRYPOINT_BRAND: '__WORKER_ENTRYPOINT_BRAND';
   export const __DURABLE_OBJECT_BRAND: '__DURABLE_OBJECT_BRAND';
   export const __WORKFLOW_ENTRYPOINT_BRAND: '__WORKFLOW_ENTRYPOINT_BRAND';
+  export const __CONTAINER_ENTRYPOINT_BRAND: '__CONTAINER_ENTRYPOINT_BRAND';
   export interface RpcTargetBranded {
     [__RPC_TARGET_BRAND]: never;
   }
@@ -23,10 +24,14 @@ declare namespace Rpc {
   export interface WorkflowEntrypointBranded {
     [__WORKFLOW_ENTRYPOINT_BRAND]: never;
   }
+  export interface ContainerEntrypointBranded {
+    [__CONTAINER_ENTRYPOINT_BRAND]: never;
+  }
   export type EntrypointBranded =
     | WorkerEntrypointBranded
     | DurableObjectBranded
-    | WorkflowEntrypointBranded;
+    | WorkflowEntrypointBranded
+    | ContainerEntrypointBranded;
 
   // Types that can be used through `Stub`s
   export type Stubable = RpcTargetBranded | ((...args: any[]) => any);
@@ -348,6 +353,18 @@ declare namespace CloudflareWorkersModule {
       event: Readonly<WorkflowEvent<T>>,
       step: WorkflowStep
     ): Promise<unknown>;
+  }
+
+  export abstract class ContainerEntrypoint<
+    Env = Cloudflare.Env,
+  > implements Rpc.ContainerEntrypointBranded
+  {
+    [Rpc.__CONTAINER_ENTRYPOINT_BRAND]: never;
+
+    protected ctx: unknown;
+    protected env: Env;
+
+    constructor(ctx: unknown, env: Env);
   }
 
   export function waitUntil(promise: Promise<unknown>): void;

@@ -10,6 +10,8 @@ import innerEnv from 'cloudflare-internal:env';
 
 export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
+export const ContainerEntrypoint = entrypoints.ContainerEntrypoint
+
 export const RpcStub = entrypoints.RpcStub;
 export const RpcPromise = entrypoints.RpcPromise;
 export const RpcProperty = entrypoints.RpcProperty;
