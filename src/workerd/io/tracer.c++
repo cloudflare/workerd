@@ -169,7 +169,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
 
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
-  // to the legacy trace object is not needed; this will be addressed in a future refactor.
+  // to the buffered trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     // If message is too big on its own, truncate it.
     writer->report(context,
@@ -200,7 +200,7 @@ void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
     return;
   }
 
-  // Note: spans are not available in the legacy tail worker, so we don't need an exceededSpanLimit
+  // Note: spans are not available in the buffered tail worker, so we don't need an exceededSpanLimit
   // variable for it and it can't cause truncation.
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
 
@@ -526,7 +526,7 @@ void WorkerTracer::setReturn(
         timestamp.orDefault([&]() { return getTime(); }));
   }
 
-  // Add fetch response info for legacy tail worker
+  // Add fetch response info for buffered tail worker
   KJ_IF_SOME(info, fetchResponseInfo) {
     KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
     KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");

@@ -122,7 +122,7 @@ class BaseTracer: public kj::Refcounted {
 
   // Sets the return event for Streaming Tail Worker, including fetchResponseInfo (HTTP status code)
   // if available. Must not be called more than once, and fetchResponseInfo should only be set for
-  // fetch events. For legacy tail worker, there is no distinct return event so we only add
+  // fetch events. For buffered tail worker, there is no distinct return event so we only add
   // fetchResponseInfo to the trace if present.
   virtual void setReturn(kj::Maybe<kj::Date> time = kj::none,
       kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) = 0;

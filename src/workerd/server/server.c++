@@ -2165,7 +2165,7 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
 
     if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
-      // Setting up legacy tail workers support, but only if we actually have tail workers
+      // Setting up buffered tail workers support, but only if we actually have tail workers
       // configured.
       auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
@@ -2182,7 +2182,7 @@ class Server::WorkerService final: public Service,
           kj::mv(tailStreamWriter));
 
       // When the tracer is complete, deliver the traces to both the parent
-      // and the legacy tail workers. We do NOT want to attach the tracer to the
+      // and the buffered tail workers. We do NOT want to attach the tracer to the
       // tracer->onComplete() promise here because it is the destructor of
       // the PipelineTracer that resolves the onComplete promise. If we attach
       // the tracer to the promise the tracer won't be destroyed while the

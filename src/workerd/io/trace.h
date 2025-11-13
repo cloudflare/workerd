@@ -302,7 +302,7 @@ kj::String KJ_STRINGIFY(const TraceId& id);
 kj::String KJ_STRINGIFY(const InvocationSpanContext& context);
 kj::String KJ_STRINGIFY(const SpanContext& context);
 
-// The various structs defined below are used in both legacy tail workers
+// The various structs defined below are used in both buffered tail workers
 // and streaming tail workers to report tail events.
 
 // Describes a fetch request
@@ -422,7 +422,7 @@ struct EmailEventInfo final {
   EmailEventInfo clone() const;
 };
 
-// Describes a legacy tail worker request
+// Describes a buffered tail worker request
 struct TraceEventInfo final {
   struct TraceItem;
 
