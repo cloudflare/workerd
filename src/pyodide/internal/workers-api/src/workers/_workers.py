@@ -257,6 +257,7 @@ async def fetch(
         resource = resource.js_object
     if "method" in other_options and isinstance(other_options["method"], HTTPMethod):
         other_options["method"] = other_options["method"].value
+
     resp = await _pyfetch_patched(resource, **other_options)
     return Response(resp.js_response)
 
@@ -360,7 +361,7 @@ class Response(FetchResponse):
             super().__init__(body.url, body)
             return
 
-        options = self._create_options(status, status_text, headers)
+        options = self._create_options(status, status_text, headers, web_socket)
 
         # Initialize via the FetchResponse super-class which gives us access to
         # methods that we would ordinarily have to redeclare.
@@ -879,6 +880,10 @@ def _raise_on_disabled_type(value):
     if isinstance(value, (tuple, bytearray, LambdaType)):
         raise TypeError(f"{type(value)} cannot be sent over RPC.")
 
+    if inspect.isawaitable(value):
+        # The caller is expected to await the value prior to conversion.
+        raise TypeError(f"Awaitable {type(value)} cannot be sent over RPC.")
+
     if _is_iterable(value):
         if isinstance(value, dict):
             for v in value.values():
@@ -968,6 +973,14 @@ class _DurableObjectNamespaceWrapper:
 
     def get(self, *args, **kwargs):
         return _FetcherWrapper(self._binding.get(*args, **kwargs))
+
+    def getByName(self, *args, **kwargs):
+        return _FetcherWrapper(self._binding.getByName(*args, **kwargs))
+
+    def jurisdiction(self, *args, **kwargs):
+        return _DurableObjectNamespaceWrapper(
+            self._binding.jurisdiction(*args, **kwargs)
+        )
 
 
 class _WorkflowInstanceWrapper:
