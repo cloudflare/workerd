@@ -76,11 +76,13 @@ def _snapshot_files(
         baseline_snapshot = None,
         numpy_snapshot = None,
         fastapi_snapshot = None,
+        dedicated_fastapi_snapshot = None,
         **_kwds):
     result = []
     result += _snapshot_file(baseline_snapshot)
     result += _snapshot_file(numpy_snapshot)
     result += _snapshot_file(fastapi_snapshot)
+    result += _snapshot_file(dedicated_fastapi_snapshot)
     return result
 
 def python_test_setup():

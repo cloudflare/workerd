@@ -164,6 +164,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "numpy_snapshot_hash": "60c9cb28e6dc1ea6ab38b25471ddaa315b667637c9dd6f94aceb2acc6519c623",
         "fastapi_snapshot": "package_snapshot_fastapi-a6ccb56fe.bin",
         "fastapi_snapshot_hash": "a6ccb56fe9eac265d139727d0134e8d6432c5fe25c8c0b8ec95252b13493b297",
+        "dedicated_fastapi_snapshot": "snapshot_a6b652a95810783f5078b9a5dbd4a07c30718acb4ff724e82c25db7353dd7f2d.bin",
+        "dedicated_fastapi_snapshot_hash": "4af6f012a5fb32f31a426e6f109e88ae85b18ee3dd131e1caaaad989cd962bbe",
         "vendored_packages_for_tests": [
             {
                 # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip

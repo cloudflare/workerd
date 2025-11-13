@@ -44,7 +44,7 @@ filegroup(
 
 SNAPSHOT_R2 = "https://pyodide-capnp-bin.edgeworker.net/"
 
-def _snapshot_http_file(bundle_name, folder, snapshot, integrity, hash):
+def _snapshot_http_file(bundle_name, folder, snapshot, integrity, hash, r2_base = SNAPSHOT_R2):
     if not snapshot:
         return
     if not integrity:
@@ -56,7 +56,7 @@ def _snapshot_http_file(bundle_name, folder, snapshot, integrity, hash):
     http_file(
         name = "pyodide-snapshot-" + snapshot,
         integrity = integrity,
-        url = SNAPSHOT_R2 + folder + key,
+        url = r2_base + folder + key,
     )
 
 def _snapshot_http_files(
@@ -68,10 +68,13 @@ def _snapshot_http_files(
         numpy_snapshot_integrity = None,
         fastapi_snapshot = None,
         fastapi_snapshot_integrity = None,
+        dedicated_fastapi_snapshot = None,
+        dedicated_fastapi_snapshot_integrity = None,
         **_kwds):
     _snapshot_http_file(name, "baseline-snapshot/", baseline_snapshot, baseline_snapshot_integrity, baseline_snapshot_hash)
     _snapshot_http_file(name, "test-snapshot/", numpy_snapshot, numpy_snapshot_integrity, None)
     _snapshot_http_file(name, "test-snapshot/", fastapi_snapshot, fastapi_snapshot_integrity, None)
+    _snapshot_http_file(name, "", dedicated_fastapi_snapshot, dedicated_fastapi_snapshot_integrity, None, VENDOR_R2)
 
 def dep_pyodide():
     for info in PYODIDE_VERSIONS:

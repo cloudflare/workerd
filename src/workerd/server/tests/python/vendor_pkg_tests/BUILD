@@ -20,3 +20,15 @@ vendored_py_wd_test(
     python_flags = ["0.28.2"],
     use_snapshot = "baseline",
 )
+
+# Note: the `existing_dedicated` tests verify that a dedicated snapshot which has been deployed to
+# production continues to work. Because of this the snapshot should never be changed and should
+# remain the same to ensure Workers in production continue to work.
+vendored_py_wd_test(
+    "existing_dedicated_fastapi",
+    feature_flags = ["python_dedicated_snapshot"],
+    make_snapshot = False,
+    python_flags = ["0.28.2"],
+    use_snapshot = "dedicated_fastapi",
+    vendored_package_name = "fastapi",
+)
