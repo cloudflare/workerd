@@ -107,6 +107,7 @@ jobs:
 
   check-snapshot:
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -169,6 +170,7 @@ jobs:
     needs: [test-linux, check-snapshot]
     name: Run workers-sdk tests
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
     steps:
       - name: Checkout workers-sdk
         uses: actions/checkout@v4

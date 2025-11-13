@@ -74,6 +74,8 @@ permissions:
 jobs:
   bazel:
     runs-on: ${{ inputs.image }}
+    # Cancel all builds taking longer than an hour, except on Windows
+    timeout-minutes: ${{ inputs.os_name == 'windows' && 90 || 60 }}
     steps:
       - uses: actions/checkout@v4
         with:
