@@ -287,11 +287,6 @@ Server::~Server() noexcept {
   // have a hard time avoiding a segfault later... and we're shutting down the server anyway so
   // whatever, better to crash.
 
-  // Clear unload tasks from all workers to avoid EventLoop errors.
-  for (auto& service: services) {
-    service.value->clearUnloadTasks();
-  }
-
   // It's important to cancel all tasks before we start tearing down.
   tasks.clear();
 
@@ -2072,10 +2067,6 @@ class Server::WorkerService final: public Service,
     }
 
     ioChannels = kj::mv(linked);
-  }
-
-  void clearUnloadTasks() override {
-    worker->clearUnloadTasks();
   }
 
   void unlink() override {

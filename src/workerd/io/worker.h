@@ -91,7 +91,7 @@ struct EntrypointClasses {
 // Note: This class should be referred to as "Worker instance" in cases where the bare word
 //   "Worker" is ambiguous. I considered naming the class WorkerInstance, but it feels redundant
 //   for a class name to end in "Instance". ("I have an instance of WorkerInstance...")
-class Worker: public kj::AtomicRefcounted, private kj::TaskSet::ErrorHandler {
+class Worker: public kj::AtomicRefcounted {
  public:
   class Script;
   class Isolate;
@@ -187,10 +187,7 @@ class Worker: public kj::AtomicRefcounted, private kj::TaskSet::ErrorHandler {
 
   // Helper for running unload handlers. Acquires an async lock, executes the callback
   // with SuppressIoContextScope, then clears any queued microtasks.
-  void runInUnloadScope(kj::Function<void(jsg::Lock&)> func) const;
-
-  // Clear any pending unload tasks. Should be called during shutdown before the EventLoop is destroyed.
-  void clearUnloadTasks() const;
+  void addUnloadTask(kj::Function<void(jsg::Lock&)> func) const;
 
   class AsyncLock;
 
@@ -238,12 +235,6 @@ class Worker: public kj::AtomicRefcounted, private kj::TaskSet::ErrorHandler {
 
   struct Impl;
   kj::Own<Impl> impl;
-
-  // TaskSet for tracking async unload handlers.
-  mutable kj::TaskSet unloadTasks;
-
-  // TaskSet::ErrorHandler implementation
-  void taskFailed(kj::Exception&& exception) override;
 
   kj::HashMap<kj::String, ConnectFn> connectOverrides;
 

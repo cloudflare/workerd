@@ -502,7 +502,7 @@ const Worker::Api& Worker::Api::current() {
   return *currentApi;
 }
 
-struct Worker::Impl {
+struct Worker::Impl: public kj::TaskSet::ErrorHandler {
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> context;
 
   // The environment blob to pass to handlers.
@@ -519,6 +519,17 @@ struct Worker::Impl {
 
   // If set, then any attempt to use this worker shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
+
+  // TaskSet for tracking async unload handlers.
+  mutable kj::TaskSet unloadTasks;
+
+  explicit Impl(): unloadTasks(*this) {}
+
+  virtual ~Impl() noexcept(false) = default;
+
+  void taskFailed(kj::Exception&& exception) override {
+    KJ_LOG(ERROR, "unload task failed", exception);
+  }
 };
 
 // Note that Isolate mutable state is protected by locking the JsgWorkerIsolate unless otherwise
@@ -600,6 +611,11 @@ struct Worker::Isolate::Impl {
         KJ_IF_SOME(c, workerImpl->context) {
           disposeContext(kj::mv(c));
         }
+
+        // Supress KJ IO warning: KJ async object being destroyed when not allowed:
+        //   JavaScript heap objects must not contain KJ I/O objects without a IoOwn.
+        // Since all tasks use weak references.
+        kj::AllowAsyncDestructorsScope allowAsyncDestructors;
         workerImpl = nullptr;
       }
 
@@ -1637,8 +1653,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     kj::Maybe<kj::Duration&> startupTime)
     : script(kj::mv(scriptParam)),
       metrics(kj::mv(metricsParam)),
-      impl(kj::heap<Impl>()),
-      unloadTasks(*this) {
+      impl(kj::heap<Impl>()) {
   // Enter/lock isolate.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     Isolate::Impl::Lock recordedLock(*script->isolate, lockType, stackScope);
@@ -1853,9 +1868,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
   });
 }
 
-void Worker::runInUnloadScope(kj::Function<void(jsg::Lock&)> func) const {
+void Worker::addUnloadTask(kj::Function<void(jsg::Lock&)> func) const {
   auto workerWeakRef = kj::atomicAddRefWeak(*this);
-  unloadTasks.add(takeAsyncLockWithoutRequest(nullptr).then(
+  impl->unloadTasks.add(takeAsyncLockWithoutRequest(nullptr).then(
       [workerWeakRef = kj::mv(workerWeakRef), func = kj::mv(func)](
           AsyncLock asyncLock) mutable -> kj::Promise<void> {
     // If worker is already disposed, no need to run unload handler.
@@ -1886,18 +1901,8 @@ void Worker::runInUnloadScope(kj::Function<void(jsg::Lock&)> func) const {
   }));
 }
 
-void Worker::taskFailed(kj::Exception&& exception) {
-  KJ_LOG(ERROR, "unload task failed", exception);
-}
-
-void Worker::clearUnloadTasks() const {
-  unloadTasks.clear();
-}
-
 Worker::~Worker() noexcept(false) {
   metrics->teardownStarted();
-
-  clearUnloadTasks();
 
   auto& isolateImpl = *script->getIsolate().impl;
   auto lock = isolateImpl.workerDestructionQueue.lockExclusive();
@@ -1907,7 +1912,8 @@ Worker::~Worker() noexcept(false) {
   metrics->teardownLockAcquired();
 
   // Defer destruction of our V8 objects, in particular our jsg::Context, which requires some
-  // finalization.
+  // finalization. Note: Worker::Impl::unloadTasks is declared last so it destructs first,
+  // before the DISALLOW_KJ_IO_DESTRUCTORS_SCOPE is entered.
   lock->push(kj::mv(impl));
 }
 
@@ -3822,7 +3828,7 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
   // of the design - unload does not remove the need for finalization.
   KJ_IF_SOME(state, durableObjectState) {
     if (state->hasUnloadHandlers) {
-      worker->runInUnloadScope([weakState = state->weakThis.addRef()](jsg::Lock& js) mutable {
+      worker->addUnloadTask([weakState = state->weakThis.addRef()](jsg::Lock& js) mutable {
         weakState->runIfAlive([&](api::DurableObjectState& state) {
           state.dispatchEvent(js, js.alloc<api::Event>("unload"_kjc));
         });

@@ -591,7 +591,7 @@ IoContext::~IoContext() noexcept(false) {
   // triggered by design.
   if (hasUnloadHandlers) {
     KJ_IF_SOME(weakCtx, executionContext) {
-      worker->runInUnloadScope([weakCtx = weakCtx.addRef()](jsg::Lock& js) mutable {
+      worker->addUnloadTask([weakCtx = weakCtx.addRef()](jsg::Lock& js) mutable {
         weakCtx->runIfAlive([&](api::ExecutionContext& ctx) {
           ctx.dispatchEvent(js, js.alloc<api::Event>("unload"_kjc));
         });
