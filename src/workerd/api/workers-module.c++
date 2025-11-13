@@ -52,6 +52,18 @@ jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
   return js.alloc<WorkflowEntrypoint>();
 }
 
+jsg::Ref<ContainerEntrypoint> ContainerEntrypoint::constructor(
+    const v8::FunctionCallbackInfo<v8::Value>& args,
+    jsg::Ref<DurableObjectState> ctx,
+    jsg::JsObject env) {
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+
+  jsg::JsObject self(args.This());
+  self.set(js, "ctx", jsg::JsValue(args[0]));
+  self.set(js, "env", jsg::JsValue(args[1]));
+  return js.alloc<ContainerEntrypoint>();
+}
+
 void EntrypointsModule::waitUntil(kj::Promise<void> promise) {
   // No need to check if IoContext::hasCurrent since current() will throw
   // if there is no active request.

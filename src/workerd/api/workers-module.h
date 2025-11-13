@@ -70,6 +70,19 @@ class WorkflowEntrypoint: public jsg::Object {
   JSG_RESOURCE_TYPE(WorkflowEntrypoint) {}
 };
 
+// Base class for Containers
+//
+// When the worker's top-level module exports a class that extends this class, it means that it
+// is a Container entrypoint, similar to Durable Objects but with container-specific functionality.
+class ContainerEntrypoint: public jsg::Object {
+ public:
+  static jsg::Ref<ContainerEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
+      jsg::Ref<DurableObjectState> ctx,
+      jsg::JsObject env);
+
+  JSG_RESOURCE_TYPE(ContainerEntrypoint) {}
+};
+
 // The "cloudflare:workers" module, which exposes the WorkerEntrypoint, WorkflowEntrypoint and DurableObject types
 // for extending.
 class EntrypointsModule: public jsg::Object {
@@ -82,6 +95,7 @@ class EntrypointsModule: public jsg::Object {
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE(WorkflowEntrypoint);
+    JSG_NESTED_TYPE(ContainerEntrypoint);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
     JSG_NESTED_TYPE_NAMED(JsRpcPromise, RpcPromise);
     JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
@@ -94,7 +108,8 @@ class EntrypointsModule: public jsg::Object {
 };
 
 #define EW_WORKERS_MODULE_ISOLATE_TYPES                                                            \
-  api::WorkerEntrypoint, api::WorkflowEntrypoint, api::DurableObjectBase, api::EntrypointsModule
+  api::WorkerEntrypoint, api::WorkflowEntrypoint, api::ContainerEntrypoint,                        \
+      api::DurableObjectBase, api::EntrypointsModule
 
 template <class Registry>
 void registerWorkersModule(Registry& registry, CompatibilityFlags::Reader flags) {

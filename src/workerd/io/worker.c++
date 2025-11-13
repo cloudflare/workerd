@@ -1875,6 +1875,13 @@ void Worker::processEntrypointClass(jsg::Lock& js,
               .missingSuperclass = false,
             });
         return;
+      } else if (handle == entrypointClasses.containerEntrypoint) {
+        impl->actorClasses.insert(kj::mv(handlerName),
+            ActorClassInfo{
+              .cls = kj::mv(cls),
+              .missingSuperclass = false,
+            });
+        return;
       } else if (handle == entrypointClasses.workerEntrypoint) {
         impl->statelessClasses.insert(kj::mv(handlerName), kj::mv(cls));
         return;
