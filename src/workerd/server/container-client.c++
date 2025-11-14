@@ -431,6 +431,12 @@ kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutCont
   co_return;
 }
 
+kj::Promise<void> ContainerClient::setEgressTcp(SetEgressTcpContext context) {
+  // TODO: Implement setEgress
+  KJ_UNIMPLEMENTED(
+      "setEgress is not implemented in local development as it's a experimental feature");
+}
+
 kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
   const auto params = context.getParams();
   uint16_t port = params.getPort();

@@ -17,6 +17,15 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
       running(running) {}
 
+void Container::setEgress(jsg::Lock& js, kj::String addr, jsg::Ref<api::Fetcher> binding) {
+  auto subrequestChannel = binding->getSubrequestChannel(IoContext::current());
+  subrequestChannel->requireAllowsTransfer();
+  auto request = rpcClient->setEgressTcpRequest();
+  auto serviceDesignator = request.initService();
+  subrequestChannel->writeServiceDesignator(serviceDesignator);
+  IoContext::current().addTask(request.sendIgnoringResult());
+}
+
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");

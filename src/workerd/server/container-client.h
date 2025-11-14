@@ -40,6 +40,7 @@ class ContainerClient final: public rpc::Container::Server {
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
+  kj::Promise<void> setEgressTcp(SetEgressTcpContext context) override;
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;

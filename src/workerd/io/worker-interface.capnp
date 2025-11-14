@@ -17,6 +17,30 @@ using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
 
+struct ServiceDesignator {
+  # ServiceDesignator serves as a way to transfer binding information to external services
+
+  name @0 :Text;
+  # The service name.
+
+  entrypoint @1 :Text;
+  # A modules-syntax Worker can export multiple named entrypoints. `export default {` specifies
+  # the default entrypoint, whereas `export let foo = {` defines an entrypoint named `foo`. If
+  # `entrypoint` is specified here, it names an alternate entrypoint to use on the target worker,
+  # otherwise the default is used.
+
+  props :union {
+    # Value to provide in `ctx.props` in the target worker
+    # when invoked by this service.
+
+    empty @2 :Void;
+    # Empty object. (This is the default.)
+
+    json @3 :Text;
+    # A JSON-encoded value.
+  }
+}
+
 # A 128-bit trace ID used to identify traces.
 struct TraceId {
   high @0 :UInt64;

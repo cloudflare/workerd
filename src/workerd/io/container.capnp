@@ -5,6 +5,7 @@ $Cxx.namespace("workerd::rpc");
 $Cxx.allowCancellation;
 
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
+using import "/workerd/io/worker-interface.capnp".ServiceDesignator;
 
 interface Container @0x9aaceefc06523bca {
   # RPC interface to talk to a container, for containers attached to Durable Objects.
@@ -100,7 +101,7 @@ interface Container @0x9aaceefc06523bca {
     # attempting to connect.
   }
 
-  setInactivityTimeout @7 (durationMs  :Int64);
+  setInactivityTimeout @7 (durationMs :Int64);
   # Configures the duration where the runtime should shutdown the container after there is
   # no connections or activity to the Container.
   #
@@ -110,4 +111,8 @@ interface Container @0x9aaceefc06523bca {
   # Note that if there is an open connection to the container, the runtime must not shutdown the container.
   # If there is no activity timeout duration configured and no container connection, it's up to the runtime
   # to decide when to signal the container to exit.
+
+  setEgressTcp @8 (addr: Text, service: ServiceDesignator);
+  # setEgressTcp will configure the container to send traffic to this
+  # service
 }
