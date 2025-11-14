@@ -1170,3 +1170,9 @@ wd_test(
         "tests/instrumentation-tail-worker.js",
     ],
 )
+
+wd_test(
+    src = "tests/headers-immutable-prototype-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/headers-immutable-prototype-test.js"],
+)

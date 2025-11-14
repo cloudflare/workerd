@@ -231,6 +231,10 @@ void Lock::setToStringTag() {
   IsolateBase::from(v8Isolate).enableSetToStringTag();
 }
 
+void Lock::setImmutablePrototype() {
+  IsolateBase::from(v8Isolate).enableSetImmutablePrototype();
+}
+
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
   IsolateBase::from(v8Isolate).setLoggerCallback({}, kj::mv(logger));
 }

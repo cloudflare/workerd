@@ -1052,8 +1052,13 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
+    // TODO(cleanup): Now that this list has grown significantly, we should probably
+    // refactor to pass all of the options in a single call instead of one by one.
     if (features.getSetToStringTag()) {
       lock->setToStringTag();
+    }
+    if (features.getShouldSetImmutablePrototype() || features.getPythonWorkers()) {
+      lock->setImmutablePrototype();
     }
     if (features.getNodeJsCompatV2()) {
       lock->setNodeJsCompatEnabled();

@@ -33,6 +33,11 @@ bool getShouldSetToStringTag(v8::Isolate* isolate) {
   return jsgIsolate.shouldSetToStringTag();
 }
 
+bool getShouldSetImmutablePrototype(v8::Isolate* isolate) {
+  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  return jsgIsolate.shouldSetImmutablePrototype();
+}
+
 #if _WIN32
 kj::String fullyQualifiedTypeName(const std::type_info& type) {
   // type.name() returns a human-readable name on Windows:
