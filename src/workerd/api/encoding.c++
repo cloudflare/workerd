@@ -466,7 +466,7 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
 
 namespace {
 
-constexpr inline bool isLeadSurrogate(char16_t c) {
+[[maybe_unused]] constexpr inline bool isLeadSurrogate(char16_t c) {
   return (c & 0xFC00) == 0xD800;
 }
 
@@ -502,7 +502,7 @@ size_t utf8LengthFromInvalidUtf16(kj::ArrayPtr<const char16_t> input) {
 
       // Handle the invalid surrogate at inputPos
       // SURROGATE error means unpaired surrogate, so valid pair should be impossible
-      char16_t c = input[inputPos];
+      [[maybe_unused]] char16_t c = input[inputPos];
       KJ_DASSERT(!(isLeadSurrogate(c) && inputPos + 1 < input.size() &&
                      isTrailSurrogate(input[inputPos + 1])),
           "Valid surrogate pair should not trigger SURROGATE error");
@@ -571,7 +571,7 @@ size_t convertInvalidUtf16ToUtf8(kj::ArrayPtr<const char16_t> input, kj::ArrayPt
 
       // Handle the invalid surrogate at inputPos
       // SURROGATE error means unpaired surrogate, so valid pair should be impossible
-      char16_t c = input[inputPos];
+      [[maybe_unused]] char16_t c = input[inputPos];
       KJ_DASSERT(!(isLeadSurrogate(c) && inputPos + 1 < input.size() &&
                      isTrailSurrogate(input[inputPos + 1])),
           "Valid surrogate pair should not trigger SURROGATE error");
@@ -725,15 +725,7 @@ size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) 
 
   while (pos < length) {
     size_t remaining = length - pos;
-    size_t chunkSize = remaining < CHUNK ? remaining : CHUNK;
-
-    // Don't split surrogate pairs at chunk boundary
-    if (pos + chunkSize < length && chunkSize > 0) {
-      char16_t last = data[pos + chunkSize - 1];
-      if (isLeadSurrogate(last)) {
-        chunkSize--;
-      }
-    }
+    size_t chunkSize = simdutf::trim_partial_utf16(data + pos, kj::min(remaining, CHUNK));
 
     if (chunkSize == 0) {
       chunkSize = (remaining >= 2) ? 2 : remaining;
@@ -751,14 +743,7 @@ size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) 
         size_t mid = left + (right - left) / 2;
         if (mid == 0) break;
 
-        // Don't split surrogate pairs
-        size_t adjustedMid = mid;
-        if (adjustedMid > 0 && pos + adjustedMid < length) {
-          char16_t prev = data[pos + adjustedMid - 1];
-          if (isLeadSurrogate(prev)) {
-            adjustedMid--;
-          }
-        }
+        size_t adjustedMid = simdutf::trim_partial_utf16(data + pos, mid);
 
         if (adjustedMid == 0) {
           right = 0;
@@ -794,15 +779,7 @@ size_t findBestFitInvalidUtf16(const char16_t* data, size_t length, size_t buffe
 
   while (pos < length) {
     size_t remaining = length - pos;
-    size_t chunkSize = remaining < CHUNK ? remaining : CHUNK;
-
-    // Don't split surrogate pairs at chunk boundary
-    if (pos + chunkSize < length && chunkSize > 0) {
-      char16_t last = data[pos + chunkSize - 1];
-      if (isLeadSurrogate(last)) {
-        chunkSize--;
-      }
-    }
+    size_t chunkSize = simdutf::trim_partial_utf16(data + pos, kj::min(remaining, CHUNK));
 
     if (chunkSize == 0) {
       chunkSize = (remaining >= 2) ? 2 : remaining;
@@ -820,14 +797,7 @@ size_t findBestFitInvalidUtf16(const char16_t* data, size_t length, size_t buffe
         size_t mid = left + (right - left) / 2;
         if (mid == 0) break;
 
-        // Don't split surrogate pairs
-        size_t adjustedMid = mid;
-        if (adjustedMid > 0 && pos + adjustedMid < length) {
-          char16_t prev = data[pos + adjustedMid - 1];
-          if (isLeadSurrogate(prev)) {
-            adjustedMid--;
-          }
-        }
+        size_t adjustedMid = simdutf::trim_partial_utf16(data + pos, mid);
 
         if (adjustedMid == 0) {
           right = 0;
