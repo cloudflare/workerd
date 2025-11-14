@@ -110,9 +110,9 @@ export const test = {
       '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://foo/test","headers":[]}}{"type":"spanOpen","name":"durable_object_storage_setAlarm","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000002"}{"type":"spanClose","outcome":"ok"}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","scriptTags":[],"info":{"type":"alarm","scheduledTime":"1970-01-01T00:00:00.000Z"}}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000002"}{"type":"spanClose","outcome":"ok"}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
-      // legacy tail worker, triggered via alarm test. It would appear that these being recorded
+      // buffered tail worker, triggered via alarm test. It would appear that these being recorded
       // after the onsets above is not guaranteed, but since the streaming tail worker is invoked
-      // when the main invocation starts whereas the legacy tail worker is only invoked when it ends
+      // when the main invocation starts whereas the buffered tail worker is only invoked when it ends
       // this should be fine in practice.
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',

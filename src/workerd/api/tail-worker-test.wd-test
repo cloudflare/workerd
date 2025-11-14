@@ -35,8 +35,8 @@ const unitTests :Workerd.Config = (
     (name = "hiber", worker = .hiberWorker),
     (name = "js-rpc-test", worker = .jsRpcWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),
-    # Dummy legacy tail worker (gets traces from alarms worker and produces trace for main tracer)
-    (name = "legacy", worker = .logLegacy, ),
+    # Dummy buffered tail worker (gets traces from alarms worker and produces trace for main tracer)
+    (name = "buffered", worker = .logBuffered, ),
     # Receives trace events from STW, used to check that STW produces trace events properly
     (name = "receiver", worker = .logReceiver, ),
     # Unified tail worker with tests
@@ -72,8 +72,8 @@ const alarmsWorker :Workerd.Worker = (
   bindings = [
     (name = "ns", durableObjectNamespace = "DurableObjectExample"),
   ],
-  # tailed by the main tail worker and the dummy legacy tail worker, to get traces for it too.
-  tails = ["legacy"],
+  # tailed by the main tail worker and the dummy buffered tail worker, to get traces for it too.
+  tails = ["buffered"],
   streamingTails = ["log"],
 );
 
@@ -133,7 +133,7 @@ const logReceiver :Workerd.Worker = (
   compatibilityFlags = ["experimental", "nodejs_compat"],
 );
 
-const logLegacy :Workerd.Worker = (
+const logBuffered :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "tail-worker-test-dummy.js")
   ],
