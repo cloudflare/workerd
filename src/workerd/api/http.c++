@@ -1568,6 +1568,9 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
   }
 
   if (webSocket == kj::none) {
+    if (statusCode == 101) {
+      JSG_FAIL_REQUIRE(RangeError, "Responses with status code 101 must specify a webSocket.");
+    }
     JSG_REQUIRE(statusCode >= 200 && statusCode <= 599, RangeError,
         "Responses may only be constructed with status codes in the range 200 to 599, inclusive.");
   } else {
