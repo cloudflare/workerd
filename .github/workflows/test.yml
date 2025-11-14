@@ -76,6 +76,7 @@ jobs:
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
       extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}'
+      disable_job_timeouts: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'slow') }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
@@ -91,6 +92,7 @@ jobs:
       extra_bazel_args: '--config=ci-test --config=ci-linux'
       upload_test_logs: true
       upload_binary: true
+      disable_job_timeouts: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'slow') }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
