@@ -453,11 +453,6 @@ public:
     NO
   };
 
-  kj::Maybe<uint> tryGetChannel() const {
-      // Return the channel if it's stored as a uint
-      return channelOrClientFactory.tryGet<uint>();
-  }
-
   // `channel` is what to pass to IoContext::getSubrequestChannel() to get a WorkerInterface
   // representing this Fetcher. Note that different requests potentially have different client
   // objects because a WorkerInterface is a KJ I/O object and therefore tied to a thread.

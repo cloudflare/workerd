@@ -23,8 +23,6 @@ void Container::listen(jsg::Lock& js, kj::String addr, jsg::Ref<api::Fetcher> bi
     auto request = rpcClient->setEgressTcpRequest();
     auto serviceDesignator = request.initService();
     subrequestChannel->writeServiceDesignator(serviceDesignator);
-    // auto request = rpcClient->setEgressTcpRequest();
-    // request.setChannelId(channel);
     IoContext::current().addTask(request.sendIgnoringResult());
 }
 

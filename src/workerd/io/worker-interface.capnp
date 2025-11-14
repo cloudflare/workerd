@@ -17,24 +17,11 @@ using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
 
-# TODO: copied from worker.capnp...
 struct ServiceDesignator {
-  # A reference to a service from elsewhere in the config file, e.g. from a service binding in a
-  # Worker.
-  #
-  # In the case that only `name` needs to be specified, then you can provide a raw string wherever
-  # `ServiceDesignator` is needed. Cap'n proto automatically assumes the string is intended to be
-  # the value for `name`, since that is the first field. In other words, if you would otherwise
-  # write something like:
-  #
-  #     bindings = [(service = (name = "foo"))]
-  #
-  # You can write this instead, which is equivalent:
-  #
-  #     bindings = [(service = "foo")]
+  # ServiceDesignator serves as a way to transfer binding information to external services
 
   name @0 :Text;
-  # Name of the service in the Config.services list.
+  # The service name.
 
   entrypoint @1 :Text;
   # A modules-syntax Worker can export multiple named entrypoints. `export default {` specifies
@@ -43,7 +30,8 @@ struct ServiceDesignator {
   # otherwise the default is used.
 
   props :union {
-    # Value to provide in `ctx.props` in the target worker.
+    # Value to provide in `ctx.props` in the target worker
+    # when invoked by this service.
 
     empty @2 :Void;
     # Empty object. (This is the default.)
@@ -52,11 +40,11 @@ struct ServiceDesignator {
     # A JSON-encoded value.
   }
 
-  # TODO(someday): Options to specify which event types are allowed.
-  # TODO(someday): Allow adding an outgoing middleware stack here (see TODO in Service, above).
+  metadata @4: Text;
+  # A JSON-encoded value that carries information of the
+  # service in how-to communicate back.
+  # In workerd, this can be empty.
 }
-
-
 
 # A 128-bit trace ID used to identify traces.
 struct TraceId {
