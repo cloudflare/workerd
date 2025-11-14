@@ -17,7 +17,7 @@ export const test = {
     strictEqual(exports.MyService, undefined);
     strictEqual(exports.test, undefined);
 
-    // withExports still works as expected though
+    // withExports still works as expected with an object
     const result = await withExports({ customExport: 'test' }, async () => {
       await scheduler.wait(0);
       const { exports: otherExports } = await import('child');
@@ -26,5 +26,17 @@ export const test = {
       return otherExports.customExport;
     });
     strictEqual(result, 'test');
+
+    // withExports with non-object values should fall back to disabled behavior
+    const nonObjectValues = [null, 'string', 123, undefined];
+    for (const value of nonObjectValues) {
+      await withExports(value, async () => {
+        await scheduler.wait(0);
+        // When withExports gets a non-object, getCurrentExports falls through to the
+        // base behavior (which is disabled by disallow_importable_env), so exports are empty
+        strictEqual(exports.MyService, undefined);
+        strictEqual(exports.customExport, undefined);
+      });
+    }
   },
 };
