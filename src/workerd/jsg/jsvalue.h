@@ -305,6 +305,12 @@ class JsString final: public JsBase<v8::String, JsString> {
     // The number of elements (e.g. char, byte, uint16_t) written to the buffer.
     size_t written;
   };
+
+  // Copy string contents into a provided buffer (off-heap memory).
+  //
+  // IMPORTANT: This method does NOT flatten the V8 string or hold V8 heap locks. It safely
+  // copies data out of V8's heap into your buffer. This makes it safe to use before calling
+  // GC-triggering operations like Lock::allocBackingStore().
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<char> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
