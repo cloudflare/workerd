@@ -676,7 +676,10 @@ namespace {
 
 // Find how many Latin-1 characters fit when converted to UTF-8
 // Uses chunked forward scan with SIMD, O(result) complexity
-size_t findBestFitLatin1(const char* data, size_t length, size_t bufferSize) {
+// Template parameter ReturnLength controls whether to return just position or (position, utf8_length)
+template <bool ReturnLength = false>
+std::conditional_t<ReturnLength, std::pair<size_t, size_t>, size_t> findBestFitLatin1(
+    const char* data, size_t length, size_t bufferSize) {
   size_t pos = 0;
   size_t utf8Accumulated = 0;
   constexpr size_t CHUNK = 256;
@@ -705,22 +708,35 @@ size_t findBestFitLatin1(const char* data, size_t length, size_t bufferSize) {
         }
       }
 
-      return pos + bestFit;
+      if constexpr (ReturnLength) {
+        size_t finalPos = pos + bestFit;
+        size_t finalUtf8Len =
+            utf8Accumulated + simdutf::utf8_length_from_latin1(data + pos, bestFit);
+        return {finalPos, finalUtf8Len};
+      } else {
+        return pos + bestFit;
+      }
     }
 
     utf8Accumulated += chunkUtf8Len;
     pos += chunkSize;
   }
 
-  return pos;
+  if constexpr (ReturnLength) {
+    return {pos, utf8Accumulated};
+  } else {
+    return pos;
+  }
 }
 
 // Find how many UTF-16 code units fit when converted to UTF-8
 // Uses chunked forward scan with SIMD, O(result) complexity. Never splits surrogate pairs.
-size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) {
+// Template parameter ReturnLength controls whether to return just position or (position, utf8_length)
+template <bool ReturnLength = false>
+std::conditional_t<ReturnLength, std::pair<size_t, size_t>, size_t> findBestFitUtf16(
+    const char16_t* data, size_t length, size_t bufferSize) {
   size_t pos = 0;
   size_t utf8Accumulated = 0;
-
   constexpr size_t CHUNK = 256;
 
   while (pos < length) {
@@ -759,14 +775,25 @@ size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) 
         }
       }
 
-      return pos + bestFit;
+      if constexpr (ReturnLength) {
+        size_t finalPos = pos + bestFit;
+        size_t finalUtf8Len =
+            utf8Accumulated + simdutf::utf8_length_from_utf16(data + pos, bestFit);
+        return {finalPos, finalUtf8Len};
+      } else {
+        return pos + bestFit;
+      }
     }
 
     utf8Accumulated += chunkUtf8Len;
     pos += chunkSize;
   }
 
-  return pos;
+  if constexpr (ReturnLength) {
+    return {pos, utf8Accumulated};
+  } else {
+    return pos;
+  }
 }
 
 // Find how many UTF-16 code units with invalid surrogates fit when converted to UTF-8
@@ -849,8 +876,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Buffer might fit most/all of string: try optimized fast paths
-    // Fast path 1: Worst-case (2x) definitely fits
+    // Fast path: Worst-case (2x) definitely fits
     if (length * 2 <= bufferSize) {
       size_t written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
@@ -859,10 +885,12 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Calculate exact UTF-8 length to determine if it fits
-    size_t utf8Length = simdutf::utf8_length_from_latin1(data, length);
-    if (utf8Length <= bufferSize) {
-      // Fast path 2: ASCII (utf8Length == length means no conversion needed)
+    // Use forward scan that also returns UTF-8 length (avoids redundant full-string scan)
+    auto [read, utf8Length] = findBestFitLatin1<true>(data, length, bufferSize);
+
+    // Check if everything fit
+    if (read == length) {
+      // ASCII fast path: utf8Length == length means no conversion needed
       if (utf8Length == length) {
         memcpy(outputBuf.begin(), data, length);
         return TextEncoder::EncodeIntoResult{
@@ -870,7 +898,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
           .written = static_cast<int>(length),
         };
       }
-      // Fits: convert with SIMD
+      // All fit: convert with SIMD
       size_t written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
         .read = static_cast<int>(length),
@@ -878,8 +906,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Doesn't fit: forward scan to find what does
-    size_t read = findBestFitLatin1(data, length, bufferSize);
+    // Partial fit: convert only what fits
     size_t written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
     return TextEncoder::EncodeIntoResult{
       .read = static_cast<int>(read),
@@ -912,9 +939,11 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Slow path: calculate exact UTF-8 length
-    size_t utf8Length = simdutf::utf8_length_from_utf16(data, length);
-    if (utf8Length <= bufferSize) {
+    // Use forward scan that also returns UTF-8 length (avoids redundant full-string scan)
+    auto [read, utf8Length] = findBestFitUtf16<true>(data, length, bufferSize);
+
+    if (read == length) {
+      // Everything fit: convert all
       size_t written = simdutf::convert_utf16_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
         .read = static_cast<int>(length),
@@ -922,8 +951,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Doesn't fit: forward scan to find what does
-    size_t read = findBestFitUtf16(data, length, bufferSize);
+    // Partial fit: convert only what fits
     size_t written = simdutf::convert_utf16_to_utf8(data, read, outputBuf.begin());
     return TextEncoder::EncodeIntoResult{
       .read = static_cast<int>(read),
