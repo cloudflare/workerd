@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "existing-dedicated-fastapi-vendor-test",
+      worker = (
+        modules = [
+          # The snapshot's main module is also named worker.py. This needs to match.
+          (name = "worker.py", pythonModule = embed "existing_dedicated_fastapi.py"),
+          %PYTHON_VENDORED_MODULES%
+        ],
+        compatibilityDate = "2025-11-01",
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+      )
+    ),
+  ],
+);

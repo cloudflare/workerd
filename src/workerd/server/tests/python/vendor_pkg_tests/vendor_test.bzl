@@ -81,6 +81,7 @@ def vendored_py_wd_test(
         vendored_srcs_target_prefix = None,
         python_flags = "all",
         skip_python_flags = [],
+        vendored_package_name = None,
         **kwds):
     python_flags = compute_python_flags(python_flags, skip_python_flags)
     bzl_name = "%s_vendor_test" % name
@@ -88,11 +89,13 @@ def vendored_py_wd_test(
         test_template = "%s_vendor.wd-test" % name
     if main_py_file == None:
         main_py_file = "%s.py" % name
+    if vendored_package_name == None:
+        vendored_package_name = name
     if vendored_srcs_target_prefix == None:
-        vendored_srcs_target_prefix = "@%s_src" % name
+        vendored_srcs_target_prefix = "@%s_src" % vendored_package_name
 
     for flag in python_flags:
         info = BUNDLE_VERSION_INFO[flag]
-        if name not in info["vendored_packages_for_tests"]:
-            fail("Not found", name, "in", info["vendored_packages_for_tests"])
+        if vendored_package_name not in info["vendored_packages_for_tests"]:
+            fail("Not found", vendored_package_name, "in", info["vendored_packages_for_tests"])
         _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, **kwds)
