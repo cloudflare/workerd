@@ -599,10 +599,10 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   jsg::JsString str = input.orDefault(js.str());
   std::shared_ptr<v8::BackingStore> backingStore;
   size_t utf8_length = 0;
+  auto length = str.length(js);
 
   // Fast path: check if string is one-byte before creating ValueView
   if (str.isOneByte(js)) {
-    auto length = str.length(js);
     // Use off-heap allocation for intermediate Latin-1 buffer to avoid wasting V8 heap space
     // and potentially triggering GC. Stack allocation for small strings, heap for large.
     kj::SmallArray<kj::byte, 4096> latin1Buffer(length);
@@ -637,36 +637,28 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   }
 
   // Two-byte string path
-  {
-    // Note that ValueView flattens the string, if it's not already flattened
-    v8::String::ValueView view(js.v8Isolate, str);
-    // Two-byte string path. V8 uses UTF-16LE encoding internally for strings with code points
-    // > U+00FF. Check if the UTF-16 is valid (no unpaired surrogates) to determine the path.
-    auto data = reinterpret_cast<const char16_t*>(view.data16());
+  // Use off-heap allocation for intermediate UTF-16 buffer to avoid triggering GC.
+  // Stack allocation for small strings, heap for large.
+  kj::SmallArray<uint16_t, 4096> utf16Buffer(length);
 
-    if (simdutf::validate_utf16le(data, view.length())) {
-      // Common case: valid UTF-16, convert directly to UTF-8
-      utf8_length = simdutf::utf8_length_from_utf16le(data, view.length());
-      backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
-      [[maybe_unused]] auto written = simdutf::convert_utf16le_to_utf8(
-          data, view.length(), reinterpret_cast<char*>(backingStore->Data()));
-      KJ_DASSERT(written == utf8_length);
-    } else {
-      // Invalid UTF-16 with unpaired surrogates. Per the Encoding Standard,
-      // unpaired surrogates must be replaced with U+FFFD (replacement character).
-      // Use custom conversion that handles invalid surrogates without creating an
-      // intermediate well-formed UTF-16 buffer.
-      auto inputArray = kj::ArrayPtr<const char16_t>(data, view.length());
-      utf8_length = utf8LengthFromInvalidUtf16(inputArray);
-      backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
-      auto outputArray =
-          kj::ArrayPtr<char>(reinterpret_cast<char*>(backingStore->Data()), utf8_length);
-      convertInvalidUtf16ToUtf8(inputArray, outputArray);
-    }
-  }  // ValueView destroyed here, releasing the heap lock
+  // Note: writeInto() doesn't flatten the string - it calls writeTo() which chains through
+  // Write2 -> WriteV2 -> WriteHelperV2 -> String::WriteToFlat (written by Erik in 2008).
+  // This means we may read from multiple string segments, but that's fine for our use case.
+  [[maybe_unused]] auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
+  KJ_DASSERT(
+      writeResult.written == length, "writeInto must completely overwrite the backing buffer");
 
-  // Now that ValueView is destroyed and the heap lock is released, it's safe to create V8 objects.
-  // Create the Uint8Array from the raw v8::BackingStore.
+  auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());
+  utf8_length = utf8LengthFromInvalidUtf16(kj::arrayPtr(data, length));
+
+  if (!simdutf::validate_utf16(data, length)) {
+    simdutf::to_well_formed_utf16(data, length, data);
+  }
+
+  backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+  [[maybe_unused]] auto written = simdutf::convert_valid_utf16_to_utf8(
+      data, length, reinterpret_cast<char*>(backingStore->Data()));
+
   auto array =
       v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, backingStore), 0, utf8_length);
   return jsg::JsUint8Array(array);
@@ -885,12 +877,15 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Use forward scan that also returns UTF-8 length (avoids redundant full-string scan)
+    // "Maybe fits" zone: bufferSize < length*2, but might still fit entirely.
+    // Use forward scan with ReturnLength=true to get both position and UTF-8 length.
+    // This avoids redundant work: if we called utf8_length_from_latin1() to check if it fits,
+    // then called findBestFitLatin1() when it doesn't, we'd scan the string twice.
     auto [read, utf8Length] = findBestFitLatin1<true>(data, length, bufferSize);
 
     // Check if everything fit
     if (read == length) {
-      // ASCII fast path: utf8Length == length means no conversion needed
+      // ASCII fast path: utf8Length == length means all chars are ASCII, no conversion needed
       if (utf8Length == length) {
         memcpy(outputBuf.begin(), data, length);
         return TextEncoder::EncodeIntoResult{
@@ -898,8 +893,8 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
           .written = static_cast<int>(length),
         };
       }
-      // All fit: convert with SIMD
-      size_t written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
+
+      auto written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
         .read = static_cast<int>(length),
         .written = static_cast<int>(written),
@@ -939,11 +934,14 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Use forward scan that also returns UTF-8 length (avoids redundant full-string scan)
+    // "Maybe fits" zone: bufferSize < length*3, but might still fit entirely.
+    // Use forward scan with ReturnLength=true to get both position and UTF-8 length.
+    // This avoids redundant work: if we called utf8_length_from_utf16() to check if it fits,
+    // then called findBestFitUtf16() when it doesn't, we'd scan the string twice.
     auto [read, utf8Length] = findBestFitUtf16<true>(data, length, bufferSize);
 
     if (read == length) {
-      // Everything fit: convert all
+      // Everything fit: convert entire string with SIMD
       size_t written = simdutf::convert_utf16_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
         .read = static_cast<int>(length),
