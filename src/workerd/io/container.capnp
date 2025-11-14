@@ -5,12 +5,7 @@ $Cxx.namespace("workerd::rpc");
 $Cxx.allowCancellation;
 
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
-
-
-interface ContainerIoChannelIdFactory {
-    # HACK
-    getConfiguration @0 (channelId: Int32) -> (channelConfiguration: Text);
-}
+using import "/workerd/io/worker-interface.capnp".ServiceDesignator;
 
 interface Container @0x9aaceefc06523bca {
   # RPC interface to talk to a container, for containers attached to Durable Objects.
@@ -117,8 +112,7 @@ interface Container @0x9aaceefc06523bca {
   # If there is no activity timeout duration configured and no container connection, it's up to the runtime
   # to decide when to signal the container to exit.
 
-  setChannelIdFactory @8 (factory: ContainerIoChannelIdFactory);
-  # TODO: this is not correct
-
-  setEgressTcp @9 (addr: Text, channelId: Int64);
+  setEgressTcp @8 (addr: Text, service: ServiceDesignator);
+  # setEgressTcp will configure the container to send traffic to this
+  # service
 }
