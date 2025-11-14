@@ -202,7 +202,8 @@ class QueueImpl final {
   void maybeUpdateBackpressure() {
     totalQueueSize = 0;
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
-      for (auto consumer: ready.consumers) {
+      auto consumers = ready.consumers.snapshot();
+      for (auto consumer: consumers) {
         totalQueueSize = kj::max(totalQueueSize, consumer->size());
       }
     }
@@ -217,7 +218,8 @@ class QueueImpl final {
     auto& ready =
         KJ_REQUIRE_NONNULL(state.template tryGet<Ready>(), "The queue is closed or errored.");
 
-    for (auto consumer: ready.consumers) {
+    auto consumers = ready.consumers.snapshot();
+    for (auto consumer: consumers) {
       KJ_IF_SOME(skip, skipConsumer) {
         if (&skip == consumer) {
           continue;
@@ -257,7 +259,8 @@ class QueueImpl final {
         return false;
       }
       KJ_CASE_ONEOF(ready, Ready) {
-        for (auto consumer: ready.consumers) {
+        auto consumers = ready.consumers.snapshot();
+        for (auto consumer: consumers) {
           if (consumer->hasReadRequests()) return true;
         }
         return false;
