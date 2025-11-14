@@ -17,6 +17,47 @@ using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
 
+# TODO: copied from worker.capnp...
+struct ServiceDesignator {
+  # A reference to a service from elsewhere in the config file, e.g. from a service binding in a
+  # Worker.
+  #
+  # In the case that only `name` needs to be specified, then you can provide a raw string wherever
+  # `ServiceDesignator` is needed. Cap'n proto automatically assumes the string is intended to be
+  # the value for `name`, since that is the first field. In other words, if you would otherwise
+  # write something like:
+  #
+  #     bindings = [(service = (name = "foo"))]
+  #
+  # You can write this instead, which is equivalent:
+  #
+  #     bindings = [(service = "foo")]
+
+  name @0 :Text;
+  # Name of the service in the Config.services list.
+
+  entrypoint @1 :Text;
+  # A modules-syntax Worker can export multiple named entrypoints. `export default {` specifies
+  # the default entrypoint, whereas `export let foo = {` defines an entrypoint named `foo`. If
+  # `entrypoint` is specified here, it names an alternate entrypoint to use on the target worker,
+  # otherwise the default is used.
+
+  props :union {
+    # Value to provide in `ctx.props` in the target worker.
+
+    empty @2 :Void;
+    # Empty object. (This is the default.)
+
+    json @3 :Text;
+    # A JSON-encoded value.
+  }
+
+  # TODO(someday): Options to specify which event types are allowed.
+  # TODO(someday): Allow adding an outgoing middleware stack here (see TODO in Service, above).
+}
+
+
+
 # A 128-bit trace ID used to identify traces.
 struct TraceId {
   high @0 :UInt64;

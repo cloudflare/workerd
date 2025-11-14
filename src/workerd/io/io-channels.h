@@ -157,6 +157,11 @@ class IoChannelFactory {
     // the returned WorkerInterface.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
 
+    virtual void writeServiceDesignator(rpc::ServiceDesignator::Builder builder) {
+        JSG_FAIL_REQUIRE(Error,
+          "You can't transfer to a service across an IO boundary");
+    }
+
     kj::Own<CapTableEntry> clone() override final {
       return kj::addRef(*this);
     }

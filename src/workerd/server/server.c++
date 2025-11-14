@@ -716,7 +716,9 @@ class Server::ExternalHttpService final: public Service {
         rewriter(kj::mv(rewriter)),
         headerTable(headerTable),
         byteStreamFactory(byteStreamFactory),
-        httpOverCapnpFactory(httpOverCapnpFactory) {}
+        httpOverCapnpFactory(httpOverCapnpFactory) {
+    KJ_LOG(ERROR, "TEST: hellooo?");
+    }
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     return kj::heap<WorkerInterfaceImpl>(*this, kj::mv(metadata));
@@ -1934,7 +1936,9 @@ class Server::WorkerService final: public Service,
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
         dockerPath(kj::mv(dockerPathParam)),
-        isDynamic(isDynamic) {}
+        isDynamic(isDynamic) {
+    KJ_LOG(ERROR, "TEST: hellooo");
+    }
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
@@ -2983,7 +2987,9 @@ class Server::WorkerService final: public Service,
         : worker(kj::addRef(worker)),
           entrypoint(entrypoint),
           handlers(handlers),
-          props(kj::mv(props)) {}
+          props(kj::mv(props)) {
+        KJ_LOG(ERROR, "TEST: hellooo");
+    }
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       return startRequest(kj::mv(metadata), false);
@@ -4032,7 +4038,9 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           kj::Rc<WorkerStubImpl> isolate, kj::Maybe<kj::String> entrypointName, Frankenvalue props)
           : isolate(kj::mv(isolate)),
             entrypointName(kj::mv(entrypointName)),
-            props(kj::mv(props)) {}
+            props(kj::mv(props)) {
+        KJ_LOG(ERROR, "TEST: hey...");
+      }
 
       kj::Own<WorkerInterface> startRequest(
           IoChannelFactory::SubrequestMetadata metadata) override {
@@ -4643,6 +4651,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeService(config::Service::Reade
     kj::HttpHeaderTable::Builder& headerTableBuilder,
     capnp::List<config::Extension>::Reader extensions) {
   kj::StringPtr name = conf.getName();
+  KJ_LOG(ERROR, "TEST: Make service is being called", name);
   switch (conf.which()) {
     case config::Service::UNSPECIFIED:
       reportConfigError(kj::str("Service named \"", name, "\" does not specify what to serve."));
