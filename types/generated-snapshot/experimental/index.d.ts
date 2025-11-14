@@ -8078,24 +8078,12 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   toMarkdown(): ToMarkdownService;
   toMarkdown(
-    files: {
-      name: string;
-      blob: Blob;
-    }[],
-    options?: {
-      gateway?: GatewayOptions;
-      extraHeaders?: object;
-    },
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions,
   ): Promise<ConversionResponse[]>;
   toMarkdown(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: {
-      gateway?: GatewayOptions;
-      extraHeaders?: object;
-    },
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions,
   ): Promise<ConversionResponse>;
 }
 type GatewayRetries = {
@@ -10306,44 +10294,63 @@ declare module "cloudflare:sockets" {
   ): Socket;
   export { _connect as connect };
 }
-type ConversionResponse = {
+type MarkdownDocument = {
   name: string;
-  mimeType: string;
-} & (
+  blob: Blob;
+};
+type ConversionResponse =
   | {
+      name: string;
+      mimeType: string;
       format: "markdown";
       tokens: number;
       data: string;
     }
   | {
+      name: string;
+      mimeType: string;
       format: "error";
       error: string;
-    }
-);
+    };
+type ImageConversionOptions = {
+  descriptionLanguage?: "en" | "es" | "fr" | "it" | "pt" | "de";
+};
+type EmbeddedImageConversionOptions = ImageConversionOptions & {
+  convert?: boolean;
+  maxConvertedImages?: number;
+};
+type ConversionOptions = {
+  html?: {
+    images?: EmbeddedImageConversionOptions & {
+      convertOGImage?: boolean;
+    };
+  };
+  docx?: {
+    images?: EmbeddedImageConversionOptions;
+  };
+  image?: ImageConversionOptions;
+  pdf?: {
+    images?: EmbeddedImageConversionOptions;
+    metadata?: boolean;
+  };
+};
+type ConversionRequestOptions = {
+  gateway?: GatewayOptions;
+  extraHeaders?: object;
+  conversionOptions?: ConversionOptions;
+};
 type SupportedFileFormat = {
   mimeType: string;
   extension: string;
 };
 declare abstract class ToMarkdownService {
   transform(
-    files: {
-      name: string;
-      blob: Blob;
-    }[],
-    options?: {
-      gateway?: GatewayOptions;
-      extraHeaders?: object;
-    },
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions,
   ): Promise<ConversionResponse[]>;
   transform(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: {
-      gateway?: GatewayOptions;
-      extraHeaders?: object;
-    },
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions,
   ): Promise<ConversionResponse>;
   supported(): Promise<SupportedFileFormat[]>;
 }

@@ -6,20 +6,54 @@ interface Fetcher {
   fetch: typeof fetch;
 }
 
-export type ConversionResponse = {
+export type MarkdownDocument = {
   name: string;
-  mimeType: string;
-} & (
+  blob: Blob;
+};
+
+export type ConversionResponse =
   | {
+      name: string;
+      mimeType: string;
       format: 'markdown';
       tokens: number;
       data: string;
     }
   | {
+      name: string;
+      mimeType: string;
       format: 'error';
       error: string;
-    }
-);
+    };
+
+export type ImageConversionOptions = {
+  descriptionLanguage?: 'en' | 'es' | 'fr' | 'it' | 'pt' | 'de';
+};
+
+export type EmbeddedImageConversionOptions = ImageConversionOptions & {
+  convert?: boolean;
+  maxConvertedImages?: number;
+};
+
+export type ConversionOptions = {
+  html?: {
+    images?: EmbeddedImageConversionOptions & { convertOGImage?: boolean };
+  };
+  docx?: {
+    images?: EmbeddedImageConversionOptions;
+  };
+  image?: ImageConversionOptions;
+  pdf?: {
+    images?: EmbeddedImageConversionOptions;
+    metadata?: boolean;
+  };
+};
+
+export type ConversionRequestOptions = {
+  gateway?: GatewayOptions;
+  extraHeaders?: object;
+  conversionOptions?: ConversionOptions;
+};
 
 export type SupportedFileFormat = {
   mimeType: string;
@@ -39,19 +73,16 @@ export class ToMarkdownService {
   }
 
   async transform(
-    files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse[]>;
   async transform(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse>;
   async transform(
-    files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument | MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse | ConversionResponse[]> {
     const input = Array.isArray(files) ? files : [files];
 

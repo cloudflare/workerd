@@ -6,7 +6,9 @@ import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
 import { AutoRAG } from 'cloudflare-internal:autorag-api';
 import {
   ToMarkdownService,
+  type ConversionRequestOptions,
   type ConversionResponse,
+  type MarkdownDocument,
 } from 'cloudflare-internal:to-markdown-api';
 
 interface Fetcher {
@@ -392,19 +394,16 @@ export class Ai {
 
   toMarkdown(): ToMarkdownService;
   async toMarkdown(
-    files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse[]>;
   async toMarkdown(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse>;
   toMarkdown(
-    files?: { name: string; blob: Blob } | { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files?: MarkdownDocument | MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): ToMarkdownService | Promise<ConversionResponse | ConversionResponse[]> {
     const service = new ToMarkdownService(this.#fetcher);
 
