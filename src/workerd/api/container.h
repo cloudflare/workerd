@@ -63,6 +63,8 @@ class Container: public jsg::Object {
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
   jsg::Promise<void> setInactivityTimeout(jsg::Lock& js, int64_t durationMs);
 
+  void listen(jsg::Lock& js, kj::String addr, jsg::Ref<api::Fetcher> binding);
+
   // TODO(containers): listenTcp()
 
   JSG_RESOURCE_TYPE(Container, CompatibilityFlags::Reader flags) {
@@ -73,6 +75,7 @@ class Container: public jsg::Object {
     JSG_METHOD(signal);
     JSG_METHOD(getTcpPort);
     JSG_METHOD(setInactivityTimeout);
+    JSG_METHOD(listen);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

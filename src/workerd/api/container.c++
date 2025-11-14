@@ -17,6 +17,10 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
       running(running) {}
 
+void Container::listen(jsg::Lock& js, kj::String addr, jsg::Ref<api::Fetcher> binding) {
+    KJ_LOG(ERROR, "Get the io channel", binding->tryGetChannel());
+}
+
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
