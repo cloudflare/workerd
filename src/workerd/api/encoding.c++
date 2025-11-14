@@ -678,7 +678,7 @@ std::conditional_t<ReturnLength, std::pair<size_t, size_t>, size_t> findBestFitL
 
   while (pos < length) {
     size_t remaining = length - pos;
-    size_t chunkSize = remaining < CHUNK ? remaining : CHUNK;
+    size_t chunkSize = kj::min(remaining, CHUNK);
     size_t chunkUtf8Len = simdutf::utf8_length_from_latin1(data + pos, chunkSize);
 
     if (utf8Accumulated + chunkUtf8Len > bufferSize) {
