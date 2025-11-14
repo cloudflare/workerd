@@ -24,15 +24,27 @@ class EnvModule final: public jsg::Object {
   EnvModule() = default;
   EnvModule(jsg::Lock&, const jsg::Url&) {}
 
-  kj::Maybe<jsg::JsObject> getCurrent(jsg::Lock& js);
+  kj::Maybe<jsg::JsObject> getCurrentEnv(jsg::Lock& js);
+  kj::Maybe<jsg::JsObject> getCurrentExports(jsg::Lock& js);
 
   // Arranges to propagate the given newEnv in the async context.
   jsg::JsRef<jsg::JsValue> withEnv(
       jsg::Lock& js, jsg::Value newEnv, jsg::Function<jsg::JsRef<jsg::JsValue>()> fn);
 
+  jsg::JsRef<jsg::JsValue> withExports(
+      jsg::Lock& js, jsg::Value newExports, jsg::Function<jsg::JsRef<jsg::JsValue>()> fn);
+
+  jsg::JsRef<jsg::JsValue> withEnvAndExports(jsg::Lock& js,
+      jsg::Value newEnv,
+      jsg::Value newExports,
+      jsg::Function<jsg::JsRef<jsg::JsValue>()> fn);
+
   JSG_RESOURCE_TYPE(EnvModule) {
-    JSG_METHOD(getCurrent);
+    JSG_METHOD(getCurrentEnv);
+    JSG_METHOD(getCurrentExports);
     JSG_METHOD(withEnv);
+    JSG_METHOD(withExports);
+    JSG_METHOD(withEnvAndExports);
   }
 };
 

@@ -1062,6 +1062,18 @@ wd_test(
 )
 
 wd_test(
+    src = "tests/disable-importable-exports-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/disable-importable-exports-test.js"],
+)
+
+wd_test(
+    src = "tests/importable-exports-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/importable-exports-test.js"],
+)
+
+wd_test(
     src = "tests/webfs-test.wd-test",
     args = ["--experimental"],
     data = ["tests/webfs-test.js"],
