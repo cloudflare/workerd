@@ -150,8 +150,10 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
       // reported" error) or we created a WorkerInterface with WorkerTracer without ever invoking it
       // (which is not incorrect behavior, but likely indicates inefficient code that sets up
       // WorkerInterfaces and then ends up not using it due to an error/incorrect parameters; such
-      // error checking should be done beforehand to ). Log such cases.
-      KJ_LOG(WARNING, "NOSENTRY destructed WorkerTracer with STW without reporting Onset event");
+      // error checking should be done beforehand to avoid unused allocations). Report such cases.
+      // TODO(soon): Make this a regular Sentry error once it proves stable.
+      LOG_ERROR_PERIODICALLY(
+          "NOSENTRY destructed WorkerTracer with STW without reporting Onset event");
     }
   }
 };

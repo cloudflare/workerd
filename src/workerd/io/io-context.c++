@@ -1084,8 +1084,6 @@ SpanParent IoContext::getCurrentTraceSpan() {
 }
 
 SpanParent IoContext::getCurrentUserTraceSpan() {
-  // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
-  // context, as with Jaeger spans.
   if (incomingRequests.empty()) {
     return SpanParent(nullptr);
   } else {
