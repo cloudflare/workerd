@@ -59,6 +59,10 @@ on:
         type: boolean
         required: false
         default: false
+      disable_job_timeouts:
+        type: boolean
+        required: false
+        default: false
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -74,6 +78,8 @@ permissions:
 jobs:
   bazel:
     runs-on: ${{ inputs.image }}
+    # Cancel all builds taking longer than an hour, except on Windows
+    timeout-minutes: ${{ (inputs.disable_job_timeouts && 360) || (inputs.os_name == 'windows' && 90) || 60 }}
     steps:
       - uses: actions/checkout@v4
         with:
