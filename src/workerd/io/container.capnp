@@ -6,6 +6,12 @@ $Cxx.allowCancellation;
 
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
 
+
+interface ContainerIoChannelIdFactory {
+    # HACK
+    getConfiguration @0 (channelId: Int32) -> (channelConfiguration: Text);
+}
+
 interface Container @0x9aaceefc06523bca {
   # RPC interface to talk to a container, for containers attached to Durable Objects.
   #
@@ -100,7 +106,7 @@ interface Container @0x9aaceefc06523bca {
     # attempting to connect.
   }
 
-  setInactivityTimeout @7 (durationMs  :Int64);
+  setInactivityTimeout @7 (durationMs :Int64);
   # Configures the duration where the runtime should shutdown the container after there is
   # no connections or activity to the Container.
   #
@@ -110,4 +116,9 @@ interface Container @0x9aaceefc06523bca {
   # Note that if there is an open connection to the container, the runtime must not shutdown the container.
   # If there is no activity timeout duration configured and no container connection, it's up to the runtime
   # to decide when to signal the container to exit.
+
+  setChannelIdFactory @8 (factory: ContainerIoChannelIdFactory);
+  # TODO: this is not correct
+
+  setEgressTcp @9 (addr: Text, channelId: Int64);
 }
