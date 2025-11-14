@@ -700,14 +700,11 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
 
 namespace {
 
-// Forward scan to find how many Latin-1 characters fit when converted to UTF-8.
-// Uses SIMD for fast processing while maintaining O(result) complexity.
-// Latin-1 bytes 0x00-0x7F encode as 1 UTF-8 byte, 0x80-0xFF encode as 2 UTF-8 bytes.
+// Find how many Latin-1 characters fit when converted to UTF-8
+// Uses chunked forward scan with SIMD, O(result) complexity
 size_t findBestFitLatin1(const char* data, size_t length, size_t bufferSize) {
   size_t pos = 0;
   size_t utf8Accumulated = 0;
-
-  // Process in chunks using SIMD for speed
   constexpr size_t CHUNK = 256;
 
   while (pos < length) {
@@ -716,7 +713,7 @@ size_t findBestFitLatin1(const char* data, size_t length, size_t bufferSize) {
     size_t chunkUtf8Len = simdutf::utf8_length_from_latin1(data + pos, chunkSize);
 
     if (utf8Accumulated + chunkUtf8Len > bufferSize) {
-      // This chunk would overflow - binary search within this chunk
+      // Chunk would overflow - binary search within chunk
       size_t left = 0;
       size_t right = chunkSize;
       size_t bestFit = 0;
@@ -744,21 +741,19 @@ size_t findBestFitLatin1(const char* data, size_t length, size_t bufferSize) {
   return pos;
 }
 
-// Forward scan to find how many UTF-16 code units fit when converted to UTF-8.
-// Uses SIMD for fast processing while maintaining O(result) complexity.
-// Ensures surrogate pairs (0xD800-0xDFFF) are never split across the boundary.
+// Find how many UTF-16 code units fit when converted to UTF-8
+// Uses chunked forward scan with SIMD, O(result) complexity. Never splits surrogate pairs.
 size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) {
   size_t pos = 0;
   size_t utf8Accumulated = 0;
 
-  // Process in chunks using SIMD for speed
   constexpr size_t CHUNK = 256;
 
   while (pos < length) {
     size_t remaining = length - pos;
     size_t chunkSize = remaining < CHUNK ? remaining : CHUNK;
 
-    // Adjust chunk to not split surrogate pairs
+    // Don't split surrogate pairs at chunk boundary
     if (pos + chunkSize < length && chunkSize > 0) {
       char16_t last = data[pos + chunkSize - 1];
       if (isLeadSurrogate(last)) {
@@ -767,14 +762,13 @@ size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) 
     }
 
     if (chunkSize == 0) {
-      // Edge case: chunk would be empty, process at least 2 code units (surrogate pair)
       chunkSize = (remaining >= 2) ? 2 : remaining;
     }
 
     size_t chunkUtf8Len = simdutf::utf8_length_from_utf16(data + pos, chunkSize);
 
     if (utf8Accumulated + chunkUtf8Len > bufferSize) {
-      // This chunk would overflow - binary search within this chunk
+      // Chunk would overflow - binary search within chunk
       size_t left = 0;
       size_t right = chunkSize;
       size_t bestFit = 0;
@@ -816,21 +810,19 @@ size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) 
   return pos;
 }
 
-// Forward scan to find how many UTF-16 code units with invalid surrogates fit when converted to UTF-8.
-// Uses SIMD for fast processing while maintaining O(result) complexity.
-// Ensures surrogate pairs are never split, and unpaired surrogates are replaced with U+FFFD.
+// Find how many UTF-16 code units with invalid surrogates fit when converted to UTF-8
+// Uses chunked forward scan with SIMD, O(result) complexity. Never splits surrogate pairs.
+// Unpaired surrogates replaced with U+FFFD.
 size_t findBestFitInvalidUtf16(const char16_t* data, size_t length, size_t bufferSize) {
   size_t pos = 0;
   size_t utf8Accumulated = 0;
-
-  // Process in chunks using SIMD for speed
   constexpr size_t CHUNK = 256;
 
   while (pos < length) {
     size_t remaining = length - pos;
     size_t chunkSize = remaining < CHUNK ? remaining : CHUNK;
 
-    // Adjust chunk to not split surrogate pairs
+    // Don't split surrogate pairs at chunk boundary
     if (pos + chunkSize < length && chunkSize > 0) {
       char16_t last = data[pos + chunkSize - 1];
       if (isLeadSurrogate(last)) {
@@ -839,14 +831,13 @@ size_t findBestFitInvalidUtf16(const char16_t* data, size_t length, size_t buffe
     }
 
     if (chunkSize == 0) {
-      // Edge case: chunk would be empty, process at least 2 code units (surrogate pair)
       chunkSize = (remaining >= 2) ? 2 : remaining;
     }
 
     size_t chunkUtf8Len = utf8LengthFromInvalidUtf16(kj::arrayPtr(data + pos, chunkSize));
 
     if (utf8Accumulated + chunkUtf8Len > bufferSize) {
-      // This chunk would overflow - binary search within this chunk
+      // Chunk would overflow - binary search within chunk
       size_t left = 0;
       size_t right = chunkSize;
       size_t bestFit = 0;
@@ -924,18 +915,18 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Fast path 2: Check if ASCII (which is 1:1 Latin-1 to UTF-8)
-    if (length <= bufferSize && simdutf::validate_ascii(data, length)) {
-      memcpy(outputBuf.begin(), data, length);
-      return TextEncoder::EncodeIntoResult{
-        .read = static_cast<int>(length),
-        .written = static_cast<int>(length),
-      };
-    }
-
-    // Slow path: Calculate exact UTF-8 length to determine if it fits
+    // Calculate exact UTF-8 length to determine if it fits
     size_t utf8Length = simdutf::utf8_length_from_latin1(data, length);
     if (utf8Length <= bufferSize) {
+      // Fast path 2: ASCII (utf8Length == length means no conversion needed)
+      if (utf8Length == length) {
+        memcpy(outputBuf.begin(), data, length);
+        return TextEncoder::EncodeIntoResult{
+          .read = static_cast<int>(length),
+          .written = static_cast<int>(length),
+        };
+      }
+      // Fits: convert with SIMD
       size_t written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
         .read = static_cast<int>(length),
