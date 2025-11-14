@@ -856,10 +856,37 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     // Latin-1 path: characters 0x00-0x7F encode as 1 UTF-8 byte, 0x80-0xFF as 2 bytes
     auto data = reinterpret_cast<const char*>(view.data8());
 
-    // Optimize for incremental encoding: if buffer is much smaller than input,
-    // skip all "whole string fits" checks and go straight to forward scan
+    // Latin-1 encoding strategy: three zones based on input size vs buffer capacity
+    //
+    // For Latin-1: ASCII chars (0x00-0x7F) → 1 byte, extended chars (0x80-0xFF) → 2 bytes
+    // Worst-case expansion: 2x, Best-case: 1x (pure ASCII), Typical mixed: ~1.2-1.5x
+    //
+    // Zone 1: "Definitely doesn't fit" (length > bufferSize * 2)
+    //   Even if all ASCII (best case 1:1), string won't fit. Go straight to incremental mode.
+    //   Uses forward scan without length calculation for maximum efficiency.
+    //   Example: 1M chars, 400k buffer → can't possibly fit, scan to find cutoff point
+    //
+    // Zone 2: "Definitely fits" (length * 2 <= bufferSize)
+    //   Even if all extended Latin-1 (worst case 1:2), string will fit. Convert directly.
+    //   Example: 100k chars, 250k buffer → worst case 200k bytes, guaranteed to fit
+    //
+    // Zone 3: "Maybe fits" (bufferSize < length * 2 AND length <= bufferSize * 2)
+    //   Might fit depending on ASCII/extended ratio. Use forward scan with length calculation.
+    //   Avoids redundant work: scanning once gets us both position and UTF-8 length.
+    //   Example: 600k chars, 700k buffer → fits if mostly ASCII, doesn't if mixed
+    //
+    // Threshold selection (bufferSize * 2):
+    //   - Chosen based on worst-case Latin-1 expansion of 2x
+    //   - Optimized for common case: small buffer relative to input (SSR, streaming)
+    //   - Trade-off: Zone 3 still does forward scan, but with length calculation overhead
+    //   - Performance cliff exists for borderline cases (e.g., 1M chars, 500k buffer falls
+    //     into Zone 3), but forward scan with length is still reasonably efficient
+    //
+    // Future optimization: Could use sampling to estimate ASCII ratio and choose zone
+    // dynamically, but adds complexity for marginal benefit in typical workloads.
+
     if (length > bufferSize * 2) {
-      // Incremental mode: forward scan to find what fits, then convert
+      // Zone 1: Incremental mode - forward scan to find what fits, then convert
       size_t read = findBestFitLatin1(data, length, bufferSize);
       size_t written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
@@ -868,8 +895,8 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Fast path: Worst-case (2x) definitely fits
     if (length * 2 <= bufferSize) {
+      // Zone 2: Fast path - worst-case (2x) definitely fits, convert directly
       size_t written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
         .read = static_cast<int>(length),
@@ -877,10 +904,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // "Maybe fits" zone: bufferSize < length*2, but might still fit entirely.
-    // Use forward scan with ReturnLength=true to get both position and UTF-8 length.
-    // This avoids redundant work: if we called utf8_length_from_latin1() to check if it fits,
-    // then called findBestFitLatin1() when it doesn't, we'd scan the string twice.
+    // Zone 3: "Maybe fits" - use forward scan with length calculation to avoid double-scan
     auto [read, utf8Length] = findBestFitLatin1<true>(data, length, bufferSize);
 
     // Check if everything fit
@@ -914,9 +938,36 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
 
   if (simdutf::validate_utf16(data, length)) {
     // Valid UTF-16: use fast SIMD conversion
+    //
+    // UTF-16 to UTF-8 encoding: variable expansion based on code point ranges
+    //   U+0000-U+007F (ASCII):           1 byte   (rare in two-byte strings)
+    //   U+0080-U+07FF:                    2 bytes  (most common)
+    //   U+0800-U+FFFF (BMP):             3 bytes  (common: CJK, etc.)
+    //   U+10000-U+10FFFF (surrogate pairs): 4 bytes (less common: emoji, etc.)
+    // Worst-case: 3 bytes per code unit (BMP chars), Typical: ~2-3 bytes per code unit
+    //
+    // Zone 1: "Definitely doesn't fit" (length > bufferSize)
+    //   Conservative threshold: even if all ASCII (impossible for two-byte strings), won't fit.
+    //   This differs from Latin-1 (bufferSize * 2) due to different typical expansion patterns.
+    //   Example: 1M code units, 900k buffer → can't fit, use incremental mode
+    //
+    // Zone 2: "Definitely fits" (length * 3 <= bufferSize)
+    //   Even if all BMP characters (worst case 1:3), string will fit. Convert directly.
+    //   Example: 200k code units, 700k buffer → worst case 600k bytes, guaranteed to fit
+    //
+    // Zone 3: "Maybe fits" (bufferSize < length * 3 AND length <= bufferSize)
+    //   Might fit depending on character distribution. Use forward scan with length calculation.
+    //   Example: 300k code units, 800k buffer → fits if mostly 2-byte chars, doesn't if BMP
+    //
+    // Threshold selection (bufferSize vs bufferSize * 3):
+    //   - Zone 1 threshold (length > bufferSize) is conservative: even 1:1 ratio won't fit
+    //   - More aggressive than Latin-1 because UTF-16 typical expansion is higher (~2-3x)
+    //   - Zone 3 (maybe fits) is large: from bufferSize to bufferSize * 3
+    //   - Optimized for common case where UTF-16 strings are mostly 2-3 byte encodings
+    //   - Performance cliff: Zone 3 still uses forward scan with length calculation overhead
 
-    // Incremental mode: buffer much smaller than input, skip "whole string fits" checks
     if (length > bufferSize) {
+      // Zone 1: Incremental mode - forward scan to find what fits, then convert
       size_t read = findBestFitUtf16(data, length, bufferSize);
       size_t written = simdutf::convert_utf16_to_utf8(data, read, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
@@ -925,8 +976,8 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // Fast path: worst-case (3 bytes per UTF-16 code unit) fits
     if (length * 3 <= bufferSize) {
+      // Zone 2: Fast path - worst-case (3x) definitely fits, convert directly
       size_t written = simdutf::convert_utf16_to_utf8(data, length, outputBuf.begin());
       return TextEncoder::EncodeIntoResult{
         .read = static_cast<int>(length),
@@ -934,10 +985,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       };
     }
 
-    // "Maybe fits" zone: bufferSize < length*3, but might still fit entirely.
-    // Use forward scan with ReturnLength=true to get both position and UTF-8 length.
-    // This avoids redundant work: if we called utf8_length_from_utf16() to check if it fits,
-    // then called findBestFitUtf16() when it doesn't, we'd scan the string twice.
+    // Zone 3: "Maybe fits" - use forward scan with length calculation to avoid double-scan
     auto [read, utf8Length] = findBestFitUtf16<true>(data, length, bufferSize);
 
     if (read == length) {
