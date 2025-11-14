@@ -467,11 +467,11 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
 namespace {
 
 constexpr inline bool isLeadSurrogate(char16_t c) {
-  return 0xD800 <= c && c < 0xDC00;
+  return (c & 0xFC00) == 0xD800;
 }
 
 constexpr inline bool isTrailSurrogate(char16_t c) {
-  return 0xDC00 <= c && c <= 0xDFFF;
+  return (c & 0xFC00) == 0xDC00;
 }
 
 // Calculate UTF-8 length from UTF-16 with potentially invalid surrogates.
@@ -501,20 +501,18 @@ size_t utf8LengthFromInvalidUtf16(kj::ArrayPtr<const char16_t> input) {
       }
 
       // Handle the invalid surrogate at inputPos
+      // SURROGATE error means unpaired surrogate, so valid pair should be impossible
       char16_t c = input[inputPos];
-      if (isLeadSurrogate(c) && inputPos + 1 < input.size() &&
-          isTrailSurrogate(input[inputPos + 1])) {
-        // Valid surrogate pair = 4 bytes in UTF-8
-        utf8Length += 4;
-        inputPos += 2;
-      } else {
-        // Invalid surrogate = U+FFFD (3 bytes)
-        utf8Length += 3;
-        inputPos++;
-      }
+      KJ_DASSERT(!(isLeadSurrogate(c) && inputPos + 1 < input.size() &&
+                     isTrailSurrogate(input[inputPos + 1])),
+          "Valid surrogate pair should not trigger SURROGATE error");
+
+      // Invalid surrogate = U+FFFD (3 bytes)
+      utf8Length += 3;
+      inputPos++;
     } else {
-      // Unexpected error - fall back to scalar calculation for safety
-      break;
+      KJ_FAIL_REQUIRE(
+          "Unexpected UTF-16 validation error from simdutf", static_cast<int>(result.error));
     }
   }
 
@@ -524,27 +522,21 @@ size_t utf8LengthFromInvalidUtf16(kj::ArrayPtr<const char16_t> input) {
 // Encode a single UTF-16 code unit to UTF-8
 inline size_t encodeUtf8CodeUnit(char16_t c, kj::ArrayPtr<char> out) {
   if (c < 0x80) {
+    KJ_DASSERT(out.size() >= 1);
     out[0] = static_cast<char>(c);
     return 1;
   } else if (c < 0x800) {
+    KJ_DASSERT(out.size() >= 2);
     out[0] = static_cast<char>(0xC0 | (c >> 6));
     out[1] = static_cast<char>(0x80 | (c & 0x3F));
     return 2;
   } else {
+    KJ_DASSERT(out.size() >= 3);
     out[0] = static_cast<char>(0xE0 | (c >> 12));
     out[1] = static_cast<char>(0x80 | ((c >> 6) & 0x3F));
     out[2] = static_cast<char>(0x80 | (c & 0x3F));
     return 3;
   }
-}
-
-// Encode a valid surrogate pair to UTF-8
-inline void encodeSurrogatePair(char16_t lead, char16_t trail, kj::ArrayPtr<char> out) {
-  uint32_t codepoint = 0x10000 + (((lead & 0x3FF) << 10) | (trail & 0x3FF));
-  out[0] = static_cast<char>(0xF0 | (codepoint >> 18));
-  out[1] = static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
-  out[2] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
-  out[3] = static_cast<char>(0x80 | (codepoint & 0x3F));
 }
 
 // Convert UTF-16 with potentially invalid surrogates to UTF-8.
@@ -564,6 +556,7 @@ size_t convertInvalidUtf16ToUtf8(kj::ArrayPtr<const char16_t> input, kj::ArrayPt
       // Remaining input is valid - convert it all with SIMD
       outputPos += simdutf::convert_utf16_to_utf8(
           input.begin() + inputPos, input.size() - inputPos, out.begin() + outputPos);
+      KJ_DASSERT(outputPos <= out.size());
       break;
     }
 
@@ -572,25 +565,24 @@ size_t convertInvalidUtf16ToUtf8(kj::ArrayPtr<const char16_t> input, kj::ArrayPt
       if (result.count > 0) {
         outputPos += simdutf::convert_valid_utf16_to_utf8(
             input.begin() + inputPos, result.count, out.begin() + outputPos);
+        KJ_DASSERT(outputPos <= out.size());
         inputPos += result.count;
       }
 
       // Handle the invalid surrogate at inputPos
+      // SURROGATE error means unpaired surrogate, so valid pair should be impossible
       char16_t c = input[inputPos];
-      if (isLeadSurrogate(c) && inputPos + 1 < input.size() &&
-          isTrailSurrogate(input[inputPos + 1])) {
-        // Valid surrogate pair - encode it (this shouldn't happen if SURROGATE error)
-        encodeSurrogatePair(c, input[inputPos + 1], out.slice(outputPos, out.size()));
-        outputPos += 4;
-        inputPos += 2;
-      } else {
-        // Invalid surrogate - replace with U+FFFD (3 bytes)
-        outputPos += encodeUtf8CodeUnit(0xFFFD, out.slice(outputPos, out.size()));
-        inputPos++;
-      }
+      KJ_DASSERT(!(isLeadSurrogate(c) && inputPos + 1 < input.size() &&
+                     isTrailSurrogate(input[inputPos + 1])),
+          "Valid surrogate pair should not trigger SURROGATE error");
+
+      // Invalid surrogate - replace with U+FFFD (3 bytes)
+      outputPos += encodeUtf8CodeUnit(0xFFFD, out.slice(outputPos, out.size()));
+      KJ_DASSERT(outputPos <= out.size());
+      inputPos++;
     } else {
-      // Unexpected error - fall back to scalar processing for safety
-      break;
+      KJ_FAIL_REQUIRE(
+          "Unexpected UTF-16 validation error from simdutf", static_cast<int>(result.error));
     }
   }
 
@@ -719,7 +711,7 @@ size_t findBestFitUtf16(const char16_t* data, size_t length, size_t bufferSize) 
     size_t adjustedMid = mid;
     if (adjustedMid > 0 && adjustedMid < length) {
       char16_t prev = data[adjustedMid - 1];
-      if (prev >= 0xD800 && prev < 0xDC00) {
+      if (isLeadSurrogate(prev)) {
         adjustedMid--;
       }
     }
@@ -756,7 +748,7 @@ size_t findBestFitInvalidUtf16(const char16_t* data, size_t length, size_t buffe
     size_t adjustedMid = mid;
     if (adjustedMid > 0 && adjustedMid < length) {
       char16_t prev = data[adjustedMid - 1];
-      if (prev >= 0xD800 && prev < 0xDC00) {
+      if (isLeadSurrogate(prev)) {
         adjustedMid--;
       }
     }
@@ -792,14 +784,25 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     // Latin-1 path: characters 0x00-0x7F encode as 1 UTF-8 byte, 0x80-0xFF as 2 bytes
     auto data = reinterpret_cast<const char*>(view.data8());
 
-    // Fast path: avoid length calculation when we can prove the string fits.
-    // Check worst-case (2x), ASCII (1:1), or calculate exact length as fallback.
+    // Determine if we need binary search using short-circuit evaluation to minimize checks
     size_t read = length;
-    if (!(length * 2 <= bufferSize ||
-            (length <= bufferSize && simdutf::validate_ascii(data, length)) ||
-            simdutf::utf8_length_from_latin1(data, length) <= bufferSize)) {
-      // Binary search to find how many characters fit
+    size_t utf8Length = 0;
+    bool needsBinarySearch = !(length * 2 <= bufferSize ||  // Fast: worst-case (2x) fits
+        (length <= bufferSize && simdutf::validate_ascii(data, length)) ||           // ASCII check
+        (utf8Length = simdutf::utf8_length_from_latin1(data, length)) <= bufferSize  // Exact length
+    );
+
+    if (needsBinarySearch) {
       read = findBestFitLatin1(data, length, bufferSize);
+    }
+
+    // ASCII fast path: use memcpy instead of conversion
+    if (utf8Length == length || (utf8Length == 0 && simdutf::validate_ascii(data, read))) {
+      memcpy(outputBuf.begin(), data, read);
+      return TextEncoder::EncodeIntoResult{
+        .read = static_cast<int>(read),
+        .written = static_cast<int>(read),
+      };
     }
 
     size_t written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
