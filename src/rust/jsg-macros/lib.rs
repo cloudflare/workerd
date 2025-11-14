@@ -391,8 +391,8 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                 #drop_callback_name as usize
             }
 
-            fn get_state(&self) -> &jsg::ResourceState {
-                &self._state
+            fn get_state(&mut self) -> &mut jsg::ResourceState {
+                &mut self._state
             }
         }
     };

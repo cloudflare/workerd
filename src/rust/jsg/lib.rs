@@ -65,35 +65,35 @@ pub fn create_resource_constructor<R: Resource>(
 /// The caller must ensure that `resource` points to a valid R instance.
 pub unsafe fn wrap_resource<'a, R: Resource + 'a, RT: ResourceTemplate>(
     lock: &mut Lock,
-    resource: Ref<R>,
+    mut resource: Ref<R>,
     resource_template: &mut RT,
 ) -> v8::Local<'a, v8::Value> {
-    let state = resource.get_state();
-    let handle = state.wrapper.as_ref().map(|val| val.into_local(lock));
-
-    match handle {
-        Some(value) if value.has_value() => {
-            todo!()
-        }
+    match resource
+        .get_state()
+        .strong_wrapper
+        .as_ref()
+        .map(|val| val.as_local(lock))
+    {
+        Some(value) if value.has_value() => value.into(),
         _ => {
             let constructor = resource_template.get_constructor();
+            let this = Ref::into_raw(resource.clone());
             let instance: v8::Local<'a, v8::Value> = unsafe {
-                // todo: can we get rid of this from_ffi call?
                 v8::Local::from_ffi(
                     lock.get_isolate(),
                     ffi::wrap_resource(
                         lock.get_isolate(),
-                        state.this as usize, // todo: who sets state.this?
+                        this as usize,
                         constructor.as_ffi_ref(),
                         (*resource).get_drop_callback(),
                     ),
                 )
             };
-            unsafe { state.attach_wrapper(lock.get_isolate(), instance.clone().into(), false) };
-
-            // state.wrapper = Some(instance.into_trace_reference(lock));
-            // let cached_instance = instance.clone();
-            // wrapper.set_js_instance(lock, cached_instance);
+            unsafe {
+                resource
+                    .get_state()
+                    .attach_wrapper(lock.get_isolate(), instance.clone().into())
+            };
             instance
         }
     }
@@ -264,11 +264,8 @@ pub enum Member {
 #[derive(Default)]
 pub struct ResourceState {
     pub this: *mut c_void,
-    pub shim: Option<v8::ffi::ResourceShim>,
     pub strong_wrapper: Option<v8::Global<v8::Object>>,
     pub isolate: *mut v8::ffi::Isolate,
-    pub strong_ref_count: usize,
-    pub wrapper: Option<v8::TracedReference<v8::Object>>,
 }
 
 impl ResourceState {
@@ -276,31 +273,11 @@ impl ResourceState {
         &mut self,
         isolate: *mut v8::ffi::Isolate,
         object: v8::Local<v8::Object>,
-        needs_gc_tracing: bool,
     ) {
-        assert!(self.wrapper.is_none());
         assert!(self.strong_wrapper.is_none());
 
-        self.wrapper = Some(object.into());
+        self.strong_wrapper = Some(object.into());
         self.isolate = isolate;
-
-        // auto& tracer = HeapTracer::getTracer(isolate);
-        // tracer.addWrapper({}, *this);
-
-        // Deal with tags.
-
-        // v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
-        //
-        todo!();
-
-        if self.strong_ref_count > 0 {
-            self.strong_wrapper = Some(object.into());
-
-            todo!()
-
-            // GcVisitor visitor(*this, kj::none);
-            // jsgVisitForGc(visitor);
-        }
     }
 }
 
@@ -309,7 +286,7 @@ pub trait Resource: Type {
     where
         Self: Sized;
     fn get_drop_callback(&self) -> usize;
-    fn get_state(&self) -> &mut ResourceState;
+    fn get_state(&mut self) -> &mut ResourceState;
 }
 
 pub trait ResourceTemplate {

@@ -88,7 +88,6 @@ void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
 
 // Wrappers
 Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
-  auto& tracer = ::workerd::jsg::HeapTracer::getTracer(isolate);
   auto self = reinterpret_cast<void*>(resource);
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
@@ -101,10 +100,6 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
   object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
       self,
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-
-  tracer.addRustWrapper(
-      self, reinterpret_cast<::workerd::jsg::HeapTracer::RustDropCallback>(drop_callback));
-
   return to_ffi(kj::mv(object));
 }
 
