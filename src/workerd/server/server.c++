@@ -4180,7 +4180,6 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
-  KJ_LOG(ERROR, "TEST: makeWorker was called");
 
   auto confBindings = conf.getBindings();
   kj::Vector<WorkerdApi::Global> globals(confBindings.size());
@@ -4251,7 +4250,6 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     ErrorReporter& errorReporter) {
   // Load Python artifacts if this is a Python worker
   co_await preloadPython(name, def, errorReporter);
-  KJ_LOG(ERROR, "TEST: makeWorkerImpl was called");
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
@@ -4647,8 +4645,6 @@ kj::Promise<kj::Own<Server::Service>> Server::makeService(config::Service::Reade
     kj::HttpHeaderTable::Builder& headerTableBuilder,
     capnp::List<config::Extension>::Reader extensions) {
   kj::StringPtr name = conf.getName();
-  KJ_LOG(ERROR, "TEST: makeService was called");
-
   switch (conf.which()) {
     case config::Service::UNSPECIFIED:
       reportConfigError(kj::str("Service named \"", name, "\" does not specify what to serve."));

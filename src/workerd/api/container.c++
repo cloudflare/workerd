@@ -18,7 +18,12 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
       running(running) {}
 
 void Container::listen(jsg::Lock& js, kj::String addr, jsg::Ref<api::Fetcher> binding) {
-    KJ_LOG(ERROR, "Get the io channel", binding->tryGetChannel());
+    KJ_IF_SOME(channel, binding->tryGetChannel()) {
+        KJ_LOG(ERROR, "TEST: Get the io channel", channel);
+        auto request = rpcClient->setEgressTcpRequest();
+        request.setChannelId(channel);
+        IoContext::current().addTask(request.sendIgnoringResult());
+    }
 }
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {

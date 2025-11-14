@@ -3636,7 +3636,6 @@ Worker::Actor::Actor(const Worker& worker,
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), facetManager);
-
   KJ_IF_SOME(c, className) {
     KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
       // const_cast OK because we're just storing the pointer and will only use this under lock.
