@@ -593,7 +593,7 @@ class PromisedNetworkAddress final: public kj::NetworkAddress {
  public:
   PromisedNetworkAddress(kj::Promise<kj::Own<kj::NetworkAddress>> promise)
       : promise(promise.then([this](kj::Own<kj::NetworkAddress> result) { addr = kj::mv(result); })
-                    .fork()) {}
+                .fork()) {}
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
     KJ_IF_SOME(a, addr) {
@@ -2305,7 +2305,7 @@ class Server::WorkerService final: public Service,
             tracker(kj::refcounted<RequestTracker>(*this)),
             ns(ns),
             root(parent.map([](ActorContainer& p) -> ActorContainer& { return p.root; })
-                     .orDefault(*this)),
+                    .orDefault(*this)),
             parent(parent),
             timer(timer),
             lastAccess(timer.now()) {
@@ -2804,7 +2804,7 @@ class Server::WorkerService final: public Service,
         kj::Maybe<rpc::Container::Client> containerClient = kj::none;
         KJ_IF_SOME(config, containerOptions) {
           auto& dockerPathRef = KJ_ASSERT_NONNULL(ns.dockerPath,
-              "dockerPath needs to be defined in order enable containers on this durable object.");
+              "dockerPath needs to be defined to enable containers on this Durable Object.");
           KJ_ASSERT(config.hasImageName(), "Image name is required");
           auto imageName = config.getImageName();
           kj::String containerId;
@@ -4342,7 +4342,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
               jsg::Lock& js, kj::StringPtr specifier, kj::Maybe<kj::String> referrer,
               jsg::CompilationObserver& observer, jsg::ModuleRegistry::ResolveMethod method,
               kj::Maybe<kj::StringPtr> rawSpecifier) mutable
-          -> kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>> {
+              -> kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>> {
         kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
         KJ_IF_SOME(moduleOrRedirect,
             workerd::fallback::tryResolve(workerd::fallback::Version::V1,

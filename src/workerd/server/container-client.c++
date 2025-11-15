@@ -4,6 +4,9 @@
 
 #include "container-client.h"
 
+#include "kj/memory.h"
+#include "kj/time.h"
+
 #include <workerd/io/container.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/docker-api.capnp.h>
@@ -117,9 +120,20 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       waitUntilTasks(waitUntilTasks) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
-  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+  KJ_DBG("Shutting down container in ContainerClient destructor");
+  KJ_DBG(inactivityTimeout);
+  const auto t = inactivityTimeout.orDefault(timer.now());
+  const auto p = dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", containerName, "?force=true"))
-                         .ignoreResult());
+                     .ignoreResult();
+  waitUntilTasks.add(timer.atTime(t).then(p));
+
+  // also tried this...
+  // waitUntilTasks.add(timer.atTime(t).then([this] {
+  //   return dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+  //       kj::str("/containers/", containerName, "?force=true"))
+  //       .ignoreResult();
+  // }));
 }
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
@@ -427,7 +441,13 @@ kj::Promise<void> ContainerClient::signal(SignalContext context) {
 }
 
 kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutContext context) {
-  // empty implementation on purpose
+  const auto& params = context.getParams();
+  const auto durationMs = params.getDurationMs();
+  JSG_REQUIRE(
+      durationMs > 0, TypeError, "setInactivityTimeout() cannot be called with a durationMs <= 0");
+
+  inactivityTimeout = timer.now() + (durationMs * kj::MILLISECONDS);
+
   co_return;
 }
 
