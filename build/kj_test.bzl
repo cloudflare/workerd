@@ -1,3 +1,4 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 def kj_test(
@@ -9,8 +10,7 @@ def kj_test(
         **kwargs):
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
-
-    native.cc_binary(
+    cc_binary(
         name = binary_name,
         testonly = True,
         srcs = [src],

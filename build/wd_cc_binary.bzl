@@ -1,5 +1,7 @@
 """wd_cc_binary definition"""
 
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
 def wd_cc_binary(
         name,
         linkopts = [],
@@ -9,7 +11,7 @@ def wd_cc_binary(
         **kwargs):
     """Wrapper for cc_binary that sets common attributes
     """
-    native.cc_binary(
+    cc_binary(
         name = name,
         # -dead_strip is the macOS equivalent of -ffunction-sections, -Wl,--gc-sections.
         # -no_exported_symbols is used to not include the exports trie, which significantly reduces

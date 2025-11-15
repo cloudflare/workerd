@@ -1,5 +1,6 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//crate_universe:defs.bzl", "crates_vendor", "render_config")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
 load("cargo.bzl", "PACKAGES")

@@ -7,3 +7,5 @@ local_path_override(
     module_name = "workerd",
     path = "../..",
 )
+
+bazel_dep(name = "rules_cc", version = "0.2.11")

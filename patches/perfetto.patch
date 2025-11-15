@@ -9,7 +9,7 @@ index a321128..cd672d2 100644
 +module(name = "perfetto")
 +bazel_dep(name = "perfetto_cfg", version = "0.0.0")
 +bazel_dep(name = "platforms", version = "1.0.0")
-+bazel_dep(name = "protobuf", version = "32.0", repo_name = "com_google_protobuf")
++bazel_dep(name = "protobuf", version = "33.1")
  bazel_dep(name = "rules_android", version = "0.6.0")
 
  android_sdk_repository_extension = use_extension(
