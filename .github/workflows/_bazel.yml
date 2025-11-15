@@ -31,6 +31,10 @@ on:
         type: string
         required: false
         default: //...
+      parse_headers:
+        type: boolean
+        required: false
+        default: false
       extra_bazel_args:
         type: string
         required: false
@@ -55,6 +59,10 @@ on:
         type: boolean
         required: false
         default: false
+      disable_job_timeouts:
+        type: boolean
+        required: false
+        default: false
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -70,6 +78,8 @@ permissions:
 jobs:
   bazel:
     runs-on: ${{ inputs.image }}
+    # Cancel all builds taking longer than an hour, except on Windows
+    timeout-minutes: ${{ (inputs.disable_job_timeouts && 360) || (inputs.os_name == 'windows' && 90) || 60 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -101,7 +111,7 @@ jobs:
         run: |
           if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
-            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
+            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak build/deps/nodejs.MODULE.bazel
           fi
       - name: Bazel build (Windows workaround)
         if: runner.os == 'Windows'
@@ -109,7 +119,7 @@ jobs:
         # support. Since we still need symlinks to compile C++ code properly, compile these targets
         # separately.
         run: |
-          bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
+          bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --profile build-win-workaround.bazel-profile.gz --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
@@ -119,6 +129,13 @@ jobs:
         if: inputs.run_tests
         run: |
           bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Parse headers
+        # TODO(cleanup): Bazel does not allow for only parsing headers in non-recursive targets, so
+        # we can't widely enable header parsing for now (dependencies like V8 do not specify
+        # dependencies of header targets properly).
+        if: inputs.parse_headers
+        run: |
+          bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util
       - name: Upload test logs
         if: inputs.upload_test_logs
         uses: actions/upload-artifact@v4
@@ -147,6 +164,12 @@ jobs:
           name: ${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}-binary
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
           if-no-files-found: error
+      - name: Upload build statistics
+        if: inputs.run_tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.os_name }}${{ inputs.arch_name }}${{ inputs.suffix }}-bazel-profile
+          path: '*.bazel-profile.gz'
 
       - name: Drop large Bazel cache files
         if: always()

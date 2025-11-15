@@ -7,6 +7,7 @@
 #include <workerd/api/basics.h>
 #include <workerd/api/hibernation-event-params.h>
 #include <workerd/api/web-socket.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
@@ -54,13 +55,13 @@ class HibernatableWebSocketEvent final: public ExtendableEvent {
   Worker::Actor::HibernationManager& getHibernationManager(jsg::Lock& lock);
 };
 
-class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::CustomEvent,
-                                                  public kj::Refcounted {
+class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEvent,
+                                              public kj::Refcounted {
  public:
-  HibernatableWebSocketCustomEventImpl(uint16_t typeId,
+  HibernatableWebSocketCustomEvent(uint16_t typeId,
       kj::Own<HibernationReader> params,
       kj::Maybe<Worker::Actor::HibernationManager&> manager = kj::none);
-  HibernatableWebSocketCustomEventImpl(
+  HibernatableWebSocketCustomEvent(
       uint16_t typeId, HibernatableSocketParams params, Worker::Actor::HibernationManager& manager);
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
@@ -75,6 +76,8 @@ class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::Custom
   uint16_t getType() override {
     return typeId;
   }
+
+  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
 
   kj::Promise<Result> notSupported() override {
     KJ_UNIMPLEMENTED("hibernatable web socket event not supported");

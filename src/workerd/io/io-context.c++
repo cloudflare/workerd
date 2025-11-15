@@ -46,6 +46,18 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
 
   TimeoutId setTimeout(
       IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) override {
+    // Verify the generator is from the correct ServiceWorkerGlobalScope. If we have been passed a
+    // different `timeoutIdGenerator`, then that means this IoContext is active at a time when
+    // JavaScript in a different V8 context is executing. This _should_ be impossible, but we're
+    // occasionally seeing timeout ID collision assertion failures in `addState()`, and one possible
+    // explanation is that an IoContext is somehow current for a different V8 context.
+    //
+    // TODO(cleanup): Find a more general way to assert that the JS API surface is being used under
+    //   the correct IoContext, get rid of this function's `generator` parameter, and instead rely
+    //   on the IoContext to provide the generator.
+    KJ_ASSERT(&generator == &context.getCurrentLock().getTimeoutIdGenerator(),
+        "TimeoutId Generator mismatch - using a generator from wrong ServiceWorkerGlobalScope");
+
     auto [id, it] = addState(generator, kj::mv(params));
     setTimeoutImpl(context, it);
     return id;
@@ -137,7 +149,6 @@ IoContext::IoContext(ThreadContext& thread,
     kj::Maybe<Worker::Actor&> actorParam,
     kj::Own<LimitEnforcer> limitEnforcerParam)
     : thread(thread),
-      tmpDirStoreScope(TmpDirStoreScope::create()),
       worker(kj::mv(workerParam)),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
@@ -201,12 +212,27 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-    tracing::InvocationSpanContext invocationSpanContext)
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
-      invocationSpanContext(kj::mv(invocationSpanContext)) {}
+      maybeTriggerInvocationSpan(kj::mv(maybeTriggerInvocationSpan)) {}
+
+tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanContext() {
+  // Creating a new InvocationSpanContext can be a bit expensive since it needs to
+  // generate random IDs, so we only create it lazily when requested, which should
+  // only be when tracing is enabled and we need to record spans.
+  KJ_IF_SOME(ctx, invocationSpanContext) {
+    return ctx;
+  }
+
+  invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
+      maybeTriggerInvocationSpan.map(
+          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
+      context->getEntropySource());
+  return KJ_ASSERT_NONNULL(invocationSpanContext);
+}
 
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
 // that sets waitedForWaitUntil). So, we can now safely add the request to
@@ -230,6 +256,10 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   wasDelivered = true;
   deliveredLocation = location;
   metrics->delivered();
+
+  KJ_IF_SOME(workerTracer, workerTracer) {
+    currentUserTraceSpan = workerTracer->makeUserRequestSpan();
+  }
 
   KJ_IF_SOME(a, context->actor) {
     // Re-synchronize the timer and top up limits for every new incoming request to an actor.
@@ -491,11 +521,17 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
   }
 
   kj::Promise<void> timeoutPromise = nullptr;
+  auto timeoutLogPromise = [this]() -> kj::Promise<void> {
+    return context->run([this](Worker::Lock&) {
+      context->logWarning(
+          "IoContext timed out due to inactivity, waitUntil tasks were cancelled without completing.");
+    });
+  };
   KJ_IF_SOME(a, context->actor) {
     // For actors, all promises are canceled on actor shutdown, not on a fixed timeout,
     // because work doesn't necessarily happen on a per-request basis in actors and we don't want
     // work being unexpectedly canceled based on which request initiated it.
-    timeoutPromise = a.onShutdown();
+    timeoutPromise = a.onShutdown().then(kj::mv(timeoutLogPromise));
 
     // Also arrange to cancel the drain if a new request arrives, since it will take over
     // responsibility for background tasks.
@@ -504,7 +540,7 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     timeoutPromise = timeoutPromise.exclusiveJoin(kj::mv(drainPaf.promise));
   } else {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
-    timeoutPromise = context->limitEnforcer->limitDrain();
+    timeoutPromise = context->limitEnforcer->limitDrain().then(kj::mv(timeoutLogPromise));
   }
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
@@ -860,10 +896,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   SpanBuilder userSpan = nullptr;
 
   KJ_IF_SOME(n, options.operationName) {
-    // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
-    // a memory allocation here, but there might be use cases for dynamically allocated strings.
-    span = makeTraceSpan(kj::ConstString(kj::str(n)));
-    userSpan = makeUserTraceSpan(kj::ConstString(kj::mv(n)));
+    span = makeTraceSpan(n.clone());
+    userSpan = makeUserTraceSpan(n.clone());
   }
 
   TraceContext tracing(kj::mv(span), kj::mv(userSpan));
@@ -1051,10 +1085,15 @@ SpanParent IoContext::getCurrentTraceSpan() {
 SpanParent IoContext::getCurrentUserTraceSpan() {
   // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
   // context, as with Jaeger spans.
-  KJ_IF_SOME(workerTracer, getWorkerTracer()) {
-    return workerTracer.getUserRequestSpan();
+  if (incomingRequests.empty()) {
+    return SpanParent(nullptr);
+  } else {
+    return getCurrentIncomingRequest().getCurrentUserTraceSpan();
   }
-  return SpanParent(nullptr);
+}
+
+SpanParent IoContext_IncomingRequest::getCurrentUserTraceSpan() {
+  return currentUserTraceSpan.addRef();
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {

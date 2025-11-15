@@ -582,4 +582,6 @@ kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(jsg::Lock& js,
     R2Result& r2Result,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
+void addHeadResultSpanTags(jsg::Lock& js, TraceContext& traceContext, R2Bucket::HeadResult& result);
+
 }  // namespace workerd::api::public_beta

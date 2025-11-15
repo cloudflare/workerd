@@ -10,6 +10,7 @@
 
 #include <v8-context.h>
 #include <v8-object.h>
+#include <v8-version.h>
 
 #include <kj/common.h>
 #include <kj/debug.h>
@@ -43,15 +44,20 @@ enum class ContextPointerSlot : int {
 
 inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
+  // The type tag is a small integer that should be different for every pointer
+  // type to avoid type confusion attacks.  We just use the slot index for now,
+  // since we have a different pointer type for each slot.
   KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
-  context->SetAlignedPointerInEmbedderData(static_cast<int>(slot), ptr);
+  context->SetAlignedPointerInEmbedderData(
+      static_cast<int>(slot), ptr, static_cast<v8::EmbedderDataTypeTag>(slot));
 }
 
 template <typename T>
 kj::Maybe<T&> getAlignedPointerFromEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot) {
   KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
-  void* ptr = context->GetAlignedPointerFromEmbedderData(static_cast<int>(slot));
+  void* ptr = context->GetAlignedPointerFromEmbedderData(
+      static_cast<int>(slot), static_cast<v8::EmbedderDataTypeTag>(slot));
   if (ptr == nullptr) return kj::none;
   return *reinterpret_cast<T*>(ptr);
 }
@@ -105,7 +111,8 @@ class Wrappable: public kj::Refcounted {
   static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
 
   static bool isWorkerdApiObject(v8::Local<v8::Object> object) {
-    return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX) ==
+    return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX,
+               static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX)) ==
         &WORKERD_WRAPPABLE_TAG;
   }
 
@@ -312,7 +319,8 @@ T& extractInternalPointer(
   } else {
     KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
     return *reinterpret_cast<T*>(
-        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+            static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
   }
 }
 

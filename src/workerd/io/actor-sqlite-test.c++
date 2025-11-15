@@ -66,7 +66,8 @@ struct ActorSqliteTest final {
    public:
     explicit ActorSqliteTestHooks(ActorSqliteTest& parent): parent(parent) {}
 
-    kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
+    kj::Promise<void> scheduleRun(
+        kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
       KJ_IF_SOME(h, parent.scheduleRunHandler) {
         return h(newAlarmTime);
       }
@@ -158,8 +159,14 @@ struct ActorSqliteTest final {
     txn->put(kj::mv(pairs), options);
     return txn->commit();
   }
+  auto deleteMultiple(kj::Array<kj::String> keys, ActorCache::WriteOptions options = {}) {
+    return actor.delete_(kj::mv(keys), options);
+  }
   auto setAlarm(kj::Maybe<kj::Date> newTime, ActorCache::WriteOptions options = {}) {
     return actor.setAlarm(newTime, options);
+  }
+  auto sync() {
+    return actor.onNoPendingFlush();
   }
 };
 
@@ -229,12 +236,8 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
   }
 }
 
-KJ_TEST(
-    "check put multiple wraps operations in a transaction with sql-kv-put-multiple-transaction autogate") {
+KJ_TEST("check put multiple wraps operations in a transaction") {
   ActorSqliteTest test;
-
-  // This test should reflect the same behavior we saw without the autogate enabled.
-  util::Autogate::initAutogateNamesForTest({"sql-kv-put-multiple-transaction"_kj});
 
   kj::Vector<ActorCache::KeyValuePair> putKVs;
   putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
@@ -279,105 +282,10 @@ KJ_TEST(
   }
 }
 
-KJ_TEST("check put multiple wraps operations in a transaction and does not rollback on error") {
+KJ_TEST("check put multiple wraps operations in a transaction and rollback on error") {
   ActorSqliteTest test;
 
-  if (util::Autogate::isEnabled(util::AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION)) {
-    // We should skip this test as it will expect a different behavior when
-    // SQL_KV_PUT_MULTIPLE_TRANSACTION is set
-    KJ_DBG("Skipping test because SQL_KV_PUT_MULTIPLE_TRANSACTION is enabled.");
-    return;
-  }
-
-  // Let's deinit the autogate. This will enforce the old behavior where putMultiple would commit
-  // some puts, until a single put failed.
-  util::Autogate::deinitAutogate();
-
-  kj::Vector<ActorCache::KeyValuePair> putKVs;
-
-  // Add some regular key-value pairs that we know are supported
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray(kj::str("bar2").asBytes())});
-  putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray(kj::str("bar3").asBytes())});
-
-  // Now create a key that's too large. Should fail with  string or blob too big: SQLITE_TOOBIG
-  auto tooLongKey = kj::heapString(2200000);
-  tooLongKey.asArray().fill('a');
-  // Add it to our KV array
-  putKVs.add(
-      ActorCache::KeyValuePair{kj::str(tooLongKey), kj::heapArray(kj::str("bar").asBytes())});
-
-  // NoTxn test
-  {
-    // Check that we're in a NoTxn
-    KJ_ASSERT(!test.actor.isCommitScheduled());
-    try {
-      test.putMultiple(putKVs.releaseAsArray());
-      // We should fail with correct error before reaching here.
-      KJ_UNREACHABLE;
-    } catch (kj::Exception& e) {
-      KJ_ASSERT(
-          e.getDescription() == "expected false; jsg.Error: string or blob too big: SQLITE_TOOBIG");
-    }
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo2"))) == kj::str("bar2").asBytes());
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo3"))) == kj::str("bar3").asBytes());
-    // During write, all NoTxn operations are wrapped in an ImplicitTxn. Since some puts succeeded
-    // we need to flush commit.
-    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-    commitFulfiller->fulfill();
-  }
-
-  {
-    // Let's clear the db.
-    test.actor.deleteAll({});
-    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-    commitFulfiller->fulfill();
-    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
-  }
-
-  // ExplicitTxn test
-  {
-    KJ_ASSERT(!test.actor.isCommitScheduled());
-    // Similar to the previous putMultiple, but wrapped in a transactionSync (ExplicitTxn)
-    test.putMultipleExplicitTxn(putKVs.releaseAsArray());
-    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-    commitFulfiller->fulfill();
-    // This was wrapped in an explicit transaction. We rolled back as expected.
-    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
-  }
-
-  // ImplicitTxn test
-  {
-    // A single put will create an ImplicitTxn that we can use to wrap our putMultiple into.
-    KJ_ASSERT(!test.actor.isCommitScheduled());
-    test.put("baz", "bat");
-
-    // By now, we should check there's a commit scheduled in a ImplicitTxn.
-    KJ_ASSERT(test.actor.isCommitScheduled());
-    test.putMultiple(putKVs.releaseAsArray());
-
-    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-    // The single put succeeded, but the putMultiple did not.
-    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("bat").asBytes());
-    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
-    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
-    commitFulfiller->fulfill();
-  }
-}
-
-KJ_TEST(
-    "check put multiple wraps operations in a transaction and rollback on error with sql-kv-put-multiple-transaction autogate") {
-  ActorSqliteTest test;
-
-  // With the autogate enabled, we expect that putMultiple is all of nothing, rolling back if a
-  // single put fails.
-  util::Autogate::initAutogateNamesForTest({"sql-kv-put-multiple-transaction"_kj});
+  // We expect that putMultiple is all or nothing, rolling back if a single put fails.
 
   kj::Vector<ActorCache::KeyValuePair> putKVs;
 
@@ -410,6 +318,12 @@ KJ_TEST(
     KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
     KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
     KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+  }
+
+  // Reset the transaction state by going async, which will cause the ImplicitTxn to commit.
+  {
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
   }
 
   // ExplicitTxn test
@@ -1149,40 +1063,18 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
 
   // Fulfill 3ms db commit.  Expect 3ms alarm to be scheduled and 3ms gate to be unblocked.
   KJ_ASSERT(!gateWait3Ms.poll(test.ws));
+
   commit3MsFulfiller->fulfill();
   KJ_ASSERT(gateWait3Ms.poll(test.ws));
+
+  // The 3ms scheduleRun waits for the 2ms scheduleRun to complete first, since we chain
+  // "move later" operations to ensure they execute in order at the alarm manager.
+  fulfiller2Ms->fulfill();
+
   auto fulfiller3Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]);
   test.pollAndExpectCalls({});
 
-  // Outstanding alarm scheduling can complete asynchronously.
-  fulfiller2Ms->fulfill();
   fulfiller3Ms->fulfill();
-}
-
-KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
-  ActorSqliteTest test;
-
-  // Initialize alarm state to 1ms.
-  test.setAlarm(oneMs);
-  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({});
-  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
-
-  // Set alarm to 5ms.  Expect 5ms db commit and scheduling to start.
-  test.setAlarm(fiveMs);
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  auto fulfiller5Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(5ms)"})[0]);
-
-  // While 5ms scheduling is still in-flight, set alarm to 2ms.  Even though the last-confirmed
-  // alarm value was 1ms, we expect that setting the alarm to 2ms will be interpreted as setting
-  // the alarm earlier, so it will issue the schedule request before the commit request.
-  test.setAlarm(twoMs);
-  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
-  auto commit2MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-
-  fulfiller5Ms->fulfill();
-  commit2MsFulfiller->fulfill();
 }
 
 KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {
@@ -1582,6 +1474,718 @@ KJ_TEST("database write operations check for brokenness") {
   KJ_EXPECT_THROW_MESSAGE(
       "a_rejected_commit", test.db.run("CREATE TABLE IF NOT EXISTS counter (count INTEGER)"));
   test.pollAndExpectCalls({});
+}
+
+KJ_TEST("allowUnconfirmed put does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do an unconfirmed put
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("confirmed put blocks output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do a confirmed put (default behavior)
+  test.put("foo", "bar", {.allowUnconfirmed = false});
+
+  // Now it should be blocked.
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("mixed confirmed and unconfirmed writes in same transaction use output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do an unconfirmed put followed by a confirmed put in the same transaction batch
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+  test.put("baz", "quux", {.allowUnconfirmed = false});
+
+  // Since any write in the batch needs confirmation, the entire batch should use output gate
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Both writes should be committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("quux").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed delete does not block output gate") {
+  ActorSqliteTest test;
+
+  // First set up some data
+  test.put("foo", "bar");
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Perform an unconfirmed delete - need to add delete helper method or use actor directly
+  expectSync(test.actor.delete_(kj::str("foo"), {.allowUnconfirmed = true}));
+
+  // Gate still isn't blocked, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Data should be deleted
+  KJ_ASSERT(expectSync(test.get("foo")) == kj::none);
+}
+
+KJ_TEST("allowUnconfirmed putMultiple does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate should be unblocked at start
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Create multiple key-value pairs for the test
+  kj::Vector<ActorCache::KeyValuePair> putKVs;
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("baz"), kj::heapArray(kj::str("qux").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("key3"), kj::heapArray(kj::str("value3").asBytes())});
+
+  // Perform an unconfirmed putMultiple within the implicit transaction
+  test.putMultiple(putKVs.releaseAsArray(), {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify all data was written correctly
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("qux").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("key3"))) == kj::str("value3").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed deleteMultiple does not block output gate") {
+  ActorSqliteTest test;
+
+  // First set up some data
+  kj::Vector<ActorCache::KeyValuePair> putKVs;
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("baz"), kj::heapArray(kj::str("qux").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("key3"), kj::heapArray(kj::str("value3").asBytes())});
+
+  test.putMultiple(putKVs.releaseAsArray());
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Create array of keys to delete
+  kj::Vector<kj::String> deleteKeys;
+  deleteKeys.add(kj::str("foo"));
+  deleteKeys.add(kj::str("baz"));
+  deleteKeys.add(kj::str("key3"));
+
+  // Perform an unconfirmed deleteMultiple
+  KJ_EXPECT(expectSync(
+                test.deleteMultiple(deleteKeys.releaseAsArray(), {.allowUnconfirmed = true})) == 3);
+
+  // Gate still isn't blocked, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify all data was deleted
+  KJ_ASSERT(expectSync(test.get("foo")) == kj::none);
+  KJ_ASSERT(expectSync(test.get("baz")) == kj::none);
+  KJ_ASSERT(expectSync(test.get("key3")) == kj::none);
+}
+
+KJ_TEST("unconfirmed write failure still breaks output gate") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  auto promise = test.gate.onBroken();
+
+  // Do an unconfirmed put
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // The output gate is not applied initially.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+  KJ_ASSERT(!promise.poll(test.ws));
+
+  // Reject the commit to simulate failure
+  test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "flush failed hard"));
+
+  // Gate should be broken due to commit failure
+  KJ_EXPECT_THROW_MESSAGE("flush failed hard", promise.wait(test.ws));
+}
+
+KJ_TEST("Direct SQL queries are confirmed writes") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  auto& db = KJ_ASSERT_NONNULL(test.actor.getSqliteDatabase());
+
+  db.run("CREATE TABLE myTable (i INTEGER PRIMARY KEY, s TEXT)");
+  db.run("INSERT INTO myTable VALUES (1, \"a\")");
+
+  // Now the gate should be blocked.
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Make sure that the write actually succeeded.
+  {
+    auto query = db.run("SELECT * FROM myTable");
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt64(0) == 1);
+    KJ_EXPECT(query.getText(1) == "a");
+    query.nextRow();
+    KJ_ASSERT(query.isDone());
+  }
+}
+
+KJ_TEST("An unconfirmed put followed by a direct SQL queries requires the output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+  auto& db = KJ_ASSERT_NONNULL(test.actor.getSqliteDatabase());
+  db.run("CREATE TABLE myTable (i INTEGER PRIMARY KEY, s TEXT)");
+  db.run("INSERT INTO myTable VALUES (1, \"a\")");
+
+  // Now the gate should be blocked.
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Make sure that the write actually succeeded.
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  {
+    auto query = db.run("SELECT * FROM myTable");
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt64(0) == 1);
+    KJ_EXPECT(query.getText(1) == "a");
+    query.nextRow();
+    KJ_ASSERT(query.isDone());
+  }
+}
+
+KJ_TEST("sync() returns immediately when no writes are pending") {
+  ActorSqliteTest test;
+
+  // When there are no pending writes, sync() should return a resolved promise
+  auto syncResult = test.sync();
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+  KJ_ASSERT(syncPromise.poll(test.ws));
+}
+
+KJ_TEST("sync() waits for confirmed writes to complete") {
+  ActorSqliteTest test;
+
+  // Do a confirmed write (default behavior)
+  test.put("foo", "bar", {.allowUnconfirmed = false});
+
+  // sync() should return a promise that blocks until the commit completes
+  auto syncResult = test.sync();
+  KJ_ASSERT(syncResult != kj::none);
+
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+
+  // The sync promise should not be ready yet
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Now the sync promise should be ready
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("sync() waits for unconfirmed writes to complete") {
+  ActorSqliteTest test;
+
+  // Do an unconfirmed write
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // sync() should still return a promise that blocks until the commit completes
+  auto syncResult = test.sync();
+  KJ_ASSERT(syncResult != kj::none);
+
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+
+  // The sync promise should not be ready yet
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Now the sync promise should be ready
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("sync() waits for multiple unconfirmed writes in a row") {
+  ActorSqliteTest test;
+
+  // Do multiple unconfirmed writes - they should batch into a single transaction
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+  test.put("baz", "qux", {.allowUnconfirmed = true});
+  test.put("key3", "value3", {.allowUnconfirmed = true});
+
+  // sync() should wait for the batched commit
+  auto syncResult = test.sync();
+  KJ_ASSERT(syncResult != kj::none);
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+
+  // The sync promise should not be ready yet
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  // Complete the single batched commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Now the sync promise should be ready
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  // Verify all writes were committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("qux").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("key3"))) == kj::str("value3").asBytes());
+}
+
+KJ_TEST("sync() only waits for writes before it was called") {
+  ActorSqliteTest test;
+
+  // First write
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // Call sync for the first write
+  auto syncResult = test.sync();
+  KJ_ASSERT(syncResult != kj::none);
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+
+  // Complete first commit
+  auto firstCommit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  firstCommit->fulfill();
+
+  // First sync should complete
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  // Second write after sync was called
+  test.put("baz", "qux", {.allowUnconfirmed = true});
+
+  // The original sync should still be complete (doesn't wait for new write)
+  // To verify this, let's get a new sync that should wait for the second write
+  auto syncResult2 = test.sync();
+  KJ_ASSERT(syncResult2 != kj::none);
+  auto syncPromise2 = kj::mv(KJ_ASSERT_NONNULL(syncResult2));
+
+  // Second sync should not be ready
+  KJ_ASSERT(!syncPromise2.poll(test.ws));
+
+  // Complete second commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Now second sync should complete
+  KJ_ASSERT(syncPromise2.poll(test.ws));
+  syncPromise2.wait(test.ws);
+}
+
+KJ_TEST("sync() propagates commit errors") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  auto promise = test.gate.onBroken();
+
+  // Do an unconfirmed write
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // Call sync
+  auto syncResult = test.sync();
+  KJ_ASSERT(syncResult != kj::none);
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+
+  // The sync promise should not be ready yet
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  // Reject the commit to simulate failure
+  test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "commit failed"));
+
+  // sync promise should become ready with an exception
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  KJ_EXPECT_THROW_MESSAGE("commit failed", syncPromise.wait(test.ws));
+
+  // Gate should also be broken
+  KJ_EXPECT_THROW_MESSAGE("commit failed", promise.wait(test.ws));
+}
+
+KJ_TEST("sync() with mixed confirmed and unconfirmed writes") {
+  ActorSqliteTest test;
+
+  // Do an unconfirmed write followed by a confirmed write
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+  test.put("baz", "qux", {.allowUnconfirmed = false});
+
+  // sync() should wait for both writes
+  auto syncResult = test.sync();
+  KJ_ASSERT(syncResult != kj::none);
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+
+  // The sync promise should not be ready yet
+  KJ_ASSERT(!syncPromise.poll(test.ws));
+
+  // Complete the commit (both writes are in the same transaction)
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Now the sync promise should be ready
+  KJ_ASSERT(syncPromise.poll(test.ws));
+  syncPromise.wait(test.ws);
+
+  // Both writes should be committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("qux").asBytes());
+}
+
+KJ_TEST("multiple sync() calls for same commit") {
+  ActorSqliteTest test;
+
+  // Do a write
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // Call sync multiple times - they should all wait for the same commit
+  auto syncResult1 = test.sync();
+  auto syncResult2 = test.sync();
+  auto syncResult3 = test.sync();
+
+  KJ_ASSERT(syncResult1 != kj::none);
+  KJ_ASSERT(syncResult2 != kj::none);
+  KJ_ASSERT(syncResult3 != kj::none);
+
+  auto syncPromise1 = kj::mv(KJ_ASSERT_NONNULL(syncResult1));
+  auto syncPromise2 = kj::mv(KJ_ASSERT_NONNULL(syncResult2));
+  auto syncPromise3 = kj::mv(KJ_ASSERT_NONNULL(syncResult3));
+
+  // None should be ready yet
+  KJ_ASSERT(!syncPromise1.poll(test.ws));
+  KJ_ASSERT(!syncPromise2.poll(test.ws));
+  KJ_ASSERT(!syncPromise3.poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // All sync promises should become ready
+  KJ_ASSERT(syncPromise1.poll(test.ws));
+  KJ_ASSERT(syncPromise2.poll(test.ws));
+  KJ_ASSERT(syncPromise3.poll(test.ws));
+
+  syncPromise1.wait(test.ws);
+  syncPromise2.wait(test.ws);
+  syncPromise3.wait(test.ws);
+}
+
+KJ_TEST("allowUnconfirmed setAlarm does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do an unconfirmed setAlarm
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction - alarm scheduling happens before commit
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was set
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("confirmed setAlarm blocks output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do a confirmed setAlarm (default behavior)
+  test.setAlarm(oneMs, {.allowUnconfirmed = false});
+
+  // Gate should be blocked after scheduling starts
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was set
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("allowUnconfirmed setAlarm then confirmed put uses output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do an unconfirmed setAlarm followed by a confirmed put in the same transaction batch
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+  test.put("foo", "bar", {.allowUnconfirmed = false});
+
+  // Since any write in the batch needs confirmation, the entire batch should use output gate
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Both operations should be committed
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed setAlarm with storage ops") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do unconfirmed setAlarm with unconfirmed storage writes
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked since both operations are unconfirmed
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify both alarm and storage writes committed
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed setAlarm updating existing alarm") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Update alarm to earlier time with allowUnconfirmed
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction - when moving alarm earlier, schedule happens first
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was updated
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("allowUnconfirmed setAlarm to later time") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Update alarm to later time with allowUnconfirmed
+  test.setAlarm(twoMs, {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction - when moving alarm later, commit happens first
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was updated
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+}
+
+KJ_TEST("allowUnconfirmed setAlarm to clear alarm") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Clear alarm with allowUnconfirmed
+  test.setAlarm(kj::none, {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was cleared
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
+KJ_TEST("unconfirmed setAlarm failure still breaks output gate") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  auto promise = test.gate.onBroken();
+
+  // Do an unconfirmed setAlarm
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+
+  // The output gate is not applied initially.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+  KJ_ASSERT(!promise.poll(test.ws));
+
+  // Fulfill scheduleRun but reject the commit to simulate failure
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "alarm commit failed"));
+
+  // Gate should be broken due to commit failure
+  KJ_EXPECT_THROW_MESSAGE("alarm commit failed", promise.wait(test.ws));
+}
+
+KJ_TEST("sync() throws after critical error in explicit transaction") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Do a write within the transaction
+  txn->put(kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {});
+
+  // Trigger a critical error using SQLITE_NOMEM by setting a very low heap limit
+  // and then trying to insert a large value.
+  try {
+    // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
+    test.db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
+
+    // Create data that will exceed the memory limit
+    auto largeData = kj::heapArray<byte>(50000, 'X');  // 50KB
+
+    // This should trigger SQLITE_NOMEM, causing SQLite to auto-rollback the transaction,
+    // which will trigger the critical error handler.
+    //
+    // We have to copy it again in order to convert to a Array<const byte> from an Array<byte>.
+    txn->put(kj::str("large_key"), kj::heapArray<const byte>(largeData.asBytes()), /*options=*/{});
+    KJ_FAIL_ASSERT("Query should have failed with SQLITE_NOMEM");
+  } catch (kj::Exception& e) {
+    // Expected: out of memory error. We catch and ignore this to continue the test.
+    KJ_ASSERT(e.getDescription().contains("out of memory"));
+  }
+
+  // sync() should also throw an exception because the storage is now broken
+  auto syncResult = test.sync();
+  KJ_ASSERT(syncResult != kj::none);
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+  KJ_EXPECT_THROW_MESSAGE("broken", syncPromise.wait(test.ws));
+
+  // The transaction is now in a broken state due to the critical error.
+  // Attempting to commit should fail.
+  KJ_EXPECT_THROW_MESSAGE("broken", txn->commit());
 }
 
 }  // namespace

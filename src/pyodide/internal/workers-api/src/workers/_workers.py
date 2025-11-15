@@ -257,6 +257,7 @@ async def fetch(
         resource = resource.js_object
     if "method" in other_options and isinstance(other_options["method"], HTTPMethod):
         other_options["method"] = other_options["method"].value
+
     resp = await _pyfetch_patched(resource, **other_options)
     return Response(resp.js_response)
 
@@ -360,7 +361,7 @@ class Response(FetchResponse):
             super().__init__(body.url, body)
             return
 
-        options = self._create_options(status, status_text, headers)
+        options = self._create_options(status, status_text, headers, web_socket)
 
         # Initialize via the FetchResponse super-class which gives us access to
         # methods that we would ordinarily have to redeclare.
@@ -841,9 +842,13 @@ def _python_from_rpc_default_converter(value, convert, cache):
     elif value.constructor.name == "Number":
         return value.valueOf()
 
-    raise TypeError(
-        f"Couldn't convert object to Python type, got {value.constructor.name}"
-    )
+    # We used to throw an error here, but since these conversions are now automatic when the default
+    # entrypoint is being used, it makes sense to be less loud about it and just pass through the
+    # JS value un-modified.
+    #
+    # This does mean that in the future we need to be careful when adding type wrappers for new
+    # types here, so if you're doing this make sure to do so behind a compat flag.
+    return value
 
 
 def python_from_rpc(obj: "JsProxy"):
@@ -874,6 +879,10 @@ def _raise_on_disabled_type(value):
 
     if isinstance(value, (tuple, bytearray, LambdaType)):
         raise TypeError(f"{type(value)} cannot be sent over RPC.")
+
+    if inspect.isawaitable(value):
+        # The caller is expected to await the value prior to conversion.
+        raise TypeError(f"Awaitable {type(value)} cannot be sent over RPC.")
 
     if _is_iterable(value):
         if isinstance(value, dict):
@@ -965,6 +974,60 @@ class _DurableObjectNamespaceWrapper:
     def get(self, *args, **kwargs):
         return _FetcherWrapper(self._binding.get(*args, **kwargs))
 
+    def getByName(self, *args, **kwargs):
+        return _FetcherWrapper(self._binding.getByName(*args, **kwargs))
+
+    def jurisdiction(self, *args, **kwargs):
+        return _DurableObjectNamespaceWrapper(
+            self._binding.jurisdiction(*args, **kwargs)
+        )
+
+
+class _WorkflowInstanceWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    async def send_event(self, *args, **kwargs):
+        return self._binding.sendEvent(*args, **kwargs)
+
+    async def pause(self, *args, **kwargs):
+        return self._binding.pause(*args, **kwargs)
+
+    async def resume(self, *args, **kwargs):
+        return self._binding.resume(*args, **kwargs)
+
+    async def terminate(self, *args, **kwargs):
+        return self._binding.terminate(*args, **kwargs)
+
+    async def restart(self, *args, **kwargs):
+        return self._binding.restart(*args, **kwargs)
+
+    async def status(self, *args, **kwargs):
+        return self._binding.status(*args, **kwargs)
+
+
+class _WorkflowBindingWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    async def get(self, *args, **kwargs):
+        return _WorkflowInstanceWrapper(await self._binding.get(*args, **kwargs))
+
+    async def create(self, *args, **kwargs):
+        return _WorkflowInstanceWrapper(await self._binding.create(*args, **kwargs))
+
+    async def create_batch(self, *args, **kwargs):
+        return [
+            _WorkflowInstanceWrapper(w)
+            for w in await self._binding.createBatch(*args, **kwargs)
+        ]
+
 
 class _EnvWrapper:
     def __init__(self, env: Any):
@@ -977,6 +1040,9 @@ class _EnvWrapper:
 
         if _is_js_instance(binding, "DurableObjectNamespace"):
             return _DurableObjectNamespaceWrapper(binding)
+
+        if _is_js_instance(binding, "WorkflowImpl"):
+            return _WorkflowBindingWrapper(binding)
 
         # TODO: Implement APIs for bindings.
         return binding

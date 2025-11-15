@@ -25,6 +25,13 @@ SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
+  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_exec"_kjc);
+  userSpan.setTag("db.system.name"_kjc, kj::str("cloudflare-durable-object-sql"_kjc));
+  userSpan.setTag("db.operation.name"_kjc, kj::str("exec"_kjc));
+  userSpan.setTag("db.query.text"_kjc, kj::str(querySql));
+  userSpan.setTag(
+      "cloudflare.durable_object.query.bindings"_kjc, static_cast<int64_t>(bindings.size()));
+
   // Internalize the string, so that the cache can be keyed by string identity rather than content.
   // Any string we put into the cache is expected to live there for a while anyway, so even if it
   // is a one-off, internalizing it (which moves it to the old generation) shouldn't hurt.
@@ -68,19 +75,30 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     KJ_ASSERT(statementCache.map.eraseMatch(oldQuery));
   }
 
+  userSpan.setTag("cloudflare.durable_object.response.rows_read"_kjc,
+      static_cast<int64_t>(result->getRowsRead()));
+  userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc,
+      static_cast<int64_t>(result->getRowsWritten()));
   return result;
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
+  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_ingest"_kjc);
   SqliteDatabase::Regulator& regulator = *this;
   auto result = getDb(js).ingestSql(regulator, querySql);
+  userSpan.setTag(
+      "cloudflare.durable_object.response.rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
+  userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc,
+      static_cast<int64_t>(result.rowsWritten));
+  userSpan.setTag("cloudflare.durable_object.response.statement_count"_kjc,
+      static_cast<int64_t>(result.statementCount));
   return IngestResult(
       kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
 
 void SqlStorage::setMaxPageCountForTest(jsg::Lock& js, int count) {
   auto& db = getDb(js);
-  db.run(SqliteDatabase::TRUSTED, kj::str("PRAGMA max_page_count = ", count));
+  db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str("PRAGMA max_page_count = ", count));
 }
 
 jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString query) {
@@ -88,11 +106,16 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString
 }
 
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
+  auto userSpan =
+      IoContext::current().makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
+  userSpan.setTag("db.operation.name"_kjc, kj::str("getDatabaseSize"_kjc));
   auto& db = getDb(js);
   int64_t pages = execMemoized(db, pragmaPageCount,
       "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
                       .getInt64(0);
-  return pages * getPageSize(db);
+  auto dbSize = pages * getPageSize(db);
+  userSpan.setTag("cloudflare.durable_object.response.db_size"_kjc, static_cast<int64_t>(dbSize));
+  return dbSize;
 }
 
 bool SqlStorage::isAllowedName(kj::StringPtr name) const {
@@ -151,7 +174,7 @@ SqlStorage::Cursor::State::State(SqliteDatabase& db,
     kj::StringPtr sqlCode,
     kj::Array<BindingValue> bindingsParam)
     : bindings(kj::mv(bindingsParam)),
-      query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())) {}
+      query(db.run({.regulator = regulator}, sqlCode, mapBindings(bindings).asPtr())) {}
 
 SqlStorage::Cursor::State::State(
     kj::Rc<CachedStatement> cachedStatementParam, kj::Array<BindingValue> bindingsParam)

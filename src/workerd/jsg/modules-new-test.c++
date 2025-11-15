@@ -1588,7 +1588,7 @@ KJ_TEST("Using a registry from multiple threads works") {
       ModuleRegistry::Builder(resolveObserver, BASE).add(bundleBuilder.finish()).finish();
 
   struct NonOpErrorHandler final: public kj::TaskSet::ErrorHandler {
-    void taskFailed(kj::Exception&& exception) {}
+    void taskFailed(kj::Exception&& exception) override {}
   };
   NonOpErrorHandler errorHandler;
 
@@ -1891,28 +1891,6 @@ KJ_TEST("Using a deferred eval callback works") {
     // We don't care about the specific exception above. We only want to know that
     // the eval callback was invoked.
     KJ_ASSERT(called);
-  });
-}
-
-KJ_TEST("New module registry has a schema loader") {
-  ResolveObserver resolveObserver;
-  CompilationObserver compilationObserver;
-  ModuleBundle::BundleBuilder builder(BASE);
-
-  auto foo = kj::str("export default 1;");
-  builder.addEsmModule("foo", foo);
-
-  bool called = false;
-  auto registry = ModuleRegistry::Builder(resolveObserver, BASE)
-                      .add(builder.finish())
-                      .setEvalCallback([&called](Lock& js, const Module& module, auto v8Module,
-                                           const auto& observer) {
-    called = true;
-    return js.resolvedPromise<Value>(js.v8Ref<v8::Value>(js.num(123)));
-  }).finish();
-
-  PREAMBLE([&](Lock& js) {
-    KJ_ASSERT(js.getCapnpSchemaLoader<TestContext>().getAllLoaded().size() == 0);
   });
 }
 

@@ -180,14 +180,14 @@ Server::Server(kj::Filesystem& fs,
     kj::Timer& timer,
     kj::Network& network,
     kj::EntropySource& entropySource,
-    Worker::ConsoleMode consoleMode,
+    Worker::LoggingOptions loggingOptions,
     kj::Function<void(kj::String)> reportConfigError)
     : fs(fs),
       timer(timer),
       network(network),
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
-      consoleMode(consoleMode),
+      loggingOptions(loggingOptions),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
       tasks(*this) {}
 
@@ -1587,9 +1587,6 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
         auto time = IoContext::current().now();
         t->recordTimestamp(time);
       }
-      if (fetchStatus != 0) {
-        t->setFetchResponseInfo(tracing::FetchResponseInfo(fetchStatus));
-      }
       t->setOutcome(
           outcome, 0 * kj::MILLISECONDS /* cpu time */, 0 * kj::MILLISECONDS /* wall time */);
     }
@@ -1708,11 +1705,11 @@ class SpanSubmitter final: public kj::Refcounted {
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
-    CompleteSpan span2(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
-        span.startTime, span.endTime);
+    tracing::CompleteSpan span2(
+        spanId, parentSpanId, span.operationName.clone(), span.startTime, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
-      span2.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+      span2.tags.insert(tag.key.clone(), spanTagClone(tag.value));
     }
     if (isPredictableModeForTest()) {
       span2.startTime = span2.endTime = kj::UNIX_EPOCH;
@@ -1731,8 +1728,7 @@ class SpanSubmitter final: public kj::Refcounted {
   kj::Own<WorkerTracer> workerTracer;
 };
 
-class WorkerTracerSpanObserver: public SpanObserver,
-                                public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
+class WorkerTracerSpanObserver: public SpanObserver {
  public:
   WorkerTracerSpanObserver(
       kj::Own<SpanSubmitter> spanSubmitter, tracing::SpanId parentSpanId = tracing::SpanId::nullId)
@@ -1748,6 +1744,11 @@ class WorkerTracerSpanObserver: public SpanObserver,
 
   void report(const Span& span) override {
     spanSubmitter->submitSpan(spanId, parentSpanId, span);
+  }
+
+  // Provide I/O time to the tracing system for user spans.
+  kj::Date getTime() override {
+    return IoContext::current().now();
   }
 
  private:
@@ -1830,6 +1831,7 @@ struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
   kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
   kj::HashSet<kj::String> actorClasses;
+  kj::HashSet<kj::String> workflowClasses;
 
   void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
     kj::HashSet<kj::String> set;
@@ -1856,6 +1858,7 @@ struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
       set.insert(kj::mv(method));
     }
     namedEntrypoints.insert(kj::str(exportName), kj::mv(set));
+    workflowClasses.insert(kj::str(exportName));
   }
 };
 
@@ -2162,7 +2165,7 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
 
     if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
-      // Setting up legacy tail workers support, but only if we actually have tail workers
+      // Setting up buffered tail workers support, but only if we actually have tail workers
       // configured.
       auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
@@ -2179,7 +2182,7 @@ class Server::WorkerService final: public Service,
           kj::mv(tailStreamWriter));
 
       // When the tracer is complete, deliver the traces to both the parent
-      // and the legacy tail workers. We do NOT want to attach the tracer to the
+      // and the buffered tail workers. We do NOT want to attach the tracer to the
       // tracer->onComplete() promise here because it is the destructor of
       // the PipelineTracer that resolves the onComplete promise. If we attach
       // the tracer to the promise the tracer won't be destroyed while the
@@ -2193,8 +2196,8 @@ class Server::WorkerService final: public Service,
           kj::coCapture([tailWorkers = legacyTailWorkers.releaseAsArray()](
                             kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
         for (auto& worker: tailWorkers) {
-          auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
-              workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
+          auto event = kj::heap<workerd::api::TraceCustomEvent>(
+              workerd::api::TraceCustomEvent::TYPE, mapAddRef(traces));
           co_await worker->customEvent(kj::mv(event)).ignoreResult();
         }
         co_return;
@@ -2202,9 +2205,10 @@ class Server::WorkerService final: public Service,
     }
 
     KJ_IF_SOME(w, workerTracer) {
-      auto tracerSpanObserver =
-          kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(*w)));
-      w->setUserRequestSpan({kj::mv(tracerSpanObserver)});
+      w->setMakeUserRequestSpanFunc([&w = *w]() {
+        return SpanParent(
+            kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(w))));
+      });
     }
     kj::Own<RequestObserver> observer =
         kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
@@ -2936,11 +2940,11 @@ class Server::WorkerService final: public Service,
      public:
       Loopback(ActorContainer& actorContainer): actorContainer(actorContainer) {}
 
-      kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
+      kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
         return newPromisedWorkerInterface(actorContainer.startRequest(kj::mv(metadata)));
       }
 
-      kj::Own<Worker::Actor::Loopback> addRef() {
+      kj::Own<Worker::Actor::Loopback> addRef() override {
         return kj::addRef(*this);
       }
 
@@ -2954,7 +2958,9 @@ class Server::WorkerService final: public Service,
           : alarmScheduler(alarmScheduler),
             actor(actor) {}
 
-      kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
+      // We ignore the priorTask in workerd because everything should run synchronously.
+      kj::Promise<void> scheduleRun(
+          kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
         KJ_IF_SOME(scheduledTime, newAlarmTime) {
           alarmScheduler.setAlarm(actor, scheduledTime);
         } else {
@@ -3562,7 +3568,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::SERVICE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getService(), kj::mv(errorContext)});
       return makeGlobal(
           Global::Fetcher{.channel = channel, .requiresHost = true, .isInHouse = false});
@@ -3596,7 +3603,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
         });
       }
 
-      uint channel = (uint)actorChannels.size();
+      uint channel = static_cast<uint>(actorChannels.size());
       actorChannels.add(FutureActorChannel{actorBinding, kj::mv(errorContext)});
 
       KJ_SWITCH_ONEOF(*actorConfig) {
@@ -3613,7 +3620,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::KV_NAMESPACE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getKvNamespace(), kj::mv(errorContext)});
 
@@ -3622,7 +3630,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::R2_BUCKET: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getR2Bucket(), kj::mv(errorContext)});
       return makeGlobal(Global::R2Bucket{.subrequestChannel = channel,
         .bucket = kj::str(binding.getR2Bucket().getName()),
@@ -3630,13 +3639,15 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::R2_ADMIN: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getR2Admin(), kj::mv(errorContext)});
       return makeGlobal(Global::R2Admin{.subrequestChannel = channel});
     }
 
     case config::Worker::Binding::QUEUE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getQueue(), kj::mv(errorContext)});
 
       return makeGlobal(Global::QueueBinding{.subrequestChannel = channel});
@@ -3681,7 +3692,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
             "You must run workerd with `--experimental` to use this feature."));
       }
 
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getAnalyticsEngine(), kj::mv(errorContext)});
 
@@ -3692,7 +3704,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       });
     }
     case config::Worker::Binding::HYPERDRIVE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getHyperdrive().getDesignator(), kj::mv(errorContext)});
       return makeGlobal(Global::Hyperdrive{
@@ -3897,9 +3910,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
     }
   };
 
-  class WorkerStubImpl final: public WorkerStubChannel,
-                              public kj::Refcounted,
-                              public kj::EnableAddRefToThis<WorkerStubImpl> {
+  class WorkerStubImpl final: public WorkerStubChannel, public kj::Refcounted {
    public:
     WorkerStubImpl(Server& server,
         kj::String isolateName,
@@ -4251,8 +4262,19 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // config. So for now this just uses the defaults.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
 
+  // TODO(soon): Either make python workers support the new module registry before
+  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
+  // While NMR is experimental, we'll just throw an error if both are enabled.
+  if (def.featureFlags.getPythonWorkers()) {
+    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
+        "Python workers do not currently support the new ModuleRegistry implementation. "
+        "Please disable the new ModuleRegistry feature flag to use Python workers.");
+  }
+
+  bool usingNewModuleRegistry = def.featureFlags.getNewModuleRegistry();
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
-  if (def.featureFlags.getNewModuleRegistry()) {
+  // TODO(soon): Python workers do not currently support the new module registry.
+  if (usingNewModuleRegistry) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
@@ -4292,13 +4314,13 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
+  Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
+  isolateLoggingOptions.consoleMode =
+      def.source.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
+      ? Worker::ConsoleMode::INSPECTOR_ONLY
+      : loggingOptions.consoleMode;
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
-      kj::mv(limitEnforcer), inspectorPolicy,
-      def.source.variant.is<WorkerSource::ScriptSource>() &&
-              !def.featureFlags.getNewModuleRegistry()
-          ? Worker::ConsoleMode::INSPECTOR_ONLY
-          : consoleMode,
-      structuredLogging);
+      kj::mv(limitEnforcer), inspectorPolicy, kj::mv(isolateLoggingOptions));
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
@@ -4306,7 +4328,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     isolateRegistrar->registerIsolate(name, isolate.get());
   }
 
-  if (!def.featureFlags.getNewModuleRegistry()) {
+  if (!usingNewModuleRegistry) {
     KJ_IF_SOME(moduleFallback, def.moduleFallback) {
       KJ_REQUIRE(experimental,
           "The module fallback service is an experimental feature. "
@@ -4394,8 +4416,15 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
         .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
     }
     for (auto& ep: errorReporter.namedEntrypoints) {
-      ctxExports.add(Global{.name = kj::str(ep.key),
-        .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
+      // Workflow classes are treated as stateless entrypoints for runtime purposes, but should
+      // NOT be reflected in ctx.exports.
+      // TODO(someday): Currently Workflows must be given a name independent of their class name,
+      //   and the binding must reference that name. If the name were just the class name -- like
+      //   Durable Object namespaces -- then we could put a `Workflow` binding into `ctx.exports`.
+      if (!errorReporter.workflowClasses.contains(ep.key)) {
+        ctxExports.add(Global{.name = kj::str(ep.key),
+          .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
+      }
     }
 
     // Start numbering loopback channels for actor classes after the last actor channel and actor
@@ -4867,7 +4896,7 @@ class Server::HttpListener final: public kj::Refcounted {
    public:
     WorkerdBootstrapImpl(HttpListener& parent): parent(parent) {}
 
-    kj::Promise<void> startEvent(StartEventContext context) {
+    kj::Promise<void> startEvent(StartEventContext context) override {
       // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
       //   if we add that? (Note that if a connection-level cf blob exists, it should take
       //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
@@ -4897,8 +4926,7 @@ class Server::HttpListener final: public kj::Refcounted {
     kj::Promise<void> sendTraces(SendTracesContext context) override {
       auto traces =
           KJ_MAP(trace, context.getParams().getTraces()){ return kj::refcounted<Trace>(trace); };
-      auto event =
-          kj::heap<api::TraceCustomEventImpl>(api::TraceCustomEventImpl::TYPE, kj::mv(traces));
+      auto event = kj::heap<api::TraceCustomEvent>(api::TraceCustomEvent::TYPE, kj::mv(traces));
       auto worker = getWorker();
       auto result = co_await worker->customEvent(kj::mv(event));
       auto resp = context.getResults().getResult();
@@ -4922,8 +4950,8 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
-      auto customEvent = kj::heap<api::JsRpcSessionCustomEventImpl>(
-          api::JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
+      auto customEvent = kj::heap<api::JsRpcSessionCustomEvent>(
+          api::JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
       auto cap = customEvent->getCap();
       capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
@@ -4936,7 +4964,7 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
-      auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
+      auto customEvent = kj::heap<tracing::TailStreamCustomEvent>();
       auto cap = customEvent->getCap();
       capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
       pipelineBuilder.setTopLevel(cap);
@@ -5111,8 +5139,19 @@ kj::Promise<void> Server::run(
     jsg::V8System& v8System, config::Config::Reader config, kj::Promise<void> drainWhen) {
   TRACE_EVENT("workerd", "Server.run");
 
-  // Update structured logging setting from config
-  structuredLogging = StructuredLogging(config.getStructuredLogging());
+  // Update logging settings from config (overridding structuredLogging when so)
+  if (config.hasLogging()) {
+    auto logging = config.getLogging();
+    loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
+    if (logging.hasStdoutPrefix()) {
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
+    }
+    if (logging.hasStderrPrefix()) {
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
+    }
+  } else {
+    loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
+  }
 
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
@@ -5504,6 +5543,20 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     config::Config::Reader config,
     kj::StringPtr servicePattern,
     kj::StringPtr entrypointPattern) {
+
+  if (config.hasLogging()) {
+    auto logging = config.getLogging();
+    loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
+    if (logging.hasStdoutPrefix()) {
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
+    }
+    if (logging.hasStderrPrefix()) {
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
+    }
+  } else {
+    loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
+  }
+
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::refcounted<InvalidConfigService>();

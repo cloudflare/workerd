@@ -1,0 +1,43 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+    (name = "tail", worker = .tailWorker),
+  ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instumentation-tail", esModule = embed "tests/instrumentation-tail-worker.js" ),
+    ]
+  ) ]
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityDate = "2022-09-16",
+  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
+
+  streamingTails = ["tail"],
+
+  modules = [
+    (name = "worker", esModule = embed "actor-kv-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "ActorKvTest", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "ActorKvTest"),
+  ],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "actor-kv-test-tail.js")
+  ],
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);

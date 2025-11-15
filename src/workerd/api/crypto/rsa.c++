@@ -2,7 +2,6 @@
 
 #include "impl.h"
 #include "keys.h"
-#include "simdutf.h"
 #include "util.h"
 
 #include <openssl/bn.h>
@@ -840,7 +839,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(jsg::
       InternalDOMOperationError, "Error setting up RSA keygen.");
 
   auto rsaPrivateKey = OSSL_NEW(RSA);
-  OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), 0));
+  OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), nullptr));
   auto privateEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_RSA(privateEvpPKey.get(), rsaPrivateKey.get()));
   kj::Own<RSA> rsaPublicKey = OSSLCALL_OWN(RSA, RSAPublicKey_dup(rsaPrivateKey.get()),
@@ -887,47 +886,43 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(jsg::Lock& js,
     KJ_IF_SOME(alg, keyDataJwk.alg) {
       // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
       // importKey().
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaShaAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> knownRsaAlgorithms{
         {"RS1", EVP_sha1()},
         {"RS256", EVP_sha256()},
         {"RS384", EVP_sha384()},
         {"RS512", EVP_sha512()},
-      };
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaPssAlgorithms{
         {"PS1", EVP_sha1()},
         {"PS256", EVP_sha256()},
         {"PS384", EVP_sha384()},
         {"PS512", EVP_sha512()},
-      };
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaOaepAlgorithms{
         {"RSA-OAEP", EVP_sha1()},
         {"RSA-OAEP-256", EVP_sha256()},
         {"RSA-OAEP-384", EVP_sha384()},
         {"RSA-OAEP-512", EVP_sha512()},
       };
-      const auto& validAlgorithms = [&] {
-        if (algorithm.name == "RSASSA-PKCS1-v1_5") {
-          return rsaShaAlgorithms;
-        } else if (algorithm.name == "RSA-PSS") {
-          return rsaPssAlgorithms;
-        } else if (algorithm.name == "RSA-OAEP") {
-          return rsaOaepAlgorithms;
+      const auto tryFindAlgorithm = [&](kj::StringPtr alg) -> kj::Maybe<const EVP_MD*> {
+        if (algorithm.name == "RSASSA-PKCS1-v1_5" || algorithm.name == "RSA-PSS" ||
+            algorithm.name == "RSA-OAEP") {
+          auto ret = knownRsaAlgorithms.find(alg);
+          if (ret != knownRsaAlgorithms.end()) {
+            return ret->second;
+          }
+          return kj::none;
         } else {
           JSG_FAIL_REQUIRE(
               DOMNotSupportedError, "Unrecognized RSA variant \"", algorithm.name, "\".");
         }
-      }();
-      auto jwkHash = validAlgorithms.find(alg);
-      JSG_REQUIRE(jwkHash != rsaPssAlgorithms.end(), DOMNotSupportedError,
+      };
+      auto jwkHash = JSG_REQUIRE_NONNULL(tryFindAlgorithm(alg), DOMNotSupportedError,
           "Unrecognized or unimplemented algorithm \"", alg,
           "\" listed in JSON Web Key Algorithm "
           "parameter.");
 
-      JSG_REQUIRE(jwkHash->second == hashEvpMd, DOMDataError,
+      JSG_REQUIRE(jwkHash == hashEvpMd, DOMDataError,
           "JSON Web Key Algorithm parameter \"alg\" (\"", alg,
           "\") does not match requested hash "
           "algorithm \"",
-          jwkHash->first, "\".");
+          alg, "\".");
     }
 
     return rsaJwkReader(kj::mv(keyDataJwk));

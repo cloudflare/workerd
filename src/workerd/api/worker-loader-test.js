@@ -582,6 +582,53 @@ export let moduleTypes = {
   },
 };
 
+// Test WASM module support
+export let wasmModules = {
+  async test(ctrl, env, ctx) {
+    // Create a simple WASM module that exports an add function
+    // (module (func (export "add") (param i32 i32) (result i32) (local.get 0) (local.get 1) (i32.add)))
+    const wasmBytes = new Uint8Array([
+      0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01, 0x60,
+      0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x07, 0x01,
+      0x03, 0x61, 0x64, 0x64, 0x00, 0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x20,
+      0x00, 0x20, 0x01, 0x6a, 0x0b,
+    ]);
+
+    let worker = env.loader.get('wasmModules', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'main.js',
+        modules: {
+          'main.js': {
+            js: `
+              import {WorkerEntrypoint} from "cloudflare:workers";
+              import wasmModule from './math.wasm';
+
+              export default class extends WorkerEntrypoint {
+                async getWasmAdd(a, b) {
+                  const instance = await WebAssembly.instantiate(wasmModule);
+                  return instance.exports.add(a, b);
+                }
+              }
+            `,
+          },
+          'math.wasm': {
+            wasm: wasmBytes,
+          },
+        },
+      };
+    });
+
+    let entrypoint = worker.getEntrypoint();
+
+    let result = await entrypoint.getWasmAdd(5, 7);
+    assert.strictEqual(result, 12);
+
+    result = await entrypoint.getWasmAdd(100, 42);
+    assert.strictEqual(result, 142);
+  },
+};
+
 // Test setting compat date / flags works
 export let compatDateFlags = {
   async test(ctrl, env, ctx) {
@@ -685,7 +732,7 @@ export let ctxExports = {
     let worker = env.loader.get('ctxExports', () => {
       return {
         compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['experimental'],
+        compatibilityFlags: ['enable_ctx_exports'],
         mainModule: 'foo.js',
         allowExperimental: true,
         modules: {

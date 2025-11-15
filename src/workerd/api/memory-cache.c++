@@ -40,8 +40,7 @@ SharedMemoryCache::SharedMemoryCache(kj::Maybe<const MemoryCacheProvider&> provi
     kj::StringPtr id,
     kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler,
     const kj::MonotonicClock& timer)
-    : data(),
-      provider(provider),
+    : provider(provider),
       id(kj::str(id)),
       additionalResizeMemoryLimitHandler(additionalResizeMemoryLimitHandler),
       timer(timer) {}

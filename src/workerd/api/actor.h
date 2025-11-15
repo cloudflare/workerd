@@ -333,6 +333,12 @@ class DurableObjectClass: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectClass) {
     // No methods - this is just a handle that gets passed to ctx.facets.get()
+
+    JSG_TS_OVERRIDE(
+      interface DurableObjectClass<
+        _T extends Rpc.DurableObjectBranded | undefined = undefined
+      > {}
+    );
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);

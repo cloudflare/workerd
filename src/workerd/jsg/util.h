@@ -65,6 +65,7 @@ class JsExceptionThrown: public std::exception {
 
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
 bool getShouldSetToStringTag(v8::Isolate* isolate);
+bool getShouldSetImmutablePrototype(v8::Isolate* isolate);
 
 kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
@@ -89,8 +90,15 @@ void throwInternalError(
 
 constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe8027292171b1646ull;
 
+// Detail type for JavaScript exception metadata (error type and stack trace)
+constexpr kj::Exception::DetailTypeId JS_EXCEPTION_METADATA_DETAIL_ID = 0xa9ae63464030fcefull;
+
 // Add a serialized copy of the exception value to the KJ exception, as a "detail".
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
+
+// Extract and add JavaScript exception metadata (error type and stack trace) to the KJ exception.
+// Serializes using Cap'n Proto schema defined in exception-metadata.capnp.
+void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
 struct TypeErrorContext {
   enum Kind : uint8_t {

@@ -104,7 +104,7 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-      tracing::InvocationSpanContext invocationSpanContext);
+      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
 
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
@@ -134,6 +134,9 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   bool isSent() const {
     return sent;
   }
+  uint getHttpResponseStatus() const {
+    return httpResponseStatus;
+  }
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
       kj::StringPtr statusText,
@@ -142,6 +145,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
     TRACE_EVENT(
         "workerd", "WorkerEntrypoint::ResponseSentTracker::send()", "statusCode", statusCode);
     sent = true;
+    httpResponseStatus = statusCode;
     return inner.send(statusCode, statusText, headers, expectedBodySize);
   }
 
@@ -152,6 +156,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   }
 
  private:
+  uint httpResponseStatus = 0;
   kj::HttpService::Response& inner;
   bool sent = false;
 };
@@ -172,17 +177,11 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
-  // Create a new InvocationSpanContext for this worker invocation.
-  auto invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
-      maybeTriggerInvocationSpan.map(
-          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
-      threadContext.getEntropySource());
-
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, tunnelExceptions, entrypointName, kj::mv(props), kj::mv(cfBlobJson));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
-      kj::mv(invocationSpanContext));
+      kj::mv(maybeTriggerInvocationSpan));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -208,7 +207,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-    tracing::InvocationSpanContext invocationSpanContext) {
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -234,7 +233,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
   }
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
-      kj::mv(metrics), kj::mv(workerTracer), kj::mv(invocationSpanContext))
+      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan))
                         .attach(kj::mv(actor));
 }
 
@@ -243,7 +242,6 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
-  throwIfInvalidHeaderValue(headers);
   TRACE_EVENT("workerd", "WorkerEntrypoint::request()", "url", url.cStr(),
       PERFETTO_FLOW_FROM_POINTER(this));
   auto incomingRequest =
@@ -255,9 +253,13 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
 
   bool isActor = context.getActor() != kj::none;
+  // HACK: Capture workerTracer directly, it's unclear how to acquire the right tracer from context
+  // when we need it (for DOs, IoContext may point to a different WorkerTracer by the time we use
+  // it). The tracer lives as long or longer than the IoContext (based on being co-owned
+  // by IncomingRequest and PipelineTracer) so long enough.
+  kj::Maybe<BaseTracer&> workerTracer;
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    auto timestamp = context.now();
     kj::String cfJson;
     KJ_IF_SOME(c, cfBlobJson) {
       cfJson = kj::str(c);
@@ -280,8 +282,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       return tracing::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
     };
 
-    t.setEventInfo(context.getInvocationSpanContext(), timestamp,
+    t.setEventInfo(*incomingRequest,
         tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
+    workerTracer = t;
   }
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
@@ -314,10 +317,19 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         cfBlobJson, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), kj::mv(signal));
   })
-      .then([this](api::DeferredProxy<void> deferredProxy) {
+      .then([this, &context, &wrappedResponse = *wrappedResponse, workerTracer](
+                api::DeferredProxy<void> deferredProxy) {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
         PERFETTO_FLOW_FROM_POINTER(this));
     proxyTask = kj::mv(deferredProxy.proxyTask);
+    KJ_IF_SOME(t, workerTracer) {
+      auto httpResponseStatus = wrappedResponse.getHttpResponseStatus();
+      if (httpResponseStatus != 0) {
+        t.setReturn(context.now(), tracing::FetchResponseInfo(httpResponseStatus));
+      } else {
+        t.setReturn(context.now());
+      }
+    }
   })
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
@@ -384,8 +396,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     proxyTask = kj::none;
   }))
       .catch_([this, wrappedResponse = kj::mv(wrappedResponse), isActor, method, url, &headers,
-                  &requestBody, metrics = kj::mv(metricsForCatch)](
-                  kj::Exception&& exception) mutable -> kj::Promise<void> {
+                  &requestBody, metrics = kj::mv(metricsForCatch),
+                  workerTracer](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() exception",
         PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
@@ -450,7 +462,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         metrics->setFailedOpen(true);
         return promise.attach(kj::mv(service));
       });
-      return promise.catch_([this, wrappedResponse = kj::mv(wrappedResponse),
+      return promise.catch_([this, wrappedResponse = kj::mv(wrappedResponse), workerTracer,
                                 metrics = kj::mv(metrics)](kj::Exception&& e) mutable {
         metrics->setFailedOpen(false);
         if (e.getType() != kj::Exception::Type::DISCONNECTED &&
@@ -462,7 +474,10 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         }
         if (!wrappedResponse->isSent()) {
           kj::HttpHeaders headers(threadContext.getHeaderTable());
-          wrappedResponse->send(500, "Internal Server Error", headers, uint64_t(0));
+          wrappedResponse->send(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
+          KJ_IF_SOME(t, workerTracer) {
+            t.setReturn(kj::none, tracing::FetchResponseInfo(500));
+          }
         }
       });
     } else if (tunnelExceptions) {
@@ -482,9 +497,13 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       if (!wrappedResponse->isSent()) {
         kj::HttpHeaders headers(threadContext.getHeaderTable());
         if (exception.getType() == kj::Exception::Type::OVERLOADED) {
-          wrappedResponse->send(503, "Service Unavailable", headers, uint64_t(0));
+          wrappedResponse->send(503, "Service Unavailable", headers, static_cast<uint64_t>(0));
         } else {
-          wrappedResponse->send(500, "Internal Server Error", headers, uint64_t(0));
+          wrappedResponse->send(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
+        }
+        KJ_IF_SOME(t, workerTracer) {
+          t.setReturn(
+              kj::none, tracing::FetchResponseInfo(wrappedResponse->getHttpResponseStatus()));
         }
       }
 
@@ -502,6 +521,9 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   auto incomingRequest =
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "connect() can only be called once"));
   this->incomingRequest = kj::none;
+  // Whenever we implement incoming connections over the `connect` handler we need to remember to
+  // add tracing `onset` and `return` events using setEventInfo()/setReturn(), as with the other
+  // event types here.
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
@@ -560,8 +582,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
   KJ_IF_SOME(t, context.getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
-        tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
+    t.setEventInfo(*incomingRequest, tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
   // Scheduled handlers run entirely in waitUntil() tasks.
@@ -621,8 +642,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   incomingRequest->delivered();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(
-        context.getInvocationSpanContext(), context.now(), tracing::AlarmEventInfo(scheduledTime));
+    t.setEventInfo(*incomingRequest, tracing::AlarmEventInfo(scheduledTime));
   }
 
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
@@ -700,7 +720,11 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
 
   auto& context = incomingRequest->getContext();
   auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount);
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  auto result = co_await maybeAddGcPassForTest(context, kj::mv(promise));
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
+    t.setReturn(context.now());
+  }
+  co_return result;
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
@@ -712,7 +736,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
 
   auto& context = incomingRequest->getContext();
   KJ_IF_SOME(t, context.getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(), tracing::CustomEventInfo());
+    t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
   }
 
   context.addWaitUntil(context.run([entrypointName = entrypointName, props = kj::mv(props),
@@ -745,6 +769,10 @@ kj::Promise<bool> WorkerEntrypoint::test() {
       }
     }
 
+    // Not adding a return event here – we only provide rudimentary tracing support for test events
+    // (enough so that we can get logs/spans from them in wd-tests), so this is not needed in
+    // practice.
+
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
     co_return outcome == EventOutcome::OK;
@@ -761,6 +789,16 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   this->incomingRequest = kj::none;
 
   auto& context = incomingRequest->getContext();
+
+  // Set event info BEFORE calling run() to ensure onset event is reported before
+  // any user code executes (particularly important for actors whose constructors may run
+  // during delivered()).
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    KJ_IF_SOME(eventInfo, event->getEventInfo()) {
+      t.setEventInfo(*incomingRequest, kj::mv(eventInfo));
+    }
+  }
+
   auto promise = event->run(kj::mv(incomingRequest), entrypointName, kj::mv(props), waitUntilTasks)
                      .attach(kj::mv(event));
 

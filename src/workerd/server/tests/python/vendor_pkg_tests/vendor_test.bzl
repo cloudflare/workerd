@@ -1,5 +1,5 @@
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "compute_python_flags", "py_wd_test")
 
 def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix, **kwds):
     """Creates a Python Workers test which includes vendored packages in its bundle, the
@@ -26,9 +26,9 @@ def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_sr
         cmd = """
         # Create a file with all the file paths to avoid Windows command line length limits
         echo "$(locations """ + vendored_srcs_target + """)" > paths.txt
-        $(execpath @python3_13_host//:python) $(location generate_modules.py) @paths.txt > $@
+        $(execpath @python_3_13//:python3) $(location generate_modules.py) @paths.txt > $@
         """,
-        tools = ["@python3_13_host//:python"],
+        tools = ["@python_3_13//:python3"],
     )
 
     # Perform substitution to include the generated modules in template
@@ -41,7 +41,7 @@ def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_sr
         ],
         outs = [name + ".test.generated" + "_" + version],
         cmd = """
-        $(execpath @python3_13_host//:python) -c "
+        $(execpath @python_3_13//:python3) -c "
 import sys
 with open('$(location :""" + module_list_name + """)', 'r') as f:
     modules = f.read()
@@ -53,7 +53,7 @@ with open('$@', 'w') as f:
     f.write(result)
         "
     """,
-        tools = ["@python3_13_host//:python"],
+        tools = ["@python_3_13//:python3"],
     )
 
     # Create the py_wd_test
@@ -65,19 +65,37 @@ with open('$@', 'w') as f:
             main_py_file,
             vendored_srcs_target,
         ],
+        # Disable on windows because of flakiness
+        # TODO fix this
+        target_compatible_with = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
         **kwds
     )
 
-def vendored_py_wd_test(name, test_template = None, main_py_file = None, vendored_srcs_target_prefix = None, **kwds):
+def vendored_py_wd_test(
+        name,
+        test_template = None,
+        main_py_file = None,
+        vendored_srcs_target_prefix = None,
+        python_flags = "all",
+        skip_python_flags = [],
+        vendored_package_name = None,
+        **kwds):
+    python_flags = compute_python_flags(python_flags, skip_python_flags)
     bzl_name = "%s_vendor_test" % name
     if test_template == None:
         test_template = "%s_vendor.wd-test" % name
     if main_py_file == None:
         main_py_file = "%s.py" % name
+    if vendored_package_name == None:
+        vendored_package_name = name
     if vendored_srcs_target_prefix == None:
-        vendored_srcs_target_prefix = "@%s_src" % name
+        vendored_srcs_target_prefix = "@%s_src" % vendored_package_name
 
-    for info in BUNDLE_VERSION_INFO.values():
-        if name not in info["vendored_packages_for_tests"]:
-            continue
+    for flag in python_flags:
+        info = BUNDLE_VERSION_INFO[flag]
+        if vendored_package_name not in info["vendored_packages_for_tests"]:
+            fail("Not found", vendored_package_name, "in", info["vendored_packages_for_tests"])
         _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, **kwds)

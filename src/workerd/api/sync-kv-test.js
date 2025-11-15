@@ -38,7 +38,7 @@ export class MyActor extends DurableObject {
       assert.throws(() => [...cursor1], {
         name: 'Error',
         message:
-          'kv.list() iterator was invalidated because a new call to kv.list() was sarted. ' +
+          'kv.list() iterator was invalidated because a new call to kv.list() was started. ' +
           'Only one kv.list() iterator can exist at a time.',
       });
 

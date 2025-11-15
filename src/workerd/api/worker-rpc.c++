@@ -980,15 +980,14 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
 
  private:
+  virtual void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) = 0;
+
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
   // using IoContext::makeReentryCallback().
   kj::Function<kj::Promise<void>(CallContext callContext)> enterIsolateAndCall;
 
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
-
-  // Hook for recording trace information.
-  virtual void addTrace(IoContext& ioctx, kj::StringPtr methodName) = 0;
 
   kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
     jsg::Lock& js = lock;
@@ -1000,7 +999,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     // Retrieve the method name and report onset event info if tracing is enabled.
     switch (params.which()) {
       case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
-        methodNameForTrace = params.getMethodName().attach();
+        methodNameForTrace = kj::ConstString(kj::str(params.getMethodName()));
         break;
       }
       case rpc::JsRpcTarget::CallParams::METHOD_PATH: {
@@ -1016,7 +1015,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         break;
       }
     }
-    addTrace(ctx, methodNameForTrace);
+
+    maybeSetJsRpcInfo(ctx, methodNameForTrace);
 
     auto targetInfo = getTargetInfo(lock, ctx);
 
@@ -1553,11 +1553,7 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
     return false;
   }
 
-  void addTrace(IoContext& ioctx, kj::StringPtr methodName) override {
-    // TODO(someday): Trace non-top-level calls? Note that this would have to be done differently
-    // than with EntrypointJsRpcTarget since we will already have an onset event set here – creating
-    // a span might be the right approach, but we'd have to end it at the right time too.
-  }
+  void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {}
 };
 
 // See comment at call site for explanation.
@@ -1786,7 +1782,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
         KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, kj::mv(props), ioCtx.getActor()),
             "Failed to get handler to worker.");
 
-    if (handler->missingSuperclass) {
+    if (handler->missingSuperclass && wrapperModule == kj::none) {
       // JS RPC is not enabled on the server side, we cannot call any methods.
       JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
           "The receiving Durable Object does not support RPC, because its class was not declared "
@@ -1850,7 +1846,6 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
   kj::Maybe<kj::Own<BaseTracer>> tracer;
-  bool addedTracer = false;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.
@@ -1872,17 +1867,9 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     return false;
   }
 
-  void addTrace(IoContext& ioctx, kj::StringPtr methodName) override {
-    KJ_IF_SOME(t, tracer) {
-      // TODO(felix): This should not be necessary, still check since we now add traces in a
-      // different place. Remove after a few days if it proves stable.
-      if (addedTracer) {
-        LOG_WARNING_PERIODICALLY("NOSENTRY tried to add JsRpc trace onset twice"_kj);
-        return;
-      }
-      addedTracer = true;
-      t->setEventInfo(ioctx.getInvocationSpanContext(), ioctx.now(),
-          tracing::JsRpcEventInfo(kj::str(methodName)));
+  void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {
+    KJ_IF_SOME(tracer, ctx.getWorkerTracer()) {
+      tracer.setJsRpcInfo(ctx.getInvocationSpanContext(), ctx.now(), methodNameForTrace);
     }
   }
 };
@@ -1894,8 +1881,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 // completes, since it is actually returned as the result of the top-level RPC call, but that
 // call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
 // would create a cycle.
-class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::MembranePolicy,
-                                                                 public kj::Refcounted {
+class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::MembranePolicy,
+                                                             public kj::Refcounted {
  public:
   explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : doneFulfiller(kj::mv(doneFulfiller)) {}
@@ -1927,7 +1914,7 @@ class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::M
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> doneFulfiller;
 };
 
-kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::run(
+kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
@@ -1935,9 +1922,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   IoContext& ioctx = incomingRequest->getContext();
 
   incomingRequest->delivered();
-  KJ_IF_SOME(tracer, incomingRequest->getWorkerTracer()) {
-    tracer.setIsJsRpc();
-  }
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
@@ -1958,6 +1942,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
     // and server as part of this session.
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
 
+    KJ_IF_SOME(t, ioctx.getWorkerTracer()) {
+      t.setReturn(ioctx.now());
+    }
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   } catch (...) {
     // Make sure the top-level capability is revoked with the same exception that `run()` is
@@ -1968,7 +1955,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   }
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::sendRpc(
+kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {

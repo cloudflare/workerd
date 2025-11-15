@@ -383,7 +383,8 @@ FOR_EACH_MAYBE_TYPE(DECLARE_MAYBE_TYPE)
   F(kj::ArrayPtr)                                                                                  \
   F(kj::HashSet)                                                                                   \
   F(jsg::Sequence)                                                                                 \
-  F(jsg::AsyncGenerator)
+  F(jsg::AsyncGenerator)                                                                           \
+  F(jsg::AsyncGeneratorIgnoringStrings)
 
 template <typename Configuration>
 struct BuildRtti<Configuration, jsg::JsArray> {
@@ -468,6 +469,7 @@ struct BuildRtti<Configuration, v8::Promise> {
   };
 
 #define FOR_EACH_BUILTIN_TYPE(F, ...)                                                              \
+  F(jsg::JsUint8Array, BuiltinType::Type::V8_UINT8_ARRAY)                                          \
   F(jsg::BufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                       \
   F(kj::Date, BuiltinType::Type::KJ_DATE)                                                          \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                                  \
@@ -651,6 +653,11 @@ struct MemberCounter {
     ++members;
   }
 
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerStaticProperty() {
+    ++members;
+  }
+
   template <const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
     ++members;
@@ -775,6 +782,16 @@ struct MembersBuilder {
     constant.setName(name);
     constant.setValue(value);
     // BuildRtti<Configuration, T>::build(constant.initType());
+  }
+
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerStaticProperty() {
+    auto prop = members[memberIndex++].initProperty();
+    prop.setName(name);
+    prop.setReadonly(true);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
+    using GetterTraits = FunctionTraits<Getter>;
+    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
   template <typename Property, Property Self::*property>

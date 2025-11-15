@@ -329,7 +329,6 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'ReadableStream with byte source (empty): calling getReader with invalid arguments should throw appropriate errors',
-      'ReadableStream with byte source (empty) default reader: canceling via the reader should cause the reader to act closed',
       'ReadableStream with byte source (empty) BYOB reader: canceling via the reader should cause the reader to act closed',
     ],
   },
@@ -338,7 +337,6 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'Async iterator instances should have the correct list of properties',
-      'return(); next()',
       'return(); next() [no awaiting]',
       'return(); return() [no awaiting]',
       'return(); next() with delayed cancel() [no awaiting]',
@@ -348,8 +346,6 @@ export default {
       'next() that succeeds; return() [no awaiting]',
       'next() that succeeds; next() that reports an error; next()',
       'next() that succeeds; next() that reports an error(); return()',
-      'Async-iterating a pull source manually',
-      'return(); next() with delayed cancel()',
     ],
   },
   'readable-streams/bad-strategies.any.js': {
@@ -444,11 +440,6 @@ export default {
       'ReadableStreamDefaultReader closed promise should be rejected with undefined if that is the error',
       // TODO(conform): The spec expects this to be a TypeError, not a RangeError
       'getReader() should call ToString() on mode',
-      // In the actual WPT, the result is expected to explicitly contain `value: undefined`,
-      // but we omit that.
-      'Reading twice on a stream that gets closed',
-      // TODO: Investigate why this test is failing
-      'Reading twice on a closed stream',
     ],
   },
   'readable-streams/floating-point-total-queue-size.any.js': {
@@ -464,35 +455,13 @@ export default {
     comment: 'See comments on tests',
     disabledTests: [
       // A hanging promise was cancelled
-      'ReadableStream.from: cancel() resolves when return() method is missing',
       'ReadableStream.from: cancel() rejects when return() rejects',
       'ReadableStream.from: cancel() rejects when return() fulfills with a non-object',
-      // Heap use-after-free
-      'ReadableStream.from: reader.cancel() inside return()',
-      'ReadableStream.from: reader.cancel() inside next()',
     ],
     expectedFailures: [
-      // To be investigated
+      // TODO(soon): This one is a bit pedantic. We ignore the case where return() is not
+      // a method whereas the spec expects us to return a rejected promise in this case.
       'ReadableStream.from: cancel() rejects when return() is not a method',
-      'ReadableStream.from accepts a string',
-      'ReadableStream.from: cancel() rejects when return() throws synchronously',
-      'ReadableStream.from accepts an array of promises',
-      'ReadableStream.from accepts a sync iterable of promises',
-      'ReadableStream.from accepts an empty iterable',
-      'ReadableStream.from accepts an array of values',
-      'ReadableStream.from accepts an array iterator',
-      'ReadableStream.from accepts a Set',
-      'ReadableStream.from accepts a Set iterator',
-      'ReadableStream.from accepts a sync generator',
-      'ReadableStream.from accepts a sync iterable of values',
-      'ReadableStream.from accepts an async iterable',
-      'ReadableStream.from accepts an async generator',
-      'ReadableStream.from accepts a ReadableStream',
-      'ReadableStream.from accepts a ReadableStream async iterator',
-      'ReadableStream.from ignores a null @@asyncIterator',
-      'ReadableStream.from: return() is not called when iterator completes normally',
-      'ReadableStream.from(array), push() to array while reading',
-      'ReadableStream.from: cancelling the returned stream calls and awaits return()',
     ],
   },
   'readable-streams/garbage-collection.any.js': {
@@ -593,14 +562,11 @@ export default {
   'readable-streams/tee.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
-      'ReadableStream teeing: should be able to read one branch to the end without affecting the other',
       'ReadableStream teeing: errors in the source should propagate to both branches',
       'ReadableStreamTee should only pull enough to fill the emptiest queue',
       'ReadableStreamTee stops pulling when original stream errors while branch 1 is reading',
       'ReadableStreamTee stops pulling when original stream errors while branch 2 is reading',
       'ReadableStreamTee stops pulling when original stream errors while both branches are reading',
-      'ReadableStream teeing: canceling branch1 should finish when branch2 reads until end of stream',
-      'ReadableStream teeing: enqueue() and close() while both branches are pulling',
       'ReadableStream teeing: canceling both branches should aggregate the cancel reasons into an array',
       'ReadableStream teeing: canceling both branches in reverse order should aggregate the cancel reasons into an array',
       'ReadableStream teeing: failing to cancel the original stream should cause cancel() to reject on branches',
@@ -616,25 +582,12 @@ export default {
     ],
     expectedFailures: [
       'ReadableStream (empty): calling getReader with invalid arguments should throw appropriate errors',
-      'ReadableStream (empty) reader: canceling via the reader should cause the reader to act closed',
-      'ReadableStream reader (closed before getting reader): read() should fulfill with { value: undefined, done: true }',
-      'ReadableStream reader (closed before getting reader): read() multiple times should fulfill with { value: undefined, done: true }',
-      'ReadableStream reader (closed before getting reader): read() should work when used within another read() fulfill callback',
       'ReadableStream reader (closed before getting reader): releasing the lock should cause closed to reject and change identity',
-      'ReadableStream reader (closed after getting reader): read() should fulfill with { value: undefined, done: true }',
-      'ReadableStream reader (closed after getting reader): read() multiple times should fulfill with { value: undefined, done: true }',
-      'ReadableStream reader (closed after getting reader): read() should work when used within another read() fulfill callback',
       'ReadableStream reader (closed after getting reader): releasing the lock should cause closed to reject and change identity',
-      'ReadableStream reader (closed via cancel after getting reader): read() should fulfill with { value: undefined, done: true }',
-      'ReadableStream reader (closed via cancel after getting reader): read() multiple times should fulfill with { value: undefined, done: true }',
-      'ReadableStream reader (closed via cancel after getting reader): read() should work when used within another read() fulfill callback',
       'ReadableStream reader (closed via cancel after getting reader): releasing the lock should cause closed to reject and change identity',
       'ReadableStream (errored via returning a rejected promise in start) reader: releasing the lock should cause closed to reject and change identity',
       'ReadableStream reader (errored before getting reader): releasing the lock should cause closed to reject and change identity',
       'ReadableStream reader (errored after getting reader): releasing the lock should cause closed to reject and change identity',
-      'ReadableStream (two chunks enqueued, still open) reader: cancel() after a read() should still give that single read result',
-      'ReadableStream (two chunks enqueued, then closed) reader: third read(), without waiting, should give { value: undefined, done: true } (sequential)',
-      'ReadableStream (two chunks enqueued, then closed) reader: third read(), without waiting, should give { value: undefined, done: true } (nested)',
     ],
   },
 

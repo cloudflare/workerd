@@ -8,30 +8,6 @@
       "repo": "capnproto",
       "branch": "v2",
       "extra_strip_prefix": "/c++"
-    },
-    {
-      "name": "ada-url",
-      "type": "github_release",
-      "owner": "ada-url",
-      "repo": "ada",
-      "file_regex": "singleheader.zip",
-      "strip_prefix": "",
-      "build_file": "//:build/BUILD.ada-url"
-    },
-    {
-      "name": "simdutf",
-      "type": "github_release",
-      "owner": "simdutf",
-      "repo": "simdutf",
-      "file_regex": "singleheader.zip",
-      "strip_prefix": "",
-      "build_file": "//:build/BUILD.simdutf"
-    },
-    {
-      "type": "github_release",
-      "name": "brotli",
-      "owner": "google",
-      "repo": "brotli"
     }
   ]
 }

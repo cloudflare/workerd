@@ -3,7 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/rust/python-parser/lib.rs.h>
+
 #include <kj-rs/kj-rs.h>
+
 #include <kj/test.h>
 
 using namespace kj_rs;
@@ -17,7 +19,7 @@ kj::Array<kj::String> parseImports(kj::ArrayPtr<kj::StringPtr> cpp_modules) {
   }
   ::rust::Slice<::rust::Str const> rust_slice(rust_modules.begin(), rust_modules.size());
   auto rust_result = get_imports(rust_slice);
-  return from<RustCopy>(rust_result);
+  return kj::from<RustCopy>(rust_result);
 }
 
 namespace workerd::api {
@@ -93,12 +95,14 @@ KJ_TEST("supports commas") {
 }
 
 KJ_TEST("supports backslash") {
+  // clang-format off
   auto result = parseImports(kj::arr(
     "import a\\\n,b"_kj,
     "import\\\n q,w"_kj,
     "from \\\nx import y"_kj,
     "from \\\n   c import y"_kj
   ));
+  // clang-format on
   KJ_REQUIRE(result.size() == 6);
   KJ_REQUIRE(result[0] == "a");
   KJ_REQUIRE(result[1] == "b");
@@ -109,6 +113,7 @@ KJ_TEST("supports backslash") {
 }
 
 KJ_TEST("multiline-strings ignored") {
+  // clang-format off
   auto files = kj::arr(R"SCRIPT(
 FOO="""
 import x
@@ -128,6 +133,7 @@ import b \
 R"SCRIPT(import x
 from y import z
 """)SCRIPT"_kj);
+  // clang-format on
   auto result = parseImports(files);
   KJ_REQUIRE(result.size() == 0);
 }

@@ -143,9 +143,6 @@ class IsolateBase {
     evalAllowed = true;
   }
 
-  inline void setJspiEnabled(kj::Badge<Lock>, bool enabled) {
-    jspiEnabled = enabled;
-  }
   inline void setCaptureThrowsAsRejections(kj::Badge<Lock>, bool capture) {
     captureThrowsAsRejections = capture;
   }
@@ -179,6 +176,14 @@ class IsolateBase {
 
   void enableSetToStringTag() {
     setToStringTag = true;
+  }
+
+  inline bool shouldSetImmutablePrototype() const {
+    return shouldSetImmutablePrototypeFlag;
+  }
+
+  void enableSetImmutablePrototype() {
+    shouldSetImmutablePrototypeFlag = true;
   }
 
   inline void disableTopLevelAwait() {
@@ -258,6 +263,14 @@ class IsolateBase {
     return usingEnhancedErrorSerialization;
   }
 
+  void setUsingFastJsgStruct() {
+    usingFastJsgStruct = true;
+  }
+
+  bool getUsingFastJsgStruct() const {
+    return usingFastJsgStruct;
+  }
+
   bool pumpMsgLoop() {
     return v8System.pumpMsgLoop(ptr);
   }
@@ -308,7 +321,6 @@ class IsolateBase {
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
-  bool jspiEnabled = false;
 
   // The Web Platform API specifications require that any API that returns a JavaScript Promise
   // should never throw errors synchronously. Rather, they are supposed to capture any synchronous
@@ -320,9 +332,11 @@ class IsolateBase {
   bool nodeJsCompatEnabled = false;
   bool nodeJsProcessV2Enabled = false;
   bool setToStringTag = false;
+  bool shouldSetImmutablePrototypeFlag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
+  bool usingFastJsgStruct = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
@@ -359,6 +373,9 @@ class IsolateBase {
   // operation) outside of the queue lock.
   const kj::MutexGuarded<BatchQueue<Item>> queue{
     DESTRUCTION_QUEUE_INITIAL_SIZE, DESTRUCTION_QUEUE_MAX_CAPACITY};
+
+  enum QueueState { ACTIVE, DROPPING, DROPPED };
+  QueueState queueState = ACTIVE;
 
   struct CodeBlockInfo {
     size_t size = 0;
@@ -670,7 +687,7 @@ class Isolate: public IsolateBase {
     jsg::JsObject getConstructor(v8::Local<v8::Context> context) {
       v8::EscapableHandleScope scope(v8Isolate);
       v8::Local<v8::FunctionTemplate> tpl =
-          jsgIsolate.getWrapperByContext(context)->getTemplate(v8Isolate, (T*)nullptr);
+          jsgIsolate.getWrapperByContext(context)->getTemplate(v8Isolate, static_cast<T*>(nullptr));
       v8::Local<v8::Object> prototype = check(tpl->GetFunction(context));
       return jsg::JsObject(scope.Escape(prototype));
     }
@@ -793,7 +810,8 @@ class Isolate: public IsolateBase {
         return kj::none;
       } else {
         return *reinterpret_cast<Object*>(
-            instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+            instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+                static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
       }
     }
 

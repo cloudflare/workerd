@@ -6,10 +6,10 @@ Subject: Add another slot in the isolate for embedder
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-internal.h b/include/v8-internal.h
-index 1259a220e7b0d9b7e4aa15989e9389fbc44d20de..98375fbf3791c4369ca410c685a36e12de6c8b1d 100644
+index 9a39f8ede92bad9acf1c390cde2048d7a9eb6a88..efdd0ec674f11a0e68a2e996f6ac0dc66c6ec1e3 100644
 --- a/include/v8-internal.h
 +++ b/include/v8-internal.h
-@@ -910,7 +910,7 @@ class Internals {
+@@ -918,7 +918,7 @@ class Internals {
    static const int kExternalTwoByteRepresentationTag = 0x02;
    static const int kExternalOneByteRepresentationTag = 0x0a;
  

@@ -470,6 +470,7 @@ struct StartQueueEventResponse {
 };
 
 StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
+    IoContext& context,
     kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params,
     IoPtr<QueueEventResult> result,
     Worker::Lock& lock,
@@ -493,8 +494,11 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     KJ_IF_SOME(f, queueHandler.queue) {
       auto promise = f(lock, js.alloc<QueueController>(event.addRef()),
           jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
-                         .then([event = event.addRef()]() mutable {
+                         .then([event = event.addRef(), &context]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
+        KJ_IF_SOME(t, context.getWorkerTracer()) {
+          t.setReturn(context.now());
+        }
       }, [event = event.addRef()](kj::Exception&& e) mutable {
         event->setCompletionStatus(QueueEvent::CompletedWithError{kj::cp(e)});
         return kj::mv(e);
@@ -526,18 +530,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
 
 }  // namespace
 
-kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
-    kj::Own<IoContext_IncomingRequest> incomingRequest,
-    kj::Maybe<kj::StringPtr> entrypointName,
-    Frankenvalue props,
-    kj::TaskSet& waitUntilTasks) {
-  // This method has three main chunks of logic:
-  // 1. Do all necessary setup work. This starts right below this comment.
-  // 2. Call into the worker's queue event handler.
-  // 3. Wait on the necessary portions of the worker's code to complete.
-  incomingRequest->delivered();
-  auto& context = incomingRequest->getContext();
-
+kj::Maybe<tracing::EventInfo> QueueCustomEvent::getEventInfo() const {
   kj::String queueName;
   uint32_t batchSize;
   KJ_SWITCH_ONEOF(params) {
@@ -551,10 +544,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     }
   }
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
-        tracing::QueueEventInfo(kj::str(queueName), batchSize));
-  }
+  return tracing::EventInfo(tracing::QueueEventInfo(kj::mv(queueName), batchSize));
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
+    kj::Own<IoContext_IncomingRequest> incomingRequest,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
+    kj::TaskSet& waitUntilTasks) {
+  // This method has three main chunks of logic:
+  // 1. Do all necessary setup work. This starts right below this comment.
+  // 2. Call into the worker's queue event handler.
+  // 3. Wait on the necessary portions of the worker's code to complete.
+  incomingRequest->delivered();
+  auto& context = incomingRequest->getContext();
 
   // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
   // waitUntil'ed callback safely without worrying about whether this coroutine gets canceled.
@@ -573,7 +576,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
-    auto startResp = startQueueEvent(lock.getGlobalScope(), kj::mv(params),
+    auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
         context.addObject(result), lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler);
     queueEvent->event = kj::mv(startResp.event);
@@ -704,7 +707,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   }
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
+kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
@@ -756,7 +759,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
   });
 }
 
-kj::Array<QueueRetryMessage> QueueCustomEventImpl::getRetryMessages() const {
+kj::Array<QueueRetryMessage> QueueCustomEvent::getRetryMessages() const {
   auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result.retries.size());
   for (const auto& entry: result.retries) {
     retryMsgs.add(QueueRetryMessage{
@@ -765,7 +768,7 @@ kj::Array<QueueRetryMessage> QueueCustomEventImpl::getRetryMessages() const {
   return retryMsgs.finish();
 }
 
-kj::Array<kj::String> QueueCustomEventImpl::getExplicitAcks() const {
+kj::Array<kj::String> QueueCustomEvent::getExplicitAcks() const {
   auto ackArray = kj::heapArrayBuilder<kj::String>(result.explicitAcks.size());
   for (const auto& msgId: result.explicitAcks) {
     ackArray.add(kj::heapString(msgId));

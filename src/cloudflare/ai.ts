@@ -20,3 +20,14 @@ export {
   AutoRAGNotFoundError,
   AutoRAGUnauthorizedError,
 } from 'cloudflare-internal:autorag-api';
+
+export {
+  ToMarkdownService,
+  type ConversionResponse,
+  type SupportedFileFormat,
+  type ConversionOptions,
+  type ConversionRequestOptions,
+  type EmbeddedImageConversionOptions,
+  type ImageConversionOptions,
+  type MarkdownDocument,
+} from 'cloudflare-internal:to-markdown-api';

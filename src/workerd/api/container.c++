@@ -5,6 +5,7 @@
 #include "container.h"
 
 #include <workerd/api/http.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
@@ -17,6 +18,7 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
       running(running) {}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
+  auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
@@ -50,6 +52,23 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
+
+  if (flags.getWorkerdExperimental()) {
+    KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
+      JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
+      req.setHardTimeoutMs(hardTimeoutMs);
+    }
+  }
+}
+
+jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
+  JSG_REQUIRE(
+      durationMs > 0, TypeError, "setInactivityTimeout() cannot be called with a durationMs <= 0");
+
+  auto req = rpcClient->setInactivityTimeoutRequest();
+
+  req.setDurationMs(durationMs);
+  return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
@@ -142,8 +161,9 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
     // Make a TCP connection...
     auto pipe = kj::newTwoWayPipe();
-    auto connectionPromise =
-        connectImpl(*pipe.ends[1]).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
+    kj::Maybe<kj::Exception> connectionException = kj::none;
+
+    auto connectionPromise = connectImpl(*pipe.ends[1]);
 
     // ... and then stack an HttpClient on it ...
     auto client = kj::newHttpClient(headerTable, *pipe.ends[0], {.entropySource = entropySource});
@@ -151,9 +171,29 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     // ... and then adapt that to an HttpService ...
     auto service = kj::newHttpService(*client);
 
-    // ... and now we can just forward our call to that.
-    co_await connectionPromise.exclusiveJoin(
-        service->request(method, noHostUrl, newHeaders, requestBody, response));
+    // ... fork connection promises so we can keep the original exception around ...
+    auto connectionPromiseForked = connectionPromise.fork();
+    auto connectionPromiseBranch = connectionPromiseForked.addBranch();
+    auto connectionPromiseToKeepException = connectionPromiseForked.addBranch();
+
+    // ... and now we can just forward our call to that ...
+    try {
+      co_await service->request(method, noHostUrl, newHeaders, requestBody, response)
+          .exclusiveJoin(
+              // never done as we do not want a Connection RPC exiting successfully
+              // affecting the request
+              connectionPromiseBranch.then([]() -> kj::Promise<void> { return kj::NEVER_DONE; }));
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      connectionException = kj::some(kj::mv(exception));
+    }
+
+    // ... and last but not least, if the connect() call succeeded but the connection
+    // was broken, we throw that exception.
+    KJ_IF_SOME(exception, connectionException) {
+      co_await connectionPromiseToKeepException;
+      kj::throwFatalException(kj::mv(exception));
+    }
   }
 
   // Implements connect(), i.e., forms a raw socket.

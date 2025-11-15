@@ -1,0 +1,14 @@
+module(name = "workerd-google-benchmark")
+
+bazel_dep(name = "bazel_skylib", version = "1.8.1")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_cc", version = "0.2.8")
+
+git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+
+git_repository(
+    name = "codspeed",
+    commit = "810d6b4f87f3409673c07c1c04cfdd1ebc2d298f",
+    recursive_init_submodules = True,
+    remote = "https://github.com/CodSpeedHQ/codspeed-cpp",
+)

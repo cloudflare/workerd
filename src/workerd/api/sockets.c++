@@ -531,9 +531,12 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
 // Implementation of the custom factory for creating WorkerInterface instances from a socket
 class StreamOutgoingFactory final: public Fetcher::OutgoingFactory, public kj::Refcounted {
  public:
-  StreamOutgoingFactory(kj::Own<kj::AsyncIoStream> stream, const kj::HttpHeaderTable& headerTable)
+  StreamOutgoingFactory(kj::Own<kj::AsyncIoStream> stream,
+      kj::EntropySource& entropySource,
+      const kj::HttpHeaderTable& headerTable)
       : stream(kj::mv(stream)),
-        httpClient(kj::newHttpClient(headerTable, *this->stream)) {}
+        httpClient(
+            kj::newHttpClient(headerTable, *this->stream, {.entropySource = entropySource})) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
 
@@ -621,7 +624,7 @@ jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
 
         // Create our custom factory that will create client instances from this socket
         kj::Own<Fetcher::OutgoingFactory> outgoingFactory = kj::refcounted<StreamOutgoingFactory>(
-            socket->takeConnectionStream(js), ioctx.getHeaderTable());
+            socket->takeConnectionStream(js), ioctx.getEntropySource(), ioctx.getHeaderTable());
 
         // Create a Fetcher that uses our custom factory
         auto fetcher = js.alloc<Fetcher>(

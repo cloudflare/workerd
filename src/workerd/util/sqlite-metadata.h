@@ -26,7 +26,7 @@ class SqliteMetadata final: private SqliteDatabase::ResetListener {
   kj::Maybe<kj::Date> getAlarm();
 
   // Sets current alarm time, or none.
-  void setAlarm(kj::Maybe<kj::Date> currentTime);
+  void setAlarm(kj::Maybe<kj::Date> currentTime, bool allowUnconfirmed);
 
   // Return the current local development bookmark, or none if no bookmark has been set.
   kj::Maybe<uint64_t> getLocalDevelopmentBookmark();
@@ -67,9 +67,9 @@ class SqliteMetadata final: private SqliteDatabase::ResetListener {
   kj::Maybe<Cache> cacheState;
 
   kj::Maybe<kj::Date> getAlarmUncached();
-  void setAlarmUncached(kj::Maybe<kj::Date> currentTime);
+  void setAlarmUncached(kj::Maybe<kj::Date> currentTime, bool allowUnconfirmed);
 
-  Initialized& ensureInitialized();
+  Initialized& ensureInitialized(bool allowUnconfirmed);
   // Make sure the metadata table is created and prepared statements are ready. Not called until the
   // first write.
 

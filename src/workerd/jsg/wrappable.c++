@@ -47,9 +47,6 @@ void HeapTracer::clearWrappers() {
 }
 
 using JSGWrappable = workerd::jsg::Wrappable;
-#if (V8_MAJOR_VERSION >= 14 && V8_MINOR_VERSION >= 1) || (V8_MAJOR_VERSION > 14)
-#define HAS_V8_WRAPPABLE
-#endif
 
 // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
 // integrate with the GC in order to receive GC visitation callbacks, so that the GC is able to
@@ -77,11 +74,7 @@ using JSGWrappable = workerd::jsg::Wrappable;
 // reused for a future allocation, if that allocation occurs before the next major GC. When a
 // major GC occurs, the freelist is cleared, since any unreachable CppgcShim objects are likely
 // condemned after that point and will be deleted shortly thereafter.
-#ifdef HAS_V8_WRAPPABLE
 class Wrappable::CppgcShim final: public v8::Object::Wrappable {
-#else
-class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
-#endif
  public:
   CppgcShim(JSGWrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
@@ -114,11 +107,7 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
     }
   }
 
-#ifdef HAS_V8_WRAPPABLE
   void Trace(cppgc::Visitor* visitor) const override {
-#else
-  void Trace(cppgc::Visitor* visitor) const {
-#endif
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(active, Active) {
         active.wrappable->traceFromV8(*visitor);
@@ -132,11 +121,9 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
     }
   }
 
-#ifdef HAS_V8_WRAPPABLE
   const char* GetHumanReadableName() const override {
     return "CppgcShim";
   }
-#endif
 
   struct Active {
     kj::Own<JSGWrappable> wrappable;
@@ -372,9 +359,15 @@ void Wrappable::attachWrapper(
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  int indices[] = {WRAPPABLE_TAG_FIELD_INDEX, WRAPPED_OBJECT_FIELD_INDEX};
-  void* values[] = {const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG), this};
-  object->SetAlignedPointerInInternalFields(2, indices, values);
+  // The third argument is the type tag, a small integer that should be
+  // different for every pointer type to avoid type confusion attacks.  We just
+  // use the slot index for now, since we have a different pointer type for
+  // each slot.
+  auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
+  object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX));
 
   v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
 
@@ -411,7 +404,8 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
             IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
       return *reinterpret_cast<Wrappable*>(
-          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX));
+          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX,
+              static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX)));
     }
   }
 

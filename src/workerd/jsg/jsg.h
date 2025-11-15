@@ -415,6 +415,34 @@ namespace workerd::jsg {
     registry.template registerInspectProperty<NAME, decltype(&Self::getter), &Self::getter>();     \
   } while (false)
 
+// Use inside a JSG_RESOURCE_TYPE to expose a static property on the JavaScript constructor.
+// The property will be read-only and will call the specified static function when accessed.
+// The function should take no parameters or take jsg::Lock& as the first parameter.
+// Example:
+//   static int getVersion() { return 42; }
+//   JSG_RESOURCE_TYPE(MyClass) {
+//     JSG_STATIC_READONLY_PROPERTY(getVersion);  // Exposes as MyClass.getVersion
+//   }
+#define JSG_STATIC_READONLY_PROPERTY(name)                                                         \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerStaticProperty<NAME, decltype(Self::name), &Self::name>();           \
+  } while (false)
+
+// Use inside a JSG_RESOURCE_TYPE to expose a static property with a different name than the
+// underlying C++ function. The property will be read-only and will call the specified static
+// getter function when accessed. The getter can optionally take jsg::Lock& as the first parameter.
+// Example:
+//   static kj::Array<kj::String> getSupportedTypes() { ... }
+//   JSG_RESOURCE_TYPE(MyClass) {
+//     JSG_STATIC_READONLY_PROPERTY_NAMED(supportedTypes, getSupportedTypes);  // MyClass.supportedTypes
+//   }
+#define JSG_STATIC_READONLY_PROPERTY_NAMED(name, getter)                                           \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerStaticProperty<NAME, decltype(Self::getter), &Self::getter>();       \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE to create a static constant member on the constructor and
 // prototype of this object. Only primitive data types (booleans, strings, numbers) are allowed.
 // Unlike the JSG_INSTANCE_PROPERTY and JSG_READONLY_PROPERTY macros, this does not use a getter
@@ -480,8 +508,8 @@ namespace workerd::jsg {
 // An isDetected() operation which detects if the expression t.getTemplate(isolate, &u) is available
 // for instances `t`, `u` of types T and U.
 template <typename T, typename U>
-using HasGetTemplateOverload =
-    decltype(kj::instance<T&>().getTemplate((v8::Isolate*)nullptr, (U*)nullptr));
+using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
+    static_cast<v8::Isolate*>(nullptr), static_cast<U*>(nullptr)));
 
 // Use inside a JSG_RESOURCE_TYPE block to declare that the given type should be visible as a
 // static member of this type. Typically, your "global" type would use several of these
@@ -689,6 +717,14 @@ struct HasStructTypeScriptDefine<T, decltype(T::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE
   template <typename TypeWrapper, typename Self>                                                   \
   using JsgFieldWrappers =                                                                         \
       ::workerd::jsg::TypeTuple<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                    \
+  template <typename Self>                                                                         \
+  static v8::Local<v8::DictionaryTemplate> jsgGetTemplate(v8::Isolate* isolate) {                  \
+    kj::Vector<std::string_view> names;                                                            \
+    JSG_FOR_EACH(JSG_STRUCT_FIELD_COL, , __VA_ARGS__);                                             \
+    auto namesPtr = names.asPtr().asConst();                                                       \
+    return v8::DictionaryTemplate::New(                                                            \
+        isolate, v8::MemorySpan<const std::string_view>(namesPtr.begin(), namesPtr.size()));       \
+  }                                                                                                \
   template <typename Registry, typename Self, typename Config>                                     \
   static void registerMembersInternal(Registry& registry, Config arg) {                            \
     JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__);                                       \
@@ -732,6 +768,10 @@ consteval size_t prefixLengthToStrip(const char (&s)[N]) {
 // this value will still contain the `$` even though the `FieldWrapper` template argument will have
 // it stripped.
 #define JSG_STRUCT_FIELD_NAME(_, name) name##_JSG_NAME_DO_NOT_USE_DIRECTLY[] = #name
+
+#define JSG_STRUCT_FIELD_COL(_, name)                                                              \
+  ::workerd::jsg::jsgAddToStructNames<decltype(::kj::instance<Self>().name),                       \
+      name##_JSG_NAME_DO_NOT_USE_DIRECTLY, ::workerd::jsg::prefixLengthToStrip(#name)>(names)
 
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_FIELD(_, name)                                                                  \
@@ -1033,6 +1073,16 @@ class SelfRef: public V8Ref<v8::Object> {
   inline Value asValue(Lock& js) const;
 };
 
+template <typename U>
+static constexpr bool isUsableStructField = !kj::isSameType<U, SelfRef>() &&
+    !kj::isSameType<U, Unimplemented>() && !kj::isSameType<U, WontImplement>();
+
+template <typename T, const char* name, size_t prefix>
+void jsgAddToStructNames(auto& names) {
+  constexpr const char* exportedName = name + prefix;
+  if constexpr (isUsableStructField<T>) names.add(exportedName);
+}
+
 // TODO(cleanup): This class was meant to be a ByteString (characters in the range [0,255]), but
 //   its only use so far is in api::Headers. But making the Headers class use ByteStrings turned
 //   out to be unwise. Nevertheless, it is still useful to keep around in order to provide
@@ -1076,7 +1126,7 @@ class USVString: public kj::String {
   }
 
  private:
-  // This is a seperate method to avoid including simdutf8 in the header file.
+  // This is a seperate method to avoid including simdutf in the header file.
   bool isValidUtf8() const;
 };
 
@@ -1690,11 +1740,6 @@ using ReturnType = typename ReturnType_<Func, T, passLock>::Type;
 template <typename Func, typename Param, bool passLock>
 using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>>>;
 
-class ModuleRegistry;
-namespace modules {
-class ModuleRegistry;
-};
-
 // All types declared with JSG_RESOURCE_TYPE which are intended to be used as the global object
 // must inherit jsg::ContextGlobal, in addition to inheriting jsg::Object
 // (or a subclass of jsg::Object).
@@ -1713,12 +1758,12 @@ class ContextGlobal {
   // object is alive. This may be the legacy or new module registry, depending which one is
   // in use. We don't care about the actual type here, just that it is kept alive.
   kj::Own<void> moduleRegistryBackingOwner;
-  kj::Maybe<kj::Own<const capnp::SchemaLoader>> maybeSchemaLoader;
+  kj::Maybe<const capnp::SchemaLoader&> schemaLoader;
 
   void setModuleRegistryBackingOwner(kj::Own<void> registry) {
     moduleRegistryBackingOwner = kj::mv(registry);
   }
-  void setSchemaLoader(kj::Own<const capnp::SchemaLoader> schemaLoader);
+  void setSchemaLoader(const capnp::SchemaLoader& schemaLoader);
 
   template <typename, typename>
   friend class ResourceWrapper;
@@ -1769,7 +1814,7 @@ constexpr bool hasPublicVisitForGc_(T*) {
 
 template <typename T>
 constexpr bool hasPublicVisitForGc() {
-  return hasPublicVisitForGc_((T*)nullptr);
+  return hasPublicVisitForGc_(static_cast<T*>(nullptr));
 }
 
 // Visitor used during garbage collection. Any resource class that holds `Ref`s should
@@ -1889,7 +1934,7 @@ constexpr bool isGcVisitable_(T*) {
 
 template <typename T>
 constexpr bool isGcVisitable() {
-  return isGcVisitable_((T*)nullptr);
+  return isGcVisitable_(static_cast<T*>(nullptr));
 }
 
 // TypeHandler translates between V8 values and local values for a particular type T.
@@ -2091,6 +2136,7 @@ class GeneratorContext;
 struct JsgConfig {
   bool noSubstituteNull = false;
   bool unwrapCustomThenables = false;
+  bool fetchIterableTypeSupport = false;
 };
 
 static constexpr JsgConfig DEFAULT_JSG_CONFIG = {};
@@ -2122,7 +2168,7 @@ constexpr bool isV8Ref(V8Ref<T>*) {
 
 template <typename T>
 constexpr bool isV8Ref() {
-  return isV8Ref((T*)nullptr);
+  return isV8Ref(static_cast<T*>(nullptr));
 }
 
 template <typename T>
@@ -2136,7 +2182,7 @@ constexpr bool isV8Local(v8::Local<T>*) {
 
 template <typename T>
 constexpr bool isV8Local() {
-  return isV8Local((T*)nullptr);
+  return isV8Local(static_cast<T*>(nullptr));
 }
 
 template <typename T>
@@ -2150,7 +2196,7 @@ constexpr bool isV8MaybeLocal(v8::MaybeLocal<T>*) {
 
 template <typename T>
 constexpr bool isV8MaybeLocal() {
-  return isV8MaybeLocal((T*)nullptr);
+  return isV8MaybeLocal(static_cast<T*>(nullptr));
 }
 
 class AsyncContextFrame;
@@ -2190,7 +2236,10 @@ class JsMessage;
   V(Set)                                                                                           \
   V(Promise)                                                                                       \
   V(Proxy)                                                                                         \
-  V(Function)
+  V(Function)                                                                                      \
+  V(Uint8Array)                                                                                    \
+  V(ArrayBuffer)                                                                                   \
+  V(ArrayBufferView)
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
@@ -2212,8 +2261,7 @@ class ExternalMemoryAdjustment;
 // Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
 // point to. The only purpose of this object is to hold a weak reference back to the isolate; the
 // reference is nulled out when the isolate is destroyed.
-class ExternalMemoryTarget: public kj::AtomicRefcounted,
-                            public kj::EnableAddRefToThis<ExternalMemoryTarget> {
+class ExternalMemoryTarget: public kj::AtomicRefcounted {
  public:
   ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
 
@@ -2327,42 +2375,6 @@ class Lock {
   Ref<T> allocAccounted(size_t accountedSize, Params&&... params) {
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...)
                       .attach(getExternalMemoryAdjustment(accountedSize)));
-  }
-
-  // Returns a kj::String with an external memory adjustment attached.
-  kj::String accountedKjString(kj::Array<char>&& str);
-  kj::String accountedKjString(kj::String&& str) {
-    return accountedKjString(str.releaseArray());
-  }
-  kj::String accountedKjString(kj::StringPtr str) {
-    return accountedKjString(kj::str(str));
-  }
-
-  // Returns a ByteString with an external memory adjustment attached.
-  ByteString accountedByteString(kj::Array<char>&& str);
-  ByteString accountedByteString(kj::String&& str) {
-    return accountedByteString(str.releaseArray());
-  }
-  ByteString accountedByteString(kj::StringPtr str) {
-    return accountedByteString(kj::str(str));
-  }
-
-  // Returns a DOMString with an external memory adjustment attached.
-  DOMString accountedDOMString(kj::Array<char>&& str);
-  DOMString accountedDOMString(kj::String&& str) {
-    return accountedDOMString(str.releaseArray());
-  }
-  DOMString accountedDOMString(kj::StringPtr str) {
-    return accountedDOMString(kj::str(str));
-  }
-
-  // Returns a USVString with an external memory adjustment attached.
-  USVString accountedUSVString(kj::Array<char>&& str);
-  USVString accountedUSVString(kj::String&& str) {
-    return accountedUSVString(str.releaseArray());
-  }
-  USVString accountedUSVString(kj::StringPtr str) {
-    return accountedUSVString(kj::str(str));
   }
 
   v8::Local<v8::Context> v8Context() {
@@ -2638,11 +2650,10 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
-  // Install JSPI on the current context. Currently used only for Python workers.
-  void installJspi();
-
   void setCaptureThrowsAsRejections(bool capture);
   void setUsingEnhancedErrorSerialization();
+  void setUsingFastJsgStruct();
+  bool isUsingFastJsgStruct() const;
   bool isUsingEnhancedErrorSerialization() const;
 
   void setNodeJsCompatEnabled();
@@ -2650,6 +2661,7 @@ class Lock {
   void setThrowOnUnrecognizedImportAssertion();
   bool getThrowOnUnrecognizedImportAssertion() const;
   void setToStringTag();
+  void setImmutablePrototype();
   void disableTopLevelAwait();
 
   using Logger = void(Lock&, kj::StringPtr);
@@ -2728,6 +2740,8 @@ class Lock {
   JsObject obj(
       kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<jsg::JsValue> values) KJ_WARN_UNUSED_RESULT;
   JsObject objNoProto() KJ_WARN_UNUSED_RESULT;
+  JsObject objNoProto(
+      kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<jsg::JsValue> values) KJ_WARN_UNUSED_RESULT;
   JsMap map() KJ_WARN_UNUSED_RESULT;
   JsValue external(void*) KJ_WARN_UNUSED_RESULT;
   JsValue error(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
@@ -2958,8 +2972,8 @@ inline V8Ref<T> V8Ref<T>::addRef(jsg::Lock& js) {
   return js.v8Ref(getHandle(js));
 }
 
-v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
-// Defined in util.c++.
+// v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
+// Already defined in util.c++.
 
 template <typename T>
 V8Ref<T> V8Ref<T>::deepClone(jsg::Lock& js) {
@@ -2993,8 +3007,11 @@ inline Value SelfRef::asValue(Lock& js) const {
 
 // clang-format off
 // These includes are needed for the JSG type glue macros to work.
+#include "promise.h"
 #include "modules.h"
 #include "resource.h"
+// JSG has very entrenched include cycles
+// NOLINTNEXTLINE(misc-header-include-cycle)
 #include "jsvalue.h"
 // clang-format on
 

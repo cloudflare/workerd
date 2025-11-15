@@ -2658,3 +2658,42 @@ export const stateSizeTest = {
     globalThis.Uint32Array = Uint32Array_orig;
   },
 };
+
+export const zlibStreamTest = {
+  async test() {
+    const imgBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII';
+
+    const buf = Buffer.from(imgBase64, 'base64');
+    const imageStream = Readable.from(Buffer.from(imgBase64, 'base64'));
+    const g = zlib.createGzip();
+
+    const { promise, resolve } = Promise.withResolvers();
+    const chunks = [];
+    const w = new Writable({
+      construct(callback) {
+        // Double queueMicrotask is intentional to reproduce the bug.
+        // Do not remove any of them.
+        queueMicrotask(() => {
+          queueMicrotask(() => {
+            callback(null);
+          });
+        });
+      },
+      write(chunk, encoding, callback) {
+        chunks.push(chunk);
+        callback();
+      },
+    });
+    w.on('close', resolve);
+    const pp = imageStream.pipe(g);
+    pp.pipe(w);
+
+    await promise;
+
+    assert.strictEqual(
+      zlib.gunzipSync(Buffer.concat(chunks)).toString('hex'),
+      buf.toString('hex')
+    );
+  },
+};

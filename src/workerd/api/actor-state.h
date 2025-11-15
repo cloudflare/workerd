@@ -432,6 +432,14 @@ class DurableObjectFacets: public jsg::Object {
     jsg::Optional<kj::OneOf<jsg::Ref<DurableObjectId>, kj::String>> id;
 
     JSG_STRUCT($class, id);
+
+    JSG_STRUCT_TS_OVERRIDE(FacetStartupOptions<
+        T extends Rpc.DurableObjectBranded | undefined = undefined> {
+      class: DurableObjectClass<T>;
+      id?: DurableObjectId | string;
+
+      $class: never;  // work around generate-types bug
+    });
   };
 
   // Get a facet by name, starting it if it isn't already running. `getStartupOptions` is invoked
@@ -450,6 +458,13 @@ class DurableObjectFacets: public jsg::Object {
     JSG_METHOD(get);
     JSG_METHOD(abort);
     JSG_METHOD_NAMED(delete, delete_);
+
+    JSG_TS_OVERRIDE({
+      get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
+          name: string,
+          getStartupOptions: () => FacetStartupOptions<T> | Promise<FacetStartupOptions<T>>)
+          : Fetcher<T>;
+    });
   }
 
  private:
@@ -641,9 +656,7 @@ class DurableObjectState: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
-    if (flags.getWorkerdExperimental()) {
-      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
-      // this works in production.
+    if (flags.getEnableCtxExports()) {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
@@ -667,12 +680,29 @@ class DurableObjectState: public jsg::Object {
     JSG_METHOD(abort);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-      readonly id: DurableObjectId;
-      readonly storage: DurableObjectStorage;
-      blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
-    });
-    // Make `storage` non-optional
+
+    // Type overrides:
+    // * Define Props/Exports type parameters.
+    // * Make `storage` non-optional
+    // * Make `id` strictly `DurableObjectId` (it's only a string for colo-local actors which are
+    //   not available publicly).
+    if (flags.getEnableCtxExports()) {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly exports: Cloudflare.Exports;
+        readonly id: DurableObjectId;
+        readonly storage: DurableObjectStorage;
+        blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+      });
+    } else {
+      // No ctx.exports yet.
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly id: DurableObjectId;
+        readonly storage: DurableObjectStorage;
+        blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+      });
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

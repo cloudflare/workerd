@@ -6,28 +6,47 @@ load("//:build/wd_test.bzl", "wd_test")
 
 filegroup(
     name = "srcs",
-    srcs = glob(
-        ["**/*.c++"],
+    # Only add files here when needed: Where possible, new src/header files should be defined in
+    # their own targets, modularizing bazel targets makes incremental rebuilds faster.
+    srcs = [
+        "actor.c++",
+        "actor-state.c++",
+        "basics.c++",
+        "blob.c++",
+        "cache.c++",
+        "cf-property.c++",
+        "container.c++",
+        "events.c++",
+        "eventsource.c++",
+        "export-loopback.c++",
+        "filesystem.c++",
+        "form-data.c++",
+        "global-scope.c++",
+        "hibernatable-web-socket.c++",
+        "http.c++",
+        "messagechannel.c++",
+        "performance.c++",
+        "queue.c++",
+        "scheduled.c++",
+        "sockets.c++",
+        "sql.c++",
+        "sync-kv.c++",
+        "system-streams.c++",
+        "trace.c++",
+        "unsafe.c++",
+        "url-standard.c++",
+        "web-socket.c++",
+        "worker-rpc.c++",
+    ] + glob(
+        [
+            "crypto/*.c++",
+            "streams/*.c++",
+        ],
         exclude = [
-            # TODO(cleanup): Continue shrinking the io target: Create independent targets for
-            # analytics-engine, kv and streams/compression, which either do not depend
-            # on io or do not have io depending on them.
             "**/*test*.c++",
-            "data-url.c++",
-            "encoding.c++",
-            "html-rewriter.c++",
-            "hyperdrive.c++",
-            "pyodide/pyodide.c++",
-            "pyodide/setup-emscripten.c++",
-            "pyodide/requirements.c++",
-            "memory-cache.c++",
-            "modules.c++",
-            "r2*.c++",
-            "rtti.c++",
-            "url.c++",
-            "urlpattern.c++",
-            "urlpattern-standard.c++",
-            "util.c++",
+            "crypto/crc-impl.c++",
+            "streams/compression.c++",
+            "streams/encoding.c++",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -35,29 +54,219 @@ filegroup(
 
 filegroup(
     name = "hdrs",
-    srcs = glob(
-        ["**/*.h"],
+    srcs = [
+        "actor.h",
+        "actor-state.h",
+        "basics.h",
+        "blob.h",
+        "cache.h",
+        "cf-property.h",
+        "container.h",
+        "events.h",
+        "eventsource.h",
+        "export-loopback.h",
+        "filesystem.h",
+        "form-data.h",
+        "global-scope.h",
+        "hibernatable-web-socket.h",
+        "http.h",
+        "messagechannel.h",
+        "performance.h",
+        "queue.h",
+        "scheduled.h",
+        "sockets.h",
+        "sql.h",
+        "sync-kv.h",
+        "system-streams.h",
+        "trace.h",
+        "unsafe.h",
+        "url-standard.h",
+        "web-socket.h",
+        "worker-rpc.h",
+    ] + glob(
+        [
+            "crypto/*.h",
+            "streams/*.h",
+        ],
         exclude = [
-            "**/*test*.h",
-            "data-url.h",
-            "deferred-proxy.h",
-            "encoding.h",
-            "html-rewriter.h",
-            "hyperdrive.h",
-            "memory-cache.h",
-            "pyodide/pyodide.h",
-            "pyodide/setup-emscripten.h",
-            "pyodide/requirements.h",
-            "modules.h",
-            "r2*.h",
-            "rtti.h",
-            "url.h",
-            "urlpattern.h",
-            "urlpattern-standard.h",
-            "util.h",
+            "crypto/crc-impl.h",
+            "streams/compression.h",
+            "streams/encoding.h",
         ],
     ),
     visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "analytics-engine",
+    srcs = [
+        "analytics-engine.c++",
+    ],
+    hdrs = [
+        "analytics-engine.h",
+        "analytics-engine-impl.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "capnp",
+    srcs = [
+        "capnp.c++",
+    ],
+    hdrs = [
+        "capnp.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "worker-loader",
+    srcs = [
+        "worker-loader.c++",
+    ],
+    hdrs = [
+        "worker-loader.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "workers-module",
+    srcs = [
+        "workers-module.c++",
+    ],
+    hdrs = [
+        "workers-module.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "base64",
+    srcs = [
+        "base64.c++",
+    ],
+    hdrs = [
+        "base64.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@simdutf",
+    ],
+)
+
+wd_cc_library(
+    name = "commonjs",
+    srcs = [
+        "commonjs.c++",
+    ],
+    hdrs = [
+        "commonjs.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "crypto-crc-impl",
+    srcs = [
+        "crypto/crc-impl.c++",
+    ],
+    hdrs = [
+        "crypto/crc-impl.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "fuzzilli",
+    srcs = [
+        "fuzzilli.c++",
+    ],
+    hdrs = [
+        "fuzzilli.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/api:util",
+        "//src/workerd/util:immediate-crash",
+    ],
+)
+
+wd_cc_library(
+    name = "kv",
+    srcs = [
+        "kv.c++",
+    ],
+    hdrs = [
+        "kv.h",
+    ],
+    implementation_deps = [
+        "//src/workerd/util:mimetype",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+# for using EW_STREAMS_ISOLATE_TYPES with workerd-api etc. To use the different streams APIs,
+# include the headers you need directly.
+wd_cc_library(
+    name = "streams",
+    hdrs = ["streams.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":streams-compression",
+        ":streams-encoding",
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "streams-compression",
+    srcs = ["streams/compression.c++"],
+    hdrs = ["streams/compression.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "@nbytes",
+    ],
+)
+
+wd_cc_library(
+    name = "streams-encoding",
+    srcs = ["streams/encoding.c++"],
+    hdrs = ["streams/encoding.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "hibernation-event-params",
+    hdrs = ["hibernation-event-params.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
@@ -90,6 +299,17 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "tracing-module",
+    srcs = ["tracing-module.c++"],
+    hdrs = ["tracing-module.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_library(
     name = "rtti",
     srcs = [
         "modules.c++",
@@ -100,15 +320,26 @@ wd_cc_library(
         "rtti.h",
     ],
     implementation_deps = [
+        ":analytics-engine",
+        ":kv",
         ":pyodide",
+        ":streams",
+        ":streams-compression",
+        ":streams-encoding",
+        ":urlpattern",
+        ":urlpattern-standard",
+        ":worker-loader",
         "//src/workerd/jsg:rtti",
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":base64",
         ":html-rewriter",
         ":hyperdrive",
         ":memory-cache",
         ":r2",
+        ":tracing-module",
+        ":workers-module",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
@@ -134,6 +365,9 @@ wd_cc_library(
     name = "hyperdrive",
     srcs = ["hyperdrive.c++"],
     hdrs = ["hyperdrive.h"],
+    implementation_deps = [
+        "//src/workerd/util:entropy",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
@@ -154,7 +388,10 @@ wd_cc_library(
         "//src/pyodide:generated/pyodide_extra.capnp.h",
         "//src/pyodide:pyodide_static.capnp.h",
     ],
-    implementation_deps = ["//src/workerd/io"],
+    implementation_deps = [
+        "//src/workerd/io",
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
@@ -177,12 +414,14 @@ wd_cc_library(
     name = "util",
     srcs = ["util.c++"],
     hdrs = ["util.h"],
-    implementation_deps = ["@simdutf"],
+    implementation_deps = [
+        "//src/workerd/util:mimetype",
+        "//src/workerd/util:strings",
+        "@simdutf",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
-        "//src/workerd/util",
-        "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -191,12 +430,14 @@ wd_cc_library(
     name = "encoding",
     srcs = ["encoding.c++"],
     hdrs = ["encoding.h"],
+    implementation_deps = [
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":util",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/util",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -207,11 +448,11 @@ wd_cc_library(
     hdrs = ["data-url.h"],
     implementation_deps = [
         ":encoding",
+        "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg:url",
-        "//src/workerd/util",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
@@ -276,6 +517,7 @@ wd_cc_library(
         src = f,
         deps = [
             "//src/workerd/io",
+            "//src/workerd/io:promise-wrapper",
         ],
     )
     for f in [
@@ -285,30 +527,20 @@ wd_cc_library(
         "crypto/impl-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
-        "util-test.c++",
     ]
 ]
-
-# TODO(cleanup): Reenable test when we reenable string accounting
-# kj_test(
-#     src = "form-data-memory-test.c++",
-#     deps = [
-#         "//src/workerd/io",
-#     ],
-# )
-
-# TODO(cleanup): Reenable test when we reenable string accounting
-# kj_test(
-#     src = "headers-test.c++",
-#     deps = [
-#         "//src/workerd/io",
-#     ],
-# )
 
 kj_test(
     src = "data-url-test.c++",
     deps = [
         ":data-url",
+    ],
+)
+
+kj_test(
+    src = "util-test.c++",
+    deps = [
+        ":util",
     ],
 )
 
@@ -340,6 +572,9 @@ kj_test(
     deps = [
         ":encoding",
         ":html-rewriter",
+        ":streams",
+        ":urlpattern",
+        ":urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
     ],
@@ -361,6 +596,42 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "streams/writable-sink-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/writable-sink-adapter-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-adapter-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 wd_test(
@@ -432,6 +703,7 @@ wd_test(
     data = [
         "kv-instrumentation-test.js",
         "kv-test.js",
+        "tests/instrumentation-tail-worker.js",
     ],
 )
 
@@ -447,6 +719,7 @@ wd_test(
     data = [
         "r2-instrumentation-test.js",
         "r2-test.js",
+        "tests/instrumentation-tail-worker.js",
     ],
 )
 
@@ -460,13 +733,20 @@ wd_test(
     size = "large",
     src = "sql-test.wd-test",
     args = ["--experimental"],
-    data = ["sql-test.js"],
+    data = [
+        "sql-test.js",
+        "sql-test-tail.js",
+    ],
 )
 
 wd_test(
     src = "sync-kv-test.wd-test",
     args = ["--experimental"],
-    data = ["sync-kv-test.js"],
+    data = [
+        "sync-kv-instrumentation-test.js",
+        "sync-kv-test.js",
+        "tests/instrumentation-tail-worker.js",
+    ],
 )
 
 wd_test(
@@ -794,6 +1074,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tests/request-clone-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-clone-test.js"],
+)
+
+wd_test(
     src = "tests/request-signal-enabled.wd-test",
     args = ["--experimental"],
     data = ["tests/request-signal-enabled.js"],
@@ -873,4 +1159,20 @@ wd_test(
         "tests/rpc-error-test.js",
         "tests/rpc-error-test.rpc.js",
     ],
+)
+
+wd_test(
+    src = "actor-kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "actor-kv-test.js",
+        "actor-kv-test-tail.js",
+        "tests/instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "tests/headers-immutable-prototype-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/headers-immutable-prototype-test.js"],
 )

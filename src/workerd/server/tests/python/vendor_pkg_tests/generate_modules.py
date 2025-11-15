@@ -27,7 +27,7 @@ for f_path in file_paths:
     # without `external/` prefix
     embed_path = ("../" * 7) + str(Path(*components[1:])).replace("\\", "\\\\")
     # without `external/fastapi_src/` prefix
-    module_path = str(Path(*components[2:])).replace("\\", "/")
+    module_path = str(Path("python_modules", *components[2:])).replace("\\", "/")
 
     # Format as a Cap'n Proto module definition.
     if f_path.endswith(".py"):

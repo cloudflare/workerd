@@ -8,9 +8,7 @@
 
 #include <workerd/io/features.h>
 
-#include <iterator>
 #include <list>
-#include <vector>
 
 namespace workerd::api {
 CompressionAllocator::CompressionAllocator(
@@ -205,12 +203,13 @@ class LazyBuffer {
     size_t unusedSpace = output.size() - valid_size_;
     if (unusedSpace >= 1024 && unusedSpace >= (output.size() >> 3)) {
       // Shifting buffer to erase data that has already been read. valid_size_ remains the same.
-      output.erase(output.begin(), output.begin() + unusedSpace);
+      memmove(output.begin(), output.begin() + unusedSpace, valid_size_);
+      output.truncate(valid_size_);
     }
   }
 
   void write(kj::ArrayPtr<const byte> chunk) {
-    std::copy(chunk.begin(), chunk.end(), std::back_inserter(output));
+    output.addAll(chunk);
     valid_size_ += chunk.size();
   }
 
@@ -232,7 +231,7 @@ class LazyBuffer {
   }
 
  private:
-  std::vector<kj::byte> output;
+  kj::Vector<kj::byte> output;
   size_t valid_size_;
 };
 
@@ -300,7 +299,7 @@ class CompressionStreamImpl: public kj::Refcounted,
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
         // There might still be data in the output buffer remaining to read.
-        if (output.empty()) return size_t(0);
+        if (output.empty()) return static_cast<size_t>(0);
         return tryReadInternal(
             kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
       }

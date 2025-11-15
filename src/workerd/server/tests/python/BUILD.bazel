@@ -1,17 +1,7 @@
-load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests", "gen_rust_import_tests")
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 
-# pyodide_dev.capnp.bin represents a custom pyodide version "dev" that is generated
-# at build time using the latest contents of the src/pyodide directory.
-# This is used to run tests to ensure that they are always run against the latest build of
-# the Pyodide bundle.
-copy_file(
-    name = "pyodide_dev.capnp.bin@rule",
-    src = "//src/pyodide:pyodide.capnp.bin_cross",
-    out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
-    visibility = ["//visibility:public"],
-)
+python_test_setup()
 
 py_wd_test("hello")
 
@@ -50,6 +40,13 @@ py_wd_test("filter-non-py-files")
 
 py_wd_test("durable-object")
 
+py_wd_test(
+    "durable-object-websocket",
+    make_snapshot = False,
+    # TODO: enabling this will reproduce a strange issue, see comment in EW-9767.
+    use_snapshot = None,
+)
+
 py_wd_test("worker-entrypoint")
 
 py_wd_test(
@@ -59,7 +56,11 @@ py_wd_test(
 
 py_wd_test("js-import")
 
-py_wd_test("importable-env")
+py_wd_test(
+    "importable-env",
+    # TODO: why doesn't dedicated snapshot work with this?
+    use_snapshot = None,
+)
 
 py_wd_test("python-rpc")
 
@@ -70,3 +71,15 @@ py_wd_test("vendor_dir_compat_flag")
 py_wd_test("multiprocessing")
 
 py_wd_test("default-class-with-legacy-global-handlers")
+
+py_wd_test(
+    "fastapi",
+    make_snapshot = False,
+    use_snapshot = "fastapi",
+)
+
+py_wd_test(
+    "numpy",
+    make_snapshot = False,
+    use_snapshot = "numpy",
+)

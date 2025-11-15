@@ -320,11 +320,7 @@ class WorkerdApi final: public Worker::Api {
   // Part of the original module registry API.
   static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
       config::Worker::Module::Reader conf,
-      jsg::CompilationObserver& observer,
-      CompatibilityFlags::Reader featureFlags);
-  static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
-      const Worker::Script::Module& module,
-      jsg::CompilationObserver& observer,
+      const jsg::CompilationObserver& observer,
       CompatibilityFlags::Reader featureFlags);
 
   // Convert a module definition from workerd config to a Worker::Script::Module (which may contain
@@ -354,8 +350,8 @@ class WorkerdApi final: public Worker::Api {
 
 kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
 
-// Helper method for defining actor storage server treating all reads as empty, defined here to be
-// used by test-fixture and server.
+// An ActorStorage implementation which will always respond to reads as if the state is empty,
+// and will fail any writes. Defined here to be used by test-fixture and server.
 kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
 
 }  // namespace workerd::server

@@ -15,6 +15,11 @@ prepare:
   cargo install gen-compile-commands watchexec-cli
   just create-external
   just compile-commands
+  just prepare-rust
+
+prepare-rust:
+  rustup install 1.91.0
+  rustup component add rust-analyzer --toolchain 1.91.0
 
 prepare-ubuntu:
   sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
@@ -117,7 +122,7 @@ create-external:
   tools/unix/create-external.sh
 
 bench-all:
-  bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label | grep -v 'all_benchmarks' | xargs -I {} bazel run --config=benchmark {}
+  bazel query 'attr(tags, "benchmark-binary", //...)' --output=label | xargs -I {} bazel run --config=benchmark {}
 
 eslint:
   just stream-test \

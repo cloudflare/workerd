@@ -12,15 +12,19 @@ import {
   IS_CREATING_SNAPSHOT,
   IS_EW_VALIDATING,
   IS_DEDICATED_SNAPSHOT_ENABLED,
-  compatibilityFlags,
+  COMPATIBILITY_FLAGS,
+  type CompatibilityFlags,
+  IS_SECOND_VALIDATION_PHASE,
 } from 'pyodide-internal:metadata';
 import {
-  PythonRuntimeError,
+  invalidateCaches,
+  PythonWorkersInternalError,
   PythonUserError,
   simpleRunPython,
 } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
+import { entropyAfterSnapshot } from 'pyodide-internal:topLevelEntropy/lib';
 
 // A handle is the pointer into the linear memory returned by dlopen. Multiple dlopens will return
 // multiple pointers.
@@ -35,6 +39,7 @@ type DsoHandles = {
 type DsoLoadInfo = {
   readonly loadOrder: string[];
   readonly soMemoryBases: { [name: string]: number };
+  readonly soTableBases?: { [name: string]: number };
 };
 
 // This is the old wire format, where "settings" is mixed with the DsoHandles information and
@@ -47,6 +52,15 @@ type OldSnapshotMeta = DsoHandles & {
   readonly version?: undefined;
 };
 
+type LoadedSnapshotSettings = {
+  readonly snapshotType: ArtifactBundler.SnapshotType;
+  readonly compatFlags: CompatibilityFlags;
+};
+
+type SnapshotSettings = {
+  readonly baselineSnapshot?: boolean;
+} & Partial<LoadedSnapshotSettings>;
+
 // The new wire format, with additional information about the hiwire state, the order that dsos were
 // loaded in, and their memory bases. We also moved settings out of the dsoHandles.
 type SnapshotMeta = {
@@ -54,7 +68,7 @@ type SnapshotMeta = {
   readonly importedModulesList: ReadonlyArray<string> | undefined;
   readonly hiwire: SnapshotConfig | undefined;
   readonly dsoHandles: DsoHandles;
-  readonly settings: { readonly baselineSnapshot: boolean };
+  readonly settings: SnapshotSettings;
   readonly version: 1;
 } & DsoLoadInfo;
 
@@ -74,7 +88,8 @@ type LoadedSnapshotExtras = {
   snapshotReader: SnapshotReader;
 };
 
-type LoadedSnapshotMeta = SnapshotMeta & LoadedSnapshotExtras;
+type LoadedSnapshotMeta = SnapshotMeta &
+  LoadedSnapshotExtras & { readonly settings: LoadedSnapshotSettings };
 
 /**
  * Constants
@@ -90,10 +105,25 @@ const HEADER_SIZE = 4 * 4;
 const LOADED_SNAPSHOT_META: LoadedSnapshotMeta | undefined = decodeSnapshot(
   MEMORY_SNAPSHOT_READER
 );
-const CREATED_SNAPSHOT_META: DsoLoadInfo = {
+const CREATED_SNAPSHOT_META: Required<DsoLoadInfo> = {
   soMemoryBases: {},
+  soTableBases: {},
   loadOrder: [],
 };
+if (LOADED_SNAPSHOT_META) {
+  // Make sure we include the soMemoryBases and loadOrder from the baseline snapshot when we are
+  // generating stacked snapshots.
+  Object.assign(
+    CREATED_SNAPSHOT_META.soMemoryBases,
+    LOADED_SNAPSHOT_META.soMemoryBases
+  );
+  Object.assign(
+    CREATED_SNAPSHOT_META.soTableBases,
+    LOADED_SNAPSHOT_META.soTableBases
+  );
+  CREATED_SNAPSHOT_META.loadOrder.push(...LOADED_SNAPSHOT_META.loadOrder);
+}
+export const LOADED_SNAPSHOT_TYPE = LOADED_SNAPSHOT_META?.settings.snapshotType;
 
 /**
  * Preload a dynamic library.
@@ -199,17 +229,27 @@ function getMemoryPatched(
   const libName = libPath.split('/').at(-1)!;
   // 1. Is it loaded in the snapshot? Replay the memory base.
   {
-    const { soMemoryBases } = LOADED_SNAPSHOT_META ?? {};
+    const { soMemoryBases, soTableBases } = LOADED_SNAPSHOT_META ?? {};
     // If we loaded this library before taking the snapshot, we already allocated the memory and the
     // allocator remembers because its state is in the linear memory. We just have to look it up.
-    const base = soMemoryBases?.[libPath] ?? soMemoryBases?.[libName];
-    if (base) {
-      return base;
+    const tableBase = Module.wasmTable.length;
+    const expectedTableBase =
+      soTableBases?.[libPath] ?? soTableBases?.[libName];
+    if (expectedTableBase && tableBase !== expectedTableBase) {
+      // If this happens, we will segfault if we ever try to use this dynamic library.
+      // Save ourselves some debugging pain by crashing early.
+      throw new PythonWorkersInternalError(
+        `Error loading ${libName}: Expected table base ${expectedTableBase} but got table base ${tableBase}`
+      );
+    }
+    const memoryBase = soMemoryBases?.[libPath] ?? soMemoryBases?.[libName];
+    if (memoryBase) {
+      return memoryBase;
     }
   }
   // 2. It's not loaded in the snapshot. Record
   {
-    const { loadOrder, soMemoryBases } = CREATED_SNAPSHOT_META;
+    const { loadOrder, soMemoryBases, soTableBases } = CREATED_SNAPSHOT_META;
     // Okay, we didn't load this before so we need to allocate new memory for it. Also record what we
     // did in case someone makes a snapshot from this run.
     loadOrder.push(libPath);
@@ -218,6 +258,8 @@ function getMemoryPatched(
     // full path.
     soMemoryBases[libPath] = memoryBase;
     soMemoryBases[libName] = memoryBase;
+    soTableBases[libPath] = Module.wasmTable.length;
+    soTableBases[libName] = Module.wasmTable.length;
     return memoryBase;
   }
 }
@@ -261,7 +303,7 @@ function loadDynlibFromVendor(
   const path = soFile.slice(3).join('/');
   const index = userBundleNames.indexOf(path);
   if (index == -1) {
-    throw new PythonRuntimeError(
+    throw new PythonWorkersInternalError(
       `Could not find ${path} in user bundle, which is required by the snapshot.`
     );
   }
@@ -272,37 +314,76 @@ function loadDynlibFromVendor(
 }
 
 /**
- * This loads all dynamic libraries visible in the site-packages directory. They
- * are loaded before the runtime is initialized outside of the heap, using the
- * same mechanism for DT_NEEDED libs (i.e., the libs that are loaded before the
- * program starts because you passed them as linker args).
- *
- * Currently, we pessimistically preload all libs. It would be nice to only load
- * the ones that are used. I am pretty sure we can manage this by reserving a
- * separate shared lib metadata arena at startup and allocating shared libs
- * there.
+ * Preloading for the legacy 0.26 version. This loads all dynamic libraries
+ * visible in the site-packages directory. They are loaded before the runtime is
+ * initialized outside of the heap, using the same mechanism for DT_NEEDED libs
+ * (i.e., the libs that are loaded before the program starts because you passed
+ * them as linker args).
  */
-export function preloadDynamicLibs(Module: Module): void {
-  Module.noInitialRun = isRestoringSnapshot();
-  Module.getMemoryPatched = getMemoryPatched;
-  Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
+function preloadDynamicLibs026(Module: Module): void {
   const sitePackages = Module.FS.sessionSitePackages + '/';
   const sitePackagesRoot = VIRTUALIZED_DIR.getSitePackagesRoot();
-  if (Module.API.version === '0.26.0a2') {
-    const loadedBaselineSnapshot =
-      LOADED_SNAPSHOT_META?.settings?.baselineSnapshot;
-    let SO_FILES_TO_LOAD: string[][];
-    if (IS_CREATING_BASELINE_SNAPSHOT || loadedBaselineSnapshot) {
-      SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
+  const loadedBaselineSnapshot =
+    LOADED_SNAPSHOT_META?.settings?.baselineSnapshot;
+  let SO_FILES_TO_LOAD: string[][];
+  if (IS_CREATING_BASELINE_SNAPSHOT || loadedBaselineSnapshot) {
+    SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
+  } else {
+    SO_FILES_TO_LOAD = sortSoFiles(VIRTUALIZED_DIR.getSoFilesToLoad());
+  }
+  for (const soFile of SO_FILES_TO_LOAD) {
+    loadDynlibFromTarFs(Module, sitePackages, sitePackagesRoot, soFile);
+  }
+}
+
+/**
+ * If we're restoring from a snapshot, we need to preload dynamic libraries so that any function
+ * pointers that point into the dylib symbols work correctly.
+ * Load the dynamic libraries in loadOrder. Mostly logic dealing with paths.
+ */
+function preloadDynamicLibsMain(Module: Module, loadOrder: string[]): void {
+  const sitePackages = Module.FS.sessionSitePackages + '/';
+  const sitePackagesRoot = VIRTUALIZED_DIR.getSitePackagesRoot();
+  const dynlibRoot = VIRTUALIZED_DIR.getDynlibRoot();
+  const dynlibPath = '/usr/lib/';
+  const userBundleNames = MetadataReader.getNames();
+  for (let path of loadOrder) {
+    let root = sitePackagesRoot;
+    let base = '';
+    if (path.startsWith(sitePackages)) {
+      path = path.slice(sitePackages.length);
+      base = sitePackages;
+    } else if (path.startsWith(dynlibPath)) {
+      path = path.slice(dynlibPath.length);
+      root = dynlibRoot;
+      base = dynlibPath;
+    }
+
+    const pathSplit = Module.PATH.normalizeArray(path.split('/'), true);
+    if (pathSplit[0] == '') {
+      // This is a file path beginning with `/`, like /session/metadata/vendor/pkg/lib.so. So we
+      // are loading the vendored package's dynlibs here.
+      //
+      // TODO(EW-9508): support .so's in user bundle outside vendor dir.
+      loadDynlibFromVendor(Module, pathSplit, userBundleNames);
     } else {
-      SO_FILES_TO_LOAD = sortSoFiles(VIRTUALIZED_DIR.getSoFilesToLoad());
+      // This is a file path relative to the site-packages directory, like pkg/lib.so. So we are
+      // loading the built-in package's dynlibs here.
+      loadDynlibFromTarFs(Module, base, root, pathSplit);
     }
-    for (const soFile of SO_FILES_TO_LOAD) {
-      loadDynlibFromTarFs(Module, sitePackages, sitePackagesRoot, soFile);
-    }
+  }
+}
+
+function preloadDynamicLibs(Module: Module): void {
+  if (Module.API.version === '0.26.0a2') {
+    // In 0.26.0a2 we need to preload dynamic libraries even if we aren't restoring a snapshot.
+    preloadDynamicLibs026(Module);
     return;
   }
-  if (!LOADED_SNAPSHOT_META?.loadOrder) {
+  //
+  const loadOrder = LOADED_SNAPSHOT_META?.loadOrder;
+  if (!loadOrder) {
+    // In newer versions we only need to do the preloading if there is a snapshot to restore.
     return;
   }
   // In Pyodide 0.28 we switched from using top level EM_JS to initialize the CountArgs function
@@ -316,32 +397,7 @@ export function preloadDynamicLibs(Module: Module): void {
   // CountArgsPointer and after loading dynamic libraries, we put it in the free list so it will be
   // used at the right moment.
   const PyEMCountArgsPtr = Module.getEmptyTableSlot();
-
-  const dynlibRoot = VIRTUALIZED_DIR.getDynlibRoot();
-  const dynlibPath = '/usr/lib/';
-  const userBundleNames = MetadataReader.getNames();
-  for (let path of LOADED_SNAPSHOT_META.loadOrder) {
-    let root = sitePackagesRoot;
-    if (path.startsWith(sitePackages)) {
-      path = path.slice(sitePackages.length);
-    } else if (path.startsWith(dynlibPath)) {
-      path = path.slice(dynlibPath.length);
-      root = dynlibRoot;
-    }
-
-    const pathSplit = path.split('/');
-    if (pathSplit[0] == '') {
-      // This is a file path beginning with `/`, like /session/metadata/vendor/pkg/lib.so. So we
-      // are loading the vendored package's dynlibs here.
-      //
-      // TODO(EW-9508): support .so's in user bundle outside vendor dir.
-      loadDynlibFromVendor(Module, pathSplit, userBundleNames);
-    } else {
-      // This is a file path relative to the site-packages directory, like pkg/lib.so. So we are
-      // loading the built-in package's dynlibs here.
-      loadDynlibFromTarFs(Module, sitePackages, root, pathSplit);
-    }
-  }
+  preloadDynamicLibsMain(Module, loadOrder);
   Module.freeTableIndexes.push(PyEMCountArgsPtr);
 }
 
@@ -429,6 +485,14 @@ function describeValue(val: any): string {
     const isObject = type === 'object';
     out.push(`Value: ${val}`);
     out.push(`Type: ${type}`);
+    try {
+      const constructorName = val?.constructor?.name; // eslint-disable-line
+      if (constructorName) {
+        out.push(`Constructor name: ${constructorName}`);
+      }
+    } catch {
+      // Ignore errors when getting keys
+    }
 
     if (val && isObject) {
       try {
@@ -451,7 +515,7 @@ function describeValue(val: any): string {
     }
 
     try {
-      out.push(`Prototype: ${Object.prototype.toString.call(val)}`);
+      out.push(`toStringTag: ${Object.prototype.toString.call(val)}`);
     } catch {
       // Ignore errors when getting object type
     }
@@ -500,7 +564,8 @@ ${describeValue(obj)}
 function makeLinearMemorySnapshot(
   Module: Module,
   importedModulesList: string[],
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null,
+  snapshotType: ArtifactBundler.SnapshotType
 ): Uint8Array {
   const customHiwireStateSerializer = (obj: any): Record<string, boolean> => {
     if (obj === pyodide_entrypoint_helper) {
@@ -514,9 +579,10 @@ function makeLinearMemorySnapshot(
     Module.API.version === '0.26.0a2'
       ? undefined
       : Module.API.serializeHiwireState(customHiwireStateSerializer);
-  const settings = {
+  const settings: SnapshotSettings = {
     baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
-    compatFlags: compatibilityFlags,
+    snapshotType,
+    compatFlags: COMPATIBILITY_FLAGS,
   };
   return encodeSnapshot(Module.HEAP8, {
     version: 1,
@@ -561,14 +627,14 @@ function decodeSnapshot(
     return undefined;
   }
   if (reader.getMemorySnapshotSize() === 0) {
-    throw new PythonRuntimeError(
+    throw new PythonWorkersInternalError(
       `SnapshotReader returned memory snapshot size of 0`
     );
   }
   const header = new Uint32Array(4);
   reader.readMemorySnapshot(0, header);
   if (header[0] !== SNAPSHOT_MAGIC) {
-    throw new PythonRuntimeError(
+    throw new PythonWorkersInternalError(
       `Invalid magic number ${header[0]}, expected ${SNAPSHOT_MAGIC}`
     );
   }
@@ -595,56 +661,121 @@ function decodeSnapshot(
       hiwire: undefined,
       loadOrder: [],
       soMemoryBases: {},
-      settings: { baselineSnapshot: false, ...meta.settings },
+      settings: {
+        snapshotType: meta.settings?.baselineSnapshot ? 'baseline' : 'package',
+        compatFlags: {},
+        ...meta.settings,
+      },
       ...extras,
     };
   }
-  return { ...meta, ...extras };
+  return {
+    ...meta,
+    ...extras,
+    settings: {
+      ...meta.settings,
+      snapshotType:
+        meta.settings.snapshotType ??
+        (meta.settings.baselineSnapshot ? 'baseline' : 'package'),
+      compatFlags: meta.settings.compatFlags ?? {},
+    },
+  };
 }
 
 export function isRestoringSnapshot(): boolean {
   return !!LOADED_SNAPSHOT_META;
 }
 
+function checkSnapshotType(snapshotType: string): void {
+  if (SHOULD_SNAPSHOT_TO_DISK) {
+    return;
+  }
+  if (
+    !IS_EW_VALIDATING &&
+    snapshotType === 'dedicated' &&
+    !IS_DEDICATED_SNAPSHOT_ENABLED
+  ) {
+    throw new PythonWorkersInternalError(
+      'Received dedicated snapshot but compat flag for dedicated snapshots is not enabled'
+    );
+  }
+
+  if (
+    !IS_EW_VALIDATING &&
+    snapshotType !== 'dedicated' &&
+    IS_DEDICATED_SNAPSHOT_ENABLED
+  ) {
+    throw new PythonWorkersInternalError(
+      'Received non-dedicated snapshot but compat flag for dedicated snapshots is enabled'
+    );
+  }
+
+  // If we have a snapshot in the bundle and the dedicated snapshot flag is enabled, then we
+  // should verify that the snapshot in the bundle is a dedicated snapshot. If it is not
+  // we should fail with an error.
+  if (snapshotType !== 'dedicated' && IS_SECOND_VALIDATION_PHASE) {
+    throw new PythonWorkersInternalError(
+      'The second validation phase should receive a dedicated snapshot, got ' +
+        snapshotType
+    );
+  }
+}
+
 export function maybeRestoreSnapshot(Module: Module): void {
+  Module.noInitialRun = isRestoringSnapshot();
+  Module.getMemoryPatched = getMemoryPatched;
+  // Make sure memory is large enough
+  Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
+  enterJaegerSpan('preload_dynamic_libs', () => {
+    preloadDynamicLibs(Module);
+  });
+  // TODO: Remove the jaeger span here
+  enterJaegerSpan('remove_run_dependency', () => {
+    Module.removeRunDependency('dynlibs');
+  });
   if (!LOADED_SNAPSHOT_META) {
     return;
   }
-  const { snapshotSize, snapshotOffset, snapshotReader } = LOADED_SNAPSHOT_META;
+  const { snapshotSize, snapshotOffset, snapshotReader, settings } =
+    LOADED_SNAPSHOT_META;
+  checkSnapshotType(settings.snapshotType);
+
   Module.growMemory(snapshotSize);
   snapshotReader.readMemorySnapshot(snapshotOffset, Module.HEAP8);
   snapshotReader.disposeMemorySnapshot();
   // Invalidate caches if we have a snapshot because the contents of site-packages
   // may have changed.
-  simpleRunPython(
-    Module,
-    'from importlib import invalidate_caches as f; f(); del f'
-  );
+  invalidateCaches(Module);
 }
 
 function collectSnapshot(
   Module: Module,
   importedModulesList: string[],
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null,
+  snapshotType: ArtifactBundler.SnapshotType
 ): void {
-  if (IS_EW_VALIDATING) {
-    const snapshot = makeLinearMemorySnapshot(
-      Module,
-      importedModulesList,
-      pyodide_entrypoint_helper
-    );
-    ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
-  } else if (SHOULD_SNAPSHOT_TO_DISK) {
-    const snapshot = makeLinearMemorySnapshot(
-      Module,
-      importedModulesList,
-      pyodide_entrypoint_helper
-    );
-    DiskCache.put('snapshot.bin', snapshot);
-  } else {
-    throw new PythonRuntimeError(
+  if (!IS_EW_VALIDATING && !SHOULD_SNAPSHOT_TO_DISK) {
+    throw new PythonWorkersInternalError(
       "Attempted to collect snapshot outside of context where it's supported."
     );
+  }
+  const snapshot = makeLinearMemorySnapshot(
+    Module,
+    importedModulesList,
+    pyodide_entrypoint_helper,
+    snapshotType
+  );
+  entropyAfterSnapshot(Module);
+  if (IS_EW_VALIDATING) {
+    ArtifactBundler.storeMemorySnapshot({
+      snapshot,
+      importedModulesList,
+      snapshotType,
+    });
+  } else if (SHOULD_SNAPSHOT_TO_DISK) {
+    DiskCache.put('snapshot.bin', snapshot);
+  } else {
+    throw new PythonWorkersInternalError('Unreachable');
   }
 }
 
@@ -667,17 +798,17 @@ export function maybeCollectDedicatedSnapshot(
   if (Module.API.version == '0.26.0a2') {
     // 0.26.0a2 does not support serialisation of the hiwire state, so it cannot support dedicated
     // snapshots.
-    throw new PythonRuntimeError(
+    throw new PythonWorkersInternalError(
       'Dedicated snapshot is not supported for Python runtime version 0.26.0a2'
     );
   }
 
   if (!pyodide_entrypoint_helper) {
-    throw new PythonRuntimeError(
+    throw new PythonWorkersInternalError(
       'pyodide_entrypoint_helper is required for dedicated snapshot'
     );
   }
-  collectSnapshot(Module, [], pyodide_entrypoint_helper);
+  collectSnapshot(Module, [], pyodide_entrypoint_helper, 'dedicated');
 }
 
 /**
@@ -700,7 +831,12 @@ export function maybeCollectSnapshot(Module: Module): void {
     return;
   }
 
-  collectSnapshot(Module, importedModulesList, null);
+  collectSnapshot(
+    Module,
+    importedModulesList,
+    null,
+    IS_CREATING_BASELINE_SNAPSHOT ? 'baseline' : 'package'
+  );
 }
 
 export function finalizeBootstrap(
@@ -711,7 +847,7 @@ export function finalizeBootstrap(
     if ('pyodide_entrypoint_helper' in obj) {
       return pyodide_entrypoint_helper;
     }
-    throw new PythonRuntimeError(`Can't deserialize ${obj}`);
+    throw new PythonWorkersInternalError(`Can't deserialize ${obj}`);
   };
 
   Module.API.config._makeSnapshot =
@@ -722,6 +858,11 @@ export function finalizeBootstrap(
       customHiwireStateDeserializer
     );
   });
+  // finalizeBootstrap overrides LD_LIBRARY_PATH. Restore it.
+  simpleRunPython(
+    Module,
+    `import os; os.environ["LD_LIBRARY_PATH"] += ":/session/metadata/python_modules/lib/"; del os`
+  );
   if (IS_CREATING_SNAPSHOT) {
     return;
   }

@@ -119,7 +119,7 @@ class IoContext_IncomingRequest final {
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-      tracing::InvocationSpanContext invocationSpanContext);
+      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -174,11 +174,11 @@ class IoContext_IncomingRequest final {
     return workerTracer;
   }
 
+  SpanParent getCurrentUserTraceSpan();
+
   // The invocation span context is a unique identifier for a specific
   // worker invocation.
-  tracing::InvocationSpanContext& getInvocationSpanContext() {
-    return invocationSpanContext;
-  }
+  tracing::InvocationSpanContext& getInvocationSpanContext();
 
  private:
   kj::Own<IoContext> context;
@@ -186,10 +186,13 @@ class IoContext_IncomingRequest final {
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
 
+  SpanParent currentUserTraceSpan = nullptr;
+
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
-  tracing::InvocationSpanContext invocationSpanContext;
+  kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan;
+  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
 
   bool wasDelivered = false;
 
@@ -400,6 +403,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
   bool isCurrent();
+
+  // Check if a current request is available. Used to provide better diagnostics when this is
+  // unexpectedly absent when reporting a user span.
+  // TODO(cleanup): This is a hack, remove after addressing the underlying issue.
+  bool hasCurrentIncomingRequest() {
+    return !incomingRequests.empty();
+  }
 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
   void requireCurrentOrThrowJs();
@@ -719,7 +729,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Date now();
 
   TmpDirStoreScope& getTmpDirStoreScope() {
-    return *tmpDirStoreScope;
+    KJ_IF_SOME(scope, tmpDirStoreScope) {
+      return *scope;
+    }
+    return *tmpDirStoreScope.emplace(TmpDirStoreScope::create());
   }
 
   // Returns a promise that resolves once `now() >= when`.
@@ -915,7 +928,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentUserTraceSpan();
 
   tracing::InvocationSpanContext& getInvocationSpanContext() {
-    return getCurrentIncomingRequest().invocationSpanContext;
+    return getCurrentIncomingRequest().getInvocationSpanContext();
   }
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
@@ -965,7 +978,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
 
-  kj::Own<TmpDirStoreScope> tmpDirStoreScope;
+  kj::Maybe<kj::Own<TmpDirStoreScope>> tmpDirStoreScope;
 
   kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;

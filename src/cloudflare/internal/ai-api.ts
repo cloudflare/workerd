@@ -4,7 +4,12 @@
 
 import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
 import { AutoRAG } from 'cloudflare-internal:autorag-api';
-import base64 from 'cloudflare-internal:base64';
+import {
+  ToMarkdownService,
+  type ConversionRequestOptions,
+  type ConversionResponse,
+  type MarkdownDocument,
+} from 'cloudflare-internal:to-markdown-api';
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -39,14 +44,6 @@ export type AiOptions = {
 export type AiInputReadableStream = {
   body: ReadableStream;
   contentType: string;
-};
-
-export type ConversionResponse = {
-  name: string;
-  mimeType: string;
-  format: 'markdown';
-  tokens: number;
-  data: string;
 };
 
 export type AiModelsSearchParams = {
@@ -88,10 +85,6 @@ export class AiInternalError extends Error {
     super(message);
     this.name = name;
   }
-}
-
-async function blobToBase64(blob: Blob): Promise<string> {
-  return base64.encodeArrayToString(await blob.arrayBuffer());
 }
 
 // TODO: merge this function with the one with images-api.ts
@@ -399,86 +392,29 @@ export class Ai {
     }
   }
 
+  toMarkdown(): ToMarkdownService;
   async toMarkdown(
-    files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse[]>;
   async toMarkdown(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse>;
-  async toMarkdown(
-    files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
-  ): Promise<ConversionResponse | ConversionResponse[]> {
-    const input = Array.isArray(files) ? files : [files];
+  toMarkdown(
+    files?: MarkdownDocument | MarkdownDocument[],
+    options?: ConversionRequestOptions
+  ): ToMarkdownService | Promise<ConversionResponse | ConversionResponse[]> {
+    const service = new ToMarkdownService(this.#fetcher);
 
-    const processedFiles = [];
-    for (const file of input) {
-      processedFiles.push({
-        name: file.name,
-        mimeType: file.blob.type,
-        data: await blobToBase64(file.blob),
-      });
-    }
+    if (arguments.length < 1 || !files) return service;
 
-    const fetchOptions = {
-      method: 'POST',
-      body: JSON.stringify({
-        files: processedFiles,
-        options: options,
-      }),
-      headers: {
-        ...options?.extraHeaders,
-        'content-type': 'application/json',
-      },
-    };
-
-    const endpointUrl = `${this.#endpointURL}/to-everything/markdown/transformer`;
-
-    const res = await this.#fetcher.fetch(endpointUrl, fetchOptions);
-
-    if (!res.ok) {
-      const content = await res.text();
-      let parsedContent;
-
-      try {
-        parsedContent = JSON.parse(content) as {
-          errors: { message: string }[];
-        };
-      } catch {
-        throw new AiInternalError(content);
-      }
-
-      throw new AiInternalError(
-        parsedContent.errors.at(0)?.message || 'Internal Error'
-      );
-    }
-
-    const data = (await res.json()) as { result: ConversionResponse[] };
-
-    if (data.result.length === 0) {
-      throw new AiInternalError(
-        'Internal Error Converting files into Markdown'
-      );
-    }
-
-    // If the user sent a list of files, return an array of results, otherwise, return just the first object
-    if (Array.isArray(files)) {
-      return data.result;
-    }
-
-    const obj = data.result.at(0);
-    if (!obj) {
-      throw new AiInternalError(
-        'Internal Error Converting files into Markdown'
-      );
-    }
-
-    return obj;
+    // NOTE(nunopereira): assuming type A = { name: string; blob: Blob }, 'files' here can be of type A | A[].
+    // However, 'service.transform' has no overload that accepts that union, rather it has one overload for each variant.
+    // We know the type of 'files' satisfies whatever type 'service.transform' expects and
+    // instead it's Typescript that is failing to narrow the type, so just ignore this error.
+    // @ts-expect-error unable to narrow type of file to either { name: string; blob: Blob } or { name: string; blob: Blob }[]
+    return service.transform(files, options);
   }
 
   gateway(gatewayId: string): AiGateway {

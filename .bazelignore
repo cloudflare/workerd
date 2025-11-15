@@ -1,1 +1,6 @@
 node_modules
+
+# Nested modules
+build/google-benchmark
+build/perfetto
+build/workerd-v8

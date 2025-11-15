@@ -6,7 +6,6 @@ import {
 import {
   maybeCollectSnapshot,
   maybeRestoreSnapshot,
-  preloadDynamicLibs,
   finalizeBootstrap,
   isRestoringSnapshot,
 } from 'pyodide-internal:snapshot';
@@ -17,7 +16,7 @@ import {
   getRandomValues,
   entropyBeforeRequest,
 } from 'pyodide-internal:topLevelEntropy/lib';
-import { legacyVendorPath } from 'pyodide-internal:metadata';
+import { LEGACY_VENDOR_PATH } from 'pyodide-internal:metadata';
 import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
 
 /**
@@ -28,7 +27,7 @@ import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
 import { default as SetupEmscripten } from 'internal:setup-emscripten';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
-import { PythonRuntimeError, reportError } from 'pyodide-internal:util';
+import { PythonWorkersInternalError, reportError } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
@@ -43,12 +42,6 @@ function prepareWasmLinearMemory(
   Module: Module,
   pyodide_entrypoint_helper: PyodideEntrypointHelper
 ): void {
-  enterJaegerSpan('preload_dynamic_libs', () => {
-    preloadDynamicLibs(Module);
-  });
-  enterJaegerSpan('remove_run_dependency', () => {
-    Module.removeRunDependency('dynlibs');
-  });
   maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
   entropyAfterRuntimeInit(Module);
@@ -71,7 +64,7 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       import sys
       from pathlib import Path
 
-      LEGACY_VENDOR_PATH = "${legacyVendorPath}" == "true"
+      LEGACY_VENDOR_PATH = "${LEGACY_VENDOR_PATH}" == "true"
       VENDOR_PATH = "/session/metadata/vendor"
       PYTHON_MODULES_PATH = "/session/metadata/python_modules"
 
@@ -116,7 +109,7 @@ function validatePyodideVersion(pyodide: Pyodide): void {
     return;
   }
   if (pyodide.version !== expectedPyodideVersion) {
-    throw new PythonRuntimeError(
+    throw new PythonWorkersInternalError(
       `Pyodide version mismatch, expected '${expectedPyodideVersion}'`
     );
   }

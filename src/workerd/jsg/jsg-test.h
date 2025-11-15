@@ -217,7 +217,6 @@ struct NumberBox: public Object {
   }
 
   JSG_RESOURCE_TYPE(NumberBox) {
-
     JSG_METHOD(increment);
     JSG_METHOD(incrementBy);
     JSG_METHOD(incrementByBox);

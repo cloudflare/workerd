@@ -24,6 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import {
+  ERR_BUFFER_OUT_OF_BOUNDS,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
@@ -296,7 +297,7 @@ export function validateRmDirArgs(
   options: RmDirOptions
 ): { path: URL; recursive: boolean } {
   validateObject(options, 'options');
-  const { maxRetries = 0, recursive = false, retryDelay = 0 } = options;
+  const { maxRetries = 0, recursive = false, retryDelay = 0 } = options; // eslint-disable-line @typescript-eslint/no-deprecated
   // We do not implement the maxRetries or retryDelay options in any meaningful
   // way. We just validate them.
   validateUint32(maxRetries, 'options.maxRetries');
@@ -367,7 +368,7 @@ export function validateOpendirArgs(
   validateBoolean(recursive, 'options.recursive');
   return {
     path: normalizePath(path),
-    encoding: encoding as BufferEncoding,
+    encoding,
     recursive,
   };
 }
@@ -391,22 +392,33 @@ export function validateWriteArgs(
   if (isArrayBufferView(buffer)) {
     if (typeof offsetOrOptions === 'object' && offsetOrOptions != null) {
       ({
-        offset = buffer.byteOffset,
+        offset = 0,
         length = buffer.byteLength,
         position = null,
       } = (offsetOrOptions as WriteSyncOptions | null) || {});
+      offset ??= 0;
+      validateInteger(offset, 'offset', 0);
+      offset += buffer.byteOffset;
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (offset != null) {
+        validateInteger(offset, 'offset', 0);
+      }
+      offset ??= 0;
+      offset += buffer.byteOffset;
+      length ??= buffer.byteLength;
+      position ??= null;
     }
-    position ??= null;
-    offset ??= buffer.byteOffset;
-    length ??= buffer.byteLength;
 
-    validateInteger(offset, 'offset', 0);
     validatePosition(position, 'position');
     validateInteger(length, 'length', 0);
 
     // Validate that the offset + length do not exceed the buffer's byte length.
     if (length > buffer.byteLength) {
-      throw new ERR_INVALID_ARG_VALUE('offset', offset, 'out of bounds');
+      throw new ERR_BUFFER_OUT_OF_BOUNDS('length');
+    }
+    if (offset > length) {
+      throw new ERR_BUFFER_OUT_OF_BOUNDS('offset');
     }
 
     return {
@@ -465,12 +477,13 @@ export function validateWriteFileArgs(
     flag = 'w',
     flush = false,
   } = options;
+  // @ts-expect-error TS2367 types does not overlap.
   if (encoding !== 'buffer' && !Buffer.isEncoding(encoding)) {
     throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
   }
   validateBoolean(flush, 'options.flush');
   parseFileMode(mode, 'options.mode', 0o666);
-  const newFlag = stringToFlags(flag as string);
+  const newFlag = stringToFlags(flag);
 
   const append = Boolean(newFlag & O_APPEND);
   const write = Boolean(newFlag & O_WRONLY || newFlag & O_RDWR) || append;

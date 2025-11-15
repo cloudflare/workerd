@@ -160,26 +160,61 @@ declare namespace Rpc {
 }
 
 declare namespace Cloudflare {
+  // Type of `env`.
+  //
+  // The specific project can extend `Env` by redeclaring it in project-specific files. Typescript
+  // will merge all declarations.
+  //
+  // You can use `wrangler types` to generate the `Env` type automatically.
   interface Env {}
+
+  // Project-specific parameters used to inform types.
+  //
+  // This interface is, again, intended to be declared in project-specific files, and then that
+  // declaration will be merged with this one.
+  //
+  // A project should have a declaration like this:
+  //
+  //     interface GlobalProps {
+  //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // of `ctx.exports`.
+  //       mainModule: typeof import("my-main-module");
+  //
+  //       // Declares which of the main module's exports are configured with durable storage, and
+  //       // thus should behave as Durable Object namsepace bindings.
+  //       durableNamespaces: "MyDurableObject" | "AnotherDurableObject";
+  //     }
+  //
+  // You can use `wrangler types` to generate `GlobalProps` automatically.
+  interface GlobalProps {}
+
+  // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
+  // present.
+  type GlobalProp<K extends string, Default> =
+      K extends keyof GlobalProps ? GlobalProps[K] : Default;
+
+  // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
+  // `mainModule` property.
+  type MainModule = GlobalProp<"mainModule", {}>;
+
+  // The type of ctx.exports, which contains loopback bindings for all top-level exports.
+  type Exports = {
+    [K in keyof MainModule]:
+        & LoopbackForExport<MainModule[K]>
+
+        // If the export is listed in `durableNamespaces`, then it is also a
+        // DurableObjectNamespace.
+        & (K extends GlobalProp<"durableNamespaces", never>
+            ?  MainModule[K] extends new (...args: any[]) => infer DoInstance
+                ? DoInstance extends Rpc.DurableObjectBranded
+                    ? DurableObjectNamespace<DoInstance>
+                    : DurableObjectNamespace<undefined>
+                : DurableObjectNamespace<undefined>
+            : {});
+  };
 }
 
-declare module 'cloudflare:node' {
-  export interface DefaultHandler {
-    fetch?(request: Request): Response | Promise<Response>;
-    tail?(events: TraceItem[]): void | Promise<void>;
-    trace?(traces: TraceItem[]): void | Promise<void>;
-    scheduled?(controller: ScheduledController): void | Promise<void>;
-    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
-    test?(controller: TestController): void | Promise<void>;
-  }
-
-  export function httpServerHandler(
-    options: { port: number },
-    handlers?: Omit<DefaultHandler, 'fetch'>
-  ): DefaultHandler;
-}
-
-declare module 'cloudflare:workers' {
+declare namespace CloudflareWorkersModule {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
     new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
@@ -191,29 +226,34 @@ declare module 'cloudflare:workers' {
 
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
-  export abstract class WorkerEntrypoint<Env = unknown>
-    implements Rpc.WorkerEntrypointBranded
+  export abstract class WorkerEntrypoint<
+    Env = Cloudflare.Env,
+    Props = {},
+  > implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
-    protected ctx: ExecutionContext;
+    protected ctx: ExecutionContext<Props>;
     protected env: Env;
     constructor(ctx: ExecutionContext, env: Env);
 
     fetch?(request: Request): Response | Promise<Response>;
     tail?(events: TraceItem[]): void | Promise<void>;
+    tailStream?(event: TailStream.TailEvent<TailStream.Onset>): TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
     trace?(traces: TraceItem[]): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     test?(controller: TestController): void | Promise<void>;
   }
 
-  export abstract class DurableObject<Env = unknown>
-    implements Rpc.DurableObjectBranded
+  export abstract class DurableObject<
+    Env = Cloudflare.Env,
+    Props = {},
+  > implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
-    protected ctx: DurableObjectState;
+    protected ctx: DurableObjectState<Props>;
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
 
@@ -316,4 +356,8 @@ declare module 'cloudflare:workers' {
   export function waitUntil(promise: Promise<unknown>): void;
 
   export const env: Cloudflare.Env;
+}
+
+declare module 'cloudflare:workers' {
+  export = CloudflareWorkersModule;
 }

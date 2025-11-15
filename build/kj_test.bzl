@@ -21,7 +21,11 @@ def kj_test(
             "@platforms//os:linux": 0,
             "//conditions:default": 1,
         }),
+        # For test binaries, reduce thinLTO optimizations and inlining to speed up linking. This
+        # only has an effect if thinLTO is enabled. Also apply dead_strip on macOS to manage binary
+        # sizes.
         linkopts = select({
+            "@platforms//os:linux": ["-Wl,--lto-O1", "-Wl,-mllvm,-import-instr-limit=5"],
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],
         }),
@@ -48,14 +52,16 @@ def kj_test(
         name = test_name,
         size = size,
         srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias],
+        data = [cross_alias] + data,
         args = ["$(location " + cross_alias + ")"],
+        tags = tags,
     )
     sh_test(
         name = test_name + "@all-autogates-enabled",
         size = size,
         env = {"WORKERD_ALL_AUTOGATES": "1"},
         srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias],
+        data = [cross_alias] + data,
         args = ["$(location " + cross_alias + ")"],
+        tags = tags,
     )

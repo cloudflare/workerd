@@ -12,6 +12,25 @@ import { Buffer } from 'buffer'; // Intentionally omit the 'node:' prefix
 import { foo as foo2, default as def2 } from 'bar';
 import { createRequire } from 'module'; // Intentionally omit the 'node:' prefix
 
+import * as workers from 'cloudflare:workers';
+strictEqual(typeof workers, 'object');
+strictEqual(typeof workers.DurableObject, 'function');
+strictEqual(typeof workers.RpcPromise, 'function');
+strictEqual(typeof workers.RpcProperty, 'function');
+strictEqual(typeof workers.RpcStub, 'function');
+strictEqual(typeof workers.RpcTarget, 'function');
+strictEqual(typeof workers.ServiceStub, 'function');
+strictEqual(typeof workers.WorkerEntrypoint, 'function');
+strictEqual(typeof workers.WorkflowEntrypoint, 'function');
+strictEqual(typeof workers.waitUntil, 'function');
+strictEqual(typeof workers.withEnv, 'function');
+strictEqual(typeof workers.env, 'object');
+
+await rejects(import('cloudflare-internal:env'), {
+  message: /Module not found/,
+});
+await rejects(import('cloudflare-internal:filesystem'));
+
 // Verify that import.meta.url is correct here.
 strictEqual(import.meta.url, 'file:///bundle/worker');
 
@@ -120,6 +139,54 @@ await rejects(import('module-not-found'), {
   message: /Module not found: file:\/\/\/bundle\/module-not-found/,
 });
 
+await rejects(import('file:///outside'), {
+  message: /Module not found/,
+});
+
+await import('file:///bundle/outside');
+
+const abc123 = await import('abc123');
+strictEqual(abc123.default, 1);
+
+// Full URLs can be used as module specifiers. These would not
+// actually resolve to network requests.
+const mod = await import('https://example.com/mod');
+strictEqual(mod.default, 'example');
+
+// Whitespace and leading ./, ../, and multiple slashes are
+// stripped and ignored when setting up the module registry,
+// so they should resolve as expected here as being relative
+// to the bundle base URL.
+const mod2 = await import('   ./should/be/ok   ');
+strictEqual(mod2.default, 1);
+
+// UTF-8 percent-encoded of 部品 (Japanese for "component")
+const mod3 = await import('%E9%83%A8%E5%93%81');
+const mod4 = await import('部品'); // Get's converted into UTF-8 bytes in source
+const mod5 = await import('\u90e8\u54c1'); // Specifically UTF-16 code units in source
+const mod6 = await import('\xE9\x83\xA8\xE5\x93\x81');
+import { default as mod7 } from '部品';
+import { default as mod8 } from '\u90e8\u54c1';
+import { default as mod9 } from '\xE9\x83\xA8\xE5\x93\x81';
+import { default as mod10 } from '%E9%83%A8%E5%93%81';
+
+strictEqual(mod3.default, 1);
+strictEqual(mod4.default, 1);
+strictEqual(mod5.default, 1);
+strictEqual(mod6.default, 1);
+strictEqual(mod7, 1);
+strictEqual(mod8, 1);
+strictEqual(mod9, 1);
+strictEqual(mod10, 1);
+
+// The percent-encoded UTF-16 form of 部品 should not work.
+await rejects(import('%E8%90%C1%54'), {
+  message: /Module not found/,
+});
+await rejects(import('%90%E8%54%C1'), {
+  message: /Module not found/,
+});
+
 // Verify that a module is unable to perform IO operations at the top level, even if
 // the dynamic import is initiated within the scope of an active IoContext.
 export const noTopLevelIo = {
@@ -213,6 +280,42 @@ export const wasmModuleTest = {
     const { default: wasm } = await import('wasm');
     ok(wasm instanceof WebAssembly.Module);
     await WebAssembly.instantiate(wasm, {});
+  },
+};
+
+import source wasmSource from 'wasm';
+export const wasmSourcePhaseTest = {
+  async test() {
+    ok(wasmSource instanceof WebAssembly.Module);
+    await WebAssembly.instantiate(wasmSource, {});
+  },
+};
+
+export const wasmDynamicSourcePhaseTest = {
+  async test() {
+    const wasmSource = await import.source('wasm');
+    ok(wasmSource instanceof WebAssembly.Module);
+    await WebAssembly.instantiate(wasmSource, {});
+  },
+};
+
+export const wasmDynamicSourcePhaseFailureTest = {
+  async test() {
+    await rejects(import.source('foo'), {
+      message:
+        'Source phase import not available for module: file:///bundle/foo',
+    });
+  },
+};
+
+export const complexModuleTest = {
+  async test() {
+    const { abc } = await import('complex');
+    strictEqual(abc.foo, 1);
+    strictEqual(abc.def.bar, 2);
+
+    const { default: abc2 } = await import('abc');
+    strictEqual(abc2, 'file:///bundle/abc');
   },
 };
 

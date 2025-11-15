@@ -296,7 +296,7 @@ export function compileFunction(
     columnOffset = 0,
     lineOffset = 0,
     cachedData = undefined,
-    produceCachedData = false,
+    produceCachedData = false, // eslint-disable-line @typescript-eslint/no-deprecated
     parsingContext = undefined,
     contextExtensions = [],
     importModuleDynamically = false,
@@ -312,7 +312,7 @@ export function compileFunction(
   if (parsingContext !== undefined) {
     if (
       typeof parsingContext !== 'object' ||
-      parsingContext === null ||
+      parsingContext === null || // eslint-disable-line @typescript-eslint/no-unnecessary-condition
       !isContext(parsingContext)
     ) {
       throw new ERR_INVALID_ARG_TYPE(

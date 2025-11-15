@@ -374,6 +374,211 @@ export function notDeepStrictEqual(
   }
 }
 
+// Helper function to check if actual contains all properties from expected with deep strict equality
+function isPartialDeepStrictEqual(
+  actual: unknown,
+  expected: unknown,
+  memo?: Map<unknown, Set<unknown>>
+): boolean {
+  // Handle primitive cases first
+  if (expected === null || typeof expected !== 'object') {
+    return Object.is(actual, expected);
+  }
+
+  if (actual === null || typeof actual !== 'object') {
+    return false;
+  }
+
+  // Initialize memo for cycle detection on first call
+  memo ??= new Map();
+
+  // Cycle detection: check if we're already comparing this pair
+  if (memo.has(actual)) {
+    const actualSet = memo.get(actual)!;
+    if (actualSet.has(expected)) {
+      // We're already comparing this pair, assume they match to avoid infinite recursion
+      return true;
+    }
+    actualSet.add(expected);
+  } else {
+    memo.set(actual, new Set([expected]));
+  }
+
+  try {
+    // Handle Date objects
+    if (expected instanceof Date) {
+      return actual instanceof Date && actual.getTime() === expected.getTime();
+    }
+
+    // Handle RegExp objects
+    if (expected instanceof RegExp) {
+      return (
+        actual instanceof RegExp &&
+        actual.source === expected.source &&
+        actual.flags === expected.flags &&
+        actual.lastIndex === expected.lastIndex
+      );
+    }
+
+    // Handle Error objects
+    if (expected instanceof Error) {
+      return (
+        actual instanceof Error &&
+        actual.name === expected.name &&
+        actual.message === expected.message
+      );
+    }
+
+    // Handle arrays
+    if (Array.isArray(expected)) {
+      if (!Array.isArray(actual)) {
+        return false;
+      }
+
+      // For arrays, check if all expected elements are present in actual
+      // This allows for sparse checking - actual can have more elements
+      for (let i = 0; i < expected.length; i++) {
+        if (i in expected) {
+          if (
+            !(i in actual) ||
+            !isPartialDeepStrictEqual(actual[i], expected[i], memo)
+          ) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    // Handle Sets
+    if (expected instanceof Set) {
+      if (!(actual instanceof Set)) {
+        return false;
+      }
+
+      // Check if all expected values are in actual set
+      for (const expectedValue of expected) {
+        let found = false;
+        for (const actualValue of actual) {
+          if (isDeepStrictEqual(expectedValue, actualValue)) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // Handle Maps
+    if (expected instanceof Map) {
+      if (!(actual instanceof Map)) {
+        return false;
+      }
+
+      // Check if all expected key-value pairs are in actual map
+      for (const [expectedKey, expectedValue] of expected) {
+        let found = false;
+        for (const [actualKey, actualValue] of actual) {
+          if (isDeepStrictEqual(expectedKey, actualKey)) {
+            if (!isPartialDeepStrictEqual(actualValue, expectedValue, memo)) {
+              return false;
+            }
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // Check prototypes are the same (required for deepStrictEqual behavior)
+    if (Object.getPrototypeOf(actual) !== Object.getPrototypeOf(expected)) {
+      return false;
+    }
+
+    // Handle regular objects
+    const expectedKeys = Object.keys(expected);
+
+    for (const key of expectedKeys) {
+      if (!(key in actual)) {
+        return false;
+      }
+
+      if (
+        !isPartialDeepStrictEqual(
+          (actual as any)[key],
+          (expected as any)[key],
+          memo
+        )
+      ) {
+        return false;
+      }
+    }
+
+    // Handle symbol properties
+    const expectedSymbols = Object.getOwnPropertySymbols(expected);
+    for (const symbol of expectedSymbols) {
+      if (expected.propertyIsEnumerable(symbol)) {
+        if (
+          !(symbol in actual) ||
+          !isPartialDeepStrictEqual(
+            (actual as any)[symbol],
+            (expected as any)[symbol],
+            memo
+          )
+        ) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  } finally {
+    // Clean up memo to prevent memory leaks
+    if (memo.has(actual)) {
+      const actualSet = memo.get(actual)!;
+      actualSet.delete(expected);
+      if (actualSet.size === 0) {
+        memo.delete(actual);
+      }
+    }
+  }
+}
+
+export function partialDeepStrictEqual(
+  actual: unknown,
+  expected: unknown,
+  message?: string | Error
+): void {
+  if (arguments.length < 2) {
+    throw new ERR_MISSING_ARGS('actual', 'expected');
+  }
+
+  if (isPartialDeepStrictEqual(actual, expected)) {
+    return;
+  }
+
+  if (message) {
+    message = `${message}`;
+  } else {
+    message =
+      'Expected actual to be partially deeply strictly equal to expected';
+  }
+
+  throw new AssertionError({
+    message,
+    actual,
+    expected,
+    operator: 'partialDeepStrictEqual',
+  });
+}
+
 export function fail(message?: string | Error): never {
   if (typeof message === 'string' || message == null) {
     throw createAssertionError({
@@ -872,6 +1077,7 @@ Object.assign(strict, {
   notEqual: notStrictEqual,
   notStrictEqual,
   ok,
+  partialDeepStrictEqual,
   rejects,
   strict,
   strictEqual,
@@ -894,6 +1100,7 @@ export default Object.assign(assert, {
   notEqual,
   notStrictEqual,
   ok,
+  partialDeepStrictEqual,
   rejects,
   strict,
   strictEqual,

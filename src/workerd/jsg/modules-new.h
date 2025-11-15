@@ -254,6 +254,8 @@ class Module {
     // that require JavaScript evaluation outside of the current request context.
     // The eval callback must be set or the flag is ignored.
     EVAL = 1 << 2,
+    // A Module with the WASM flag set is a WebAssembly module.
+    WASM = 1 << 3,
   };
 
   // The Evaluator is used to to ensure evaluation of a module outside of an
@@ -273,7 +275,7 @@ class Module {
   };
 
   KJ_DISALLOW_COPY_AND_MOVE(Module);
-  virtual ~Module() = default;
+  virtual ~Module() noexcept(false) = default;
 
   // The fully resolved absolute import specifier URL for the module.
   inline const Url& id() const KJ_LIFETIMEBOUND {
@@ -294,6 +296,9 @@ class Module {
   // If isEval() returns true, then the module requires code evaluation to complete
   // outside of a request context (that is, it cannot perform certain I/O tasks).
   inline bool isEval() const;
+
+  // If isWasm() returns true, then the module is a WebAssembly module.
+  inline bool isWasm() const;
 
   // Returns a v8::Module representing this Module definition for the given isolate.
   // The return value follows the established v8 rules for Maybe. If the returned
@@ -471,6 +476,10 @@ class Module {
   const Url id_;
   Type type_;
   Flags flags_;
+
+  // TODO: Support source objects as optional instantiation-hook creations and move
+  // Wasm compilation to start at instantiation-time instead of evaluation-time.
+  // kj::Maybe<HashableV8Ref<v8::Object>> sourceObject_;
 };
 
 constexpr Module::Flags operator&(const Module::Flags& a, const Module::Flags& b) {
@@ -537,6 +546,9 @@ class ModuleBundle {
     BundleBuilder& addEsmModule(kj::StringPtr name,
         kj::ArrayPtr<const char> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
+
+    BundleBuilder& addWasmModule(
+        kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) KJ_LIFETIMEBOUND;
 
     BundleBuilder& alias(kj::StringPtr alias, kj::StringPtr name) KJ_LIFETIMEBOUND;
 

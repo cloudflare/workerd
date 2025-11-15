@@ -4,13 +4,21 @@ const config :Workerd.Config = (
   services = [
     (name = "main", worker = .mainWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),
+    (name = "tail", worker= .tailWorker)
   ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instumentation-tail", esModule = embed "tests/instrumentation-tail-worker.js" ),
+    ]
+  ) ]
 );
 
 const mainWorker :Workerd.Worker = (
   compatibilityDate = "2025-08-01",
 
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["enable_ctx_exports", "nodejs_compat", "streaming_tail_worker"],
+
+  streamingTails = ["tail"],
 
   modules = [
     (name = "worker", esModule = embed "sync-kv-test.js"),
@@ -23,4 +31,12 @@ const mainWorker :Workerd.Worker = (
   ],
 
   durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "sync-kv-instrumentation-test.js")
+  ],
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 );

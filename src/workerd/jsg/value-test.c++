@@ -115,6 +115,7 @@ JSG_DECLARE_ISOLATE_TYPE(OptionalIsolate,
 
 KJ_TEST("optionals and maybes") {
   Evaluator<OptionalContext, OptionalIsolate> e(v8System);
+  e.getIsolate().setUsingFastJsgStruct();
   e.expectEval("takeOptional(new NumberBox(123))", "number", "123");
   e.expectEval("takeOptional()", "number", "321");
   e.expectEval("takeOptional(undefined)", "number", "321");
@@ -161,14 +162,14 @@ KJ_TEST("optionals and maybes") {
 
   e.expectEval(
       "var object = makeTestOptionalFields(undefined, undefined, null);\n" ENUMERATE_OBJECT,
-      "string", "nullable: null");
+      "string", "optional: undefined, lenient: undefined, nullable: null");
   e.expectEval("var object = makeTestOptionalFields('foo', 'bar', null);\n" ENUMERATE_OBJECT,
       "string", "optional: foo, lenient: bar, nullable: null");
   e.expectEval("var object = makeTestOptionalFields('foo', 'bar', 'baz');\n" ENUMERATE_OBJECT,
       "string", "optional: foo, lenient: bar, nullable: baz");
   e.expectEval(
       "var object = makeTestOptionalFields(undefined, undefined, 'bar');\n" ENUMERATE_OBJECT,
-      "string", "nullable: bar");
+      "string", "optional: undefined, lenient: undefined, nullable: bar");
 #undef ENUMERATE_OBJECT
 
   e.expectEval("readTestAllOptionalFields({})", "string", "(absent), 321");

@@ -6,6 +6,7 @@
 
 #include "actor-cache.h"
 
+#include <workerd/io/trace.h>
 #include <workerd/util/sqlite-kv.h>
 #include <workerd/util/sqlite-metadata.h>
 
@@ -25,8 +26,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   class Hooks {
    public:
     // Makes a request to the alarm manager to run the alarm handler at the given time, returning
-    // a promise that resolves when the scheduling has succeeded.
-    virtual kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime);
+    // a promise that resolves when the scheduling has succeeded. `priorTask` is any work we must
+    // wait on prior to scheduling the new request, as of this writing, this would be the
+    // alarmLaterChain, which holds promises to move the alarm time "later" than is currently set.
+    virtual kj::Promise<void> scheduleRun(
+        kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask);
 
     static const Hooks DEFAULT;
 
@@ -89,7 +93,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
-  kj::Promise<kj::String> getCurrentBookmark() override;
+  kj::Promise<kj::String> getCurrentBookmark(SpanParent parentSpan) override;
   kj::Promise<void> waitForBookmark(kj::StringPtr bookmark) override;
   // See ActorCacheInterface
 
@@ -105,7 +109,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // into application errors as appropriate when committing an implicit transaction.
   class TxnCommitRegulator: public SqliteDatabase::Regulator {
    public:
-    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const;
+    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override;
   };
   static constexpr TxnCommitRegulator TRUSTED_TXN_COMMIT;
 
@@ -125,10 +129,16 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     void commit();
     void rollback();
 
+    void setSomeWriteConfirmed(bool someWriteConfirmed);
+    bool isSomeWriteConfirmed() const;
+
    private:
     ActorSqlite& parent;
 
     bool committed = false;
+
+    // True if any of the writes in this commit are confirmed writes.
+    bool someWriteConfirmed = false;
   };
 
   class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted {
@@ -186,13 +196,17 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // If true, then a commit is scheduled as a result of deleteAll() having been called.
   bool deleteAllCommitScheduled = false;
 
+  // State for tracking completion of all commits (both confirmed and unconfirmed) for implementing
+  // sync() in onNoPendingFlush.
+  kj::ForkedPromise<void> lastCommit = kj::Promise<void>(kj::READY_NOW).fork();
+
   // Backs the `kj::Own<void>` returned by `armAlarmHandler()`.
   class DeferredAlarmDeleter: public kj::Disposer {
    public:
     // The `Own<void>` returned by `armAlarmHandler()` is actually set up to point to the
     // `ActorSqlite` itself, but with an alternate disposer that deletes the alarm rather than
     // the whole object.
-    void disposeImpl(void* pointer) const {
+    void disposeImpl(void* pointer) const override {
       reinterpret_cast<ActorSqlite*>(pointer)->maybeDeleteDeferredAlarm();
     }
   };
@@ -220,20 +234,20 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   kj::TaskSet commitTasks;
 
-  class AlarmLaterErrorHandler: public kj::TaskSet::ErrorHandler {
-   public:
-    void taskFailed(kj::Exception&& exception) override;
-  };
-  AlarmLaterErrorHandler alarmLaterErrorHandler;
-  kj::TaskSet alarmLaterTasks;
+  // Promise chain for serializing "move alarm later" operations to prevent races
+  // at the alarm manager. Each update waits for the previous one to complete.
+  kj::ForkedPromise<void> alarmLaterChain = kj::Promise<void>(kj::READY_NOW).fork();
 
-  void onWrite();
+  void startImplicitTxn();
+
+  void onWrite(bool allowUnconfirmed);
 
   void onCriticalError(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException);
 
   // Issues a request to the alarm scheduler for the given time, returning a promise that resolves
   // when the request is confirmed.
-  kj::Promise<void> requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime);
+  kj::Promise<void> requestScheduledAlarm(
+      kj::Maybe<kj::Date> requestedTime, kj::Promise<void> priorTask);
 
   struct PrecommitAlarmState {
     // Promise for the completion of precommit alarm scheduling

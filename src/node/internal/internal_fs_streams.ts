@@ -40,7 +40,8 @@ import type {
 
 import type { FileHandle } from 'node-internal:internal_fs_promises';
 
-import { errorOrDestroy, eos } from 'node-internal:streams_util';
+import { errorOrDestroy } from 'node-internal:streams_destroy';
+import { eos } from 'node-internal:streams_end_of_stream';
 
 import {
   ERR_INVALID_ARG_VALUE,
@@ -541,7 +542,7 @@ function readImpl(this: ReadStream, n: number): void {
     }
 
     if (er) {
-      errorOrDestroy(this, er);
+      errorOrDestroy(this, er as Error);
       return;
     }
 
@@ -812,6 +813,7 @@ function writeAll(
   if (this.fd == null) {
     return cb(new ERR_INVALID_ARG_VALUE('fd', 'null'));
   }
+
   this[kFs].write(
     this.fd,
     data,
@@ -971,15 +973,12 @@ function writevImpl(
   data: WriteVChunk[],
   callback: ErrorOnlyCallback
 ) {
-  const len = data.length;
-  const chunks = new Array(len);
   let size = 0;
-
-  for (let i = 0; i < len; i++) {
-    const chunk = (data[i] as any).chunk;
-    chunks[i] = chunk;
+  const chunks = data.map((d) => {
+    const chunk = (d as any).chunk;
     size += chunk.length;
-  }
+    return chunk;
+  });
 
   this[kIsPerformingIO] = true;
   writevAll.call(this, chunks, size, this.pos, (er: unknown) => {

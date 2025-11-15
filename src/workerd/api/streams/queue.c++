@@ -48,8 +48,8 @@ void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
 
 #pragma region ValueQueue::QueueEntry
 
-kj::Own<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
-  return kj::heap<Entry>(getValue(js), getSize());
+kj::Rc<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
+  return addRefToThis();
 }
 
 ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
@@ -88,7 +88,7 @@ void ValueQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
   impl.read(js, kj::mv(request));
 }
 
-void ValueQueue::Consumer::push(jsg::Lock& js, kj::Own<Entry> entry) {
+void ValueQueue::Consumer::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -139,7 +139,7 @@ void ValueQueue::maybeUpdateBackpressure() {
   impl.maybeUpdateBackpressure();
 }
 
-void ValueQueue::push(jsg::Lock& js, kj::Own<Entry> entry) {
+void ValueQueue::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -148,7 +148,7 @@ size_t ValueQueue::size() const {
 }
 
 void ValueQueue::handlePush(
-    jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Own<Entry> entry) {
+    jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Rc<Entry> entry) {
   // If there are no pending reads, just add the entry to the buffer and return, adjusting
   // the size of the queue in the process.
   if (state.readRequests.empty()) {
@@ -316,8 +316,8 @@ size_t ByteQueue::Entry::getSize() const {
   return store.size();
 }
 
-kj::Own<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
-  return kj::heap<ByteQueue::Entry>(store.clone(js));
+kj::Rc<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
+  return addRefToThis();
 }
 
 void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
@@ -365,7 +365,7 @@ void ByteQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
   impl.read(js, kj::mv(request));
 }
 
-void ByteQueue::Consumer::push(jsg::Lock& js, kj::Own<Entry> entry) {
+void ByteQueue::Consumer::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -438,7 +438,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
     KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, amount)) {
-      auto entry = kj::heap<Entry>(kj::mv(store));
+      auto entry = kj::rc<Entry>(kj::mv(store));
 
       auto start = sourcePtr.slice(req.pullInto.filled);
 
@@ -484,7 +484,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
     auto start = sourcePtr.slice(amount - unaligned);
 
     KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, unaligned)) {
-      auto excess = kj::heap<Entry>(kj::mv(store));
+      auto excess = kj::rc<Entry>(kj::mv(store));
       excess->toArrayPtr().first(unaligned).copyFrom(start.first(unaligned));
       consumer.push(js, kj::mv(excess));
     } else {
@@ -562,13 +562,14 @@ void ByteQueue::maybeUpdateBackpressure() {
     // take of them from time to time since. Since maybeUpdateBackpressure
     // is going to be called regularly while the queue is actively in use,
     // this is as good a place to clean them out as any.
-    auto pivot KJ_UNUSED = std::remove_if(state.pendingByobReadRequests.begin(),
+    auto pivot = std::remove_if(state.pendingByobReadRequests.begin(),
         state.pendingByobReadRequests.end(), [](auto& item) { return item->isInvalidated(); });
+    state.pendingByobReadRequests.erase(pivot, state.pendingByobReadRequests.end());
   }
   impl.maybeUpdateBackpressure();
 }
 
-void ByteQueue::push(jsg::Lock& js, kj::Own<Entry> entry) {
+void ByteQueue::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -577,7 +578,7 @@ size_t ByteQueue::size() const {
 }
 
 void ByteQueue::handlePush(
-    jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Own<Entry> newEntry) {
+    jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Rc<Entry> newEntry) {
   const auto bufferData = [&](size_t offset) {
     state.queueTotalSize += newEntry->getSize() - offset;
     state.buffer.emplace_back(QueueEntry{

@@ -4,9 +4,10 @@
 
 #include "html-rewriter.h"
 
-#include "streams.h"
 #include "util.h"
 
+#include <workerd/api/streams/common.h>
+#include <workerd/api/streams/identity-transform-stream.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 

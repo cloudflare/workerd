@@ -72,6 +72,12 @@ class SqliteDatabase {
   class Lock;
   class LockManager;
   struct VfsOptions;
+  class Regulator;
+
+  struct QueryOptions {
+    const Regulator& regulator;
+    bool allowUnconfirmed = false;
+  };
 
   struct IngestResult {
     kj::StringPtr remainder;
@@ -180,7 +186,7 @@ class SqliteDatabase {
   //   `Query` object are both associated with the last statement. This is particularly convenient
   //   for doing database initialization such as creating several tables at once.
   template <typename... Params>
-  Query run(const Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings);
+  Query run(QueryOptions options, kj::StringPtr sqlCode, Params&&... bindings);
 
   template <size_t size>
   Statement prepare(const char (&sqlCode)[size]);
@@ -199,7 +205,7 @@ class SqliteDatabase {
   //
   // Note that the write callback is NOT called before (or at any point during) a reset(). Use the
   // `ResetListener` mechanism or `afterReset()` instead for that case.
-  void onWrite(kj::Function<void()> callback) {
+  void onWrite(kj::Function<void(bool allowUnconfirmed)> callback) {
     onWriteCallback = kj::mv(callback);
   }
 
@@ -224,7 +230,7 @@ class SqliteDatabase {
   // implement explicit transactions. For synchronous transactions, the explicit transaction needs
   // to be nested inside the automatic transaction, so we need to force an auto-transaction to
   // start before the SAVEPOINT.
-  void notifyWrite();
+  void notifyWrite(bool allowUnconfirmed = false);
 
   // Get the currently-executing SQL query for debug purposes. The query is normalized to hide
   // any literal values that might contain sensitive information. This is intended to be safe for
@@ -327,7 +333,7 @@ class SqliteDatabase {
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
   bool criticalErrorOccurred = false;
-  kj::Maybe<kj::Function<void()>> onWriteCallback;
+  kj::Maybe<kj::Function<void(bool allowUnconfirmed)>> onWriteCallback;
   kj::Maybe<kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>>
       onCriticalErrorCallback;
   kj::Maybe<kj::Function<void(SqliteDatabase&)>> afterResetCallback;
@@ -440,6 +446,13 @@ class SqliteDatabase::Statement final: private ResetListener {
   // this method returns.
   template <typename... Params>
   Query run(Params&&... bindings);
+
+  struct StatementOptions {
+    bool allowUnconfirmed = false;
+  };
+
+  template <typename... Params>
+  Query run(StatementOptions options, Params&&... bindings);
 
  private:
   const Regulator& regulator;
@@ -627,34 +640,39 @@ class SqliteDatabase::Query final: private ResetListener {
   uint64_t rowsRead = 0;
   uint64_t rowsWritten = 0;
 
+  // Whether this query allows unconfirmed writes.
+  bool allowUnconfirmed = false;
+
   friend class SqliteDatabase;
 
   Query(SqliteDatabase& db,
-      const Regulator& regulator,
+      QueryOptions options,
       Statement& statement,
       kj::ArrayPtr<const ValuePtr> bindings);
   Query(SqliteDatabase& db,
-      const Regulator& regulator,
+      QueryOptions options,
       kj::StringPtr sqlCode,
       kj::ArrayPtr<const ValuePtr> bindings);
   template <typename... Params>
-  Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement, Params&&... bindings)
+  Query(SqliteDatabase& db, QueryOptions options, Statement& statement, Params&&... bindings)
       : ResetListener(db),
-        regulator(regulator),
+        regulator(options.regulator),
         maybeStatement(statement.prepareForExecution()),
-        queryEvent(this->db.sqliteObserver) {
+        queryEvent(this->db.sqliteObserver),
+        allowUnconfirmed(options.allowUnconfirmed) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
-  Query(SqliteDatabase& db, const Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
+  Query(SqliteDatabase& db, QueryOptions options, kj::StringPtr sqlCode, Params&&... bindings)
       : ResetListener(db),
-        regulator(regulator),
+        regulator(options.regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
         maybeStatement(ownStatement),
-        queryEvent(this->db.sqliteObserver) {
+        queryEvent(this->db.sqliteObserver),
+        allowUnconfirmed(options.allowUnconfirmed) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
@@ -697,7 +715,7 @@ class SqliteDatabase::Query final: private ResetListener {
   template <typename... T, size_t... i>
   void bindAll(std::index_sequence<i...>, T&&... value) {
     checkRequirements(sizeof...(T));
-    (bind(i, value), ...);
+    (bind(i, kj::fwd<T>(value)), ...);
     nextRow(/*first=*/true);
   }
 
@@ -952,18 +970,24 @@ class SqliteDatabase::Lock {
 
 template <typename... Params>
 SqliteDatabase::Query SqliteDatabase::run(
-    const Regulator& regulator, kj::StringPtr sqlCode, Params&&... params) {
-  return Query(*this, regulator, sqlCode, kj::fwd<Params>(params)...);
+    QueryOptions options, kj::StringPtr sqlCode, Params&&... params) {
+  return Query(*this, options, sqlCode, kj::fwd<Params>(params)...);
 }
 
 template <typename... Params>
 SqliteDatabase::Query SqliteDatabase::Statement::run(Params&&... params) {
-  return Query(db, regulator, *this, kj::fwd<Params>(params)...);
+  return Query(db, QueryOptions{.regulator = regulator}, *this, kj::fwd<Params>(params)...);
+}
+
+template <typename... Params>
+SqliteDatabase::Query SqliteDatabase::Statement::run(StatementOptions options, Params&&... params) {
+  return Query(db, {.regulator = regulator, .allowUnconfirmed = options.allowUnconfirmed}, *this,
+      kj::fwd<Params>(params)...);
 }
 
 template <size_t size, typename... Params>
 SqliteDatabase::Query SqliteDatabase::run(const char (&sqlCode)[size], Params&&... params) {
-  return Query(*this, TRUSTED, sqlCode, kj::fwd<Params>(params)...);
+  return Query(*this, QueryOptions{.regulator = TRUSTED}, sqlCode, kj::fwd<Params>(params)...);
 }
 
 template <size_t size>

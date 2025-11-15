@@ -6,6 +6,9 @@
 
 #include "sqlite.h"
 
+#include <kj/debug.h>
+#include <kj/exception.h>
+
 namespace workerd {
 
 // Small class which is used to customize certain aspects of the underlying sql operations
@@ -54,11 +57,26 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   class ListCursor;
   kj::Own<ListCursor> list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order);
 
+  struct WriteOptions {
+    bool allowUnconfirmed = false;
+  };
+
   // Store a value into the table.
   void put(KeyPtr key, ValuePtr value);
+  void put(KeyPtr key, ValuePtr value, WriteOptions options);
+
+  // Atomically store multiple values into the table.
+  //
+  // ArrayOfKeyValuePair should be a type that allows iteration of a struct that has two members,
+  // key and value, that can be coerced into KeyPtr and ValuePtr, respectively.  I'm using a
+  // template so that we don't have to transform (by copy) the values passed in from higher levels
+  // while also preventing this module from taking a dependency on types from higher levels.
+  template <typename ArrayOfKeyValuePair>
+  void put(ArrayOfKeyValuePair& pairs, WriteOptions options);
 
   // Delete the key and return whether it was matched.
   bool delete_(KeyPtr key);
+  bool delete_(KeyPtr key, WriteOptions options);
 
   uint deleteAll();
 
@@ -134,6 +152,12 @@ class SqliteKv: private SqliteDatabase::ResetListener {
     SqliteDatabase::Statement stmtCountKeys = db.prepare(regulator, R"(
       SELECT count(*) FROM _cf_KV
     )");
+    SqliteDatabase::Statement stmtMultiPutSavepoint = db.prepare(regulator, R"(
+      SAVEPOINT _cf_put_multiple_savepoint
+    )");
+    SqliteDatabase::Statement stmtMultiPutRelease = db.prepare(regulator, R"(
+      RELEASE _cf_put_multiple_savepoint
+    )");
 
     Initialized(SqliteDatabase& db): db(db) {}
   };
@@ -148,11 +172,15 @@ class SqliteKv: private SqliteDatabase::ResetListener {
 
   void cancelCurrentCursor();
 
-  Initialized& ensureInitialized();
+  Initialized& ensureInitialized(bool allowUnconfirmed);
   // Make sure the KV table is created and prepared statements are ready. Not called until the
   // first write.
 
   void beforeSqliteReset() override;
+
+  // Helper function that rolls back a multi-put statement and swallows any exceptions that may
+  // occur during the rollback.
+  void rollbackMultiPut(Initialized& stmts, WriteOptions options);
 };
 
 // Iterator over list results.
@@ -240,6 +268,24 @@ template <typename Func>
 uint SqliteKv::list(
     KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order, Func&& callback) {
   return list(begin, end, limit, order)->forEach(kj::fwd<Func>(callback));
+}
+
+template <typename ArrayOfKeyValuePair>
+void SqliteKv::put(ArrayOfKeyValuePair& pairs, WriteOptions options) {
+  // TODO(cleanup): This code is very similar to DurableObjectStorage::transactionSync.  Perhaps the
+  // general structure can be shared somehow?
+  auto& stmts = ensureInitialized(options.allowUnconfirmed);
+  stmts.stmtMultiPutSavepoint.run({.allowUnconfirmed = options.allowUnconfirmed});
+
+  {
+    // If any of the puts throw an exception, rollback the transaction and re-throw the exception
+    // from the put that failed.
+    KJ_ON_SCOPE_FAILURE(rollbackMultiPut(stmts, options));
+    for (const auto& pair: pairs) {
+      put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
+    }
+  }
+  stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
 }
 
 }  // namespace workerd

@@ -32,9 +32,25 @@ class WorkerStub: public jsg::Object {
       jsg::Optional<kj::Maybe<kj::String>> name,
       jsg::Optional<EntrypointOptions> options);
 
-  JSG_RESOURCE_TYPE(WorkerStub) {
+  JSG_RESOURCE_TYPE(WorkerStub, CompatibilityFlags::Reader flags) {
     JSG_METHOD(getEntrypoint);
-    JSG_METHOD(getDurableObjectClass);
+
+    if (flags.getWorkerdExperimental()) {
+      // Facets are experimental.
+      JSG_METHOD(getDurableObjectClass);
+
+      JSG_TS_OVERRIDE({
+        getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+            name?: string, options?: WorkerStubEntrypointOptions): Fetcher<T>;
+        getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>(
+            name?: string, options?: WorkerStubEntrypointOptions): DurableObjectClass<T>;
+      });
+    } else {
+      JSG_TS_OVERRIDE({
+        getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+            name?: string, options?: WorkerStubEntrypointOptions): Fetcher<T>;
+      });
+    }
   }
 
  private:
@@ -60,8 +76,9 @@ class WorkerLoader: public jsg::Object {
     jsg::Optional<jsg::Value> json;             // arbitrary JS value, will be serialized to JSON
                                                 // and then parsed again when imported
     jsg::Optional<kj::String> py;               // Python module
+    jsg::Optional<kj::Array<const byte>> wasm;  // compiled WASM module
 
-    JSG_STRUCT(js, cjs, text, data, json, py);
+    JSG_STRUCT(js, cjs, text, data, json, py, wasm);
 
     // HACK: When we serialize the JSON in extractSource() we need to place the owned kj::String
     //   somewhere since Worker::Script::Source only gets a kj::StringPtr.
@@ -112,6 +129,8 @@ class WorkerLoader: public jsg::Object {
 
   JSG_RESOURCE_TYPE(WorkerLoader) {
     JSG_METHOD(get);
+
+    JSG_TS_ROOT();
   }
 
  private:

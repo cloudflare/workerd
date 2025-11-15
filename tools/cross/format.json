@@ -1,6 +1,6 @@
 [
   {
-    "directory": "src/workerd",
+    "directory": "src",
     "globs": ["*.c++", "*.h"],
     "formatter": "clang-format"
   },
@@ -21,7 +21,7 @@
   },
   {
     "directory": ".",
-    "globs": ["*.bzl", "WORKSPACE", "BUILD", "BUILD.*"],
+    "globs": ["*.bzl", "WORKSPACE", "BUILD", "BUILD.*", "*.bazel"],
     "formatter": "buildifier"
   }
 ]

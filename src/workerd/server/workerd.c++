@@ -5,6 +5,7 @@
 #include "server.h"
 #include "workerd-api.h"
 
+#include <workerd/api/unsafe.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/supported-compatibility-date.embed.h>
@@ -16,10 +17,14 @@
 #include <workerd/server/workerd-capnp-schema.embed.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/entropy.h>
 
+#include <errno.h>
 #include <fcntl.h>
-#include <openssl/rand.h>
+#ifdef __linux__
+#include <sys/mman.h>
 #include <sys/stat.h>
+#endif
 
 #include <capnp/dynamic.h>
 #include <capnp/message.h>
@@ -70,6 +75,32 @@
 
 #include <workerd/util/use-perfetto-categories.h>
 
+// since kj installs their global signal handlers
+// and exits with 1 Fuzzilli doesn't realize that an application crashed due to the signo.
+// Therefore, we install a handler before and just raise the signo
+#ifdef WORKERD_FUZZILLI
+
+void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
+  // inform reprl - remove debug output for clean testing
+  struct sigaction sa = {};
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(signo, &sa, nullptr);
+  raise(signo);
+}
+
+void initSignalHandlers() {
+  struct sigaction action {};
+  action.sa_flags = SA_SIGINFO;
+  action.sa_sigaction = &signalHandler;
+
+  for (auto signo: {SIGBUS, SIGFPE, SIGABRT, SIGILL, SIGTRAP, SIGSEGV}) {
+    KJ_SYSCALL(sigaction(signo, &action, nullptr));
+  }
+}
+#endif
+
 namespace workerd::server {
 namespace {
 
@@ -99,7 +130,7 @@ __lsan_default_suppressions() {
 class EntropySourceImpl: public kj::EntropySource {
  public:
   void generate(kj::ArrayPtr<kj::byte> buffer) override {
-    KJ_ASSERT(RAND_bytes(buffer.begin(), buffer.size()) == 1);
+    getEntropy(buffer);
   }
 };
 
@@ -656,7 +687,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             io.provider->getTimer(),
             network,
             entropySource,
-            Worker::ConsoleMode::STDOUT,
+            Worker::LoggingOptions(Worker::ConsoleMode::STDOUT),
             [&](kj::String error) {
               if (watcher == kj::none) {
                 // TODO(someday): Don't just fail on the first error, keep going in order to report
@@ -713,6 +744,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
           .addSubCommand("serve", KJ_BIND_METHOD(*this, getServe), "run the server")
           .addSubCommand(
               "compile", KJ_BIND_METHOD(*this, getCompile), "create a self-contained binary")
+#ifdef WORKERD_FUZZILLI
+          .addSubCommand("fuzzilli", KJ_BIND_METHOD(*this, getFuzz), "run reprl for fuzzing")
+#endif
           .addSubCommand("test", KJ_BIND_METHOD(*this, getTest), "run unit tests")
           .addSubCommand("pyodide-lock", KJ_BIND_METHOD(*this, getPyodideLock),
               "outputs the package lock file used by Pyodide")
@@ -765,7 +799,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "<addr> instead of the address specified in the config file.")
         .addOptionWithArg({'i', "inspector-addr"}, CLI_METHOD(enableInspector), "<addr>",
             "Enable the inspector protocol to connect to the address <addr>.")
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
         // TODO(later): In the future, we might want to enable providing a perfetto
         // TraceConfig structure here rather than just the categories.
         .addOptionWithArg({"p", "perfetto-trace"}, CLI_METHOD(enablePerfetto),
@@ -797,10 +831,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       server->setPythonCreateBaselineSnapshot();
       return true;
     }, "Save a baseline snapshot to the disk cache")
-        .addOption({"python-load-snapshot"}, [this]() {
-      server->setPythonLoadSnapshot();
-      return true;
-    }, "Load a snapshot from the package disk cache");
+        .addOptionWithArg({"python-load-snapshot"}, CLI_METHOD(setPythonLoadSnapshot), "<path>",
+            "Load a snapshot from the package disk cache.");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
@@ -900,6 +932,15 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "Enable predictable mode. This makes workerd behave more deterministically by using "
             "pre-set values instead of random data or timestamps to facilitate testing.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
+        .callAfterParsing(CLI_METHOD(test))
+        .build();
+  }
+
+  kj::MainFunc getFuzz() {
+    auto builder = kj::MainBuilder(context, getVersionString(),
+        "Creates a custom signal handler and depending on the config leverages Stdin.reprl() to communicate with fuzzilli.");
+
+    return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
         .callAfterParsing(CLI_METHOD(test))
         .build();
   }
@@ -1028,7 +1069,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     server->overrideExternal(kj::mv(name), kj::str(value));
   }
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
   void enablePerfetto(kj::StringPtr param) {
     auto [name, value] = parseOverride(param);
     perfettoTraceDestination = kj::str(name);
@@ -1059,6 +1100,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     kj::Maybe<kj::Own<const kj::Directory>> dir =
         fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
     server->setPyodideDiskCacheRoot(kj::mv(dir));
+  }
+
+  void setPythonLoadSnapshot(kj::StringPtr pathStr) {
+    server->setPythonLoadSnapshot(kj::str(pathStr));
   }
 
   void parsePythonCompatFlag(kj::StringPtr compatFlagStr) {
@@ -1346,7 +1391,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       auto config = getConfig();
 
       // Configure structured logging in the process context
-      if (config.getStructuredLogging()) {
+      if (config.hasLogging() ? config.getLogging().getStructuredLogging()
+                              : config.getStructuredLogging()) {
         context.enableStructuredLogging();
       }
 
@@ -1487,7 +1533,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   kj::Maybe<kj::String> testServicePattern;
   kj::Maybe<kj::String> testEntrypointPattern;
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
   kj::Maybe<kj::String> perfettoTraceDestination;
   kj::Maybe<kj::String> perfettoTraceCategories;
 #endif
@@ -1659,11 +1705,16 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
+
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
+
+#if defined(WORKERD_FUZZILLI) && defined(__linux__)
+  initSignalHandlers();
+#endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }

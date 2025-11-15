@@ -25,7 +25,7 @@ namespace {
 // console.
 // It's important to keep this list in sync with any other top level events that are emitted
 // when in worker syntax but called as exports in module syntax.
-bool isSpecialEventType(kj::StringPtr type) {
+constexpr bool isSpecialEventType(kj::StringPtr type) {
   // TODO(someday): How should we cover custom events here? Since it's just for a warning I'm
   //   leaving them out for now.
   return type == "fetch" || type == "scheduled" || type == "tail" || type == "trace" ||
@@ -167,7 +167,7 @@ kj::StringPtr Event::getType() {
 }
 
 kj::Maybe<jsg::Ref<EventTarget>> Event::getCurrentTarget() {
-  if (isBeingDispatched) {
+  if (flags.isBeingDispatched) {
     return getTarget();
   }
   return kj::none;
@@ -178,7 +178,7 @@ jsg::Optional<jsg::Ref<EventTarget>> Event::getTarget() {
 }
 
 kj::Array<jsg::Ref<EventTarget>> Event::composedPath() {
-  if (isBeingDispatched) {
+  if (flags.isBeingDispatched) {
     // When isBeingDispatched is true, target should always be non-null.
     // If it's not, there's a bug that we need to know about.
     return kj::arr(KJ_ASSERT_NONNULL(target).addRef());
@@ -187,8 +187,9 @@ kj::Array<jsg::Ref<EventTarget>> Event::composedPath() {
 }
 
 void Event::beginDispatch(jsg::Ref<EventTarget> target) {
-  JSG_REQUIRE(!isBeingDispatched, DOMInvalidStateError, "The event is already being dispatched.");
-  isBeingDispatched = true;
+  JSG_REQUIRE(
+      !flags.isBeingDispatched, DOMInvalidStateError, "The event is already being dispatched.");
+  flags.isBeingDispatched = true;
   this->target = kj::mv(target);
 }
 
@@ -226,7 +227,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
     kj::Maybe<jsg::Identified<Handler>> maybeHandler,
     jsg::Optional<AddEventListenerOpts> maybeOptions,
     const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler) {
-  if (warnOnSpecialEvents && isSpecialEventType(type)) {
+  if (flags.warnOnSpecialEvents && isSpecialEventType(type)) {
     js.logWarning(kj::str("When using module syntax, the '", type,
         "' event handler should be "
         "declared as an exported function on the root module as opposed to using "
@@ -410,6 +411,7 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
     }
 
     KJ_IF_SOME(handlerSet, typeMap.find(event->getType())) {
+      callbacks.reserve(handlerSet.handlers.size());
       for (auto& handler: handlerSet.handlers.ordered<kj::InsertionOrderIndex>()) {
         KJ_SWITCH_ONEOF(handler->handler) {
           KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
@@ -504,8 +506,8 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
             if (handle->IsTrue()) {
               event->preventDefault();
             }
-            if (warnOnHandlerReturn && !handle->IsBoolean()) {
-              warnOnHandlerReturn = false;
+            if (flags.warnOnHandlerReturn && !handle->IsBoolean()) {
+              flags.warnOnHandlerReturn = false;
               // To help make debugging easier, let's tailor the warning a bit if it was a promise.
               if (handle->IsPromise()) {
                 js.logWarning(kj::str(
@@ -1071,7 +1073,7 @@ jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js
 }
 
 CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
-    : Event(kj::mv(ownType), (Event::Init)init),
+    : Event(kj::mv(ownType), Event::Init(init)),
       detail(kj::mv(init.detail)) {}
 
 jsg::Ref<CustomEvent> CustomEvent::constructor(

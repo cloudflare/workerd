@@ -14,6 +14,10 @@
 #include <cstdlib>
 #include <regex>
 
+#if __linux__
+#include <unistd.h>
+#endif
+
 namespace workerd::server {
 namespace {
 
@@ -326,7 +330,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
             timer,
             mockNetwork,
             *this,
-            consoleMode,
+            Worker::LoggingOptions(consoleMode),
             [this](kj::String error) {
               if (expectedErrors.startsWith(error) && expectedErrors[error.size()] == '\n') {
                 expectedErrors = expectedErrors.slice(error.size() + 1);
@@ -4361,12 +4365,12 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
     services = [
       ( name = "hello",
         worker = (
-          compatibilityDate = "2024-02-23",
-          compatibilityFlags = ["experimental"],
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
           modules = [
             ( name = "main.js",
               esModule =
-                `import { WorkerEntrypoint, DurableObject } from "cloudflare:workers";
+                `import { WorkerEntrypoint, DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
                 `export default {
                 `  async fetch(request, env, ctx) {
                 `    // First set the actor state the old fashion way, to make sure we get
@@ -4386,6 +4390,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `      ctx.exports.UnconfiguredActor.constructor.name,
                 `      await ctx.exports.MyEntrypoint.myProps(),
                 `      await ctx.exports.MyEntrypoint({props: {foo: 123, bar: "abc"}}).myProps(),
+                `      MyWorkflow in ctx.exports,
                 `    ].join(", "));
                 `  },
                 `  corge(i) { return `corge: ${i}` }
@@ -4406,6 +4411,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `export class UnconfiguredActor extends DurableObject {
                 `  qux(i) { return `qux: ${i}` }
                 `}
+                `export class MyWorkflow extends WorkflowEntrypoint {}
             )
           ],
           bindings = [
@@ -4436,7 +4442,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
   auto conn = test.connect("test-addr");
   conn.httpGet200("/",
       "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, LoopbackDurableObjectClass, "
-      "{}, {\"foo\":123,\"bar\":\"abc\"}");
+      "{}, {\"foo\":123,\"bar\":\"abc\"}, false");
 }
 
 // =======================================================================================
@@ -4641,13 +4647,13 @@ KJ_TEST("Server: Catch websocket server errors") {
 
   class NotVeryGoodEntropySource: public kj::EntropySource {
    public:
-    void generate(kj::ArrayPtr<byte> buffer) {
+    void generate(kj::ArrayPtr<byte> buffer) override {
       buffer.fill('4');
     }
   };
 
   KJ_EXPECT_LOG(ERROR,
-      "jsg.Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 2097152 > 1048576");
+      "jsg.Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 34603008 > 33554432");
   test.start();
   auto& waitScope = test.getWaitScope();
 
@@ -4667,7 +4673,7 @@ KJ_TEST("Server: Catch websocket server errors") {
     ws->send(smallMessage).wait(waitScope);
     auto smallResponse = ws->receive().wait(waitScope);
     KJ_EXPECT(smallResponse.get<kj::String>() == smallMessage);
-    const auto bigMessage = kj::heapArray<kj::byte>(2 * 1024 * 1024);
+    const auto bigMessage = kj::heapArray<kj::byte>(33 * 1024 * 1024);
     auto sendProm =
         kj::evalNow([&]() { return ws->send(bigMessage); }).then([]() {}, [](kj::Exception ex) {});
     // Message is too big; we should close the connection.
@@ -4702,7 +4708,7 @@ KJ_TEST("Server: Durable Object facets") {
       ( name = "hello",
         worker = (
           compatibilityDate = "2025-04-01",
-          compatibilityFlags = ["experimental"],
+          compatibilityFlags = ["experimental","enable_ctx_exports"],
           modules = [
             ( name = "main.js",
               esModule =
@@ -4973,7 +4979,7 @@ KJ_TEST("Server: Pass service stubs in ctx.props.") {
       ( name = "hello",
         worker = (
           compatibilityDate = "2025-08-01",
-          compatibilityFlags = ["experimental"],
+          compatibilityFlags = ["enable_ctx_exports"],
           modules = [
             ( name = "main.js",
               esModule =
@@ -5017,7 +5023,6 @@ KJ_TEST("Server: Pass service stubs in ctx.props.") {
 
 #if __linux__
 // This test uses pipe2 and dup2 to capture stdout which is far easier on linux.
-#include <unistd.h>
 
 struct FdPair {
   kj::AutoCloseFd output;
@@ -5162,28 +5167,28 @@ KJ_TEST("Server: structured logging with console methods") {
   // process.stdout should be logs split by newline
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"stdoutstdout with")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: stdoutstdout with")"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"multiple")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: multiple")"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"newlines")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: newlines")"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"logged")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: logged")"), logline);
   });
 
   // process.stderr should be info
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
-    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"stderr")"), logline);
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stderr: stderr")"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
@@ -5195,8 +5200,8 @@ KJ_TEST("Server: structured logging with console methods") {
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
-    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"after await")"), logline);
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stderr: after await")"), logline);
   });
 }
 

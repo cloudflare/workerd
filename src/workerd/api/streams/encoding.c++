@@ -4,9 +4,8 @@
 
 #include "encoding.h"
 
-#include "../encoding.h"
-#include "standard.h"
-
+#include <workerd/api/encoding.h>
+#include <workerd/api/streams/standard.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {

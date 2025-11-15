@@ -23,7 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { fail, ok, strictEqual, throws } from 'node:assert';
+import { fail, ok, strictEqual, deepStrictEqual, throws } from 'node:assert';
 import { mock } from 'node:test';
 import { once } from 'node:events';
 import * as net from 'node:net';
@@ -1743,5 +1743,268 @@ export const testNetWriteConnectWrite = {
       resolve();
     });
     await promise;
+  },
+};
+
+export const testSocketAddress = {
+  test() {
+    // Test constructor with default options
+    const addr1 = new net.SocketAddress();
+    strictEqual(addr1.address, '127.0.0.1');
+    strictEqual(addr1.port, 0);
+    strictEqual(addr1.family, 'ipv4');
+    strictEqual(addr1.flowlabel, 0);
+
+    // Test constructor with IPv4 options
+    const addr2 = new net.SocketAddress({
+      address: '192.168.1.1',
+      port: 8080,
+      family: 'ipv4',
+    });
+    strictEqual(addr2.address, '192.168.1.1');
+    strictEqual(addr2.port, 8080);
+    strictEqual(addr2.family, 'ipv4');
+    strictEqual(addr2.flowlabel, 0);
+
+    // Test constructor with IPv6 options
+    const addr3 = new net.SocketAddress({
+      address: '::1',
+      port: 3000,
+      family: 'ipv6',
+      flowlabel: 123,
+    });
+    strictEqual(addr3.address, '::1');
+    strictEqual(addr3.port, 3000);
+    strictEqual(addr3.family, 'ipv6');
+    strictEqual(addr3.flowlabel, 123);
+
+    // Test default IPv6 address
+    const addr4 = new net.SocketAddress({ family: 'ipv6' });
+    strictEqual(addr4.address, '::');
+    strictEqual(addr4.family, 'ipv6');
+
+    // Test toJSON method
+    const addr5 = new net.SocketAddress({
+      address: '10.0.0.1',
+      port: 9000,
+      family: 'ipv4',
+    });
+    const json = addr5.toJSON();
+    strictEqual(json.address, '10.0.0.1');
+    strictEqual(json.port, 9000);
+    strictEqual(json.family, 'ipv4');
+    strictEqual(json.flowlabel, 0);
+
+    // Test isSocketAddress static method
+    ok(net.SocketAddress.isSocketAddress(addr1));
+    ok(net.SocketAddress.isSocketAddress(addr2));
+    ok(!net.SocketAddress.isSocketAddress({}));
+    ok(!net.SocketAddress.isSocketAddress(null));
+    ok(!net.SocketAddress.isSocketAddress('string'));
+
+    // Test parse static method with IPv4
+    const parsed1 = net.SocketAddress.parse('192.168.1.100:8080');
+    ok(parsed1);
+    strictEqual(parsed1.address, '192.168.1.100');
+    strictEqual(parsed1.port, 8080);
+    strictEqual(parsed1.family, 'ipv4');
+
+    // Test parse static method with IPv6
+    const parsed2 = net.SocketAddress.parse('[::1]:3000');
+    ok(parsed2);
+    strictEqual(parsed2.address, '::1');
+    strictEqual(parsed2.port, 3000);
+    strictEqual(parsed2.family, 'ipv6');
+
+    // Test parse with invalid input
+    strictEqual(net.SocketAddress.parse('invalid'), undefined);
+    strictEqual(net.SocketAddress.parse(''), undefined);
+
+    // Test constructor validation - invalid family
+    throws(() => new net.SocketAddress({ family: 'invalid' }), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    // Test constructor validation - invalid IPv4 address
+    throws(
+      () =>
+        new net.SocketAddress({
+          address: '300.300.300.300',
+          family: 'ipv4',
+        }),
+      {
+        code: 'ERR_INVALID_ADDRESS',
+      }
+    );
+
+    // Test constructor validation - invalid IPv6 address
+    throws(
+      () =>
+        new net.SocketAddress({
+          address: 'invalid::ipv6',
+          family: 'ipv6',
+        }),
+      {
+        code: 'ERR_INVALID_ADDRESS',
+      }
+    );
+
+    // Test constructor validation - invalid port
+    throws(() => new net.SocketAddress({ port: -1 }), {
+      code: 'ERR_SOCKET_BAD_PORT',
+    });
+
+    throws(() => new net.SocketAddress({ port: 65536 }), {
+      code: 'ERR_SOCKET_BAD_PORT',
+    });
+
+    // Test family case insensitive
+    const addr6 = new net.SocketAddress({ family: 'IPv4' });
+    strictEqual(addr6.family, 'ipv4');
+
+    const addr7 = new net.SocketAddress({ family: 'IPv6' });
+    strictEqual(addr7.family, 'ipv6');
+
+    // Test port type coercion
+    const addr8 = new net.SocketAddress({ port: '8080' });
+    console.log(typeof addr8.port);
+    strictEqual(addr8.port, 8080);
+  },
+};
+
+export const testBlockList = {
+  test() {
+    // Test BlockList constructor and static methods
+    const bl = new net.BlockList();
+    ok(net.BlockList.isBlockList(bl));
+    ok(!net.BlockList.isBlockList({}));
+    ok(!net.BlockList.isBlockList(null));
+
+    // Test addAddress with IPv4
+    bl.addAddress('192.168.1.1');
+    bl.addAddress('10.0.0.1', 'ipv4');
+
+    // Test check method with IPv4 addresses
+    ok(bl.check('192.168.1.1'));
+    ok(bl.check('10.0.0.1', 'ipv4'));
+    ok(!bl.check('192.168.1.2'));
+    ok(!bl.check('192.168.1.1', 'ipv6'));
+
+    // Test addAddress with IPv6
+    bl.addAddress('2001:db8::1', 'ipv6');
+    ok(bl.check('2001:db8::1', 'ipv6'));
+    ok(!bl.check('2001:db8::2', 'ipv6'));
+
+    // Test addAddress with SocketAddress
+    const addr1 = new net.SocketAddress({ address: '172.16.0.1', port: 80 });
+    bl.addAddress(addr1);
+    ok(bl.check(addr1));
+    ok(bl.check('172.16.0.1'));
+
+    // Test addRange with IPv4
+    bl.addRange('192.168.2.1', '192.168.2.10');
+    ok(bl.check('192.168.2.1'));
+    ok(bl.check('192.168.2.5'));
+    ok(bl.check('192.168.2.10'));
+    ok(!bl.check('192.168.2.11'));
+    ok(!bl.check('192.168.1.255'));
+
+    // Test addRange with IPv6
+    bl.addRange('2001:db8::10', '2001:db8::20', 'ipv6');
+    ok(bl.check('2001:db8::15', 'ipv6'));
+    ok(bl.check('2001:db8::10', 'ipv6'));
+    ok(bl.check('2001:db8::20', 'ipv6'));
+    ok(!bl.check('2001:db8::21', 'ipv6'));
+
+    // Test addRange with SocketAddress
+    const startAddr = new net.SocketAddress({
+      address: '172.16.1.1',
+      port: 80,
+    });
+    const endAddr = new net.SocketAddress({ address: '172.16.1.5', port: 80 });
+    bl.addRange(startAddr, endAddr);
+    ok(bl.check('172.16.1.3'));
+    ok(!bl.check('172.16.1.6'));
+
+    // Test addSubnet with IPv4
+    bl.addSubnet('10.1.0.0', 24);
+    ok(bl.check('10.1.0.1'));
+    ok(bl.check('10.1.0.255'));
+    ok(!bl.check('10.1.1.1'));
+
+    // Test addSubnet with IPv6
+    bl.addSubnet('2001:db8::', 32, 'ipv6');
+    ok(bl.check('2001:db8::1', 'ipv6'));
+    ok(bl.check('2001:db8:ffff::1', 'ipv6'));
+    ok(!bl.check('2001:db9::1', 'ipv6'));
+
+    // Test addSubnet with SocketAddress
+    const subnetAddr = new net.SocketAddress({
+      address: '172.17.0.0',
+      port: 80,
+    });
+    bl.addSubnet(subnetAddr, 16);
+    ok(bl.check('172.17.1.1'));
+    ok(bl.check('172.17.255.255'));
+    ok(!bl.check('172.18.0.1'));
+
+    // Test rules getter
+    const rules = bl.rules;
+    ok(Array.isArray(rules));
+    ok(rules.length > 0);
+    ok(rules.some((rule) => rule.includes('Address: IPv4 192.168.1.1')));
+    ok(
+      rules.some((rule) =>
+        rule.includes('Range: IPv4 192.168.2.1-192.168.2.10')
+      )
+    );
+    ok(rules.some((rule) => rule.includes('Subnet: IPv4 10.1.0.0/24')));
+
+    // Test toJSON
+    const json = bl.toJSON();
+    ok(Array.isArray(json));
+    deepStrictEqual(json, rules);
+
+    // Test fromJSON
+    const bl2 = new net.BlockList();
+    bl2.fromJSON(['Address: IPv4 203.0.113.1', 'Subnet: IPv4 198.51.100.0/24']);
+    ok(bl2.check('203.0.113.1'));
+    ok(bl2.check('198.51.100.100'));
+    ok(!bl2.check('203.0.113.2'));
+
+    // Test error cases
+    throws(() => bl.addAddress(123), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    throws(() => bl.addAddress('invalid.ip'), {
+      code: 'ERR_INVALID_IP_ADDRESS',
+    });
+
+    throws(() => bl.addAddress('192.168.1.1', 'invalid'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    throws(() => bl.addRange('192.168.1.10', '192.168.1.1'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    throws(() => bl.addSubnet('192.168.1.0', 33), {
+      code: 'ERR_OUT_OF_RANGE',
+    });
+
+    throws(() => bl.addSubnet('192.168.1.0', -1), {
+      code: 'ERR_OUT_OF_RANGE',
+    });
+
+    // Test IPv4-mapped IPv6 addresses
+    bl.addAddress('192.168.10.1');
+    ok(bl.check('::ffff:192.168.10.1', 'ipv6'));
+
+    bl.addRange('192.168.11.1', '192.168.11.10');
+    ok(bl.check('::ffff:192.168.11.5', 'ipv6'));
+
+    bl.addSubnet('192.168.12.0', 24);
+    ok(bl.check('::ffff:192.168.12.100', 'ipv6'));
   },
 };

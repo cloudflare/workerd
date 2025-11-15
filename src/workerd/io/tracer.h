@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
 
 #include <kj/refcount.h>
@@ -44,7 +45,7 @@ class WorkerTracer;
 // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
-class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<PipelineTracer> {
+class PipelineTracer: public kj::Refcounted {
  public:
   // Creates a pipeline tracer (with a possible parent).
   explicit PipelineTracer() = default;
@@ -94,13 +95,15 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
 // there will be plenty of cleanup potential.
 class BaseTracer: public kj::Refcounted {
  public:
+  virtual ~BaseTracer() noexcept(false) {};
+
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) = 0;
-  // Add a span. There can be at most MAX_USER_SPANS spans in a trace.
-  virtual void addSpan(CompleteSpan&& span) = 0;
+  // Add a span.
+  virtual void addSpan(tracing::CompleteSpan&& span) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -114,13 +117,15 @@ class BaseTracer: public kj::Refcounted {
       kj::Array<kj::byte> message) = 0;
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
-  virtual void setEventInfo(const tracing::InvocationSpanContext& context,
-      kj::Date timestamp,
-      tracing::EventInfo&& info) = 0;
+  virtual void setEventInfo(
+      IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) = 0;
 
-  // Adds info about the response. Must not be called more than once, and only
-  // after passing a FetchEventInfo to setEventInfo().
-  virtual void setFetchResponseInfo(tracing::FetchResponseInfo&& info) = 0;
+  // Sets the return event for Streaming Tail Worker, including fetchResponseInfo (HTTP status code)
+  // if available. Must not be called more than once, and fetchResponseInfo should only be set for
+  // fetch events. For buffered tail worker, there is no distinct return event so we only add
+  // fetchResponseInfo to the trace if present.
+  virtual void setReturn(kj::Maybe<kj::Date> time = kj::none,
+      kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) = 0;
 
   // Reports the outcome event of the worker invocation. For Streaming Tail Worker, this will be the
   // final event, causing the stream to terminate.
@@ -130,18 +135,41 @@ class BaseTracer: public kj::Refcounted {
   // be available afterwards.
   virtual void recordTimestamp(kj::Date timestamp) = 0;
 
-  virtual SpanParent getUserRequestSpan() = 0;
+  SpanParent makeUserRequestSpan();
 
-  // TODO(felix): Used for debug logging, remove after a few days.
-  void setIsJsRpc();
+  using MakeUserRequestSpanFunc = kj::Function<SpanParent()>;
 
-  // Indicates that we're reporting from a JsRpc customEvent.
-  bool isJsRpc = false;
+  // Allow setting the user request span after the tracer has been created so its observer can
+  // reference the tracer. This can only be set once.
+  void setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func);
+
+  virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      const kj::ConstString& methodName) = 0;
+
+ protected:
+  // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
+  // worker must have wrapped up and reported its outcome event, we report completeTime in that case
+  // acordingly.
+  kj::Date getTime();
+
+  // helper method for addSpan() implementations
+  void adjustSpanTime(tracing::CompleteSpan& span);
+
+  // Function to create the root span for the new tracing format.
+  kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
+
+  // Time to be reported for the outcome event time. This will be set before the outcome is
+  // dispatched.
+  kj::Date completeTime = kj::UNIX_EPOCH;
+
+  // Weak reference to the IoContext, used to report span end time if available.
+  kj::Maybe<kj::Own<IoContext::WeakRef>> weakIoContext;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
 // Tracer are released, its Trace is considered complete and ready for submission.
-class WorkerTracer: public BaseTracer {
+class WorkerTracer final: public BaseTracer {
  public:
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
@@ -155,7 +183,7 @@ class WorkerTracer: public BaseTracer {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) override;
-  void addSpan(CompleteSpan&& span) override;
+  void addSpan(tracing::CompleteSpan&& span) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
@@ -165,26 +193,33 @@ class WorkerTracer: public BaseTracer {
       kj::Date timestamp,
       kj::String channel,
       kj::Array<kj::byte> message) override;
-  void setEventInfo(const tracing::InvocationSpanContext& context,
-      kj::Date timestamp,
-      tracing::EventInfo&& info) override;
-  void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
+  // Set event info (equivalent to Onset event under streaming). We use the incomingRequest here
+  // since the IoContext may not have the IncomingRequest linked to it yet (depending on if
+  // delivered() has been set), so it might not be possible to acquire the required timestamp and
+  // span context from it.
+  void setEventInfo(
+      IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) override;
+  // Variant for when we don't have a proper IoContext but instead provide context and timestamp
+  // directly, used internally for RPC-based tracing.
+  void setEventInfoInternal(
+      const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info);
+
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
   virtual void recordTimestamp(kj::Date timestamp) override;
-
-  SpanParent getUserRequestSpan() override;
-  // Allow setting the user request span after the tracer has been created so its observer can
-  // reference the tracer. This can only be set once.
-  void setUserRequestSpan(SpanParent&& span);
 
   // Set a worker-level tag/attribute to be provided in the onset event.
   void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
 
+  void setReturn(kj::Maybe<kj::Date> time = kj::none,
+      kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
+
+  void setJsRpcInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      const kj::ConstString& methodName) override;
+
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
-  // The root span for the new tracing format.
-  SpanParent userRequestSpan;
   // span attributes to be added to the onset event.
   kj::Vector<tracing::Attribute> attributes;
 
@@ -198,9 +233,5 @@ class WorkerTracer: public BaseTracer {
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
-
-  // Time to be reported for the outcome event time. This will be set before the outcome is
-  // dispatched.
-  kj::Date completeTime = kj::UNIX_EPOCH;
 };
 }  // namespace workerd

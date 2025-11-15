@@ -15,6 +15,7 @@
 // See worker-interface.capnp for the underlying protocol.
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -428,9 +429,9 @@ class RpcStubDisposalGroup {
 
 // `jsRpcSession` returns a capability that provides the client a way to call remote methods
 // over RPC. We drain the IncomingRequest after the capability is used to run the relevant JS.
-class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
+class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  JsRpcSessionCustomEventImpl(uint16_t typeId,
+  JsRpcSessionCustomEvent(uint16_t typeId,
       kj::Maybe<kj::String> wrapperModule = kj::none,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
@@ -452,6 +453,10 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
+  kj::Maybe<tracing::EventInfo> getEventInfo() const override {
+    return tracing::EventInfo(tracing::JsRpcEventInfo(kj::str("")));
+  }
+
   rpc::JsRpcTarget::Client getCap() {
     auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
     clientCap = kj::none;
@@ -469,7 +474,7 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
   // Event ID for jsRpcSession.
   //
   // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since
-  // we don't create JsRpcSessionCustomEventImpl from our internal code, we can't pass the event
+  // we don't create JsRpcSessionCustomEvent from our internal code, we can't pass the event
   // type in -- so we hardcode it here.
   static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
 

@@ -90,6 +90,27 @@ wd_cc_benchmark(
     ],
 )
 
+wd_cc_benchmark(
+    name = "bench-text-encoder",
+    srcs = ["bench-text-encoder.c++"],
+    deps = [":test-fixture"],
+)
+
+wd_cc_benchmark(
+    name = "bench-response",
+    srcs = ["bench-response.c++"],
+    deps = [":test-fixture"],
+)
+
+wd_cc_benchmark(
+    name = "bench-jsstring",
+    srcs = ["bench-jsstring.c++"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],
@@ -99,19 +120,39 @@ wd_test(
 wd_test(
     src = "module-imports-test.wd-test",
     args = ["--experimental"],
-    data = ["module-imports-test.js"],
+    data = [
+        "module-imports-test.js",
+        "test.wasm",
+    ],
 )
 
-filegroup(
-    name = "all_benchmarks",
-    srcs = [
-        ":bench-api-headers",
-        ":bench-global-scope",
-        ":bench-json",
-        ":bench-kj-headers",
-        ":bench-mimetype",
-        ":bench-regex",
-        ":bench-util",
+wd_test(
+    src = "performance-test.wd-test",
+    data = ["performance-test.js"],
+)
+
+# REPRL tests using KJ test framework
+wd_cc_library(
+    name = "libreprl",
+    srcs = ["libreprl/libreprl.c"],
+    hdrs = ["libreprl/libreprl.h"],
+    copts = [
+        "-Ilibreprl",
+        "-std=c23",
     ],
-    visibility = ["//visibility:public"],
+    includes = ["libreprl"],
+)
+
+kj_test(
+    src = "test-reprl.c++",
+    data = [
+        "//fuzzilli:config.capnp",
+        "//fuzzilli:worker.js",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["requires-fuzzilli"],
+    deps = [
+        ":libreprl",
+        "@bazel_tools//tools/cpp/runfiles",
+    ],
 )

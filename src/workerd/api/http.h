@@ -256,7 +256,8 @@ public:
   // the POST will successfully retransmit.
   using Initializer = kj::OneOf<jsg::Ref<ReadableStream>, kj::String, kj::Array<byte>,
                                 jsg::Ref<Blob>, jsg::Ref<FormData>,
-                                jsg::Ref<URLSearchParams>, jsg::Ref<url::URLSearchParams>>;
+                                jsg::Ref<URLSearchParams>, jsg::Ref<url::URLSearchParams>,
+                                jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
@@ -382,7 +383,11 @@ public:
     JSG_METHOD(formData);
     JSG_METHOD(blob);
 
-    JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData);
+    if (flags.getFetchIterableTypeSupport()) {
+      JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData | Iterable<ArrayBuffer|ArrayBufferView> | AsyncIterable<ArrayBuffer|ArrayBufferView>);
+    } else {
+      JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData);
+    }
     // All type aliases get inlined when exporting RTTI, but this type alias is included by
     // the official TypeScript types, so users might be depending on it.
     JSG_TS_OVERRIDE({
@@ -800,7 +805,16 @@ struct RequestInitializerDict {
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, cache, integrity, signal, encodeResponseBody);
   JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
     if(flags.getCacheOptionEnabled()) {
-      if(flags.getCacheNoCache()) {
+      if(flags.getCacheReload()) {
+        JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
+          headers?: HeadersInit;
+          body?: BodyInit | null;
+          cache?: 'no-store' | 'no-cache' | 'reload';
+          cf?: Cf;
+          encodeResponseBody?: "automatic" | "manual";
+        });
+
+      } else if(flags.getCacheNoCache()) {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
           headers?: HeadersInit;
           body?: BodyInit | null;
@@ -848,6 +862,7 @@ public:
     NONE,
     NOSTORE,
     NOCACHE,
+    RELOAD,
   };
 
   Request(jsg::Lock& js, kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
@@ -936,7 +951,7 @@ public:
   // the response. There are currently a proposal to add a "full" option which is the model
   // we support. Once "full" is added, we need to update this to accept either undefined or
   // "full", and possibly decide if we want to support the "half" option.
-  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.undefined(); }
   // TODO(conform): Might implement?
 
   // These relate to CORS support, which we do not implement. WinterTC has determined that
@@ -994,7 +1009,14 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
       if(flags.getCacheOptionEnabled()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
-        if(flags.getCacheNoCache()) {
+        if(flags.getCacheReload()) {
+          JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+            constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
+            clone(): Request<CfHostMetadata, Cf>;
+            cache?: "no-store" | "no-cache" | "reload";
+            get cf(): Cf | undefined;
+          });
+        } else if(flags.getCacheNoCache()) {
           JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
             constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
             clone(): Request<CfHostMetadata, Cf>;
@@ -1092,8 +1114,8 @@ public:
   // Alias to the global Response_BodyEncoding enum for backward compatibility
   using BodyEncoding = Response_BodyEncoding;
 
-  Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
-           CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
+  Response(jsg::Lock& js, int statusCode, kj::Maybe<kj::String> statusText,
+           jsg::Ref<Headers> headers, CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
            kj::Array<kj::String> urlList = {},
            kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
            BodyEncoding bodyEncoding = BodyEncoding::AUTO);
@@ -1260,7 +1282,9 @@ public:
 
 private:
   int statusCode;
-  kj::String statusText;
+  // If the statusText is empty, we will derive it from the statusCode. If there's no
+  // match, it will be empty.
+  kj::Maybe<kj::String> statusText;
   jsg::Ref<Headers> headers;
   CfProperty cf;
 
@@ -1281,8 +1305,6 @@ private:
   // If this response is already encoded and the user don't want to encode the
   // body twice, they can specify encodeBody: "manual".
   Response::BodyEncoding bodyEncoding;
-
-  bool hasEnabledWebSocketCompression = false;
 
   // Capturing the AsyncContextFrame when the Response is created is necessary because there's
   // a natural separation that occurs between the moment the Response is created and when we
@@ -1359,13 +1381,6 @@ jsg::Ref<Response> makeHttpResponse(
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = kj::none);
-
-bool isNullBodyStatusCode(uint statusCode);
-bool isRedirectStatusCode(uint statusCode);
-
-kj::String makeRandomBoundaryCharacters();
-// Make a boundary string for FormData serialization.
-// TODO(cleanup): Move to form-data.{h,c++}?
 
 #define EW_HTTP_ISOLATE_TYPES         \
   api::FetchEvent,                    \

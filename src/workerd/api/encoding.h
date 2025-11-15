@@ -218,7 +218,7 @@ class TextEncoder final: public jsg::Object {
 
   jsg::BufferSource encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input);
 
-  EncodeIntoResult encodeInto(jsg::Lock& js, jsg::JsString input, jsg::BufferSource buffer);
+  EncodeIntoResult encodeInto(jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer);
 
   // UTF-8 is the only encoding type supported by the WHATWG spec.
   kj::StringPtr getEncoding() {
@@ -239,6 +239,7 @@ class TextEncoder final: public jsg::Object {
     // `Uint8Array`. The spec defines that this function returns a `Uint8Array` too.
     JSG_TS_OVERRIDE({
       encode(input?: string): Uint8Array;
+      encodeInto(input: string, buffer: Uint8Array): TextEncoderEncodeIntoResult;
     });
   }
 };

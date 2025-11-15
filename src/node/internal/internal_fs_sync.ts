@@ -194,7 +194,10 @@ export function copyFileSync(
     throw new ERR_UNSUPPORTED_OPERATION();
   }
   if (mode & COPYFILE_EXCL && existsSync(dest)) {
-    throw new ERR_EEXIST({ syscall: 'copyFile' });
+    throw new ERR_EEXIST({
+      syscall: 'copyFile',
+      path: normalizePath(dest).pathname,
+    });
   }
   cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
 }
@@ -209,7 +212,6 @@ export function cpSync(
     dereference = false,
     errorOnExist = false,
     force = true,
-    filter,
     mode = 0,
     preserveTimestamps = false,
     recursive = false,
@@ -238,9 +240,13 @@ export function cpSync(
   // change to the API or a new API that appropriately handles Buffer inputs and non
   // UTF-8 encoded names. We want to avoid implementing the filter option for now
   // until Node.js settles on a better implementation and API.
-  if (filter !== undefined) {
-    if (typeof filter !== 'function') {
-      throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+  if (options.filter !== undefined) {
+    if (typeof options.filter !== 'function') {
+      throw new ERR_INVALID_ARG_TYPE(
+        'options.filter',
+        'function',
+        options.filter
+      );
     }
     throw new ERR_UNSUPPORTED_OPERATION();
   }

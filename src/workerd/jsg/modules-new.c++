@@ -25,6 +25,22 @@ kj::Maybe<const Module&> checkModule(const ResolveContext& context, const Module
   return module;
 };
 
+kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
+  // Source files in workers end up being converted to UTF-8 bytes, so if the specifier
+  // string contains non-ASCII unicode characters, those will be directly encoded as UTF-8
+  // bytes, which unfortunately end up double-encoded if we try to read them using the
+  // regular js.toString() method. Doh! Fortunately they come through as one-byte strings,
+  // so we can detect that case and handle those correctly here.
+  if (spec->ContainsOnlyOneByte()) {
+    auto buf = kj::heapArray<char>(spec->Length() + 1);
+    spec->WriteOneByteV2(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
+        v8::String::WriteFlags::kNullTerminate);
+    KJ_ASSERT(buf[buf.size() - 1] == '\0');
+    return kj::String(kj::mv(buf));
+  }
+  return js.toString(spec);
+}
+
 // Ensure that the given module has been instantiated or errored.
 // If false is returned, then an exception should have been scheduled
 // on the isolate.
@@ -111,6 +127,7 @@ class EsModule final: public Module {
           // The cached data is not compatible with the current isolate. Let's
           // not try using it.
           delete data;
+          data = nullptr;
         } else {
           observer.onCompileCacheFound(js.v8Isolate);
         }
@@ -279,6 +296,11 @@ class SyntheticModule final: public Module {
   kj::Array<kj::String> namedExports;
 };
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+WD_STRONG_BOOL(SourcePhase);
+#pragma clang diagnostic pop
+
 // Binds a ModuleRegistry to an Isolate.
 class IsolateModuleRegistry final {
  public:
@@ -331,8 +353,11 @@ class IsolateModuleRegistry final {
   // Used to implement the async dynamic import of modules (using `await import(...)`)
   // Returns a promise that is resolved once the module is resolved. If any empty
   // v8::MaybeLocal is returned, then an exception has been scheduled with the isolate.
-  v8::MaybeLocal<v8::Promise> dynamicResolve(
-      Lock& js, Url normalizedSpecifier, Url referrer, kj::StringPtr rawSpecifier) {
+  v8::MaybeLocal<v8::Promise> dynamicResolve(Lock& js,
+      Url normalizedSpecifier,
+      Url referrer,
+      kj::StringPtr rawSpecifier,
+      SourcePhase sourcePhase) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry, const CompilationObserver& observer,
                                          const Module::Evaluator& maybeEvaluate) {
       auto module = entry.key.getHandle(js);
@@ -344,7 +369,7 @@ class IsolateModuleRegistry final {
       });
     };
 
-    return js.wrapSimplePromise(js.tryCatch([&]() -> Promise<Value> {
+    return js.wrapSimplePromise(js.tryCatch([&] -> Promise<Value> {
       // The referrer should absolutely already be known to the registry
       // or something bad happened.
       auto& referring = JSG_REQUIRE_NONNULL(lookupCache.find<kj::HashIndex<UrlCallbacks>>(referrer),
@@ -361,14 +386,51 @@ class IsolateModuleRegistry final {
         .rawSpecifier = rawSpecifier,
       };
 
+      auto handleFoundModule = [&](Entry& found) -> Promise<Value> {
+        auto evaluatePromise = evaluate(js, found, getObserver(), inner.getEvaluator());
+        auto isWasm = found.module.isWasm();
+
+        if (!sourcePhase) {
+          return evaluatePromise;
+        } else {
+          // We only support source phase imports for Wasm modules.
+          // Source phase imports provide uninstantiated and unlinked representations for modules, as distinct
+          // from module instances. They effectively represent the compiled module without state.
+          // WebAssembly.Module is this representation for WebAssembly.
+          // JS source module handles as an instance of `ModuleSource` will be supported in due course,
+          // but are specified in a different spec ESM Phase Imports (https://github.com/tc39/proposal-esm-phase-imports).
+          // For builtins and other synthetic modules, there are currently no plans to make a source phase
+          // representation available, so that these would remain with the specified syntax error as
+          // implemented below.
+          if (isWasm) {
+            return evaluatePromise.then(js,
+                [normalizedSpecifier = normalizedSpecifier.clone()](
+                    Lock& js, Value namespaceValue) -> Value {
+              auto moduleNamespace = namespaceValue.getHandle(js).As<v8::Object>();
+              v8::Local<v8::Value> defaultExport;
+              if (moduleNamespace->Get(js.v8Context(), js.strIntern("default"_kj))
+                      .ToLocal(&defaultExport)) {
+                if (defaultExport->IsWasmModuleObject()) {
+                  return js.v8Ref(defaultExport);
+                }
+              }
+              KJ_FAIL_REQUIRE(v8::Exception::SyntaxError,
+                  "Source phase import not available for module: ", normalizedSpecifier.getHref());
+            });
+          }
+          return js.rejectedPromise<Value>(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(kj::str(
+              "Source phase import not available for module: ", normalizedSpecifier.getHref())))));
+        }
+      };
+
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
-        return evaluate(js, found, getObserver(), inner.getEvaluator());
+        return handleFoundModule(found);
       }
 
       // No? That's OK, let's look it up.
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
-        return evaluate(js, found, getObserver(), inner.getEvaluator());
+        return handleFoundModule(found);
       }
 
       // Nothing found? Aw... fail!
@@ -459,6 +521,19 @@ class IsolateModuleRegistry final {
     };
 
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Object> {
+      if (context.normalizedSpecifier == "node:process"_url) {
+        static const auto publicProcess = "node-internal:public_process"_url;
+        static const auto legacyProcess = "node-internal:legacy_process"_url;
+        ResolveContext newContext{
+          .type = ResolveContext::Type::BUILTIN_ONLY,
+          .source = context.source,
+          .normalizedSpecifier = isNodeJsProcessV2Enabled(js) ? publicProcess : legacyProcess,
+          .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
+          .rawSpecifier = context.rawSpecifier,
+        };
+        return require(js, newContext, option);
+      }
+
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
         return evaluate(
@@ -551,6 +626,7 @@ class IsolateModuleRegistry final {
       // The referrer is passed along for informational purposes only.
       .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
     };
+
     KJ_IF_SOME(found, inner.lookup(innerContext)) {
       return kj::Maybe<Entry&>(lookupCache.upsert(
           Entry{
@@ -662,11 +738,12 @@ void importMeta(
   }
 }
 
-// The callback v8 calls when dynamic import(...) is used.
-v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
+// Templated implementation for both evaluation and source phase dynamic imports
+v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> context,
     v8::Local<v8::Data> host_defined_options,
     v8::Local<v8::Value> resource_name,
     v8::Local<v8::String> specifier,
+    SourcePhase isSourcePhase,
     v8::Local<v8::FixedArray> import_attributes) {
   auto& js = Lock::current();
 
@@ -685,7 +762,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
   try {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Promise> {
-      auto spec = js.toString(specifier);
+      auto spec = specifierToString(js, specifier);
 
       // The proposed specification for import attributes strongly recommends that
       // embedders reject import attributes and types they do not understand/implement.
@@ -728,13 +805,15 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
             .referrerNormalizedSpecifier = referrer,
             .rawSpecifier = processSpec,
           };
-          return registry.dynamicResolve(js, kj::mv(normalized), kj::mv(referrer), processSpec);
+          return registry.dynamicResolve(
+              js, kj::mv(normalized), kj::mv(referrer), processSpec, isSourcePhase);
         }
       }
 
       KJ_IF_SOME(url, referrer.tryResolve(spec.asPtr())) {
         auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-        return registry.dynamicResolve(js, kj::mv(normalized), kj::mv(referrer), spec);
+        return registry.dynamicResolve(
+            js, kj::mv(normalized), kj::mv(referrer), spec, isSourcePhase);
       }
 
       // We were not able to parse the specifier. We'll return a rejected promise.
@@ -751,6 +830,28 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
   }
 }
 
+// Wrapper functions to match the V8 callback signatures
+v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
+    v8::Local<v8::Data> host_defined_options,
+    v8::Local<v8::Value> resource_name,
+    v8::Local<v8::String> specifier,
+    v8::Local<v8::FixedArray> import_attributes) {
+  return dynamicImportModuleCallback(
+      context, host_defined_options, resource_name, specifier, SourcePhase::NO, import_attributes);
+}
+
+v8::MaybeLocal<v8::Promise> dynamicImportWithPhase(v8::Local<v8::Context> context,
+    v8::Local<v8::Data> host_defined_options,
+    v8::Local<v8::Value> resource_name,
+    v8::Local<v8::String> specifier,
+    v8::ModuleImportPhase phase,
+    v8::Local<v8::FixedArray> import_attributes) {
+  SourcePhase sourcePhase =
+      (phase == v8::ModuleImportPhase::kSource) ? SourcePhase::YES : SourcePhase::NO;
+  return dynamicImportModuleCallback(
+      context, host_defined_options, resource_name, specifier, sourcePhase, import_attributes);
+}
+
 IsolateModuleRegistry::IsolateModuleRegistry(
     Lock& js, const ModuleRegistry& registry, const CompilationObserver& observer)
     : inner(registry),
@@ -761,19 +862,23 @@ IsolateModuleRegistry::IsolateModuleRegistry(
   KJ_ASSERT(!context.IsEmpty());
   setAlignedPointerInEmbedderData(context, ContextPointerSlot::MODULE_REGISTRY, this);
   isolate->SetHostImportModuleDynamicallyCallback(&dynamicImport);
+  isolate->SetHostImportModuleWithPhaseDynamicallyCallback(&dynamicImportWithPhase);
   isolate->SetHostInitializeImportMetaObjectCallback(&importMeta);
 }
 
-// The callback v8 calls when static import is used.
-v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
+// Generalized module resolution callback that handles both evaluation and source phase imports
+template <bool IsSourcePhase>
+v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolveModuleCallback(
+    v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
+  using ReturnType = std::conditional_t<IsSourcePhase, v8::Object, v8::Module>;
   auto& js = Lock::current();
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
 
-  return js.tryCatch([&]() -> v8::MaybeLocal<v8::Module> {
-    auto spec = kj::str(specifier);
+  return js.tryCatch([&]() -> v8::MaybeLocal<ReturnType> {
+    auto spec = specifierToString(js, specifier);
 
     // The proposed specification for import attributes strongly recommends that
     // embedders reject import attributes and types they do not understand/implement.
@@ -804,19 +909,22 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     }
 
     // Handle process module redirection based on enable_nodejs_process_v2 flag
-    if (spec == "node:process") {
-      auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
-                                                      : "node-internal:legacy_process"_kj;
-      KJ_IF_SOME(url, referrerUrl.tryResolve(processSpec)) {
-        auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-        ResolveContext resolveContext = {
-          .type = ResolveContext::Type::BUILTIN_ONLY,
-          .source = ResolveContext::Source::STATIC_IMPORT,
-          .normalizedSpecifier = normalized,
-          .referrerNormalizedSpecifier = referrerUrl,
-          .rawSpecifier = processSpec,
-        };
-        return registry.resolve(js, resolveContext);
+    if constexpr (!IsSourcePhase) {
+      if (spec == "node:process") {
+        auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                        : "node-internal:legacy_process"_kj;
+        KJ_IF_SOME(url, referrerUrl.tryResolve(processSpec)) {
+          auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+          ResolveContext resolveContext = {
+            .type = ResolveContext::Type::BUILTIN_ONLY,
+            .source = ResolveContext::Source::STATIC_IMPORT,
+            .normalizedSpecifier = normalized,
+            .referrerNormalizedSpecifier = referrerUrl,
+            .rawSpecifier = processSpec,
+          };
+
+          return registry.resolve(js, resolveContext);
+        }
       }
     }
 
@@ -830,19 +938,56 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         .referrerNormalizedSpecifier = referrerUrl,
         .rawSpecifier = spec.asPtr(),
       };
-      // TODO(soon): Add import attributes to the context.
 
-      return registry.resolve(js, resolveContext);
+      auto maybeResolved = registry.resolve(js, resolveContext);
+      if (maybeResolved.IsEmpty()) {
+        return v8::MaybeLocal<ReturnType>();
+      }
+
+      auto resolved = check(maybeResolved);
+
+      if constexpr (!IsSourcePhase) {
+        return resolved;
+      } else {
+        KJ_IF_SOME(entry, registry.lookup(js, resolved)) {
+          // We only support source phase imports for Wasm modules.
+          // Since we do not have an async pre-instantiation phase which populates compilation,
+          // and instead have compilation happening lazily in evaluate calls, we implement this
+          // hack to synchronously obtain the compiled Wasm leaning into the require implementation
+          // for the Wasm then plucking out the compiled Wasm module.
+          // In future, the source phase should be eagerly populated during pre-innstantiation
+          // with the compiled record, so that we can just directly read `sourceObject_` off of
+          // entry.module instead.
+          if (entry.module.isWasm()) {
+            v8::Local<v8::Object> moduleNamespace;
+            if (registry
+                    .require(js, resolveContext, IsolateModuleRegistry::RequireOption::RETURN_EMPTY)
+                    .ToLocal(&moduleNamespace)) {
+              v8::Local<v8::Value> defaultExport;
+              if (moduleNamespace->Get(js.v8Context(), js.strIntern("default"_kj))
+                      .ToLocal(&defaultExport)) {
+                if (defaultExport->IsWasmModuleObject()) {
+                  return defaultExport.As<v8::Object>();
+                }
+              }
+            }
+          }
+        }
+        js.throwException(js.v8Ref(v8::Exception::SyntaxError(
+            js.strIntern(kj::str("Source phase import not available for module: "_kj, spec)))));
+        return v8::MaybeLocal<ReturnType>();
+      }
     }
 
     js.throwException(js.error(kj::str("Invalid module specifier: "_kj, specifier)));
-  }, [&](Value exception) -> v8::MaybeLocal<v8::Module> {
+    return v8::MaybeLocal<ReturnType>();
+  }, [&](Value exception) -> v8::MaybeLocal<ReturnType> {
     // If there are any synchronously thrown exceptions, we want to catch them
     // here and convert them into a rejected promise. The only exception are
     // fatal cases where the isolate is terminating which won't make it here
     // anyway.
     js.v8Isolate->ThrowException(exception.getHandle(js));
-    return v8::MaybeLocal<v8::Module>();
+    return v8::MaybeLocal<ReturnType>();
   });
 }
 
@@ -1072,11 +1217,108 @@ ModuleBundle::BundleBuilder::BundleBuilder(const jsg::Url& bundleBase)
     : ModuleBundle::Builder(Type::BUNDLE),
       bundleBase(bundleBase) {}
 
+namespace {
+static constexpr auto BUNDLE_CLONE_OPTIONS = jsg::Url::EquivalenceOption::IGNORE_FRAGMENTS |
+    jsg::Url::EquivalenceOption::IGNORE_SEARCH | jsg::Url::EquivalenceOption::NORMALIZE_PATH;
+
+// Takes the user-provided module name and normalizes it to a form that can be
+// resolved relative to the bundle base. This involves pre-parsing the name as a URL
+// relative to a dummy base URL in order to normalize out dot and double-dot segments,
+// then stripping off any leading slashes so that the name is always relative and cannot
+// be interpreted as an absolute path.
+jsg::Url normalizeModuleName(kj::StringPtr name, const jsg::Url& base) {
+  // This first step normalizes out path segments like "." and "..", drops query
+  // strings and fragments, and normalizes percent-encoding in the path.
+  auto url = KJ_ASSERT_NONNULL(base.tryResolve(name)).clone(BUNDLE_CLONE_OPTIONS);
+
+  // If the protocol is not file:, then we don't need to do any more processing
+  // here. We will check the validity of the result as a module URL in the next
+  // step.
+  if (url.getProtocol() != "file:"_kj) {
+    return kj::mv(url);
+  }
+
+  auto urlPath = url.getPathname();
+  auto basePath = base.getPathname();
+
+  // The url path must not be identical to the base...
+  KJ_REQUIRE(urlPath != basePath, "Invalid empty module name");
+
+  // If the url path starts with the base path, then we're good!
+  if (urlPath.startsWith(basePath)) {
+    return kj::mv(url);
+  }
+
+  // Otherwise, let's make sure that the url path is processed as
+  // relative to the base path. We do this by stripping off any
+  // leading slashes from the front of the URL then re-resolve
+  // against the base. This should be an exceedingly rare edge
+  // case if the worker bundle is being constructed properly. It's
+  // meant only to handle cases where silliness like "///foo" is
+  // given as a module name.
+  while (urlPath.startsWith("/"_kj) && urlPath.size() > 0) {
+    urlPath = urlPath.slice(1);
+  }
+  KJ_REQUIRE(urlPath.size() > 0, "Invalid empty module name");
+
+  return KJ_ASSERT_NONNULL(base.tryResolve(urlPath));
+}
+
+bool isValidBundleModuleUrl(const jsg::Url& url, const jsg::Url& base) {
+  KJ_DASSERT(base.getProtocol() == "file:"_kj);
+  KJ_DASSERT(base.getPathname().endsWith("/"_kj));
+
+  // Let's forbid users from using cloudflare: and workerd: URLs in bundles so that
+  // we can protect those namespaces for our own future use. Specifically, these
+  // should only be used by the runtime to refer to built-in modules. We don't
+  // restrict other non-standard protocols like node:
+  KJ_REQUIRE(url.getProtocol() != "cloudflare:"_kj,
+      "The cloudflare: protocol is reserved and cannot be used in module bundles");
+  KJ_REQUIRE(url.getProtocol() != "workerd:"_kj,
+      "The workerd: protocol is reserved and cannot be used in module bundles");
+
+  // Let's forbid data: URL use from module bundles. They are not yet supported
+  // by the runtime due to dynamic eval restrictions. Even when we do support them
+  // eventually, we want to be able to reserve the data: URL namespace for that
+  // use. If we allowed worker bundles to use data: URLs that we could end up
+  // requiring a compat flag later to actually properly enable them.
+  KJ_REQUIRE(
+      url.getProtocol() != "data:"_kj, "The data: protocol cannot be used in module bundles");
+
+  if (url.getProtocol() != "file:"_kj) {
+    // Different protocols are always OK
+    return true;
+  }
+
+  // Module file: URLs must not have a host component.
+  // We already know the protocol is "file:" here because of the check above.
+  if (url.getHost() != ""_kj) {
+    return false;
+  }
+
+  // Check if url is subordinate to the base.
+  // This means url's path should start with base's path as a prefix
+  auto aPath = url.getPathname();
+  auto bPath = base.getPathname();
+
+  return aPath.startsWith(bPath);
+}
+
+// Converts the name given for a user-bundle module into a fully qualified module url.
+// This involves normalizing the name such that it is relative to the bundle base, removes
+// any query parameters or fragments, removes dot and double-dot path segments, normalizes
+// percent-encoding, and otherwise validates that the resulting URL is a valid URL.
+const jsg::Url processModuleName(kj::StringPtr name, const jsg::Url& base) {
+  auto url = normalizeModuleName(name, base);
+  KJ_REQUIRE(isValidBundleModuleUrl(url, base), "Invalid module name: ", name);
+  return url;
+}
+
+}  // namespace
+
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
     kj::StringPtr name, EvaluateCallback callback, kj::Array<kj::String> namedExports) {
-  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
-  // Make sure that percent-encoding in the path is normalized so we can match correctly.
-  url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  const auto url = processModuleName(name, bundleBase);
   add(url,
       [url = url.clone(), callback = kj::mv(callback), namedExports = kj::mv(namedExports),
           type = type()](const ResolveContext& context) mutable
@@ -1090,9 +1332,7 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
     kj::StringPtr name, kj::ArrayPtr<const char> source, Module::Flags flags) {
-  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
-  // Make sure that percent-encoding in the path is normalized so we can match correctly.
-  url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  const auto url = processModuleName(name, bundleBase);
   add(url,
       [url = url.clone(), source, flags, type = type()](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
@@ -1102,10 +1342,25 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
   return *this;
 }
 
+ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
+    kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) {
+  const auto url = processModuleName(name, bundleBase);
+  auto callback = jsg::modules::Module::newWasmModuleHandler(data);
+  add(url,
+      [url = url.clone(), callback = kj::mv(callback), type = type()](
+          const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod =
+        Module::newSynthetic(kj::mv(url), type, kj::mv(callback), nullptr, EsModule::Flags::WASM);
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
+  });
+  return *this;
+}
+
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::alias(
     kj::StringPtr alias, kj::StringPtr name) {
-  auto aliasUrl = KJ_ASSERT_NONNULL(bundleBase.tryResolve(alias));
-  auto id = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
+  const auto id = processModuleName(name, bundleBase);
+  const auto aliasUrl = processModuleName(alias, bundleBase);
   Builder::alias(aliasUrl, id);
   return *this;
 }
@@ -1370,7 +1625,9 @@ bool Module::instantiate(
   // never returns Just(false). It either returns Just(true) or an empty Maybe
   // to signal that the instantiation failed. Eventually I would expect V8 to
   // replace the return value with a Maybe<void>.
-  return module->InstantiateModule(js.v8Context(), resolveCallback).IsJust();
+  return module
+      ->InstantiateModule(js.v8Context(), resolveModuleCallback<false>, resolveModuleCallback<true>)
+      .IsJust();
 }
 
 bool Module::isEval() const {
@@ -1383,6 +1640,10 @@ bool Module::isEsm() const {
 
 bool Module::isMain() const {
   return (flags_ & Flags::MAIN) == Flags::MAIN;
+}
+
+bool Module::isWasm() const {
+  return (flags_ & Flags::WASM) == Flags::WASM;
 }
 
 bool Module::evaluateContext(const ResolveContext& context) const {

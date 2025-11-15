@@ -86,6 +86,7 @@ def _make_bundle_version_info(versions):
         name = entry["name"]
         if name != "development":
             entry["id"] = _bundle_id(**entry)
+            entry["real_pyodide_version"] = entry["pyodide_version"]
         entry["feature_flags"] = [entry["flag"]]
         entry["feature_string_flags"] = [entry["enable_flag_name"]]
         if "packages" in entry:
@@ -96,8 +97,8 @@ def _make_bundle_version_info(versions):
 
     dev = result["development"]
 
-    # Uncomment to test with development = 0.28.2
-    # dev["real_pyodide_version"] = "0.28.2"
+    # Uncomment to test with development = 0.26.0a2
+    # dev["real_pyodide_version"] = "0.26.0a2"
     result["development"] = result[dev["real_pyodide_version"]] | dev
     _check_pyodide_versions(result)
     return result
@@ -109,14 +110,14 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": PACKAGES_20240829_4,
-        "backport": "63",
-        "integrity": "sha256-xrG65VJvao9GYH07C73Uq2jA9DW7O1DP16fiZo36Xq0=",
+        "backport": "75",
+        "integrity": "sha256-E1OCAgukWZU6gchqkxgYlvMSieJ8xz6aPFhN/KeqhTw=",
         "flag": "pythonWorkers",
         "enable_flag_name": "python_workers",
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
-        "baseline_snapshot": "baseline-d13ce2f4a.bin",
-        "baseline_snapshot_hash": "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5",
+        "baseline_snapshot": "baseline-61eedf943.bin",
+        "baseline_snapshot_hash": "61eedf9432d635bdf091b26efece020b3543429a609fad7af9e8d4de2ec44f47",
         "numpy_snapshot": "ew-py-package-snapshot_numpy-v2.bin",
         "numpy_snapshot_hash": "5055deb53f404afacba73642fd10e766b123e661847e8fdf4f1ec92d8ca624dc",
         "fastapi_snapshot": "ew-py-package-snapshot_fastapi-v2.bin",
@@ -134,6 +135,16 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "abi": "3.12",
                 "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
             },
+            {
+                "name": "python-workers-runtime-sdk",
+                "abi": None,
+                "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
+            },
+            {
+                "name": "scipy",
+                "abi": "3.12",
+                "sha256": "787e45be6969a5609093b3df9cc2dba2afec9e10bace977f5045697cc329aa7c",
+            },
         ],
     },
     {
@@ -141,18 +152,20 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
         "packages": PACKAGES_20250808,
-        "backport": "3",
-        "integrity": "sha256-SCMwCLKzdE65vBQmdeUPs1enbE8TzOu57LBupZzwJY4=",
+        "backport": "6",
+        "integrity": "sha256-bsCa4xEXjgtTDJu7h28GzjJEGqCVawPMqlQqkauCVp8=",
         "flag": "pythonWorkers20250116",
         "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",
         "python_version": "3.13.2",
-        "baseline_snapshot": "baseline-32a2de5f7.bin",
-        "baseline_snapshot_hash": "32a2de5f759cd0e7b6aaa5a9292e0c54c3605b9f626ff6c88dc95f49cd98105d",
+        "baseline_snapshot": "baseline-4569679fb.bin",
+        "baseline_snapshot_hash": "4569679fb78a3c5c8dbfa73d57c61c6a5394617632fbac7b5873ba322c85463d",
         "numpy_snapshot": "package_snapshot_numpy-60c9cb28e.bin",
         "numpy_snapshot_hash": "60c9cb28e6dc1ea6ab38b25471ddaa315b667637c9dd6f94aceb2acc6519c623",
         "fastapi_snapshot": "package_snapshot_fastapi-a6ccb56fe.bin",
         "fastapi_snapshot_hash": "a6ccb56fe9eac265d139727d0134e8d6432c5fe25c8c0b8ec95252b13493b297",
+        "dedicated_fastapi_snapshot": "snapshot_a6b652a95810783f5078b9a5dbd4a07c30718acb4ff724e82c25db7353dd7f2d.bin",
+        "dedicated_fastapi_snapshot_hash": "4af6f012a5fb32f31a426e6f109e88ae85b18ee3dd131e1caaaad989cd962bbe",
         "vendored_packages_for_tests": [
             {
                 # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
@@ -165,10 +178,25 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "abi": "3.13",
                 "sha256": "955091f1bd2eb33255ff2633df990bedc96e2f6294e78f2b416078777394f942",
             },
+            {
+                "name": "python-workers-runtime-sdk",
+                "abi": None,
+                "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
+            },
+            # {
+            #     "name": "scipy",
+            #     "abi": "3.13",
+            #     "sha256": "4f1b6fc179bd5c6d3de68abc4aa9fca2aaecd09c5c8d357c2ecfedce7d621f3d",
+            # },
+            {
+                "name": "shapely",
+                "abi": "3.13",
+                "sha256": "2e5c462cb32ee8697b3647dfc9d5c88dcdfd0702da34a2d7dc6b07b8090dd321",
+            },
         ],
     },
     {
-        "real_pyodide_version": "0.26.0a2",
+        "real_pyodide_version": "0.28.2",
         "name": "development",
         "pyodide_version": "dev",
         "pyodide_date": "dev",

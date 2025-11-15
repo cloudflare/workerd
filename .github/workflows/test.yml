@@ -35,7 +35,7 @@ jobs:
           [
             { name: linux, arch: X64, image: ubuntu-22.04 },
             { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm },
-            { name: macOS, arch: ARM64, image: macos-15 },
+            { name: macOS, arch: ARM64, image: macos-26 },
             { name: windows, arch: X64, image: windows-2025 },
           ]
         config: [
@@ -60,7 +60,7 @@ jobs:
           # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
           # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
           # debug configuration.
-          - os: { name: macOS, arch: ARM64 ,image: macos-15 }
+          - os: { name: macOS, arch: ARM64, image: macos-26 }
             config: { suffix: -debug }
           - os: { name: linux, arch: X64, image: ubuntu-22.04 }
             config: { suffix: -debug }
@@ -76,6 +76,7 @@ jobs:
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
       extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}'
+      disable_job_timeouts: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'slow') }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
@@ -91,6 +92,7 @@ jobs:
       extra_bazel_args: '--config=ci-test --config=ci-linux'
       upload_test_logs: true
       upload_binary: true
+      disable_job_timeouts: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'slow') }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
@@ -98,14 +100,16 @@ jobs:
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
-      extra_bazel_args: '--config=lint --config=ci-test --config=ci-linux'
+      extra_bazel_args: '--config=lint --config=clang-tidy --config=ci-test --config=ci-linux'
       run_tests: false
+      parse_headers: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
 
   check-snapshot:
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -168,6 +172,7 @@ jobs:
     needs: [test-linux, check-snapshot]
     name: Run workers-sdk tests
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - name: Checkout workers-sdk
         uses: actions/checkout@v4
@@ -210,8 +215,31 @@ jobs:
           EOF
           pnpm add /tmp/test-types -w
 
-      - name: Run Wrangler, Miniflare, Vitest, Vite tests
-        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
+      - name: Run Wrangler unit tests
+        # Run all the wrangler unit tests besides the ConfigController ones since those
+        # are currently very flaky (the ANT team will look into stabilizing them and
+        # re-enabling them here as soon as possible, ref: https://jira.cfdata.org/browse/DEVX-2309)
+        run: pnpm test:ci --filter wrangler -- -t '^((?!(ConfigController)).)*$'
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Miniflare unit tests
+        run: pnpm test:ci --filter miniflare
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Vite unit tests
+        run: pnpm test:ci --filter @cloudflare/vite-plugin
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Vitest unit tests
+        run: pnpm test:ci --filter="./fixtures/vitest-pool-workers-examples"
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Wrangler Node.js e2e tests
+        run: pnpm test:e2e --filter wrangler -- unenv-preset
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
 

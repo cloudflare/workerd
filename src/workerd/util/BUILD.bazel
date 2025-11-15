@@ -76,6 +76,22 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "ring-buffer",
+    hdrs = ["ring-buffer.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "small-set",
+    hdrs = ["small-set.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "mimetype",
     srcs = ["mimetype.c++"],
     hdrs = ["mimetype.h"],
@@ -84,6 +100,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
@@ -121,6 +138,7 @@ wd_cc_library(
     srcs = ["uuid.c++"],
     hdrs = ["uuid.h"],
     implementation_deps = [
+        ":entropy",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
     ],
@@ -231,6 +249,18 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "entropy",
+    srcs = ["entropy.c++"],
+    hdrs = ["entropy.h"],
+    implementation_deps = [
+        "@ncrypto",
+        "@ssl",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "completion-membrane",
     hdrs = ["completion-membrane.h"],
     visibility = ["//visibility:public"],
@@ -242,6 +272,12 @@ wd_cc_library(
     hdrs = ["exception.h"],
     visibility = ["//visibility:public"],
     deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "immediate-crash",
+    hdrs = ["immediate-crash.h"],
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(
@@ -332,4 +368,14 @@ kj_test(
 kj_test(
     src = "checked-queue-test.c++",
     deps = [":checked-queue"],
+)
+
+kj_test(
+    src = "ring-buffer-test.c++",
+    deps = [":ring-buffer"],
+)
+
+kj_test(
+    src = "small-set-test.c++",
+    deps = [":small-set"],
 )

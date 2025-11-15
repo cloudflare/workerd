@@ -59,8 +59,6 @@ if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v23) {
   isBoolean = (val: unknown): boolean => typeof val === 'boolean';
   isBuffer = (val: unknown): boolean => Buffer.isBuffer(val);
   isDate = (val: unknown): boolean => val instanceof Date;
-  // @ts-expect-error TS2339 Error.isError is not defined in the current typescript version.
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-call
   isError = (val: unknown): boolean => Error.isError(val);
   isFunction = (val: unknown): boolean => typeof val === 'function';
   isNull = (val: unknown): boolean => val === null;

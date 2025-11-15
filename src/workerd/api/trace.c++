@@ -79,10 +79,6 @@ kj::Array<jsg::Ref<TraceLog>> getTraceLogs(jsg::Lock& js, const Trace& trace) {
   return KJ_MAP(x, trace.logs) -> jsg::Ref<TraceLog> { return js.alloc<TraceLog>(js, trace, x); };
 }
 
-kj::Array<jsg::Ref<OTelSpan>> getTraceSpans(jsg::Lock& js, const Trace& trace) {
-  return KJ_MAP(x, trace.spans) -> jsg::Ref<OTelSpan> { return js.alloc<OTelSpan>(x); };
-}
-
 kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> getTraceDiagnosticChannelEvents(
     jsg::Lock& js, const Trace& trace) {
   return KJ_MAP(x, trace.diagnosticChannelEvents) -> jsg::Ref<TraceDiagnosticChannelEvent> {
@@ -205,7 +201,6 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptTags(getTraceScriptTags(trace)),
       durableObjectId(trace.durableObjectId.map([](auto& id) { return kj::str(id); })),
       executionModel(enumToStr(trace.executionModel)),
-      spans(getTraceSpans(js, trace)),
       outcome(enumToStr(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
       wallTime(trace.wallTime / kj::MILLISECONDS),
@@ -291,10 +286,6 @@ kj::StringPtr TraceItem::getExecutionModel() {
   return executionModel;
 }
 
-kj::ArrayPtr<jsg::Ref<OTelSpan>> TraceItem::getSpans() {
-  return spans;
-}
-
 kj::StringPtr TraceItem::getOutcome() {
   return outcome;
 }
@@ -364,7 +355,8 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
   auto builder = kj::heapArrayBuilder<HeaderDict::Field>(detail->headers.size());
   for (const auto& header: detail->headers) {
     auto v = (redacted && shouldRedact(header.name)) ? "REDACTED"_kj : header.value;
-    builder.add(HeaderDict::Field{js.accountedByteString(header.name), js.accountedByteString(v)});
+    builder.add(
+        HeaderDict::Field{jsg::ByteString(kj::str(header.name)), jsg::ByteString(kj::str(v))});
   }
 
   // TODO(conform): Better to return a frozen JS Object?
@@ -562,47 +554,6 @@ bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
   return eventInfo.wasClean;
 }
 
-kj::StringPtr OTelSpan::getOperation() {
-  return operation;
-}
-
-kj::Date OTelSpan::getStartTime() {
-  return startTime;
-}
-
-kj::StringPtr OTelSpan::getSpanID() {
-  return spanId;
-}
-kj::StringPtr OTelSpan::getParentSpanID() {
-  return parentSpanId;
-}
-
-kj::Date OTelSpan::getEndTime() {
-  return endTime;
-}
-
-kj::ArrayPtr<OTelSpanTag> OTelSpan::getTags() {
-  return tags;
-}
-
-OTelSpan::OTelSpan(const CompleteSpan& span)
-    : operation(kj::str(span.operationName)),
-      startTime(span.startTime),
-      endTime(span.endTime),
-      tags(kj::heapArray<OTelSpanTag>(span.tags.size())) {
-  // IDs are represented as network-order hex strings.
-  uint64_t netSpanId = __builtin_bswap64(span.spanId);
-  uint64_t netParentSpanId = __builtin_bswap64(span.parentSpanId);
-  spanId = kj::encodeHex(kj::ArrayPtr<byte>((kj::byte*)&netSpanId, sizeof(uint64_t)));
-  parentSpanId = kj::encodeHex(kj::ArrayPtr<byte>((kj::byte*)&netParentSpanId, sizeof(uint64_t)));
-  uint32_t i = 0;
-  for (auto& tag: span.tags) {
-    tags[i].key = kj::str(tag.key);
-    tags[i].value = spanTagClone(tag.value);
-    i++;
-  }
-}
-
 TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const tracing::Log& log)
     : timestamp(getTraceLogTimestamp(log)),
       level(getTraceLogLevel(log)),
@@ -659,11 +610,6 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(
-        context.getInvocationSpanContext(), context.now(), tracing::TraceEventInfo(traces));
-  }
-
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
   for (auto& trace: traces) {
     if (trace->eventInfo != kj::none) {
@@ -703,7 +649,11 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
 }
 }  // namespace
 
-auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
+kj::Maybe<tracing::EventInfo> TraceCustomEvent::getEventInfo() const {
+  return tracing::EventInfo(tracing::TraceEventInfo(traces));
+}
+
+auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) -> kj::Promise<Result> {
@@ -711,14 +661,14 @@ auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingReque
   waitUntilTasks.add(sendTracesToExportedHandler(
       kj::mv(incomingRequest), entrypointNamePtr, kj::mv(props), traces));
 
-  // Reporting a proper return code here would be nice, but for that we'd need to await running the
-  // tail handler...
+  // Reporting a proper outcome and return event here would be nice, but for that we'd need to await
+  // running the tail handler...
   return Result{
     .outcome = EventOutcome::OK,
   };
 }
 
-auto TraceCustomEventImpl::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+auto TraceCustomEvent::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     workerd::rpc::EventDispatcher::Client dispatcher) -> kj::Promise<Result> {
   auto req = dispatcher.sendTracesRequest();

@@ -6,7 +6,8 @@
 // APIs that an Actor (Durable Object) uses to access its own state.
 //
 // See actor.h for APIs used by other Workers to talk to Actors.
-
+//
+#include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>
@@ -27,10 +28,27 @@ class Container: public jsg::Object {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
     bool enableInternet = false;
     jsg::Optional<jsg::Dict<kj::String>> env;
+    jsg::Optional<int64_t> hardTimeout;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
-    JSG_STRUCT(entrypoint, enableInternet, env);
+    JSG_STRUCT(entrypoint, enableInternet, env, hardTimeout);
+    JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+      if (flags.getWorkerdExperimental()) {
+        JSG_TS_OVERRIDE(ContainerStartupOptions {
+          entrypoint?: string[];
+          enableInternet: boolean;
+          env?: Record<string, string>;
+          hardTimeout?: number | bigint;
+        });
+      } else {
+        JSG_TS_OVERRIDE(ContainerStartupOptions {
+          entrypoint?: string[];
+          enableInternet: boolean;
+          env?: Record<string, string>;
+        });
+      }
+    }
   };
 
   bool getRunning() {
@@ -43,16 +61,18 @@ class Container: public jsg::Object {
   jsg::Promise<void> destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error);
   void signal(jsg::Lock& js, int signo);
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
+  jsg::Promise<void> setInactivityTimeout(jsg::Lock& js, int64_t durationMs);
 
   // TODO(containers): listenTcp()
 
-  JSG_RESOURCE_TYPE(Container) {
+  JSG_RESOURCE_TYPE(Container, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(running, getRunning);
     JSG_METHOD(start);
     JSG_METHOD(monitor);
     JSG_METHOD(destroy);
     JSG_METHOD(signal);
     JSG_METHOD(getTcpPort);
+    JSG_METHOD(setInactivityTimeout);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

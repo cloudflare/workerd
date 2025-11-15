@@ -36,6 +36,30 @@ class LoopbackServiceStub: public Fetcher {
   JSG_RESOURCE_TYPE(LoopbackServiceStub) {
     JSG_INHERIT(Fetcher);
     JSG_CALLABLE(call);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE(
+      type LoopbackServiceStub<
+        T extends Rpc.WorkerEntrypointBranded | undefined = undefined
+      > = Fetcher<T> &
+        ( T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props>
+        ? (opts: {props?: Props}) => Fetcher<T>
+        : (opts: {props?: any}) => Fetcher<T>);
+    );
+
+    // LoopbackForExport takes the type of an exported value and evaluates to the appropriate
+    // loopback stub for that export.
+    JSG_TS_DEFINE(
+      type LoopbackForExport<
+        T extends
+          | (new (...args: any[]) => Rpc.EntrypointBranded)
+          | ExportedHandler<any, any, any>
+          | undefined = undefined
+      > = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded ? LoopbackServiceStub<InstanceType<T>>
+        : T extends new (...args: any[]) => Rpc.DurableObjectBranded ? LoopbackDurableObjectClass<InstanceType<T>>
+        : T extends ExportedHandler<any, any, any> ? LoopbackServiceStub<undefined>
+        : undefined;
+    );
   }
 
  private:
@@ -63,6 +87,18 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
   JSG_RESOURCE_TYPE(LoopbackDurableObjectClass) {
     JSG_INHERIT(DurableObjectClass);
     JSG_CALLABLE(call);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE(
+      type LoopbackDurableObjectClass<
+        T extends
+          | Rpc.DurableObjectBranded
+          | undefined = undefined
+      > = DurableObjectClass<T> &
+        ( T extends CloudflareWorkersModule.DurableObject<any, infer Props>
+        ? (opts: {props?: Props}) => DurableObjectClass<T>
+        : (opts: {props?: any}) => DurableObjectClass<T>);
+    );
   }
 
  private:

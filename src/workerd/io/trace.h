@@ -302,7 +302,7 @@ kj::String KJ_STRINGIFY(const TraceId& id);
 kj::String KJ_STRINGIFY(const InvocationSpanContext& context);
 kj::String KJ_STRINGIFY(const SpanContext& context);
 
-// The various structs defined below are used in both legacy tail workers
+// The various structs defined below are used in both buffered tail workers
 // and streaming tail workers to report tail events.
 
 // Describes a fetch request
@@ -422,11 +422,11 @@ struct EmailEventInfo final {
   EmailEventInfo clone() const;
 };
 
-// Describes a legacy tail worker request
+// Describes a buffered tail worker request
 struct TraceEventInfo final {
   struct TraceItem;
 
-  explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
+  explicit TraceEventInfo(kj::ArrayPtr<const kj::Own<Trace>> traces);
   TraceEventInfo(kj::Array<TraceItem> traces): traces(kj::mv(traces)) {}
   TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
   TraceEventInfo(TraceEventInfo&&) = default;
@@ -554,8 +554,6 @@ struct Exception final {
 
 // EventInfo types are used to describe the onset of an invocation. The FetchEventInfo
 // can also be used to describe the start of a fetch subrequest.
-// TODO(o11y): Write KJ_STRINGIFY() for EventInfo to beef up logging for events reported after
-// stream close.
 using EventInfo = kj::OneOf<FetchEventInfo,
     JsRpcEventInfo,
     ScheduledEventInfo,
@@ -569,7 +567,7 @@ using EventInfo = kj::OneOf<FetchEventInfo,
 EventInfo cloneEventInfo(const EventInfo& info);
 
 template <typename T>
-concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() ||
+concept AttributeValue = kj::isSameType<kj::ConstString, T>() || kj::isSameType<bool, T>() ||
     kj::isSameType<double, T>() || kj::isSameType<int64_t, T>();
 
 // An Attribute mark is used to add detail to a span over its lifetime.
@@ -577,7 +575,7 @@ concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool,
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::String, bool, double, int64_t>;
+  using Value = kj::OneOf<kj::ConstString, bool, double, int64_t>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::ConstString name, Value&& value);
@@ -608,7 +606,6 @@ struct Attribute final {
 };
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
-}  // namespace tracing
 
 struct CompleteSpan {
   // Represents a completed span within user tracing.
@@ -640,7 +637,6 @@ struct CompleteSpan {
   kj::String toString() const;
 };
 
-namespace tracing {
 // A Return mark is used to mark the point at which a span operation returned
 // a value. For instance, when a fetch subrequest response is received, or when
 // the fetch handler returns a Response. Importantly, it does not signal that the
@@ -668,13 +664,13 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(SpanId spanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(SpanId spanId, kj::ConstString operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
   KJ_DISALLOW_COPY(SpanOpen);
 
-  kj::String operationName;
+  kj::ConstString operationName;
   kj::Maybe<Info> info = kj::none;
   SpanId spanId;
 
@@ -864,7 +860,6 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> durableObjectId;
 
   kj::Vector<tracing::Log> logs;
-  kj::Vector<CompleteSpan> spans;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
   kj::Vector<tracing::Exception> exceptions;
 
@@ -959,9 +954,7 @@ struct Span {
 void serializeTagValue(rpc::TagValue::Builder builder, const Span::TagValue& value);
 Span::TagValue deserializeTagValue(rpc::TagValue::Reader value);
 
-// Stringify and clone for span tags, getting this to work with KJ_STRINGIFY() appears exceedingly
-// difficult.
-kj::String spanTagStr(const Span::TagValue& tag);
+// Clone function for span tags, avoids memory allocation for string literals and non-string values.
 Span::TagValue spanTagClone(const Span::TagValue& tag);
 
 // An opaque token which can be used to create child spans of some parent. This is typically
@@ -987,7 +980,7 @@ class SpanParent {
   //
   // `operationName` should be a string literal with infinite lifetime.
   [[nodiscard]] SpanBuilder newChild(
-      kj::ConstString operationName, kj::Date startTime = kj::systemPreciseCalendarClock().now());
+      kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
@@ -1024,7 +1017,7 @@ class SpanBuilder {
   // attached to the observer observing this span.
   explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
       kj::ConstString operationName,
-      kj::Date startTime = kj::systemPreciseCalendarClock().now());
+      kj::Maybe<kj::Date> startTime = kj::none);
 
   // Make a SpanBuilder that ignores all calls. (Useful if you want to assign it later.)
   SpanBuilder(decltype(nullptr)) {}
@@ -1058,7 +1051,7 @@ class SpanBuilder {
   //
   // `operationName` should be a string literal with infinite lifetime.
   [[nodiscard]] SpanBuilder newChild(
-      kj::ConstString operationName, kj::Date startTime = kj::systemPreciseCalendarClock().now());
+      kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
 
   // Change the operation name from what was specified at span creation.
   //
@@ -1068,7 +1061,18 @@ class SpanBuilder {
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
-  void setTag(kj::ConstString key, TagValue value);
+  // Allow setting tags with an extended set of types to elide string allocations when we have a
+  // string literal or are not being observed. We include String/LiteralStringConst here to avoid
+  // having to manually cast them to ConstString each time.
+  using TagInitValue = kj::OneOf<kj::StringPtr,
+      kj::String,
+      kj::LiteralStringConst,
+      kj::ConstString,
+      bool,
+      double,
+      int64_t>;
+
+  void setTag(kj::ConstString key, TagInitValue value);
 
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
@@ -1102,6 +1106,15 @@ class SpanObserver: public kj::Refcounted {
   //
   // This should always be called exactly once per observer.
   virtual void report(const Span& span) = 0;
+
+  // The current time to be provided for the span. For user tracing, we will override this to
+  // provide I/O time. This *requires* that spans are only created when an IOContext is available
+  // (usually it is difficult to violate this assumption, but care must be taken that the observer
+  // isn't used directly to create a span before the IoContext has been constructed (previously this
+  // was a case with a top-level span owned by the WorkerTracer itself).
+  virtual kj::Date getTime() {
+    return kj::systemPreciseCalendarClock().now();
+  }
 };
 
 inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
@@ -1110,12 +1123,14 @@ inline SpanParent SpanParent::addRef() {
   return SpanParent(mapAddRef(observer));
 }
 
-inline SpanBuilder SpanParent::newChild(kj::ConstString operationName, kj::Date startTime) {
+inline SpanBuilder SpanParent::newChild(
+    kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
       kj::mv(operationName), startTime);
 }
 
-inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date startTime) {
+inline SpanBuilder SpanBuilder::newChild(
+    kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
       kj::mv(operationName), startTime);
 }
@@ -1135,6 +1150,42 @@ struct TraceContext {
   TraceContext(TraceContext&& other) = default;
   TraceContext& operator=(TraceContext&& other) = default;
   KJ_DISALLOW_COPY(TraceContext);
+
+  // Set a tag on both the internal span and user span.
+  void setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
+    // We need to duplicate the key and value since both are move-only types.
+    // Clone the value based on its type.
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(s, kj::StringPtr) {
+        span.setTag(key.clone(), s);
+        userSpan.setTag(kj::mv(key), s);
+      }
+      KJ_CASE_ONEOF(s, kj::String) {
+        span.setTag(key.clone(), kj::str(s));
+        userSpan.setTag(kj::mv(key), kj::mv(s));
+      }
+      KJ_CASE_ONEOF(s, kj::LiteralStringConst) {
+        span.setTag(key.clone(), s);
+        userSpan.setTag(kj::mv(key), s);
+      }
+      KJ_CASE_ONEOF(s, kj::ConstString) {
+        span.setTag(key.clone(), s.clone());
+        userSpan.setTag(kj::mv(key), kj::mv(s));
+      }
+      KJ_CASE_ONEOF(b, bool) {
+        span.setTag(key.clone(), b);
+        userSpan.setTag(kj::mv(key), b);
+      }
+      KJ_CASE_ONEOF(d, double) {
+        span.setTag(key.clone(), d);
+        userSpan.setTag(kj::mv(key), d);
+      }
+      KJ_CASE_ONEOF(i, int64_t) {
+        span.setTag(key.clone(), i);
+        userSpan.setTag(kj::mv(key), i);
+      }
+    }
+  }
 
   SpanBuilder span;
   SpanBuilder userSpan;

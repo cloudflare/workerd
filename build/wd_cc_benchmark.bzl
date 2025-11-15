@@ -9,7 +9,7 @@ def wd_cc_benchmark(
     """Wrapper for cc_binary that sets common attributes and links the benchmark library.
     """
 
-    native.cc_binary(
+    native.cc_test(
         name = name,
         defines = ["WD_IS_BENCHMARK"],
         # Use shared linkage for benchmarks, matching the approach used for tests. Unfortunately,
@@ -30,7 +30,8 @@ def wd_cc_benchmark(
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        tags = ["workerd-benchmark"],
+        tags = ["workerd-benchmark", "benchmark-binary"],
+        size = "large",
         **kwargs
     )
 

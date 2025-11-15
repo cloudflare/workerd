@@ -26,7 +26,7 @@ jobs:
     name: Run benchmarks
     runs-on: ubuntu-22.04
     env:
-      BAZEL_ARGS: --config=benchmark --@codspeed//core:codspeed_mode=instrumentation --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
+      BAZEL_ARGS: --config=benchmark --@workerd-google-benchmark//:codspeed_mode=instrumentation --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,16 +44,16 @@ jobs:
 
       - name: Build benchmarks
         run: |
-          bazel build ${{ env.BAZEL_ARGS }} //src/workerd/tests:all_benchmarks
+          bazel build ${{ env.BAZEL_ARGS }} --build_tag_filters=benchmark-binary //...
 
       - name: Generate benchmark script
         run: |
           echo '#!/bin/bash' > run_benchmarks.sh
-          echo 'set -e' >> run_benchmarks.sh
-          targets=$(bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label 2>/dev/null | grep -E '^//src/workerd/tests:bench-' | grep -v '@')
+          echo 'set -ex' >> run_benchmarks.sh
+          targets=$(bazel query 'attr(tags, "benchmark-binary", //...)' --output=label 2>/dev/null)
           for target in $targets; do
             echo "echo 'Running benchmark: $target'" >> run_benchmarks.sh
-            echo "bazel run ${{ env.BAZEL_ARGS }} $target" >> run_benchmarks.sh
+            echo "bazel run ${{ env.BAZEL_ARGS }} $target -- --benchmark_min_time=1s" >> run_benchmarks.sh
           done
           chmod +x run_benchmarks.sh
 

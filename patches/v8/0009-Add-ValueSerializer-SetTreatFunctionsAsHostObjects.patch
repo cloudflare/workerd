@@ -30,10 +30,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index ac3a516d93e0b9871796486251827467e802b7a2..51c4cd44b2e2fdacb42dc4649743508dc9d9ca15 100644
+index 73c875def0126423653b63935fa7de67af8746ab..f1c13696d9f23e62cf0f4733360f13d0bd617322 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3327,6 +3327,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3358,6 +3358,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  

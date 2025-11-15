@@ -197,8 +197,8 @@ class Serializer final: v8::ValueSerializer::Delegate {
 
   kj::Maybe<ExternalHandler&> externalHandler;
 
-  kj::Vector<JsValue> sharedArrayBuffers;
-  kj::Vector<JsValue> arrayBuffers;
+  kj::Vector<jsg::JsRef<JsValue>> sharedArrayBuffers;
+  kj::Vector<jsg::JsRef<JsValue>> arrayBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
   bool released = false;

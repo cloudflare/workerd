@@ -10,6 +10,7 @@
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
+#include <workerd/api/tracing-module.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/jsg/modules-new.h>
@@ -52,6 +53,7 @@ void registerModules(Registry& registry, auto featureFlags) {
   registerBase64Module(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerWorkersModule(registry, featureFlags);
+  registerTracingModule(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   registry.template addBuiltinModule<FileSystemModule>(
@@ -67,6 +69,7 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
   builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));
 
   builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalTracingModuleBundle<TypeWrapper>(featureFlags));
   if (featureFlags.getUnsafeModule()) {
     builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   }
@@ -77,14 +80,14 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
 
   {
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
-        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
     builder.add(builtinsBuilder.finish());
   }
 
   {
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
-        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
     builtinsBuilder.addObject<EnvModule, TypeWrapper>("cloudflare-internal:env"_url);
     builtinsBuilder.addObject<FileSystemModule, TypeWrapper>("cloudflare-internal:filesystem"_url);
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);

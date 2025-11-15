@@ -20,8 +20,8 @@ enum class AutogateKey {
   STREAMING_TAIL_WORKER,
   // Enable refactor used to consolidate the different tail worker stream implementations.
   TAIL_STREAM_REFACTOR,
-  // Enable wrapping DO SQL KV put multiple in a transaction, fully rolling back if some put fails
-  SQL_KV_PUT_MULTIPLE_TRANSACTION,
+  // Enable the BodyBufferInputStream replacement
+  BODY_BUFFER_INPUT_STREAM_REPLACEMENT,
   NumOfKeys  // Reserved for iteration.
 };
 
@@ -55,7 +55,7 @@ class Autogate {
   static void deinitAutogate();
 
  private:
-  bool gates[(unsigned long)AutogateKey::NumOfKeys];
+  bool gates[static_cast<unsigned long>(AutogateKey::NumOfKeys)];
 
   Autogate(capnp::List<capnp::Text>::Reader autogates);
 };

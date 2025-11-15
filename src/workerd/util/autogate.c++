@@ -25,8 +25,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:
       return "tail-stream-refactor"_kj;
-    case AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION:
-      return "sql-kv-put-multiple-transaction"_kj;
+    case AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT:
+      return "body-buffer-input-stream-replacement"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
@@ -34,8 +34,9 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
 
 Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
   // Init all gates to false.
-  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys; i = AutogateKey((int)i + 1)) {
-    gates[(unsigned long)i] = false;
+  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
+       i = AutogateKey(static_cast<int>(i) + 1)) {
+    gates[static_cast<unsigned long>(i)] = false;
   }
 
   for (auto name: autogates) {
@@ -46,9 +47,10 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
     auto sliced = name.slice(17);
 
     // Parse the gate name into a AutogateKey.
-    for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys; i = AutogateKey((int)i + 1)) {
+    for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
+         i = AutogateKey(static_cast<int>(i) + 1)) {
       if (kj::str(i) == sliced) {
-        gates[(unsigned long)i] = true;
+        gates[static_cast<unsigned long>(i)] = true;
         break;
       }
     }
@@ -57,7 +59,7 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
 
 bool Autogate::isEnabled(AutogateKey key) {
   KJ_IF_SOME(a, globalAutogate) {
-    return a.gates[(unsigned long)key];
+    return a.gates[static_cast<unsigned long>(key)];
   }
 
   static const bool defaultResult = getenv("WORKERD_ALL_AUTOGATES") != nullptr;

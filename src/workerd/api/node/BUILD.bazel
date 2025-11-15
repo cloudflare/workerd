@@ -18,6 +18,7 @@ wd_cc_library(
 wd_cc_library(
     name = "node",
     srcs = [
+        "async-hooks.c++",
         "crypto.c++",
         "crypto-keys.c++",
         "diagnostics-channel.c++",
@@ -28,6 +29,7 @@ wd_cc_library(
         "zlib-util.c++",
     ],
     hdrs = [
+        "async-hooks.h",
         "crypto.h",
         "diagnostics-channel.h",
         "module.h",
@@ -44,7 +46,9 @@ wd_cc_library(
     deps = [
         ":node-core",
         "//src/node",
+        "//src/workerd/api:streams-compression",
         "//src/workerd/io",
+        "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@ncrypto",
     ],
@@ -54,19 +58,19 @@ wd_cc_library(
 wd_cc_library(
     name = "node-core",
     srcs = [
-        "async-hooks.c++",
         "buffer.c++",
         "dns.c++",
         "i18n.c++",
+        "sqlite.c++",
         "url.c++",
     ],
     hdrs = [
-        "async-hooks.h",
         "buffer.h",
         "buffer-string-search.h",
         "dns.h",
         "i18n.h",
         "node-version.h",
+        "sqlite.h",
         "url.h",
     ],
     implementation_deps = [
@@ -79,12 +83,11 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        # Do not add the io target here – this target is intended for code that does not depend on
-        # it, move files to the main node target if needed.
+        # Please do not add //src/workerd/io here – this target is intended for code that does not
+        # depend on it, move files to the main node target if needed. That way, the files here don't
+        # need to be rebuilt if there are changes to io.
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/io",
-        "//src/workerd/util:mimetype",
         ":exceptions",
     ],
 )

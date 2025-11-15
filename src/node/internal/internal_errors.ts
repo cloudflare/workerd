@@ -762,7 +762,7 @@ export class ConnResetException extends NodeError {
 
 export function aggregateTwoErrors(
   innerError: unknown,
-  outerError: Error | null
+  outerError: Error | null | undefined
 ): AggregateError {
   if (innerError && outerError && innerError !== outerError) {
     if ('errors' in outerError && Array.isArray(outerError.errors)) {
@@ -783,6 +783,12 @@ export function aggregateTwoErrors(
 export class ERR_INVALID_IP_ADDRESS extends NodeTypeError {
   constructor(ipAddress: string) {
     super('ERR_INVALID_IP_ADDRESS', `Invalid IP address: ${ipAddress}`);
+  }
+}
+
+export class ERR_INVALID_ADDRESS extends NodeTypeError {
+  constructor() {
+    super('ERR_INVALID_ADDRESS', 'Invalid socket address');
   }
 }
 
@@ -835,7 +841,11 @@ export class NodeSyscallError extends NodeError {
 export class ERR_ENOENT extends NodeSyscallError {
   path: string;
   constructor(path: string, options: { syscall: string }) {
-    super('ENOENT', `No such file or directory: ${path}`, options.syscall);
+    super(
+      'ENOENT',
+      `no such file or directory, ${options.syscall} '${path}'`,
+      options.syscall
+    );
     this.path = path;
     this.errno = -2; // ENOENT
   }
@@ -849,22 +859,43 @@ export class ERR_EBADF extends NodeSyscallError {
 }
 
 export class ERR_EINVAL extends NodeSyscallError {
-  constructor(options: { syscall: string }) {
-    super('EINVAL', 'Invalid argument', options.syscall);
+  path?: string;
+  constructor(options: { syscall: string; path?: string }) {
+    const message = options.path
+      ? `invalid argument, ${options.syscall} '${options.path}'`
+      : 'invalid argument';
+    super('EINVAL', message, options.syscall);
+    if (options.path !== undefined) {
+      this.path = options.path;
+    }
     this.errno = -22; // EINVAL
   }
 }
 
 export class ERR_EEXIST extends NodeSyscallError {
-  constructor(options: { syscall: string }) {
-    super('EEXIST', 'file already exists', options.syscall);
+  path?: string;
+  constructor(options: { syscall: string; path?: string }) {
+    const message = options.path
+      ? `file already exists, ${options.syscall} '${options.path}'`
+      : 'file already exists';
+    super('EEXIST', message, options.syscall);
+    if (options.path !== undefined) {
+      this.path = options.path;
+    }
     this.errno = -17; // EEXIST
   }
 }
 
 export class ERR_EPERM extends NodeSyscallError {
-  constructor(options: { syscall: string; errno?: number }) {
-    super('EPERM', 'Operation not permitted', options.syscall);
+  path?: string;
+  constructor(options: { syscall: string; errno?: number; path?: string }) {
+    const message = options.path
+      ? `operation not permitted, ${options.syscall} '${options.path}'`
+      : 'operation not permitted';
+    super('EPERM', message, options.syscall);
+    if (options.path !== undefined) {
+      this.path = options.path;
+    }
     this.errno = options.errno ?? 1; // EPERM
   }
 }
@@ -934,6 +965,30 @@ export class ERR_SERVER_ALREADY_LISTEN extends NodeError {
     super(
       'ERR_SERVER_ALREADY_LISTEN',
       'Listen method has been called more than once without closing.'
+    );
+  }
+}
+
+export class ERR_ILLEGAL_CONSTRUCTOR extends NodeTypeError {
+  constructor() {
+    super('ERR_ILLEGAL_CONSTRUCTOR', 'Illegal constructor');
+  }
+}
+
+export class ERR_PERFORMANCE_INVALID_TIMESTAMP extends NodeTypeError {
+  constructor(value: unknown) {
+    super(
+      'ERR_PERFORMANCE_INVALID_TIMESTAMP',
+      `${value} is not a valid timestamp`
+    );
+  }
+}
+
+export class ERR_TRACE_EVENTS_CATEGORY_REQUIRED extends NodeTypeError {
+  constructor() {
+    super(
+      'ERR_TRACE_EVENTS_CATEGORY_REQUIRED',
+      'At least one category is required'
     );
   }
 }
