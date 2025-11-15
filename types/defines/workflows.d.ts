@@ -81,7 +81,7 @@ type InstanceStatus = {
     | 'waiting' // instance is hibernating and waiting for sleep or event to finish
     | 'waitingForPause' // instance is finishing the current work to pause
     | 'unknown';
-  error?: string;
+	error?: { message: string; name: 'Error' };
   output?: object;
 };
 
