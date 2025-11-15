@@ -85,7 +85,8 @@ bazel_dep(name = "workerd-v8")
 archive_override(
     module_name = "perfetto",
     integrity = "sha256-T5F4h9xXdYfTGMa+AXmewHIkS1cgxu5ierfyJMOwqJA=",
-    patches = ["//:patches/perfetto.patch"],
+    patch_args = ["-p1"],
+    patches = ["//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch"],
     strip_prefix = "perfetto-51.2",
     url = "https://github.com/google/perfetto/archive/refs/tags/v51.2.tar.gz",
 )
