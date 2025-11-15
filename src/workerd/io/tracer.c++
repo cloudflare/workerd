@@ -81,6 +81,7 @@ kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
   return kj::mv(paf.promise);
 }
 
+PipelineTracer::PipelineTracer(bool hasLtw): hasLtw(hasLtw) {}
 kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
     ExecutionModel executionModel,
     kj::Maybe<kj::String> scriptId,
@@ -97,7 +98,7 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
       executionModel, kj::mv(durableObjectId));
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(
-      addRefToThis(), kj::mv(trace), pipelineLogLevel, kj::mv(maybeTailStreamWriter));
+      addRefToThis(), kj::mv(trace), pipelineLogLevel, kj::mv(maybeTailStreamWriter), hasLtw);
 }
 
 void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
@@ -111,20 +112,27 @@ void PipelineTracer::addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& wr
 WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
-    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter)
+    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter,
+    bool hasLTW)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
-      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {}
-
-WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
-    : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(
-          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)) {}
+      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)),
+      hasLTW(hasLTW) {
+  // If log level is none, we should not be creating an STW (we don't provide automated
+  // tracing in that case), and we should have LTW tracers available (otherwise we can skip
+  // setting up a WorkerTracer entirely).
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    KJ_ASSERT(maybeTailStreamWriter == kj::none);
+    KJ_ASSERT(hasLTW);
+  }
+}
 
 WorkerTracer::~WorkerTracer() noexcept(false) {
   // Report the outcome event, which should have been delivered by now.
 
+  KJ_ASSERT(pipelineLogLevel != PipelineLogLevel::NONE || maybeTailStreamWriter == kj::none);
+  KJ_ASSERT(pipelineLogLevel != PipelineLogLevel::NONE || hasLTW);
   // Do not attempt to report an outcome event if logging is disabled, as with other event types.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
@@ -163,6 +171,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel logLevel,
     kj::String message) {
+  // TODO(now): Optimize this and more functions based on hasLTW to elide memory allocations.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
