@@ -609,8 +609,10 @@ type DurableObjectLocationHint =
   | "oc"
   | "afr"
   | "me";
+type DurableObjectRoutingMode = "primary-only";
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
+  routingMode?: DurableObjectRoutingMode;
 }
 interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
