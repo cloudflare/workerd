@@ -732,11 +732,6 @@ class DurableObjectState: public EventTarget {
   kj::Maybe<jsg::Ref<Container>> container;
   kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;
 
-  // Weak reference for async unload handlers to safely check if state is still alive
- public:
-  mutable kj::Rc<WeakRef<DurableObjectState>> weakThis;
-  bool hasUnloadHandlers = false;
-
   // Limits for Hibernatable WebSocket tags.
 
   const size_t MAX_TAGS_PER_CONNECTION = 10;

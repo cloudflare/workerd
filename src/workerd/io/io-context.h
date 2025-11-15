@@ -28,13 +28,15 @@
 #include <kj/mutex.h>
 
 namespace workerd {
-class WorkerTracer;
 class BaseTracer;
-}  // namespace workerd
-
-namespace workerd {
 class LimitEnforcer;
+class WorkerTracer;
+
+namespace api {
+class EventTarget;
 }
+
+}  // namespace workerd
 
 namespace capnp {
 class HttpOverCapnpFactory;
@@ -276,6 +278,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   LimitEnforcer& getLimitEnforcer() {
     return *limitEnforcer;
   }
+
+  void dispatchUnload();
+  void setUnloadListener(jsg::Ref<api::EventTarget>);
 
   // Get the current input lock. Throws an exception if no input lock is held (e.g. because this is
   // not an actor request).
@@ -625,7 +630,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Indicates that the script has requested that it stay active until the given promise resolves.
   // drain() waits until all such promises have completed.
-  void addWaitUntil(kj::Promise<void> promise);
+  void addWaitUntil(kj::Promise<void> promise, bool isUnload = false);
 
   // Returns the status of waitUntil promises. If a promise fails, this sets the status to the
   // one corresponding to the exception type.
@@ -970,11 +975,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void pumpMessageLoop();
 
-  // Weak reference to the ExecutionContext for this request, used to dispatch unload events.
-  kj::Maybe<kj::Rc<workerd::WeakRef<api::ExecutionContext>>> executionContext;
-  // Fast path flag to check if unload handlers exist without needing isolate lock.
-  bool hasUnloadHandlers = false;
-
  private:
   ThreadContext& thread;
 
@@ -990,6 +990,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::List<IncomingRequest, &IncomingRequest::link> incomingRequests;
 
   kj::Maybe<kj::SourceLocation> lastDeliveredLocation;
+
+  kj::Maybe<jsg::Ref<api::EventTarget>> unloadTarget;
 
   capnp::CapabilityServerSet<capnp::DynamicCapability> localCapSet;
 

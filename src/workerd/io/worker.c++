@@ -611,11 +611,6 @@ struct Worker::Isolate::Impl {
         KJ_IF_SOME(c, workerImpl->context) {
           disposeContext(kj::mv(c));
         }
-
-        // Supress KJ IO warning: KJ async object being destroyed when not allowed:
-        //   JavaScript heap objects must not contain KJ I/O objects without a IoOwn.
-        // Since all tasks use weak references.
-        kj::AllowAsyncDestructorsScope allowAsyncDestructors;
         workerImpl = nullptr;
       }
 
@@ -1805,7 +1800,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         // Store weak reference for unload event dispatching (if IoContext exists).
                         if (IoContext::hasCurrent() &&
                             !FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
-                          IoContext::current().executionContext = ctx->weakThis.addRef();
+                          IoContext::current().setUnloadListener(ctx.addRef());
                         }
                         obj.ctx = kj::mv(ctx);
 
@@ -1868,17 +1863,16 @@ Worker::Worker(kj::Own<const Script> scriptParam,
   });
 }
 
-void Worker::addUnloadTask(kj::Function<void(jsg::Lock&)> func) const {
+void Worker::runInUnloadScope(IoContext& ctx, kj::Function<void(jsg::Lock&)> func) const {
   auto workerWeakRef = kj::atomicAddRefWeak(*this);
-  impl->unloadTasks.add(takeAsyncLockWithoutRequest(nullptr).then(
-      [workerWeakRef = kj::mv(workerWeakRef), func = kj::mv(func)](
-          AsyncLock asyncLock) mutable -> kj::Promise<void> {
+  ctx.addWaitUntil(takeAsyncLockWithoutRequest(nullptr).then(
+                       [workerWeakRef = kj::mv(workerWeakRef), func = kj::mv(func)](
+                           AsyncLock asyncLock) mutable -> kj::Promise<void> {
     // If worker is already disposed, no need to run unload handler.
     KJ_IF_SOME(worker, workerWeakRef) {
       worker->runInLockScope(asyncLock, [&](Lock& lock) {
         JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-          // Ensure we run the unload handler without an IoContext
-          // (although by definition there should be none?).
+          // Ensure we run the unload handler without an IoContext.
           {
             SuppressIoContextScope suppressIo;
             js.tryCatch([&] { func(js); }, [&](jsg::Value exception) {
@@ -1898,7 +1892,8 @@ void Worker::addUnloadTask(kj::Function<void(jsg::Lock&)> func) const {
       });
     }
     return kj::READY_NOW;
-  }));
+  }),
+      true);
 }
 
 Worker::~Worker() noexcept(false) {
@@ -2181,9 +2176,9 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     jsg::Lock& js = *this;
     auto ctx = js.alloc<api::ExecutionContext>(
         js, jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
-    // Store weak reference for unload event dispatching (if IoContext exists).
+    // Store reference for unload event dispatching (if IoContext exists).
     if (IoContext::hasCurrent() && !FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
-      IoContext::current().executionContext = ctx->weakThis.addRef();
+      IoContext::current().setUnloadListener(ctx.addRef());
     }
     auto handler = kj::heap(cls(js, kj::mv(ctx), KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
@@ -2202,9 +2197,9 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
       api::ExportedHandler constructedHandler = h.clone(js);
       auto ctx = js.alloc<api::ExecutionContext>(js,
           jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
-      // Store weak reference for unload event dispatching (if IoContext exists).
+      // Store reference for unload event dispatching (if IoContext exists).
       if (IoContext::hasCurrent()) {
-        IoContext::current().executionContext = ctx->weakThis.addRef();
+        IoContext::current().setUnloadListener(ctx.addRef());
       }
       constructedHandler.ctx = kj::mv(ctx);
       return kj::heap(kj::mv(constructedHandler));
@@ -3809,6 +3804,14 @@ Worker::Actor::~Actor() noexcept(false) {
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
+  KJ_IF_SOME(state, durableObjectState) {
+    KJ_IF_SOME(ctx, getIoContext()) {
+      worker->runInUnloadScope(ctx, [state = kj::mv(state)](jsg::Lock& js) mutable {
+        state->dispatchEvent(js, js.alloc<api::Event>("unload"_kjc));
+      });
+    }
+  }
+
   // We're officially canceling all background work and we're going to destruct the Actor as soon
   // as all IoContexts that reference it go out of scope. We might still log additional
   // periodic messages, and that's good because we might care about that information. That said,
@@ -3819,21 +3822,6 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
   } else {
     // The actor was shut down before the IoContext was even constructed, so no metrics are
     // written.
-  }
-
-  // Dispatch unload event on DurableObjectState if it was attached.
-  // We do not maintain a strong reference to DurableObjectState here.
-  // This means THERE ARE NO GUARANTEES AT ALL that unload will run if the GC runs first.
-  // In that case, finalizers should run, defeating the need for unload. This is the tradeoff
-  // of the design - unload does not remove the need for finalization.
-  KJ_IF_SOME(state, durableObjectState) {
-    if (state->hasUnloadHandlers) {
-      worker->addUnloadTask([weakState = state->weakThis.addRef()](jsg::Lock& js) mutable {
-        weakState->runIfAlive([&](api::DurableObjectState& state) {
-          state.dispatchEvent(js, js.alloc<api::Event>("unload"_kjc));
-        });
-      });
-    }
   }
 
   shutdownActorCache(error);

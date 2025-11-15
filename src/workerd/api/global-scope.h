@@ -189,29 +189,11 @@ class TestController: public jsg::Object {
 class ExecutionContext: public EventTarget {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
-      : weakThis(kj::rc<workerd::WeakRef<ExecutionContext>>(kj::Badge<ExecutionContext>(), *this)),
-        exports(js, exports),
-        props(js, js.obj()) {
-    setEventListenerCallback([](jsg::Lock&, kj::StringPtr name, size_t count) {
-      if (name == "unload") {
-        if (IoContext::hasCurrent()) {
-          IoContext::current().hasUnloadHandlers = count > 0;
-        }
-      }
-    });
-  }
+      : exports(js, exports),
+        props(js, js.obj()) {}
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports, jsg::JsValue props)
-      : weakThis(kj::rc<workerd::WeakRef<ExecutionContext>>(kj::Badge<ExecutionContext>(), *this)),
-        exports(js, exports),
-        props(js, props) {
-    setEventListenerCallback([](jsg::Lock&, kj::StringPtr name, size_t count) {
-      if (name == "unload") {
-        if (IoContext::hasCurrent()) {
-          IoContext::current().hasUnloadHandlers = count > 0;
-        }
-      }
-    });
-  }
+      : exports(js, exports),
+        props(js, props) {}
 
   static jsg::Ref<ExecutionContext> constructor() = delete;
 
@@ -268,8 +250,6 @@ class ExecutionContext: public EventTarget {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("props", props);
   }
-
-  mutable kj::Rc<workerd::WeakRef<ExecutionContext>> weakThis;
 
  private:
   jsg::JsRef<jsg::JsValue> exports;

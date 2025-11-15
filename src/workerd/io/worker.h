@@ -187,7 +187,10 @@ class Worker: public kj::AtomicRefcounted {
 
   // Helper for running unload handlers. Acquires an async lock, executes the callback
   // with SuppressIoContextScope, then clears any queued microtasks.
-  void addUnloadTask(kj::Function<void(jsg::Lock&)> func) const;
+  void runInUnloadScope(IoContext& ctx, kj::Function<void(jsg::Lock&)> func) const;
+
+  // Clear any pending unload tasks. Should be called during shutdown before the EventLoop is destroyed.
+  void clearUnloadTasks() const;
 
   class AsyncLock;
 
@@ -1005,11 +1008,11 @@ class Worker::Actor final: public kj::Refcounted {
 
   kj::Own<Worker::Actor> addRef();
 
-  // Reference to the DurableObjectState for this actor, used to dispatch unload events.
-  kj::Maybe<jsg::Ref<api::DurableObjectState>> durableObjectState;
-
  private:
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
+
+  // Reference to the DurableObjectState for this actor, used to dispatch unload events.
+  kj::Maybe<jsg::Ref<api::DurableObjectState>> durableObjectState;
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::Own<RequestTracker>> tracker;
