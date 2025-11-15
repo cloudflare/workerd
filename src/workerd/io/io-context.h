@@ -729,7 +729,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Date now();
 
   TmpDirStoreScope& getTmpDirStoreScope() {
-    return *tmpDirStoreScope;
+    KJ_IF_SOME(scope, tmpDirStoreScope) {
+      return *scope;
+    }
+    return *tmpDirStoreScope.emplace(TmpDirStoreScope::create());
   }
 
   // Returns a promise that resolves once `now() >= when`.
@@ -975,7 +978,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
 
-  kj::Own<TmpDirStoreScope> tmpDirStoreScope;
+  kj::Maybe<kj::Own<TmpDirStoreScope>> tmpDirStoreScope;
 
   kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;
