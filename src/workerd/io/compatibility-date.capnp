@@ -1227,4 +1227,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When set, tells JSG to make the prototype of all jsg::Objects immutable.
   # TODO(soon): Add the default on date once the flag is verified to be
   # generally safe.
+
+  fetchIterableTypeSupport @146 :Bool
+    $compatEnableFlag("fetch_iterable_type_support")
+    $compatDisableFlag("no_fetch_iterable_type_support")
+    $compatEnableDate("2025-12-16");
+  # Enables passing sync and async iterables as the body of fetch Request or Response.
+  # Previously, sync iterables like Arrays would be accepted but stringified, and async
+  # iterables would be treated as regular objects and not iterated over at all. With this
+  # flag enabled, sync and async iterables will be properly iterated over and their values
+  # used as the body of the request or response.
+  # The actual compat flag enables the specific AsyncGeneratorIgnoringStrings type wrapper
+  # that allows this behavior and allows sync Generator and AsyncGenerator objects to be
+  # included in kj::OneOf declarations safely with strings and other types. When enabled,
+  # strings are ignored but Arrays will be treated as iterables and not stringified as before.
 }

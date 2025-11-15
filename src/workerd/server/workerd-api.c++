@@ -267,6 +267,7 @@ struct WorkerdApi::Impl final {
           jsgConfig(jsg::JsgConfig{
             .noSubstituteNull = features.getNoSubstituteNull(),
             .unwrapCustomThenables = features.getUnwrapCustomThenables(),
+            .fetchIterableTypeSupport = features.getFetchIterableTypeSupport(),
           }) {}
     operator const CompatibilityFlags::Reader() const {
       return features;

@@ -2136,6 +2136,7 @@ class GeneratorContext;
 struct JsgConfig {
   bool noSubstituteNull = false;
   bool unwrapCustomThenables = false;
+  bool fetchIterableTypeSupport = false;
 };
 
 static constexpr JsgConfig DEFAULT_JSG_CONFIG = {};

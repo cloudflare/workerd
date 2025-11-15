@@ -419,6 +419,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   TypeWrapper(v8::Isolate* isolate, MetaConfiguration&& configuration)
       : TypeWrapperBase<Self, T>(configuration)...,
         MaybeWrapper<Self>(configuration),
+        GeneratorWrapper<Self>(configuration),
         PromiseWrapper<Self>(configuration) {
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
     fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API);

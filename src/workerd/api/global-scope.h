@@ -118,6 +118,10 @@ class Navigator: public jsg::Object {
     if (reader.getWebFileSystem()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     }
+
+    JSG_TS_OVERRIDE({
+      sendBeacon(url: string, body?: BodyInit): boolean;
+    });
   }
 };
 
