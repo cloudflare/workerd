@@ -1211,7 +1211,7 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
     // to be dispatched. The writer should handle that case by dropping this lambda.
 
     return !state.closing;
-  }).attach(kj::mv(state));
+  }).attachToThisReference(kj::mv(state));
 }
 
 }  // namespace workerd::tracing
