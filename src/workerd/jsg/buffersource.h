@@ -102,9 +102,10 @@ class BackingStore {
 
   // Creates a new BackingStore of the given size.
   template <BufferSourceType T = v8::Uint8Array>
-  static BackingStore alloc(Lock& js, size_t size) {
-    return BackingStore(js.allocBackingStore(size), size, 0, getBufferSourceElementSize<T>(),
-        construct<T>, checkIsIntegerType<T>());
+  static BackingStore alloc(
+      Lock& js, size_t size, Lock::AllocOption init_mode = Lock::AllocOption::ZERO_INITIALIZED) {
+    return BackingStore(js.allocBackingStore(size, init_mode), size, 0,
+        getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
   }
 
   using Disposer = void(void*, size_t, void*);
