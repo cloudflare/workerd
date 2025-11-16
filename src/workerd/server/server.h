@@ -132,6 +132,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   Worker::LoggingOptions loggingOptions;
 
+  kj::Duration actorInactivityTimeout;
+
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
