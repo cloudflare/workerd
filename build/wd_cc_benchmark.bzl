@@ -1,5 +1,7 @@
 """wd_cc_benchmark definition"""
 
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 def wd_cc_benchmark(
         name,
         linkopts = [],
@@ -8,8 +10,7 @@ def wd_cc_benchmark(
         **kwargs):
     """Wrapper for cc_binary that sets common attributes and links the benchmark library.
     """
-
-    native.cc_test(
+    cc_test(
         name = name,
         defines = ["WD_IS_BENCHMARK"],
         # Use shared linkage for benchmarks, matching the approach used for tests. Unfortunately,

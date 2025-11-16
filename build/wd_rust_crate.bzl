@@ -1,3 +1,4 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test", "rust_unpretty")
 
 def rust_cxx_bridge(
@@ -22,8 +23,7 @@ def rust_cxx_bridge(
             "//conditions:default": [],
         }),
     )
-
-    native.cc_library(
+    cc_library(
         name = name,
         srcs = [src + ".cc"],
         hdrs = [src + ".h"] + hdrs,
