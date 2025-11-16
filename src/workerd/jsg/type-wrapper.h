@@ -386,7 +386,7 @@ template <typename Self, typename... T>
 class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public TypeWrapperBase<Self, T>...,
                    public PrimitiveWrapper,
-                   public NameWrapper<Self>,
+                   public NameWrapper,
                    public StringWrapper,
                    public OptionalWrapper<Self>,
                    public LenientOptionalWrapper<Self>,
@@ -451,7 +451,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   using Name::tryUnwrap
 
   USING_WRAPPER(PrimitiveWrapper);
-  USING_WRAPPER(NameWrapper<Self>);
+  USING_WRAPPER(NameWrapper);
   USING_WRAPPER(StringWrapper);
   USING_WRAPPER(OptionalWrapper<Self>);
   USING_WRAPPER(LenientOptionalWrapper<Self>);
