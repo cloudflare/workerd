@@ -1,1 +1,5 @@
 module(name = "perfetto_cfg")
+
+bazel_dep(name = "rules_python", version = "1.6.3")
+bazel_dep(name = "rules_cc", version = "0.2.11")
+bazel_dep(name = "protobuf", version = "33.1")

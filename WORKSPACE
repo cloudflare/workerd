@@ -1,6 +1,7 @@
 workspace(name = "workerd")
 
 load("@//build/deps:gen/build_deps.bzl", build_deps_gen = "deps_gen")
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
 
 build_deps_gen()
 
