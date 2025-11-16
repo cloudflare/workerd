@@ -12,6 +12,10 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
+#ifdef V8_ENABLE_SANDBOX
+#include <sys/mman.h>
+#endif
+
 namespace workerd::jsg {
 
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
@@ -558,5 +562,23 @@ const capnp::SchemaLoader& ContextGlobal::getSchemaLoader() {
 void ContextGlobal::setSchemaLoader(const capnp::SchemaLoader& schemaLoader) {
   this->schemaLoader = schemaLoader;
 }
+
+#ifdef V8_ENABLE_SANDBOX
+// These are disabled by default in workerd. We do not build workerd with
+// the V8_ENABLED_SANDBOX flag. If we do decide to enable it, we will need
+// additional setup to ensure that these are handled correctly on all platforms.
+// For now, keeping it simple. This bit will only be used in the internal
+// project.
+static constexpr int kPkeyNoRestrictions = 0;
+MemoryProtectionKeyScope::MemoryProtectionKeyScope(Lock& js)
+    : pkey(js.v8Isolate->GetMemoryProtectionKey()) {}
+
+MemoryProtectionKeyScope::PkeyScope::PkeyScope(int pkey): key(pkey), saved(pkey_get(key)) {
+  pkey_set(pkey, kPkeyNoRestrictions);
+}
+MemoryProtectionKeyScope::PkeyScope::~PkeyScope() {
+  pkey_set(key, saved);
+}
+#endif
 
 }  // namespace workerd::jsg
