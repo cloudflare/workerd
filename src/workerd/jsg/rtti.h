@@ -246,7 +246,6 @@ FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
   F(kj::String)                                                                                    \
   F(kj::StringPtr)                                                                                 \
   F(v8::String)                                                                                    \
-  F(ByteString)                                                                                    \
   F(USVString)                                                                                     \
   F(DOMString)                                                                                     \
   F(jsg::JsString)
