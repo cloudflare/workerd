@@ -43,9 +43,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.45",
+    version = "1.2.46",
     deps = [
-        "@crates_vendor__find-msvc-tools-0.1.4//:find_msvc_tools",
+        "@crates_vendor__find-msvc-tools-0.1.5//:find_msvc_tools",
         "@crates_vendor__jobserver-0.1.34//:jobserver",
         "@crates_vendor__shlex-1.3.0//:shlex",
     ] + select({

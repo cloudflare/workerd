@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "bytes",
+    name = "crypto_common",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,7 +29,6 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
         "std",
     ],
     crate_root = "src/lib.rs",
@@ -39,10 +38,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=bytes",
+        "crate-name=crypto-common",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.10.1",
+    version = "0.1.7",
+    deps = [
+        "@crates_vendor__generic-array-0.14.7//:generic_array",
+        "@crates_vendor__typenum-1.19.0//:typenum",
+    ],
 )
