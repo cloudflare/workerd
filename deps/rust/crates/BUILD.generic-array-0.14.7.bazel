@@ -44,9 +44,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.14.9",
+    version = "0.14.7",
     deps = [
-        "@crates_vendor__generic-array-0.14.9//:build_script_build",
+        "@crates_vendor__generic-array-0.14.7//:build_script_build",
         "@crates_vendor__typenum-1.19.0//:typenum",
     ],
 )
@@ -99,7 +99,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.14.9",
+    version = "0.14.7",
     visibility = ["//visibility:private"],
     deps = [
         "@crates_vendor__version_check-0.9.5//:version_check",
