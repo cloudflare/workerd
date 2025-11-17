@@ -709,7 +709,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   disableImportableEnv @78 :Bool
       $compatEnableFlag("disallow_importable_env")
       $compatDisableFlag("allow_importable_env");
-  # When allowed, `import { env } from 'cloudflare:workers'` will provide access
+  # When allowed, `import { env, exports } from 'cloudflare:workers'` will provide access
   # to the per-request environment/bindings. This flag also disables importable exports
   # (the exports proxy) since both features are conceptually related.
 
