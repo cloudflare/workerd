@@ -22,7 +22,7 @@ kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     if (tracing.span.isObserved()) {
-      tracing.span.setTag("actor_id"_kjc, kj::str(actorId));
+      tracing.span.setTag("actor_id"_kjc, actorId.asPtr());
     }
 
     // Lazily initialize actorChannel
@@ -77,7 +77,7 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     if (tracing.span.isObserved()) {
-      tracing.span.setTag("actor_id"_kjc, kj::heapString(actorId));
+      tracing.span.setTag("actor_id"_kjc, actorId.asPtr());
     }
 
     // Unlike in `GlobalActorOutgoingFactory`, we do not create this lazily, since our channel was

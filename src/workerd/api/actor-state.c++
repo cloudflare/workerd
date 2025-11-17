@@ -929,7 +929,7 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       if (tracing.span.isObserved()) {
-        tracing.span.setTag("facet_name"_kjc, kj::str(name));
+        tracing.span.setTag("facet_name"_kjc, name.asPtr());
       }
 
       // Lazily initialize actorChannel

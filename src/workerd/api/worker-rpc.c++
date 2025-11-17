@@ -703,12 +703,12 @@ JsRpcStub::~JsRpcStub() noexcept(false) {
     //   IoContext tear-down is problematic since logWarningOnce() is a method on
     //   IoContext...
     if (IoContext::hasCurrent()) {
-      IoContext::current().logWarningOnce(kj::str(
+      IoContext::current().logWarningOnce(
           "An RPC stub was not disposed properly. You must call dispose() on all stubs in order to "
           "let the other side know that you are no longer using them. You cannot rely on "
           "the garbage collector for this because it may take arbitrarily long before actually "
           "collecting unreachable objects. As a shortcut, calling dispose() on the result of "
-          "an RPC call disposes all stubs within it."));
+          "an RPC call disposes all stubs within it."_kj);
     }
   }
 }
@@ -738,11 +738,11 @@ RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
       //
       // TODO(cleanup): Same comment as in ~JsRpcStub().
       if (IoContext::hasCurrent()) {
-        IoContext::current().logWarningOnce(kj::str(
+        IoContext::current().logWarningOnce(
             "An RPC result was not disposed properly. One of the RPC calls you made expects you "
             "to call dispose() on the return value, but you didn't do so. You cannot rely on "
             "the garbage collector for this because it may take arbitrarily long before actually "
-            "collecting unreachable objects."));
+            "collecting unreachable objects."_kj);
       }
     }
   } else {

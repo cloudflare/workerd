@@ -537,7 +537,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
   TraceContext traceContext(
       context.makeTraceSpan(operationName), context.makeUserTraceSpan(operationName));
 
-  traceContext.setTag("url.full"_kjc, kj::str(url));
+  traceContext.setTag("url.full"_kjc, url);
   // TODO(o11y): Can we parse cacheControl more cleanly? For example, if tags are duplicated in the
   // same category we should choose the last value. We should also support these tags for
   // cache_match (where we should pull them from the returned response and need to keep the span
@@ -545,36 +545,34 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
   KJ_IF_SOME(c, cacheControl) {
     // cacheability
     if (c.contains("no-store")) {
-      traceContext.setTag("cache_control.cacheability"_kjc, kj::str("no-store"));
+      traceContext.setTag("cache_control.cacheability"_kjc, "no-store"_kjc);
     } else if (c.contains("private")) {
-      traceContext.setTag("cache_control.cacheability"_kjc, kj::str("private"));
+      traceContext.setTag("cache_control.cacheability"_kjc, "private"_kjc);
     } else if (c.contains("public")) {
-      traceContext.setTag("cache_control.cacheability"_kjc, kj::str("public"));
+      traceContext.setTag("cache_control.cacheability"_kjc, "public"_kjc);
     }
 
     // expiration
     if (c.contains("no-cache")) {
-      traceContext.setTag("cache_control.expiration"_kjc, kj::str("no-cache"));
+      traceContext.setTag("cache_control.expiration"_kjc, "no-cache"_kjc);
     } else KJ_IF_SOME(idx, c.find("max-age="_kj)) {
       auto maybeNum = c.slice(idx + "max-age="_kj.size()).tryParseAs<double>();
       KJ_IF_SOME(num, maybeNum) {
-        traceContext.setTag(
-            "cache_control.expiration"_kjc, kj::str(kj::str("max-age="), kj::str(num)));
+        traceContext.setTag("cache_control.expiration"_kjc, kj::str("max-age="_kjc, num));
       }
     } else KJ_IF_SOME(idx, c.find("s-maxage="_kj)) {
       auto maybeNum = c.slice(idx + "s-maxage="_kj.size()).tryParseAs<double>();
       KJ_IF_SOME(num, maybeNum) {
-        traceContext.setTag(
-            "cache_control.expiration"_kjc, kj::str(kj::str("s-maxage="), kj::str(num)));
+        traceContext.setTag("cache_control.expiration"_kjc, kj::str("s-maxage="_kjc, num));
       }
     }
 
     // revalidation. Note: There are also stale-while-revalidate and stale-if-error directives, but
     // they are ignored by the Workers Cache API and we do not set them as tags accordingly.
     if (c.contains("must-revalidate")) {
-      traceContext.setTag("cache_control.revalidation"_kjc, kj::str("must-revalidate"));
+      traceContext.setTag("cache_control.revalidation"_kjc, "must-revalidate"_kjc);
     } else if (c.contains("proxy-revalidate")) {
-      traceContext.setTag("cache_control.revalidation"_kjc, kj::str("proxy-revalidate"));
+      traceContext.setTag("cache_control.revalidation"_kjc, "proxy-revalidate"_kjc);
     }
   }
   auto cacheClient = context.getCacheClient();

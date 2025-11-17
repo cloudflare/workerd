@@ -25,7 +25,7 @@ namespace {
   if (IoContext::hasCurrent()) {
     auto& context = IoContext::current();
     if (context.isInspectorEnabled()) {
-      context.logWarning(kj::str(message));
+      context.logWarning(message);
     }
   }
 
