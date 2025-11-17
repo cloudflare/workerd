@@ -105,12 +105,8 @@ local_path_override(
     path = "build/workerd-v8",
 )
 
-# Tell workerd code where to find google-benchmark with CodSpeed.
-#
-# We indirect through `@workerd-google-benchmark` to allow dependents to override how and where
-# google-benchmark is built, similar to the v8 setup above.
-bazel_dep(name = "workerd-google-benchmark")
+bazel_dep(name = "google_benchmark")
 local_path_override(
-    module_name = "workerd-google-benchmark",
+    module_name = "google_benchmark",
     path = "build/google-benchmark",
 )

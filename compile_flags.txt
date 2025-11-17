@@ -143,7 +143,7 @@
 -Iexternal/+_repo_rules2+simdutf/
 -Iexternal/+_repo_rules+nbytes/include/
 -Iexternal/+_repo_rules+ncrypto/include
--Iexternal/workerd-google-benchmark++_repo_rules+codspeed/google_benchmark/include/
+-Iexternal/google_benchmark++_repo_rules+codspeed/google_benchmark/include/
 -Iexternal/perfetto+/include/
 -Iexternal/perfetto+/include/perfetto/base/build_configs/bazel/
 -Ibazel-bin/external/perfetto+/

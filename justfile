@@ -126,7 +126,7 @@ create-external:
   tools/unix/create-external.sh
 
 bench-all:
-  bazel query 'attr(tags, "benchmark-binary", //...)' --output=label | xargs -I {} bazel run --config=benchmark {}
+  bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run --config=benchmark {}
 
 eslint:
   just stream-test \
