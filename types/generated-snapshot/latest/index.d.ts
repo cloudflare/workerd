@@ -9562,18 +9562,18 @@ declare namespace CloudflareWorkersModule {
     protected ctx: ExecutionContext<Props>;
     protected env: Env;
     constructor(ctx: ExecutionContext, env: Env);
+    email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
+    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;
     tailStream?(
       event: TailStream.TailEvent<TailStream.Onset>,
     ):
       | TailStream.TailEventHandlerType
       | Promise<TailStream.TailEventHandlerType>;
-    trace?(traces: TraceItem[]): void | Promise<void>;
-    scheduled?(controller: ScheduledController): void | Promise<void>;
-    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     test?(controller: TestController): void | Promise<void>;
-    email?(message: ForwardableEmailMessage): void | Promise<void>;
+    trace?(traces: TraceItem[]): void | Promise<void>;
   }
   export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
     implements Rpc.DurableObjectBranded
@@ -9582,8 +9582,8 @@ declare namespace CloudflareWorkersModule {
     protected ctx: DurableObjectState<Props>;
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
-    fetch?(request: Request): Response | Promise<Response>;
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+    fetch?(request: Request): Response | Promise<Response>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer,
