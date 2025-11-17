@@ -30,6 +30,11 @@ declare namespace MetadataReader {
   const read: (index: number, position: number, buffer: Uint8Array) => number;
   const getTransitiveRequirements: () => Set<string>;
   const getCompatibilityFlags: () => CompatibilityFlags;
+  const setCpuLimitNearlyExceededCallback: (
+    buf: Uint8Array,
+    sig_clock: number,
+    sig_flag: number
+  ) => void;
   const constructor: {
     getBaselineSnapshotImports(): string[];
   };
