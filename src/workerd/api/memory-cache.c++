@@ -135,7 +135,7 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
   size_t valueSize = value->bytes.size();
 
   auto writeSpan = IoContext::current().makeTraceSpan("memory_cache_write"_kjc);
-  writeSpan.setTag("key"_kjc, kj::str(key));
+  writeSpan.setTag("key"_kjc, key.asPtr());
   writeSpan.setTag("value_size"_kjc, static_cast<double>(valueSize));
   writeSpan.setTag("has_expiration"_kjc, expiration != kj::none);
 

@@ -307,7 +307,7 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
     for (auto& message: messages) {
       auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
       if (data.size() == 0) continue;
-      kj::String type = kj::mv(message.event).orDefault(kj::str("message"));
+      kj::String type = kj::mv(message.event).orDefault([]() { return kj::str("message"); });
       dispatchEventImpl(js,
           js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
               kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
