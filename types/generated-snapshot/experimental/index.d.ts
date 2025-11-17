@@ -10177,6 +10177,7 @@ declare namespace CloudflareWorkersModule {
     scheduled?(controller: ScheduledController): void | Promise<void>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     test?(controller: TestController): void | Promise<void>;
+    email?(message: ForwardableEmailMessage): void | Promise<void>;
   }
   export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
     implements Rpc.DurableObjectBranded
