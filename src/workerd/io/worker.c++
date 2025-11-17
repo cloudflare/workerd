@@ -1034,6 +1034,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
+      cpuLimitNearlyExceededCallback(
+          kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>>(kj::none)),
       api(kj::mv(apiParam)),
       loggingOptions(loggingOptions),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
@@ -1492,6 +1494,10 @@ Worker::Isolate::~Isolate() noexcept(false) {
 
   metrics->evicted();
   weakIsolateRef->invalidate();
+  // The cpuLimitNearlyExceededCallback may hold references to objects owned by the isolate and
+  // their destructors need the isolate to still exist. So destroy them before we destroy the
+  // isolate.
+  *cpuLimitNearlyExceededCallback.lockExclusive() = kj::none;
 
   // Make sure to destroy things under lock. This lock should never be contended since the isolate
   // is about to be destroyed, but we have to take the lock in order to enter the isolate.
@@ -1530,6 +1536,24 @@ const Worker::Isolate& Worker::Isolate::from(jsg::Lock& js) {
 bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isolate) {
   shouldReportIsolateMetrics = true;
   return limitEnforcer.exitJs(*lock);
+}
+
+kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
+  KJ_IF_SOME(cb, *cpuLimitNearlyExceededCallback.lockExclusive()) {
+    return cb.reference();
+  }
+  return kj::none;
+}
+
+void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const {
+  auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
+  // Make sure we don't reassign the callback so we don't invalidate references we've passed out.
+  if (*lock == kj::none) {
+    *lock = kj::mv(cb);
+    return;
+  }
+  kj::throwRecoverableException(KJ_EXCEPTION(
+      FAILED, "Python Workers Internal Error: CpuLimitNearlyExceededCallback already set"));
 }
 
 // EW-1319: Set WebAssembly.Module @@HasInstance

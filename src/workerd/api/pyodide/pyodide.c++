@@ -89,6 +89,19 @@ kj::Array<kj::StringPtr> PyodideMetadataReader::getNames(
   return builder.releaseAsArray();
 }
 
+void PyodideMetadataReader::setCpuLimitNearlyExceededCallback(
+    jsg::Lock& js, kj::Array<kj::byte> wasm_memory, int sig_clock, int sig_flag) {
+  // This callback has to be implemented in C++ because we don't hold the isolate lock when we call
+  // it. It also has to be signal safe since we call it from the cpu time limiter.
+  Worker::Isolate::from(js).setCpuLimitNearlyExceededCallback(
+      [wasm_memory = kj::mv(wasm_memory), sig_clock, sig_flag]() mutable {
+    // Set signal handling clock to fire on the next check.
+    wasm_memory[sig_clock] = 0;
+    // Set signal handling to on
+    wasm_memory[sig_flag] = 1;
+  });
+}
+
 kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
   auto builder = kj::Vector<kj::String>(names.size());
   for (auto i: kj::zeroTo(names.size())) {
