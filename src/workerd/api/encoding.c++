@@ -492,13 +492,15 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
 
 namespace {
 
-[[maybe_unused]] constexpr inline bool isLeadSurrogate(char16_t c) {
+#ifdef KJ_DEBUG
+constexpr inline bool isLeadSurrogate(char16_t c) {
   return (c & 0xFC00) == 0xD800;
 }
 
-[[maybe_unused]] constexpr inline bool isTrailSurrogate(char16_t c) {
+constexpr inline bool isTrailSurrogate(char16_t c) {
   return (c & 0xFC00) == 0xDC00;
 }
+#endif  // KJ_DEBUG
 
 // Calculate UTF-8 length from UTF-16 with potentially invalid surrogates.
 // Invalid surrogates are counted as U+FFFD (3 bytes in UTF-8).
@@ -545,26 +547,6 @@ size_t utf8LengthFromInvalidUtf16(kj::ArrayPtr<const char16_t> input) {
   return utf8Length;
 }
 
-// Encode a single UTF-16 code unit to UTF-8
-inline size_t encodeUtf8CodeUnit(char16_t c, kj::ArrayPtr<char> out) {
-  if (c < 0x80) {
-    KJ_DASSERT(out.size() >= 1);
-    out[0] = static_cast<char>(c);
-    return 1;
-  } else if (c < 0x800) {
-    KJ_DASSERT(out.size() >= 2);
-    out[0] = static_cast<char>(0xC0 | (c >> 6));
-    out[1] = static_cast<char>(0x80 | (c & 0x3F));
-    return 2;
-  } else {
-    KJ_DASSERT(out.size() >= 3);
-    out[0] = static_cast<char>(0xE0 | (c >> 12));
-    out[1] = static_cast<char>(0x80 | ((c >> 6) & 0x3F));
-    out[2] = static_cast<char>(0x80 | (c & 0x3F));
-    return 3;
-  }
-}
-
 // Convert UTF-16 with potentially invalid surrogates to UTF-8.
 // Invalid surrogates are replaced with U+FFFD.
 // Returns the number of UTF-8 bytes written.
@@ -597,14 +579,15 @@ size_t convertInvalidUtf16ToUtf8(kj::ArrayPtr<const char16_t> input, kj::ArrayPt
 
       // Handle the invalid surrogate at inputPos
       // SURROGATE error means unpaired surrogate, so valid pair should be impossible
-      [[maybe_unused]] char16_t c = input[inputPos];
-      KJ_DASSERT(!(isLeadSurrogate(c) && inputPos + 1 < input.size() &&
+      KJ_DASSERT(!(isLeadSurrogate(input[inputPos]) && inputPos + 1 < input.size() &&
                      isTrailSurrogate(input[inputPos + 1])),
           "Valid surrogate pair should not trigger SURROGATE error");
 
-      // Invalid surrogate - replace with U+FFFD (3 bytes)
-      outputPos += encodeUtf8CodeUnit(0xFFFD, out.slice(outputPos, out.size()));
-      KJ_DASSERT(outputPos <= out.size());
+      // Invalid surrogate - replace with U+FFFD (3 bytes: 0xEF 0xBF 0xBD)
+      KJ_DASSERT(outputPos + 3 <= out.size());
+      out[outputPos++] = static_cast<char>(0xEF);
+      out[outputPos++] = static_cast<char>(0xBF);
+      out[outputPos++] = static_cast<char>(0xBD);
       inputPos++;
     } else {
       KJ_FAIL_REQUIRE(
@@ -623,7 +606,12 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
 
 jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   jsg::JsString str = input.orDefault(js.str());
-  std::shared_ptr<v8::BackingStore> backingStore;
+
+#ifdef KJ_DEBUG
+  bool wasAlreadyFlat = str.isFlat();
+  KJ_DEFER({ KJ_ASSERT(wasAlreadyFlat || !str.isFlat()); });
+#endif
+
   size_t utf8_length = 0;
   auto length = str.length(js);
 
@@ -643,22 +631,23 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
     if (utf8_length == length) {
       // ASCII fast path: no conversion needed, Latin-1 is same as UTF-8 for ASCII
       // Allocate final on-heap buffer and copy
-      backingStore = js.allocBackingStore(length, jsg::Lock::AllocOption::UNINITIALIZED);
+      auto backingStore = js.allocBackingStore(length, jsg::Lock::AllocOption::UNINITIALIZED);
       memcpy(backingStore->Data(), latin1Buffer.begin(), length);
-      auto array = v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, backingStore), 0, length);
+      auto array =
+          v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, length);
       return jsg::JsUint8Array(array);
     }
 
     KJ_DASSERT(utf8_length > length);
 
     // Need to convert Latin-1 to UTF-8
-    backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+    auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
     [[maybe_unused]] auto written =
         simdutf::convert_latin1_to_utf8(reinterpret_cast<const char*>(latin1Buffer.begin()), length,
             reinterpret_cast<char*>(backingStore->Data()));
     KJ_DASSERT(utf8_length == written);
-    auto array =
-        v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, backingStore), 0, utf8_length);
+    auto array = v8::Uint8Array::New(
+        v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8_length);
     return jsg::JsUint8Array(array);
   }
 
@@ -681,12 +670,12 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
     simdutf::to_well_formed_utf16(data, length, data);
   }
 
-  backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+  auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
   [[maybe_unused]] auto written = simdutf::convert_valid_utf16_to_utf8(
       data, length, reinterpret_cast<char*>(backingStore->Data()));
 
   auto array =
-      v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, backingStore), 0, utf8_length);
+      v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8_length);
   return jsg::JsUint8Array(array);
 }
 
@@ -937,7 +926,8 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     if (read == length) {
       // ASCII fast path: utf8Length == length means all chars are ASCII, no conversion needed
       if (utf8Length == length) {
-        memcpy(outputBuf.begin(), data, length);
+        KJ_DASSERT(length <= bufferSize);
+        outputBuf.slice(0, length).copyFrom(kj::arrayPtr(data, length));
         return TextEncoder::EncodeIntoResult{
           .read = static_cast<int>(length),
           .written = static_cast<int>(length),
