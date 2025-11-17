@@ -8,7 +8,7 @@ git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "g
 
 git_repository(
     name = "codspeed",
-    commit = "810d6b4f87f3409673c07c1c04cfdd1ebc2d298f",
+    commit = "20ab8dcbaf63b4d0c0ed3ac498cfe3f8104fac36",  # v1.4.1
     recursive_init_submodules = True,
     remote = "https://github.com/CodSpeedHQ/codspeed-cpp",
 )
