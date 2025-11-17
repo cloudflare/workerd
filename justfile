@@ -104,6 +104,10 @@ bench path:
 clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
 
+# example: just clang-tidy //src/rust/jsg:ffi
+clang-tidy target="//...":
+  bazel build {{target}} --config=clang-tidy
+
 generate-types:
   bazel build //types
   cp -r bazel-bin/types/definitions/latest types/generated-snapshot/
