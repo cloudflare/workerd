@@ -560,7 +560,7 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
     return;
   }
 
-  // Update the method name in the already-set JsRpcEventInfo for LTW compatibility
+  // Update the method name in the already-set JsRpcEventInfo for buffered tail worker compatibility
   KJ_IF_SOME(info, trace->eventInfo) {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(jsRpcInfo, tracing::JsRpcEventInfo) {

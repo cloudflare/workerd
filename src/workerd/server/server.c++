@@ -2109,7 +2109,7 @@ class Server::WorkerService final: public Service,
 
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
 
-    kj::Vector<kj::Own<WorkerInterface>> legacyTailWorkers(channels.tails.size());
+    kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers(channels.tails.size());
     kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers(channels.streamingTails.size());
     auto addWorkerIfNotRecursiveTracer = [this, isTracer](
                                              kj::Vector<kj::Own<WorkerInterface>>& workers,
@@ -2152,7 +2152,7 @@ class Server::WorkerService final: public Service,
     // here.
     if (entrypointName.orDefault("") != "test"_kj) {
       for (auto& service: channels.tails) {
-        addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);
+        addWorkerIfNotRecursiveTracer(bufferedTailWorkers, *service);
       }
 
       if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
@@ -2164,7 +2164,7 @@ class Server::WorkerService final: public Service,
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
 
-    if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
+    if (bufferedTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
       // Setting up buffered tail workers support, but only if we actually have tail workers
       // configured.
       auto tracer = kj::rc<PipelineTracer>();
@@ -2193,7 +2193,7 @@ class Server::WorkerService final: public Service,
       // one held by the observer and one that will be passed to the IoContext.
       // The PipelineTracer will be destroyed once both of those are freed.
       waitUntilTasks.add(tracer->onComplete().then(
-          kj::coCapture([tailWorkers = legacyTailWorkers.releaseAsArray()](
+          kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
                             kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
         for (auto& worker: tailWorkers) {
           auto event = kj::heap<workerd::api::TraceCustomEvent>(
