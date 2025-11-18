@@ -2154,11 +2154,8 @@ class Server::WorkerService final: public Service,
       for (auto& service: channels.tails) {
         addWorkerIfNotRecursiveTracer(bufferedTailWorkers, *service);
       }
-
-      if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
-        for (auto& service: channels.streamingTails) {
-          addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
-        }
+      for (auto& service: channels.streamingTails) {
+        addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
       }
     }
 
