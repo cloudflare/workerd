@@ -733,10 +733,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # when enabled, enables Durable Object support for Python Workers.
 
-  streamingTailWorker @82 :Bool
+  obsolete82 @82 :Bool
       $compatEnableFlag("streaming_tail_worker")
       $experimental;
-  # Experimental support for streaming tail worker.
+  # Obsolete flag. Has no effect.
 
   specCompliantUrlpattern @83 :Bool
     $compatEnableFlag("urlpattern_standard")
