@@ -430,6 +430,14 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     (TypeWrapperBase<Self, T>::initTypeWrapper(), ...);
   }
 
+  // PoC: Collect external references for all registered types BEFORE isolate creation
+  static void collectAllExternalReferencesPoC() {
+    KJ_DBG(
+        "========== PoC: Collecting external references for ALL types (no isolate needed!) ==========");
+    (ResourceWrapper<Self, T>::collectExternalReferencesPoC(), ...);
+    KJ_DBG("========== PoC: Collection complete for all types! ==========");
+  }
+
   static TypeWrapper& from(v8::Isolate* isolate) {
     return *reinterpret_cast<TypeWrapper*>(isolate->GetData(SET_DATA_TYPE_WRAPPER));
   }

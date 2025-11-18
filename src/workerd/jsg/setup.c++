@@ -364,6 +364,7 @@ static v8::Isolate* newIsolate(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
 #endif
     }
+    KJ_DBG("creating new isolate");
     return v8::Isolate::New(group, params);
   });
 }

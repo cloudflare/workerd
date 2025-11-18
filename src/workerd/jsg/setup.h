@@ -534,7 +534,13 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
-      : IsolateBase(system, kj::mv(createParams), kj::mv(observer), group) {
+      : IsolateBase(system, [&]() -> v8::Isolate::CreateParams {
+          // PoC: Call this BEFORE creating the isolate to prove we can collect
+          // external references without a v8::Isolate
+          /* auto external_references = */ TypeWrapper::collectAllExternalReferencesPoC();
+          // TODO: Set createParams.external_references = external_references.begin();
+          return kj::mv(createParams);
+        }(), kj::mv(observer), group) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
@@ -549,7 +555,13 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
-      : IsolateBase(system, kj::mv(createParams), kj::mv(observer), v8::IsolateGroup::Create()) {
+      : IsolateBase(system, [&]() -> v8::Isolate::CreateParams {
+          // PoC: Call this BEFORE creating the isolate to prove we can collect
+          // external references without a v8::Isolate
+          /* auto external_references = */ TypeWrapper::collectAllExternalReferencesPoC();
+          // TODO: Set createParams.external_references = external_references.begin();
+          return kj::mv(createParams);
+        }(), kj::mv(observer), v8::IsolateGroup::Create()) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));

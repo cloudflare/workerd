@@ -1286,6 +1286,7 @@ struct ResourceTypeBuilder {
             &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
                 ArgumentIndexes<Method>>::callback,
             v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow));
+    KJ_DBG("created function templates", name);
   }
 
   template <const char* name, typename Method, Method method>
@@ -1618,6 +1619,117 @@ struct JsSetup {
   v8::Local<v8::Context> context;
 };
 
+// PoC: Collector for external references that can be called BEFORE isolate creation
+// This demonstrates that we can collect all function pointers without needing a v8::Isolate
+template <typename TypeWrapper, typename Self, bool isContext>
+struct ExternalReferenceCollector {
+  KJ_DISALLOW_COPY_AND_MOVE(ExternalReferenceCollector);
+
+  ExternalReferenceCollector() {}
+
+  // PoC: Only implement registerMethod to demonstrate the concept
+  template <const char* name, typename Method, Method method>
+  inline void registerMethod() {
+    // Collect the slow path callback pointer
+    auto slowCallback =
+        reinterpret_cast<intptr_t>(&MethodCallback<TypeWrapper, name, isContext, Self, Method,
+                                   method, ArgumentIndexes<Method>>::callback);
+
+    KJ_DBG("ExternalRef collected (BEFORE isolate creation)", name, slowCallback);
+
+    // If fast API is supported, we'd also collect the fast callback
+    if constexpr (isFastApiCompatible<Method>) {
+      auto fastCallback = reinterpret_cast<intptr_t>(MethodCallback<TypeWrapper, name, isContext,
+          Self, Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
+      KJ_DBG("ExternalRef collected (fast path)", name, fastCallback);
+    }
+
+    // In real implementation, we'd add these to a kj::Vector<intptr_t>
+    // For PoC, we just log them to prove this works without an isolate
+  }
+
+  // Stub implementations for all other registry methods (don't need isolate)
+  template <typename Type>
+  inline void registerInherit() {}
+
+  template <const char* name>
+  inline void registerInheritIntrinsic(v8::Intrinsic intrinsic) {}
+
+  template <typename Method, Method method>
+  inline void registerCallable() {
+    // In real implementation, would collect MethodCallback pointer for callable
+    KJ_DBG("ExternalRef collected (callable, BEFORE isolate)");
+  }
+
+  template <const char* name, typename Method, Method method>
+  inline void registerStaticMethod() {
+    // In real implementation, would collect StaticMethodCallback pointers
+    KJ_DBG("ExternalRef collected (static method, BEFORE isolate)", name);
+  }
+
+  template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
+  inline void registerInstanceProperty() {
+    // In real implementation, would collect getter/setter callback pointers
+    KJ_DBG("ExternalRef collected (property getters/setters, BEFORE isolate)", name);
+  }
+
+  template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
+  inline void registerPrototypeProperty() {}
+
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerReadonlyInstanceProperty() {}
+
+  template <typename T>
+  inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {}
+
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerReadonlyPrototypeProperty() {}
+
+  template <const char* name, typename Getter, Getter getter, bool readOnly>
+  inline void registerLazyInstanceProperty() {}
+
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerInspectProperty() {}
+
+  template <const char* name, typename T>
+  inline void registerStaticConstant(T value) {}
+
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerStaticProperty() {}
+
+  template <const char* name, typename Method, Method method>
+  inline void registerIterable() {}
+
+  template <const char* name, typename Method, Method method>
+  inline void registerAsyncIterable() {}
+
+  template <const char* name, typename Method, Method method>
+  inline void registerDispose() {}
+
+  template <const char* name, typename Method, Method method>
+  inline void registerAsyncDispose() {}
+
+  template <typename Type, const char* name>
+  inline void registerNestedType() {}
+
+  inline void registerTypeScriptRoot() {}
+
+  template <const char* tsOverride>
+  inline void registerTypeScriptOverride() {}
+
+  template <const char* tsDefine>
+  inline void registerTypeScriptDefine() {}
+
+  inline void registerJsBundle(Bundle::Reader bundle) {}
+
+  template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
+  inline void registerWildcardProperty() {}
+
+  // Stub for struct property registration (used by JSG_STRUCT)
+  template <typename T, auto ptr>
+  inline void registerStructProperty(kj::StringPtr name) {}
+};
+
 class ModuleRegistryBase {
  public:
   virtual ~ModuleRegistryBase() noexcept(false) {}
@@ -1849,6 +1961,37 @@ class ResourceWrapper {
       return Ref<T>(kj::addRef(p));
     } else {
       return kj::none;
+    }
+  }
+
+  // PoC: Collect external references BEFORE creating isolate
+  // This demonstrates that we can walk the type system and collect all function pointers
+  // without needing a v8::Isolate instance
+  static void collectExternalReferencesPoC() {
+    // Only process resource types (those with registerMembers)
+    if constexpr (requires {
+                    &T::template registerMembers<ExternalReferenceCollector<TypeWrapper, T, false>,
+                        T>;
+                  }) {
+      KJ_DBG("=== PoC: Collecting external references BEFORE isolate creation ===");
+      KJ_DBG("Type:", typeid(T).name());
+
+      // Create our collector (no isolate needed!)
+      ExternalReferenceCollector<TypeWrapper, T, false> collector;
+
+      // Call registerMembers with our collector - this walks through all JSG_METHOD etc.
+      // and collects function pointers
+      if constexpr (isDetected<GetConfiguration, T>()) {
+        // If type has configuration, we'd need to construct a dummy config
+        // For PoC, we'll just skip configured types
+        KJ_DBG("Type has configuration - skipping for PoC");
+      } else {
+        T::template registerMembers<decltype(collector), T>(collector);
+      }
+
+      KJ_DBG("=== PoC: External references collected successfully (no isolate required!) ===");
+      // In real implementation, we'd return a kj::Array<intptr_t> here
+      // and pass it to v8::Isolate::CreateParams::external_references
     }
   }
 
