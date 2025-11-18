@@ -1242,4 +1242,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # that allows this behavior and allows sync Generator and AsyncGenerator objects to be
   # included in kj::OneOf declarations safely with strings and other types. When enabled,
   # strings are ignored but Arrays will be treated as iterables and not stringified as before.
+
+  envModuleNullableSupport @147 :Bool
+    $compatEnableFlag("env_module_nullable_support")
+    $compatDisableFlag("no_env_module_nullable_support");
+  # Enables support for null and undefined values in EnvModule's getCurrentEnv() and
+  # getCurrentExports() methods. When enabled, if the async context contains null or
+  # undefined values, they will be returned instead of falling through to the worker
+  # env/exports. This allows more explicit control over env and exports values in async
+  # contexts.
 }
