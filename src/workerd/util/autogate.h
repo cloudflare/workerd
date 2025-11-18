@@ -22,6 +22,8 @@ enum class AutogateKey {
   TAIL_STREAM_REFACTOR,
   // Enable the BodyBufferInputStream replacement
   BODY_BUFFER_INPUT_STREAM_REPLACEMENT,
+  // Enable the fetch request memory adjustment
+  FETCH_REQUEST_MEMORY_ADJUSTMENT,
   NumOfKeys  // Reserved for iteration.
 };
 
