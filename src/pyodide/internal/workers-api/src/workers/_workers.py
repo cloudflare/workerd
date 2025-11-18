@@ -314,6 +314,23 @@ def _to_js_headers(headers: Headers):
         raise TypeError("Received unexpected type for headers argument")
 
 
+@contextmanager
+def _get_js_body(body):
+    if isinstance(body, bytes):
+        proxy_bytes = create_proxy(body)
+        proxy_buffer = proxy_bytes.getBuffer()
+        try:
+            yield proxy_buffer.data
+            return
+        finally:
+            proxy_buffer.release()
+            proxy_bytes.destroy()
+    if isinstance(body, FormData):
+        yield body.js_object
+        return
+    yield body
+
+
 class Response(FetchResponse):
     """
     This class represents the response to an HTTP request, with a similar API to that of the web
@@ -349,7 +366,7 @@ class Response(FetchResponse):
                 raise TypeError(
                     f"Unsupported type in Response: {body.constructor.name}"
                 )
-        elif not isinstance(body, str | FormData) and body is not None:
+        elif not isinstance(body, str | FormData | bytes) and body is not None:
             raise TypeError(f"Unsupported type in Response: {type(body).__name__}")
 
         # Handle constructing a Response from a JS Response.
@@ -363,11 +380,11 @@ class Response(FetchResponse):
 
         options = self._create_options(status, status_text, headers, web_socket)
 
-        # Initialize via the FetchResponse super-class which gives us access to
-        # methods that we would ordinarily have to redeclare.
-        js_resp = js.Response.new(
-            body.js_object if isinstance(body, FormData) else body, **options
-        )
+        # To avoid unnecessary copies we use this context manager.
+        with _get_js_body(body) as js_body:
+            # Initialize via the FetchResponse super-class which gives us access to
+            # methods that we would ordinarily have to redeclare.
+            js_resp = js.Response.new(js_body, **options)
         super().__init__(js_resp.url, js_resp)
 
     def __repr__(self):
