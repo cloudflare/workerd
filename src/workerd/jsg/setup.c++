@@ -378,6 +378,7 @@ IsolateBase::IsolateBase(V8System& system,
       ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
+      exportsAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -477,6 +478,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
+    KJ_DEFER(workerExportsObj.Reset());
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
     // that is destroyed before the lock is released.

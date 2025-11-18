@@ -239,6 +239,10 @@ class IsolateBase {
     return *envAsyncContextKey;
   }
 
+  AsyncContextFrame::StorageKey& getExportsAsyncContextKey() {
+    return *exportsAsyncContextKey;
+  }
+
   void setUsingNewModuleRegistry() {
     usingNewModuleRegistry = true;
   }
@@ -352,6 +356,9 @@ class IsolateBase {
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
 
+  // Object used as the underlying storage for a workers exports.
+  v8::Global<v8::Object> workerExportsObj;
+
   /* *** External Memory accounting *** */
   // ExternalMemoryTarget holds a weak reference back to the isolate. ExternalMemoryAjustments
   // hold references to the ExternalMemoryTarget. This allows the ExternalMemoryAjustments to
@@ -360,6 +367,9 @@ class IsolateBase {
 
   // A shared async context key for accessing env
   kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
+
+  // A shared async context key for accessing exports
+  kj::Own<AsyncContextFrame::StorageKey> exportsAsyncContextKey;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.
@@ -797,6 +807,15 @@ class Isolate: public IsolateBase {
     kj::Maybe<V8Ref<v8::Object>> getWorkerEnv() override {
       if (jsgIsolate.workerEnvObj.IsEmpty()) return kj::none;
       return v8Ref<v8::Object>(jsgIsolate.workerEnvObj.Get(v8Isolate));
+    }
+
+    void setWorkerExports(V8Ref<v8::Object> value) override {
+      jsgIsolate.workerExportsObj.Reset(v8Isolate, value.getHandle(*this));
+    }
+
+    kj::Maybe<V8Ref<v8::Object>> getWorkerExports() override {
+      if (jsgIsolate.workerExportsObj.IsEmpty()) return kj::none;
+      return v8Ref<v8::Object>(jsgIsolate.workerExportsObj.Get(v8Isolate));
     }
 
    private:
