@@ -120,6 +120,6 @@ http_archive(
 http_archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "b92e186ff44840edd1350f57e6c75144d912407045a3057450014cf9b2014a83",
-    url = "https://github.com/simdutf/simdutf/releases/download/v7.4.0/singleheader.zip",
+    sha256 = "52c319501f1c3ddd0d1e87feaeb1c97fb3ecefc1fd6f8f7e06ac7337367e5823",
+    url = "https://github.com/simdutf/simdutf/releases/download/v7.6.0/singleheader.zip",
 )
