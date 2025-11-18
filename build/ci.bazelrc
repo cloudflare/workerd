@@ -78,6 +78,9 @@ build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-asan --config=asan --copt="-g0" --strip=always
 build:ci-linux-arm-asan --config=ci-linux-asan
 
+# Speculatively disable asynchronous remote cache uploads on macOS to debug CI job freezes. This is
+# a no-op when remote caching is disabled, so we can always enable it on macOS.
+build:macos --noremote_cache_async
 
 # Unlike the bazel Unix toolchain the macOS toolchain sets "-O0 -DDEBUG" for fastbuild by
 # default. This is unhelpful for compile speeds and test performance, remove the DEBUG
