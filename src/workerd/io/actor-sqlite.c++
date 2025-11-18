@@ -25,6 +25,11 @@ static bool willFireEarlier(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alar
   return alarm1.orDefault(kj::maxValue) < alarm2.orDefault(kj::maxValue);
 }
 
+// Helper to make kj::Maybe<kj::Date> loggable - returns the date or kj::maxValue for logging
+static kj::Date logDate(kj::Maybe<kj::Date> maybeDate) {
+  return maybeDate.orDefault(kj::maxValue);
+}
+
 // Set options.allowUnconfirmed to false and log a reason why.
 void disableAllowUnconfirmed(ActorCacheOps::WriteOptions& options, kj::StringPtr reason) {
   if (options.allowUnconfirmed) {
@@ -38,14 +43,16 @@ void disableAllowUnconfirmed(ActorCacheOps::WriteOptions& options, kj::StringPtr
 ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
     OutputGate& outputGate,
     kj::Function<kj::Promise<void>()> commitCallback,
-    Hooks& hooks)
+    Hooks& hooks,
+    bool debugAlarmSyncParam)
     : db(kj::mv(dbParam)),
       outputGate(outputGate),
       commitCallback(kj::mv(commitCallback)),
       hooks(hooks),
       kv(*db),
       metadata(*db),
-      commitTasks(*this) {
+      commitTasks(*this),
+      debugAlarmSync(debugAlarmSyncParam) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
   db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
@@ -356,7 +363,17 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
     // If an earlier commitImpl() invocation is already in the process of updating precommit
     // alarms but has not yet made the commitCallback() call, it should be OK to wait on it to
     // perform the precommit alarm update and db commit for this invocation, too.
+    kj::Maybe<kj::Date> alarmBeforeMerge;
+    if (debugAlarmSync) {
+      alarmBeforeMerge = metadata.getAlarm();
+      KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Commit merge waiting", logDate(alarmBeforeMerge));
+    }
     co_await pending.addBranch();
+    if (debugAlarmSync) {
+      auto alarmAfterMerge = metadata.getAlarm();
+      KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Commit merge resumed", "alarm_before",
+          logDate(alarmBeforeMerge), "alarm_after", logDate(alarmAfterMerge));
+    }
     co_return;
   }
 
@@ -380,7 +397,14 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // alarm update request for the earlier time and wait for it to complete.  This helps ensure
   // that the successfully scheduled alarm time is always earlier or equal to the alarm state in
   // the successfully persisted db.
+  int syncIterations = 0;
+  auto startAlarmState = metadata.getAlarm();
   while (willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
+    if (debugAlarmSync) {
+      auto currentAlarmState = metadata.getAlarm();
+      KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Move earlier loop iteration", syncIterations,
+          logDate(currentAlarmState), logDate(alarmScheduledNoLaterThan));
+    }
     // Note that we do not pass alarmLaterChain here. We don't need to for the following reasons:
     //
     //  1. We already waited for the chain in the precommitAlarmState promise above.
@@ -393,6 +417,12 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
     // of the event loop. That means we're going to suspend, even if the promise is ready, which
     // means we'd take a performance hit.
     co_await requestScheduledAlarm(metadata.getAlarm(), kj::READY_NOW);
+    syncIterations++;
+  }
+  if (debugAlarmSync && syncIterations > 0) {
+    KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Move earlier loop complete", "started_with",
+        logDate(startAlarmState), "ended_with", logDate(metadata.getAlarm()), "iterations",
+        syncIterations);
   }
 
   // Issue the commitCallback() request to persist the db state, then synchronously clear the
@@ -406,12 +436,23 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   co_await commitCallbackPromise;
   lastConfirmedAlarmDbState = alarmStateForCommit;
 
+  if (debugAlarmSync) {
+    KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Persisted in SQLite", "sqlite_has",
+        logDate(alarmStateForCommit), "alarmScheduledNoLaterThan",
+        logDate(alarmScheduledNoLaterThan));
+  }
+
   // Notify any merged commitImpl() requests that the db persistence completed.
   fulfiller->fulfill();
 
   // If the db state is now later than the in-flight scheduled alarms, issue a request to update
   // it to match the db state.
   if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
+    if (debugAlarmSync) {
+      KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Moving alarm later", "sqlite_has",
+          logDate(alarmStateForCommit), "alarmScheduledNoLaterThan",
+          logDate(alarmScheduledNoLaterThan));
+    }
     // We need to extend our alarmLaterChain now that we're adding a new "move-later" alarm task.
     //
     // Technically, we don't need serialize our "move-later" alarms since SQLite has the later
