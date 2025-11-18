@@ -476,6 +476,10 @@ async def response_unit_tests(env):
     assert response_none.status == 204
     assert response_none.body is None
 
+    response_bytes = Response(b"test")
+    assert response_bytes.status == 200
+    assert await response_bytes.text() == "test"
+
     class Test:
         def __init__(self, x):
             self.x = x
