@@ -502,51 +502,6 @@ constexpr inline bool isTrailSurrogate(char16_t c) {
 }
 #endif  // KJ_DEBUG
 
-// Calculate UTF-8 length from UTF-16 with potentially invalid surrogates.
-// Invalid surrogates are counted as U+FFFD (3 bytes in UTF-8).
-// Uses SIMD for valid portions and falls back to scalar for invalid surrogates.
-size_t utf8LengthFromInvalidUtf16(kj::ArrayPtr<const char16_t> input) {
-  size_t inputPos = 0;
-  size_t utf8Length = 0;
-
-  while (inputPos < input.size()) {
-    // Find the next invalid surrogate using SIMD validation
-    auto result =
-        simdutf::validate_utf16_with_errors(input.begin() + inputPos, input.size() - inputPos);
-
-    if (result.error == simdutf::error_code::SUCCESS) {
-      // Remaining input is valid - calculate length with SIMD
-      utf8Length +=
-          simdutf::utf8_length_from_utf16(input.begin() + inputPos, input.size() - inputPos);
-      break;
-    }
-
-    if (result.error == simdutf::error_code::SURROGATE) {
-      // Calculate length for the valid portion before the error with SIMD
-      if (result.count > 0) {
-        utf8Length += simdutf::utf8_length_from_utf16(input.begin() + inputPos, result.count);
-        inputPos += result.count;
-      }
-
-      // Handle the invalid surrogate at inputPos
-      // SURROGATE error means unpaired surrogate, so valid pair should be impossible
-      [[maybe_unused]] char16_t c = input[inputPos];
-      KJ_DASSERT(!(isLeadSurrogate(c) && inputPos + 1 < input.size() &&
-                     isTrailSurrogate(input[inputPos + 1])),
-          "Valid surrogate pair should not trigger SURROGATE error");
-
-      // Invalid surrogate = U+FFFD (3 bytes)
-      utf8Length += 3;
-      inputPos++;
-    } else {
-      KJ_FAIL_REQUIRE(
-          "Unexpected UTF-16 validation error from simdutf", static_cast<int>(result.error));
-    }
-  }
-
-  return utf8Length;
-}
-
 // Convert UTF-16 with potentially invalid surrogates to UTF-8.
 // Invalid surrogates are replaced with U+FFFD.
 // Returns the number of UTF-8 bytes written.
@@ -657,14 +612,14 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   kj::SmallArray<uint16_t, 4096> utf16Buffer(length);
 
   // Note: writeInto() doesn't flatten the string - it calls writeTo() which chains through
-  // Write2 -> WriteV2 -> WriteHelperV2 -> String::WriteToFlat (written by Erik in 2008).
+  // Write2 -> WriteV2 -> WriteHelperV2 -> String::WriteToFlat.
   // This means we may read from multiple string segments, but that's fine for our use case.
   [[maybe_unused]] auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
   KJ_DASSERT(
       writeResult.written == length, "writeInto must completely overwrite the backing buffer");
 
   auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());
-  utf8_length = utf8LengthFromInvalidUtf16(kj::arrayPtr(data, length));
+  utf8_length = simdutf::utf8_length_from_utf16_with_replacement(data, length);
 
   if (!simdutf::validate_utf16(data, length)) {
     simdutf::to_well_formed_utf16(data, length, data);
@@ -819,7 +774,7 @@ size_t findBestFitInvalidUtf16(const char16_t* data, size_t length, size_t buffe
       chunkSize = (remaining >= 2) ? 2 : remaining;
     }
 
-    size_t chunkUtf8Len = utf8LengthFromInvalidUtf16(kj::arrayPtr(data + pos, chunkSize));
+    size_t chunkUtf8Len = simdutf::utf8_length_from_utf16_with_replacement(data + pos, chunkSize);
 
     if (utf8Accumulated + chunkUtf8Len > bufferSize) {
       // Chunk would overflow - binary search within chunk
@@ -838,7 +793,8 @@ size_t findBestFitInvalidUtf16(const char16_t* data, size_t length, size_t buffe
           break;
         }
 
-        size_t midUtf8Length = utf8LengthFromInvalidUtf16(kj::arrayPtr(data + pos, adjustedMid));
+        size_t midUtf8Length =
+            simdutf::utf8_length_from_utf16_with_replacement(data + pos, adjustedMid);
         if (utf8Accumulated + midUtf8Length <= bufferSize) {
           bestFit = adjustedMid;
           left = adjustedMid + 1;
@@ -1043,7 +999,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
   }
 
   // Slow path: calculate exact UTF-8 length
-  size_t utf8Length = utf8LengthFromInvalidUtf16(kj::arrayPtr(data, length));
+  size_t utf8Length = simdutf::utf8_length_from_utf16_with_replacement(data, length);
   if (utf8Length <= bufferSize) {
     size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, length), outputBuf);
     return TextEncoder::EncodeIntoResult{
