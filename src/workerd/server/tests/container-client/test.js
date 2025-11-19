@@ -12,18 +12,37 @@ export class DurableObjectExample extends DurableObject {
     }
     assert.strictEqual(container.running, false);
 
-    // Start container with valid configuration
-    await container.start({
-      entrypoint: ['node', 'nonexistant.js'],
-    });
+    // Start container with invalid entrypoint
+    {
+      container.start({
+        entrypoint: ['node', 'nonexistant.js'],
+      });
 
-    let exitCode = undefined;
-    await container.monitor().catch((err) => {
-      exitCode = err.exitCode;
-    });
+      let exitCode = undefined;
+      await container.monitor().catch((err) => {
+        exitCode = err.exitCode;
+      });
 
-    assert.strictEqual(typeof exitCode, 'number');
-    assert.notEqual(0, exitCode);
+      assert.strictEqual(typeof exitCode, 'number');
+      assert.notEqual(0, exitCode);
+    }
+
+    // Start container with valid entrypoint and stop it
+    {
+      container.start();
+
+      await scheduler.wait(500);
+
+      let exitCode = undefined;
+      const monitor = container.monitor().catch((err) => {
+        exitCode = err.exitCode;
+      });
+      await container.destroy();
+      await monitor;
+
+      assert.strictEqual(typeof exitCode, 'number');
+      assert.equal(137, exitCode);
+    }
   }
 
   async testBasics() {
@@ -36,7 +55,7 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
 
     // Start container with valid configuration
-    await container.start({
+    container.start({
       env: { A: 'B', C: 'D', L: 'F' },
       enableInternet: true,
     });
@@ -68,7 +87,7 @@ export class DurableObjectExample extends DurableObject {
             );
             throw e;
           }
-          await scheduler.wait(1000);
+          await scheduler.wait(500);
         }
       }
 
@@ -81,28 +100,39 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
-  async leaveRunning() {
-    // Start container and leave it running
+  async testSetInactivityTimeout() {
     const container = this.ctx.container;
-    if (!container.running) {
-      await container.start({
-        entrypoint: ['leave-running'],
-      });
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
     }
+    assert.strictEqual(container.running, false);
+
+    container.start();
 
     assert.strictEqual(container.running, true);
-  }
 
-  async checkRunning() {
-    // Check container was started using leaveRunning()
-    const container = this.ctx.container;
+    // Wait for container to be running
+    await scheduler.wait(500);
 
-    // Let's guard in case the test assumptions are wrong.
-    if (!container.running) {
-      return;
+    try {
+      await container.setInactivityTimeout(0);
+    } catch (err) {
+      assert.strictEqual(err.name, 'TypeError');
+      assert.match(
+        err.message,
+        /setInactivityTimeout\(\) cannot be called with a durationMs <= 0/
+      );
     }
 
-    await container.destroy();
+    await container.setInactivityTimeout(1000);
+  }
+
+  // Assert that the container is running
+  async expectRunning(running) {
+    assert.strictEqual(this.ctx.container.running, running);
+    await this.ctx.container.destroy();
   }
 
   async abort() {
@@ -130,7 +160,7 @@ export class DurableObjectExample extends DurableObject {
 
   async startAlarm(start, ms) {
     if (start && !this.ctx.container.running) {
-      await this.ctx.container.start();
+      this.ctx.container.start();
     }
     await this.ctx.storage.setAlarm(Date.now() + ms);
   }
@@ -148,7 +178,7 @@ export class DurableObjectExample extends DurableObject {
     const { container } = this.ctx;
 
     if (!container.running) {
-      await container.start({
+      container.start({
         env: { WS_ENABLED: 'true' },
         enableInternet: true,
       });
@@ -256,25 +286,6 @@ export const testExitCode = {
   },
 };
 
-// Test container persistence across durable object instances
-export const testAlreadyRunning = {
-  async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName('testAlreadyRunning');
-    let stub = env.MY_CONTAINER.get(id);
-
-    await stub.leaveRunning();
-
-    await assert.rejects(() => stub.abort(), {
-      name: 'Error',
-      message: 'Application called abort() to reset Durable Object.',
-    });
-
-    // Recreate stub to get a new instance
-    stub = env.MY_CONTAINER.get(id);
-    await stub.checkRunning();
-  },
-};
-
 // Test WebSocket functionality
 export const testWebSockets = {
   async test(_ctrl, env) {
@@ -284,7 +295,7 @@ export const testWebSockets = {
   },
 };
 
-// // Test alarm functionality with containers
+// Test alarm functionality with containers
 export const testAlarm = {
   async test(_ctrl, env) {
     // Test that we can recover the use_containers flag correctly in setAlarm
@@ -302,6 +313,9 @@ export const testAlarm = {
       retries++;
     }
 
+    // Wait for container to start
+    await scheduler.wait(500);
+
     // Set alarm for future and abort
     await stub.startAlarm(false, 1000);
 
@@ -316,5 +330,27 @@ export const testAlarm = {
 
     stub = env.MY_CONTAINER.get(id);
     await stub.checkAlarmAbortConfirmation();
+  },
+};
+
+export const testSetInactivityTimeout = {
+  async test(_ctrl, env) {
+    {
+      const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
+
+      await stub.testSetInactivityTimeout();
+
+      await assert.rejects(() => stub.abort(), {
+        name: 'Error',
+        message: 'Application called abort() to reset Durable Object.',
+      });
+    }
+
+    {
+      const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
+
+      // Container should still be running after DO exited
+      await stub.expectRunning(true);
+    }
   },
 };
