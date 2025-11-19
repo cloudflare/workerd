@@ -1597,6 +1597,51 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
   }
 }
 
+void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
+  // Fast path (without string allocations) if only some spans are observed.
+  if (!span.isObserved()) {
+    userSpan.setTag(kj::mv(key), kj::mv(value));
+    return;
+  }
+  if (!userSpan.isObserved()) {
+    span.setTag(kj::mv(key), kj::mv(value));
+    return;
+  }
+
+  // We need to duplicate the key and value since both are move-only types.
+  // Clone the value based on its type.
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(s, kj::StringPtr) {
+      span.setTag(key.clone(), s);
+      userSpan.setTag(kj::mv(key), s);
+    }
+    KJ_CASE_ONEOF(s, kj::String) {
+      span.setTag(key.clone(), kj::str(s));
+      userSpan.setTag(kj::mv(key), kj::mv(s));
+    }
+    KJ_CASE_ONEOF(s, kj::LiteralStringConst) {
+      span.setTag(key.clone(), s);
+      userSpan.setTag(kj::mv(key), s);
+    }
+    KJ_CASE_ONEOF(s, kj::ConstString) {
+      span.setTag(key.clone(), s.clone());
+      userSpan.setTag(kj::mv(key), kj::mv(s));
+    }
+    KJ_CASE_ONEOF(b, bool) {
+      span.setTag(key.clone(), b);
+      userSpan.setTag(kj::mv(key), b);
+    }
+    KJ_CASE_ONEOF(d, double) {
+      span.setTag(key.clone(), d);
+      userSpan.setTag(kj::mv(key), d);
+    }
+    KJ_CASE_ONEOF(i, int64_t) {
+      span.setTag(key.clone(), i);
+      userSpan.setTag(kj::mv(key), i);
+    }
+  }
+}
+
 Span::TagValue spanTagClone(const Span::TagValue& tag) {
   KJ_SWITCH_ONEOF(tag) {
     KJ_CASE_ONEOF(str, kj::ConstString) {
