@@ -971,26 +971,6 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::ConstString operationName,
-    kj::Vector<Span::Tag> tags) {
-  return getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
-    for (Span::Tag& tag: tags) {
-      tracing.userSpan.setTag(kj::mv(tag.key), kj::mv(tag.value));
-    }
-    return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
-  },
-      SubrequestOptions{
-        .inHouse = isInHouse,
-        .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
-      });
-}
-
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
@@ -1027,15 +1007,6 @@ kj::Own<kj::HttpClient> IoContext::getHttpClient(
     uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
   return asHttpClient(
       getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
-}
-
-kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::ConstString operationName,
-    kj::Vector<Span::Tag> tags) {
-  return asHttpClient(getSubrequestChannelWithSpans(
-      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClient(

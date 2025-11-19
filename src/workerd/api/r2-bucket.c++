@@ -25,17 +25,21 @@
 namespace workerd::api::public_beta {
 kj::Own<kj::HttpClient> r2GetClient(
     IoContext& context, uint subrequestChannel, R2UserTracing user) {
-  kj::Vector<Span::Tag> tags;
-  tags.add("rpc.service"_kjc, kj::ConstString("r2"_kjc));
-  tags.add(user.method.key, kj::ConstString(kj::str(user.method.value)));
+  auto traceSpan = context.makeTraceSpan(user.op);
+  auto userSpan = context.makeUserTraceSpan(user.op);
+  TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+  traceContext.userSpan.setTag("rpc.service"_kjc, "r2"_kjc);
+  traceContext.userSpan.setTag(user.method.key, user.method.value);
   KJ_IF_SOME(b, user.bucket) {
-    tags.add("cloudflare.r2.bucket"_kjc, kj::ConstString(kj::str(b)));
+    traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, b);
   }
   KJ_IF_SOME(tag, user.extraTag) {
-    tags.add(tag.key, kj::ConstString(kj::str(tag.value)));
+    traceContext.userSpan.setTag(tag.key, tag.value);
   }
 
-  return context.getHttpClientWithSpans(subrequestChannel, true, kj::none, user.op, kj::mv(tags));
+  // TODO(o11y): Attach trace context to awaitIo call to match operation lifetime better?
+  return context.getHttpClient(subrequestChannel, true, kj::none, traceContext)
+      .attach(kj::mv(traceContext));
 }
 
 static bool isWholeNumber(double x) {
