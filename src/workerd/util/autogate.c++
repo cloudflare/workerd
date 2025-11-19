@@ -27,6 +27,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "tail-stream-refactor"_kj;
     case AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT:
       return "body-buffer-input-stream-replacement"_kj;
+    case AutogateKey::FETCH_REQUEST_MEMORY_ADJUSTMENT:
+      return "fetch-request-memory-adjustment"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

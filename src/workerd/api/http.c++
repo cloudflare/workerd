@@ -2032,6 +2032,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   //   requires a significant rewrite of the code below. It'll probably get simpler, though?
   kj::Own<kj::HttpClient> client = asHttpClient(kj::mv(clientWithTracing.client));
 
+  if (util::Autogate::Autogate::isEnabled(util::AutogateKey::FETCH_REQUEST_MEMORY_ADJUSTMENT)) {
+    // fetch requests use a lot of unaccounted c++ memory, so we simply adjust memory usage by some
+    // arbitrary amount to protect against OOMs.
+    client = client.attach(js.getExternalMemoryAdjustment(3 * 1024));
+  }
+
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   jsRequest->shallowCopyHeadersTo(headers);
 
