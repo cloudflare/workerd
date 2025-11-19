@@ -206,6 +206,32 @@ genrule(
 GENERATED_SOURCES += ["keywordhash.h"]
 
 # ========================================================================
+# Constructs ctime.c
+
+genrule(
+    name = "ctime_c",
+    srcs = [],
+    outs = ["ctime.c"],
+    cmd = "tclsh $(location tool/mkctimec.tcl) $(RULEDIR)/ctime.c",
+    tools = ["tool/mkctimec.tcl"],
+)
+
+GENERATED_SOURCES += ["ctime.c"]
+
+# ========================================================================
+# Constructs pragma.h
+
+genrule(
+    name = "pragma_h",
+    srcs = [],
+    outs = ["pragma.h"],
+    cmd = "tclsh $(location tool/mkpragmatab.tcl) $(RULEDIR)/pragma.h",
+    tools = ["tool/mkpragmatab.tcl"],
+)
+
+GENERATED_SOURCES += ["pragma.h"]
+
+# ========================================================================
 # Constructs sqlite3.h.
 
 cc_binary(
