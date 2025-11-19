@@ -26,8 +26,8 @@ SqlStorage::~SqlStorage() {}
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
   auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_exec"_kjc);
-  userSpan.setTag("db.system.name"_kjc, kj::str("cloudflare-durable-object-sql"_kjc));
-  userSpan.setTag("db.operation.name"_kjc, kj::str("exec"_kjc));
+  userSpan.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
+  userSpan.setTag("db.operation.name"_kjc, "exec"_kjc);
   userSpan.setTag("db.query.text"_kjc, kj::str(querySql));
   userSpan.setTag(
       "cloudflare.durable_object.query.bindings"_kjc, static_cast<int64_t>(bindings.size()));
@@ -108,7 +108,7 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
   auto userSpan =
       IoContext::current().makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
-  userSpan.setTag("db.operation.name"_kjc, kj::str("getDatabaseSize"_kjc));
+  userSpan.setTag("db.operation.name"_kjc, "getDatabaseSize"_kjc);
   auto& db = getDb(js);
   int64_t pages = execMemoized(db, pragmaPageCount,
       "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
