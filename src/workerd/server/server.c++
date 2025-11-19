@@ -2347,6 +2347,11 @@ class Server::WorkerService final: public Service,
           auto reason = 0;
           a->shutdown(reason);
         }
+
+        // Drop the container client reference
+        // If setInactivityTimeout() was called, there's still a timer holding a reference
+        // If not, this may be the last reference and the ContainerClient destructor will run
+        containerClient = kj::none;
       }
 
       void active() override {
@@ -2475,6 +2480,7 @@ class Server::WorkerService final: public Service,
         manager = kj::none;
         tracker->shutdown();
         actor = kj::none;
+        containerClient = kj::none;
 
         KJ_IF_SOME(r, reason) {
           brokenReason = kj::cp(r);
@@ -2545,6 +2551,9 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
+
+      // Reference to the ContainerClient (if container is enabled for this actor)
+      kj::Maybe<kj::Own<ContainerClient>> containerClient;
 
       // If this is a `ForkedPromise<void>`, await the promise. When it has resolved, then
       // `classAndId` will have been replaced with the resolved `ClassAndId` value.
@@ -2717,6 +2726,11 @@ class Server::WorkerService final: public Service,
         }
         // Destroy the last strong Worker::Actor reference.
         actor = kj::none;
+
+        // Drop our reference to the ContainerClient
+        // If setInactivityTimeout() was called, the timer still holds a reference
+        // so the container stays alive until the timeout expires
+        containerClient = kj::none;
       }
 
       void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
@@ -2801,10 +2815,8 @@ class Server::WorkerService final: public Service,
 
         auto loopback = kj::refcounted<Loopback>(*this);
 
-        kj::Maybe<rpc::Container::Client> containerClient = kj::none;
+        kj::Maybe<rpc::Container::Client> container = kj::none;
         KJ_IF_SOME(config, containerOptions) {
-          auto& dockerPathRef = KJ_ASSERT_NONNULL(ns.dockerPath,
-              "dockerPath needs to be defined in order enable containers on this durable object.");
           KJ_ASSERT(config.hasImageName(), "Image name is required");
           auto imageName = config.getImageName();
           kj::String containerId;
@@ -2816,15 +2828,17 @@ class Server::WorkerService final: public Service,
               containerId = kj::str(existingId);
             }
           }
-          containerClient = kj::heap<ContainerClient>(ns.byteStreamFactory, timer, ns.dockerNetwork,
-              kj::str(dockerPathRef),
-              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId),
-              kj::str(imageName), ns.waitUntilTasks);
+
+          // Get or create the ContainerClient (may reuse existing one from previous actor instance)
+          containerClient = ns.getContainerClient(
+              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName);
+
+          container = KJ_ASSERT_NONNULL(containerClient)->addRef();
         }
 
         auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
             kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
-            kj::mv(containerClient), *this);
+            kj::mv(container), *this);
         onBrokenTask = monitorOnBroken(*actor);
         this->actor = kj::mv(actor);
       }
@@ -2862,6 +2876,36 @@ class Server::WorkerService final: public Service,
       })->addRef();
     }
 
+    kj::Own<ContainerClient> getContainerClient(
+        kj::StringPtr containerId, kj::StringPtr imageName) {
+      // Check if ContainerClient already exists in map
+      KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
+        // Found existing client, return a new reference to it
+        return existingClient->addRef();
+      }
+
+      // Not found, create new ContainerClient
+      auto& dockerPathRef = KJ_ASSERT_NONNULL(
+          dockerPath, "dockerPath must be defined to enable containers on this Durable Object.");
+
+      // Create cleanup callback to remove from map when destroyed
+      kj::Function<void()> cleanupCallback = [this, containerId]() {
+        // Remove raw pointer from map when destructor runs
+        containerClients.erase(containerId);
+      };
+
+      // Create new ContainerClient
+      auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
+          kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName), waitUntilTasks,
+          kj::mv(cleanupCallback));
+
+      // Store raw pointer in map (does not own)
+      containerClients.insert(kj::str(containerId), client.get());
+
+      // Return owned reference
+      return kj::mv(client);
+    }
+
     void abortAll(kj::Maybe<const kj::Exception&> reason) {
       for (auto& actor: actors) {
         actor.value->abort(reason);
@@ -2890,6 +2934,12 @@ class Server::WorkerService final: public Service,
     // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
     // request comes in, we recreate the Own<Worker::Actor>.
     ActorMap actors;
+
+    // Map of container IDs to ContainerClients (for reconnection support with inactivity timeouts).
+    // The map holds raw pointers (not ownership) - ContainerClients are owned by actors and timers.
+    // When the last reference is dropped, the destructor removes the entry from this map.
+    kj::HashMap<kj::StringPtr, ContainerClient*> containerClients;
+
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
     capnp::ByteStreamFactory& byteStreamFactory;
