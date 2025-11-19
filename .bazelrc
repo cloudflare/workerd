@@ -51,6 +51,9 @@ build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
 build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations
 
+# opt in to capnp deprecation warnings about trying to attach to a refcounted object
+build --cxxopt=-DKJ_WARN_REFCOUNTED_ATTACH=1
+
 # TODO(cleanup): Causes warnings with LLVM20, fix and enable again
 build --copt=-Wno-nontrivial-memaccess
 
