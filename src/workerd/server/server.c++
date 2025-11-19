@@ -5046,7 +5046,7 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "Connection:request()");
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); });
+      metadata.cfBlobJson = mapCopyString(cfBlobJson);
 
       Response* wrappedResponse = &response;
       kj::Own<ResponseWrapper> ownResponse;
