@@ -15,8 +15,7 @@ kj::Maybe<jsg::JsObject> EnvModule::getCurrentEnv(jsg::Lock& js) {
       if (handle->IsObject()) {
         return jsg::JsObject(handle.As<v8::Object>());
       }
-      if (FeatureFlags::get(js).getEnvModuleNullableSupport() &&
-          handle->IsNullOrUndefined()) {
+      if (FeatureFlags::get(js).getEnvModuleNullableSupport() && handle->IsNullOrUndefined()) {
         return kj::none;
       }
     }
@@ -47,8 +46,7 @@ kj::Maybe<jsg::JsObject> EnvModule::getCurrentExports(jsg::Lock& js) {
       if (handle->IsObject()) {
         return jsg::JsObject(handle.As<v8::Object>());
       }
-      if (FeatureFlags::get(js).getEnvModuleNullableSupport() &&
-          handle->IsNullOrUndefined()) {
+      if (FeatureFlags::get(js).getEnvModuleNullableSupport() && handle->IsNullOrUndefined()) {
         return kj::none;
       }
     }
