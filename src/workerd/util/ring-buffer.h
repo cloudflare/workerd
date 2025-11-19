@@ -239,6 +239,7 @@ class RingBuffer final {
   T& back() {
     KJ_DREQUIRE(count > 0);
     size_t backIdx = (tail == 0) ? storage.size() - 1 : tail - 1;
+    KJ_REQUIRE(backIdx < storage.size());
     return storage[backIdx];
   }
 
