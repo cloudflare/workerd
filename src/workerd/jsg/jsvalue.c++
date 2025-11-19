@@ -460,9 +460,9 @@ jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
   return jsg::ByteString(str.toString(js));
 }
 
-jsg::ByteString JsDate::toISOString(jsg::Lock& js) const {
+kj::String JsDate::toISOString(jsg::Lock& js) const {
   JsString str(inner->ToISOString());
-  return jsg::ByteString(str.toString(js));
+  return str.toString(js);
 }
 
 JsDate::operator kj::Date() const {
