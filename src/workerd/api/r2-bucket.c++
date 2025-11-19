@@ -582,8 +582,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         KJ_SWITCH_ONEOF(v) {
           KJ_CASE_ONEOF(v, jsg::Ref<ReadableStream>) {
             (*v).cancel(js,
-                js.v8Error(kj::str(
-                    "Stream cancelled because the associated put operation encountered an error.")));
+                js.v8Error(
+                    "Stream cancelled because the associated put operation encountered an error."));
           }
           KJ_CASE_ONEOF_DEFAULT {}
         }
@@ -1243,15 +1243,15 @@ kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(kj::StringPtr condHeader,
     // always larger than at least one of nextWildcard, nextQuotation and nextWeak
     size_t firstEncounteredProblem = std::min({nextWildcard, nextQuotation, nextWeak});
 
-    kj::String failureReason;
+    kj::StringPtr failureReason;
     if (firstEncounteredProblem == nextWildcard) {
-      failureReason = kj::str("Encountered a wildcard character '*' instead.");
+      failureReason = "Encountered a wildcard character '*' instead."_kjc;
     } else if (firstEncounteredProblem == nextQuotation) {
-      failureReason = kj::str("Encountered a double quote character '\"' instead. "
-                              "This would otherwise indicate the start of a new strong etag.");
+      failureReason = "Encountered a double quote character '\"' instead. "
+                      "This would otherwise indicate the start of a new strong etag."_kjc;
     } else if (firstEncounteredProblem == nextWeak) {
-      failureReason = kj::str("Encountered a weak quotation character 'W' instead. "
-                              "This would otherwise indicate the start of a new weak etag.");
+      failureReason = "Encountered a weak quotation character 'W' instead. "
+                      "This would otherwise indicate the start of a new weak etag."_kjc;
     } else {
       KJ_FAIL_ASSERT(
           "We shouldn't be able to reach this point. The above etag parsing code is incorrect.");
@@ -1319,7 +1319,7 @@ kj::Array<R2Bucket::Etag> buildSingleEtagArray(kj::StringPtr etagValue) {
 R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     : secondsGranularity(true) {
   KJ_IF_SOME(e, h.getNoChecks(js, "if-match"_kj)) {
-    etagMatches = parseConditionalEtagHeader(kj::str(e));
+    etagMatches = parseConditionalEtagHeader(e);
     KJ_IF_SOME(arr, etagMatches) {
       if (arr.size() == 0) {
         JSG_FAIL_REQUIRE(Error, "Invalid ETag in if-match header");
@@ -1327,7 +1327,7 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     }
   }
   KJ_IF_SOME(e, h.getNoChecks(js, "if-none-match"_kj)) {
-    etagDoesNotMatch = parseConditionalEtagHeader(kj::str(e));
+    etagDoesNotMatch = parseConditionalEtagHeader(e);
     KJ_IF_SOME(arr, etagDoesNotMatch) {
       if (arr.size() == 0) {
         JSG_FAIL_REQUIRE(Error, "Invalid ETag in if-none-match header");

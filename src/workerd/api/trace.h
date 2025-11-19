@@ -24,7 +24,8 @@ class TraceDiagnosticChannelEvent;
 
 class TailEvent final: public ExtendableEvent {
  public:
-  explicit TailEvent(jsg::Lock& js, kj::StringPtr type, kj::ArrayPtr<kj::Own<Trace>> events);
+  explicit TailEvent(
+      jsg::Lock& js, kj::LiteralStringConst type, kj::ArrayPtr<kj::Own<Trace>> events);
 
   static jsg::Ref<TailEvent> constructor(kj::String type) = delete;
   // TODO(soon): constructor?
@@ -538,13 +539,12 @@ class TraceLog final: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("level", level);
     tracker.trackField("message", message);
   }
 
  private:
   double timestamp;
-  kj::String level;
+  kj::LiteralStringConst level;
   jsg::V8Ref<v8::Object> message;
 };
 

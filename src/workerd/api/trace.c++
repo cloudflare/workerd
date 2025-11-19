@@ -20,8 +20,9 @@
 
 namespace workerd::api {
 
-TailEvent::TailEvent(jsg::Lock& js, kj::StringPtr type, kj::ArrayPtr<kj::Own<Trace>> events)
-    : ExtendableEvent(kj::str(type)),
+TailEvent::TailEvent(
+    jsg::Lock& js, kj::LiteralStringConst type, kj::ArrayPtr<kj::Own<Trace>> events)
+    : ExtendableEvent(type),
       events(KJ_MAP(e, events) -> jsg::Ref<TraceItem> { return js.alloc<TraceItem>(js, *e); }) {}
 
 kj::Array<jsg::Ref<TraceItem>> TailEvent::getEvents() {
@@ -55,18 +56,18 @@ double getTraceDiagnosticChannelEventTimestamp(const tracing::DiagnosticChannelE
   }
 }
 
-kj::String getTraceLogLevel(const tracing::Log& log) {
+kj::LiteralStringConst getTraceLogLevel(const tracing::Log& log) {
   switch (log.logLevel) {
     case LogLevel::DEBUG_:
-      return kj::str("debug");
+      return "debug"_kjc;
     case LogLevel::INFO:
-      return kj::str("info");
+      return "info"_kjc;
     case LogLevel::LOG:
-      return kj::str("log");
+      return "log"_kjc;
     case LogLevel::WARN:
-      return kj::str("warn");
+      return "warn"_kjc;
     case LogLevel::ERROR:
-      return kj::str("error");
+      return "error"_kjc;
   }
   KJ_UNREACHABLE;
 }
