@@ -273,8 +273,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       maybeJsStream = kj::none;  // Release our reference; we don't need it anymore.
     }
 
-    auto client = ioContext.getHttpClient(IoContext::NEXT_CLIENT_CHANNEL, false,
-        cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); }), "fetch_default"_kjc);
+    auto client = ioContext.getHttpClient(
+        IoContext::NEXT_CLIENT_CHANNEL, false, mapCopyString(cfBlobJson), "fetch_default"_kjc);
     auto adapter = kj::newHttpService(*client);
     auto promise = adapter->request(method, url, headers, requestBody, response);
     // Default handling doesn't rely on the IoContext at all so we can return it as a
