@@ -10,7 +10,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",
-        "@workerd-google-benchmark//:benchmark",
+        "@google_benchmark//:benchmark",
     ],
 )
 

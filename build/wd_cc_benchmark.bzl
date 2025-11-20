@@ -26,12 +26,12 @@ def wd_cc_benchmark(
         }),
         visibility = visibility,
         deps = deps + [
-            "@workerd-google-benchmark//:benchmark_main",
+            "@google_benchmark//:benchmark_main",
             "//src/workerd/tests:bench-tools",
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        tags = ["workerd-benchmark", "benchmark-binary"],
+        tags = ["workerd-benchmark", "google_benchmark"],
         size = "large",
         **kwargs
     )
