@@ -4,11 +4,5 @@ bazel_dep(name = "bazel_skylib", version = "1.8.1")
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_cc", version = "0.2.8")
 
-git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
-
-git_repository(
-    name = "codspeed",
-    commit = "20ab8dcbaf63b4d0c0ed3ac498cfe3f8104fac36",  # v1.4.1
-    recursive_init_submodules = True,
-    remote = "https://github.com/CodSpeedHQ/codspeed-cpp",
-)
+# CodSpeed performance monitoring from BCR PR #6586
+bazel_dep(name = "codspeed_google_benchmark_compat", version = "2.0.0", repo_name = "codspeed")

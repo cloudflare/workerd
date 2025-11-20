@@ -1,4 +1,10 @@
 common --enable_platform_specific_config
+
+# Test BCR PR #6586 (codspeed v2.0.0)
+# This registry override allows testing the BCR PR before it's merged
+common --registry=https://raw.githubusercontent.com/CodSpeedHQ/bazel-central-registry/codspeed-v2.0/
+common --registry=https://bcr.bazel.build
+
 build --verbose_failures
 build --build_tag_filters=-off-by-default
 test --test_tag_filters=-off-by-default,-requires-fuzzilli
