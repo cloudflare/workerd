@@ -12,7 +12,7 @@ namespace workerd {
 struct ActorCacheSharedLruOptions;
 class IoContext;
 
-static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 100'000;
+static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 600'000;
 
 // Interface for an object that enforces resource limits on an Isolate level.
 //
