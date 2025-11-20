@@ -123,13 +123,14 @@ jobs:
         # 'Show timestamps' on the web interface)
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
-      - name: Build and load container images
-        if: inputs.build_container_images
-        run: |
-          bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
       - name: Bazel test
         if: inputs.run_tests
         run: |
+          if [[ ${{ inputs.build_container_images }} = true ]]; then
+            echo "::group::Building and loading container images"
+            bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
+            echo "::endgroup::"
+          fi
           bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
       - name: Parse headers
         # TODO(cleanup): Bazel does not allow for only parsing headers in non-recursive targets, so
