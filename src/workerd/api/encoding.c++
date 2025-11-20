@@ -464,71 +464,6 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
 // =======================================================================================
 // TextEncoder implementation
 
-namespace {
-
-#ifdef KJ_DEBUG
-constexpr inline bool isLeadSurrogate(char16_t c) {
-  return (c & 0xFC00) == 0xD800;
-}
-
-constexpr inline bool isTrailSurrogate(char16_t c) {
-  return (c & 0xFC00) == 0xDC00;
-}
-#endif  // KJ_DEBUG
-
-// Convert UTF-16 with potentially invalid surrogates to UTF-8.
-// Invalid surrogates are replaced with U+FFFD.
-// Returns the number of UTF-8 bytes written.
-// Uses SIMD for valid portions and falls back to scalar for invalid surrogates.
-size_t convertInvalidUtf16ToUtf8(kj::ArrayPtr<const char16_t> input, kj::ArrayPtr<char> out) {
-  size_t inputPos = 0;
-  size_t outputPos = 0;
-
-  while (inputPos < input.size()) {
-    // Find the next invalid surrogate using SIMD validation
-    auto result =
-        simdutf::validate_utf16_with_errors(input.begin() + inputPos, input.size() - inputPos);
-
-    if (result.error == simdutf::error_code::SUCCESS) {
-      // Remaining input is valid - convert it all with SIMD
-      outputPos += simdutf::convert_utf16_to_utf8(
-          input.begin() + inputPos, input.size() - inputPos, out.begin() + outputPos);
-      KJ_DASSERT(outputPos <= out.size());
-      break;
-    }
-
-    if (result.error == simdutf::error_code::SURROGATE) {
-      // Convert the valid portion before the error with SIMD
-      if (result.count > 0) {
-        outputPos += simdutf::convert_valid_utf16_to_utf8(
-            input.begin() + inputPos, result.count, out.begin() + outputPos);
-        KJ_DASSERT(outputPos <= out.size());
-        inputPos += result.count;
-      }
-
-      // Handle the invalid surrogate at inputPos
-      // SURROGATE error means unpaired surrogate, so valid pair should be impossible
-      KJ_DASSERT(!(isLeadSurrogate(input[inputPos]) && inputPos + 1 < input.size() &&
-                     isTrailSurrogate(input[inputPos + 1])),
-          "Valid surrogate pair should not trigger SURROGATE error");
-
-      // Invalid surrogate - replace with U+FFFD (3 bytes: 0xEF 0xBF 0xBD)
-      KJ_DASSERT(outputPos + 3 <= out.size());
-      out[outputPos++] = static_cast<char>(0xEF);
-      out[outputPos++] = static_cast<char>(0xBF);
-      out[outputPos++] = static_cast<char>(0xBD);
-      inputPos++;
-    } else {
-      KJ_FAIL_REQUIRE(
-          "Unexpected UTF-16 validation error from simdutf", static_cast<int>(result.error));
-    }
-  }
-
-  return outputPos;
-}
-
-}  // namespace
-
 jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
@@ -536,15 +471,13 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
 jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   jsg::JsString str = input.orDefault(js.str());
 
-#ifdef KJ_DEBUG
-  bool wasAlreadyFlat = str.isFlat();
-  KJ_DEFER({ KJ_ASSERT(wasAlreadyFlat || !str.isFlat()); });
-#endif
-
   size_t utf8_length = 0;
   auto length = str.length(js);
 
-  // Fast path: check if string is one-byte before creating ValueView
+  // Note: writeInto() doesn't flatten the string - it calls writeTo() which chains through
+  // Write2 -> WriteV2 -> WriteHelperV2 -> String::WriteToFlat.
+  // This means we may read from multiple string segments, but that's fine for our use case.
+
   if (str.isOneByte(js)) {
     // Use off-heap allocation for intermediate Latin-1 buffer to avoid wasting V8 heap space
     // and potentially triggering GC. Stack allocation for small strings, heap for large.
@@ -557,37 +490,26 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
     utf8_length = simdutf::utf8_length_from_latin1(
         reinterpret_cast<const char*>(latin1Buffer.begin()), length);
 
+    auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
     if (utf8_length == length) {
       // ASCII fast path: no conversion needed, Latin-1 is same as UTF-8 for ASCII
-      // Allocate final on-heap buffer and copy
-      auto backingStore = js.allocBackingStore(length, jsg::Lock::AllocOption::UNINITIALIZED);
       memcpy(backingStore->Data(), latin1Buffer.begin(), length);
-      auto array =
-          v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, length);
-      return jsg::JsUint8Array(array);
+    } else {
+      [[maybe_unused]] auto written =
+          simdutf::convert_latin1_to_utf8(reinterpret_cast<const char*>(latin1Buffer.begin()),
+              length, reinterpret_cast<char*>(backingStore->Data()));
+      KJ_DASSERT(utf8_length == written);
     }
-
-    KJ_DASSERT(utf8_length > length);
-
-    // Need to convert Latin-1 to UTF-8
-    auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
-    [[maybe_unused]] auto written =
-        simdutf::convert_latin1_to_utf8(reinterpret_cast<const char*>(latin1Buffer.begin()), length,
-            reinterpret_cast<char*>(backingStore->Data()));
-    KJ_DASSERT(utf8_length == written);
     auto array = v8::Uint8Array::New(
         v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8_length);
     return jsg::JsUint8Array(array);
   }
 
-  // Two-byte string path
-  // Use off-heap allocation for intermediate UTF-16 buffer to avoid triggering GC.
+  // Use off-heap allocation for intermediate UTF-16 buffer to avoid wasting V8 heap space
+  // and potentially triggering GC. Stack allocation for small strings, heap for large.
   // Stack allocation for small strings, heap for large.
   kj::SmallArray<uint16_t, 4096> utf16Buffer(length);
 
-  // Note: writeInto() doesn't flatten the string - it calls writeTo() which chains through
-  // Write2 -> WriteV2 -> WriteHelperV2 -> String::WriteToFlat.
-  // This means we may read from multiple string segments, but that's fine for our use case.
   [[maybe_unused]] auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
   KJ_DASSERT(
       writeResult.written == length, "writeInto must completely overwrite the backing buffer");
@@ -595,13 +517,19 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());
   utf8_length = simdutf::utf8_length_from_utf16_with_replacement(data, length);
 
-  if (!simdutf::validate_utf16(data, length)) {
-    simdutf::to_well_formed_utf16(data, length, data);
-  }
-
   auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
-  [[maybe_unused]] auto written = simdutf::convert_valid_utf16_to_utf8(
+  auto result = simdutf::convert_utf16_to_utf8_with_errors(
       data, length, reinterpret_cast<char*>(backingStore->Data()));
+
+  if (result.error != simdutf::SUCCESS) {
+    // Oh, no, there are unpaired surrogates.  This is hopefully rare.
+    simdutf::to_well_formed_utf16(data, length, data);
+    [[maybe_unused]] auto written =
+        simdutf::convert_utf16_to_utf8(data, length, reinterpret_cast<char*>(backingStore->Data()));
+    KJ_DASSERT(written == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
+  } else {
+    KJ_DASSERT(result.count == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
+  }
 
   auto array =
       v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8_length);
@@ -610,180 +538,78 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
 
 namespace {
 
-// Find how many Latin-1 characters fit when converted to UTF-8
-// Uses chunked forward scan with SIMD, O(result) complexity
-// Template parameter ReturnLength controls whether to return just position or (position, utf8_length)
-template <bool ReturnLength = false>
-std::conditional_t<ReturnLength, std::pair<size_t, size_t>, size_t> findBestFitLatin1(
-    const char* data, size_t length, size_t bufferSize) {
-  size_t pos = 0;
-  size_t utf8Accumulated = 0;
-  constexpr size_t CHUNK = 256;
-
-  while (pos < length) {
-    size_t remaining = length - pos;
-    size_t chunkSize = kj::min(remaining, CHUNK);
-    size_t chunkUtf8Len = simdutf::utf8_length_from_latin1(data + pos, chunkSize);
-
-    if (utf8Accumulated + chunkUtf8Len > bufferSize) {
-      // Chunk would overflow - binary search within chunk
-      size_t left = 0;
-      size_t right = chunkSize;
-      size_t bestFit = 0;
-
-      while (left <= right) {
-        size_t mid = left + (right - left) / 2;
-        if (mid == 0) break;
-
-        size_t midUtf8Length = simdutf::utf8_length_from_latin1(data + pos, mid);
-        if (utf8Accumulated + midUtf8Length <= bufferSize) {
-          bestFit = mid;
-          left = mid + 1;
-        } else {
-          right = mid - 1;
-        }
-      }
-
-      if constexpr (ReturnLength) {
-        size_t finalPos = pos + bestFit;
-        size_t finalUtf8Len =
-            utf8Accumulated + simdutf::utf8_length_from_latin1(data + pos, bestFit);
-        return {finalPos, finalUtf8Len};
-      } else {
-        return pos + bestFit;
-      }
-    }
-
-    utf8Accumulated += chunkUtf8Len;
-    pos += chunkSize;
-  }
-
-  if constexpr (ReturnLength) {
-    return {pos, utf8Accumulated};
-  } else {
-    return pos;
-  }
+bool isSurrogatePair(const char16_t* p) {
+  // We would like to use simdutf::trim_partial_utf16, but it's not guaranteed
+  // to work right on invalid UTF-16.
+  return (p[0] & 0xfc00) == 0xd800 && (p[1] & 0xfc00) == 0xdc00;
 }
 
-// Find how many UTF-16 code units fit when converted to UTF-8
-// Uses chunked forward scan with SIMD, O(result) complexity. Never splits surrogate pairs.
-// Template parameter ReturnLength controls whether to return just position or (position, utf8_length)
-template <bool ReturnLength = false>
-std::conditional_t<ReturnLength, std::pair<size_t, size_t>, size_t> findBestFitUtf16(
-    const char16_t* data, size_t length, size_t bufferSize) {
+// Find how many UTF-16 or Latin1 code units fit when converted to UTF-8.
+// May conservatively underestimate the largest number of code units we can fit
+// because of undetected surrogate pairs on boundaries.
+// Works even on malformed UTF-16.
+template <typename Char>
+size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
   size_t pos = 0;
   size_t utf8Accumulated = 0;
-  constexpr size_t CHUNK = 256;
-
-  while (pos < length) {
-    size_t remaining = length - pos;
-    size_t chunkSize = simdutf::trim_partial_utf16(data + pos, kj::min(remaining, CHUNK));
-
-    if (chunkSize == 0) {
-      chunkSize = (remaining >= 2) ? 2 : remaining;
-    }
-
-    size_t chunkUtf8Len = simdutf::utf8_length_from_utf16(data + pos, chunkSize);
-
-    if (utf8Accumulated + chunkUtf8Len > bufferSize) {
-      // Chunk would overflow - binary search within chunk
-      size_t left = 0;
-      size_t right = chunkSize;
-      size_t bestFit = 0;
-
-      while (left <= right) {
-        size_t mid = left + (right - left) / 2;
-        if (mid == 0) break;
-
-        size_t adjustedMid = simdutf::trim_partial_utf16(data + pos, mid);
-
-        if (adjustedMid == 0) {
-          right = 0;
-          break;
-        }
-
-        size_t midUtf8Length = simdutf::utf8_length_from_utf16(data + pos, adjustedMid);
-        if (utf8Accumulated + midUtf8Length <= bufferSize) {
-          bestFit = adjustedMid;
-          left = adjustedMid + 1;
-        } else {
-          right = adjustedMid - 1;
-        }
-      }
-
-      if constexpr (ReturnLength) {
-        size_t finalPos = pos + bestFit;
-        size_t finalUtf8Len =
-            utf8Accumulated + simdutf::utf8_length_from_utf16(data + pos, bestFit);
-        return {finalPos, finalUtf8Len};
-      } else {
-        return pos + bestFit;
-      }
-    }
-
-    utf8Accumulated += chunkUtf8Len;
-    pos += chunkSize;
-  }
-
-  if constexpr (ReturnLength) {
-    return {pos, utf8Accumulated};
+  // The SIMD is more efficient with a size that's a little over a multiple of 16.
+  constexpr size_t CHUNK = 257;
+  // The max number of UTF-8 output bytes per input code unit.
+  constexpr bool UTF16 = sizeof(Char) == 2;
+  constexpr size_t MAX_FACTOR = UTF16 ? 3 : 2;
+  // If the bufferSize is too small, give up now.
+  if (UTF16) {
+    if (bufferSize < 4) return 0;
   } else {
-    return pos;
+    if (bufferSize < 2) return 0;
   }
-}
 
-// Find how many UTF-16 code units with invalid surrogates fit when converted to UTF-8
-// Uses chunked forward scan with SIMD, O(result) complexity. Never splits surrogate pairs.
-// Unpaired surrogates replaced with U+FFFD.
-size_t findBestFitInvalidUtf16(const char16_t* data, size_t length, size_t bufferSize) {
-  size_t pos = 0;
-  size_t utf8Accumulated = 0;
-  constexpr size_t CHUNK = 256;
+  // Our intial guess at how much the number of elements expands in the
+  // conversion to UTF-8.
+  double expansion = 1.05;
 
-  while (pos < length) {
-    size_t remaining = length - pos;
-    size_t chunkSize = simdutf::trim_partial_utf16(data + pos, kj::min(remaining, CHUNK));
+  while (pos < length && utf8Accumulated < bufferSize) {
+    size_t remainingInput = length - pos;
+    size_t spaceRemaining = bufferSize - utf8Accumulated;
+    KJ_DASSERT(expansion >= 1.05);
 
-    if (chunkSize == 0) {
-      chunkSize = (remaining >= 2) ? 2 : remaining;
+    // We estimate how many characters are likely to fit in the buffer, but
+    // only try for CHUNK characters at a time to minimize the worst case
+    // waste of time if we guessed too high.
+    size_t guaranteedToFit = spaceRemaining / MAX_FACTOR;
+    size_t likelyToFit = kj::min(static_cast<size_t>(spaceRemaining / (expansion * 1.1)), CHUNK);
+    size_t fitEstimate = kj::max(1, kj::max(guaranteedToFit, likelyToFit));
+    size_t chunkSize = kj::min(remainingInput, fitEstimate);
+    // No div-by-zero because remainingInput and fitEstimate are at least 1.
+    KJ_DASSERT(chunkSize >= 1);
+
+    size_t chunkUtf8Len;
+    if constexpr (UTF16) {
+      chunkUtf8Len = simdutf::utf8_length_from_utf16_with_replacement(data + pos, chunkSize);
+    } else {
+      chunkUtf8Len = simdutf::utf8_length_from_latin1(data + pos, chunkSize);
     }
-
-    size_t chunkUtf8Len = simdutf::utf8_length_from_utf16_with_replacement(data + pos, chunkSize);
 
     if (utf8Accumulated + chunkUtf8Len > bufferSize) {
-      // Chunk would overflow - binary search within chunk
-      size_t left = 0;
-      size_t right = chunkSize;
-      size_t bestFit = 0;
-
-      while (left <= right) {
-        size_t mid = left + (right - left) / 2;
-        if (mid == 0) break;
-
-        size_t adjustedMid = simdutf::trim_partial_utf16(data + pos, mid);
-
-        if (adjustedMid == 0) {
-          right = 0;
-          break;
+      // Our chosen chunk didn't fit in the rest of the output buffer.
+      KJ_DASSERT(chunkSize > guaranteedToFit);
+      if (chunkSize == 1) {
+        if (pos != 0) {
+          if constexpr (UTF16) {
+            if (isSurrogatePair(data + pos - 1)) pos--;
+          }
         }
-
-        size_t midUtf8Length =
-            simdutf::utf8_length_from_utf16_with_replacement(data + pos, adjustedMid);
-        if (utf8Accumulated + midUtf8Length <= bufferSize) {
-          bestFit = adjustedMid;
-          left = adjustedMid + 1;
-        } else {
-          right = adjustedMid - 1;
-        }
+        return pos;
       }
-
-      return pos + bestFit;
+      // Since it didn't fit we adjust our expansion guess upwards.
+      expansion = kj::max(expansion * 1.1, static_cast<double>(chunkUtf8Len) / chunkSize);
+    } else {
+      // Use successful length calculation to adjust our expansion estimate.
+      expansion = std::max(1.05, static_cast<double>(chunkUtf8Len) / chunkSize);
+      pos += chunkSize;
+      utf8Accumulated += chunkUtf8Len;
     }
-
-    utf8Accumulated += chunkUtf8Len;
-    pos += chunkSize;
   }
-
   return pos;
 }
 
@@ -794,197 +620,40 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
   auto outputBuf = buffer.asArrayPtr<char>();
   size_t bufferSize = outputBuf.size();
 
-  v8::String::ValueView view(js.v8Isolate, input);
-  uint32_t length = view.length();
+  size_t read = 0;
+  size_t written = 0;
+  {
+    // Scope for the view - we can't do anything that might cause a V8 GC!
+    v8::String::ValueView view(js.v8Isolate, input);
+    uint32_t length = view.length();
 
-  if (view.is_one_byte()) {
-    // Latin-1 path: characters 0x00-0x7F encode as 1 UTF-8 byte, 0x80-0xFF as 2 bytes
-    auto data = reinterpret_cast<const char*>(view.data8());
-
-    // Latin-1 encoding strategy: three zones based on input size vs buffer capacity
-    //
-    // For Latin-1: ASCII chars (0x00-0x7F) → 1 byte, extended chars (0x80-0xFF) → 2 bytes
-    // Worst-case expansion: 2x, Best-case: 1x (pure ASCII), Typical mixed: ~1.2-1.5x
-    //
-    // Zone 1: "Definitely doesn't fit" (length > bufferSize * 2)
-    //   Even if all ASCII (best case 1:1), string won't fit. Go straight to incremental mode.
-    //   Uses forward scan without length calculation for maximum efficiency.
-    //   Example: 1M chars, 400k buffer → can't possibly fit, scan to find cutoff point
-    //
-    // Zone 2: "Definitely fits" (length * 2 <= bufferSize)
-    //   Even if all extended Latin-1 (worst case 1:2), string will fit. Convert directly.
-    //   Example: 100k chars, 250k buffer → worst case 200k bytes, guaranteed to fit
-    //
-    // Zone 3: "Maybe fits" (bufferSize < length * 2 AND length <= bufferSize * 2)
-    //   Might fit depending on ASCII/extended ratio. Use forward scan with length calculation.
-    //   Avoids redundant work: scanning once gets us both position and UTF-8 length.
-    //   Example: 600k chars, 700k buffer → fits if mostly ASCII, doesn't if mixed
-    //
-    // Threshold selection (bufferSize * 2):
-    //   - Chosen based on worst-case Latin-1 expansion of 2x
-    //   - Optimized for common case: small buffer relative to input (SSR, streaming)
-    //   - Trade-off: Zone 3 still does forward scan, but with length calculation overhead
-    //   - Performance cliff exists for borderline cases (e.g., 1M chars, 500k buffer falls
-    //     into Zone 3), but forward scan with length is still reasonably efficient
-    //
-    // Future optimization: Could use sampling to estimate ASCII ratio and choose zone
-    // dynamically, but adds complexity for marginal benefit in typical workloads.
-
-    if (length > bufferSize * 2) {
-      // Zone 1: Incremental mode - forward scan to find what fits, then convert
-      size_t read = findBestFitLatin1(data, length, bufferSize);
-      size_t written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
-      return TextEncoder::EncodeIntoResult{
-        .read = static_cast<int>(read),
-        .written = static_cast<int>(written),
-      };
-    }
-
-    if (length * 2 <= bufferSize) {
-      // Zone 2: Fast path - worst-case (2x) definitely fits, convert directly
-      size_t written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
-      return TextEncoder::EncodeIntoResult{
-        .read = static_cast<int>(length),
-        .written = static_cast<int>(written),
-      };
-    }
-
-    // Zone 3: "Maybe fits" - use forward scan with length calculation to avoid double-scan
-    auto [read, utf8Length] = findBestFitLatin1<true>(data, length, bufferSize);
-
-    // Check if everything fit
-    if (read == length) {
-      // ASCII fast path: utf8Length == length means all chars are ASCII, no conversion needed
-      if (utf8Length == length) {
-        KJ_DASSERT(length <= bufferSize);
-        outputBuf.slice(0, length).copyFrom(kj::arrayPtr(data, length));
-        return TextEncoder::EncodeIntoResult{
-          .read = static_cast<int>(length),
-          .written = static_cast<int>(length),
-        };
+    if (view.is_one_byte()) {
+      auto data = reinterpret_cast<const char*>(view.data8());
+      read = findBestFit(data, length, bufferSize);
+      if (read != 0) {
+        KJ_DASSERT(simdutf::utf8_length_from_latin1(data, read) <= bufferSize);
+        written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
       }
-
-      auto written = simdutf::convert_latin1_to_utf8(data, length, outputBuf.begin());
-      return TextEncoder::EncodeIntoResult{
-        .read = static_cast<int>(length),
-        .written = static_cast<int>(written),
-      };
+    } else {
+      auto data = reinterpret_cast<const char16_t*>(view.data8());
+      read = findBestFit(data, length, bufferSize);
+      if (read != 0) {
+        KJ_DASSERT(simdutf::utf8_length_from_utf16_with_replacement(data, read) <= bufferSize);
+        simdutf::result result =
+            simdutf::convert_utf16_to_utf8_with_errors(data, read, outputBuf.begin());
+        if (result.error == simdutf::SUCCESS) {
+          written = result.count;
+        } else {
+          // Oh, no, there are unpaired surrogates.  This is hopefully rare.
+          kj::SmallArray<char16_t, 4096> conversionBuffer(read);
+          simdutf::to_well_formed_utf16(data, read, conversionBuffer.begin());
+          written =
+              simdutf::convert_utf16_to_utf8(conversionBuffer.begin(), read, outputBuf.begin());
+        }
+      }
     }
-
-    // Partial fit: convert only what fits
-    size_t written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
-    return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(read),
-      .written = static_cast<int>(written),
-    };
   }
-
-  // UTF-16 path: validate to ensure spec compliance (replace invalid surrogates with U+FFFD)
-  auto data = reinterpret_cast<const char16_t*>(view.data16());
-
-  if (simdutf::validate_utf16(data, length)) {
-    // Valid UTF-16: use fast SIMD conversion
-    //
-    // UTF-16 to UTF-8 encoding: variable expansion based on code point ranges
-    //   U+0000-U+007F (ASCII):           1 byte   (rare in two-byte strings)
-    //   U+0080-U+07FF:                    2 bytes  (most common)
-    //   U+0800-U+FFFF (BMP):             3 bytes  (common: CJK, etc.)
-    //   U+10000-U+10FFFF (surrogate pairs): 4 bytes (less common: emoji, etc.)
-    // Worst-case: 3 bytes per code unit (BMP chars), Typical: ~2-3 bytes per code unit
-    //
-    // Zone 1: "Definitely doesn't fit" (length > bufferSize)
-    //   Conservative threshold: even if all ASCII (impossible for two-byte strings), won't fit.
-    //   This differs from Latin-1 (bufferSize * 2) due to different typical expansion patterns.
-    //   Example: 1M code units, 900k buffer → can't fit, use incremental mode
-    //
-    // Zone 2: "Definitely fits" (length * 3 <= bufferSize)
-    //   Even if all BMP characters (worst case 1:3), string will fit. Convert directly.
-    //   Example: 200k code units, 700k buffer → worst case 600k bytes, guaranteed to fit
-    //
-    // Zone 3: "Maybe fits" (bufferSize < length * 3 AND length <= bufferSize)
-    //   Might fit depending on character distribution. Use forward scan with length calculation.
-    //   Example: 300k code units, 800k buffer → fits if mostly 2-byte chars, doesn't if BMP
-    //
-    // Threshold selection (bufferSize vs bufferSize * 3):
-    //   - Zone 1 threshold (length > bufferSize) is conservative: even 1:1 ratio won't fit
-    //   - More aggressive than Latin-1 because UTF-16 typical expansion is higher (~2-3x)
-    //   - Zone 3 (maybe fits) is large: from bufferSize to bufferSize * 3
-    //   - Optimized for common case where UTF-16 strings are mostly 2-3 byte encodings
-    //   - Performance cliff: Zone 3 still uses forward scan with length calculation overhead
-
-    if (length > bufferSize) {
-      // Zone 1: Incremental mode - forward scan to find what fits, then convert
-      size_t read = findBestFitUtf16(data, length, bufferSize);
-      size_t written = simdutf::convert_utf16_to_utf8(data, read, outputBuf.begin());
-      return TextEncoder::EncodeIntoResult{
-        .read = static_cast<int>(read),
-        .written = static_cast<int>(written),
-      };
-    }
-
-    if (length * 3 <= bufferSize) {
-      // Zone 2: Fast path - worst-case (3x) definitely fits, convert directly
-      size_t written = simdutf::convert_utf16_to_utf8(data, length, outputBuf.begin());
-      return TextEncoder::EncodeIntoResult{
-        .read = static_cast<int>(length),
-        .written = static_cast<int>(written),
-      };
-    }
-
-    // Zone 3: "Maybe fits" - use forward scan with length calculation to avoid double-scan
-    auto [read, utf8Length] = findBestFitUtf16<true>(data, length, bufferSize);
-
-    if (read == length) {
-      // Everything fit: convert entire string with SIMD
-      size_t written = simdutf::convert_utf16_to_utf8(data, length, outputBuf.begin());
-      return TextEncoder::EncodeIntoResult{
-        .read = static_cast<int>(length),
-        .written = static_cast<int>(written),
-      };
-    }
-
-    // Partial fit: convert only what fits
-    size_t written = simdutf::convert_utf16_to_utf8(data, read, outputBuf.begin());
-    return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(read),
-      .written = static_cast<int>(written),
-    };
-  }
-
-  // Invalid UTF-16: convert directly to UTF-8, replacing unpaired surrogates with U+FFFD
-
-  // Incremental mode: buffer much smaller than input, skip "whole string fits" checks
-  if (length > bufferSize) {
-    size_t read = findBestFitInvalidUtf16(data, length, bufferSize);
-    size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, read), outputBuf);
-    return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(read),
-      .written = static_cast<int>(written),
-    };
-  }
-
-  // Fast path: worst-case (3 bytes per UTF-16 code unit) fits
-  if (length * 3 <= bufferSize) {
-    size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, length), outputBuf);
-    return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(length),
-      .written = static_cast<int>(written),
-    };
-  }
-
-  // Slow path: calculate exact UTF-8 length
-  size_t utf8Length = simdutf::utf8_length_from_utf16_with_replacement(data, length);
-  if (utf8Length <= bufferSize) {
-    size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, length), outputBuf);
-    return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(length),
-      .written = static_cast<int>(written),
-    };
-  }
-
-  // Doesn't fit: forward scan to find what does
-  size_t read = findBestFitInvalidUtf16(data, length, bufferSize);
-  size_t written = convertInvalidUtf16ToUtf8(kj::arrayPtr(data, read), outputBuf);
+  KJ_DASSERT(written <= bufferSize);
   return TextEncoder::EncodeIntoResult{
     .read = static_cast<int>(read),
     .written = static_cast<int>(written),
