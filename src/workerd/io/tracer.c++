@@ -39,7 +39,8 @@ WorkerTracer::WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
-      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {
+      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)),
+      hasBufferedTailWorkers(hasBufferedTailWorkers) {
   // If logLevel is none, we should not be creating an STW (we don't provide automated tracing in
   // that case, so the tail stream writer is redundant), and we should have BTW tracers available
   // (otherwise we should have skipped setting up a WorkerTracer entirely).
@@ -100,10 +101,14 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     return;
   }
 
-  // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
-  // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
-  // to the buffered trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    // fast path: if there are no BTWs present, we can send the log directly without needing to copy
+    // it.
+    if (!hasBufferedTailWorkers && message.size() < MAX_TRACE_BYTES) {
+      writer->report(context, {tracing::Log(timestamp, logLevel, kj::mv(message))}, timestamp);
+      return;
+    }
+
     // If message is too big on its own, truncate it.
     writer->report(context,
         {tracing::Log(
@@ -196,6 +201,12 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     messageSize += s.size();
   }
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    // STW fast path: no BTW, no truncation
+    if (!hasBufferedTailWorkers && messageSize < MAX_TRACE_BYTES) {
+      writer->report(context,
+          {tracing::Exception(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack))}, timestamp);
+      return;
+    }
     auto maybeTruncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES));
     auto maybeTruncatedMessage =
         message.first(kj::min(message.size(), MAX_TRACE_BYTES - maybeTruncatedName.size()));
