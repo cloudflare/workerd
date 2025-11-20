@@ -20,6 +20,8 @@
 //   to the application are still being flushed to disk. If the flush fails, these messages will
 //   never be sent, so that the rest of the world cannot observe a prematurely-confirmed write.
 
+#include <workerd/io/trace.h>
+
 #include <kj/async.h>
 #include <kj/list.h>
 #include <kj/one-of.h>
@@ -50,6 +52,10 @@ class InputGate {
     virtual void inputGateWaiterRemoved() {}
 
     static const Hooks DEFAULT;
+
+   protected:
+    kj::Maybe<SpanBuilder> inputGateWaitSpan;
+    kj::Maybe<SpanBuilder> inputGateHoldSpan;
   };
 
   // Hooks has no member variables, so const_cast is acceptable.
@@ -245,6 +251,10 @@ class OutputGate {
     virtual void outputGateWaiterRemoved() {}
 
     static const Hooks DEFAULT;
+
+   protected:
+    kj::Maybe<SpanBuilder> outputGateWaitSpan;
+    kj::Maybe<SpanBuilder> outputGateHoldSpan;
   };
 
   // Hooks has no member variables, so const_cast is acceptable.
