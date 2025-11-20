@@ -359,6 +359,8 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // We assume that exceptions thrown during commit will propagate to the caller, such that they
   // will ensure cancelDeferredAlarmDeletion() is called, if necessary.
 
+  bool haveAlarmForDebug = false;
+
   KJ_IF_SOME(pending, pendingCommit) {
     // If an earlier commitImpl() invocation is already in the process of updating precommit
     // alarms but has not yet made the commitCallback() call, it should be OK to wait on it to
@@ -390,6 +392,7 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // while() loop, but needed to be initiated synchronously before the local database commit to
   // ensure correctness in workerd.
   KJ_IF_SOME(p, precommitAlarmState.schedulingPromise) {
+    haveAlarmForDebug = true;
     co_await p;
   }
 
@@ -401,6 +404,7 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   auto startAlarmState = metadata.getAlarm();
   while (willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
     if (debugAlarmSync) {
+      haveAlarmForDebug = true;
       auto currentAlarmState = metadata.getAlarm();
       KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Move earlier loop iteration", syncIterations,
           logDate(currentAlarmState), logDate(alarmScheduledNoLaterThan));
@@ -436,7 +440,7 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   co_await commitCallbackPromise;
   lastConfirmedAlarmDbState = alarmStateForCommit;
 
-  if (debugAlarmSync) {
+  if (debugAlarmSync && haveAlarmForDebug) {
     KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Persisted in SQLite", "sqlite_has",
         logDate(alarmStateForCommit), "alarmScheduledNoLaterThan",
         logDate(alarmScheduledNoLaterThan));
