@@ -99,3 +99,23 @@ export const importableEnv = {
     });
   },
 };
+
+export const nullableEnv = {
+  async test(_, argEnv) {
+    strictEqual(env.FOO, 'BAR');
+
+    await withEnv(null, async () => {
+      strictEqual(env.FOO, undefined);
+      strictEqual(env.CACHE, undefined);
+      strictEqual(typeof env, 'object');
+    });
+
+    await withEnv(undefined, async () => {
+      strictEqual(env.FOO, undefined);
+      strictEqual(env.CACHE, undefined);
+      strictEqual(typeof env, 'object');
+    });
+
+    strictEqual(env.FOO, 'BAR');
+  },
+};

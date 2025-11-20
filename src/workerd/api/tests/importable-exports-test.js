@@ -51,7 +51,7 @@ export const importableExports = {
     strictEqual(exports.customValue, undefined);
 
     // Test withExports with non-object values - should fall back to base exports
-    const nonObjectValues = [null, 'string', 123, undefined];
+    const nonObjectValues = ['string', 123];
     for (const value of nonObjectValues) {
       await withExports(value, async () => {
         await scheduler.wait(10);
@@ -64,5 +64,23 @@ export const importableExports = {
         );
       });
     }
+  },
+};
+
+export const nullableExports = {
+  async test() {
+    await withExports(null, async () => {
+      strictEqual(exports.MyService, undefined);
+      strictEqual(exports.importableExports, undefined);
+      strictEqual(typeof exports, 'object');
+    });
+
+    await withExports(undefined, async () => {
+      strictEqual(exports.MyService, undefined);
+      strictEqual(exports.importableExports, undefined);
+      strictEqual(typeof exports, 'object');
+    });
+
+    strictEqual(exports.MyService, MyService);
   },
 };
