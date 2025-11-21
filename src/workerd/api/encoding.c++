@@ -584,6 +584,11 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
     // only try for CHUNK characters at a time to minimize the worst case
     // waste of time if we guessed too high.
     size_t guaranteedToFit = spaceRemaining / MAX_FACTOR;
+    if (guaranteedToFit >= remainingInput) {
+      // Don't even bother checking any more, it's all going to fit.  Hitting
+      // this halfway through is also a good reason to limit the CHUNK size.
+      return length;
+    }
     size_t likelyToFit = kj::min(static_cast<size_t>(spaceRemaining / expansion), CHUNK);
     size_t fitEstimate = kj::max(1, kj::max(guaranteedToFit, likelyToFit));
     size_t chunkSize = kj::min(remainingInput, fitEstimate);
@@ -617,7 +622,9 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
     pos++;
     utf8Accumulated += extra;
   }
-  if (UTF16 && pos != 0 && isSurrogatePair(data[pos - 1], data[pos])) pos--;
+  if (UTF16 && pos != 0 && pos != length && isSurrogatePair(data[pos - 1], data[pos])) {
+    pos--;
+  }
   return pos;
 }
 
