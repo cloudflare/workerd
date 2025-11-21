@@ -643,7 +643,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
         written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
       }
     } else {
-      auto data = reinterpret_cast<const char16_t*>(view.data8());
+      auto data = reinterpret_cast<const char16_t*>(view.data16());
       read = findBestFit(data, length, bufferSize);
       if (read != 0) {
         KJ_DASSERT(simdutf::utf8_length_from_utf16_with_replacement(data, read) <= bufferSize);
