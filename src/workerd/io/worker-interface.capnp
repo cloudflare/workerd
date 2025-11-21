@@ -16,6 +16,7 @@ using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
+using import "/workerd/io/frankenvalue.capnp".Frankenvalue;
 
 # A 128-bit trace ID used to identify traces.
 struct TraceId {
@@ -695,4 +696,20 @@ interface WorkerdBootstrap {
   #
   # TODO(someday): Pass cfBlobJson? Currently doesn't matter since the cf blob is only present for
   #   HTTP requests which can be delivered over regular HTTP instead of capnp.
+}
+
+interface WorkerdDebugPort {
+  # Bootstrap interface exposed on the debug RPC port, if one is configured. This exposes access
+  # to all services in the process, with the ability for the client to specify arbitrary props, so
+  # this interface should be considered privileged, and should probably only be used for testing
+  # purposes.
+  #
+  # This interface is subject to change. It is intended for use by miniflare.
+
+  getEntrypoint @0 (service :Text, entrypoint :Text, props :Frankenvalue)
+              -> (entrypoint :WorkerdBootstrap);
+  # Get direct access to a stateless entrypoint.
+
+  getActor @1 (service :Text, entrypoint :Text, actorId :Data) -> (actor :WorkerdBootstrap);
+  # Get an actor (Durable Object) stub.
 }
