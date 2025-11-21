@@ -4898,9 +4898,17 @@ class Server::HttpListener final: public kj::Refcounted {
     return s.accept(conn);
   }
 
+ public:
   class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
    public:
-    WorkerdBootstrapImpl(HttpListener& parent): parent(parent) {}
+    WorkerdBootstrapImpl(HttpListener& parent)
+        : service(kj::addRef(*parent.service)),
+          httpOverCapnpFactory(parent.httpOverCapnpFactory) {}
+
+    WorkerdBootstrapImpl(kj::Own<IoChannelFactory::SubrequestChannel> service,
+        capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+        : service(kj::mv(service)),
+          httpOverCapnpFactory(httpOverCapnpFactory) {}
 
     kj::Promise<void> startEvent(StartEventContext context) override {
       // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
@@ -4909,23 +4917,26 @@ class Server::HttpListener final: public kj::Refcounted {
       //   configured, which hints that this service trusts the client to provide the cf blob.)
 
       context.initResults(capnp::MessageSize{4, 1})
-          .setDispatcher(kj::heap<EventDispatcherImpl>(parent, parent.service->startRequest({})));
+          .setDispatcher(
+              kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->startRequest({})));
       return kj::READY_NOW;
     }
 
    private:
-    HttpListener& parent;
+    kj::Own<IoChannelFactory::SubrequestChannel> service;
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   };
 
   class EventDispatcherImpl final: public rpc::EventDispatcher::Server {
    public:
-    EventDispatcherImpl(HttpListener& parent, kj::Own<WorkerInterface> worker)
-        : parent(parent),
+    EventDispatcherImpl(
+        capnp::HttpOverCapnpFactory& httpOverCapnpFactory, kj::Own<WorkerInterface> worker)
+        : httpOverCapnpFactory(httpOverCapnpFactory),
           worker(kj::mv(worker)) {}
 
     kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
       context.initResults(capnp::MessageSize{4, 1})
-          .setHttp(parent.httpOverCapnpFactory.kjToCapnp(getWorker()));
+          .setHttp(httpOverCapnpFactory.kjToCapnp(getWorker()));
       return kj::READY_NOW;
     }
 
@@ -4984,7 +4995,7 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
    private:
-    HttpListener& parent;
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
     kj::Maybe<kj::Own<WorkerInterface>> worker;
 
     kj::Own<WorkerInterface> getWorker() {
@@ -5118,6 +5129,145 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
   auto obj =
       kj::refcounted<HttpListener>(*this, kj::mv(listener), kj::mv(service), physicalProtocol,
           kj::mv(rewriter), globalContext->headerTable, timer, globalContext->httpOverCapnpFactory);
+  co_return co_await obj->run();
+}
+
+// =======================================================================================
+// Debug port for exposing all services via RPC
+
+class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSet::ErrorHandler {
+ public:
+  DebugPortListener(Server& owner,
+      kj::Own<kj::ConnectionReceiver> listener,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+      : owner(owner),
+        listener(kj::mv(listener)),
+        httpOverCapnpFactory(httpOverCapnpFactory),
+        tasks(*this) {}
+
+  kj::Promise<void> run() {
+    for (;;) {
+      auto conn = co_await listener->accept();
+      tasks.add(acceptLoop(kj::mv(conn)));
+    }
+  }
+
+ private:
+  Server& owner;
+  kj::Own<kj::ConnectionReceiver> listener;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  kj::TaskSet tasks;
+
+  kj::Promise<void> acceptLoop(kj::Own<kj::AsyncIoStream> conn) {
+    auto server = kj::heap<capnp::TwoPartyServer>(
+        kj::heap<WorkerdDebugPortImpl>(&owner, httpOverCapnpFactory));
+    auto promise = server->accept(*conn);
+    co_return co_await promise.attach(kj::mv(conn), kj::mv(server));
+  }
+
+  void taskFailed(kj::Exception&& exception) override {
+    KJ_LOG(ERROR, exception);
+  }
+
+  class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
+   public:
+    WorkerdDebugPortImpl(
+        workerd::server::Server* srvPtr, capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+        : srv(*srvPtr),
+          httpOverCapnpFactory(httpOverCapnpFactory) {}
+
+    kj::Promise<void> getEntrypoint(GetEntrypointContext context) override {
+      auto params = context.getParams();
+      auto serviceName = params.getService();
+      auto entrypointName = params.getEntrypoint();
+      auto propsReader = params.getProps();
+
+      // Look up the service
+      auto& serviceEntry =
+          KJ_ASSERT_NONNULL(srv.services.find(serviceName), "Service not found", serviceName);
+      auto service = serviceEntry->service();
+
+      // Convert props from Frankenvalue
+      Frankenvalue props = Frankenvalue::fromCapnp(propsReader);
+
+      kj::Own<Service> targetService;
+
+      // Try to cast to WorkerService to support entrypoints and props
+      auto* workerService = dynamic_cast<WorkerService*>(service);
+      if (workerService != nullptr) {
+        // This is a WorkerService, use getEntrypoint which supports both entrypoints and props
+        kj::Maybe<kj::StringPtr> maybeEntrypoint;
+        if (entrypointName.size() > 0) {
+          maybeEntrypoint = kj::StringPtr(entrypointName);
+        }
+
+        targetService =
+            KJ_ASSERT_NONNULL(workerService->getEntrypoint(maybeEntrypoint, kj::mv(props)),
+                "Entrypoint not found", entrypointName);
+      } else {
+        // Not a WorkerService
+        KJ_ASSERT(
+            entrypointName.size() == 0, "Service does not support named entrypoints", serviceName);
+
+        // Try to apply props if the service supports it
+        if (!propsReader.isEmptyObject()) {
+          targetService = service->forProps(kj::mv(props));
+        } else {
+          // No props, just use the service as-is
+          targetService = kj::addRef(*service);
+        }
+      }
+
+      // Return a WorkerdBootstrap that wraps this service using the generic implementation.
+      context.initResults(capnp::MessageSize{4, 1})
+          .setEntrypoint(kj::heap<HttpListener::WorkerdBootstrapImpl>(
+              kj::mv(targetService), httpOverCapnpFactory));
+      return kj::READY_NOW;
+    }
+
+    kj::Promise<void> getActor(GetActorContext context) override {
+      auto params = context.getParams();
+      auto serviceName = params.getService();
+      auto entrypointName = params.getEntrypoint();
+      auto actorIdData = params.getActorId();
+
+      // Look up the service
+      auto& serviceEntry =
+          KJ_ASSERT_NONNULL(srv.services.find(serviceName), "Service not found", serviceName);
+      auto service = serviceEntry->service();
+
+      // Try to cast to WorkerService
+      auto* workerService = dynamic_cast<WorkerService*>(service);
+      KJ_REQUIRE(workerService != nullptr, "Service does not support actors", serviceName);
+
+      // Look up the actor namespace
+      auto& actorNamespace = KJ_ASSERT_NONNULL(workerService->getActorNamespace(entrypointName),
+          "Actor namespace not found", entrypointName);
+
+      // Validate actor ID size
+      KJ_REQUIRE(
+          actorIdData.size() == SHA256_DIGEST_LENGTH, "Invalid actor ID size", actorIdData.size());
+
+      // Create an ActorId from the provided bytes
+      kj::Own<ActorIdFactory::ActorId> actorId =
+          kj::heap<ActorIdFactoryImpl::ActorIdImpl>(actorIdData.begin(), kj::none);
+
+      // Wrap the actor channel using the generic WorkerdBootstrap implementation.
+      context.initResults(capnp::MessageSize{4, 1})
+          .setActor(kj::heap<HttpListener::WorkerdBootstrapImpl>(
+              actorNamespace.getActorChannel(kj::mv(actorId)), httpOverCapnpFactory));
+      return kj::READY_NOW;
+    }
+
+   private:
+    workerd::server::Server& srv;
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  };
+};
+
+kj::Promise<void> Server::listenDebugPort(kj::Own<kj::ConnectionReceiver> listener) {
+  auto obj = kj::refcounted<DebugPortListener>(
+      *this, kj::mv(listener), globalContext->httpOverCapnpFactory);
   co_return co_await obj->run();
 }
 
@@ -5500,6 +5650,29 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
+  }
+
+  // Start debug port if configured
+  KJ_IF_SOME(addr, debugPortOverride) {
+    auto handle = kj::coCapture(
+        [this, addr = kj::str(addr)](kj::ForkedPromise<void>& drain) mutable -> kj::Promise<void> {
+      auto parsed = co_await network.parseAddress(addr, 0);
+      auto listener = parsed->listen();
+
+      KJ_IF_SOME(stream, controlOverride) {
+        auto message = kj::str("{\"event\":\"listen\",\"socket\":\"debug-port"
+                               "\",\"port\":",
+            listener->getPort(), "}\n");
+        try {
+          stream->write(message.asBytes());
+        } catch (kj::Exception& e) {
+          KJ_LOG(ERROR, e);
+        }
+      }
+
+      co_await listenDebugPort(kj::mv(listener));
+    });
+    tasks.add(handle(forkedDrainWhen).exclusiveJoin(forkedDrainWhen.addBranch()));
   }
 
   for (auto& unmatched: socketOverrides) {
