@@ -33,13 +33,14 @@ enum class ContextPointerSlot : int {
   MODULE_REGISTRY = 2,
   EXTENDED_CONTEXT_WRAPPER = 3,
   VIRTUAL_FILE_SYSTEM = 4,
+  RUST_REALM = 5,
   // Keep the MAX_POINTER_SLOT as the last entry and always set to
   // to the highest value of the other entries. We use this to
   // ensure that the highest used index is always initialized in
   // every context we create without having to update the specific
   // callsites whenever we add a new slot. We can just make the
   // change here.
-  MAX_POINTER_SLOT = VIRTUAL_FILE_SYSTEM,
+  MAX_POINTER_SLOT = RUST_REALM,
 };
 
 inline void setAlignedPointerInEmbedderData(
@@ -109,6 +110,7 @@ class Wrappable: public kj::Refcounted {
   //
   // This value was chosen randomly.
   static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
+  static constexpr uint16_t WORKERD_RUST_WRAPPABLE_TAG = 0xeb05;
 
   static bool isWorkerdApiObject(v8::Local<v8::Object> object) {
     return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX,

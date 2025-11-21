@@ -1,0 +1,43 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_cc_library(
+    name = "ffi-hdrs",
+    hdrs = [
+        "ffi.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/jsg:ffi",
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_library(
+    name = "ffi-impl",
+    srcs = ["ffi.c++"],
+    implementation_deps = [
+        ":lib.rs@cxx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi-hdrs",
+    ],
+)
+
+wd_rust_crate(
+    name = "jsg-test",
+    cxx_bridge_deps = [
+        "//src/workerd/jsg:jsg-core",
+        ":ffi-hdrs",
+    ],
+    cxx_bridge_srcs = [
+        "lib.rs",
+    ],
+    test_proc_macro_deps = ["//src/rust/jsg-macros"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi-impl",
+        "//src/rust/jsg",
+    ],
+)
