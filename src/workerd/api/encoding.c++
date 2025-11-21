@@ -538,14 +538,14 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
 
 namespace {
 
-bool isSurrogatePair(uint16_t lead, uint16_t trail) {
+constexpr bool isSurrogatePair(uint16_t lead, uint16_t trail) {
   // We would like to use simdutf::trim_partial_utf16, but it's not guaranteed
   // to work right on invalid UTF-16.
   return (lead & 0xfc00) == 0xd800 && (trail & 0xfc00) == 0xdc00;
 }
 
 // Ignores surrogates conservatively.
-size_t simpleUtfEncodingLength(uint16_t c) {
+constexpr size_t simpleUtfEncodingLength(uint16_t c) {
   if (c < 0x80) return 1;
   if (c < 0x400) return 2;
   return 3;
@@ -565,7 +565,7 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
   constexpr bool UTF16 = sizeof(Char) == 2;
   constexpr size_t MAX_FACTOR = UTF16 ? 3 : 2;
 
-  // Our intial guess at how much the number of elements expands in the
+  // Our initial guess at how much the number of elements expands in the
   // conversion to UTF-8.
   double expansion = 1.15;
 
@@ -604,7 +604,7 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
       expansion = kj::max(expansion * 1.1, (chunkUtf8Len * 1.1) / chunkSize);
     } else {
       // Use successful length calculation to adjust our expansion estimate.
-      expansion = std::max(1.15, (chunkUtf8Len * 1.1) / chunkSize);
+      expansion = kj::max(1.15, (chunkUtf8Len * 1.1) / chunkSize);
       pos += chunkSize;
       utf8Accumulated += chunkUtf8Len;
     }
