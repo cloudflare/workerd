@@ -564,12 +564,6 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
   // The max number of UTF-8 output bytes per input code unit.
   constexpr bool UTF16 = sizeof(Char) == 2;
   constexpr size_t MAX_FACTOR = UTF16 ? 3 : 2;
-  // If the bufferSize is too small, give up now.
-  if (UTF16) {
-    if (bufferSize < 4) return 0;
-  } else {
-    if (bufferSize < 2) return 0;
-  }
 
   // Our intial guess at how much the number of elements expands in the
   // conversion to UTF-8.
@@ -623,7 +617,13 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
     utf8Accumulated += extra;
   }
   if (UTF16 && pos != 0 && pos != length && isSurrogatePair(data[pos - 1], data[pos])) {
-    pos--;
+    // We ended on a leading surrogate which has a matching trailing surrogate in the next
+    // position.  In order to make progress when the bufferSize is tiny we try to include it.
+    if (utf8Accumulated < bufferSize) {
+      pos++;  // We had one more byte, so we can include the pair, UTF-8 encoding 3->4.
+    } else {
+      pos--;  // Don't chop the pair in half.
+    }
   }
   return pos;
 }
