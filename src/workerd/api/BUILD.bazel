@@ -582,6 +582,13 @@ kj_test(
 )
 
 kj_test(
+    src = "encoding-test.c++",
+    deps = [
+        ":encoding",
+    ],
+)
+
+kj_test(
     src = "base64-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )

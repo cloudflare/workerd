@@ -243,4 +243,11 @@ class TextEncoder final: public jsg::Object {
 #define EW_ENCODING_ISOLATE_TYPES                                                                  \
   api::TextDecoder, api::TextEncoder, api::TextDecoder::ConstructorOptions,                        \
       api::TextDecoder::DecodeOptions, api::TextEncoder::EncodeIntoResult
+
+namespace test {
+
+size_t bestFit(const char* str, size_t bufferSize);
+size_t bestFit(const char16_t* str, size_t bufferSize);
+
+}  // namespace test
 }  // namespace workerd::api
