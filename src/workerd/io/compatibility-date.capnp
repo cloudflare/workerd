@@ -1080,8 +1080,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsDomainModule @124 :Bool
     $compatEnableFlag("enable_nodejs_domain_module")
     $compatDisableFlag("disable_nodejs_domain_module")
-    $experimental;
-    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js non-functional stub domain module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 
@@ -1104,14 +1103,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsPunycodeModule @127 :Bool
     $compatEnableFlag("enable_nodejs_punycode_module")
     $compatDisableFlag("disable_nodejs_punycode_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js deprecated punycode module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsClusterModule @128 :Bool
     $compatEnableFlag("enable_nodejs_cluster_module")
     $compatDisableFlag("disable_nodejs_cluster_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js non-functional stub cluster module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 
@@ -1139,7 +1138,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsWasiModule @132 :Bool
     $compatEnableFlag("enable_nodejs_wasi_module")
     $compatDisableFlag("disable_nodejs_wasi_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js non-functional stub wasi module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1160,7 +1159,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsTraceEventsModule @135 :Bool
     $compatEnableFlag("enable_nodejs_trace_events_module")
     $compatDisableFlag("disable_nodejs_trace_events_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js non-functional stub trace_events module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
