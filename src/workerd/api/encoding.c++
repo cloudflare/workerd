@@ -538,10 +538,17 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
 
 namespace {
 
-bool isSurrogatePair(const char16_t* p) {
+bool isSurrogatePair(uint16_t lead, uint16_t trail) {
   // We would like to use simdutf::trim_partial_utf16, but it's not guaranteed
   // to work right on invalid UTF-16.
-  return (p[0] & 0xfc00) == 0xd800 && (p[1] & 0xfc00) == 0xdc00;
+  return (lead & 0xfc00) == 0xd800 && (trail & 0xfc00) == 0xdc00;
+}
+
+// Ignores surrogates conservatively.
+size_t simpleUtfEncodingLength(uint16_t c) {
+  if (c < 0x80) return 1;
+  if (c < 0x400) return 2;
+  return 3;
 }
 
 // Find how many UTF-16 or Latin1 code units fit when converted to UTF-8.
@@ -566,20 +573,21 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
 
   // Our intial guess at how much the number of elements expands in the
   // conversion to UTF-8.
-  double expansion = 1.05;
+  double expansion = 1.15;
 
   while (pos < length && utf8Accumulated < bufferSize) {
     size_t remainingInput = length - pos;
     size_t spaceRemaining = bufferSize - utf8Accumulated;
-    KJ_DASSERT(expansion >= 1.05);
+    KJ_DASSERT(expansion >= 1.15);
 
     // We estimate how many characters are likely to fit in the buffer, but
     // only try for CHUNK characters at a time to minimize the worst case
     // waste of time if we guessed too high.
     size_t guaranteedToFit = spaceRemaining / MAX_FACTOR;
-    size_t likelyToFit = kj::min(static_cast<size_t>(spaceRemaining / (expansion * 1.1)), CHUNK);
+    size_t likelyToFit = kj::min(static_cast<size_t>(spaceRemaining / expansion), CHUNK);
     size_t fitEstimate = kj::max(1, kj::max(guaranteedToFit, likelyToFit));
     size_t chunkSize = kj::min(remainingInput, fitEstimate);
+    if (chunkSize == 1) break;  // Not worth running this complicated stuff one char at a time.
     // No div-by-zero because remainingInput and fitEstimate are at least 1.
     KJ_DASSERT(chunkSize >= 1);
 
@@ -593,23 +601,23 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
     if (utf8Accumulated + chunkUtf8Len > bufferSize) {
       // Our chosen chunk didn't fit in the rest of the output buffer.
       KJ_DASSERT(chunkSize > guaranteedToFit);
-      if (chunkSize == 1) {
-        if (pos != 0) {
-          if constexpr (UTF16) {
-            if (isSurrogatePair(data + pos - 1)) pos--;
-          }
-        }
-        return pos;
-      }
       // Since it didn't fit we adjust our expansion guess upwards.
-      expansion = kj::max(expansion * 1.1, static_cast<double>(chunkUtf8Len) / chunkSize);
+      expansion = kj::max(expansion * 1.1, (chunkUtf8Len * 1.1) / chunkSize);
     } else {
       // Use successful length calculation to adjust our expansion estimate.
-      expansion = std::max(1.05, static_cast<double>(chunkUtf8Len) / chunkSize);
+      expansion = std::max(1.15, (chunkUtf8Len * 1.1) / chunkSize);
       pos += chunkSize;
       utf8Accumulated += chunkUtf8Len;
     }
   }
+  // Do the last few code units in a simpler way.
+  while (pos < length && utf8Accumulated < bufferSize) {
+    size_t extra = simpleUtfEncodingLength(data[pos]);
+    if (utf8Accumulated + extra > bufferSize) break;
+    pos++;
+    utf8Accumulated += extra;
+  }
+  if (UTF16 && pos != 0 && isSurrogatePair(data[pos - 1], data[pos])) pos--;
   return pos;
 }
 
