@@ -276,6 +276,9 @@ Encoding getEncodingForLabel(kj::StringPtr label) {
 #undef V
   return Encoding::INVALID;
 }
+
+constexpr int MAX_SIZE_FOR_STACK_ALLOC = 4096;
+
 }  // namespace
 
 const kj::Array<const kj::byte> TextDecoder::EMPTY =
@@ -481,7 +484,7 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   if (str.isOneByte(js)) {
     // Use off-heap allocation for intermediate Latin-1 buffer to avoid wasting V8 heap space
     // and potentially triggering GC. Stack allocation for small strings, heap for large.
-    kj::SmallArray<kj::byte, 4096> latin1Buffer(length);
+    kj::SmallArray<kj::byte, MAX_SIZE_FOR_STACK_ALLOC> latin1Buffer(length);
 
     [[maybe_unused]] auto writeResult = str.writeInto(js, latin1Buffer.asPtr());
     KJ_DASSERT(
@@ -508,7 +511,7 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   // Use off-heap allocation for intermediate UTF-16 buffer to avoid wasting V8 heap space
   // and potentially triggering GC. Stack allocation for small strings, heap for large.
   // Stack allocation for small strings, heap for large.
-  kj::SmallArray<uint16_t, 4096> utf16Buffer(length);
+  kj::SmallArray<uint16_t, MAX_SIZE_FOR_STACK_ALLOC> utf16Buffer(length);
 
   [[maybe_unused]] auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
   KJ_DASSERT(
@@ -630,6 +633,20 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
 
 }  // namespace
 
+namespace test {
+
+size_t bestFit(const char* str, size_t bufferSize) {
+  return findBestFit(str, strlen(str), bufferSize);
+}
+
+size_t bestFit(const char16_t* str, size_t bufferSize) {
+  size_t length = 0;
+  while (str[length] != 0) length++;
+  return findBestFit(str, length, bufferSize);
+}
+
+}  // namespace test
+
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer) {
   auto outputBuf = buffer.asArrayPtr<char>();
@@ -660,7 +677,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
           written = result.count;
         } else {
           // Oh, no, there are unpaired surrogates.  This is hopefully rare.
-          kj::SmallArray<char16_t, 4096> conversionBuffer(read);
+          kj::SmallArray<char16_t, MAX_SIZE_FOR_STACK_ALLOC> conversionBuffer(read);
           simdutf::to_well_formed_utf16(data, read, conversionBuffer.begin());
           written =
               simdutf::convert_utf16_to_utf8(conversionBuffer.begin(), read, outputBuf.begin());
