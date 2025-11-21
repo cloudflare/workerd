@@ -607,10 +607,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
-      kj::Vector<TailEvent> events(eventReaders.size());
-      for (auto reader: eventReaders) {
-        events.add(TailEvent(reader));
-      }
+      kj::Array<TailEvent> events = KJ_MAP(reader, eventReaders) { return TailEvent(reader); };
 
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.
@@ -619,15 +616,14 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         KJ_IF_SOME(handler, maybeHandler) {
           KJ_IF_SOME(h, handler.tryGet()) {
             auto handle = h.getHandle(lock);
-            return handleEvents(
-                lock, handle, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
+            return handleEvents(lock, handle, ioContext, kj::mv(events), kj::mv(sharedResults));
           } else {
             KJ_LOG(ERROR, "tail stream handler was destroyed while processing events");
             JSG_FAIL_REQUIRE(Error, "Tail stream handler became invalid during event processing");
             KJ_UNREACHABLE;
           }
         } else {
-          return handleOnset(lock, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
+          return handleOnset(lock, ioContext, kj::mv(events), kj::mv(sharedResults));
         }
       })();
 
@@ -1025,10 +1021,6 @@ struct TailStreamWriterState {
 
   struct Closed {};
 
-  // The closing flag will be set when the Outcome event has been reported.
-  // Once closing is true, no further events will be accepted and the state
-  // will transition to closed once the currently active pump completes.
-  bool closing = false;
   kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
 
@@ -1037,7 +1029,7 @@ struct TailStreamWriterState {
         waitUntilTasks(waitUntilTasks) {}
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriterState);
 
-  void reportImpl(TailEvent&& event) {
+  bool reportImpl(TailEvent&& event) {
     // In reportImpl, our inner state must be active.
     auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
 
@@ -1056,14 +1048,7 @@ struct TailStreamWriterState {
 
       // Since we have no more living sessions (e.g. because all tail workers failed to return a valid
       // handler), mark the state as closing as we can't handle future events anyway.
-      closing = true;
-      return;
-    }
-
-    // If we're already closing, no further events should be reported.
-    if (closing) return;
-    if (event.event.is<Outcome>()) {
-      closing = true;
+      return true;
     }
 
     // Deliver the event to the queue and make sure we are processing.
@@ -1075,6 +1060,9 @@ struct TailStreamWriterState {
     }
 
     inner = alive.releaseAsArray();
+
+    // We do not expect any events after the outcome.
+    return event.event.is<Outcome>();
   }
 
   // Delivers the queued tail events to a streaming tail worker.
@@ -1203,14 +1191,13 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
         KJ_ASSERT(!event.event.is<Onset>(), "Only the first event can be an onset");
       }
     }
-    state.reportImpl(kj::mv(event));
 
-    // The state is determined to be closing when it receives a terminal event (tracing::Outcome).
+    // The state is determined to be closing when it receives a terminal event (tracing::Outcome),
+    // or if there are no active tail workers left.
     // If we return true, then the writer expects more events to be received. If we return false,
     // then the writer can release any state it is holding because we don't expect any more events
     // to be dispatched. The writer should handle that case by dropping this lambda.
-
-    return !state.closing;
+    return !state.reportImpl(kj::mv(event));
   }).attach(kj::mv(state));
 }
 
