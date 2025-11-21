@@ -10,6 +10,8 @@
 
 #include <capnp/membrane.h>
 
+#include <algorithm>
+
 namespace workerd::tracing {
 namespace {
 
@@ -1021,7 +1023,7 @@ struct TailStreamWriterState {
 
   struct Closed {};
 
-  kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
+  kj::OneOf<Pending, kj::Vector<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
 
   TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
@@ -1031,17 +1033,12 @@ struct TailStreamWriterState {
 
   bool reportImpl(TailEvent&& event) {
     // In reportImpl, our inner state must be active.
-    auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+    auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Vector<kj::Own<Active>>>());
 
-    // We only care about sessions that are currently active.
-    kj::Vector<kj::Own<Active>> alive(actives.size());
-    for (auto& active: actives) {
-      if (active->capability != kj::none) {
-        alive.add(kj::mv(active));
-      }
-    }
-
-    if (alive.empty()) {
+    // We only care about sessions that are currently active, removing any inactive ones.
+    auto activeEnd = std::remove_if(actives.begin(), actives.end(),
+        [](const auto& active) { return active->capability == kj::none; });
+    if (activeEnd == actives.begin()) {
       // Oh! We have no active sessions. Well, never mind then, let's
       // transition to a closed state and drop everything on the floor.
       inner = Closed{};
@@ -1051,15 +1048,18 @@ struct TailStreamWriterState {
       return true;
     }
 
+    // We have at least some active sessions. Truncate the array to get rid of any inactive ones.
+    if (activeEnd != actives.end()) {
+      actives.truncate(activeEnd - actives.begin());
+    }
+
     // Deliver the event to the queue and make sure we are processing.
-    for (auto& active: alive) {
+    for (auto& active: actives) {
       active->queue.push(event.clone());
       if (!active->pumping) {
         waitUntilTasks.add(pump(kj::addRef(*active)));
       }
     }
-
-    inner = alive.releaseAsArray();
 
     // We do not expect any events after the outcome.
     return event.event.is<Outcome>();
@@ -1168,7 +1168,7 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
         KJ_ASSERT(event.event.is<Onset>(), "First event must be an onset.");
 
         // Transitions into the active state by grabbing the pending client capability.
-        state.inner = KJ_MAP(wi, pending) {
+        state.inner = kj::Vector<kj::Own<TailStreamWriterState::Active>>( KJ_MAP(wi, pending) {
           auto customEvent = kj::heap<TailStreamCustomEvent>();
           auto result = customEvent->getCap();
           auto active = kj::refcounted<TailStreamWriterState::Active>(kj::mv(result));
@@ -1180,13 +1180,13 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
                                  .attach(kj::mv(wi), kj::addRef(*active))
                                  .ignoreResult());
           return active;
-        };
+        });
 
         // At this point our writer state is "active", which means the state
         // consists of one or more streaming tail worker client stubs to which
         // the event will be dispatched.
       }
-      KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
+      KJ_CASE_ONEOF(active, kj::Vector<kj::Own<TailStreamWriterState::Active>>) {
         // Event cannot be a onset, which should have been validated by the writer.
         KJ_ASSERT(!event.event.is<Onset>(), "Only the first event can be an onset");
       }
