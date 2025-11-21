@@ -366,7 +366,7 @@ void URL::setPort(kj::String value) {
 }
 
 kj::String URL::getPathname() {
-  if (url->path.size() > 0) {
+  if (!url->path.empty()) {
     auto components =
         KJ_MAP(component, url->path) { return kj::str('/', kj::encodeUriPath(component)); };
     return kj::str(kj::strArray(components, ""), url->hasTrailingSlash ? "/" : "");
@@ -391,7 +391,7 @@ void URL::setPathname(kj::String value) {
     constexpr auto END_PATH_PART = kj::parse::anyOfChars("/");
     auto part = split(text, END_PATH_PART);
     if (part.size() == 2 && part[0] == '.' && part[1] == '.') {
-      if (newPath.size() != 0) {
+      if (!newPath.empty()) {
         newPath.removeLast();
       }
       newHasTrailingSlash = true;

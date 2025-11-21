@@ -22,3 +22,6 @@ fa2c488219a5e96792e61f3d51838595e2907c8d
 
 # clang-tidy: Add google-readability-casting, modernize-use-using
 21dc6eb66a2344b8e756b897ade27cc107b58153
+
+# clang-tidy: Add more readability checks
+d8987b2c4206c8b28b637c24219a580431873d12

@@ -1514,7 +1514,7 @@ WarningAggregator::WarningAggregator(IoContext& context, EmitCallback emitter)
 
 WarningAggregator::~WarningAggregator() noexcept(false) {
   auto lock = warnings.lockExclusive();
-  if (lock->size() > 0) {
+  if (!lock->empty()) {
     auto emitter = kj::mv(this->emitter);
     auto warnings = lock->releaseAsArray();
     if (IoContext::hasCurrent()) {

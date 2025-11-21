@@ -217,7 +217,7 @@ class ModuleRegistry {
       const kj::Path& referrer,
       kj::StringPtr rawSpecifier) = 0;
 
-  virtual Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) = 0;
+  virtual Value resolveInternalImport(jsg::Lock& js, kj::StringPtr specifier) = 0;
 
   // The dynamic import callback is provided by the embedder to set up any context necessary
   // for instantiating the module during a dynamic import. The handler function passed into

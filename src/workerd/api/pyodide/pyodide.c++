@@ -13,6 +13,7 @@
 #include <pyodide/generated/pyodide_extra.capnp.h>
 
 #include <capnp/dynamic.h>
+#include <capnp/schema.h>
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
@@ -20,10 +21,7 @@
 #include <kj/debug.h>
 #include <kj/string.h>
 
-// for std::sort
-#include <capnp/schema.h>
-
-#include <algorithm>
+#include <algorithm>  // for std::sort
 
 namespace workerd::api::pyodide {
 
