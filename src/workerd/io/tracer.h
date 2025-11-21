@@ -145,6 +145,8 @@ class BaseTracer: public kj::Refcounted {
       kj::Date timestamp,
       const kj::ConstString& methodName) = 0;
 
+  virtual void setWorkflowExecutionModel() = 0;
+
  protected:
   // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
   // worker must have wrapped up and reported its outcome event, we report completeTime in that case
@@ -214,6 +216,8 @@ class WorkerTracer final: public BaseTracer {
   void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       const kj::ConstString& methodName) override;
+
+  void setWorkflowExecutionModel() override;
 
  private:
   PipelineLogLevel pipelineLogLevel;

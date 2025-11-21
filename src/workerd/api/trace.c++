@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "trace.h"
+#include "kj/one-of.h"
+#include "workerd/io/trace.h"
 
 #include <workerd/api/global-scope.h>
 #include <workerd/api/http.h>
@@ -179,6 +181,9 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
         }
         KJ_UNREACHABLE;
       }
+      KJ_CASE_ONEOF(workflow, tracing::WorkflowEventInfo) {
+          return kj::Maybe(js.alloc<TraceItem::WorkflowEventInfo>(trace, workflow));
+      }
       KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
         return kj::Maybe(js.alloc<TraceItem::CustomEventInfo>(trace, custom));
       }
@@ -231,6 +236,9 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
         return info.addRef();
       }
       KJ_CASE_ONEOF(info, jsg::Ref<HibernatableWebSocketEventInfo>) {
+        return info.addRef();
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<WorkflowEventInfo>) {
         return info.addRef();
       }
       KJ_CASE_ONEOF(info, jsg::Ref<CustomEventInfo>) {
@@ -423,6 +431,20 @@ kj::StringPtr TraceItem::QueueEventInfo::getQueueName() {
 
 uint32_t TraceItem::QueueEventInfo::getBatchSize() {
   return batchSize;
+}
+
+
+TraceItem::WorkflowEventInfo::WorkflowEventInfo(
+    const Trace& trace, const tracing::WorkflowEventInfo& eventInfo)
+    : workflowName(kj::str(eventInfo.workflowName)),
+      instanceId(kj::str(eventInfo.instanceId)) {}
+
+kj::StringPtr TraceItem::WorkflowEventInfo::getWorkflowName() {
+  return workflowName;
+}
+
+kj::StringPtr TraceItem::WorkflowEventInfo::getInstanceId() {
+  return instanceId;
 }
 
 TraceItem::EmailEventInfo::EmailEventInfo(
@@ -706,6 +728,9 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
         tracker.trackField("eventInfo", info);
       }
       KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<WorkflowEventInfo>) {
         tracker.trackField("eventInfo", info);
       }
       KJ_CASE_ONEOF(info, jsg::Ref<EmailEventInfo>) {

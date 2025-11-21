@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "kj/common.h"
+#include "kj/string.h"
 #include <workerd/io/trace.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -450,6 +452,23 @@ tracing::QueueEventInfo tracing::QueueEventInfo::clone() const {
   return QueueEventInfo(kj::str(queueName), batchSize);
 }
 
+tracing::WorkflowEventInfo::WorkflowEventInfo(kj::String workflowName, kj::String instanceId)
+    : workflowName(kj::mv(workflowName)),
+      instanceId(kj::mv(instanceId)) {}
+
+tracing::WorkflowEventInfo::WorkflowEventInfo(rpc::Trace::WorkflowEventInfo::Reader reader)
+    : workflowName(kj::heapString(reader.getWorkflowName())),
+       instanceId(kj::heapString(reader.getInstanceId())) {}
+
+void tracing::WorkflowEventInfo::copyTo(rpc::Trace::WorkflowEventInfo::Builder builder) const {
+  builder.setWorkflowName(workflowName);
+  builder.setInstanceId(instanceId);
+}
+
+tracing::WorkflowEventInfo tracing::WorkflowEventInfo::clone() const {
+  return WorkflowEventInfo(kj::str(workflowName), kj::str(instanceId));
+}
+
 tracing::EmailEventInfo::EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize)
     : mailFrom(kj::mv(mailFrom)),
       rcptTo(kj::mv(rcptTo)),
@@ -739,6 +758,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
         auto hibWsBuilder = eventInfoBuilder.initHibernatableWebSocket();
         hibWs.copyTo(hibWsBuilder);
       }
+      KJ_CASE_ONEOF(workflow, tracing::WorkflowEventInfo) {
+        auto workflowBuilder = eventInfoBuilder.initWorkflow();
+        workflow.copyTo(workflowBuilder);
+      }
       KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
         eventInfoBuilder.initCustom();
       }
@@ -864,6 +887,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::CUSTOM:
         eventInfo = tracing::CustomEventInfo(e.getCustom());
+        break;
+      case rpc::Trace::EventInfo::Which::WORKFLOW:
+        eventInfo = tracing::WorkflowEventInfo(e.getWorkflow());
         break;
       case rpc::Trace::EventInfo::Which::NONE:
         eventInfo = kj::none;
@@ -1129,6 +1155,9 @@ void tracing::writeOnsetInfo(
     KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
       hws.copyTo(infoBuilder.initHibernatableWebSocket());
     }
+    KJ_CASE_ONEOF(workflow, WorkflowEventInfo) {
+      workflow.copyTo(infoBuilder.initWorkflow());
+    }
     KJ_CASE_ONEOF(custom, CustomEventInfo) {
       infoBuilder.initCustom();
     }
@@ -1282,6 +1311,9 @@ tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
     }
     KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
       return hws.clone();
+    }
+    KJ_CASE_ONEOF(workflow, WorkflowEventInfo) {
+      return workflow.clone();
     }
     KJ_CASE_ONEOF(custom, CustomEventInfo) {
       return CustomEventInfo();

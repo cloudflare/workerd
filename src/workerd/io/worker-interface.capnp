@@ -96,6 +96,7 @@ struct Trace @0x8e8d911203762d34 {
     email @16 :EmailEventInfo;
     trace @18 :TraceEventInfo;
     hibernatableWebSocket @20 :HibernatableWebSocketEventInfo;
+    workflow @28 :WorkflowEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -127,11 +128,6 @@ struct Trace @0x8e8d911203762d34 {
     batchSize @1 :UInt32;
   }
 
-  struct WorkflowEventInfo {
-    workflowName @0 :Text;
-    instanceId @1 :Text;
-  }
-
   struct EmailEventInfo {
     mailFrom @0 :Text;
     rcptTo @1 :Text;
@@ -155,6 +151,11 @@ struct Trace @0x8e8d911203762d34 {
       }
       error @3 :Void;
     }
+  }
+
+  struct WorkflowEventInfo {
+    workflowName @0 :Text;
+    instanceId   @1 :Text;
   }
 
   struct CustomEventInfo {}
@@ -632,6 +633,9 @@ interface TailStreamTarget $Cxx.allowCancellation {
 
 struct WorkflowInstanceEvent {
     payload @0 :Data;
+    workflowName @1 :Text;
+    instanceId @2 :Text;
+    timestampMs @3 :Int64;
 }
 
 struct WorkflowInvocationResult {

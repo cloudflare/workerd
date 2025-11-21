@@ -1,5 +1,11 @@
 
+#include "kj/common.h"
 #include "kj/debug.h"
+#include "kj/memory.h"
+#include "kj/one-of.h"
+#include "kj/string.h"
+#include "kj/time.h"
+#include "workerd/io/trace.h"
 #include "workflow.h"
 
 #include <workerd/api/global-scope.h>
@@ -10,25 +16,25 @@
 
 namespace workerd::api {
 kj::Maybe<tracing::EventInfo> WorkflowCustomEventImpl::getEventInfo() const {
-  // kj::String queueName;
-  // uint32_t batchSize;
-  // KJ_SWITCH_ONEOF(params) {
-  //   KJ_CASE_ONEOF(p, rpc::EventDispatcher::QueueParams::Reader) {
-  //     queueName = kj::heapString(p.getQueueName());
-  //     batchSize = p.getMessages().size();
-  //   }
-  //   KJ_CASE_ONEOF(p, QueueEvent::Params) {
-  //     queueName = kj::heapString(p.queueName);
-  //     batchSize = p.messages.size();
-  //   }
-  // }
+  kj::String workflowName;
+  kj::String instanceId;
+  KJ_SWITCH_ONEOF(params) {
+    KJ_CASE_ONEOF(p, rpc::EventDispatcher::RunWorkflowInvocationParams::Reader) {
+      auto event = p.getEvent();
+      workflowName = kj::heapString(event.getWorkflowName());
+      instanceId = kj::heapString(event.getInstanceId());
+    }
+    KJ_CASE_ONEOF(p, IncomingWorkflowInvocation::Serialized) {
+      workflowName = kj::heapString(p.workflowName);
+      instanceId = kj::heapString(p.instanceId);
+    }
+  }
 
-  // return tracing::EventInfo(tracing::QueueEventInfo(kj::mv(queueName), batchSize));
-  //
-  KJ_UNIMPLEMENTED("i forgor tracing");
+  return tracing::EventInfo(tracing::WorkflowEventInfo(kj::mv(workflowName), kj::mv(instanceId)));
+
 }
 
-WorkflowInvocationResult::Serialized serializeV8(
+WorkflowInvocationResult::Serialized serializeResultV8(
     jsg::Lock& js, const jsg::JsRef<jsg::JsValue>& body) {
   // Use a specific serialization version to avoid sending messages using a new version before all
   // runtimes at the edge know how to read it.
@@ -46,10 +52,36 @@ WorkflowInvocationResult::Serialized serializeV8(
   return kj::mv(result);
 }
 
+IncomingWorkflowInvocation::Serialized IncomingWorkflowInvocation::Serialized::serializeEventV8(
+    jsg::Lock& js, IncomingWorkflowInvocation event) {
+  // Use a specific serialization version to avoid sending messages using a new version before all
+  // runtimes at the edge know how to read it.
+  jsg::Serializer serializer(js,
+      jsg::Serializer::Options{
+        .version = 15,
+        .omitHeader = false,
+      });
+
+  serializer.write(js, jsg::JsValue(event.payload.getHandle(js)));
+  kj::Array<kj::byte> bytes = serializer.release().data;
+  IncomingWorkflowInvocation::Serialized result = IncomingWorkflowInvocation::Serialized(
+        kj::mv(event.workflowName), kj::mv(event.instanceId), kj::mv(event.timestamp), kj::mv(bytes));
+  return kj::mv(result);
+}
+
+
 WorkflowInvocationResult deserializeResult(
     jsg::Lock& js, const WorkflowInvocationResult::Serialized& body) {
   return WorkflowInvocationResult{
     .returnValue = jsg::JsRef(js, jsg::Deserializer(js, body.data).readValue(js))};
+}
+
+jsg::Value getPayloadOrDefault(jsg::Lock& js, IncomingWorkflowInvocation::Serialized& event) {
+    KJ_IF_SOME(payloadPtr, event.payloadOwn) {
+        return jsg::JsRef(js, jsg::Deserializer(js, payloadPtr.asPtr()).readValue(js));
+    } else {
+        return js.v8Ref(js.v8Undefined());
+    }
 }
 
 WorkflowInvocationResult WorkflowCustomEventImpl::getInvocationResult(jsg::Lock& js) {
@@ -87,18 +119,39 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkflowCustomEventImpl::run(
       KJ_IF_SOME(runFunc, workflowHandler.run) {
         // now we build a IncomingWorkflowInvocation event from params in `WorkflowCustomEventImpl`
         jsg::Lock& js = lock;
-        // TODO: fill this from reader
-        auto event = IncomingWorkflowInvocation{
-          kj::str(""), kj::str(""), kj::UNIX_EPOCH, js.v8Ref(js.v8Undefined())};
+
+        KJ_SWITCH_ONEOF(this->params) {
+            KJ_CASE_ONEOF(capnpWorkflow, rpc::EventDispatcher::RunWorkflowInvocationParams::Reader) {
+                auto capnpEvent = capnpWorkflow.getEvent();
+                // TODO(cleanup): this creates a copy of stuff
+                auto workflowName = kj::heapString(capnpEvent.getWorkflowName());
+                auto instanceId = kj::heapString(capnpEvent.getInstanceId());
+                auto timestamp = kj::UNIX_EPOCH + capnpEvent.getTimestampMs() * kj::MILLISECONDS;
+                auto payload = jsg::JsRef(js, jsg::Deserializer(js, capnpEvent.getPayload()).readValue(js));
+                paramsPtr = kj::heap<IncomingWorkflowInvocation>(
+                    kj::mv(workflowName), kj::mv(instanceId), kj::mv(timestamp), kj::mv(payload));
+            }
+            KJ_CASE_ONEOF(event, IncomingWorkflowInvocation::Serialized) {
+                auto payload = getPayloadOrDefault(js, event);
+                paramsPtr = kj::heap<IncomingWorkflowInvocation>(
+                    kj::mv(event.workflowName), kj::mv(event.instanceId), kj::mv(event.timestamp), kj::mv(payload));
+            }
+        }
+
+
 
         auto stepStub = js.alloc<JsRpcStub>(context.addObject(kj::mv(this->stepStub)));
 
+        KJ_IF_SOME(tracer, context.getWorkerTracer()) {
+            tracer.setWorkflowExecutionModel();
+        }
+
         return context.awaitJs(js,
-            runFunc(lock, kj::mv(event), stepStub.addRef())
+            runFunc(lock, kj::mv(*paramsPtr), stepStub.addRef())
                 .then(js,
                     context.addFunctor(
                         [this](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) mutable {
-          this->result = kj::some(serializeV8(js, kj::mv(value)));
+          this->result = kj::some(serializeResultV8(js, kj::mv(value)));
         })));
       } else {
         KJ_FAIL_REQUIRE("jsg.Error: run() method does not exist in given entrypoint");

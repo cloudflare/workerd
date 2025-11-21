@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "kj/time.h"
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/basics.h>
 #include <workerd/io/trace.h>
@@ -14,6 +15,7 @@
 
 #include <kj/async.h>
 #include <kj/common.h>
+#include <cstdint>
 
 namespace workerd::api {
 
@@ -25,6 +27,25 @@ class ExecutionContext;
 
 // What the Workflows engine passes the userland worker
 struct IncomingWorkflowInvocation {
+  struct Serialized {
+      Serialized(
+          kj::String workflowName, kj::String instanceId, kj::Date timestamp, kj::Maybe<kj::Array<kj::byte>> payloadOwn)
+          : workflowName(kj::mv(workflowName)),
+            instanceId(kj::mv(instanceId)),
+            timestamp(kj::mv(timestamp)),
+            payloadOwn(kj::mv(payloadOwn)) {}
+
+      kj::String workflowName;
+      kj::String instanceId;
+      kj::Date timestamp;
+      kj::Maybe<kj::Array<kj::byte>> payloadOwn;
+      // A pointer into that data that can be directly written into it, regardless
+      // of its holder.
+      static IncomingWorkflowInvocation::Serialized serializeEventV8(
+          jsg::Lock& js, IncomingWorkflowInvocation event);
+  };
+
+
   explicit IncomingWorkflowInvocation(
       kj::String workflowName, kj::String instanceId, kj::Date timestamp, jsg::Value payload)
       : workflowName(kj::mv(workflowName)),
@@ -66,7 +87,7 @@ struct WorkflowInvocationResult {
 
 class WorkflowCustomEventImpl final: public WorkerInterface::CustomEvent, public kj::Refcounted {
  public:
-  WorkflowCustomEventImpl(kj::OneOf<IncomingWorkflowInvocation,
+  explicit WorkflowCustomEventImpl(kj::OneOf<IncomingWorkflowInvocation::Serialized,
                               rpc::EventDispatcher::RunWorkflowInvocationParams::Reader> params,
       kj::Own<rpc::JsRpcTarget::Client> stepStub)
       : params(kj::mv(params)),
@@ -97,8 +118,9 @@ class WorkflowCustomEventImpl final: public WorkerInterface::CustomEvent, public
   }
 
  private:
-  kj::OneOf<IncomingWorkflowInvocation, rpc::EventDispatcher::RunWorkflowInvocationParams::Reader>
+  kj::OneOf<IncomingWorkflowInvocation::Serialized, rpc::EventDispatcher::RunWorkflowInvocationParams::Reader>
       params;
+  kj::Own<IncomingWorkflowInvocation> paramsPtr;
   kj::Own<rpc::JsRpcTarget::Client> stepStub;
   kj::Maybe<WorkflowInvocationResult::Serialized> result;
 };

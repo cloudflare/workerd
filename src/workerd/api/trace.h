@@ -77,6 +77,7 @@ class TraceItem final: public jsg::Object {
   class TailEventInfo;
   class HibernatableWebSocketEventInfo;
   class CustomEventInfo;
+  class WorkflowEventInfo;
 
   explicit TraceItem(jsg::Lock& js, const Trace& trace);
 
@@ -88,7 +89,8 @@ class TraceItem final: public jsg::Object {
       jsg::Ref<EmailEventInfo>,
       jsg::Ref<TailEventInfo>,
       jsg::Ref<CustomEventInfo>,
-      jsg::Ref<HibernatableWebSocketEventInfo>>;
+      jsg::Ref<HibernatableWebSocketEventInfo>,
+      jsg::Ref<WorkflowEventInfo>>;
   kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
   kj::Maybe<double> getEventTimestamp();
 
@@ -336,6 +338,28 @@ class TraceItem::QueueEventInfo final: public jsg::Object {
  private:
   kj::String queueName;
   uint32_t batchSize;
+};
+
+class TraceItem::WorkflowEventInfo final: public jsg::Object {
+ public:
+  explicit WorkflowEventInfo(const Trace& trace, const tracing::WorkflowEventInfo& eventInfo);
+
+  kj::StringPtr getWorkflowName();
+  kj::StringPtr getInstanceId();
+
+  JSG_RESOURCE_TYPE(WorkflowEventInfo) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(workflowName, getWorkflowName);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(instanceId, getInstanceId);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+      tracker.trackField("workflowName", workflowName);
+      tracker.trackField("instanceId", instanceId);
+  }
+
+ private:
+  kj::String workflowName;
+  kj::String instanceId;
 };
 
 class TraceItem::EmailEventInfo final: public jsg::Object {
@@ -656,7 +680,8 @@ class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
       api::TraceItem::HibernatableWebSocketEventInfo::Message,                                     \
       api::TraceItem::HibernatableWebSocketEventInfo::Close,                                       \
       api::TraceItem::HibernatableWebSocketEventInfo::Error, api::TraceLog, api::TraceException,   \
-      api::TraceDiagnosticChannelEvent, api::TraceMetrics, api::UnsafeTraceMetrics
+      api::TraceDiagnosticChannelEvent, api::TraceMetrics, api::UnsafeTraceMetrics,                \
+      api::TraceItem::WorkflowEventInfo
 // The list of trace.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

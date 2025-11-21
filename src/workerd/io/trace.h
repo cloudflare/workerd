@@ -406,6 +406,21 @@ struct QueueEventInfo final {
   QueueEventInfo clone() const;
 };
 
+// Describes a Workflow request
+struct WorkflowEventInfo final {
+  explicit WorkflowEventInfo(kj::String workflowName, kj::String instanceId);
+  WorkflowEventInfo(rpc::Trace::WorkflowEventInfo::Reader reader);
+  WorkflowEventInfo(WorkflowEventInfo&&) = default;
+  WorkflowEventInfo& operator=(WorkflowEventInfo&&) = default;
+  KJ_DISALLOW_COPY(WorkflowEventInfo);
+
+  kj::String workflowName;
+  kj::String instanceId;
+
+  void copyTo(rpc::Trace::WorkflowEventInfo::Builder builder) const;
+  WorkflowEventInfo clone() const;
+};
+
 // Describes an email request
 struct EmailEventInfo final {
   explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
@@ -564,7 +579,8 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     EmailEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
-    CustomEventInfo>;
+    CustomEventInfo,
+    WorkflowEventInfo>;
 
 EventInfo cloneEventInfo(const EventInfo& info);
 

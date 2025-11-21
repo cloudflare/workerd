@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "workerd/io/trace.h"
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/sentry.h>
@@ -548,6 +549,10 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
 
 SpanParent BaseTracer::getUserRequestSpan() {
   return userRequestSpan.addRef();
+}
+
+void WorkerTracer::setWorkflowExecutionModel() {
+    this->trace->executionModel = ExecutionModel::WORKFLOW;
 }
 
 void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,

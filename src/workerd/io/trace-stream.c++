@@ -1,3 +1,4 @@
+#include "workerd/io/trace.h"
 #include <workerd/api/global-scope.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace-stream.h>
@@ -82,7 +83,11 @@ namespace {
   V(URL, "url")                                                                                    \
   V(VALUE, "value")                                                                                \
   V(WALLTIME, "wallTime")                                                                          \
-  V(WASCLEAN, "wasClean")
+  V(WASCLEAN, "wasClean")                                                                          \
+  V(WORKFLOWNAME, "workflowName")                                                                  \
+  V(INSTANCEID, "instanceId")                                                                      \
+  V(WORKFLOW, "workflow")                                                                          \
+
 
 #define V(N, L) constexpr kj::LiteralStringConst N##_STR = L##_kjc;
 STRS(V)
@@ -242,6 +247,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::EmailEventInfo& info, StringCach
   return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::WorkflowEventInfo& info, StringCache& cache) {
+  static kj::StringPtr keys[] = {WORKFLOWNAME_STR, INSTANCEID_STR};
+  jsg::JsValue values[] = {
+    cache.get(js, WORKFLOW_STR), js.str(info.workflowName), js.str(info.instanceId)};
+  return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, TRACE_STR));
@@ -384,6 +396,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
     }
     KJ_CASE_ONEOF(hws, tracing::HibernatableWebSocketEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, hws, cache));
+    }
+    KJ_CASE_ONEOF(workflow, tracing::WorkflowEventInfo) {
+      obj.set(js, INFO_STR, ToJs(js, workflow, cache));
     }
     KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, custom, cache));
