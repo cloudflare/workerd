@@ -929,7 +929,7 @@ Attribute Attribute::clone() const {
 }
 
 kj::String Attribute::toString() const {
-  return kj::str("Attribute: ", name, ", ", kj::str(value));
+  return kj::str("Attribute: ", name, ", ", value);
 }
 
 Return::Return(kj::Maybe<FetchResponseInfo> info): info(kj::mv(info)) {}

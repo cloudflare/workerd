@@ -88,10 +88,10 @@ class PipelineTracer: public kj::Refcounted {
 };
 
 // An abstract class that defines shares functionality for tracers that have different
-// characteristics. This interface is used to submit both legacy and streaming tail events.
+// characteristics. This interface is used to submit both buffered and streaming tail events.
 // TODO(streaming-tail): When further consolidating the tail worker implementations, the interface
 // of the add* methods below should make more sense: The invocation span context below is currently
-// only being used in the streaming model, when we have switched the legacy model to streaming
+// only being used in the streaming model, when we have switched the buffered model to streaming
 // there will be plenty of cleanup potential.
 class BaseTracer: public kj::Refcounted {
  public:

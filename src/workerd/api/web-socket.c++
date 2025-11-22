@@ -941,7 +941,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
     // If there are any auto-responses left to process, we should do it now.
     // We should also check if the last sent message was a close. Shouldn't happen.
-    while (autoResponse.pendingAutoResponseDeque.size() > 0 && !autoResponse.isClosed) {
+    while (!autoResponse.pendingAutoResponseDeque.empty() && !autoResponse.isClosed) {
       auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
       co_await ws.send(message);
     }

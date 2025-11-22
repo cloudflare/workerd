@@ -262,8 +262,7 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
     // assumes droppable references are not roots. This way V8 only calls ResetRoot() on droppable
     // references, and doesn't even call `IsRoot()` on anything else. See comment about droppable
     // references in Wrappable::attachWrapper() for details.
-    : v8::EmbedderRootsHandler(),
-      isolate(isolate) {
+    : isolate(isolate) {
   isolate->AddGCPrologueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
     // We can expect that any freelisted shims will be collected during a major GC, because
@@ -378,6 +377,7 @@ IsolateBase::IsolateBase(V8System& system,
       ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
+      exportsAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -477,6 +477,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
+    KJ_DEFER(workerExportsObj.Reset());
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
     // that is destroyed before the lock is released.

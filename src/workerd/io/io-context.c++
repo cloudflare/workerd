@@ -872,6 +872,14 @@ size_t IoContext::getTimeoutCount() {
 }
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
+  if (getWorker().getScript().getIsolate().getApi().getFeatureFlags().getPreciseTimers()) {
+    auto now = kj::systemPreciseCalendarClock().now();
+    // Round to 3ms granularity
+    int64_t ms = (now - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+    int64_t roundedMs = (ms / 3) * 3;
+    return kj::UNIX_EPOCH + roundedMs * kj::MILLISECONDS;
+  }
+
   kj::Date adjustedTime = incomingRequest.now();
 
   KJ_IF_SOME(maybeNextTimeout, timeoutManager->getNextTimeout()) {
@@ -1083,8 +1091,6 @@ SpanParent IoContext::getCurrentTraceSpan() {
 }
 
 SpanParent IoContext::getCurrentUserTraceSpan() {
-  // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
-  // context, as with Jaeger spans.
   if (incomingRequests.empty()) {
     return SpanParent(nullptr);
   } else {
@@ -1516,7 +1522,7 @@ WarningAggregator::WarningAggregator(IoContext& context, EmitCallback emitter)
 
 WarningAggregator::~WarningAggregator() noexcept(false) {
   auto lock = warnings.lockExclusive();
-  if (lock->size() > 0) {
+  if (!lock->empty()) {
     auto emitter = kj::mv(this->emitter);
     auto warnings = lock->releaseAsArray();
     if (IoContext::hasCurrent()) {

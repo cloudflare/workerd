@@ -23,7 +23,6 @@ permissions:
 jobs:
   wpt-report:
     runs-on: ${{ inputs.image }}
-    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Download test logs

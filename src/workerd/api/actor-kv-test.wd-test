@@ -15,7 +15,7 @@ const config :Workerd.Config = (
 
 const mainWorker :Workerd.Worker = (
   compatibilityDate = "2022-09-16",
-  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 
   streamingTails = ["tail"],
 

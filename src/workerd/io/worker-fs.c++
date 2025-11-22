@@ -1857,7 +1857,7 @@ class StdioFile final: public File {
         if (newlinePos < buffer.size()) {
           auto lineData = buffer.slice(pos, newlinePos + 1);
 
-          if (lineBuffer.size() > 0) {
+          if (!lineBuffer.empty()) {
             // We have buffered data - append the line data to it
             lineBuffer.addAll(lineData);
             writeStdio(js, type, lineBuffer.asPtr());
@@ -1937,7 +1937,7 @@ class StdioFile final: public File {
       weakThis->runIfAlive([&](StdioFile& self) {
         self.microtaskScheduled = false;
 
-        if (self.lineBuffer.size() > 0) {
+        if (!self.lineBuffer.empty()) {
           if (IoContext::hasCurrent()) {
             writeStdio(js, self.type, self.lineBuffer.asPtr());
           }

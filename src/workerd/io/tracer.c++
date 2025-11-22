@@ -150,8 +150,9 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
       // reported" error) or we created a WorkerInterface with WorkerTracer without ever invoking it
       // (which is not incorrect behavior, but likely indicates inefficient code that sets up
       // WorkerInterfaces and then ends up not using it due to an error/incorrect parameters; such
-      // error checking should be done beforehand to ). Log such cases.
-      KJ_LOG(WARNING, "NOSENTRY destructed WorkerTracer with STW without reporting Onset event");
+      // error checking should be done beforehand to avoid unused allocations). Report such cases.
+      LOG_ERROR_PERIODICALLY(
+          "destructed WorkerTracer with STW without reporting Onset event", kj::getStackTrace());
     }
   }
 };
@@ -559,7 +560,7 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
     return;
   }
 
-  // Update the method name in the already-set JsRpcEventInfo for LTW compatibility
+  // Update the method name in the already-set JsRpcEventInfo for buffered tail worker compatibility
   KJ_IF_SOME(info, trace->eventInfo) {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(jsRpcInfo, tracing::JsRpcEventInfo) {

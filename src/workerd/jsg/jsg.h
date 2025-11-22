@@ -2144,6 +2144,9 @@ static constexpr JsgConfig DEFAULT_JSG_CONFIG = {};
 template <typename Config>
 static const JsgConfig& getConfig(const Config& config) {
   if constexpr (kj::isSameType<Config, JsgConfig>() || kj::canConvert<Config, JsgConfig>()) {
+    // Returning a reference to a parameter is harmless here since call sites pass in a reference to
+    // config, which they can continue to use if returned here.
+    // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
     return config;
   } else {
     return DEFAULT_JSG_CONFIG;
@@ -2830,6 +2833,12 @@ class Lock {
 
   // Retrieve the worker environment.
   virtual kj::Maybe<V8Ref<v8::Object>> getWorkerEnv() = 0;
+
+  // Store the worker exports.
+  virtual void setWorkerExports(V8Ref<v8::Object> value) = 0;
+
+  // Retrieve the worker exports.
+  virtual kj::Maybe<V8Ref<v8::Object>> getWorkerExports() = 0;
 
   // Resolve an internal module namespace from the given specifier.
   // This variation can be used only for internal built-ins.

@@ -1778,6 +1778,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
                   impl->ctxExports = lock.v8Ref(ctxExports.As<v8::Value>());
 
+                  if (!FeatureFlags::get(js).getDisableImportableEnv()) {
+                    v8::Local<v8::Object> exportsObj = ns;
+                    lock.setWorkerExports(lock.v8Ref(exportsObj));
+                  }
+
                   auto& api = script->isolate->getApi();
                   auto handlers = api.unwrapExports(lock, ns);
                   auto entrypointClasses = api.getEntrypointClasses(lock);
@@ -2341,7 +2346,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
           handlers.add(kj::str(name));
         }
       }
-      if (handlers.size() == 0) {
+      if (handlers.empty()) {
         errorReporter.addError(
             kj::str("No event handlers were registered. This script does nothing."));
       }

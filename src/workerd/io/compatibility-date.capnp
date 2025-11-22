@@ -709,8 +709,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   disableImportableEnv @78 :Bool
       $compatEnableFlag("disallow_importable_env")
       $compatDisableFlag("allow_importable_env");
-  # When allowed, `import { env } from 'cloudflare:workers'` will provide access
-  # to the per-request environment/bindings.
+  # When allowed, `import { env, exports } from 'cloudflare:workers'` will provide access
+  # to the per-request environment/bindings. This flag also disables importable exports
+  # (the exports proxy) since both features are conceptually related.
 
   assetsSecFetchModeNavigateHeaderPrefersAssetServing @79 :Bool
       $compatEnableFlag("assets_navigation_prefers_asset_serving")
@@ -732,10 +733,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # when enabled, enables Durable Object support for Python Workers.
 
-  streamingTailWorker @82 :Bool
+  obsolete82 @82 :Bool
       $compatEnableFlag("streaming_tail_worker")
       $experimental;
-  # Experimental support for streaming tail worker.
+  # Obsolete flag. Has no effect.
 
   specCompliantUrlpattern @83 :Bool
     $compatEnableFlag("urlpattern_standard")
@@ -1079,8 +1080,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsDomainModule @124 :Bool
     $compatEnableFlag("enable_nodejs_domain_module")
     $compatDisableFlag("disable_nodejs_domain_module")
-    $experimental;
-    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js non-functional stub domain module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 
@@ -1103,14 +1103,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsPunycodeModule @127 :Bool
     $compatEnableFlag("enable_nodejs_punycode_module")
     $compatDisableFlag("disable_nodejs_punycode_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js deprecated punycode module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsClusterModule @128 :Bool
     $compatEnableFlag("enable_nodejs_cluster_module")
     $compatDisableFlag("disable_nodejs_cluster_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js non-functional stub cluster module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 
@@ -1138,7 +1138,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsWasiModule @132 :Bool
     $compatEnableFlag("enable_nodejs_wasi_module")
     $compatDisableFlag("disable_nodejs_wasi_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js non-functional stub wasi module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1159,7 +1159,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsTraceEventsModule @135 :Bool
     $compatEnableFlag("enable_nodejs_trace_events_module")
     $compatDisableFlag("disable_nodejs_trace_events_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-12-04");
   # Enables the Node.js non-functional stub trace_events module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1241,4 +1241,20 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # that allows this behavior and allows sync Generator and AsyncGenerator objects to be
   # included in kj::OneOf declarations safely with strings and other types. When enabled,
   # strings are ignored but Arrays will be treated as iterables and not stringified as before.
+
+  envModuleNullableSupport @147 :Bool
+    $compatEnableFlag("env_module_nullable_support")
+    $compatDisableFlag("no_env_module_nullable_support");
+  # Enables support for null and undefined values in EnvModule's getCurrentEnv() and
+  # getCurrentExports() methods. When enabled, if the async context contains null or
+  # undefined values, they will be returned instead of falling through to the worker
+  # env/exports. This allows more explicit control over env and exports values in async
+  # contexts.
+
+  preciseTimers @148 :Bool
+    $compatEnableFlag("precise_timers")
+    $compatDisableFlag("no_precise_timers")
+    $experimental;
+  # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
+  # measurements and time-sensitive operations.
 }

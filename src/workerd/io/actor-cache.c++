@@ -1947,7 +1947,7 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
   KJ_IF_SOME(p, getBackpressure()) {
     // This might be more than one flush but that's OK as long as our state gets taken care of.
     maybePromise = countedDelete->forgiveIfFinished(kj::mv(p));
-  } else if (countedDelete->entries.size()) {
+  } else if (!countedDelete->entries.empty()) {
     maybePromise = countedDelete->forgiveIfFinished(lastFlush.addBranch());
   }
   return mapPromise(kj::mv(maybePromise),
@@ -1977,7 +1977,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
   KJ_IF_SOME(p, getBackpressure()) {
     // This might be more than one flush but that's OK as long as our state gets taken care of.
     maybePromise = countedDelete->forgiveIfFinished(kj::mv(p));
-  } else if (countedDelete->entries.size()) {
+  } else if (!countedDelete->entries.empty()) {
     maybePromise = countedDelete->forgiveIfFinished(lastFlush.addBranch());
   }
   return mapPromise(kj::mv(maybePromise),
@@ -2376,7 +2376,7 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
 
     // We will skip this CountedDelete if there are no entries that need to be deleted.
     // It will be removed from `countedDeletes` by the next flush.
-    if (entriesToDelete.size() == 0) {
+    if (entriesToDelete.empty()) {
       continue;
     }
 
@@ -2492,13 +2492,13 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
   };
 
   uint typesOfDataToFlush = 0;
-  if (putFlush.batches.size() > 0) {
+  if (!putFlush.batches.empty()) {
     ++typesOfDataToFlush;
   }
-  if (mutedDeleteFlush.batches.size() > 0) {
+  if (!mutedDeleteFlush.batches.empty()) {
     ++typesOfDataToFlush;
   }
-  if (countedDeleteFlushes.size() > 0) {
+  if (!countedDeleteFlushes.empty()) {
     ++typesOfDataToFlush;
   }
   if (maybeAlarmChange.is<DirtyAlarm>()) {
@@ -3285,7 +3285,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
     }
   }
 
-  if (keysToCount.size() == 0) {
+  if (keysToCount.empty()) {
     return count;
   } else {
     // HACK: Since we allow deletes of larger than our maxKeysPerRpc but these deletes can provoke
