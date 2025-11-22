@@ -12,6 +12,18 @@ config_setting(
     constraint_values = ["@platforms//os:linux"],
 )
 
+# tcmalloc assumes a 48-bit virtual address space, which may not be available on
+# some ARM64 systems (e.g., devices with 39-bit or 42-bit VA). This causes crashes
+# with "MmapAligned() failed" errors. Only enable tcmalloc on x86_64 Linux.
+# See: https://github.com/google/tcmalloc/blob/master/docs/platforms.md
+config_setting(
+    name = "is_linux_x86_64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
 # Flag that can be used to force-disable tcmalloc. Mainly used for ASAN builds.
 # TODO(cleanup): This feels ugly but I've exceeded my timebox for fighting Bazel for now.
 bool_flag(
@@ -28,7 +40,7 @@ selects.config_setting_group(
     name = "really_use_tcmalloc",
     match_all = [
         ":set_use_tcmalloc",
-        ":is_linux",
+        ":is_linux_x86_64",
     ],
 )
 
