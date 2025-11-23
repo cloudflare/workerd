@@ -255,9 +255,9 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
         "Cannot cache response to a range request (206 Partial Content).");
 
     auto responseHeadersRef = jsResponse->getHeaders(js);
-    auto cacheControl = responseHeadersRef->getNoChecks(js, "cache-control"_kj);
+    auto cacheControl = responseHeadersRef->getCommon(js, capnp::CommonHeaderName::CACHE_CONTROL);
 
-    KJ_IF_SOME(vary, responseHeadersRef->getNoChecks(js, "vary"_kj)) {
+    KJ_IF_SOME(vary, responseHeadersRef->getCommon(js, capnp::CommonHeaderName::VARY)) {
       JSG_REQUIRE(vary.findFirst('*') == kj::none, TypeError,
           "Cannot cache response with 'Vary: *' header.");
     }
@@ -532,7 +532,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     kj::Maybe<kj::String> cfBlobJson,
     kj::LiteralStringConst operationName,
     kj::StringPtr url,
-    kj::Maybe<jsg::ByteString> cacheControl,
+    kj::Maybe<kj::String> cacheControl,
     bool enableCompatFlags) {
   TraceContext traceContext(
       context.makeTraceSpan(operationName), context.makeUserTraceSpan(operationName));

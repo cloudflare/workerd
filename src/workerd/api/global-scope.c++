@@ -146,8 +146,6 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
   CfProperty cf(cfBlobJson);
 
-  auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
-
   // We only create the body stream if there is a body to read.
   kj::Maybe<jsg::Ref<ReadableStream>> maybeJsStream = kj::none;
 
@@ -183,19 +181,17 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     maybeJsStream = kj::mv(jsStream);
   }
 
+  auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
+
   // If the request doesn't specify "Content-Length" or "Transfer-Encoding", set "Content-Length"
   // to the body length if it's known. This ensures handlers for worker-to-worker requests can
   // access known body lengths if they're set, without buffering bodies.
-  if (body != kj::none && headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
-      headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
-    // We can't use headers.set() here as headers is marked const. Instead, we call set() on the
-    // JavaScript headers object, ignoring the REQUEST guard that usually makes them immutable.
+  if (body != kj::none && !jsHeaders->hasCommon(capnp::CommonHeaderName::CONTENT_LENGTH) &&
+      !jsHeaders->hasCommon(capnp::CommonHeaderName::TRANSFER_ENCODING)) {
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
-      jsHeaders->setUnguarded(
-          js, jsg::ByteString(kj::str("Content-Length")), jsg::ByteString(kj::str(l)));
+      jsHeaders->setCommon(capnp::CommonHeaderName::CONTENT_LENGTH, kj::str(l));
     } else {
-      jsHeaders->setUnguarded(
-          js, jsg::ByteString(kj::str("Transfer-Encoding")), jsg::ByteString(kj::str("chunked")));
+      jsHeaders->setCommon(capnp::CommonHeaderName::TRANSFER_ENCODING, kj::str("chunked"));
     }
   }
 

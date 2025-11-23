@@ -280,6 +280,15 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "header-validation",
+    hdrs = ["header-validation.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "websocket-error-handler",
     srcs = ["websocket-error-handler.c++"],
     hdrs = ["websocket-error-handler.h"],

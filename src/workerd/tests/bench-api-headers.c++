@@ -95,11 +95,9 @@ BENCHMARK_F(ApiHeaders, set_append)(benchmark::State& state) {
         for (int n = 0; n < 13; n++) {
           auto& h = kHeaders[n];
           if (h.append) {
-            headers->append(
-                env.js, jsg::ByteString(kj::str(h.name)), jsg::ByteString(kj::str(h.value)));
+            headers->append(env.js, kj::str(h.name), kj::str(h.value));
           } else {
-            headers->set(
-                env.js, jsg::ByteString(kj::str(h.name)), jsg::ByteString(kj::str(h.value)));
+            headers->set(env.js, kj::str(h.name), kj::str(h.value));
           }
         }
         benchmark::DoNotOptimize(i);
