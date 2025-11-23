@@ -106,8 +106,9 @@ wd_cc_library(
         "//src/workerd/io:actor-id",
         "//src/workerd/jsg:exception",
         "//src/workerd/util:entropy",
+        "//src/workerd/util:own-util",
         "//src/workerd/util:thread-scopes",
-        "@capnp-cpp//src/kj:kj",
+        "@capnp-cpp//src/kj",
         "@ssl",
     ],
 )

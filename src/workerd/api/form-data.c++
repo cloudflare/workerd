@@ -8,6 +8,7 @@
 
 #include <workerd/io/io-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/own-util.h>
 
 #include <kj/compat/http.h>
 #include <kj/parse/char.h>
@@ -133,8 +134,7 @@ void addEscapingQuotes(kj::Vector<char>& builder, kj::StringPtr value) {
 }
 
 void assertUtf8(const auto& params) {
-  KJ_IF_SOME(charsetParam, params.find("charset"_kj)) {
-    auto charset = kj::str(charsetParam);
+  KJ_IF_SOME(charset, params.find("charset"_kj)) {
     JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
             strcasecmp(charset.cStr(), "utf8") == 0 ||
             strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
@@ -267,7 +267,7 @@ kj::Array<FormData::EntryWithoutLock> FormData::parseWithoutLock(
           data.add(FormData::EntryWithoutLock{
             .name = kj::str(name),
             .filename = kj::str(filename),
-            .type = maybeType.map([](kj::StringPtr str) { return kj::str(str); }),
+            .type = mapCopyString(maybeType),
             .value = kj::heapArray<kj::byte>(message),
           });
         } else {

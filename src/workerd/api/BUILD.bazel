@@ -493,6 +493,7 @@ wd_cc_library(
     deps = [
         ":url",
         "//src/workerd/jsg",
+        "//src/workerd/util:own-util",
         "@capnp-cpp//src/kj",
     ],
 )
