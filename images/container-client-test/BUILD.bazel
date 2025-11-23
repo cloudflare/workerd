@@ -1,0 +1,33 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_image_layer")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+
+js_binary(
+    name = "app",
+    chdir = package_name(),
+    data = ["//:node_modules/ws"],
+    entry_point = "app.js",
+)
+
+js_image_layer(
+    name = "layers",
+    binary = ":app",
+    root = "/",
+)
+
+oci_image(
+    name = "image",
+    base = "@node_25_slim",
+    cmd = ["/{}/app".format(package_name())],
+    exposed_ports = ["8080"],
+    tars = [
+        ":layers",
+    ],
+    workdir = "/{}/app.runfiles/_main".format(package_name()),
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["cloudflare/workerd/container-client-test:latest"],
+    visibility = ["//visibility:public"],
+)
