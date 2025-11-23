@@ -1,0 +1,2 @@
+workerd/io/worker.c++:***: info: uncaught exception; desc = Error: actor unload error
+workerd/io/worker.c++:***: info: uncaught exception; desc = Error: handler error

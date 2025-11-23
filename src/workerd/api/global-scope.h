@@ -190,7 +190,7 @@ class TestController: public jsg::Object {
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
-class ExecutionContext: public jsg::Object {
+class ExecutionContext: public EventTarget {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
       : exports(js, exports),
@@ -198,6 +198,8 @@ class ExecutionContext: public jsg::Object {
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports, jsg::JsValue props)
       : exports(js, exports),
         props(js, props) {}
+
+  static jsg::Ref<ExecutionContext> constructor() = delete;
 
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
@@ -215,6 +217,7 @@ class ExecutionContext: public jsg::Object {
   }
 
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
+    JSG_INHERIT(EventTarget);
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
     if (flags.getEnableCtxExports()) {
