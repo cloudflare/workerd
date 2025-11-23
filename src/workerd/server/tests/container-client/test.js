@@ -73,6 +73,38 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
+  async testSetInactivityTimeout() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+    assert.strictEqual(container.running, false);
+
+    await container.start({
+      entrypoint: ['node', 'app.js'],
+      enableInternet: true,
+    });
+
+    assert.strictEqual(container.running, true);
+
+    await assert.rejects(() => container.setInactivityTimeout(0), {
+      name: 'TypeError',
+      message: 'setInactivityTimeout() cannot be called with a durationMs <= 0',
+    });
+
+    await container.setInactivityTimeout(1000);
+
+    assert.strictEqual(container.running, true);
+
+    // Note: container.running is set optimistically by start() before the Docker container
+    // actually finishes starting. We need to wait for the background Docker API calls to
+    // complete before aborting the actor, otherwise the container won't actually be running
+    // when the second actor tries to reconnect.
+    await scheduler.wait(500);
+  }
+
   async leaveRunning() {
     // Start container and leave it running
     const container = this.ctx.container;
@@ -95,6 +127,12 @@ export class DurableObjectExample extends DurableObject {
     }
 
     await container.destroy();
+  }
+
+  // Like checkRunning(), but throws an error if the container is not running.
+  async expectRunning() {
+    assert.strictEqual(this.ctx.container.running, true);
+    await this.ctx.container.destroy();
   }
 
   async abort() {
@@ -289,5 +327,27 @@ export const testAlarm = {
 
     stub = env.MY_CONTAINER.get(id);
     await stub.checkAlarmAbortConfirmation();
+  },
+};
+
+export const testSetInactivityTimeout = {
+  async test(_ctrl, env) {
+    {
+      const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
+
+      await stub.testSetInactivityTimeout();
+
+      await assert.rejects(() => stub.abort(), {
+        name: 'Error',
+        message: 'Application called abort() to reset Durable Object.',
+      });
+    }
+
+    {
+      const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
+
+      // Container should still be running after DO exited
+      await stub.expectRunning();
+    }
   },
 };
