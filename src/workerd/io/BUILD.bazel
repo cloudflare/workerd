@@ -268,6 +268,7 @@ wd_cc_library(
     hdrs = ["io-gate.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":trace",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
     ],
