@@ -1,4 +1,6 @@
+import sys
 from inspect import isawaitable, isclass
+from traceback import TracebackException
 from types import FunctionType
 
 import js
@@ -86,3 +88,19 @@ async def wrapper_func(relaxed, inst, prop, *args, **kwargs):
         return python_to_rpc(await result)
     else:
         return python_to_rpc(result)
+
+
+def excepthook(_type, exc, _tb):
+    """Remove workerd runtime frames from the top of the stack trace."""
+    tb_exc = TracebackException.from_exception(exc)
+    for idx, frame in enumerate(tb_exc.stack):
+        fn = frame.filename
+        # Remove frames from "introspection.py" and "/lib/python".
+        if fn.startswith("/") and not fn.startswith("/lib/python"):
+            first_user_frame = idx
+            break
+    del tb_exc.stack[:first_user_frame]
+    tb_exc.print()
+
+
+sys.excepthook = excepthook
