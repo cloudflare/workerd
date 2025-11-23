@@ -9,6 +9,7 @@
 #include <workerd/api/util.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/limit-enforcer.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/http-util.h>

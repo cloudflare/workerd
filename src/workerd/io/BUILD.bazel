@@ -278,7 +278,7 @@ wd_cc_library(
     hdrs = ["limit-enforcer.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":observer",
+        ":outcome_capnp",
         "//src/workerd/jsg",
     ],
 )

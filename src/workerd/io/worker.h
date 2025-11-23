@@ -12,10 +12,9 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/io-timers.h>
-#include <workerd/io/limit-enforcer.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace.h>
-#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-source.h>
 #include <workerd/jsg/async-context.h>
@@ -23,7 +22,6 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/util/strong-bool.h>
-#include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
@@ -55,6 +53,10 @@ struct EmscriptenRuntime;
 KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
+
+class IsolateLimitEnforcer;
+enum class UncaughtExceptionSource;
+class VirtualFileSystem;
 
 class ThreadContext;
 class IoContext;
