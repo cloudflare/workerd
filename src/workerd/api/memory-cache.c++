@@ -145,7 +145,7 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
     // value. Note that removeIfExistsWhileLocked(key) will update the
     // totalValueSize if necessary, so we don't need to do that here.
     writeSpan.setTag("write_rejected"_kjc, true);
-    writeSpan.setTag("rejection_reason"_kjc, kj::str("value_too_large"));
+    writeSpan.setTag("rejection_reason"_kjc, "value_too_large"_kjc);
     writeSpan.setTag("max_value_size"_kjc, static_cast<double>(data.effectiveLimits.maxValueSize));
     removeIfExistsWhileLocked(data, key);
     return;
@@ -153,7 +153,7 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
 
   if (hasExpired(expiration)) {
     writeSpan.setTag("write_rejected"_kjc, true);
-    writeSpan.setTag("rejection_reason"_kjc, kj::str("already_expired"));
+    writeSpan.setTag("rejection_reason"_kjc, "already_expired"_kjc);
     removeIfExistsWhileLocked(data, key);
     return;
   }
@@ -218,8 +218,8 @@ void SharedMemoryCache::evictNextWhileLocked(
   MemoryCacheEntry& maybeExpired = *data.cache.ordered<3>().begin();
   KJ_ASSERT(data.totalValueSize >= maybeExpired.size());
   if (hasExpired(maybeExpired.expiration, allowOutsideIoContext)) {
-    evictionSpan.setTag("eviction_reason"_kjc, kj::str("expiration"));
-    evictionSpan.setTag("evicted_key"_kjc, kj::str(maybeExpired.key));
+    evictionSpan.setTag("eviction_reason"_kjc, "expiration"_kjc);
+    evictionSpan.setTag("evicted_key"_kjc, maybeExpired.key.asPtr());
     evictionSpan.setTag("evicted_size"_kjc, static_cast<double>(maybeExpired.size()));
     evictionSpan.setTag("cache_size_before"_kjc, static_cast<double>(data.totalValueSize));
     evictionSpan.setTag("cache_entries_before"_kjc, static_cast<double>(data.cache.size()));
@@ -230,8 +230,8 @@ void SharedMemoryCache::evictNextWhileLocked(
 
   // Otherwise, if no entry has expired, evict the least recently used entry.
   MemoryCacheEntry& leastRecentlyUsed = *data.cache.ordered<1>().begin();
-  evictionSpan.setTag("eviction_reason"_kjc, kj::str("lru"));
-  evictionSpan.setTag("evicted_key"_kjc, kj::str(leastRecentlyUsed.key));
+  evictionSpan.setTag("eviction_reason"_kjc, "lru"_kjc);
+  evictionSpan.setTag("evicted_key"_kjc, leastRecentlyUsed.key.asPtr());
   evictionSpan.setTag("evicted_size"_kjc, static_cast<double>(leastRecentlyUsed.size()));
   evictionSpan.setTag("cache_size_before"_kjc, static_cast<double>(data.totalValueSize));
   evictionSpan.setTag("cache_entries_before"_kjc, static_cast<double>(data.cache.size()));
@@ -321,7 +321,7 @@ SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& read
 
     // Create a span to track how long we wait for the inflight request
     auto waitSpan = readSpan.newChild("memory_cache_coalesce_wait"_kjc);
-    waitSpan.setTag("key"_kjc, kj::str(key));
+    waitSpan.setTag("key"_kjc, key.asPtr());
     waitSpan.setTag("waiters_ahead"_kjc, static_cast<double>(existingInProgress->waiting.size()));
 
     // We return a Promise, but we keep the fulfiller. We might fulfill it
@@ -492,7 +492,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
 
               // Create a span for the fallback execution
               auto fallbackSpan = readSpan.newChild("memory_cache_fallback"_kjc);
-              fallbackSpan.setTag("key"_kjc, kj::str(key));
+              fallbackSpan.setTag("key"_kjc, key.asPtr());
 
               // Wrap the spans in RefcountedWrapper so they can be shared between then/catch
               auto fallbackSpanRc = kj::refcountedWrapper<SpanBuilder>(kj::mv(fallbackSpan));
@@ -562,7 +562,7 @@ void MemoryCache::delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key) {
   }
 
   auto deleteSpan = IoContext::current().makeTraceSpan("memory_cache_delete"_kjc);
-  deleteSpan.setTag("key"_kjc, kj::str(key.value));
+  deleteSpan.setTag("key"_kjc, key.value.asPtr());
 
   cacheUse.delete_(key.value);
 
