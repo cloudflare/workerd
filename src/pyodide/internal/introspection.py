@@ -1,3 +1,4 @@
+import signal
 from inspect import isawaitable, isclass
 from types import FunctionType
 
@@ -86,3 +87,14 @@ async def wrapper_func(relaxed, inst, prop, *args, **kwargs):
         return python_to_rpc(await result)
     else:
         return python_to_rpc(result)
+
+
+class CpuLimitExceeded(BaseException):
+    pass
+
+
+def raise_cpu_limit_exceeded(signum, frame):
+    raise CpuLimitExceeded("Python Worker exceeded CPU time limit")
+
+
+signal.signal(signal.SIGXCPU, raise_cpu_limit_exceeded)

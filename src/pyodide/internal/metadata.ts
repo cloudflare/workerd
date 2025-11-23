@@ -63,3 +63,6 @@ export const LEGACY_GLOBAL_HANDLERS = !NO_GLOBAL_HANDLERS;
 export const LEGACY_VENDOR_PATH = !FORCE_NEW_VENDOR_PATH;
 export const LEGACY_INCLUDE_SDK = !EXTERNAL_SDK;
 export const CHECK_RNG_STATE = !!COMPATIBILITY_FLAGS.python_check_rng_state;
+
+export const setCpuLimitNearlyExceededCallback =
+  MetadataReader.setCpuLimitNearlyExceededCallback.bind(MetadataReader);

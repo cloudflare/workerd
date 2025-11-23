@@ -78,3 +78,7 @@ export function invalidateCaches(Module: Module): void {
     `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`
   );
 }
+
+export function unreachable(msg: never): never {
+  throw new PythonWorkersInternalError(`Unreachable: ${msg}`);
+}
