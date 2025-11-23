@@ -349,7 +349,7 @@ class Response(FetchResponse):
                 raise TypeError(
                     f"Unsupported type in Response: {body.constructor.name}"
                 )
-        elif not isinstance(body, str | FormData) and body is not None:
+        elif not isinstance(body, str | FormData | bytes) and body is not None:
             raise TypeError(f"Unsupported type in Response: {type(body).__name__}")
 
         # Handle constructing a Response from a JS Response.
@@ -363,12 +363,27 @@ class Response(FetchResponse):
 
         options = self._create_options(status, status_text, headers, web_socket)
 
-        # Initialize via the FetchResponse super-class which gives us access to
-        # methods that we would ordinarily have to redeclare.
-        js_resp = js.Response.new(
-            body.js_object if isinstance(body, FormData) else body, **options
-        )
-        super().__init__(js_resp.url, js_resp)
+        # To avoid unnecessary copies we have to keep track of the proxy and destroy it
+        # when we're done with it.
+        js_body = body
+        proxy_bytes = None
+        proxy_buffer = None
+        if isinstance(body, bytes):
+            proxy_bytes = create_proxy(body)
+            proxy_buffer = proxy_bytes.getBuffer()
+            js_body = proxy_buffer.data
+        elif isinstance(body, FormData):
+            js_body = body.js_object
+        try:
+            # Initialize via the FetchResponse super-class which gives us access to
+            # methods that we would ordinarily have to redeclare.
+            js_resp = js.Response.new(js_body, **options)
+            super().__init__(js_resp.url, js_resp)
+        finally:
+            if proxy_bytes:
+                proxy_bytes.destroy()
+            if proxy_buffer:
+                proxy_buffer.release()
 
     def __repr__(self):
         body = [f"status={self.status}"]
