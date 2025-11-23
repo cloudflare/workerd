@@ -636,8 +636,10 @@ export type DurableObjectLocationHint =
   | "oc"
   | "afr"
   | "me";
+export type DurableObjectRoutingMode = "primary-only";
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
+  routingMode?: DurableObjectRoutingMode;
 }
 export interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
