@@ -5,7 +5,7 @@
 #include "performance.h"
 
 #include <workerd/io/io-util.h>
-#include <workerd/io/worker.h>
+#include <workerd/io/limit-enforcer.h>
 
 #include <kj/encoding.h>
 

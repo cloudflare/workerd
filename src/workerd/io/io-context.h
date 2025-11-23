@@ -13,6 +13,7 @@
 #include <workerd/io/io-gate.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/io/io-timers.h>
+#include <workerd/io/limit-enforcer.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/async-context.h>

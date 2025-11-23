@@ -11,7 +11,6 @@
 #include <workerd/jsg/observer.h>
 #include <workerd/util/sqlite.h>
 
-#include <kj/exception.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/time.h>

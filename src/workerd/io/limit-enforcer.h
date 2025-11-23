@@ -4,13 +4,25 @@
 
 #pragma once
 
-#include <workerd/io/observer.h>
-#include <workerd/jsg/jsg.h>
+#include <workerd/io/outcome.capnp.h>
+
+#include <v8-isolate.h>
+
+#include <kj/async.h>   // For Promise
+#include <kj/memory.h>  // for Own
+#include <kj/one-of.h>  // for OneOf
+#include <kj/time.h>    // for Duration
 
 namespace workerd {
+class IsolateObserver;
+class RequestObserver;
 
 struct ActorCacheSharedLruOptions;
 class IoContext;
+
+namespace jsg {
+class Lock;
+}  // namespace jsg
 
 static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 100'000;
 
