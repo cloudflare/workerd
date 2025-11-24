@@ -2025,7 +2025,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   }
 
   // Get client and trace context (if needed) in one clean call
-  auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
+  auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), SpanOperation("fetch"_kjc));
   auto traceContext = kj::mv(clientWithTracing.traceContext);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
@@ -2844,25 +2844,25 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
 }
 
 kj::Own<WorkerInterface> Fetcher::getClient(
-    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
-  auto clientWithTracing = getClientWithTracing(ioContext, kj::mv(cfStr), kj::mv(operationName));
+    IoContext& ioContext, kj::Maybe<kj::String> cfStr, SpanOperation operation) {
+  auto clientWithTracing = getClientWithTracing(ioContext, kj::mv(cfStr), kj::mv(operation));
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
-    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
+    IoContext& ioContext, kj::Maybe<kj::String> cfStr, SpanOperation operation) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       // For channels, create trace context
-      auto userSpan = ioContext.makeUserTraceSpan(operationName.clone());
-      auto traceSpan = ioContext.makeTraceSpan(operationName.clone());
+      auto userSpan = ioContext.makeUserTraceSpan(operation);
+      auto traceSpan = ioContext.makeTraceSpan(operation);
       auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto userSpan = ioContext.makeUserTraceSpan(operationName.clone());
-      auto traceSpan = ioContext.makeTraceSpan(operationName.clone());
+      auto userSpan = ioContext.makeUserTraceSpan(operation);
+      auto traceSpan = ioContext.makeTraceSpan(operation);
       auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
@@ -2870,7 +2870,7 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
       }, {
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
+        .operation = kj::mv(operation),
       });
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }

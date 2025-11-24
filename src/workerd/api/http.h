@@ -528,7 +528,7 @@ public:
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
-      kj::ConstString operationName);
+      SpanOperation operation);
 
   // Result of getClient call that includes optional trace context
   struct ClientWithTracing {
@@ -540,7 +540,7 @@ public:
   ClientWithTracing getClientWithTracing(
     IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
-    kj::ConstString operationName);
+    SpanOperation operation);
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);

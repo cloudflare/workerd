@@ -942,7 +942,7 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
     },
         {.inHouse = true,
           .wrapMetrics = true,
-          .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+          .operation = SpanOperation("facet_subrequest"_kjc)}));
   }
 
  private:

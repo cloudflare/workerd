@@ -87,7 +87,7 @@ kj::String Hyperdrive::getConnectionString() {
 kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   auto& context = IoContext::current();
   auto service = context.getSubrequestChannel(
-      this->clientIndex, true, kj::none, kj::ConstString("hyperdrive_connect"_kjc));
+      this->clientIndex, true, kj::none, SpanOperation("hyperdrive_connect"_kjc));
 
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);

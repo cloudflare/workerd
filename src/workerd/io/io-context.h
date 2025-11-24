@@ -827,11 +827,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   //   request.
   // - In preview, in-house requests do not show up in the network tab.
   //
-  // `operationName` is the name to use for the request's span, if tracing is turned on.
+  // `operation` is the name to use for the request's span, if tracing is turned on.
   kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName);
+      SpanOperation operation);
 
   // Get WorkerInterface objects to use for subrequests.
   //
@@ -857,21 +857,21 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<WorkerInterface> getSubrequestChannelWithSpans(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName,
+      SpanOperation operation,
       kj::Vector<Span::Tag> tags);
 
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::ConstString> operationName = kj::none);
+      kj::Maybe<SpanOperation> operation = kj::none);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
   kj::Own<kj::HttpClient> getHttpClient(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName);
+      SpanOperation operation);
 
   kj::Own<kj::HttpClient> getHttpClient(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
@@ -880,7 +880,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<kj::HttpClient> getHttpClientWithSpans(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName,
+      SpanOperation operation,
       kj::Vector<Span::Tag> tags);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
@@ -888,7 +888,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<kj::HttpClient> getHttpClientNoChecks(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::ConstString> operationName = kj::none);
+      kj::Maybe<SpanOperation> operation = kj::none);
   // TODO(cleanup): Make it the caller's job to call asHttpClient() on the result of
   //   getSubrequest*().
 

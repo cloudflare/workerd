@@ -35,7 +35,7 @@ kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
   },
       {.inHouse = true,
         .wrapMetrics = true,
-        .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+        .operation = SpanOperation("durable_object_subrequest"_kjc)}));
 }
 
 kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
@@ -67,7 +67,7 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
   },
       {.inHouse = true,
         .wrapMetrics = true,
-        .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+        .operation = SpanOperation("durable_object_subrequest"_kjc)}));
 }
 
 kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
@@ -86,7 +86,7 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
   },
       {.inHouse = true,
         .wrapMetrics = true,
-        .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+        .operation = SpanOperation("durable_object_subrequest"_kjc)}));
 }
 
 jsg::Ref<Fetcher> ColoLocalActorNamespace::get(jsg::Lock& js, kj::String actorId) {

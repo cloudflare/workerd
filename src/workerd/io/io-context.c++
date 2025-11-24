@@ -941,7 +941,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequest(
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
+    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, SpanOperation operation) {
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
     return getSubrequestChannelImpl(
@@ -950,7 +950,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       SubrequestOptions{
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
+        .operation = kj::mv(operation),
       });
 }
 
@@ -971,7 +971,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::ConstString operationName,
+    SpanOperation operation,
     kj::Vector<Span::Tag> tags) {
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
@@ -984,14 +984,14 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
       SubrequestOptions{
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
+        .operation = kj::mv(operation),
       });
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<kj::ConstString> operationName) {
+    kj::Maybe<SpanOperation> operation) {
   return getSubrequestNoChecks(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
     return getSubrequestChannelImpl(
@@ -1000,7 +1000,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
       SubrequestOptions{
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
+        .operation = kj::mv(operation),
       });
 }
 
@@ -1021,18 +1021,18 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClient(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
+    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, SpanOperation operation) {
   return asHttpClient(
-      getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
+      getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operation)));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::ConstString operationName,
+    SpanOperation operation,
     kj::Vector<Span::Tag> tags) {
   return asHttpClient(getSubrequestChannelWithSpans(
-      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
+      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operation), kj::mv(tags)));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClient(
@@ -1043,9 +1043,9 @@ kj::Own<kj::HttpClient> IoContext::getHttpClient(
 kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<kj::ConstString> operationName) {
+    kj::Maybe<SpanOperation> operation) {
   return asHttpClient(
-      getSubrequestChannelNoChecks(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
+      getSubrequestChannelNoChecks(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operation)));
 }
 
 kj::Own<CacheClient> IoContext::getCacheClient() {
