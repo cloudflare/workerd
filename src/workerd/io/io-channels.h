@@ -31,9 +31,6 @@ class CacheClient {
     // The `request.cf` blob, JSON-encoded.
     kj::Maybe<kj::String> cfBlobJson;
 
-    // Specifies the parent span for the subrequest for tracing purposes.
-    SpanParent parentSpan;
-
     // Serialized JSON value to pass in ew_compat field of control header to FL. This has the same
     // semantics as the field in IoChannelFactory::SubrequestMetadata.
     kj::Maybe<kj::StringPtr> featureFlagsForFl;
