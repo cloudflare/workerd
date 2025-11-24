@@ -6,9 +6,9 @@
 
 #include "nbytes.h"
 
+#include <workerd/api/system-streams.h>
 #include <workerd/io/features.h>
-
-#include <list>
+#include <workerd/util/ring-buffer.h>
 
 namespace workerd::api {
 CompressionAllocator::CompressionAllocator(
@@ -238,8 +238,8 @@ class LazyBuffer {
 // Uncompressed data goes in. Compressed data comes out.
 template <Context::Mode mode>
 class CompressionStreamImpl: public kj::Refcounted,
-                             public ReadableStreamSource,
-                             public WritableStreamSink {
+                             public kj::AsyncInputStream,
+                             public capnp::ExplicitEndOutputStream {
  public:
   explicit CompressionStreamImpl(kj::String format,
       Context::ContextFlags flags,
@@ -251,14 +251,15 @@ class CompressionStreamImpl: public kj::Refcounted,
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
-        return JSG_KJ_EXCEPTION(FAILED, Error, "Write after close.");
+        JSG_FAIL_REQUIRE(Error, "Write after close");
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        return kj::cp(exception);
+        kj::throwFatalException(kj::cp(exception));
       }
       KJ_CASE_ONEOF(open, Open) {
         context.setInput(buffer.begin(), buffer.size());
-        return writeInternal(Z_NO_FLUSH);
+        writeInternal(Z_NO_FLUSH);
+        co_return;
       }
     }
     KJ_UNREACHABLE;
@@ -275,9 +276,10 @@ class CompressionStreamImpl: public kj::Refcounted,
         kj::throwFatalException(kj::cp(exception));
       }
       KJ_CASE_ONEOF(open, Open) {
-        if (pieces.size() == 0) return kj::READY_NOW;
-        return write(pieces[0]).then(
-            [this, pieces = pieces.slice(1)]() mutable { return write(pieces); });
+        for (auto piece: pieces) {
+          co_await write(piece);
+        }
+        co_return;
       }
     }
     KJ_UNREACHABLE;
@@ -285,37 +287,40 @@ class CompressionStreamImpl: public kj::Refcounted,
 
   kj::Promise<void> end() override {
     state = Ended();
-    return writeInternal(Z_FINISH);
+    writeInternal(Z_FINISH);
+    co_return;
   }
 
-  void abort(kj::Exception reason) override {
+  kj::Promise<void> whenWriteDisconnected() override {
+    return kj::NEVER_DONE;
+  }
+
+  void abortWrite(kj::Exception&& reason) override {
     cancelInternal(kj::mv(reason));
   }
 
-  // ReadableStreamSource implementation -------------------------------------------------
+  // AsyncInputStream implementation -----------------------------------------------------
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     KJ_ASSERT(minBytes <= maxBytes);
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
         // There might still be data in the output buffer remaining to read.
-        if (output.empty()) return static_cast<size_t>(0);
-        return tryReadInternal(
+        if (output.empty()) {
+          co_return static_cast<size_t>(0);
+        }
+        co_return co_await tryReadInternal(
             kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        return kj::cp(exception);
+        kj::throwFatalException(kj::cp(exception));
       }
       KJ_CASE_ONEOF(open, Open) {
-        return tryReadInternal(
+        co_return co_await tryReadInternal(
             kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
       }
     }
     KJ_UNREACHABLE;
-  }
-
-  void cancel(kj::Exception reason) override {
-    cancelInternal(kj::mv(reason));
   }
 
  private:
@@ -355,7 +360,7 @@ class CompressionStreamImpl: public kj::Refcounted,
     // If we reached the end, resolve the read immediately as well, since no
     // new data is expected.
     if (output.size() >= minBytes || state.template is<Ended>()) {
-      return copyIntoBuffer(dest);
+      co_return copyIntoBuffer(dest);
     }
 
     // Otherwise, create a pending read.
@@ -374,10 +379,10 @@ class CompressionStreamImpl: public kj::Refcounted,
 
     pendingReads.push_back(kj::mv(pendingRead));
 
-    return canceler.wrap(kj::mv(promise.promise));
+    co_return co_await canceler.wrap(kj::mv(promise.promise));
   }
 
-  kj::Promise<void> writeInternal(int flush) {
+  void writeInternal(int flush) {
     // TODO(later): This does not yet implement any backpressure. A caller can keep calling
     // write without reading, which will continue to fill the internal buffer.
     KJ_ASSERT(flush == Z_FINISH || state.template is<Open>());
@@ -388,7 +393,7 @@ class CompressionStreamImpl: public kj::Refcounted,
         result = context.pumpOnce(flush);
       })) {
         cancelInternal(kj::cp(exception));
-        return kj::mv(exception);
+        kj::throwFatalException(kj::mv(exception));
       }
 
       if (result.buffer.size() == 0) {
@@ -397,7 +402,8 @@ class CompressionStreamImpl: public kj::Refcounted,
           // pumpOnce again.
           continue;
         }
-        return maybeFulfillRead();
+        maybeFulfillRead();
+        return;
       }
 
       // Output has been produced, copy it to result buffer and continue loop to call pumpOnce
@@ -408,7 +414,7 @@ class CompressionStreamImpl: public kj::Refcounted,
   }
 
   // Fulfill as many pending reads as we can from the output buffer.
-  kj::Promise<void> maybeFulfillRead() {
+  void maybeFulfillRead() {
     // If there are pending reads and data to be read, we'll loop through
     // the pending reads and fulfill them as much as possible.
     while (!pendingReads.empty() && output.size() > 0) {
@@ -425,12 +431,12 @@ class CompressionStreamImpl: public kj::Refcounted,
         if (pending.filled > 0) {
           auto ex = JSG_KJ_EXCEPTION(FAILED, Error, "A partially fulfilled read was canceled.");
           cancelInternal(kj::cp(ex));
-          return kj::mv(ex);
+          kj::throwFatalException(kj::mv(ex));
         }
 
         auto ex = JSG_KJ_EXCEPTION(FAILED, Error, "The pending read was canceled.");
         cancelInternal(kj::cp(ex));
-        return kj::mv(ex);
+        kj::throwFatalException(kj::mv(ex));
       }
 
       // The pending read is still viable so determine how much we can copy in.
@@ -469,8 +475,6 @@ class CompressionStreamImpl: public kj::Refcounted,
         }
       }
     }
-
-    return kj::READY_NOW;
   }
 
   struct Ended {};
@@ -483,19 +487,72 @@ class CompressionStreamImpl: public kj::Refcounted,
   LazyBuffer output;
   // We use std::list to keep memory overhead low when there are many streams with no or few pending
   // reads.
-  std::list<PendingRead> pendingReads;
+  RingBuffer<PendingRead, 8> pendingReads;
 };
+
+// Adapter to bridge CompressionStreamImpl (which implements AsyncInputStream and
+// ExplicitEndOutputStream) to the ReadableStreamSource/WritableStreamSink interfaces.
+// TODO(soon): This class is intended to be replaced by the new ReadableSource/WritableSink
+// interfaces once fully implemented. We will need an adapter that knows how to handle both
+// sides of the stream once fully implemented. The current implementation in system-streams.c++
+// implements separate adapters for each side that are not aware of each other, making it
+// unsuitable for this specific case.
+template <Context::Mode mode>
+class CompressionStreamAdapter final: public kj::Refcounted,
+                                      public ReadableStreamSource,
+                                      public WritableStreamSink {
+ public:
+  explicit CompressionStreamAdapter(kj::Rc<CompressionStreamImpl<mode>> impl)
+      : impl(kj::mv(impl)),
+        ioContext(IoContext::current()) {}
+
+  // ReadableStreamSource implementation
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return impl->tryRead(buffer, minBytes, maxBytes).attach(ioContext.registerPendingEvent());
+  }
+
+  void cancel(kj::Exception reason) override {
+    // AsyncInputStream doesn't have cancel, but we can abort the write side
+    impl->abortWrite(kj::mv(reason));
+  }
+
+  // WritableStreamSink implementation
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    return impl->write(buffer).attach(ioContext.registerPendingEvent());
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    return impl->write(pieces).attach(ioContext.registerPendingEvent());
+  }
+
+  kj::Promise<void> end() override {
+    return impl->end().attach(ioContext.registerPendingEvent());
+  }
+
+  void abort(kj::Exception reason) override {
+    impl->abortWrite(kj::mv(reason));
+  }
+
+ private:
+  kj::Rc<CompressionStreamImpl<mode>> impl;
+  IoContext& ioContext;
+};
+
 }  // namespace
 
 jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
       "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
-  auto readableSide = kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(
+  auto impl = kj::rc<CompressionStreamImpl<Context::Mode::COMPRESS>>(
       kj::mv(format), Context::ContextFlags::NONE, js.getExternalMemoryTarget());
-  auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();
+
+  // Create a single adapter that implements both readable and writable sides
+  auto adapter = kj::refcounted<CompressionStreamAdapter<Context::Mode::COMPRESS>>(kj::mv(impl));
+  auto readableSide = kj::addRef(*adapter);
+  auto writableSide = kj::mv(adapter);
 
   return js.alloc<CompressionStream>(js.alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
       js.alloc<WritableStream>(ioContext, kj::mv(writableSide),
@@ -506,14 +563,17 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
       "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
-  auto readableSide =
-      kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(kj::mv(format),
-          FeatureFlags::get(js).getStrictCompression() ? Context::ContextFlags::STRICT
-                                                       : Context::ContextFlags::NONE,
-          js.getExternalMemoryTarget());
-  auto writableSide = kj::addRef(*readableSide);
+  auto impl = kj::rc<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(kj::mv(format),
+      FeatureFlags::get(js).getStrictCompression() ? Context::ContextFlags::STRICT
+                                                   : Context::ContextFlags::NONE,
+      js.getExternalMemoryTarget());
 
   auto& ioContext = IoContext::current();
+
+  // Create a single adapter that implements both readable and writable sides
+  auto adapter = kj::refcounted<CompressionStreamAdapter<Context::Mode::DECOMPRESS>>(kj::mv(impl));
+  auto readableSide = kj::addRef(*adapter);
+  auto writableSide = kj::mv(adapter);
 
   return js.alloc<DecompressionStream>(js.alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
       js.alloc<WritableStream>(ioContext, kj::mv(writableSide),
