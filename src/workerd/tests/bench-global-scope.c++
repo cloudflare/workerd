@@ -41,5 +41,39 @@ BENCHMARK_F(GlobalScopeBenchmark, request)(benchmark::State& state) {
   }
 }
 
+struct QueueMicrotaskBenchmark: public benchmark::Fixture {
+  virtual ~QueueMicrotaskBenchmark() noexcept(true) {}
+
+  void SetUp(benchmark::State& state) noexcept(true) override {
+    TestFixture::SetupParams params = {.mainModuleSource = R"(
+        export default {
+          async fetch(request) {
+            queueMicrotask(() => {
+              throw new Error('boom');
+            });
+            return new Response("OK");
+          },
+        };
+      )"_kj};
+    fixture = kj::heap<TestFixture>(kj::mv(params));
+  }
+
+  void TearDown(benchmark::State& state) noexcept(true) override {
+    fixture = nullptr;
+  }
+
+  kj::Own<TestFixture> fixture;
+};
+
+BENCHMARK_F(QueueMicrotaskBenchmark, request)(benchmark::State& state) {
+  for (auto _: state) {
+    for (size_t i = 0; i < 1000; ++i) {
+      benchmark::DoNotOptimize(
+          fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "TEST"_kj));
+      benchmark::DoNotOptimize(i);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace workerd
