@@ -703,14 +703,26 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
   {
     // Scope for the view - we can't do anything that might cause a V8 GC!
     v8::String::ValueView view(js.v8Isolate, input);
-    uint32_t length = view.length();
+    size_t length = view.length();
 
     if (view.is_one_byte()) {
       auto data = reinterpret_cast<const char*>(view.data8());
-      read = findBestFit(data, length, bufferSize);
-      if (read != 0) {
-        KJ_DASSERT(simdutf::utf8_length_from_latin1(data, read) <= bufferSize);
-        written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
+      simdutf::result result =
+          simdutf::validate_ascii_with_errors(data, kj::min(length, bufferSize));
+      written = read = result.count;
+      auto outAddr = outputBuf.begin();
+      memcpy(outAddr, data, read);
+      outAddr += read;
+      data += read;
+      length -= read;
+      bufferSize -= read;
+      if (length != 0 && bufferSize != 0) {
+        size_t rest = findBestFit(data, length, bufferSize);
+        if (rest != 0) {
+          KJ_DASSERT(simdutf::utf8_length_from_latin1(data, rest) <= bufferSize);
+          written += simdutf::convert_latin1_to_utf8(data, rest, outAddr);
+          read += rest;
+        }
       }
     } else {
       auto data = reinterpret_cast<const char16_t*>(view.data16());
@@ -732,9 +744,14 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     }
   }
   KJ_DASSERT(written <= bufferSize);
+  // V8's String::kMaxLenth is a lot less than a maximal int so this is fine.
+  using RInt = decltype(TextEncoder::EncodeIntoResult::read);
+  using WInt = decltype(TextEncoder::EncodeIntoResult::written);
+  KJ_DASSERT(0 <= read && read <= std::numeric_limits<RInt>::max());
+  KJ_DASSERT(0 <= written && written <= std::numeric_limits<WInt>::max());
   return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(read),
-    .written = static_cast<int>(written),
+    .read = static_cast<RInt>(read),
+    .written = static_cast<WInt>(written),
   };
 }
 
