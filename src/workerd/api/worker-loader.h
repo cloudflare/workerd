@@ -125,7 +125,7 @@ class WorkerLoader: public jsg::Object {
   };
 
   jsg::Ref<WorkerStub> get(
-      jsg::Lock& js, kj::String name, jsg::Function<jsg::Promise<WorkerCode>()> getCode);
+      jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode);
 
   JSG_RESOURCE_TYPE(WorkerLoader) {
     JSG_METHOD(get);

@@ -3321,7 +3321,7 @@ class Server::WorkerService final: public Service,
   }
 
   kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
-      kj::String name,
+      kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
 
   // ---------------------------------------------------------------------------
@@ -3865,19 +3865,24 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
   }
 
   kj::Own<WorkerStubChannel> loadIsolate(
-      kj::String name, kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
-    return isolates
-        .findOrCreate(name,
-            [&]() -> decltype(isolates)::Entry {
-      // This name isn't actually used in any maps nor is it ever revealed back to the app, but it
-      // may be used in error logs.
-      auto isolateName = kj::str(namespaceName, ':', name);
+      kj::Maybe<kj::String> name, kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
+    KJ_IF_SOME(n, name) {
+      return isolates
+          .findOrCreate(n,
+              [&]() -> decltype(isolates)::Entry {
+        // This name isn't actually used in any maps nor is it ever revealed back to the app, but it
+        // may be used in error logs.
+        auto isolateName = kj::str(namespaceName, ':', n);
 
-      return {.key = kj::mv(name),
-        .value = kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::mv(fetchSource))};
-    })
-        .addRef()
-        .toOwn();
+        return {.key = kj::mv(n),
+          .value = kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::mv(fetchSource))};
+      })
+          .addRef()
+          .toOwn();
+    } else {
+      auto isolateName = kj::str(namespaceName, ":dynamic:", randomUUID(server.entropySource));
+      return kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::mv(fetchSource)).toOwn();
+    }
   }
 
  private:
@@ -3915,6 +3920,10 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         kj::String isolateName,
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource)
         : startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()) {}
+
+    ~WorkerStubImpl() {
+      unlink();
+    }
 
     void unlink() {
       KJ_IF_SOME(s, service) {
@@ -4147,7 +4156,7 @@ void Server::unlinkWorkerLoaders() {
 }
 
 kj::Own<WorkerStubChannel> Server::WorkerService::loadIsolate(uint loaderChannel,
-    kj::String name,
+    kj::Maybe<kj::String> name,
     kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
   auto& channels =
       KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");

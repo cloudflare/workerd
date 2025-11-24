@@ -3843,7 +3843,7 @@ export interface WorkerStubEntrypointOptions {
 }
 export interface WorkerLoader {
   get(
-    name: string,
+    name: string | null,
     getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
   ): WorkerStub;
 }
