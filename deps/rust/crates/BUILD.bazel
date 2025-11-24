@@ -104,14 +104,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.46",
-    actual = "@crates_vendor__cc-1.2.46//:cc",
+    name = "cc-1.2.47",
+    actual = "@crates_vendor__cc-1.2.47//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.46//:cc",
+    actual = "@crates_vendor__cc-1.2.47//:cc",
     tags = ["manual"],
 )
 
@@ -128,14 +128,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.51",
-    actual = "@crates_vendor__clap-4.5.51//:clap",
+    name = "clap-4.5.53",
+    actual = "@crates_vendor__clap-4.5.53//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.51//:clap",
+    actual = "@crates_vendor__clap-4.5.53//:clap",
     tags = ["manual"],
 )
 
@@ -356,14 +356,14 @@ alias(
 )
 
 alias(
-    name = "syn-2.0.110",
-    actual = "@crates_vendor__syn-2.0.110//:syn",
+    name = "syn-2.0.111",
+    actual = "@crates_vendor__syn-2.0.111//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.110//:syn",
+    actual = "@crates_vendor__syn-2.0.111//:syn",
     tags = ["manual"],
 )
 
@@ -418,7 +418,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.51//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.53//:stdio-fixture__bin",
     tags = ["manual"],
 )
 
