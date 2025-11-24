@@ -509,7 +509,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
       kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus =
           [&]() -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
         KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
-          traceContext.userSpan.setTag("cloudflare.kv.response.cache_status"_kjc, kj::str(cs));
+          traceContext.userSpan.setTag("cloudflare.kv.response.cache_status"_kjc, cs);
           return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
         }
         return kj::none;

@@ -1152,40 +1152,7 @@ struct TraceContext {
   KJ_DISALLOW_COPY(TraceContext);
 
   // Set a tag on both the internal span and user span.
-  void setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
-    // We need to duplicate the key and value since both are move-only types.
-    // Clone the value based on its type.
-    KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(s, kj::StringPtr) {
-        span.setTag(key.clone(), s);
-        userSpan.setTag(kj::mv(key), s);
-      }
-      KJ_CASE_ONEOF(s, kj::String) {
-        span.setTag(key.clone(), kj::str(s));
-        userSpan.setTag(kj::mv(key), kj::mv(s));
-      }
-      KJ_CASE_ONEOF(s, kj::LiteralStringConst) {
-        span.setTag(key.clone(), s);
-        userSpan.setTag(kj::mv(key), s);
-      }
-      KJ_CASE_ONEOF(s, kj::ConstString) {
-        span.setTag(key.clone(), s.clone());
-        userSpan.setTag(kj::mv(key), kj::mv(s));
-      }
-      KJ_CASE_ONEOF(b, bool) {
-        span.setTag(key.clone(), b);
-        userSpan.setTag(kj::mv(key), b);
-      }
-      KJ_CASE_ONEOF(d, double) {
-        span.setTag(key.clone(), d);
-        userSpan.setTag(kj::mv(key), d);
-      }
-      KJ_CASE_ONEOF(i, int64_t) {
-        span.setTag(key.clone(), i);
-        userSpan.setTag(kj::mv(key), i);
-      }
-    }
-  }
+  void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
 
   SpanBuilder span;
   SpanBuilder userSpan;

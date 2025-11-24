@@ -20,8 +20,9 @@
 
 namespace workerd::api {
 
-TailEvent::TailEvent(jsg::Lock& js, kj::StringPtr type, kj::ArrayPtr<kj::Own<Trace>> events)
-    : ExtendableEvent(kj::str(type)),
+TailEvent::TailEvent(
+    jsg::Lock& js, kj::LiteralStringConst type, kj::ArrayPtr<kj::Own<Trace>> events)
+    : ExtendableEvent(type),
       events(KJ_MAP(e, events) -> jsg::Ref<TraceItem> { return js.alloc<TraceItem>(js, *e); }) {}
 
 kj::Array<jsg::Ref<TraceItem>> TailEvent::getEvents() {
@@ -55,18 +56,18 @@ double getTraceDiagnosticChannelEventTimestamp(const tracing::DiagnosticChannelE
   }
 }
 
-kj::String getTraceLogLevel(const tracing::Log& log) {
+kj::LiteralStringConst getTraceLogLevel(const tracing::Log& log) {
   switch (log.logLevel) {
     case LogLevel::DEBUG_:
-      return kj::str("debug");
+      return "debug"_kjc;
     case LogLevel::INFO:
-      return kj::str("info");
+      return "info"_kjc;
     case LogLevel::LOG:
-      return kj::str("log");
+      return "log"_kjc;
     case LogLevel::WARN:
-      return kj::str("warn");
+      return "warn"_kjc;
     case LogLevel::ERROR:
-      return kj::str("error");
+      return "error"_kjc;
   }
   KJ_UNREACHABLE;
 }
@@ -194,12 +195,12 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       logs(getTraceLogs(js, trace)),
       exceptions(getTraceExceptions(js, trace)),
       diagnosticChannelEvents(getTraceDiagnosticChannelEvents(js, trace)),
-      scriptName(trace.scriptName.map([](auto& name) { return kj::str(name); })),
-      entrypoint(trace.entrypoint.map([](auto& name) { return kj::str(name); })),
+      scriptName(mapCopyString(trace.scriptName)),
+      entrypoint(mapCopyString(trace.entrypoint)),
       scriptVersion(getTraceScriptVersion(trace)),
-      dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
+      dispatchNamespace(mapCopyString(trace.dispatchNamespace)),
       scriptTags(getTraceScriptTags(trace)),
-      durableObjectId(trace.durableObjectId.map([](auto& id) { return kj::str(id); })),
+      durableObjectId(mapCopyString(trace.durableObjectId)),
       executionModel(enumToStr(trace.executionModel)),
       outcome(enumToStr(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
@@ -462,7 +463,7 @@ kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> TraceItem::TailEventInfo
 }
 
 TraceItem::TailEventInfo::TailItem::TailItem(const tracing::TraceEventInfo::TraceItem& traceItem)
-    : scriptName(traceItem.scriptName.map([](auto& s) { return kj::str(s); })) {}
+    : scriptName(mapCopyString(traceItem.scriptName)) {}
 
 kj::Maybe<kj::StringPtr> TraceItem::TailEventInfo::TailItem::getScriptName() {
   return scriptName;
@@ -507,9 +508,9 @@ ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
       }()} {}
 
 ScriptVersion::ScriptVersion(const ScriptVersion& other)
-    : id{other.id.map([](const auto& id) { return kj::str(id); })},
-      tag{other.tag.map([](const auto& tag) { return kj::str(tag); })},
-      message{other.message.map([](const auto& message) { return kj::str(message); })} {}
+    : id{mapCopyString(other.id)},
+      tag{mapCopyString(other.tag)},
+      message{mapCopyString(other.message)} {}
 
 TraceItem::CustomEventInfo::CustomEventInfo(
     const Trace& trace, const tracing::CustomEventInfo& eventInfo)
@@ -575,7 +576,7 @@ TraceException::TraceException(const Trace& trace, const tracing::Exception& exc
     : timestamp(getTraceExceptionTimestamp(exception)),
       name(kj::str(exception.name)),
       message(kj::str(exception.message)),
-      stack(exception.stack.map([](kj::StringPtr s) { return kj::str(s); })) {}
+      stack(mapCopyString(exception.stack)) {}
 
 double TraceException::getTimestamp() {
   return timestamp;
@@ -620,7 +621,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   // Add the actual JS as a wait until because the handler may be an event listener which can't
   // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`
   // and its members until this task completes.
-  auto entrypointName = entrypointNamePtr.map([](auto s) { return kj::str(s); });
+  auto entrypointName = mapCopyString(entrypointNamePtr);
   try {
     co_await context.run(
         [&context, nonEmptyTraces = nonEmptyTraces.asPtr(), entrypointName = kj::mv(entrypointName),

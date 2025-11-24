@@ -20,6 +20,7 @@
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/own-util.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
@@ -1754,7 +1755,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
   auto urlListClone = KJ_MAP(url, urlList) { return kj::str(url); };
 
   return js.alloc<Response>(js, statusCode,
-      statusText.map([](auto& str) { return kj::str(str); }),
+      mapCopyString(statusText),
       kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
 }
 
@@ -2065,29 +2066,29 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   }
 
   KJ_IF_SOME(ctx, traceContext) {
-    ctx.setTag("network.protocol.name"_kjc, kj::str("http"));
-    ctx.setTag("network.protocol.version"_kjc, kj::str("HTTP/1.1"));
+    ctx.setTag("network.protocol.name"_kjc, "http"_kjc);
+    ctx.setTag("network.protocol.version"_kjc, "HTTP/1.1"_kjc);
     ctx.setTag("http.request.method"_kjc, kj::str(jsRequest->getMethodEnum()));
-    ctx.setTag("url.full"_kjc, kj::str(jsRequest->getUrl()));
+    ctx.setTag("url.full"_kjc, jsRequest->getUrl());
 
     KJ_IF_SOME(userAgent, headers.get(headerIds.userAgent)) {
-      ctx.setTag("user_agent.original"_kjc, kj::str(userAgent));
+      ctx.setTag("user_agent.original"_kjc, userAgent);
     }
 
     KJ_IF_SOME(contentType, headers.get(headerIds.contentType)) {
-      ctx.setTag("http.request.header.content-type"_kjc, kj::str(contentType));
+      ctx.setTag("http.request.header.content-type"_kjc, contentType);
     }
 
     KJ_IF_SOME(contentLength, headers.get(headerIds.contentLength)) {
-      ctx.setTag("http.request.header.content-length"_kjc, kj::str(contentLength));
+      ctx.setTag("http.request.header.content-length"_kjc, contentLength);
     }
 
     KJ_IF_SOME(accept, headers.get(headerIds.accept)) {
-      ctx.setTag("http.request.header.accept"_kjc, kj::str(accept));
+      ctx.setTag("http.request.header.accept"_kjc, accept);
     }
 
     KJ_IF_SOME(acceptEncoding, headers.get(headerIds.acceptEncoding)) {
-      ctx.setTag("http.request.header.accept-encoding"_kjc, kj::str(acceptEncoding));
+      ctx.setTag("http.request.header.accept-encoding"_kjc, acceptEncoding);
     }
   }
 
@@ -2158,7 +2159,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
 
       KJ_IF_SOME(ctx, traceContext) {
         KJ_IF_SOME(cfRay, headers.get(headerIds.cfRay)) {
-          ctx.setTag("cloudflare.ray_id"_kjc, kj::str(cfRay));
+          ctx.setTag("cloudflare.ray_id"_kjc, cfRay);
         }
       }
 
