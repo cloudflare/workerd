@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clap_builder",
+    name = "syn",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,8 +29,17 @@ rust_library(
         ],
     ),
     crate_features = [
-        "help",
-        "std",
+        "clone-impls",
+        "default",
+        "derive",
+        "extra-traits",
+        "fold",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+        "visit",
+        "visit-mut",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -39,14 +48,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap_builder",
+        "crate-name=syn",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.51",
+    version = "2.0.111",
     deps = [
-        "@crates_vendor__anstyle-1.0.13//:anstyle",
-        "@crates_vendor__clap_lex-0.7.6//:clap_lex",
+        "@crates_vendor__proc-macro2-1.0.103//:proc_macro2",
+        "@crates_vendor__quote-1.0.42//:quote",
+        "@crates_vendor__unicode-ident-1.0.22//:unicode_ident",
     ],
 )
