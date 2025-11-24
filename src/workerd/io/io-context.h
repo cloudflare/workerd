@@ -790,7 +790,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     bool wrapMetrics;
 
     // The name to use for the request's span if tracing is turned on.
-    kj::Maybe<kj::ConstString> operationName;
+    kj::Maybe<SpanOperation> operation;
 
     // The tracing context to use for the subrequest if tracing is enabled.
     kj::Maybe<TraceContext&> existingTraceContext;
@@ -934,8 +934,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.
-  [[nodiscard]] SpanBuilder makeTraceSpan(kj::ConstString operationName);
-  [[nodiscard]] SpanBuilder makeUserTraceSpan(kj::ConstString operationName);
+  [[nodiscard]] SpanBuilder makeTraceSpan(SpanOperation operation);
+  [[nodiscard]] SpanBuilder makeUserTraceSpan(SpanOperation operation);
 
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.

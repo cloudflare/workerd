@@ -30,6 +30,7 @@ struct Tag {
 
 struct UserSpanData {
   # Representation of a completed user span
+  # TODO add operation enum field
   operationName @0 :Text;
 
   startTimeNs @1 :Int64;

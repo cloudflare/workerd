@@ -1495,12 +1495,12 @@ kj::String CompleteSpan::toString() const {
 // ======================================================================================
 
 SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
-    kj::ConstString operationName,
+    SpanOperation operation,
     kj::Maybe<kj::Date> startTime) {
   KJ_IF_SOME(obs, observer) {
     // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
     // should be able to fold this virtual call and just get the timestamp directly.
-    span.emplace(kj::mv(operationName), startTime.orDefault(obs->getTime()));
+    span.emplace(kj::mv(operation), startTime.orDefault(obs->getTime()));
     this->observer = kj::mv(obs);
   }
 }
@@ -1528,9 +1528,9 @@ void SpanBuilder::end() {
   }
 }
 
-void SpanBuilder::setOperationName(kj::ConstString operationName) {
+void SpanBuilder::setOperationName(SpanOperation operation) {
   KJ_IF_SOME(s, span) {
-    s.operationName = kj::mv(operationName);
+    s.operation = kj::mv(operation);
   }
 }
 

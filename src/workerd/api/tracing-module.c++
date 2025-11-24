@@ -27,10 +27,11 @@ void JsSpan::setAttribute(
   }
 }
 
-jsg::Ref<JsSpan> TracingModule::startSpan(jsg::Lock& js, kj::String name) {
+jsg::Ref<JsSpan> TracingModule::startSpan(jsg::Lock& js, kj::String operationName) {
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
-    auto spanBuilder = ioContext.makeUserTraceSpan(kj::ConstString(kj::mv(name)));
+    auto operation = SpanOperation::tryCreate(operationName);
+    auto spanBuilder = ioContext.makeUserTraceSpan(kj::mv(operation));
     auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
     return js.alloc<JsSpan>(kj::mv(ownedSpan));
   } else {

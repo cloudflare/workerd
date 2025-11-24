@@ -903,9 +903,9 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   SpanBuilder span = nullptr;
   SpanBuilder userSpan = nullptr;
 
-  KJ_IF_SOME(n, options.operationName) {
-    span = makeTraceSpan(n.clone());
-    userSpan = makeUserTraceSpan(n.clone());
+  KJ_IF_SOME(o, options.operation) {
+    span = makeTraceSpan(o);
+    userSpan = makeUserTraceSpan(o);
   }
 
   TraceContext tracing(kj::mv(span), kj::mv(userSpan));
@@ -1102,12 +1102,13 @@ SpanParent IoContext_IncomingRequest::getCurrentUserTraceSpan() {
   return currentUserTraceSpan.addRef();
 }
 
-SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
-  return getCurrentTraceSpan().newChild(kj::mv(operationName));
+SpanBuilder IoContext::makeTraceSpan(SpanOperation operation) {
+  return getCurrentTraceSpan().newChild(kj::mv(operation));
 }
 
-SpanBuilder IoContext::makeUserTraceSpan(kj::ConstString operationName) {
-  return getCurrentUserTraceSpan().newChild(kj::mv(operationName));
+// TODO seperate SpanOperation from UserSpanOperation, rename SpanOperation to InternalSpanOperation or Have SpanOperation accept either, be smarter here
+SpanBuilder IoContext::makeUserTraceSpan(SpanOperation operation) {
+  return getCurrentUserTraceSpan().newChild(kj::mv(operation));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

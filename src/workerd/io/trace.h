@@ -913,6 +913,18 @@ inline kj::String truncateScriptId(kj::StringPtr id) {
 
 class SpanBuilder;
 class SpanObserver;
+class SpanOperation {
+  public:
+    constexpr SpanOperation(kj::LiteralStringConst operationName): operationName(operationName) {}
+    kj::StringPtr asPtr() const { return operationName; }
+    static SpanOperation tryCreate(kj::StringPtr operationName) {
+      // TODO
+      return SpanOperation(""_kjc);
+    }
+    SpanOperation(const SpanOperation& operation) : operationName(operation.operationName) {}
+  private:
+    kj::LiteralStringConst operationName;
+};
 
 struct Span {
   // Represents a trace span. `Span` objects are delivered to `SpanObserver`s for recording. To
@@ -929,7 +941,7 @@ struct Span {
     Tag tag;
   };
 
-  kj::ConstString operationName;
+  SpanOperation operation;
   kj::Date startTime;
   kj::Date endTime;
   TagMap tags;
@@ -944,8 +956,8 @@ struct Span {
   static constexpr auto MAX_LOGS = 1023;
   uint droppedLogs = 0;
 
-  explicit Span(kj::ConstString operationName, kj::Date startTime)
-      : operationName(kj::mv(operationName)),
+  explicit Span(SpanOperation operation, kj::Date startTime)
+      : operation(kj::mv(operation)),
         startTime(startTime),
         endTime(startTime) {}
 };
@@ -980,7 +992,7 @@ class SpanParent {
   //
   // `operationName` should be a string literal with infinite lifetime.
   [[nodiscard]] SpanBuilder newChild(
-      kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
+      SpanOperation operation, kj::Maybe<kj::Date> startTime = kj::none);
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
@@ -1016,7 +1028,7 @@ class SpanBuilder {
   // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
   // attached to the observer observing this span.
   explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
-      kj::ConstString operationName,
+      SpanOperation operation,
       kj::Maybe<kj::Date> startTime = kj::none);
 
   // Make a SpanBuilder that ignores all calls. (Useful if you want to assign it later.)
@@ -1051,12 +1063,12 @@ class SpanBuilder {
   //
   // `operationName` should be a string literal with infinite lifetime.
   [[nodiscard]] SpanBuilder newChild(
-      kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
+    SpanOperation operation, kj::Maybe<kj::Date> startTime = kj::none);
 
   // Change the operation name from what was specified at span creation.
   //
   // `operationName` should be a string literal with infinite lifetime.
-  void setOperationName(kj::ConstString operationName);
+  void setOperationName(SpanOperation operation);
 
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
@@ -1124,15 +1136,15 @@ inline SpanParent SpanParent::addRef() {
 }
 
 inline SpanBuilder SpanParent::newChild(
-    kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
+    SpanOperation operation, kj::Maybe<kj::Date> startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-      kj::mv(operationName), startTime);
+      kj::mv(operation), startTime);
 }
 
 inline SpanBuilder SpanBuilder::newChild(
-    kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
+    SpanOperation operation, kj::Maybe<kj::Date> startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-      kj::mv(operationName), startTime);
+      kj::mv(operation), startTime);
 }
 
 // TraceContext to keep track of user tracing/existing tracing better
