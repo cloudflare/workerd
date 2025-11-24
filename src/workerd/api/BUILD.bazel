@@ -699,6 +699,17 @@ wd_test(
 )
 
 wd_test(
+    src = "cache-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "cache-instrumentation-test.js",
+        "cache-mock.js",
+        "cache-operations-test.js",
+        "tests/instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
     src = "kv-test.wd-test",
     args = ["--experimental"],
     data = [
