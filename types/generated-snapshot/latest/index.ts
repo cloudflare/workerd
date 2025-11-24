@@ -12231,8 +12231,11 @@ export type InstanceStatus = {
     | "waiting" // instance is hibernating and waiting for sleep or event to finish
     | "waitingForPause" // instance is finishing the current work to pause
     | "unknown";
-  error?: string;
-  output?: object;
+  error?: {
+    name: string;
+    message: string;
+  };
+  output?: unknown;
 };
 export interface WorkflowError {
   code?: number;
