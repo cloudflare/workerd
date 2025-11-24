@@ -3,6 +3,7 @@
 #include "worker-interface.h"
 
 #include <kj/common.h>
+#include <kj/debug.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
 
