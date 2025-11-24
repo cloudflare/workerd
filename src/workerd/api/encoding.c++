@@ -681,10 +681,22 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
 
     if (view.is_one_byte()) {
       auto data = reinterpret_cast<const char*>(view.data8());
-      read = findBestFit(data, length, bufferSize);
-      if (read != 0) {
-        KJ_DASSERT(simdutf::utf8_length_from_latin1(data, read) <= bufferSize);
-        written = simdutf::convert_latin1_to_utf8(data, read, outputBuf.begin());
+      simdutf::result result =
+          simdutf::validate_ascii_with_errors(data, kj::min(length, bufferSize));
+      written = read = result.count;
+      auto outAddr = outputBuf.begin();
+      memcpy(outAddr, data, read);
+      outAddr += read;
+      data += read;
+      length -= read;
+      bufferSize -= read;
+      if (length != 0 && bufferSize != 0) {
+        size_t rest = findBestFit(data, length, bufferSize);
+        if (rest != 0) {
+          KJ_DASSERT(simdutf::utf8_length_from_latin1(data, rest) <= bufferSize);
+          written += simdutf::convert_latin1_to_utf8(data, rest, outAddr);
+          read += rest;
+        }
       }
     } else {
       auto data = reinterpret_cast<const char16_t*>(view.data16());
