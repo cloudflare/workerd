@@ -137,6 +137,8 @@ class BaseTracer: public kj::Refcounted {
 
   SpanParent makeUserRequestSpan();
 
+  virtual void setDestroyed() = 0;
+
   using MakeUserRequestSpanFunc = kj::Function<SpanParent()>;
 
   // Allow setting the user request span after the tracer has been created so its observer can
@@ -178,6 +180,13 @@ class WorkerTracer final: public BaseTracer {
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
   virtual ~WorkerTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
+
+  // Used to indicate that no events are expected for this tracer, we can deallocate its tail stream
+  // writer early (if present) and won't log a warning about deallocating a WorkerTracer that didn't
+  // receive any events. Intended for (hopefully rare) cases where we end up not using a
+  // WorkerInterface but can only determine this after the WorkerInterface and associated
+  // WorkerTracer have already been allocated.
+  void setDestroyed() override;
 
   void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -233,5 +242,8 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+
+  // Indicates that we are not expecting any events for this tail stream writer, that
+  bool destroyed = false;
 };
 }  // namespace workerd

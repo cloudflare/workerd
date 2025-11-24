@@ -130,6 +130,10 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
     return;
   }
 
+  if (destroyed) {
+    return;
+  }
+
   // Report the outcome event if STWs are present. All worker events need to call setEventInfo at
   // the start of the invocation to submit the onset event before any other tail events.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
@@ -156,6 +160,11 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
     }
   }
 };
+
+void WorkerTracer::setDestroyed() {
+  maybeTailStreamWriter = kj::none;
+  destroyed = true;
+}
 
 constexpr kj::LiteralStringConst logSizeExceeded =
     "[\"Log size limit exceeded: More than 256KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
