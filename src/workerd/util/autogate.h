@@ -30,6 +30,8 @@ enum class AutogateKey {
   COMPRESSION_STREAM_USE_STATE_MACHINE,
   // Switch the IdentityTransformStream to use the new state machine-based impl
   IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE,
+  // Enable fast TextEncoder implementation using simdutf
+  ENABLE_FAST_TEXTENCODER,
   NumOfKeys  // Reserved for iteration.
 };
 
