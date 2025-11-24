@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "indexmap",
+rust_proc_macro(
+    name = "zerocopy_derive",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,10 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -39,14 +35,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=indexmap",
+        "crate-name=zerocopy-derive",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.12.0",
+    version = "0.8.28",
     deps = [
-        "@crates_vendor__equivalent-1.0.2//:equivalent",
-        "@crates_vendor__hashbrown-0.16.0//:hashbrown",
+        "@crates_vendor__proc-macro2-1.0.103//:proc_macro2",
+        "@crates_vendor__quote-1.0.42//:quote",
+        "@crates_vendor__syn-2.0.111//:syn",
     ],
 )

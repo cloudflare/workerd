@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "20.0.0",
     deps = [
-        "@crates_vendor__indexmap-2.12.0//:indexmap",
+        "@crates_vendor__indexmap-2.12.1//:indexmap",
         "@crates_vendor__num_cpus-1.17.0//:num_cpus",
         "@crates_vendor__once_cell-1.21.3//:once_cell",
         "@crates_vendor__par-core-2.0.0//:par_core",

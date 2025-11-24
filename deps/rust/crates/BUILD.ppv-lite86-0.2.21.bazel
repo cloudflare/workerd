@@ -46,6 +46,6 @@ rust_library(
     ],
     version = "0.2.21",
     deps = [
-        "@crates_vendor__zerocopy-0.8.27//:zerocopy",
+        "@crates_vendor__zerocopy-0.8.28//:zerocopy",
     ],
 )
