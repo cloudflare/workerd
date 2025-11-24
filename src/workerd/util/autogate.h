@@ -22,6 +22,8 @@ enum class AutogateKey {
   TAIL_STREAM_REFACTOR,
   // Enable the BodyBufferInputStream replacement
   BODY_BUFFER_INPUT_STREAM_REPLACEMENT,
+  // Enable fast TextEncoder implementation using simdutf
+  ENABLE_FAST_TEXTENCODER,
   NumOfKeys  // Reserved for iteration.
 };
 
