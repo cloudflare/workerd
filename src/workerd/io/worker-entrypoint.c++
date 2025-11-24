@@ -631,6 +631,13 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   auto& actor = KJ_REQUIRE_NONNULL(context.getActor(), "alarm() should only work with actors");
 
   KJ_IF_SOME(promise, actor.getAlarm(scheduledTime)) {
+    // Mark the WorkerTracer as destroyed so that we don't log a warning about it being allocated
+    // without being used. Ideally we'd avoid this by detecting that an alarm is already scheduled
+    // before allocating the WorkerInterface/WorkerTracer.
+    KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+      t.setDestroyed();
+    }
+
     // There is a pre-existing alarm for `scheduledTime`, we can just wait for its result.
     // TODO(someday) If the request responsible for fulfilling this alarm were to be cancelled, then
     // we could probably take over and try to fulfill it ourselves. Maybe we'd want to loop on
