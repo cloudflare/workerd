@@ -473,16 +473,6 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
 }
 
 jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
-  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
-    auto str = input.orDefault(js.str());
-    auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
-        "Cannot allocate space for TextEncoder.encode");
-    auto result = str.writeInto(
-        js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-    KJ_DASSERT(result.written == view.size());
-    return jsg::JsUint8Array(view.getHandle(js).As<v8::Uint8Array>());
-  }
-
   jsg::JsString str = input.orDefault(js.str());
 
   size_t utf8_length = 0;
@@ -660,15 +650,6 @@ size_t bestFit(const char16_t* str, size_t bufferSize) {
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer) {
-  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
-    auto result = input.writeInto(
-        js, buffer.asArrayPtr<char>(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-    return TextEncoder::EncodeIntoResult{
-      .read = static_cast<int>(result.read),
-      .written = static_cast<int>(result.written),
-    };
-  }
-
   auto outputBuf = buffer.asArrayPtr<char>();
   size_t bufferSize = outputBuf.size();
 
@@ -677,7 +658,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
   {
     // Scope for the view - we can't do anything that might cause a V8 GC!
     v8::String::ValueView view(js.v8Isolate, input);
-    uint32_t length = view.length();
+    size_t length = view.length();
 
     if (view.is_one_byte()) {
       auto data = reinterpret_cast<const char*>(view.data8());
@@ -718,9 +699,14 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     }
   }
   KJ_DASSERT(written <= bufferSize);
+  // V8's String::kMaxLenth is a lot less than a maximal int so this is fine.
+  using RInt = decltype(TextEncoder::EncodeIntoResult::read);
+  using WInt = decltype(TextEncoder::EncodeIntoResult::written);
+  KJ_DASSERT(0 <= read && read <= std::numeric_limits<RInt>::max());
+  KJ_DASSERT(0 <= written && written <= std::numeric_limits<WInt>::max());
   return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(read),
-    .written = static_cast<int>(written),
+    .read = static_cast<RInt>(read),
+    .written = static_cast<WInt>(written),
   };
 }
 
