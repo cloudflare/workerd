@@ -2438,6 +2438,10 @@ class Lock {
 
   JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
+  // An alternative to exceptionToJsValue that returns a JsValue directly rather than a JsRef,
+  // avoiding the overhead of the internal v8::Global used by JsRef.
+  JsValue exceptionToJsValueV2(kj::Exception&& exception, ExceptionToJsOptions options = {});
+
   // Encodes the given JavaScript exception into a KJ exception, formatting the description in
   // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
   // JavaScript error.
@@ -2509,6 +2513,15 @@ class Lock {
     // otherwise the same `TryCatch` will catch any exceptions the error handler throws, ugh.
     return errorHandler(kj::mv(error));
   }
+
+  // An alternative version of tryCatch that avoids capturing the exception in a jsg::Value,
+  // avoiding the overhead of the internal v8::Global used by jsg::Value.
+  template <typename Func, typename ErrorHandler>
+  auto tryCatchV2(Func&& func,
+      ErrorHandler&& errorHandler,
+      // If an exception occurs, convert KJ exceptions to JS exceptions
+      // using these options.
+      ExceptionToJsOptions options = {}) -> decltype(func());
 
   // Like tryCatch() but returns a Promise<T> that resolves to the result of func() or
   // rejects with the result of errorHandler() if an exception is thrown.

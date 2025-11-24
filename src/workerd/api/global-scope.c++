@@ -779,23 +779,21 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
   auto fn = js.wrapSimpleFunction(js.v8Context(),
       JSG_VISITABLE_LAMBDA((this, fn = kj::mv(task)), (fn),
           (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
-            js.tryCatch([&] {
+            js.tryCatchV2([&] {
               // The function won't be called with any arguments, so we can
               // safely ignore anything passed in to args.
               fn(js);
-            }, [&](jsg::Value exception) {
+            }, [&](jsg::JsValue exception) {
               // The reportError call itself can potentially throw errors. Let's catch
               // and report them as well.
-              js.tryCatch([&] { reportError(js, jsg::JsValue(exception.getHandle(js))); },
-                  [&](jsg::Value exception) {
+              js.tryCatchV2([&] { reportError(js, exception); }, [&](jsg::JsValue exception) {
                 // An error was thrown by the 'error' event handler. That's unfortunate.
                 // Let's log the error and just continue. It won't be possible to actually
                 // catch or handle this error so logging is really the only way to notify
                 // folks about it.
-                auto val = jsg::JsValue(exception.getHandle(js));
                 // If the value is an object that has a stack property, log that so we get
                 // the stack trace if it is an exception.
-                KJ_IF_SOME(obj, val.tryCast<jsg::JsObject>()) {
+                KJ_IF_SOME(obj, exception.tryCast<jsg::JsObject>()) {
                 auto stack = obj.get(js, "stack"_kj);
                 if (!stack.isUndefined()) {
                 js.reportError(stack);
@@ -804,7 +802,7 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
                 } else {
                 }  // Here to avoid a compile warning
                 // Otherwise just log the stringified value generically.
-                js.reportError(val);
+                js.reportError(exception);
               });
             });
           }));

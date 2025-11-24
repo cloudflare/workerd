@@ -418,6 +418,11 @@ JsRef<JsValue> Lock::exceptionToJsValue(kj::Exception&& exception, ExceptionToJs
   });
 }
 
+JsValue Lock::exceptionToJsValueV2(kj::Exception&& exception, ExceptionToJsOptions options) {
+  return withinHandleScope(
+      [&] { return JsValue(jsg::exceptionToJs(v8Isolate, kj::mv(exception), options)); });
+}
+
 void Lock::throwException(Value&& exception) {
   withinHandleScope([&] { v8Isolate->ThrowException(exception.getHandle(*this)); });
   throw JsExceptionThrown();

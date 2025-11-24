@@ -947,6 +947,40 @@ inline JsDate Lock::date(kj::Date date) {
                     .As<v8::Date>());
 }
 
+template <typename Func, typename ErrorHandler>
+auto Lock::tryCatchV2(
+    Func&& func, ErrorHandler&& errorHandler, ExceptionToJsOptions options) -> decltype(func()) {
+  JsValue error = undefined();
+
+  {
+    v8::TryCatch tryCatch(v8Isolate);
+    try {
+      return func();
+    } catch (JsExceptionThrown&) {
+      // If tryCatch.HasCaught() is false, it typically means that JsExceptionThrown
+      // was thrown without an exception actually being scheduled on the isolate.
+      // This may happen in particular when the JsExceptionThrown was the result of
+      // TerminateExecution() but V8 has since cleared the terminate flag because all
+      // JavaScript call frames have been unwound. Hence, we want to treat this the
+      // same as if `CanContinue()` returned false.
+      // TODO(cleanup): Do more investigation, maybe explicitly check for the termination
+      // flag or arrange to maintain our own separate termination flag to avoid confusion.
+      if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+        tryCatch.ReThrow();
+        throw;
+      }
+
+      error = JsValue(tryCatch.Exception());
+    } catch (kj::Exception& e) {
+      error = exceptionToJsValueV2(kj::mv(e), options);
+    }
+  }
+
+  // We have to make sure the `v8::TryCatch` is off the stack before invoking `errorHandler`,
+  // otherwise the same `TryCatch` will catch any exceptions the error handler throws, ugh.
+  return errorHandler(error);
+}
+
 inline void JsObject::set(Lock& js, const JsValue& name, const JsValue& value) {
   check(inner->Set(js.v8Context(), name.inner, value.inner));
 }
