@@ -2,7 +2,11 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { beforeRequest, loadPyodide } from 'pyodide-internal:python';
+import {
+  beforeRequest,
+  loadPyodide,
+  clearSignals,
+} from 'pyodide-internal:python';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
@@ -292,6 +296,8 @@ async function doPyCallHelper(
   pyfunc: PyCallable,
   args: any[]
 ): Promise<any> {
+  const pyodide = await getPyodide();
+  clearSignals(pyodide._module);
   try {
     if (pyfunc.callWithOptions) {
       return await pyfunc.callWithOptions(

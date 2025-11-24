@@ -192,6 +192,9 @@ IoContext::IoContext(ThreadContext& thread,
 
     return promise;
   };
+  KJ_IF_SOME(cb, this->worker->getIsolate().getCpuLimitNearlyExceededCallback()) {
+    limitEnforcer->setCpuLimitNearlyExceededCallback(kj::mv(cb));
+  }
 
   // Arrange to abort when limits expire.
   abortWhen(makeLimitsPromise());

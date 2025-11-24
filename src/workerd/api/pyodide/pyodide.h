@@ -238,6 +238,12 @@ class PyodideMetadataReader: public jsg::Object {
 
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
+  // We call this during Python setup with the wasm memory and the addresses of the signal clock and
+  // the flag to indicate whether signal handling is on or off. It sets up the isolate
+  // CpuLimitNearlyExceeded callback to trigger a signal in Python.
+  void setCpuLimitNearlyExceededCallback(
+      jsg::Lock& js, kj::Array<kj::byte> wasm_memory, int sig_clock, int sig_flag);
+
   // Similar to Cloudflare::::getCompatibilityFlags in global-scope.c++, but the key difference is
   // that it returns experimental flags even if `experimental` is not enabled. This avoids a gotcha
   // where an experimental compat flag is enabled in our C++ code, but not in our JS code.
@@ -266,6 +272,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
+    JSG_METHOD(setCpuLimitNearlyExceededCallback);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

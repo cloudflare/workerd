@@ -375,6 +375,16 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
 
+  // This callback gets executed when the CPU limiter is nearly out of time. It has to be signal
+  // safe since we call it in a signal handler.
+  //
+  // We give a reference to the callback to the limit enforcer, so it has to outlive the limit
+  // enforcer. The Isolate outlives the limit enforcer. If this function is called a second time, we
+  // throw to avoid invalidating references.
+  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const;
+  // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
+  kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
+
   inline IsolateObserver& getMetrics() {
     return *metrics;
   }
@@ -519,6 +529,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   kj::String id;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
+  kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>> cpuLimitNearlyExceededCallback;
   kj::Own<Api> api;
   LoggingOptions loggingOptions;
 

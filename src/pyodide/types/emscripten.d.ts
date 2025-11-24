@@ -38,6 +38,7 @@ interface API {
   };
   serializeHiwireState(serializer: (obj: any) => any): SnapshotConfig;
   pyVersionTuple: [number, number, number];
+  scheduleCallback: (callback: () => void, timeout: number) => void;
 }
 
 interface LDSO {
@@ -74,9 +75,7 @@ interface EmscriptenSettings {
   ) => WebAssembly.Exports;
   reportUndefinedSymbolsNoOp: () => void;
   noInitialRun?: boolean;
-  API: {
-    config: API['config'];
-  };
+  API: Pick<API, 'config'>;
   readyPromise: Promise<Module>;
   rejectReadyPromise: (e: any) => void;
 }
@@ -132,4 +131,7 @@ interface Module {
   getEmptyTableSlot(): number;
   freeTableIndexes: number[];
   LD_LIBRARY_PATH: string;
+  Py_EmscriptenSignalBuffer: Uint8Array;
+  _Py_EMSCRIPTEN_SIGNAL_HANDLING: number;
+  ___memory_base: WebAssembly.Global<'i32'>;
 }
