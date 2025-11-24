@@ -402,21 +402,20 @@ class PrimitiveWrapper {
 
 // =======================================================================================
 // Name
-template <typename TypeWrapper>
 class NameWrapper {
  public:
   static constexpr const char* getName(Name*) {
     return "string or Symbol";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js,
+  v8::Local<v8::Value> wrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       Name value) {
     KJ_SWITCH_ONEOF(value.getUnwrapped(js.v8Isolate)) {
       KJ_CASE_ONEOF(string, kj::StringPtr) {
-        auto& wrapper = static_cast<TypeWrapper&>(*this);
-        return wrapper.wrap(js.v8Isolate, creator, kj::str(string));
+        return self.wrap(js.v8Isolate, creator, kj::str(string));
       }
       KJ_CASE_ONEOF(symbol, v8::Local<v8::Symbol>) {
         return symbol;
@@ -425,7 +424,8 @@ class NameWrapper {
     KJ_UNREACHABLE;
   }
 
-  kj::Maybe<Name> tryUnwrap(Lock& js,
+  kj::Maybe<Name> tryUnwrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Name*,
@@ -436,8 +436,7 @@ class NameWrapper {
 
     // Since most things are coercible to a string, this ought to catch pretty much
     // any value other than symbol
-    auto& wrapper = static_cast<TypeWrapper&>(*this);
-    KJ_IF_SOME(string, wrapper.tryUnwrap(js, context, handle, (kj::String*)nullptr, parentObject)) {
+    KJ_IF_SOME(string, self.tryUnwrap(js, context, handle, (kj::String*)nullptr, parentObject)) {
       return Name(kj::mv(string));
     }
 
