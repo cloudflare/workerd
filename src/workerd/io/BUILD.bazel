@@ -366,6 +366,15 @@ wd_capnp_library(src = "script-version.capnp")
 
 wd_capnp_library(src = "trace.capnp")
 
+wd_cc_library(
+    name = "span-operation",
+    hdrs = ["span-operation.h"],
+    deps = [
+        ":trace_capnp",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
 wd_capnp_library(src = "compatibility-date.capnp")
 
 wd_capnp_library(src = "features.capnp")

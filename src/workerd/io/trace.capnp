@@ -28,6 +28,12 @@ struct Tag {
   value @1 :TagValue;
 }
 
+enum UserSpanOperationType {
+  unknown @0;
+  fetch @1;
+  cacheMatch @2;
+}
+
 struct UserSpanData {
   # Representation of a completed user span
   # TODO add operation enum field
