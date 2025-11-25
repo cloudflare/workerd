@@ -433,6 +433,12 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // pending commit so that the next commitImpl() invocation starts its own set of precommit alarm
   // updates and db commit.
   auto alarmStateForCommit = metadata.getAlarm();
+
+  // Capture the alarm version before going async to detect concurrent alarm changes. If the
+  // alarmVersion changes while we are in-flight, we should skip attempting any move-later alarm
+  // update.
+  auto alarmVersionBeforeAsync = alarmVersion;
+
   auto commitCallbackPromise = commitCallback();
   pendingCommit = kj::none;
 
@@ -449,27 +455,36 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // Notify any merged commitImpl() requests that the db persistence completed.
   fulfiller->fulfill();
 
-  // If the db state is now later than the in-flight scheduled alarms, issue a request to update
-  // it to match the db state.
-  if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
-    if (debugAlarmSync) {
-      KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Moving alarm later", "sqlite_has",
-          logDate(alarmStateForCommit), "alarmScheduledNoLaterThan",
-          logDate(alarmScheduledNoLaterThan));
+  // If another commit modified the alarm while we were async, skip post-commit alarm sync.
+  //
+  // We do this for a few reasons:
+  //  1. The other commit will handle its own alarm sync
+  //  2. Post-commit syncs are inherently optional (the alarm will self-correct)
+  //  3. This coalesces redundant alarm updates for better performance
+  //  4. This avoids race conditions where a later commit moved the alarm earlier, requiring a
+  //     pre-commit alarm update, and this update may have already been made before we get here.
+  if (alarmVersion == alarmVersionBeforeAsync) {
+    // No intervening alarm changes, it is safe to schedule a move-later alarm update if needed.
+    if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
+      if (debugAlarmSync) {
+        KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: Moving alarm later", "sqlite_has",
+            logDate(alarmStateForCommit), "alarmScheduledNoLaterThan",
+            logDate(alarmScheduledNoLaterThan));
+      }
+      // We need to extend our alarmLaterChain now that we're adding a new "move-later" alarm task.
+      //
+      // Technically, we don't need serialize our "move-later" alarms since SQLite has the later
+      // time committed locally. We could just set the `alarmLaterChain` and pass a `kj::READY_NOW`
+      // to requestScheduledAlarm, and so if we have a partial failure we would just recover when
+      // the alarm runs early. That said, it doesn't hurt to serialize on the client-side.
+      alarmLaterChain = requestScheduledAlarm(alarmStateForCommit, alarmLaterChain.addBranch())
+                            .catch_([](kj::Exception&& e) {
+        // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
+        // eventually fire at the earlier time, and the rescheduling will be retried.
+        // We catch here to prevent the chain from breaking on errors.
+        LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", e);
+      }).fork();
     }
-    // We need to extend our alarmLaterChain now that we're adding a new "move-later" alarm task.
-    //
-    // Technically, we don't need serialize our "move-later" alarms since SQLite has the later
-    // time committed locally. We could just set the `alarmLaterChain` and pass a `kj::READY_NOW`
-    // to requestScheduledAlarm, and so if we have a partial failure we would just recover when
-    // the alarm runs early. That said, it doesn't hurt to serialize on the client-side.
-    alarmLaterChain = requestScheduledAlarm(alarmStateForCommit, alarmLaterChain.addBranch())
-                          .catch_([](kj::Exception&& e) {
-      // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
-      // eventually fire at the earlier time, and the rescheduling will be retried.
-      // We catch here to prevent the chain from breaking on errors.
-      LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", e);
-    }).fork();
   }
 }
 
@@ -641,6 +656,9 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, Wri
 kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
+
+  // Increment version counter on any alarm modification
+  ++alarmVersion;
 
   // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
   // free up resources?
