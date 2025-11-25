@@ -175,6 +175,7 @@ class Default(WorkerEntrypoint):
         await request_unit_tests(js_env)
         await can_use_event_decorator(js_env)
         await response_unit_tests(js_env)
+        await response_buffer_source_unit_tests(js_env)
         await can_fetch_python_request()
 
 
@@ -510,6 +511,46 @@ async def response_unit_tests(env):
     )
     # TODO: it doesn't seem possible to access webSocket even in JS
     assert response_ws.status == 101
+
+
+async def response_buffer_source_unit_tests(env):
+    buffer_source_cases = [
+        # TODO: Float16Array is not supported in Pyodide <= 0.29 (pyodide/pyodide#6005)
+        ("ArrayBuffer", js.Uint8Array.new(to_js([1, 2, 3, 4, 5, 6, 7, 8])).buffer),
+        ("DataView", js.DataView.new(js.Uint8Array.new(to_js([9, 10, 11, 12])).buffer)),
+        ("Uint8Array", js.Uint8Array.new(to_js([1, 2, 3, 4]))),
+        ("Uint8ClampedArray", js.Uint8ClampedArray.new(to_js([1, 2, 3, 4]))),
+        ("Int8Array", js.Int8Array.new(to_js([1, -1, 2, -2]))),
+        ("Uint16Array", js.Uint16Array.new(to_js([1, 2, 3, 4]))),
+        ("Int16Array", js.Int16Array.new(to_js([1, -2, 3, -4]))),
+        ("Uint32Array", js.Uint32Array.new(to_js([1, 2, 3, 4]))),
+        ("Int32Array", js.Int32Array.new(to_js([1, -2, 3, -4]))),
+        ("Float32Array", js.Float32Array.new(to_js([1.5, -2.5, 3.25, -4.75]))),
+        ("Float64Array", js.Float64Array.new(to_js([1.5, -2.5]))),
+        # BigInt64 not supported in Pyodide <= 0.26
+        # ("BigInt64Array", js.BigInt64Array.new(to_js([2**53 + 1, -(2**53 + 1), 2**54 + 2, -(2**54 + 2)]))),
+        # ("BigUint64Array", js.BigUint64Array.new(to_js([2**53 + 1, 2**54 + 2, 2**55 + 3, 2**56 + 4]))),
+        # Test partial views to verify they work correctly when not viewing the whole backing buffer
+        (
+            "Uint8Array.subarray",
+            js.Uint8Array.new(to_js([0, 1, 2, 3, 4, 5])).subarray(1),
+        ),
+        ("Int8Array.subarray", js.Int8Array.new(to_js([0, 1, -1, 2, -2])).subarray(1)),
+    ]
+
+    for type_name, body in buffer_source_cases:
+        expected_length = int(body.byteLength)
+        try:
+            response = Response(body)
+        except TypeError as exc:
+            raise AssertionError(
+                f"Response rejected BufferSource type {type_name}"
+            ) from exc
+
+        buffer = await response.buffer()
+        assert int(buffer.byteLength) == expected_length, (
+            f"Response buffer length mismatch for {type_name}"
+        )
 
 
 async def can_fetch_python_request():

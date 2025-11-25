@@ -331,6 +331,32 @@ def _get_js_body(body):
     yield body
 
 
+RESPONSE_ACCEPTED_TYPES = {
+    # BufferSource types
+    "Blob",
+    "ArrayBuffer",
+    "TypedArray",
+    "DataView",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int8Array",
+    "Uint16Array",
+    "Int16Array",
+    "Uint32Array",
+    "Int32Array",
+    "Float16Array",
+    "Float32Array",
+    "Float64Array",
+    "BigInt64Array",
+    "BigUint64Array",
+    # Other types
+    "FormData",
+    "ReadableStream",
+    "URLSearchParams",
+    "Response",
+}
+
+
 class Response(FetchResponse):
     """
     This class represents the response to an HTTP request, with a similar API to that of the web
@@ -353,16 +379,7 @@ class Response(FetchResponse):
         """
         # Verify passed in types.
         if hasattr(body, "constructor"):
-            if body.constructor.name not in (
-                "Blob",
-                "ArrayBuffer",
-                "TypedArray",
-                "DataView",
-                "FormData",
-                "ReadableStream",
-                "URLSearchParams",
-                "Response",
-            ):
+            if body.constructor.name not in RESPONSE_ACCEPTED_TYPES:
                 raise TypeError(
                     f"Unsupported type in Response: {body.constructor.name}"
                 )
