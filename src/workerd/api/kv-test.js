@@ -28,14 +28,30 @@ export default class KVTest extends WorkerEntrypoint {
       r += decoder.decode();
       const parsedBody = JSON.parse(r);
       const keys = parsedBody.keys;
-      if (keys.length < 1 || keys.length > 100) {
-        return new Response(null, { status: 400 });
+      if (keys.length > 100) {
+        return new Response(null, {
+          status: 400,
+          statusText: 'You can request a maximum of 100 keys',
+        });
+      }
+      if (keys.length < 1) {
+        return new Response(null, {
+          status: 400,
+          statusText: 'You must request a minimum of 1 key',
+        });
       }
       result = {};
       if (parsedBody.type == 'json') {
         for (const key of keys) {
           if (key == 'key-not-json') {
-            return new Response(null, { status: 500 });
+            return new Response(
+              'At least one of the requested keys corresponds to a non-json value',
+              {
+                status: 400,
+                statusText:
+                  'At least one of the requested keys corresponds to a non-json value',
+              }
+            );
           }
           const val = { example: `values-${key}` };
           if (parsedBody.withMetadata) {
@@ -57,7 +73,13 @@ export default class KVTest extends WorkerEntrypoint {
         }
       } else {
         // invalid type requested
-        return new Response(null, { status: 500 });
+        return new Response(
+          `"${parsedBody.type}" is not a valid type. Use "json" or "text"`,
+          {
+            status: 400,
+            statusText: `"${parsedBody.type}" is not a valid type. Use "json" or "text"`,
+          }
+        );
       }
       result = JSON.stringify(result);
     } else if (
@@ -204,7 +226,7 @@ export let getBulkTest = {
     //sending over 100 keys
     fullKeysArray.push('key100');
     await assert.rejects(env.KV.get(fullKeysArray), {
-      message: 'KV GET_BULK failed: 400 Bad Request',
+      message: 'KV GET_BULK failed: 400 You can request a maximum of 100 keys',
     });
 
     response = await env.KV.get(['key1', 'not-found'], { cacheTtl: 100 });
@@ -215,7 +237,7 @@ export let getBulkTest = {
     assert.deepStrictEqual(response, expected);
 
     await assert.rejects(env.KV.get([]), {
-      message: 'KV GET_BULK failed: 400 Bad Request',
+      message: 'KV GET_BULK failed: 400 You must request a minimum of 1 key',
     });
 
     // // get bulk json
@@ -228,18 +250,21 @@ export let getBulkTest = {
 
     // // get bulk json but it is not json - throws error
     await assert.rejects(env.KV.get(['key-not-json', 'key2'], 'json'), {
-      message: 'KV GET_BULK failed: 500 Internal Server Error',
+      message:
+        'KV GET_BULK failed: 400 At least one of the requested keys corresponds to a non-json value',
     });
 
     // // requested type is invalid for bulk get
     await assert.rejects(env.KV.get(['key-not-json', 'key2'], 'arrayBuffer'), {
-      message: 'KV GET_BULK failed: 500 Internal Server Error',
+      message:
+        'KV GET_BULK failed: 400 "arrayBuffer" is not a valid type. Use "json" or "text"',
     });
 
     await assert.rejects(
       env.KV.get(['key-not-json', 'key2'], { type: 'banana' }),
       {
-        message: 'KV GET_BULK failed: 500 Internal Server Error',
+        message:
+          'KV GET_BULK failed: 500 "banana" is not a valid type. Use "json" or "text"',
       }
     );
 
