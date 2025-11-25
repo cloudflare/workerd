@@ -1,0 +1,24 @@
+{
+  "name": "webidl-codegen",
+  "version": "0.1.0",
+  "description": "WebIDL to JSG C++ code generator",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "webidl-codegen": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "npm run test:examples && npm run test:generation && npm run test:types && npm run test:attributes",
+    "test:examples": "node tests/test-examples.js",
+    "test:generation": "node tests/test-generation.js",
+    "test:types": "node tests/test-types.js",
+    "test:attributes": "node tests/test-attributes.js"
+  },
+  "dependencies": {
+    "webidl2": "^24.2.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}
