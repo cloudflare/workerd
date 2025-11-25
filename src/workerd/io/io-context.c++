@@ -1033,12 +1033,23 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
+  static const SpanParent dummySpanParent = nullptr;
+
   jsg::Lock& js = lock;
   kj::Own<SpanParent> spanParent;
   KJ_IF_SOME(spo, kj::mv(spanParentOverride)) {
     spanParent = kj::heap(kj::mv(spo));
   } else {
-    spanParent = kj::heap(getMetrics().getSpan());
+    // TODO(cleanup): Can we also elide the other memory allocations for the (unused) storage
+    // scope if tracing is disabled?
+    SpanParent metricsSpan = getMetrics().getSpan();
+    if (!metricsSpan.isObserved()) {
+      // const_cast is ok: There's no state that could be changed in a non-observed span parent.
+      spanParent = kj::Own<SpanParent>(
+          &const_cast<SpanParent&>(dummySpanParent), kj::NullDisposer::instance);
+    } else {
+      spanParent = kj::heap(kj::mv(metricsSpan));
+    }
   }
   auto ioOwnSpanParent = IoContext::current().addObject(kj::mv(spanParent));
   auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpanParent));
