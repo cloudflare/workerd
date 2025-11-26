@@ -24,7 +24,6 @@ namespace workerd::jsg {
 
 // =======================================================================================
 // Primitives (numbers, booleans)
-
 // TypeWrapper mixin for numbers and booleans.
 //
 // This wrapper has extra wrap() overloads that take an isolate instead of a
@@ -375,7 +374,7 @@ class PrimitiveWrapper {
     return "boolean";
   }
 
-  template <typename T, typename = kj::EnableIf<kj::isSameType<T, bool>()>>
+  template <StrictlyBool T>
   v8::Local<v8::Boolean> wrap(
       Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
     // The template is needed to prevent this overload from being chosen for arbitrary types that
@@ -383,7 +382,7 @@ class PrimitiveWrapper {
     return wrap(js.v8Isolate, creator, value);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::isSameType<T, bool>()>>
+  template <StrictlyBool T>
   v8::Local<v8::Boolean> wrap(
       v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
     // The template is needed to prevent this overload from being chosen for arbitrary types that

@@ -42,7 +42,7 @@ kj::String stringifyHandle(v8::Local<v8::Value> value);
 
 namespace v8 {
 // Allows v8 handles to be passed to kj::str() as well as KJ_LOG and related macros.
-template <typename T, typename = kj::EnableIf<kj::canConvert<T*, v8::Value*>()>>
+template <workerd::jsg::V8Value T>
 kj::String KJ_STRINGIFY(v8::Local<T> value) {
   return workerd::jsg::stringifyHandle(value);
 }

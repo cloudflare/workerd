@@ -713,18 +713,21 @@ inline kj::String KJ_STRINGIFY(const JsValue& value) {
   return value.toString(jsg::Lock::current());
 }
 
+template <typename T>
+concept JsValueType = std::is_assignable_v<JsValue, T>;
+
 template <typename TypeWrapper>
 struct JsValueWrapper {
 #define TYPES_TO_WRAP(V)                                                                           \
   V(Value)                                                                                         \
   JS_TYPE_CLASSES(V)
 
-  template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
+  template <JsValueType T>
   static constexpr const std::type_info& getName(T*) {
     return typeid(T);
   }
 
-  template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
+  template <JsValueType T>
   static constexpr const std::type_info& getName(JsRef<T>*) {
     return typeid(T);
   }
@@ -742,7 +745,7 @@ struct JsValueWrapper {
   TYPES_TO_WRAP(V)
 #undef V
 
-  template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
+  template <JsValueType T>
   kj::Maybe<T> tryUnwrap(Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
@@ -763,7 +766,7 @@ struct JsValueWrapper {
     }
   }
 
-  template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
+  template <JsValueType T>
   kj::Maybe<JsRef<T>> tryUnwrap(Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
