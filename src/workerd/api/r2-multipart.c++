@@ -266,4 +266,97 @@ jsg::Promise<void> R2MultipartUpload::abort(
     });
   });
 }
+
+jsg::Promise<R2MultipartUpload::ListPartsResult> R2MultipartUpload::listParts(jsg::Lock& js,
+    jsg::Optional<ListPartsOptions> options,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+
+    auto traceSpan = context.makeTraceSpan("r2_listParts"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_listParts"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bucket->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, "ListParts"_kjc);
+    KJ_IF_SOME(b, this->bucket->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+
+    capnp::JsonCodec json;
+    json.handleByAnnotation<R2BindingRequest>();
+    json.setHasMode(capnp::HasMode::NON_DEFAULT);
+    capnp::MallocMessageBuilder requestMessage;
+
+    auto requestBuilder = requestMessage.initRoot<R2BindingRequest>();
+    requestBuilder.setVersion(VERSION_PUBLIC_BETA);
+    auto listPartsBuilder = requestBuilder.initPayload().initListParts();
+
+    listPartsBuilder.setObject(key);
+    listPartsBuilder.setUploadId(uploadId);
+
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(m, o.maxParts) {
+        JSG_REQUIRE(m >= 1 && m <= 1000, RangeError,
+            "maxParts must be between 1 and 1000 (inclusive). Actual value was: ", m);
+        listPartsBuilder.setMaxParts(m);
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.max_parts"_kjc, static_cast<int64_t>(m));
+      }
+      KJ_IF_SOME(p, o.partNumberMarker) {
+        JSG_REQUIRE(
+            p >= 0, RangeError, "partNumberMarker must be non-negative. Actual value was: ", p);
+        listPartsBuilder.setPartNumberMarker(p);
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.part_number_marker"_kjc, static_cast<int64_t>(p));
+      }
+    }
+
+    auto requestJson = json.encode(requestBuilder);
+
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, this->bucket->adminBucket);
+    CompatibilityFlags::Reader flags = {};
+    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, kj::none, flags);
+
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
+      r2Result.throwIfError("listParts", errorType);
+
+      ListPartsResult result;
+      capnp::MallocMessageBuilder responseMessage;
+      capnp::JsonCodec json;
+      json.handleByAnnotation<R2ListPartsResponse>();
+      auto responseBuilder = responseMessage.initRoot<R2ListPartsResponse>();
+
+      json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
+
+      result.parts = KJ_MAP(p, responseBuilder.getParts()) {
+        return UploadedPartInfo{
+          .partNumber = static_cast<int>(p.getPartNumber()),
+          .etag = kj::str(p.getEtag()),
+          .size = static_cast<double>(p.getSize()),
+          .uploaded = kj::UNIX_EPOCH + p.getUploadedMillisecondsSinceEpoch() * kj::MILLISECONDS,
+        };
+      };
+      result.truncated = responseBuilder.getTruncated();
+      if (result.truncated) {
+        result.partNumberMarker = static_cast<int>(responseBuilder.getPartNumberMarker());
+      }
+
+      traceContext.userSpan.setTag(
+          "cloudflare.r2.response.returned_parts"_kjc, static_cast<int64_t>(result.parts.size()));
+      traceContext.userSpan.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
+      return kj::mv(result);
+    });
+  });
+}
 }  // namespace workerd::api::public_beta
