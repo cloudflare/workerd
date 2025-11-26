@@ -1004,7 +1004,7 @@ TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
     : inner(kj::mv(pending)),
       waitUntilTasks(waitUntilTasks) {}
 
-bool TailStreamWriter::reportImpl(TailEvent&& event) {
+bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   // In reportImpl, our inner state must be active.
   auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Vector<kj::Own<Active>>>());
 
@@ -1030,13 +1030,37 @@ bool TailStreamWriter::reportImpl(TailEvent&& event) {
   bool isClosing = event.event.is<Outcome>();
   // Deliver the event to the queue and make sure we are processing.
   for (auto& active: actives) {
-    // Optimization: Elide copy for last tail worker, helpful for common case of only one STW
-    // being present.
-    if (&active == &actives.back()) {
-      active->queue.push(kj::mv(event));
+    // Only queue the event if we don't have an excessive queue size yet. Return and Outcome
+    // events are only provided once and thus won't be dropped.
+    if (active->queueSize < maxQueueSize || event.event.is<Outcome>() || event.event.is<Return>()) {
+      // When we get to the outcome, no more events will be dropped. Inject an internal structured
+      // log indicating how many events were dropped if applicable.
+      if (event.event.is<Outcome>() && active->droppedEvents > 0) {
+        auto log = kj::str(
+            "{\"$\":\"cloudflare-streaming-tail-workers-internal\",\"type\":\"dropped\",\"count\":",
+            active->droppedEvents, "}");
+        TailEvent droppedEventsLog(event.spanContext.clone(), event.invocationId, event.timestamp,
+            event.sequence, tracing::Log(event.timestamp, LogLevel::WARN, kj::mv(log)));
+        active->queue.push(kj::mv(droppedEventsLog));
+        // Increment the outcome sequence number to keep things consistent.
+        event.sequence++;
+      }
+
+      // Optimization: Elide copy for last tail worker, helpful for common case of only one STW
+      // being present.
+      if (&active == &actives.back()) {
+        active->queue.push(kj::mv(event));
+      } else {
+        active->queue.push(event.clone());
+      }
+      // Adjust estimated queue size based on size hint and an arbitrary amount for serialization
+      // overhead. As long as this estimate is reasonably accurate, we won't need to check the
+      // size again when serializing the message.
+      active->queueSize += tailSerializationOverhead + sizeHint;
     } else {
-      active->queue.push(event.clone());
+      active->droppedEvents++;
     }
+
     if (!active->pumping) {
       waitUntilTasks.add(pump(kj::addRef(*active)));
     }
@@ -1088,6 +1112,9 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
       auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
       auto eventsBuilder = builder.initEvents(current->queue.size());
       size_t n = 0;
+
+      // We're synchronously draining the queue – reset its size.
+      current->queueSize = 0;
       current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
 
       auto result = co_await builder.send();
@@ -1128,8 +1155,10 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
   return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks);
 }
 
-void TailStreamWriter::report(
-    const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
+void TailStreamWriter::report(const InvocationSpanContext& context,
+    TailEvent::Event&& event,
+    kj::Date timestamp,
+    size_t sizeHint) {
   // Becomes a no-op if a terminal event (close) has been reported, or if the stream closed due to
   // not receiving a well-formed event handler. We need to disambiguate these cases as the former
   // indicates an implementation error resulting in trailing events whereas the latter case is
@@ -1195,7 +1224,7 @@ void TailStreamWriter::report(
 
   // The state is determined to be closing when it receives a terminal event (tracing::Outcome),
   // or if there are no active tail workers left, we can close the internal state at that point.
-  if (reportImpl(kj::mv(tailEvent))) {
+  if (reportImpl(kj::mv(tailEvent), sizeHint)) {
     inner = Closed{};
   }
 }
