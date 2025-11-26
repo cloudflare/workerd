@@ -1219,7 +1219,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonCheckRngState @144 : Bool
     $compatEnableFlag("python_check_rng_state")
     $compatDisableFlag("disable_python_check_rng_state")
-    $experimental;
+    $impliedByAfterDate(name = "pythonWorkers", date = "2025-12-16");
 
   shouldSetImmutablePrototype @145 :Bool
     $compatEnableFlag("immutable_api_prototypes")
