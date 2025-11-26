@@ -100,7 +100,7 @@ template <typename K, typename V>
 constexpr bool isRecordType<Dict<V, K>> = true;
 
 template <typename T>
-constexpr bool isBooleanType = kj::isSameType<T, bool>() || kj::isSameType<T, NonCoercible<bool>>();
+constexpr bool isBooleanType = StrictlyBool<T> || kj::isSameType<T, NonCoercible<bool>>();
 
 template <typename T>
 constexpr bool isIntegerType = kj::isSameType<T, int8_t>() || kj::isSameType<T, int16_t>() ||

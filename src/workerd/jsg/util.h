@@ -482,6 +482,9 @@ inline bool isFinite(double value) {
   return !(kj::isNaN(value) || value == kj::inf() || value == -kj::inf());
 }
 
+template <typename T>
+concept StrictlyBool = kj::isSameType<T, bool>();
+
 // ======================================================================================
 
 class Lock;
