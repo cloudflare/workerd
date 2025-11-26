@@ -37,7 +37,6 @@ wd_cc_library(
     hdrs = [
         "iterator.h",
         "struct.h",
-        "value.h",
     ],
     local_defines = ["JSG_IMPLEMENTATION"],
     deps = [

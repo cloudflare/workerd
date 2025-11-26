@@ -9,7 +9,6 @@
 // struct is translated to/from a native JS object with the same field names.
 
 #include <workerd/jsg/util.h>
-#include <workerd/jsg/value.h>
 #include <workerd/jsg/web-idl.h>
 
 #include <concepts>

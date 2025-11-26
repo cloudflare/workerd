@@ -930,7 +930,7 @@ KJ_TEST("Date Values") {
 
 struct ArrayContext: public ContextGlobalObject {
   kj::Array<int> takeArray(kj::Array<int> array) {
-    // The ArrayWrapper uses a stack array with a max size of 64. This is just a
+    // The TypeWrapper uses a stack array with a max size of 64. This is just a
     // quick test to ensure that arrays larger than that are properly supported.
     KJ_ASSERT(array.size() == 65);
     KJ_ASSERT(array[64] == 1);

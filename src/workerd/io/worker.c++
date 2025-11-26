@@ -2379,7 +2379,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       auto report = [&](kj::Maybe<kj::StringPtr> name, api::ExportedHandler& exported) {
         auto handle = exported.self.getHandle(js);
         if (handle->IsArray()) {
-          // HACK: toDict() will throw a TypeError if given an array, because jsg::DictWrapper is
+          // HACK: toDict() will throw a TypeError if given an array, because jsg::TypeWrapper is
           //   designed to treat arrays as not matching when a dict is expected. However,
           //   StructWrapper has no such restriction, and therefore an exported array will
           //   successfully produce an ExportedHandler (presumably with no handler functions), and

@@ -16,7 +16,6 @@
 #include <workerd/jsg/resource.h>
 #include <workerd/jsg/struct.h>
 #include <workerd/jsg/util.h>
-#include <workerd/jsg/value.h>
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/util/autogate.h>
@@ -243,18 +242,11 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 template <typename Self, typename... T>
 class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public TypeWrapperBase<Self, T>...,
-                   public OneOfWrapper<Self>,
-                   public ArrayWrapper<Self>,
-                   public SetWrapper<Self>,
                    public SequenceWrapper<Self>,
                    public GeneratorWrapper<Self>,
-                   public ArrayBufferWrapper<Self>,
-                   public DictWrapper<Self>,
                    public BufferSourceWrapper<Self>,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
-                   public NonCoercibleWrapper<Self>,
-                   public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
                    public JsValueWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
@@ -296,18 +288,11 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   using Name::wrap;                                                                                \
   using Name::tryUnwrap
 
-  USING_WRAPPER(OneOfWrapper<Self>);
-  USING_WRAPPER(ArrayWrapper<Self>);
-  USING_WRAPPER(SetWrapper<Self>);
   USING_WRAPPER(SequenceWrapper<Self>);
   USING_WRAPPER(GeneratorWrapper<Self>);
-  USING_WRAPPER(ArrayBufferWrapper<Self>);
-  USING_WRAPPER(DictWrapper<Self>);
   USING_WRAPPER(BufferSourceWrapper<Self>);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
-  USING_WRAPPER(NonCoercibleWrapper<Self>);
-  USING_WRAPPER(ExceptionWrapper<Self>);
   USING_WRAPPER(ObjectWrapper<Self>);
   USING_WRAPPER(JsValueWrapper<Self>);
 #undef USING_WRAPPER
@@ -437,6 +422,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   // ====================================================================================
   // Primitives
+
   static constexpr const char* getName(double*) {
     return "number";
   }
@@ -1136,8 +1122,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       Name value) {
     KJ_SWITCH_ONEOF(value.getUnwrapped(js.v8Isolate)) {
       KJ_CASE_ONEOF(string, kj::StringPtr) {
-        auto& wrapper = static_cast<TypeWrapper&>(*this);
-        return wrapper.wrap(js.v8Isolate, creator, kj::str(string));
+        return wrap(js.v8Isolate, creator, kj::str(string));
       }
       KJ_CASE_ONEOF(symbol, v8::Local<v8::Symbol>) {
         return symbol;
@@ -1157,12 +1142,60 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
     // Since most things are coercible to a string, this ought to catch pretty much
     // any value other than symbol
-    auto& wrapper = static_cast<TypeWrapper&>(*this);
-    KJ_IF_SOME(string, wrapper.tryUnwrap(js, context, handle, (kj::String*)nullptr, parentObject)) {
+    KJ_IF_SOME(string, tryUnwrap(js, context, handle, (kj::String*)nullptr, parentObject)) {
       return Name(kj::mv(string));
     }
 
     return kj::none;
+  }
+
+  // ====================================================================================
+  // Set
+  template <typename U>
+  static constexpr const char* getName(kj::HashSet<U>*) {
+    return "Set";
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::HashSet<U> set) {
+    v8::Isolate* isolate = js.v8Isolate;
+    v8::EscapableHandleScope handleScope(isolate);
+
+    auto out = v8::Set::New(isolate);
+    for (auto& item: set) {
+      v8::HandleScope scope(isolate);
+      check(out->Add(context, wrap(js, context, creator, kj::mv(item))));
+    }
+
+    return handleScope.Escape(out);
+  }
+
+  template <typename U>
+  kj::Maybe<kj::HashSet<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::HashSet<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsSet()) {
+      return kj::none;
+    }
+
+    auto set = handle.As<v8::Set>();
+    auto array = set->AsArray();
+    auto length = array->Length();
+    auto builder = kj::HashSet<U>();
+    builder.reserve(length);
+    for (auto i: kj::zeroTo(length)) {
+      v8::Local<v8::Value> element = check(array->Get(context, i));
+      auto value = unwrap<U>(js, context, element, TypeErrorContext::other());
+      builder.upsert(kj::mv(value), [&](U& existing, U&& replacement) {
+        JSG_FAIL_REQUIRE(TypeError, "Duplicate values in the set after unwrapping.");
+      });
+    }
+    return kj::mv(builder);
   }
 
   // ====================================================================================
@@ -1259,10 +1292,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       MemoizedIdentity<U>& value) {
-    auto& wrapper = static_cast<TypeWrapper&>(*this);
     KJ_SWITCH_ONEOF(value.value) {
       KJ_CASE_ONEOF(raw, U) {
-        auto handle = wrapper.wrap(js, context, creator, kj::mv(raw));
+        auto handle = wrap(js, context, creator, kj::mv(raw));
         value.value.template init<Value>(js.v8Isolate, handle);
         return handle;
       }
@@ -1279,6 +1311,525 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       v8::Local<v8::Value> handle,
       MemoizedIdentity<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
+
+  // ====================================================================================
+  // Non-coercible
+
+  template <CoercibleType U>
+  static auto getName(NonCoercible<U>*) {
+    return getName(static_cast<U*>(nullptr));
+  }
+
+  template <CoercibleType U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      NonCoercible<U>) = delete;
+
+  template <CoercibleType U>
+  kj::Maybe<NonCoercible<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      NonCoercible<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if constexpr (kj::isSameType<kj::String, U>() || kj::isSameType<jsg::USVString, U>() ||
+        kj::isSameType<jsg::DOMString, U>()) {
+      if (!handle->IsString()) return kj::none;
+      KJ_IF_SOME(value, tryUnwrap(js, context, handle, static_cast<U*>(nullptr), parentObject)) {
+        return NonCoercible<U>{
+          .value = kj::mv(value),
+        };
+      }
+      return kj::none;
+    } else if constexpr (kj::isSameType<bool, U>()) {
+      if (!handle->IsBoolean()) return kj::none;
+      return tryUnwrap(js, context, handle, static_cast<U*>(nullptr), parentObject)
+          .map([](auto& value) {
+        return NonCoercible<U>{
+          .value = value,
+        };
+      });
+    } else if constexpr (kj::isSameType<double, U>()) {
+      if (!handle->IsNumber()) return kj::none;
+      return tryUnwrap(js, context, handle, static_cast<U*>(nullptr), parentObject)
+          .map([](auto& value) {
+        return NonCoercible<U>{
+          .value = value,
+        };
+      });
+    } else {
+      return nullptr;
+    }
+  }
+
+  // ====================================================================================
+  // Dict<K, V>
+
+  template <typename K, typename V>
+  static constexpr const char* getName(Dict<V, K>*) {
+    return "object";
+  }
+
+  template <typename K, typename V>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Dict<V, K> dict) {
+    static_assert(webidl::isStringType<K>, "Dicts must be keyed on a string type.");
+
+    v8::Isolate* isolate = js.v8Isolate;
+    v8::EscapableHandleScope handleScope(isolate);
+    auto out = v8::Object::New(isolate);
+    for (auto& field: dict.fields) {
+      // Set() returns Maybe<bool>. As usual, if the Maybe is null, then there was an exception,
+      // but I have no idea what it means if the Maybe was filled in with the boolean value false...
+      KJ_ASSERT(check(out->Set(context, wrap(js, context, creator, kj::mv(field.name)),
+          wrap(js, context, creator, kj::mv(field.value)))));
+    }
+    return handleScope.Escape(out);
+  }
+
+  template <typename K, typename V>
+  kj::Maybe<Dict<V, K>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Dict<V, K>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    static_assert(webidl::isStringType<K>, "Dicts must be keyed on a string type.");
+
+    // Currently the same as wrapper.unwrap<kj::String>(), but this allows us not to bother with the
+    // TypeErrorContext, or worrying about whether the tryUnwrap(kj::String*) version will ever be
+    // modified to return nullptr in the future.
+    const auto convertToUtf8 = [isolate = js.v8Isolate](v8::Local<v8::String> v8String) {
+      auto buf = kj::heapArray<char>(v8String->Utf8LengthV2(isolate) + 1);
+      v8String->WriteUtf8V2(
+          isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+      return kj::String(kj::mv(buf));
+    };
+
+    if (!handle->IsObject() || handle->IsArray()) {
+      return kj::none;
+    }
+
+    auto object = handle.As<v8::Object>();
+    v8::Local<v8::Array> names = check(object->GetOwnPropertyNames(context));
+    auto length = names->Length();
+    auto builder = kj::heapArrayBuilder<typename Dict<V, K>::Field>(length);
+    for (auto i: kj::zeroTo(length)) {
+      v8::Local<v8::String> name = check(check(names->Get(context, i))->ToString(context));
+      v8::Local<v8::Value> value = check(object->Get(context, name));
+
+      if constexpr (kj::isSameType<K, kj::String>()) {
+        auto strName = convertToUtf8(name);
+        const char* cstrName = strName.cStr();
+        builder.add(typename Dict<V, K>::Field{kj::mv(strName),
+          unwrap<V>(js, context, value, TypeErrorContext::dictField(cstrName), object)});
+      } else {
+        // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
+        // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
+        // Thus, we do the unwrapping manually and UTF-8-convert the name only if it's needed.
+        auto unwrappedName = tryUnwrap(js, context, name, static_cast<K*>(nullptr), object);
+        if (unwrappedName == kj::none) {
+          auto strName = convertToUtf8(name);
+          throwTypeError(js.v8Isolate, TypeErrorContext::dictKey(strName.cStr()),
+              TypeWrapper::getName(static_cast<K*>(nullptr)));
+        }
+        auto unwrappedValue = tryUnwrap(js, context, value, static_cast<V*>(nullptr), object);
+        if (unwrappedValue == kj::none) {
+          auto strName = convertToUtf8(name);
+          throwTypeError(js.v8Isolate, TypeErrorContext::dictField(strName.cStr()),
+              TypeWrapper::getName(static_cast<V*>(nullptr)));
+        }
+        builder.add(typename Dict<V, K>::Field{
+          KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue))});
+      }
+    }
+    return Dict<V, K>{builder.finish()};
+  }
+
+  // ====================================================================================
+  // Arrays
+  template <typename U>
+  static constexpr const char* getName(kj::Array<U>*) {
+    return "Array";
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<U> array) {
+    v8::Isolate* isolate = js.v8Isolate;
+    v8::EscapableHandleScope handleScope(isolate);
+
+    v8::LocalVector<v8::Value> items(isolate, array.size());
+    for (auto n = 0; n < items.size(); n++) {
+      items[n] = wrap(js, context, creator, kj::mv(array[n]));
+    }
+    auto out = v8::Array::New(isolate, items.data(), items.size());
+
+    return handleScope.Escape(out);
+  }
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::ArrayPtr<U> array) {
+    v8::Isolate* isolate = js.v8Isolate;
+    v8::EscapableHandleScope handleScope(isolate);
+
+    v8::LocalVector<v8::Value> items(isolate, array.size());
+    for (auto n = 0; n < items.size(); n++) {
+      items[n] = wrap(js, context, creator, kj::mv(array[n]));
+    }
+    auto out = v8::Array::New(isolate, items.data(), items.size());
+
+    return handleScope.Escape(out);
+  }
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<U>& array) {
+    return wrap(js, context, creator, array.asPtr());
+  }
+
+  template <typename U>
+  kj::Maybe<kj::Array<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Array<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsArray()) {
+      return kj::none;
+    }
+
+    auto array = handle.As<v8::Array>();
+    auto length = array->Length();
+    auto builder = kj::heapArrayBuilder<U>(length);
+    for (auto i: kj::zeroTo(length)) {
+      v8::Local<v8::Value> element = check(array->Get(context, i));
+      builder.add(unwrap<U>(js, context, element, TypeErrorContext::arrayElement(i)));
+    }
+    return builder.finish();
+  }
+
+  // ====================================================================================
+  // ArrayBuffer/ArrayBufferView
+
+  static constexpr const char* getName(kj::ArrayPtr<byte>*) {
+    return "ArrayBuffer or ArrayBufferView";
+  }
+  static constexpr const char* getName(kj::ArrayPtr<const byte>*) {
+    return "ArrayBuffer or ArrayBufferView";
+  }
+  static constexpr const char* getName(kj::Array<byte>*) {
+    return "ArrayBuffer or ArrayBufferView";
+  }
+
+  v8::Local<v8::ArrayBuffer> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<byte> value) {
+    return wrap(js.v8Isolate, creator, kj::mv(value));
+  }
+
+  v8::Local<v8::ArrayBuffer> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<byte> value) {
+    // We need to construct a BackingStore that owns the byte array. We use the version of
+    // v8::ArrayBuffer::NewBackingStore() that accepts a deleter callback, and arrange for it to
+    // delete an Array<byte> placed on the heap.
+    //
+    size_t size = value.size();
+    if (size == 0) {
+      // BackingStore doesn't call custom deleter if begin is null, which it often is for empty
+      // arrays.
+      return v8::ArrayBuffer::New(isolate, 0);
+    }
+    byte* begin = value.begin();
+    if (isolate->GetGroup().SandboxContains(begin)) {
+      // TODO(perf): We could avoid an allocation here, perhaps, by decomposing the
+      //   kj::Array<byte> into its component pointer and disposer, and then pass the disposer
+      //   pointer as the "deleter_data" for NewBackingStore. However, KJ doesn't give us any way
+      //   to decompose an Array<T> this way, and it might not want to, as this could make it
+      //   impossible to support unifying Array<T> and Vector<T> in the future (i.e. making all
+      //   Array<T>s growable). So it may be best to stick with allocating an Array<byte> on the
+      //   heap after all...
+      auto ownerPtr = new kj::Array<byte>(kj::mv(value));
+
+      std::unique_ptr<v8::BackingStore> backing = v8::ArrayBuffer::NewBackingStore(
+          begin, size, [](void* begin, size_t size, void* ownerPtr) {
+        delete reinterpret_cast<kj::Array<byte>*>(ownerPtr);
+      }, ownerPtr);
+      KJ_REQUIRE(backing != nullptr, "Failed to create ArrayBuffer backing store");
+
+      return v8::ArrayBuffer::New(isolate, kj::mv(backing));
+    } else {
+      // The Array is not already inside the sandbox.  We have to make a copy and move it in.
+      // For performance reasons we might want to throw here and fix all callers to allocate
+      // inside the sandbox.
+      auto& js = Lock::from(isolate);
+      auto in_sandbox = js.allocBackingStore(size, Lock::AllocOption::UNINITIALIZED);
+
+      memcpy(in_sandbox->Data(), value.begin(), size);
+
+      return v8::ArrayBuffer::New(isolate, kj::mv(in_sandbox));
+    }
+  }
+
+  kj::Maybe<kj::Array<byte>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Array<byte>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsArrayBufferView()) {
+      return asBytes(handle.As<v8::ArrayBufferView>());
+    } else if (handle->IsArrayBuffer()) {
+      return asBytes(handle.As<v8::ArrayBuffer>());
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<kj::Array<const byte>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Array<const byte>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return tryUnwrap(js, context, handle, static_cast<kj::Array<byte>*>(nullptr), parentObject);
+  }
+
+  // ====================================================================================
+  // OneOf / Variants
+
+  template <typename... U>
+  static kj::String getName(kj::OneOf<U...>*) {
+    const auto getNameStr = [](auto u) {
+      if constexpr (kj::isSameType<const std::type_info&, decltype(getName(u))>()) {
+        return typeName(getName(u));
+      } else {
+        return kj::str(getName(u));
+      }
+    };
+
+    return kj::strArray(kj::arr(getNameStr(static_cast<U*>(nullptr))...), " or ");
+  }
+
+  template <typename U, typename... V>
+  bool wrapHelper(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::OneOf<V...>& in,
+      v8::Local<v8::Value>& out) {
+    if (in.template is<U>()) {
+      out = wrap(js, context, creator, kj::mv(in.template get<U>()));
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  template <typename... U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::OneOf<U...> value) {
+    v8::Local<v8::Value> result;
+    if (!(wrapHelper<U>(js, context, creator, value, result) || ...)) {
+      result = js.undefined();
+    }
+    return result;
+  }
+
+  template <template <typename> class Predicate, typename U, typename... V>
+  bool unwrapHelperRecursive(
+      Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> in, kj::OneOf<V...>& out) {
+    if constexpr (isOneOf<U>) {
+      // Ugh, a nested OneOf. We can't just call tryUnwrap(), because then our string/numeric
+      // coercion might trigger early.
+      U val;
+      if (unwrapHelper<Predicate>(js, context, in, val)) {
+        out.template init<U>(kj::mv(val));
+        return true;
+      }
+    } else if constexpr (Predicate<kj::Decay<U>>::value) {
+      KJ_IF_SOME(val, tryUnwrap(js, context, in, (U*)nullptr, kj::none)) {
+        out.template init<U>(kj::mv(val));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  template <template <typename> class Predicate, typename... U>
+  bool unwrapHelper(
+      Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> in, kj::OneOf<U...>& out) {
+    return (unwrapHelperRecursive<Predicate, U>(js, context, in, out) || ...);
+  }
+
+  // Predicates for helping implement nested OneOf unwrapping. These must be struct templates
+  // because we can't pass variable templates as template template parameters.
+
+  template <typename U>
+  struct IsResourceType {
+    static constexpr bool value = webidl::isNonCallbackInterfaceType<U>;
+  };
+  template <typename U>
+  struct IsFallibleType {
+    static constexpr bool value =
+        !(webidl::isStringType<U> || webidl::isNumericType<U> || webidl::isBooleanType<U>);
+  };
+  template <typename U>
+  struct IsStringType {
+    static constexpr bool value = webidl::isStringType<U>;
+  };
+  template <typename U>
+  struct IsNumericType {
+    static constexpr bool value = webidl::isNumericType<U>;
+  };
+  template <typename U>
+  struct IsBooleanType {
+    static constexpr bool value = webidl::isBooleanType<U>;
+  };
+
+  template <typename... U>
+  kj::Maybe<kj::OneOf<U...>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::OneOf<U...>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    (void)webidl::UnionTypeValidator<kj::OneOf<U...>>();
+    // Just need to instantiate this, static_asserts will do the rest.
+
+    // In order for string, numeric, and boolean coercion to function as expected, we need to follow
+    // the algorithm defined by Web IDL section 3.2.22 to convert JS values to OneOfs. That
+    // algorithm is written in a terribly wonky way, of course, but it appears we can restate it
+    // like so:
+    //
+    //   - Perform a series of breadth-first-searches on the OneOf, filtering out certain categories
+    //     of types on each run. For the types which are not filtered out, perform a tryUnwrap() on
+    //     that type, and succeed if that call succeeds (i.e., short-circuit). The filters used for
+    //     each pass are the following:
+    //       a. Consider only fallible (uncoercible) types.
+    //       b. If the JS value is a boolean, consider only boolean types.
+    //       c. If the JS value is a number, consider only numeric types.
+    //       d. Consider only string types.
+    //       e. Consider only numeric types.
+    //       f. Consider only boolean types.
+    //
+    // Note the symmetry across steps b-f. This way, strings only get coerced to numbers if the
+    // OneOf doesn't contain a string type, numbers only get coerced to strings if the OneOf doesn't
+    // contain a numeric type, objects only get coerced to a coercible type if there's no matching
+    // object type, null and undefined only get coerced to a coercible type if there's no nullable
+    // type, etc.
+    //
+    // TODO(soon): Hacked this by unwrapping into resource types first, so that we can unwrap
+    //   Requests and Responses into Initializers without them being interpreted as dictionaries. I
+    //   believe this is actually what the Web IDL spec prescribes anyway, but verify.
+    //
+    // TODO(someday): Prove that this is the same algorithm as the one defined by Web IDL.
+    kj::OneOf<U...> result;
+    if (unwrapHelper<IsResourceType>(js, context, handle, result) ||
+        unwrapHelper<IsFallibleType>(js, context, handle, result) ||
+        (handle->IsBoolean() && unwrapHelper<IsBooleanType>(js, context, handle, result)) ||
+        (handle->IsNumber() && unwrapHelper<IsNumericType>(js, context, handle, result)) ||
+        (handle->IsBigInt() && unwrapHelper<IsNumericType>(js, context, handle, result)) ||
+        (unwrapHelper<IsStringType>(js, context, handle, result)) ||
+        (unwrapHelper<IsNumericType>(js, context, handle, result)) ||
+        (unwrapHelper<IsBooleanType>(js, context, handle, result))) {
+      return kj::mv(result);
+    }
+    return kj::none;
+  }
+
+  // ====================================================================================
+  // kj::Exception / DOMException
+
+  static constexpr const char* getName(kj::Exception*) {
+    return "Exception";
+  }
+
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Exception exception) {
+    return js.exceptionToJsValue(kj::mv(exception)).getHandle(js);
+  }
+
+  kj::Maybe<kj::Exception> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Exception*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+
+    // If handle is a DOMException, then createTunneledException will not work
+    // here. We have to manually handle the DOMException case.
+    //
+    // Note that this is a general issue with any JSG_RESOURCE_TYPE that we
+    // happen to use as Errors. The createTunneledException() method uses V8's
+    // ToDetailString() to extract the detail about the error in a manner that
+    // is safe and side-effect free. Unfortunately, that mechanism does not
+    // work for JSG_RESOURCE_TYPE objects that are used as errors. For those,
+    // we need to drop down to the C++ interface and generate the kj::Exception
+    // ourselves. If any additional JSG_RESOURCE_TYPE error-like things are
+    // introduced, they'll need to be handled explicitly here also.
+    kj::Exception result = [&]() {
+      kj::Exception::Type excType = [&]() {
+        // Use .retryable and .overloaded properties as hints for what kj exception type to use.
+        if (handle->IsObject()) {
+          auto object = handle.As<v8::Object>();
+
+          if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "overloaded"_kj))))) {
+            return kj::Exception::Type::OVERLOADED;
+          }
+          if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "retryable"_kj))))) {
+            return kj::Exception::Type::DISCONNECTED;
+          }
+        }
+        return kj::Exception::Type::FAILED;
+      }();
+
+      KJ_IF_SOME(domException,
+          tryUnwrap(js, context, handle, (DOMException*)nullptr, parentObject)) {
+        return KJ_EXCEPTION(FAILED,
+            kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
+      } else {
+
+        static const constexpr kj::StringPtr PREFIXES[] = {
+#define V(name, _) name##_kj,
+          JS_ERROR_TYPES(V)
+#undef V
+              "DOMException"_kj,
+        };
+
+        kj::String reason;
+        if (!handle->IsObject()) {
+          // if the argument isn't an object, it couldn't possibly be an Error.
+          reason = kj::str(JSG_EXCEPTION(Error) ": ", handle);
+        } else {
+          reason = kj::str(handle);
+          bool found = false;
+          // If the error message starts with a platform error type that we tunnel,
+          // prefix it with "jsg."
+          for (auto name: PREFIXES) {
+            if (reason.startsWith(name)) {
+              reason = kj::str("jsg.", reason);
+              found = true;
+              break;
+            }
+          }
+          // Everything else should just come through as a normal error.
+          if (!found) {
+            reason = kj::str(JSG_EXCEPTION(Error) ": ", reason);
+          }
+        }
+        return kj::Exception(excType, __FILE__, __LINE__, kj::mv(reason));
+      }
+    }();
+
+    addExceptionDetail(js, result, handle);
+    addJsExceptionMetadata(js, result, handle);
+    return result;
+  }
 
  private:
   const JsgConfig config;

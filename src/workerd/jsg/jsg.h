@@ -3027,6 +3027,11 @@ void MemoizedIdentity<T>::visitForGc(GcVisitor& visitor) {
   }
 }
 
+template <typename T>
+constexpr bool isOneOf = false;
+template <typename... T>
+constexpr bool isOneOf<kj::OneOf<T...>> = true;
+
 }  // namespace workerd::jsg
 
 // clang-format off
