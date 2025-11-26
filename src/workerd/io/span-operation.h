@@ -29,7 +29,13 @@ class UserSpanOperation {
   kj::StringPtr asPtr() const { return toString(type_); }
   Type type() const { return type_; }
 
-  static kj::Maybe<UserSpanOperation> tryFromString(kj::StringPtr name);
+  static kj::Maybe<UserSpanOperation> tryFromString(kj::StringPtr name) {
+#define SPAN_OP(str_name, enum_type, desc) \
+    if (name == str_name##_kj) return UserSpanOperation(enum_type);
+    USER_SPAN_OPERATIONS(SPAN_OP)
+#undef SPAN_OP
+    return kj::none;
+  }
 
  private:
   Type type_;

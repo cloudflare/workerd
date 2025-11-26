@@ -108,6 +108,7 @@ wd_cc_library(
         ":io-helpers",
         ":limit-enforcer",
         ":observer",
+        ":span-operation",
         ":supported-compatibility-date",
         ":trace",
         ":worker-interface",

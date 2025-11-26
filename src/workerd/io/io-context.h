@@ -13,6 +13,7 @@
 #include <workerd/io/io-gate.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/io/io-timers.h>
+#include <workerd/io/span-operation.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/async-context.h>
@@ -934,8 +935,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.
-  [[nodiscard]] SpanBuilder makeTraceSpan(SpanOperation operation);
-  [[nodiscard]] SpanBuilder makeUserTraceSpan(SpanOperation operation);
+  [[nodiscard]] SpanBuilder makeTraceSpan(UserSpanOperation operation);
+  [[nodiscard]] SpanBuilder makeUserTraceSpan(UserSpanOperation operation);
 
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.

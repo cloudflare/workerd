@@ -1102,13 +1102,12 @@ SpanParent IoContext_IncomingRequest::getCurrentUserTraceSpan() {
   return currentUserTraceSpan.addRef();
 }
 
-SpanBuilder IoContext::makeTraceSpan(SpanOperation operation) {
-  return getCurrentTraceSpan().newChild(kj::mv(operation));
+SpanBuilder IoContext::makeTraceSpan(UserSpanOperation operation) {
+  return getCurrentTraceSpan().newChild(SpanOperation(operation.asPtr()));
 }
 
-// TODO seperate SpanOperation from UserSpanOperation, rename SpanOperation to InternalSpanOperation or Have SpanOperation accept either, be smarter here
-SpanBuilder IoContext::makeUserTraceSpan(SpanOperation operation) {
-  return getCurrentUserTraceSpan().newChild(kj::mv(operation));
+SpanBuilder IoContext::makeUserTraceSpan(UserSpanOperation operation) {
+  return getCurrentUserTraceSpan().newChild(SpanOperation(operation.asPtr()));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

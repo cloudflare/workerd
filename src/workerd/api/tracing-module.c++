@@ -30,10 +30,13 @@ void JsSpan::setAttribute(
 jsg::Ref<JsSpan> TracingModule::startSpan(jsg::Lock& js, kj::String operationName) {
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
-    auto operation = SpanOperation::tryCreate(operationName);
-    auto spanBuilder = ioContext.makeUserTraceSpan(kj::mv(operation));
-    auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
-    return js.alloc<JsSpan>(kj::mv(ownedSpan));
+    KJ_IF_SOME(operation, UserSpanOperation::tryFromString(operationName)) {
+      auto spanBuilder = ioContext.makeUserTraceSpan(kj::mv(operation));
+      auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
+      return js.alloc<JsSpan>(kj::mv(ownedSpan));
+    }
+    // Unknown operation name - return no-op span
+    return js.alloc<JsSpan>(kj::none);
   } else {
     // When no IoContext is available, create a no-op span
     return js.alloc<JsSpan>(kj::none);
