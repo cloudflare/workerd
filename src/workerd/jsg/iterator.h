@@ -531,8 +531,6 @@ class SequenceWrapper {
   // TypeWrapper mixin for Sequences.
 
  public:
-  static auto constexpr MAX_STACK = 64;
-
   template <typename U>
   static constexpr const char* getName(Sequence<U>*) {
     // TODO(later): It would be nicer if the name included the demangled name of U

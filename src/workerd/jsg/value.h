@@ -538,16 +538,6 @@ class StringWrapper {
 // =======================================================================================
 // Optional (value or undefined) and Maybe (value or null)
 
-template <typename... T>
-constexpr bool isUnionType(kj::OneOf<T...>*) {
-  return true;
-}
-
-template <typename T>
-constexpr bool isUnionType(T*) {
-  return false;
-}
-
 // TypeWrapper mixin for optionals.
 template <typename TypeWrapper>
 class OptionalWrapper {
@@ -842,7 +832,6 @@ class OneOfWrapper {
 template <typename TypeWrapper>
 class ArrayWrapper {
  public:
-  static auto constexpr MAX_STACK = 64;
   template <typename U>
   static constexpr const char* getName(kj::Array<U>*) {
     return "Array";
@@ -917,7 +906,6 @@ class ArrayWrapper {
 template <typename TypeWrapper>
 class SetWrapper {
  public:
-  static auto constexpr MAX_STACK = 64;
   template <typename U>
   static constexpr const char* getName(kj::HashSet<U>*) {
     return "Set";
