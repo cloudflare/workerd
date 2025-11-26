@@ -775,13 +775,15 @@ struct TailEvent final {
       TraceId invocationId,
       kj::Date timestamp,
       kj::uint sequence,
-      Event&& event);
+      Event&& event,
+      size_t sizeHint);
   TailEvent(TraceId traceId,
       TraceId invocationId,
       kj::Maybe<SpanId> spanId,
       kj::Date timestamp,
       kj::uint sequence,
-      Event&& event);
+      Event&& event,
+      size_t sizeHint);
   TailEvent(rpc::Trace::TailEvent::Reader reader);
   TailEvent(TailEvent&&) = default;
   TailEvent& operator=(TailEvent&&) = default;
@@ -795,6 +797,9 @@ struct TailEvent final {
   kj::uint sequence;
 
   Event event;
+
+  // The approximate size of the event, in bytes.
+  size_t sizeHint;
 
   void copyTo(rpc::Trace::TailEvent::Builder builder) const;
   TailEvent clone() const;
