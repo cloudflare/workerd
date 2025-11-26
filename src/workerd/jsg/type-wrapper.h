@@ -41,12 +41,12 @@ concept ValueLessParameter =
 // This is just a trivial pass-through.
 class V8HandleWrapper {
  public:
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   static constexpr const std::type_info& getName(v8::Local<T>*) {
     return typeid(T);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   v8::Local<T> wrap(jsg::Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -111,12 +111,12 @@ class V8HandleWrapper {
 #undef JSG_DEFINE_TRY_UNWRAP
 #undef JSG_FOR_EACH_V8_VALUE_SUBCLASS
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   static constexpr const std::type_info& getName(v8::Global<T>*) {
     return typeid(T);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   v8::Local<T> wrap(jsg::Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -132,12 +132,12 @@ class V8HandleWrapper {
     return v8::Global<v8::Value>(js.v8Isolate, handle);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   static constexpr const std::type_info& getName(V8Ref<T>*) {
     return typeid(T);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   v8::Local<T> wrap(jsg::Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
