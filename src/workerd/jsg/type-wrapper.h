@@ -250,14 +250,10 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public GeneratorWrapper<Self>,
                    public ArrayBufferWrapper<Self>,
                    public DictWrapper<Self>,
-                   public DateWrapper<Self>,
                    public BufferSourceWrapper<Self>,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
                    public NonCoercibleWrapper<Self>,
-                   public MemoizedIdentityWrapper<Self>,
-                   public IdentifiedWrapper<Self>,
-                   public SelfRefWrapper<Self>,
                    public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
                    public JsValueWrapper<Self> {
@@ -307,14 +303,10 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(GeneratorWrapper<Self>);
   USING_WRAPPER(ArrayBufferWrapper<Self>);
   USING_WRAPPER(DictWrapper<Self>);
-  USING_WRAPPER(DateWrapper<Self>);
   USING_WRAPPER(BufferSourceWrapper<Self>);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
   USING_WRAPPER(NonCoercibleWrapper<Self>);
-  USING_WRAPPER(MemoizedIdentityWrapper<Self>);
-  USING_WRAPPER(IdentifiedWrapper<Self>);
-  USING_WRAPPER(SelfRefWrapper<Self>);
   USING_WRAPPER(ExceptionWrapper<Self>);
   USING_WRAPPER(ObjectWrapper<Self>);
   USING_WRAPPER(JsValueWrapper<Self>);
@@ -1172,6 +1164,121 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
     return kj::none;
   }
+
+  // ====================================================================================
+  // Dates
+  static constexpr const char* getName(kj::Date*) {
+    return "date";
+  }
+
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Date date) {
+    return check(v8::Date::New(context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
+  }
+
+  kj::Maybe<kj::Date> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Date*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsDate()) {
+      double millis = handle.template As<v8::Date>()->ValueOf();
+      return toKjDate(millis);
+    } else if (handle->IsNumber()) {
+      double millis = handle.template As<v8::Number>()->Value();
+      return toKjDate(millis);
+    } else {
+      return kj::none;
+    }
+  }
+
+  // ====================================================================================
+  // SelfRef
+  static auto getName(SelfRef*) {
+    return "SelfRef";
+  }
+
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const SelfRef& value) = delete;
+
+  kj::Maybe<SelfRef> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      SelfRef*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    // I'm sticking this here because it's related and I'm lazy.
+    return SelfRef(js.v8Isolate,
+        KJ_ASSERT_NONNULL(
+            parentObject, "SelfRef cannot only be used as a member of a JSG_STRUCT."));
+  }
+
+  // ====================================================================================
+  // Identified
+  template <typename U>
+  static auto getName(Identified<U>*) {
+    return getName(static_cast<U*>(nullptr));
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Identified<U>& value) = delete;
+
+  template <typename U>
+  kj::Maybe<Identified<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Identified<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsObject()) {
+      return kj::none;
+    }
+
+    return this->tryUnwrap(js, context, handle, static_cast<U*>(nullptr), parentObject)
+        .map([&](U&& value) -> Identified<U> {
+      auto isolate = js.v8Isolate;
+      auto obj = handle.As<v8::Object>();
+      return {.identity = {isolate, obj}, .unwrapped = kj::mv(value)};
+    });
+  }
+
+  // ===================================================================================
+  // MemoizedIdentity
+  template <typename U>
+  static auto getName(MemoizedIdentity<U>*) {
+    return getName(static_cast<U*>(nullptr));
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      MemoizedIdentity<U>& value) {
+    auto& wrapper = static_cast<TypeWrapper&>(*this);
+    KJ_SWITCH_ONEOF(value.value) {
+      KJ_CASE_ONEOF(raw, U) {
+        auto handle = wrapper.wrap(js, context, creator, kj::mv(raw));
+        value.value.template init<Value>(js.v8Isolate, handle);
+        return handle;
+      }
+      KJ_CASE_ONEOF(handle, Value) {
+        return handle.getHandle(js.v8Isolate);
+      }
+    }
+    __builtin_unreachable();
+  }
+
+  template <typename U>
+  kj::Maybe<MemoizedIdentity<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      MemoizedIdentity<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
 
  private:
   const JsgConfig config;

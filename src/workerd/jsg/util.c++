@@ -882,4 +882,24 @@ bool isNodeJsProcessV2Enabled(jsg::Lock& js) {
   return IsolateBase::from(js.v8Isolate).isNodeJsProcessV2Enabled();
 }
 
+kj::Date toKjDate(double millis) {
+  JSG_REQUIRE(
+      isFinite(millis), TypeError, "The value cannot be converted because it is not a valid Date.");
+
+  // JS Date uses milliseconds stored as a double-precision float to represent times
+  // KJ uses nanoseconds stored as an int64_t, which is significantly smaller but larger
+  // than my lifetime.
+  //
+  // For most use-cases, throwing when we encounter a date outside of KJ's supported range is OK.
+  // API's that need to support time-travelers or historians may need to consider using the
+  // V8 Date type directly.
+  constexpr double millisToNanos = kj::MILLISECONDS / kj::NANOSECONDS;
+  double nanos = millis * millisToNanos;
+  JSG_REQUIRE(nanos < static_cast<int64_t>(kj::maxValue), TypeError,
+      "This API doesn't support dates after 2189.");
+  JSG_REQUIRE(nanos > static_cast<int64_t>(kj::minValue), TypeError,
+      "This API doesn't support dates before 1687.");
+  return kj::UNIX_EPOCH + static_cast<int64_t>(millis) * kj::MILLISECONDS;
+};
+
 }  // namespace workerd::jsg

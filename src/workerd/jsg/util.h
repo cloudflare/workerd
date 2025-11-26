@@ -16,6 +16,7 @@
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/string.h>
+#include <kj/time.h>
 
 #include <typeinfo>
 
@@ -557,6 +558,8 @@ struct CallCounter {
     return slow == rhs.slow && fast == rhs.fast;
   }
 };
+
+kj::Date toKjDate(double millis);
 
 inline kj::String KJ_STRINGIFY(CallCounter& counter) {
   return kj::str("(", counter.slow, ", ", counter.fast, ")");

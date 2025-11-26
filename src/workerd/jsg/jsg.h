@@ -1478,8 +1478,9 @@ class MemoizedIdentity {
  private:
   kj::OneOf<T, Value> value;
 
-  template <typename TypeWrapper>
-  friend class MemoizedIdentityWrapper;
+  template <typename Self, typename... U>
+  friend class TypeWrapper;
+
   friend class MemoryTracker;
 };
 
@@ -1544,9 +1545,6 @@ class Name final {
   kj::OneOf<kj::String, V8Ref<v8::Symbol>> inner;
 
   kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> getUnwrapped(v8::Isolate* isolate);
-
-  template <typename TypeWrapper>
-  friend class NameWrapper;
 
   template <typename Self, typename... T>
   friend class TypeWrapper;
@@ -3013,6 +3011,20 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
 
 inline Value SelfRef::asValue(Lock& js) const {
   return Value(js.v8Isolate, getHandle(js).As<v8::Value>());
+}
+
+template <typename T>
+void MemoizedIdentity<T>::visitForGc(GcVisitor& visitor) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(raw, T) {
+      if constexpr (isGcVisitable<T>()) {
+        visitor.visit(raw);
+      }
+    }
+    KJ_CASE_ONEOF(handle, Value) {
+      return visitor.visit(handle);
+    }
+  }
 }
 
 }  // namespace workerd::jsg
