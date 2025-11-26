@@ -243,10 +243,6 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 template <typename Self, typename... T>
 class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public TypeWrapperBase<Self, T>...,
-                   public NameWrapper<Self>,
-                   public OptionalWrapper<Self>,
-                   public LenientOptionalWrapper<Self>,
-                   public MaybeWrapper<Self>,
                    public OneOfWrapper<Self>,
                    public ArrayWrapper<Self>,
                    public SetWrapper<Self>,
@@ -272,9 +268,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   template <typename MetaConfiguration>
   TypeWrapper(v8::Isolate* isolate, MetaConfiguration&& configuration)
       : TypeWrapperBase<Self, T>(configuration)...,
-        MaybeWrapper<Self>(configuration),
         GeneratorWrapper<Self>(configuration),
-        PromiseWrapper<Self>(configuration) {
+        PromiseWrapper<Self>(configuration),
+        config(getConfig(configuration)) {
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
     fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API);
   }
@@ -304,10 +300,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   using Name::wrap;                                                                                \
   using Name::tryUnwrap
 
-  USING_WRAPPER(NameWrapper<Self>);
-  USING_WRAPPER(OptionalWrapper<Self>);
-  USING_WRAPPER(LenientOptionalWrapper<Self>);
-  USING_WRAPPER(MaybeWrapper<Self>);
   USING_WRAPPER(OneOfWrapper<Self>);
   USING_WRAPPER(ArrayWrapper<Self>);
   USING_WRAPPER(SetWrapper<Self>);
@@ -1034,6 +1026,155 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     return V8Ref<v8::Value>(js.v8Isolate, handle);
   }
+
+  // ===================================================================================
+  // Optionals
+  template <typename U>
+  static constexpr decltype(auto) getName(Optional<U>*) {
+    return getName(static_cast<kj::Decay<U>*>(nullptr));
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Optional<U> ptr) {
+    KJ_IF_SOME(p, ptr) {
+      return this->wrap(js, context, creator, kj::fwd<U>(p));
+    } else {
+      return js.undefined();
+    }
+  }
+
+  template <typename U>
+  kj::Maybe<Optional<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Optional<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsUndefined()) {
+      return Optional<U>(kj::none);
+    } else {
+      return this->tryUnwrap(js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject)
+          .map([](auto&& value) -> Optional<U> { return kj::fwd<decltype(value)>(value); });
+    }
+  }
+
+  template <typename U>
+  static constexpr decltype(auto) getName(LenientOptional<U>*) {
+    return getName(static_cast<kj::Decay<U>*>(nullptr));
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      LenientOptional<U> ptr) {
+    KJ_IF_SOME(p, ptr) {
+      return this->wrap(js, context, creator, kj::fwd<U>(p));
+    } else {
+      return js.undefined();
+    }
+  }
+
+  template <typename U>
+  kj::Maybe<LenientOptional<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      LenientOptional<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsUndefined()) {
+      return LenientOptional<U>(kj::none);
+    } else {
+      KJ_IF_SOME(unwrapped,
+          this->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr, parentObject)) {
+        return LenientOptional<U>(kj::mv(unwrapped));
+      } else {
+        return LenientOptional<U>(kj::none);
+      }
+    }
+  }
+
+  template <typename U>
+  static constexpr decltype(auto) getName(kj::Maybe<U>*) {
+    return getName(static_cast<kj::Decay<U>*>(nullptr));
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Maybe<U> ptr) {
+    KJ_IF_SOME(p, ptr) {
+      return this->wrap(js, context, creator, kj::fwd<U>(p));
+    } else {
+      return js.null();
+    }
+  }
+
+  template <typename U>
+  kj::Maybe<kj::Maybe<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::Maybe<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsNullOrUndefined()) {
+      return kj::Maybe<U>(kj::none);
+    } else if (config.noSubstituteNull) {
+      // There was a bug in the initial version of this method that failed to correctly handle
+      // the following tryUnwrap returning a nullptr because of an incorrect type. The
+      // noSubstituteNull compatibility flag is needed to fix that.
+      return this->tryUnwrap(js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject)
+          .map([](auto&& value) -> kj::Maybe<U> { return kj::fwd<decltype(value)>(value); });
+    } else {
+      return this->tryUnwrap(
+          js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject);
+    }
+  }
+
+  // ====================================================================================
+  // Name
+  static constexpr const char* getName(Name*) {
+    return "string or Symbol";
+  }
+
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Name value) {
+    KJ_SWITCH_ONEOF(value.getUnwrapped(js.v8Isolate)) {
+      KJ_CASE_ONEOF(string, kj::StringPtr) {
+        auto& wrapper = static_cast<TypeWrapper&>(*this);
+        return wrapper.wrap(js.v8Isolate, creator, kj::str(string));
+      }
+      KJ_CASE_ONEOF(symbol, v8::Local<v8::Symbol>) {
+        return symbol;
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  kj::Maybe<Name> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Name*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsSymbol()) {
+      return Name(js, handle.As<v8::Symbol>());
+    }
+
+    // Since most things are coercible to a string, this ought to catch pretty much
+    // any value other than symbol
+    auto& wrapper = static_cast<TypeWrapper&>(*this);
+    KJ_IF_SOME(string, wrapper.tryUnwrap(js, context, handle, (kj::String*)nullptr, parentObject)) {
+      return Name(kj::mv(string));
+    }
+
+    return kj::none;
+  }
+
+ private:
+  const JsgConfig config;
 };
 
 template <typename Self, typename... Types>

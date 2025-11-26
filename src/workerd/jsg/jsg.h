@@ -1548,6 +1548,9 @@ class Name final {
   template <typename TypeWrapper>
   friend class NameWrapper;
 
+  template <typename Self, typename... T>
+  friend class TypeWrapper;
+
   void visitForGc(GcVisitor& visitor);
 
   friend class MemoryTracker;
