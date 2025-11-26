@@ -969,7 +969,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
   cap = capnp::membrane(
       kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
-  this->capFulfiller->fulfill(kj::mv(cap));
+  capFulfiller->fulfill(kj::mv(cap));
 
   // Forked promise for completion of all capabilities associated with the cap stream. This is
   // expected to be resolved when the request is canceled or when the client receives the stop
@@ -994,6 +994,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
     kj::throwFatalException(kj::mv(e));
   }
 }
+
+TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
+    : inner(kj::mv(pending)),
+      waitUntilTasks(waitUntilTasks) {}
 
 bool TailStreamWriter::reportImpl(TailEvent&& event) {
   // In reportImpl, our inner state must be active.
@@ -1101,52 +1105,6 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
   }
 }
 
-// This function is called for every streaming tail event that is reported.
-bool TailStreamWriter::reporter(TailEvent&& event) {
-  KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(closed, TailStreamWriter::Closed) {
-      // The tail stream has already been closed because we have received an outcome event. The
-      // writer should have failed and we actually shouldn't get here. Assert!
-      KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback invoked after close");
-    }
-    KJ_CASE_ONEOF(pending, TailStreamWriter::Pending) {
-      // This is our first event! It has to be an onset event, which the writer should have
-      // validated for us. Assert if it is not an onset then proceed to start each of our tail
-      // working sessions.
-      KJ_ASSERT(event.event.is<Onset>(), "First event must be an onset.");
-
-      // Transitions into the active state by grabbing the pending client capability.
-      inner = kj::Vector<kj::Own<TailStreamWriter::Active>>( KJ_MAP(wi, pending) {
-        auto customEvent = kj::heap<TailStreamCustomEvent>();
-        auto result = customEvent->getCap();
-        auto active = kj::refcounted<TailStreamWriter::Active>(kj::mv(result));
-
-        // Attach the workerInterface and customEvent to the waitUntil tasks so that they stay
-        // alive until tail worker operations including JS execution are complete, including
-        // returning the outcome.
-        waitUntilTasks.add(wi->customEvent(kj::mv(customEvent))
-                               .attach(kj::mv(wi), kj::addRef(*active))
-                               .ignoreResult());
-        return active;
-      });
-
-      // At this point our writer state is "active", which means the state consists of one or more
-      // streaming tail worker client stubs to which the event will be dispatched.
-    }
-    KJ_CASE_ONEOF(active, kj::Vector<kj::Own<TailStreamWriter::Active>>) {
-      // Event cannot be a onset, which should have been validated by the writer.
-      KJ_ASSERT(!event.event.is<Onset>(), "Only the first event can be an onset");
-    }
-  }
-
-  // The state is determined to be closing when it receives a terminal event (tracing::Outcome),
-  // or if there are no active tail workers left.
-  // If we return true, then the writer expects more events to be received. If we return false,
-  // then the writer can release any state it is holding because we don't expect any more events
-  // to be dispatched. The writer should handle that case by dropping this lambda.
-  return !reportImpl(kj::mv(event));
-}
-
 // If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
 kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
@@ -1157,10 +1115,6 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
 
   return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks);
 }
-
-TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
-    : inner(kj::mv(pending)),
-      waitUntilTasks(waitUntilTasks) {}
 
 void TailStreamWriter::report(
     const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
@@ -1194,8 +1148,42 @@ void TailStreamWriter::report(
       context.getSpanId() == SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()), timestamp,
       sequence++, kj::mv(event));
 
-  // If the reporter returns false, then we will treat it as a close signal.
-  if (!reporter(kj::mv(tailEvent))) {
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(closed, Closed) {
+      // The tail stream has already been closed because we have received an outcome event. The
+      // writer should have failed and we actually shouldn't get here. Assert!
+      KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback invoked after close");
+    }
+    KJ_CASE_ONEOF(pending, Pending) {
+      // This is our first event! It has to be an onset event as we have validated above. Start each
+      // of our tail working sessions.
+
+      // Transitions into the active state by grabbing the pending client capability.
+      inner = kj::Vector<kj::Own<Active>>( KJ_MAP(wi, pending) {
+        auto customEvent = kj::heap<TailStreamCustomEvent>();
+        auto result = customEvent->getCap();
+        auto active = kj::refcounted<Active>(kj::mv(result));
+
+        // Attach the workerInterface and customEvent to the waitUntil tasks so that they stay alive
+        // until tail worker operations including JS execution are complete, including returning the
+        // outcome.
+        waitUntilTasks.add(wi->customEvent(kj::mv(customEvent))
+                               .attach(kj::mv(wi), kj::addRef(*active))
+                               .ignoreResult());
+        return active;
+      });
+
+      // At this point our writer state is "active", which means the state consists of one or more
+      // streaming tail worker client stubs to which the event will be dispatched.
+    }
+    KJ_CASE_ONEOF(active, kj::Vector<kj::Own<Active>>) {
+      // active tail stream writers have already been configured, process the event.
+    }
+  }
+
+  // The state is determined to be closing when it receives a terminal event (tracing::Outcome),
+  // or if there are no active tail workers left, we can close the internal state at that point.
+  if (reportImpl(kj::mv(tailEvent))) {
     inner = Closed{};
   }
 }
