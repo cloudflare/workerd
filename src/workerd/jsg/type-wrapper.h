@@ -36,148 +36,6 @@ concept ValueLessParameter =
       wrapper.unwrap(js, context, ptr);
     };
 
-// TypeWrapper mixin for V8 handles.
-//
-// This is just a trivial pass-through.
-class V8HandleWrapper {
- public:
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  static constexpr const std::type_info& getName(v8::Local<T>*) {
-    return typeid(T);
-  }
-
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      v8::Local<T> value) {
-    return value;
-  }
-
-  kj::Maybe<v8::Local<v8::Value>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      v8::Local<v8::Value>*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return handle;
-  }
-
-#define JSG_FOR_EACH_V8_VALUE_SUBCLASS(f)                                                          \
-  f(ArrayBuffer) f(ArrayBufferView) f(TypedArray) f(DataView) f(Int8Array) f(Uint8Array)           \
-      f(Uint8ClampedArray) f(Int16Array) f(Uint16Array) f(Int32Array) f(Uint32Array)               \
-          f(Float16Array) f(Float32Array) f(Float64Array) f(Object) f(String) f(Function)          \
-              f(WasmMemoryObject) f(BigInt)
-
-  // Define a tryUnwrap() overload for each interesting subclass of v8::Value.
-#define JSG_DEFINE_TRY_UNWRAP(type)                                                                \
-  kj::Maybe<v8::Local<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,          \
-      v8::Local<v8::Value> handle, v8::Local<v8::type>*,                                           \
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
-    if (handle->Is##type()) {                                                                      \
-      return handle.As<v8::type>();                                                                \
-    }                                                                                              \
-    return kj::none;                                                                               \
-  }                                                                                                \
-                                                                                                   \
-  kj::Maybe<v8::Global<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,         \
-      v8::Local<v8::Value> handle, v8::Global<v8::type>*,                                          \
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
-    if (handle->Is##type()) {                                                                      \
-      return v8::Global<v8::type>(js.v8Isolate, handle.As<v8::type>());                            \
-    }                                                                                              \
-    return kj::none;                                                                               \
-  }                                                                                                \
-                                                                                                   \
-  kj::Maybe<V8Ref<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,              \
-      v8::Local<v8::Value> handle, V8Ref<v8::type>*,                                               \
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
-    if (handle->Is##type()) {                                                                      \
-      return V8Ref<v8::type>(js.v8Isolate, handle.As<v8::type>());                                 \
-    }                                                                                              \
-    return kj::none;                                                                               \
-  }                                                                                                \
-  template <typename T = v8::type, typename = decltype(&T::GetIdentityHash)>                       \
-  kj::Maybe<HashableV8Ref<T>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,             \
-      v8::Local<v8::Value> handle, HashableV8Ref<v8::type>*,                                       \
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
-    if (handle->Is##type()) {                                                                      \
-      return HashableV8Ref<v8::type>(js.v8Isolate, handle.As<v8::type>());                         \
-    }                                                                                              \
-    return kj::none;                                                                               \
-  }
-
-  JSG_FOR_EACH_V8_VALUE_SUBCLASS(JSG_DEFINE_TRY_UNWRAP)
-
-#undef JSG_DEFINE_TRY_UNWRAP
-#undef JSG_FOR_EACH_V8_VALUE_SUBCLASS
-
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  static constexpr const std::type_info& getName(v8::Global<T>*) {
-    return typeid(T);
-  }
-
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      v8::Global<T> value) {
-    return value.Get(js.v8Isolate);
-  }
-
-  kj::Maybe<v8::Global<v8::Value>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      v8::Global<v8::Value>*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return v8::Global<v8::Value>(js.v8Isolate, handle);
-  }
-
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  static constexpr const std::type_info& getName(V8Ref<T>*) {
-    return typeid(T);
-  }
-
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      V8Ref<T> value) {
-    return value.getHandle(js.v8Isolate);
-  }
-
-  kj::Maybe<V8Ref<v8::Value>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      V8Ref<v8::Value>*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return V8Ref<v8::Value>(js.v8Isolate, handle);
-  }
-};
-
-class UnimplementedWrapper {
- public:
-  static constexpr const std::type_info& getName(Unimplemented*) {
-    return typeid(Unimplemented);
-  }
-
-  v8::Local<v8::Value> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Unimplemented value) = delete;
-  kj::Maybe<Unimplemented> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      Unimplemented*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    // Can only be `undefined`.
-    if (handle->IsUndefined()) {
-      return Unimplemented();
-    } else {
-      return kj::none;
-    }
-  }
-};
-
 // The application can use this type to extend TypeWrapper with its own custom mixins. The
 // template `Extension` is a mixin which will be inherited by the TypeWrapper. It will be passed
 // the full TypeWrapper specialization as a type parameter. See TypeWrapper, below, for an
@@ -385,9 +243,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 template <typename Self, typename... T>
 class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public TypeWrapperBase<Self, T>...,
-                   public PrimitiveWrapper,
                    public NameWrapper<Self>,
-                   public StringWrapper,
                    public OptionalWrapper<Self>,
                    public LenientOptionalWrapper<Self>,
                    public MaybeWrapper<Self>,
@@ -408,8 +264,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public SelfRefWrapper<Self>,
                    public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
-                   public V8HandleWrapper,
-                   public UnimplementedWrapper,
                    public JsValueWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
   bool fastApiEnabled = false;
@@ -450,9 +304,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   using Name::wrap;                                                                                \
   using Name::tryUnwrap
 
-  USING_WRAPPER(PrimitiveWrapper);
   USING_WRAPPER(NameWrapper<Self>);
-  USING_WRAPPER(StringWrapper);
   USING_WRAPPER(OptionalWrapper<Self>);
   USING_WRAPPER(LenientOptionalWrapper<Self>);
   USING_WRAPPER(MaybeWrapper<Self>);
@@ -473,8 +325,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(SelfRefWrapper<Self>);
   USING_WRAPPER(ExceptionWrapper<Self>);
   USING_WRAPPER(ObjectWrapper<Self>);
-  USING_WRAPPER(V8HandleWrapper);
-  USING_WRAPPER(UnimplementedWrapper);
   USING_WRAPPER(JsValueWrapper<Self>);
 #undef USING_WRAPPER
 
@@ -599,6 +449,590 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   template <typename Holder, typename... U>
   void initReflection(Holder* holder, PropertyReflection<U>&... reflections) {
     (initReflection(holder, reflections), ...);
+  }
+
+  // ====================================================================================
+  // Primitives
+  static constexpr const char* getName(double*) {
+    return "number";
+  }
+
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      double value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::Number> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, double value) {
+    return v8::Number::New(isolate, value);
+  }
+
+  kj::Maybe<double> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      double*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return check(handle->ToNumber(context))->Value();
+  }
+
+  static constexpr const char* getName(int8_t*) {
+    return "byte";
+  }
+
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      int8_t value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::Number> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, int8_t value) {
+    return v8::Integer::New(isolate, value);
+  }
+
+  kj::Maybe<int8_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      int8_t*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto value = check(handle->ToNumber(context))->Value();
+
+    JSG_REQUIRE(
+        isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+
+    JSG_REQUIRE(
+        value <= static_cast<int8_t>(kj::maxValue) && value >= static_cast<int8_t>(kj::minValue),
+        TypeError,
+        kj::str("Value out of range. Must be between ", static_cast<int8_t>(kj::minValue), " and ",
+            static_cast<int8_t>(kj::maxValue), " (inclusive)."));
+
+    return static_cast<int8_t>(value);
+  }
+
+  static constexpr const char* getName(uint8_t*) {
+    return "octet";
+  }
+
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      uint8_t value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::Number> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, uint8_t value) {
+    return v8::Integer::NewFromUnsigned(isolate, value);
+  }
+
+  kj::Maybe<uint8_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      uint8_t*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto value = check(handle->ToNumber(context))->Value();
+    JSG_REQUIRE(
+        isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+
+    JSG_REQUIRE(value >= 0, TypeError,
+        "The value cannot be converted because it is negative and this "
+        "API expects a positive number.");
+
+    JSG_REQUIRE(value <= static_cast<uint8_t>(kj::maxValue), TypeError,
+        kj::str("Value out of range. Must be less than or equal to ",
+            static_cast<uint8_t>(kj::maxValue), "."));
+
+    return static_cast<uint8_t>(value);
+  }
+
+  static constexpr const char* getName(int16_t*) {
+    return "short integer";
+  }
+
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      int16_t value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::Number> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, int16_t value) {
+    return v8::Number::New(isolate, value);
+  }
+
+  kj::Maybe<int16_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      int16_t*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto value = check(handle->ToNumber(context))->Value();
+
+    JSG_REQUIRE(
+        isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+
+    JSG_REQUIRE(
+        value <= static_cast<int16_t>(kj::maxValue) && value >= static_cast<int16_t>(kj::minValue),
+        TypeError,
+        kj::str("Value out of range. Must be between ", static_cast<int16_t>(kj::minValue), " and ",
+            static_cast<int16_t>(kj::maxValue), " (inclusive)."));
+
+    return static_cast<int16_t>(value);
+  }
+
+  static constexpr const char* getName(uint16_t*) {
+    return "unsigned short integer";
+  }
+
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      uint16_t value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::Number> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, uint16_t value) {
+    return v8::Integer::NewFromUnsigned(isolate, value);
+  }
+
+  kj::Maybe<uint16_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      uint16_t*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto value = check(handle->ToNumber(context))->Value();
+    JSG_REQUIRE(
+        isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+
+    JSG_REQUIRE(value >= 0, TypeError,
+        "The value cannot be converted because it is negative and this "
+        "API expects a positive number.");
+
+    JSG_REQUIRE(value <= static_cast<uint16_t>(kj::maxValue), TypeError,
+        kj::str("Value out of range. Must be less than or equal to ",
+            static_cast<uint16_t>(kj::maxValue), "."));
+
+    return static_cast<uint16_t>(value);
+  }
+
+  static constexpr const char* getName(int*) {
+    return "integer";
+  }
+
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      int value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::Number> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, int value) {
+    return v8::Number::New(isolate, value);
+  }
+
+  kj::Maybe<int> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      int*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (int num; handle->IsInt32() && handle->Int32Value(context).To(&num)) {
+      return num;
+    }
+
+    auto value = check(handle->ToNumber(context))->Value();
+    if (!isFinite(value)) {
+      return 0;
+    }
+
+    // One would think that RangeError is more appropriate than TypeError,
+    // but WebIDL says it should be TypeError.
+    JSG_REQUIRE(value <= static_cast<int>(kj::maxValue) && value >= static_cast<int>(kj::minValue),
+        TypeError,
+        kj::str("Value out of range. Must be between ", static_cast<int>(kj::minValue), " and ",
+            static_cast<int>(kj::maxValue), " (inclusive)."));
+
+    return static_cast<int>(value);
+  }
+
+  static constexpr const char* getName(uint32_t*) {
+    return "unsigned integer";
+  }
+
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      uint32_t value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::Number> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, uint32_t value) {
+    return v8::Integer::NewFromUnsigned(isolate, value);
+  }
+
+  kj::Maybe<uint32_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      uint32_t*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (uint32_t num; handle->IsUint32() && handle->Uint32Value(context).To(&num)) {
+      return num;
+    }
+
+    auto value = check(handle->ToNumber(context))->Value();
+    JSG_REQUIRE(
+        isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+
+    JSG_REQUIRE(value >= 0, TypeError,
+        "The value cannot be converted because it is negative and this "
+        "API expects a positive number.");
+
+    JSG_REQUIRE(value <= static_cast<uint32_t>(kj::maxValue), TypeError,
+        kj::str("Value out of range. Must be less than or equal to ",
+            static_cast<uint32_t>(kj::maxValue), "."));
+
+    return static_cast<uint32_t>(value);
+  }
+
+  static constexpr const char* getName(uint64_t*) {
+    return "bigint";
+  }
+
+  v8::Local<v8::BigInt> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      uint64_t value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::BigInt> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, uint64_t value) {
+    return v8::BigInt::New(isolate, value);
+  }
+
+  kj::Maybe<uint64_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      uint64_t*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (v8::Local<v8::BigInt> bigint;
+        handle->IsBigInt() && handle->ToBigInt(context).ToLocal(&bigint)) {
+      bool lossless;
+      auto value = bigint->Uint64Value(&lossless);
+      JSG_REQUIRE(lossless, TypeError,
+          "The value cannot be converted because it is either negative and this "
+          "API expects a positive bigint, or the value would be truncated.");
+      return value;
+    }
+
+    auto value = check(handle->ToNumber(context))->Value();
+    JSG_REQUIRE(
+        isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+
+    JSG_REQUIRE(value >= 0, TypeError,
+        "The value cannot be converted because it is negative and this "
+        "API expects a positive bigint.");
+
+    JSG_REQUIRE(value <= static_cast<uint64_t>(kj::maxValue), TypeError,
+        kj::str("Value out of range. Must be less than or equal to ",
+            static_cast<uint64_t>(kj::maxValue), "."));
+
+    return static_cast<uint64_t>(value);
+  }
+
+  static constexpr const char* getName(int64_t*) {
+    return "bigint";
+  }
+
+  v8::Local<v8::BigInt> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      int64_t value) {
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  v8::Local<v8::BigInt> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, int64_t value) {
+    return v8::BigInt::New(isolate, value);
+  }
+
+  kj::Maybe<int64_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      int64_t*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (v8::Local<v8::BigInt> bigint;
+        handle->IsBigInt() && handle->ToBigInt(context).ToLocal(&bigint)) {
+      bool lossless;
+      auto value = bigint->Int64Value(&lossless);
+      JSG_REQUIRE(
+          lossless, TypeError, "The value cannot be converted because it would be truncated.");
+      return value;
+    }
+
+    auto value = check(handle->ToNumber(context))->Value();
+    JSG_REQUIRE(
+        isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
+
+    JSG_REQUIRE(
+        value <= static_cast<int64_t>(kj::maxValue) && value >= static_cast<int64_t>(kj::minValue),
+        TypeError,
+        kj::str("Value out of range. Must be between ", static_cast<int64_t>(kj::minValue), " and ",
+            static_cast<int64_t>(kj::maxValue), " (inclusive)."));
+
+    return static_cast<int64_t>(value);
+  }
+
+  static constexpr const char* getName(bool*) {
+    return "boolean";
+  }
+
+  template <typename U, typename = kj::EnableIf<kj::isSameType<U, bool>()>>
+  v8::Local<v8::Boolean> wrap(
+      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, U value) {
+    // The template is needed to prevent this overload from being chosen for arbitrary types that
+    // can convert to bool, such as pointers.
+    return wrap(js.v8Isolate, creator, value);
+  }
+
+  template <typename U, typename = kj::EnableIf<kj::isSameType<U, bool>()>>
+  v8::Local<v8::Boolean> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, U value) {
+    // The template is needed to prevent this overload from being chosen for arbitrary types that
+    // can convert to bool, such as pointers.
+    return v8::Boolean::New(isolate, value);
+  }
+
+  kj::Maybe<bool> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      bool*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return handle->ToBoolean(js.v8Isolate)->Value();
+  }
+
+  // ====================================================================================
+  // Strings
+  // TODO(someday): The conversion to kj::String doesn't explicitly consider the distinction
+  // between DOMString (~ WTF-8; could contain invalid code points) and USVString (invalid code
+  // points are always replaced with U+FFFD). Code should make an explict choice between the two.
+
+  template <typename U>
+    requires(kj::isSameType<U, kj::ArrayPtr<const char>>() ||
+        kj::isSameType<U, kj::Array<const char>>() || kj::isSameType<U, kj::String>())
+  static constexpr const char* getName(U*) {
+    return "string";
+  }
+
+  template <typename U>
+    requires(kj::isSameType<U, ByteString>() || kj::isSameType<U, USVString>() ||
+        kj::isSameType<U, DOMString>())
+  static constexpr const char* getName(U*) {
+    if constexpr (kj::isSameType<U, ByteString>()) {
+      return "ByteString";
+    } else if constexpr (kj::isSameType<U, USVString>()) {
+      return "USVString";
+    } else if constexpr (kj::isSameType<U, DOMString>()) {
+      return "DOMString";
+    }
+    KJ_UNREACHABLE;
+  }
+
+  v8::Local<v8::String> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, kj::StringPtr value) {
+    return v8Str(isolate, value);
+  }
+
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::ArrayPtr<const char> value) {
+    return v8Str(js.v8Isolate, value);
+  }
+
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<const char> value) {
+    return wrap(js, context, creator, value.asPtr());
+  }
+
+  template <typename U>
+    requires(kj::isSameType<U, const ByteString&>() || kj::isSameType<U, const USVString&>() ||
+        kj::isSameType<U, const DOMString&>())
+  v8::Local<v8::String> wrap(
+      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, U value) {
+    // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
+    return v8Str(js.v8Isolate, value.asPtr());
+  }
+
+  template <typename U>
+    requires(kj::isSameType<U, kj::String>() || kj::isSameType<U, ByteString>() ||
+        kj::isSameType<U, USVString>() || kj::isSameType<U, DOMString>())
+  kj::Maybe<U> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      U*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    // Note that if handle is already a string, calling ToString will just
+    // return handle without any further coercion. For any other type of
+    // value, v8 will try to coerce it into a string. So there is no need
+    // for us to check if handle is a string here or not, ToString does
+    // that for us.
+    JsString str(check(handle->ToString(context)));
+    if constexpr (kj::isSameType<U, kj::String>()) {
+      return str.toString(js);
+    } else if constexpr (kj::isSameType<U, ByteString>()) {
+      return str.toByteString(js);
+    } else if constexpr (kj::isSameType<U, USVString>()) {
+      return str.toUSVString(js);
+    } else if constexpr (kj::isSameType<U, DOMString>()) {
+      return str.toDOMString(js);
+    }
+
+    KJ_UNREACHABLE;
+  }
+
+  // ====================================================================================
+  // Unimplemented
+  static constexpr const std::type_info& getName(Unimplemented*) {
+    return typeid(Unimplemented);
+  }
+
+  v8::Local<v8::Value> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Unimplemented value) = delete;
+  kj::Maybe<Unimplemented> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Unimplemented*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    // Can only be `undefined`.
+    if (handle->IsUndefined()) {
+      return Unimplemented();
+    } else {
+      return kj::none;
+    }
+  }
+
+  // ====================================================================================
+  // V8 Handles
+  template <V8Value U>
+  static constexpr const std::type_info& getName(v8::Local<U>*) {
+    return typeid(U);
+  }
+
+  template <V8Value U>
+  v8::Local<U> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      v8::Local<U> value) {
+    return value;
+  }
+
+  kj::Maybe<v8::Local<v8::Value>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      v8::Local<v8::Value>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return handle;
+  }
+
+#define JSG_FOR_EACH_V8_VALUE_SUBCLASS(f)                                                          \
+  f(ArrayBuffer) f(ArrayBufferView) f(TypedArray) f(DataView) f(Int8Array) f(Uint8Array)           \
+      f(Uint8ClampedArray) f(Int16Array) f(Uint16Array) f(Int32Array) f(Uint32Array)               \
+          f(Float16Array) f(Float32Array) f(Float64Array) f(Object) f(String) f(Function)          \
+              f(WasmMemoryObject) f(BigInt)
+
+  // Define a tryUnwrap() overload for each interesting subclass of v8::Value.
+#define JSG_DEFINE_TRY_UNWRAP(type)                                                                \
+  kj::Maybe<v8::Local<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,          \
+      v8::Local<v8::Value> handle, v8::Local<v8::type>*,                                           \
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
+    if (handle->Is##type()) {                                                                      \
+      return handle.As<v8::type>();                                                                \
+    }                                                                                              \
+    return kj::none;                                                                               \
+  }                                                                                                \
+                                                                                                   \
+  kj::Maybe<v8::Global<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,         \
+      v8::Local<v8::Value> handle, v8::Global<v8::type>*,                                          \
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
+    if (handle->Is##type()) {                                                                      \
+      return v8::Global<v8::type>(js.v8Isolate, handle.As<v8::type>());                            \
+    }                                                                                              \
+    return kj::none;                                                                               \
+  }                                                                                                \
+                                                                                                   \
+  kj::Maybe<V8Ref<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,              \
+      v8::Local<v8::Value> handle, V8Ref<v8::type>*,                                               \
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
+    if (handle->Is##type()) {                                                                      \
+      return V8Ref<v8::type>(js.v8Isolate, handle.As<v8::type>());                                 \
+    }                                                                                              \
+    return kj::none;                                                                               \
+  }                                                                                                \
+  template <typename U = v8::type, typename = decltype(&U::GetIdentityHash)>                       \
+  kj::Maybe<HashableV8Ref<U>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,             \
+      v8::Local<v8::Value> handle, HashableV8Ref<v8::type>*,                                       \
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
+    if (handle->Is##type()) {                                                                      \
+      return HashableV8Ref<v8::type>(js.v8Isolate, handle.As<v8::type>());                         \
+    }                                                                                              \
+    return kj::none;                                                                               \
+  }
+
+  JSG_FOR_EACH_V8_VALUE_SUBCLASS(JSG_DEFINE_TRY_UNWRAP)
+
+#undef JSG_DEFINE_TRY_UNWRAP
+#undef JSG_FOR_EACH_V8_VALUE_SUBCLASS
+
+  template <V8Value U>
+  static constexpr const std::type_info& getName(v8::Global<U>*) {
+    return typeid(U);
+  }
+
+  template <V8Value U>
+  v8::Local<U> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      v8::Global<U> value) {
+    return value.Get(js.v8Isolate);
+  }
+
+  kj::Maybe<v8::Global<v8::Value>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      v8::Global<v8::Value>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return v8::Global<v8::Value>(js.v8Isolate, handle);
+  }
+
+  template <V8Value U>
+  static constexpr const std::type_info& getName(V8Ref<U>*) {
+    return typeid(U);
+  }
+
+  template <V8Value U>
+  v8::Local<U> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      V8Ref<U> value) {
+    return value.getHandle(js.v8Isolate);
+  }
+
+  kj::Maybe<V8Ref<v8::Value>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      V8Ref<v8::Value>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return V8Ref<v8::Value>(js.v8Isolate, handle);
   }
 };
 

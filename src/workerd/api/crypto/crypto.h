@@ -180,7 +180,7 @@ class CryptoKey: public jsg::Object {
     // Length in bits of the key. The spec wants this to be an unsigned long, but whatever.
     // TODO(someday): Reexamine use of uint16_t in these algorithm structures.
     // We picked uint16_t to work around ambiguous bindings for uint32_t in
-    // jsg::PrimitiveWrapper::wrap().  HMAC, at least, allows very long keys.
+    // jsg::TypeWrapper::wrap().  HMAC, at least, allows very long keys.
     uint16_t length;
 
     JSG_STRUCT(name, hash, length);
