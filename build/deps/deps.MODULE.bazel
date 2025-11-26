@@ -60,7 +60,7 @@ archive_override(
 bazel_dep(name = "sqlite3")
 
 # We have some patches that aren't included in BCR:
-# https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/sqlite3/3.47.0/patches
+# https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/sqlite3/3.51.0/patches
 archive_override(
     module_name = "sqlite3",
     build_file = "//:build/BUILD.sqlite3",
@@ -69,17 +69,16 @@ archive_override(
         "//:patches/sqlite/0001-row-counts-plain.patch",
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
-        "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
     ],
     remote_file_integrity = {
-        "MODULE.bazel": "sha256-TtpmqyHyks3o0WcSJO0XFyKkHfAIF98wq06+urs3oKI=",
+        "MODULE.bazel": "sha256-suM9kn7sG4wxGdvTSb1g2wH5qY0k1HULxYcj5khrP54=",
     },
     remote_file_urls = {
-        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/sqlite3/3.47.0/MODULE.bazel"],
+        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/sqlite3/3.51.0/MODULE.bazel"],
     },
-    sha256 = "f59c349bedb470203586a6b6d10adb35f2afefa49f91e55a672a36a09a8fedf7",
-    strip_prefix = "sqlite-src-3470000",
-    url = "https://sqlite.org/2024/sqlite-src-3470000.zip",
+    sha256 = "5330719b8b80bf563991ff7a373052943f5357aae76cd1f3367eab845d3a75b7",
+    strip_prefix = "sqlite-src-3510000",
+    url = "https://sqlite.org/2025/sqlite-src-3510000.zip",
 )
 
 bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")

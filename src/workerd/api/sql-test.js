@@ -626,7 +626,8 @@ async function test(state) {
         WHERE TYPE = "table"
           AND tbl_name NOT LIKE "sqlite_%"
           AND tbl_name NOT LIKE "d1_%"
-          AND tbl_name NOT LIKE "_cf_%"`),
+          AND tbl_name NOT LIKE "_cf_%"
+        ORDER BY tbl_name desc`),
     ];
     assert.equal(result.length, 2);
     assert.equal(result[0].tbl_name, 'myTable');
