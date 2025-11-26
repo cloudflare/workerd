@@ -70,16 +70,6 @@ class NameWrapper {
 // =======================================================================================
 // Optional (value or undefined) and Maybe (value or null)
 
-template <typename... T>
-constexpr bool isUnionType(kj::OneOf<T...>*) {
-  return true;
-}
-
-template <typename T>
-constexpr bool isUnionType(T*) {
-  return false;
-}
-
 // TypeWrapper mixin for optionals.
 template <typename TypeWrapper>
 class OptionalWrapper {
