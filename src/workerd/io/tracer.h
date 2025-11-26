@@ -11,33 +11,7 @@
 
 namespace workerd {
 namespace tracing {
-
-// A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final {
- public:
-  // If the Reporter returns false, then the writer should transition into a
-  // closed state.
-  using Reporter = kj::Function<bool(TailEvent&&)>;
-
-  TailStreamWriter(Reporter reporter);
-  KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
-
-  void report(const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date time);
-
-  inline bool isClosed() const {
-    return state == kj::none;
-  }
-
- private:
-  struct State {
-    Reporter reporter;
-    uint32_t sequence = 0;
-    State(Reporter reporter): reporter(kj::mv(reporter)) {}
-  };
-  kj::Maybe<State> state;
-  bool onsetSeen = false;
-  bool outcomeSeen = false;
-};
+class TailStreamWriter;
 }  // namespace tracing
 
 class WorkerTracer;
