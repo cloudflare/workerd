@@ -83,9 +83,6 @@ class TailStreamWriter final: public kj::Refcounted {
 
   struct Closed {};
 
-  // If the Reporter returns false, then the writer should transition into a closed state.
-  bool reporter(TailEvent&& event);
-
   kj::OneOf<Pending, kj::Vector<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
 
