@@ -215,6 +215,25 @@ export const tests = {
     }
 
     {
+      // Test form data input
+      const form = new FormData();
+      form.append('prompt', 'cat');
+      const resp = await env.ai.run('formDataInputs', {
+        audio: {
+          body: form,
+          contentType: 'multipart/form-data',
+        },
+      });
+
+      assert.deepStrictEqual(resp, {
+        inputs: {},
+        options: { userInputs: '{}', version: '3' },
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&userInputs=%7B%7D',
+      });
+    }
+
+    {
       // Test gateway option
       const resp = await env.ai.run(
         'rawInputs',

@@ -42,7 +42,7 @@ export type AiOptions = {
 };
 
 export type AiInputReadableStream = {
-  body: ReadableStream;
+  body: ReadableStream | FormData;
   contentType: string;
 };
 
@@ -87,13 +87,23 @@ export class AiInternalError extends Error {
   }
 }
 
-// TODO: merge this function with the one with images-api.ts
 function isReadableStream(obj: unknown): obj is ReadableStream {
   return !!(
     obj &&
     typeof obj === 'object' &&
     'getReader' in obj &&
     typeof obj.getReader === 'function'
+  );
+}
+
+function isFormData(obj: unknown): obj is FormData {
+  return !!(
+    obj &&
+    typeof obj === 'object' &&
+    'append' in obj &&
+    typeof obj.append === 'function' &&
+    'entries' in obj &&
+    typeof obj.entries === 'function'
   );
 }
 
@@ -111,9 +121,9 @@ function findReadableStreamKeys(
       value &&
       typeof value === 'object' &&
       'body' in value &&
-      isReadableStream(value.body);
+      (isReadableStream(value.body) || isFormData(value.body));
 
-    if (hasReadableStreamBody || isReadableStream(value)) {
+    if (hasReadableStreamBody || isReadableStream(value) || isFormData(value)) {
       readableStreamKeys.push(key);
     }
   }
