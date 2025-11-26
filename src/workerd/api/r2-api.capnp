@@ -27,6 +27,8 @@ struct R2BindingRequest {
     uploadPart @10 :R2UploadPartRequest $Json.flatten();
     completeMultipartUpload @11 :R2CompleteMultipartUploadRequest $Json.flatten();
     abortMultipartUpload @12 :R2AbortMultipartUploadRequest $Json.flatten();
+    listParts @13 :R2ListPartsRequest $Json.flatten();
+    listMultipartUploads @14 :R2ListMultipartUploadsRequest $Json.flatten();
   }
 }
 
@@ -138,6 +140,21 @@ struct R2CompleteMultipartUploadRequest {
 struct R2AbortMultipartUploadRequest {
   object @0 :Text;
   uploadId @1 :Text;
+}
+
+struct R2ListPartsRequest {
+  object @0 :Text;
+  uploadId @1 :Text;
+  maxParts @2 :UInt32 = 0xffffffff;
+  partNumberMarker @3 :UInt32 = 0;
+}
+
+struct R2ListMultipartUploadsRequest {
+  limit @0 :UInt32 = 0xffffffff;
+  prefix @1 :Text;
+  cursor @2 :Text;
+  delimiter @3 :Text;
+  startAfter @4 :Text;
 }
 
 struct R2ListRequest {
@@ -259,6 +276,35 @@ struct R2UploadPartResponse {
 using R2CompleteMultipartUploadResponse = R2PutResponse;
 
 struct R2AbortMultipartUploadResponse {}
+
+struct R2ListPartsResponse {
+  uploadId @0 :Text;
+  object @1 :Text;
+  parts @2 :List(Part);
+  truncated @3 :Bool;
+  partNumberMarker @4 :UInt32;
+
+  struct Part {
+    partNumber @0 :UInt32;
+    etag @1 :Text;
+    size @2 :UInt64;
+    uploadedMillisecondsSinceEpoch @3 :UInt64 $Json.name("uploaded");
+  }
+}
+
+struct R2ListMultipartUploadsResponse {
+  uploads @0 :List(Upload);
+  truncated @1 :Bool;
+  cursor @2 :Text;
+  delimitedPrefixes @3 :List(Text);
+
+  struct Upload {
+    uploadId @0 :Text;
+    object @1 :Text;
+    initiatedMillisecondsSinceEpoch @2 :UInt64 $Json.name("initiated");
+    storageClass @3 :Text;
+  }
+}
 
 struct R2ListResponse {
   objects @0 :List(R2HeadResponse);
