@@ -396,16 +396,16 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public SetWrapper<Self>,
                    public SequenceWrapper<Self>,
                    public GeneratorWrapper<Self>,
-                   public ArrayBufferWrapper<Self>,
+                   public ArrayBufferWrapper,
                    public DictWrapper<Self>,
-                   public DateWrapper<Self>,
-                   public BufferSourceWrapper<Self>,
+                   public DateWrapper,
+                   public BufferSourceWrapper,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
                    public NonCoercibleWrapper<Self>,
                    public MemoizedIdentityWrapper<Self>,
                    public IdentifiedWrapper<Self>,
-                   public SelfRefWrapper<Self>,
+                   public SelfRefWrapper,
                    public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
                    public V8HandleWrapper,
@@ -461,16 +461,16 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(SetWrapper<Self>);
   USING_WRAPPER(SequenceWrapper<Self>);
   USING_WRAPPER(GeneratorWrapper<Self>);
-  USING_WRAPPER(ArrayBufferWrapper<Self>);
+  USING_WRAPPER(ArrayBufferWrapper);
   USING_WRAPPER(DictWrapper<Self>);
-  USING_WRAPPER(DateWrapper<Self>);
-  USING_WRAPPER(BufferSourceWrapper<Self>);
+  USING_WRAPPER(DateWrapper);
+  USING_WRAPPER(BufferSourceWrapper);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
   USING_WRAPPER(NonCoercibleWrapper<Self>);
   USING_WRAPPER(MemoizedIdentityWrapper<Self>);
   USING_WRAPPER(IdentifiedWrapper<Self>);
-  USING_WRAPPER(SelfRefWrapper<Self>);
+  USING_WRAPPER(SelfRefWrapper);
   USING_WRAPPER(ExceptionWrapper<Self>);
   USING_WRAPPER(ObjectWrapper<Self>);
   USING_WRAPPER(V8HandleWrapper);

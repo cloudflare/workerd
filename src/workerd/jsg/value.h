@@ -1000,7 +1000,6 @@ class SetWrapper {
 //   - use `jsg::asBytes()` as a quick way to get a `kj::ArrayPtr<kj::byte>` view onto it.
 //
 // 3. If a method returns an ArrayBuffer, create and return a `kj::Array<kj::byte>`.
-template <typename TypeWrapper>
 class ArrayBufferWrapper {
  public:
   static constexpr const char* getName(kj::ArrayPtr<byte>*) {
@@ -1183,7 +1182,6 @@ class DictWrapper {
 // =======================================================================================
 // Dates
 
-template <typename TypeWrapper>
 class DateWrapper {
  public:
   static constexpr const char* getName(kj::Date*) {
@@ -1383,7 +1381,6 @@ class IdentifiedWrapper {
 // =======================================================================================
 // SelfRef
 
-template <typename TypeWrapper>
 class SelfRefWrapper {
  public:
   static auto getName(SelfRef*) {
