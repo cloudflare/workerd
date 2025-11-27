@@ -1545,7 +1545,6 @@ class Name final {
 
   kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> getUnwrapped(v8::Isolate* isolate);
 
-  template <typename TypeWrapper>
   friend class NameWrapper;
 
   void visitForGc(GcVisitor& visitor);

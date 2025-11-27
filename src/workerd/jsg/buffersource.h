@@ -462,7 +462,6 @@ class BufferSource {
 };
 
 // TypeWrapper implementation for the BufferSource type.
-template <typename TypeWrapper>
 class BufferSourceWrapper {
  public:
   static constexpr const char* getName(BufferSource*) {
