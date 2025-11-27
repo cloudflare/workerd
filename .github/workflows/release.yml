@@ -86,17 +86,17 @@ jobs:
             bazel-config: release_linux
             target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
-          # release binaries on the macos-26 runner.
+          # release binaries on the macos-15 runner.
           - title: macOS-x64
             os-name: macOS
-            # This configuration is used for cross-compiling – macos-26 is Apple Silicon-based but
+            # This configuration is used for cross-compiling – macos-15 is Apple Silicon-based but
             # we use it to compile the x64 release.
-            image: macos-26
+            image: macos-15
             bazel-config: release_macos_cross_x86_64
             target-arch: X64
           - title: macOS-arm64
             os-name: macOS
-            image: macos-26
+            image: macos-15
             bazel-config: release_macos
             target-arch: ARM64
           - title: windows
