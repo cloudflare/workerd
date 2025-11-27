@@ -25,8 +25,17 @@ namespace workerd::jsg {
 template <typename T, bool = isGcVisitable<T>()>
 struct OpaqueWrappable;
 
+struct OpaqueWrappableBase: public Wrappable {
+  kj::StringPtr jsgGetMemoryName() const override final {
+    return "OpaqueWrappable"_kjc;
+  }
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override final {
+    Wrappable::jsgGetMemoryInfo(tracker);
+  }
+};
+
 template <typename T>
-struct OpaqueWrappable<T, false>: public Wrappable {
+struct OpaqueWrappable<T, false>: public OpaqueWrappableBase {
   // Used to implement wrapOpaque().
 
   OpaqueWrappable(T&& value): value(kj::mv(value)) {}
@@ -34,14 +43,8 @@ struct OpaqueWrappable<T, false>: public Wrappable {
   T value;
   bool movedAway = false;
 
-  kj::StringPtr jsgGetMemoryName() const override final {
-    return "OpaqueWrappable"_kjc;
-  }
   size_t jsgGetMemorySelfSize() const override final {
     return sizeof(OpaqueWrappable);
-  }
-  void jsgGetMemoryInfo(MemoryTracker& tracker) const override final {
-    Wrappable::jsgGetMemoryInfo(tracker);
   }
 };
 
