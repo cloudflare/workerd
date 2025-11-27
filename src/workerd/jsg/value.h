@@ -401,7 +401,6 @@ class PrimitiveWrapper {
 
 // =======================================================================================
 // Name
-template <typename TypeWrapper>
 class NameWrapper {
  public:
   static constexpr const char* getName(Name*) {
@@ -414,8 +413,7 @@ class NameWrapper {
       Name value) {
     KJ_SWITCH_ONEOF(value.getUnwrapped(js.v8Isolate)) {
       KJ_CASE_ONEOF(string, kj::StringPtr) {
-        auto& wrapper = static_cast<TypeWrapper&>(*this);
-        return wrapper.wrap(js.v8Isolate, creator, kj::str(string));
+        return js.str(string);
       }
       KJ_CASE_ONEOF(symbol, v8::Local<v8::Symbol>) {
         return symbol;
@@ -435,12 +433,7 @@ class NameWrapper {
 
     // Since most things are coercible to a string, this ought to catch pretty much
     // any value other than symbol
-    auto& wrapper = static_cast<TypeWrapper&>(*this);
-    KJ_IF_SOME(string, wrapper.tryUnwrap(js, context, handle, (kj::String*)nullptr, parentObject)) {
-      return Name(kj::mv(string));
-    }
-
-    return kj::none;
+    return Name(js.toString(handle));
   }
 };
 
