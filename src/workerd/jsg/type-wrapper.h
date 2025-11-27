@@ -19,7 +19,6 @@
 #include <workerd/jsg/value.h>
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
-#include <workerd/util/autogate.h>
 
 #include <v8-wasm.h>
 
@@ -412,17 +411,15 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public UnimplementedWrapper,
                    public JsValueWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
-  bool fastApiEnabled = false;
-
  public:
   template <typename MetaConfiguration>
   TypeWrapper(v8::Isolate* isolate, MetaConfiguration&& configuration)
       : TypeWrapperBase<Self, T>(configuration)...,
         MaybeWrapper<Self>(configuration),
         GeneratorWrapper<Self>(configuration),
-        PromiseWrapper<Self>(configuration) {
+        PromiseWrapper<Self>(configuration),
+        config(getConfig(configuration)) {
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
-    fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
 
@@ -435,7 +432,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   }
 
   bool isFastApiEnabled() const {
-    return fastApiEnabled;
+    return config.fastApiEnabled;
   }
 
   using TypeWrapperBase<Self, T>::getName...;
@@ -600,6 +597,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   void initReflection(Holder* holder, PropertyReflection<U>&... reflections) {
     (initReflection(holder, reflections), ...);
   }
+
+ private:
+  const JsgConfig config;
 };
 
 template <typename Self, typename... Types>

@@ -58,6 +58,7 @@
 #include <workerd/rust/transpiler/lib.rs.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
@@ -268,6 +269,7 @@ struct WorkerdApi::Impl final {
             .noSubstituteNull = features.getNoSubstituteNull(),
             .unwrapCustomThenables = features.getUnwrapCustomThenables(),
             .fetchIterableTypeSupport = features.getFetchIterableTypeSupport(),
+            .fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API),
           }) {}
     operator const CompatibilityFlags::Reader() const {
       return features;

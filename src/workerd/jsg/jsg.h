@@ -2151,6 +2151,7 @@ struct JsgConfig {
   bool noSubstituteNull = false;
   bool unwrapCustomThenables = false;
   bool fetchIterableTypeSupport = false;
+  bool fastApiEnabled = false;
 };
 
 static constexpr JsgConfig DEFAULT_JSG_CONFIG = {};
