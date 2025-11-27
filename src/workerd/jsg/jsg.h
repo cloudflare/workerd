@@ -200,7 +200,7 @@ namespace workerd::jsg {
 #define JSG_METHOD(name)                                                                           \
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
-    registry.template registerMethod<NAME, decltype(&Self::name), &Self::name>();                  \
+    registry.template registerMethod<NAME, &Self::name>();                                         \
   } while (false)
 
 // Like JSG_METHOD but allows you to specify a different name to use in JavaScript. This is
@@ -211,7 +211,7 @@ namespace workerd::jsg {
 #define JSG_METHOD_NAMED(name, method)                                                             \
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
-    registry.template registerMethod<NAME, decltype(&Self::method), &Self::method>();              \
+    registry.template registerMethod<NAME, &Self::method>();                                       \
   } while (false)
 
 // Use inside a JSG_RESOURCE_TYPE block to declare that the given method should be callable from
@@ -1693,6 +1693,21 @@ struct RemovePromise_<Promise<T>> {
 template <typename T>
 using RemovePromise = typename RemovePromise_<T>::Type;
 
+template <typename T>
+struct MaintainPromise_ {
+  using Type = Promise<T>;
+};
+
+// Convenience template to add `jsg::Promise` if it is not present.
+template <typename T>
+struct MaintainPromise_<Promise<T>> {
+  using Type = Promise<T>;
+};
+
+// Convenience template to add `jsg::Promise` if it is not present.
+template <typename T>
+using MaintainPromise = typename MaintainPromise_<T>::Type;
+
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
 template <typename Func, typename T, bool passLock>
@@ -1737,7 +1752,7 @@ using ReturnType = typename ReturnType_<Func, T, passLock>::Type;
 // TODO(cleanup): The passLock = false variation is currently only used for js.evalNow().
 // It would be nice to refactor that a bit so we can clean up this template and simplify.
 template <typename Func, typename Param, bool passLock>
-using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>>>;
+using PromiseForResult = MaintainPromise<ReturnType<Func, Param, passLock>>;
 
 // All types declared with JSG_RESOURCE_TYPE which are intended to be used as the global object
 // must inherit jsg::ContextGlobal, in addition to inheriting jsg::Object
