@@ -339,13 +339,21 @@ export const report = {
   directory: '',
   filename: '',
   getReport: (): Record<string, unknown> => {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('process.report.getReport');
+    // We do not intend to implement process.report in workerd, but there
+    // are some modules in the ecosystem that call it expecting it to exist and
+    // not throw. Returning an empty object for now to satisfy that use case.
+    return {};
   },
   reportOnFatalError: false,
   reportOnSignal: false,
   reportOnUncaughtException: false,
+  excludeNetwork: false,
+  excludeEnv: false,
   signal: 'SIGUSR2',
   writeReport: (): string => {
+    // In this case, there's an expectation that the function will produce
+    // a report on disk and return the filename. Since we do not intend
+    // to implement this API in workerd, we throw to indicate that.
     throw new ERR_METHOD_NOT_IMPLEMENTED('process.report.writeReport');
   },
 };
