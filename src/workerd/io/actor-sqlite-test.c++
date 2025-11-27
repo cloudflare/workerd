@@ -1045,7 +1045,9 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
   auto gateWait2Ms = test.gate.wait();
   KJ_ASSERT(!gateWait2Ms.poll(test.ws));
 
-  // Set alarm to 3ms.  Expect 3ms db commit to start.
+  // Set alarm to 3ms.  Expect 3ms db commit to start. The 2ms scheduleRun will never happen now
+  // that we've overwritten it while it was persisting to SQLite (before we send an update to the
+  // alarm manager).
   test.setAlarm(threeMs);
   auto commit3MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
   test.pollAndExpectCalls({});
@@ -1054,11 +1056,10 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
   auto gateWait3Ms = test.gate.wait();
   KJ_ASSERT(!gateWait3Ms.poll(test.ws));
 
-  // Fulfill 2ms db commit.  Expect 2ms alarm to be scheduled and 2ms gate to be unblocked.
+  // Expect 2ms gate to be unblocked once the commit finishes, but don't expect a scheduleRun(2ms).
   KJ_ASSERT(!gateWait2Ms.poll(test.ws));
   commit2MsFulfiller->fulfill();
   KJ_ASSERT(gateWait2Ms.poll(test.ws));
-  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
   test.pollAndExpectCalls({});
 
   // Fulfill 3ms db commit.  Expect 3ms alarm to be scheduled and 3ms gate to be unblocked.
@@ -1066,10 +1067,6 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
 
   commit3MsFulfiller->fulfill();
   KJ_ASSERT(gateWait3Ms.poll(test.ws));
-
-  // The 3ms scheduleRun waits for the 2ms scheduleRun to complete first, since we chain
-  // "move later" operations to ensure they execute in order at the alarm manager.
-  fulfiller2Ms->fulfill();
 
   auto fulfiller3Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]);
   test.pollAndExpectCalls({});
