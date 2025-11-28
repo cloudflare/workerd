@@ -54,13 +54,6 @@ import type {
   MemoryMeasurement,
 } from 'node:vm';
 
-/** Validates that, if a timeout option is defined, it must be a strictly positive integer. */
-function validateTimeout(timeout: number | undefined): void {
-  if (timeout !== undefined) {
-    validateUint32(timeout, 'options.timeout', true);
-  }
-}
-
 export const constants = {
   __proto__: null,
   USE_MAIN_CONTEXT_DEFAULT_LOADER: Symbol(
@@ -119,7 +112,9 @@ export class Script {
     const { breakOnSigint = false, displayErrors = true, timeout } = options;
     validateBoolean(breakOnSigint, 'options.breakOnSigint');
     validateBoolean(displayErrors, 'options.displayErrors');
-    validateTimeout(timeout);
+    if (timeout !== undefined) {
+      validateUint32(timeout, 'options.timeout', true);
+    }
     throw new ERR_METHOD_NOT_IMPLEMENTED('runInThisContext');
   }
 
@@ -132,7 +127,9 @@ export class Script {
     const { breakOnSigint = false, displayErrors = true, timeout } = options;
     validateBoolean(breakOnSigint, 'options.breakOnSigint');
     validateBoolean(displayErrors, 'options.displayErrors');
-    validateTimeout(timeout);
+    if (timeout !== undefined) {
+      validateUint32(timeout, 'options.timeout', true);
+    }
     throw new ERR_METHOD_NOT_IMPLEMENTED('runInThisContext');
   }
 
