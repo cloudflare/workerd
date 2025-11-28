@@ -54,6 +54,13 @@ import type {
   MemoryMeasurement,
 } from 'node:vm';
 
+/** Validates that, if a timeout option is defined, it must be a strictly positive integer. */
+function validateTimeout(timeout: number | undefined): void {
+  if (timeout !== undefined) {
+    validateUint32(timeout, 'options.timeout', true);
+  }
+}
+
 export const constants = {
   __proto__: null,
   USE_MAIN_CONTEXT_DEFAULT_LOADER: Symbol(
@@ -101,8 +108,6 @@ export class Script {
       validateBuffer(cachedData, 'options.cachedData');
     }
     validateBoolean(produceCachedData, 'options.produceCachedData');
-
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Script');
   }
 
   createCachedData(): Buffer {
@@ -111,14 +116,10 @@ export class Script {
 
   runInThisContext(options: RunningScriptOptions = {}): unknown {
     validateObject(options, 'options');
-    const {
-      breakOnSigint = false,
-      displayErrors = true,
-      timeout = 0,
-    } = options;
+    const { breakOnSigint = false, displayErrors = true, timeout } = options;
     validateBoolean(breakOnSigint, 'options.breakOnSigint');
     validateBoolean(displayErrors, 'options.displayErrors');
-    validateUint32(timeout, 'options.timeout', true);
+    validateTimeout(timeout);
     throw new ERR_METHOD_NOT_IMPLEMENTED('runInThisContext');
   }
 
@@ -128,14 +129,10 @@ export class Script {
   ): unknown {
     validateContext(contextifiedObject);
     validateObject(options, 'options');
-    const {
-      breakOnSigint = false,
-      displayErrors = true,
-      timeout = 0,
-    } = options;
+    const { breakOnSigint = false, displayErrors = true, timeout } = options;
     validateBoolean(breakOnSigint, 'options.breakOnSigint');
     validateBoolean(displayErrors, 'options.displayErrors');
-    validateUint32(timeout, 'options.timeout', true);
+    validateTimeout(timeout);
     throw new ERR_METHOD_NOT_IMPLEMENTED('runInThisContext');
   }
 

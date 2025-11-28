@@ -1,5 +1,5 @@
 import * as vm from 'node:vm';
-import { notStrictEqual, strictEqual, throws } from 'node:assert';
+import { doesNotThrow, notStrictEqual, strictEqual, throws } from 'node:assert';
 
 export const vmTest = {
   test() {
@@ -33,10 +33,17 @@ export const vmTest = {
     const context = vm.createContext();
     strictEqual(vm.isContext(context), true);
 
-    // Basic construction should validate and throw NOT_IMPLEMENTED
-    throws(() => new vm.Script('code'), {
+    // Basic construction should return a Script object that throws on run methods
+    const script1 = new vm.Script('code');
+    strictEqual(script1 instanceof vm.Script, true);
+    throws(() => script1.runInContext(context), {
       code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      message: /Script/,
+    });
+    throws(() => script1.runInNewContext(context), {
+      code: 'ERR_METHOD_NOT_IMPLEMENTED',
+    });
+    throws(() => script1.runInThisContext(), {
+      code: 'ERR_METHOD_NOT_IMPLEMENTED',
     });
 
     // Test Script constructor argument validation
@@ -62,10 +69,8 @@ export const vmTest = {
       }
     );
 
-    // Test Script with string options (should be treated as filename)
-    throws(() => new vm.Script('code', 'filename.js'), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
-    });
+    // Script can accept string options (should be treated as filename)
+    doesNotThrow(() => new vm.Script('code', 'filename.js'));
 
     // Test runInContext function
     throws(() => vm.runInContext('this.a = 1;', {}), {
@@ -126,8 +131,16 @@ export const vmTest = {
       code: 'ERR_INVALID_ARG_VALUE',
     });
 
-    // Test createScript function
-    throws(() => vm.createScript('code'), {
+    // Test createScript function returns a Script that throws on run methods
+    const script2 = vm.createScript('code');
+    strictEqual(script2 instanceof vm.Script, true);
+    throws(() => script2.runInContext(context), {
+      code: 'ERR_METHOD_NOT_IMPLEMENTED',
+    });
+    throws(() => script2.runInNewContext(context), {
+      code: 'ERR_METHOD_NOT_IMPLEMENTED',
+    });
+    throws(() => script2.runInThisContext(), {
       code: 'ERR_METHOD_NOT_IMPLEMENTED',
     });
 
@@ -272,17 +285,17 @@ export const vmTest = {
       }
     );
 
-    // Test timeout validation in runInThisContext options
+    // Test timeout validation in runInThisContext options (must be strictly positive)
     throws(() => vm.runInThisContext('code', { timeout: -1 }), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      code: 'ERR_OUT_OF_RANGE',
     });
 
     // Test boolean validations
     throws(() => vm.runInThisContext('code', { breakOnSigint: 'invalid' }), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      code: 'ERR_INVALID_ARG_TYPE',
     });
     throws(() => vm.runInThisContext('code', { displayErrors: 'invalid' }), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      code: 'ERR_INVALID_ARG_TYPE',
     });
 
     // Test that constants object is frozen
