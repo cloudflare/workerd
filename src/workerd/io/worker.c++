@@ -1803,8 +1803,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   impl->ctxExports = lock.v8Ref(ctxExports.As<v8::Value>());
 
                   if (!FeatureFlags::get(js).getDisableImportableEnv()) {
-                    v8::Local<v8::Object> exportsObj = ns;
-                    lock.setWorkerExports(lock.v8Ref(exportsObj));
+                    lock.setWorkerExports(lock.v8Ref(ctxExports));
                   }
 
                   auto& api = script->isolate->getApi();
