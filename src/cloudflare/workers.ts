@@ -99,7 +99,10 @@ export const env = new Proxy(
     ): PropertyDescriptor | undefined {
       const inner = innerEnv.getCurrentEnv();
       if (inner) {
-        return Reflect.getOwnPropertyDescriptor(inner, prop);
+        const desc = Reflect.getOwnPropertyDescriptor(inner, prop);
+        if (desc) {
+          return { ...desc, enumerable: true };
+        }
       }
       return undefined;
     },
@@ -143,7 +146,10 @@ export const exports = new Proxy(
     ): PropertyDescriptor | undefined {
       const inner = innerEnv.getCurrentExports();
       if (inner) {
-        return Reflect.getOwnPropertyDescriptor(inner, prop);
+        const desc = Reflect.getOwnPropertyDescriptor(inner, prop);
+        if (desc) {
+          return { ...desc, enumerable: true };
+        }
       }
       return undefined;
     },
