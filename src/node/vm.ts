@@ -63,10 +63,11 @@ export const constants = {
 };
 Object.freeze(constants);
 
+const kContextSymbol = Symbol('vm_context_symbol');
+
 export function isContext(object: unknown): boolean {
   validateObject(object, 'object', kValidateObjectAllowArray);
-  // Non-functional stub
-  return false;
+  return kContextSymbol in object && object[kContextSymbol] === true;
 }
 
 export class Script {
@@ -227,7 +228,12 @@ export function createContext(
     'afterEvaluate',
     undefined,
   ]);
-  throw new ERR_METHOD_NOT_IMPLEMENTED('createContext');
+
+  return Object.create(null, {
+    [kContextSymbol]: {
+      value: true,
+    },
+  }) as object;
 }
 
 export function createScript(

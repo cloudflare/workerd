@@ -1,5 +1,5 @@
 import * as vm from 'node:vm';
-import { strictEqual, deepStrictEqual, throws } from 'node:assert';
+import { notStrictEqual, strictEqual, throws } from 'node:assert';
 
 export const vmTest = {
   test() {
@@ -28,6 +28,10 @@ export const vmTest = {
     strictEqual(vm.isContext({}), false);
     strictEqual(vm.isContext([]), false);
     strictEqual(vm.isContext(new Object()), false);
+
+    // Should return true for a valid vm.Context
+    const context = vm.createContext();
+    strictEqual(vm.isContext(context), true);
 
     // Basic construction should validate and throw NOT_IMPLEMENTED
     throws(() => new vm.Script('code'), {
@@ -91,13 +95,19 @@ export const vmTest = {
       code: 'ERR_METHOD_NOT_IMPLEMENTED',
     });
 
-    // Test createContext function
-    throws(() => vm.createContext(), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
-    });
-    throws(() => vm.createContext({}), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
-    });
+    // Test createContext function with no options
+    const context1 = vm.createContext();
+    strictEqual(vm.isContext(context1), true);
+
+    // Test createContext function passing in a context object
+    const context2 = vm.createContext(context1);
+    strictEqual(context2, context1);
+
+    // Test createContext function passing in a non-context object
+    const obj = { a: 1 };
+    const context3 = vm.createContext(obj);
+    strictEqual(vm.isContext(context3), true);
+    notStrictEqual(context3, obj);
 
     // Test createContext argument validation
     throws(() => vm.createContext({}, { name: 123 }), {
