@@ -104,14 +104,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.47",
-    actual = "@crates_vendor__cc-1.2.47//:cc",
+    name = "cc-1.2.48",
+    actual = "@crates_vendor__cc-1.2.48//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.47//:cc",
+    actual = "@crates_vendor__cc-1.2.48//:cc",
     tags = ["manual"],
 )
 
@@ -392,14 +392,14 @@ alias(
 )
 
 alias(
-    name = "tracing-0.1.41",
-    actual = "@crates_vendor__tracing-0.1.41//:tracing",
+    name = "tracing-0.1.43",
+    actual = "@crates_vendor__tracing-0.1.43//:tracing",
     tags = ["manual"],
 )
 
 alias(
     name = "tracing",
-    actual = "@crates_vendor__tracing-0.1.41//:tracing",
+    actual = "@crates_vendor__tracing-0.1.43//:tracing",
     tags = ["manual"],
 )
 

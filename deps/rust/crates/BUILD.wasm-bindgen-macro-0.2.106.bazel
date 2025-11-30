@@ -40,9 +40,9 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.105",
+    version = "0.2.106",
     deps = [
         "@crates_vendor__quote-1.0.42//:quote",
-        "@crates_vendor__wasm-bindgen-macro-support-0.2.105//:wasm_bindgen_macro_support",
+        "@crates_vendor__wasm-bindgen-macro-support-0.2.106//:wasm_bindgen_macro_support",
     ],
 )
