@@ -495,8 +495,7 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     auto tag = tracing::Attribute("jsrpc.method"_kjc, methodName.clone());
-    kj::Array<tracing::Attribute> attrs(&tag, 1, kj::NullArrayDisposer::instance);
-    writer->report(context, kj::mv(attrs), timestamp);
+    writer->report(context, kj::arr(kj::mv(tag)), timestamp);
   }
 }
 

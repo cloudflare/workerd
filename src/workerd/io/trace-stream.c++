@@ -1021,16 +1021,23 @@ bool TailStreamWriter::reportImpl(TailEvent&& event) {
     actives.truncate(activeEnd - actives.begin());
   }
 
+  // We do not expect any events after the outcome.
+  bool isClosing = event.event.is<Outcome>();
   // Deliver the event to the queue and make sure we are processing.
   for (auto& active: actives) {
-    active->queue.push(event.clone());
+    // Optimization: Elide copy for last tail worker, helpful for common case of only one STW
+    // being present.
+    if (&active == &actives.back()) {
+      active->queue.push(kj::mv(event));
+    } else {
+      active->queue.push(event.clone());
+    }
     if (!active->pumping) {
       waitUntilTasks.add(pump(kj::addRef(*active)));
     }
   }
 
-  // We do not expect any events after the outcome.
-  return event.event.is<Outcome>();
+  return isClosing;
 }
 
 // Delivers the queued tail events to a streaming tail worker.
