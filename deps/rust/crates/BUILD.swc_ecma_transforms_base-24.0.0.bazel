@@ -55,6 +55,6 @@ rust_library(
         "@crates_vendor__swc_ecma_parser-22.0.3//:swc_ecma_parser",
         "@crates_vendor__swc_ecma_utils-20.0.0//:swc_ecma_utils",
         "@crates_vendor__swc_ecma_visit-14.0.0//:swc_ecma_visit",
-        "@crates_vendor__tracing-0.1.41//:tracing",
+        "@crates_vendor__tracing-0.1.43//:tracing",
     ],
 )

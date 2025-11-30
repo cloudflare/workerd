@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "cc",
+    name = "tracing",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,38 +29,29 @@ rust_library(
         ],
     ),
     crate_features = [
-        "parallel",
+        "attributes",
+        "default",
+        "std",
+        "tracing-attributes",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
+    proc_macro_deps = [
+        "@crates_vendor__tracing-attributes-0.1.31//:tracing_attributes",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cc",
+        "crate-name=tracing",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.47",
+    version = "0.1.43",
     deps = [
-        "@crates_vendor__find-msvc-tools-0.1.5//:find_msvc_tools",
-        "@crates_vendor__jobserver-0.1.34//:jobserver",
-        "@crates_vendor__shlex-1.3.0//:shlex",
-    ] + select({
-        "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.177//:libc",  # aarch64-apple-darwin
-        ],
-        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.177//:libc",  # aarch64-unknown-linux-gnu
-        ],
-        "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.177//:libc",  # x86_64-apple-darwin
-        ],
-        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.177//:libc",  # x86_64-unknown-linux-gnu
-        ],
-        "//conditions:default": [],
-    }),
+        "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
+        "@crates_vendor__tracing-core-0.1.35//:tracing_core",
+    ],
 )

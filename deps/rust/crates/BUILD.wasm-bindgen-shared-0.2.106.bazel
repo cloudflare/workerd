@@ -41,10 +41,10 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.105",
+    version = "0.2.106",
     deps = [
         "@crates_vendor__unicode-ident-1.0.22//:unicode_ident",
-        "@crates_vendor__wasm-bindgen-shared-0.2.105//:build_script_build",
+        "@crates_vendor__wasm-bindgen-shared-0.2.106//:build_script_build",
     ],
 )
 
@@ -94,7 +94,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.105",
+    version = "0.2.106",
     visibility = ["//visibility:private"],
 )
 
