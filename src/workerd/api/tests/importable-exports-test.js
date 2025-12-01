@@ -1,4 +1,4 @@
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 import { DurableObject, exports, withExports } from 'cloudflare:workers';
 
 export class MyService extends DurableObject {
@@ -15,6 +15,13 @@ export const importableExports = {
     );
     ok(exports.nullableExports, 'exports.nullableExports should be defined');
     ok(exports.MyService, 'exports.MyService should be defined');
+
+    const keys = Object.keys(exports).sort();
+    deepStrictEqual(keys, [
+      'MyService',
+      'importableExports',
+      'nullableExports',
+    ]);
 
     const id = exports.MyService.idFromName('test');
     const stub = exports.MyService.get(id);

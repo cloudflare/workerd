@@ -39,6 +39,8 @@ export const importableEnv = {
     // But have all the same stuff...
     deepStrictEqual(env, argEnv);
 
+    deepStrictEqual(Object.keys(env).sort(), ['CACHE', 'FOO', 'RPC']);
+
     // It is populated inside a request
     strictEqual(env.FOO, 'BAR');
 
