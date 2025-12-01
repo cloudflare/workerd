@@ -221,7 +221,7 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
   explicit Request(Detail& detail, bool redacted = true);
 
   jsg::Optional<jsg::V8Ref<v8::Object>> getCf(jsg::Lock& js);
-  jsg::Dict<jsg::ByteString, jsg::ByteString> getHeaders(jsg::Lock& js);
+  jsg::Dict<kj::String, kj::String> getHeaders(jsg::Lock& js);
   kj::StringPtr getMethod();
   kj::String getUrl();
 

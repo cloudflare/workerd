@@ -851,27 +851,6 @@ KJ_TEST("jsg::DOMStrings") {
 
 // ========================================================================================
 
-struct ByteStringContext: public ContextGlobalObject {
-  ByteString takeByteString(ByteString s) {
-    return kj::mv(s);
-  }
-  JSG_RESOURCE_TYPE(ByteStringContext) {
-    JSG_METHOD(takeByteString);
-  }
-};
-JSG_DECLARE_ISOLATE_TYPE(ByteStringIsolate, ByteStringContext);
-
-KJ_TEST("ByteStrings") {
-  Evaluator<ByteStringContext, ByteStringIsolate> e(v8System);
-  e.expectEval("takeByteString('foo\\0bar') === 'foo\\0bar'", "boolean", "true");
-  // ﬃ is 0xEF 0xAC 0x83 in UTF-8.
-  e.expectEval("takeByteString('\\xEF\\xAC\\x83') === '\\xEF\\xAC\\x83'", "boolean", "true");
-
-  // TODO(cleanup): ByteString should become HeaderString somewhere in the api directory.
-}
-
-// ========================================================================================
-
 struct RawContext: public ContextGlobalObject {
   struct TwoValues {
     Value $foo;

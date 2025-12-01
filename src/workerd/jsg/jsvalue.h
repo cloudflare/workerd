@@ -272,7 +272,6 @@ class JsString final: public JsBase<v8::String, JsString> {
   size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  jsg::ByteString toByteString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   int hashCode() const;
@@ -326,7 +325,7 @@ class JsRegExp final: public JsBase<v8::RegExp, JsRegExp> {
 
 class JsDate final: public JsBase<v8::Date, JsDate> {
  public:
-  jsg::ByteString toUTCString(Lock& js) const;
+  kj::String toUTCString(Lock& js) const;
   kj::String toISOString(Lock& js) const;
   operator kj::Date() const;
   using JsBase<v8::Date, JsDate>::JsBase;
