@@ -311,7 +311,7 @@ jsg::Promise<R2MultipartUpload::ListPartsResult> R2MultipartUpload::listParts(js
       }
       KJ_IF_SOME(p, o.partNumberMarker) {
         JSG_REQUIRE(
-            p >= 0, RangeError, "partNumberMarker must be non-negative. Actual value was: ", p);
+            p > 0, RangeError, "partNumberMarker must be non-negative. Actual value was: ", p);
         listPartsBuilder.setPartNumberMarker(p);
         traceContext.userSpan.setTag(
             "cloudflare.r2.request.part_number_marker"_kjc, static_cast<int64_t>(p));
@@ -323,7 +323,8 @@ jsg::Promise<R2MultipartUpload::ListPartsResult> R2MultipartUpload::listParts(js
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
     CompatibilityFlags::Reader flags = {};
-    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, kj::none, flags);
+    auto jwt = this->bucket->jwt.map([](kj::String& s) -> kj::StringPtr { return s; });
+    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, traceContext = kj::mv(traceContext)](
