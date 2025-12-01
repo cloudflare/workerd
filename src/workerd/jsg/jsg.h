@@ -2350,6 +2350,42 @@ class ExternalMemoryAdjustment final {
   void maybeDeferAdjustment(ssize_t amount);
 };
 
+// If memory protection keys are enabled, provides the ability to run a function
+// within the scope of a particular protection key associated with the isolate lock.
+// This class is designed to be movable.
+class MemoryProtectionKeyScope final {
+ public:
+  KJ_DISALLOW_COPY(MemoryProtectionKeyScope);
+  MemoryProtectionKeyScope(MemoryProtectionKeyScope&&) = default;
+  MemoryProtectionKeyScope& operator=(MemoryProtectionKeyScope&&) = default;
+
+  auto runWithKey(auto func) {
+#ifdef V8_ENABLE_SANDBOX
+    PkeyScope scope(pkey);
+#endif
+    return func();
+  }
+
+ private:
+#ifdef V8_ENABLE_SANDBOX
+  int pkey;
+  MemoryProtectionKeyScope(Lock&);
+
+  struct PkeyScope {
+    int key;
+    int saved;
+    PkeyScope(int pkey);
+    ~PkeyScope();
+  };
+#else
+  MemoryProtectionKeyScope(Lock&) {
+    // No-op if sandboxing is not enabled.
+  }
+#endif
+
+  friend class Lock;
+};
+
 // Represents an isolate lock, which allows the current thread to execute JavaScript code within
 // an isolate. A thread must lock an isolate -- obtaining an instance of `Lock` -- before it can
 // manipulate JavaScript objects or execute JavaScript code inside the isolate.
@@ -2393,6 +2429,15 @@ class Lock {
   Ref<T> allocAccounted(size_t accountedSize, Params&&... params) {
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...)
                       .attach(getExternalMemoryAdjustment(accountedSize)));
+  }
+
+  // When you want to temporarily use a memory allocation that is protected
+  // by the isolate's memory protection key, use this to get a utility that
+  // will capture the key and allow you to run a function with the key enabled.
+  // The key use case is to allow tempporary access outside of the isolate lock
+  // for things like ArrayBuffer backing stores.
+  MemoryProtectionKeyScope getMemoryProtectionKeyScope() {
+    return MemoryProtectionKeyScope(*this);
   }
 
   v8::Local<v8::Context> v8Context() {
