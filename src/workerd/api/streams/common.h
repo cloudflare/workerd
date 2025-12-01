@@ -47,9 +47,9 @@ struct ReadResult {
 };
 
 struct StreamQueuingStrategy {
-  using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
+  using SizeAlgorithm = double(v8::Local<v8::Value>);
 
-  jsg::Optional<uint64_t> highWaterMark;
+  jsg::Optional<double> highWaterMark;
   jsg::Optional<jsg::Function<SizeAlgorithm>> size;
 
   JSG_STRUCT(highWaterMark, size);
@@ -687,7 +687,7 @@ class WritableStreamController {
   // writable stream locked and in a state where no further writes can be made.
   virtual void detach(jsg::Lock& js) = 0;
 
-  virtual kj::Maybe<int> getDesiredSize() = 0;
+  virtual kj::Maybe<double> getDesiredSize() = 0;
 
   // True if a Writer has been locked to this controller.
   virtual bool isLockedToWriter() const = 0;

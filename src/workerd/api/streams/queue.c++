@@ -30,13 +30,13 @@ void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
 
 #pragma region ValueQueue::Entry
 
-ValueQueue::Entry::Entry(jsg::Value value, size_t size): value(kj::mv(value)), size(size) {}
+ValueQueue::Entry::Entry(jsg::Value value, double size): value(kj::mv(value)), size(size) {}
 
 jsg::Value ValueQueue::Entry::getValue(jsg::Lock& js) {
   return value.addRef(js);
 }
 
-size_t ValueQueue::Entry::getSize() const {
+double ValueQueue::Entry::getSize() const {
   return size;
 }
 
@@ -96,7 +96,7 @@ void ValueQueue::Consumer::reset() {
   impl.reset();
 };
 
-size_t ValueQueue::Consumer::size() {
+double ValueQueue::Consumer::size() {
   return impl.size();
 }
 
@@ -121,13 +121,13 @@ void ValueQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
 
 #pragma endregion ValueQueue::Consumer
 
-ValueQueue::ValueQueue(size_t highWaterMark): impl(highWaterMark) {}
+ValueQueue::ValueQueue(double highWaterMark): impl(highWaterMark) {}
 
 void ValueQueue::close(jsg::Lock& js) {
   impl.close(js);
 }
 
-ssize_t ValueQueue::desiredSize() const {
+double ValueQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
@@ -143,7 +143,7 @@ void ValueQueue::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
-size_t ValueQueue::size() const {
+double ValueQueue::size() const {
   return impl.size();
 }
 
@@ -373,7 +373,7 @@ void ByteQueue::Consumer::reset() {
   impl.reset();
 }
 
-size_t ByteQueue::Consumer::size() const {
+double ByteQueue::Consumer::size() const {
   return impl.size();
 }
 
@@ -535,7 +535,7 @@ v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
 
 #pragma endregion ByteQueue::ByobRequest
 
-ByteQueue::ByteQueue(size_t highWaterMark): impl(highWaterMark) {}
+ByteQueue::ByteQueue(double highWaterMark): impl(highWaterMark) {}
 
 void ByteQueue::close(jsg::Lock& js) {
   KJ_IF_SOME(ready, impl.state.tryGet<ByteQueue::QueueImpl::Ready>()) {
@@ -548,7 +548,7 @@ void ByteQueue::close(jsg::Lock& js) {
   impl.close(js);
 }
 
-ssize_t ByteQueue::desiredSize() const {
+double ByteQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
@@ -573,7 +573,7 @@ void ByteQueue::push(jsg::Lock& js, kj::Rc<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
-size_t ByteQueue::size() const {
+double ByteQueue::size() const {
   return impl.size();
 }
 

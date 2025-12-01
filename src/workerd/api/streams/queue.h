@@ -153,7 +153,7 @@ class QueueImpl final {
   using Entry = typename Self::Entry;
   using State = typename Self::State;
 
-  explicit QueueImpl(size_t highWaterMark): highWaterMark(highWaterMark) {}
+  explicit QueueImpl(double highWaterMark): highWaterMark(highWaterMark) {}
 
   QueueImpl(QueueImpl&&) = default;
   QueueImpl& operator=(QueueImpl&&) = default;
@@ -176,7 +176,7 @@ class QueueImpl final {
   // The value can be zero or negative, in which case backpressure is
   // signaled on the queue.
   // If the queue is already closed or errored, return 0.
-  inline ssize_t desiredSize() const {
+  inline double desiredSize() const {
     return state.template is<Ready>() ? highWaterMark - size() : 0;
   }
 
@@ -231,7 +231,7 @@ class QueueImpl final {
   }
 
   // The current size of consumer with the most stored data.
-  size_t size() const {
+  double size() const {
     return totalQueueSize;
   }
 
@@ -293,8 +293,8 @@ class QueueImpl final {
     SmallSet<ConsumerImpl*> consumers;
   };
 
-  size_t highWaterMark;
-  size_t totalQueueSize = 0;
+  double highWaterMark;
+  double totalQueueSize = 0;
   kj::OneOf<Ready, Closed, Errored> state = Ready();
 
   void addConsumer(ConsumerImpl* consumer) {
@@ -432,7 +432,7 @@ class ConsumerImpl final {
   }
 
   // The current total calculated size of the consumer's internal buffer.
-  size_t size() const {
+  double size() const {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(e, Errored) {
         return 0;
@@ -550,7 +550,7 @@ class ConsumerImpl final {
   struct Ready {
     workerd::RingBuffer<kj::OneOf<QueueEntry, Close>, 16> buffer;
     std::list<ReadRequest> readRequests;
-    size_t queueTotalSize = 0;
+    double queueTotalSize = 0;
 
     inline kj::StringPtr jsgGetMemoryName() const;
     inline size_t jsgGetMemorySelfSize() const;
@@ -660,12 +660,12 @@ class ValueQueue final {
   // calculated by the size algorithm function provided in the stream constructor.
   class Entry: public kj::Refcounted {
    public:
-    explicit Entry(jsg::Value value, size_t size);
+    explicit Entry(jsg::Value value, double size);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
     jsg::Value getValue(jsg::Lock& js);
 
-    size_t getSize() const;
+    double getSize() const;
 
     void visitForGc(jsg::GcVisitor& visitor);
 
@@ -677,7 +677,7 @@ class ValueQueue final {
 
    private:
     jsg::Value value;
-    size_t size;
+    double size;
   };
 
   struct QueueEntry {
@@ -712,7 +712,7 @@ class ValueQueue final {
 
     void reset();
 
-    size_t size();
+    double size();
 
     kj::Own<Consumer> clone(
         jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
@@ -732,11 +732,11 @@ class ValueQueue final {
     friend class ValueQueue;
   };
 
-  explicit ValueQueue(size_t highWaterMark);
+  explicit ValueQueue(double highWaterMark);
 
   void close(jsg::Lock& js);
 
-  ssize_t desiredSize() const;
+  double desiredSize() const;
 
   void error(jsg::Lock& js, jsg::Value reason);
 
@@ -744,7 +744,7 @@ class ValueQueue final {
 
   void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
-  size_t size() const;
+  double size() const;
 
   size_t getConsumerCount();
 
@@ -932,7 +932,7 @@ class ByteQueue final {
 
     void reset();
 
-    size_t size() const;
+    double size() const;
 
     kj::Own<Consumer> clone(
         jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
@@ -949,11 +949,11 @@ class ByteQueue final {
     ConsumerImpl impl;
   };
 
-  explicit ByteQueue(size_t highWaterMark);
+  explicit ByteQueue(double highWaterMark);
 
   void close(jsg::Lock& js);
 
-  ssize_t desiredSize() const;
+  double desiredSize() const;
 
   void error(jsg::Lock& js, jsg::Value reason);
 
@@ -961,7 +961,7 @@ class ByteQueue final {
 
   void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
-  size_t size() const;
+  double size() const;
 
   size_t getConsumerCount();
 

@@ -1335,10 +1335,10 @@ void WritableStreamInternalController::detach(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<int> WritableStreamInternalController::getDesiredSize() {
+kj::Maybe<double> WritableStreamInternalController::getDesiredSize() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return 0;
+      return 0.0;
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return kj::none;
@@ -1347,7 +1347,7 @@ kj::Maybe<int> WritableStreamInternalController::getDesiredSize() {
       KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
         return highWaterMark - currentWriteBufferSize;
       }
-      return 1;
+      return 1.0;
     }
   }
 

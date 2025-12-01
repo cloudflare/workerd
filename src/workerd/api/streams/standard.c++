@@ -539,10 +539,10 @@ jsg::Promise<void> maybeRunAlgorithm(
   return js.resolvedPromise();
 }
 
-int getHighWaterMark(
+double getHighWaterMark(
     const UnderlyingSource& underlyingSource, const StreamQueuingStrategy& queuingStrategy) {
   bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
-  return queuingStrategy.highWaterMark.orDefault(isBytes ? 0 : 1);
+  return queuingStrategy.highWaterMark.orDefault(isBytes ? 0.0 : 1.0);
 }
 
 }  // namespace
@@ -669,7 +669,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   kj::Maybe<v8::Local<v8::Value>> isErrored(jsg::Lock& js);
 
-  kj::Maybe<int> getDesiredSize();
+  kj::Maybe<double> getDesiredSize();
 
   jsg::Promise<void> pipeTo(
       jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) override;
@@ -785,7 +785,7 @@ class WritableStreamJsController final: public WritableStreamController {
 
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
-  kj::Maybe<int> getDesiredSize() override;
+  kj::Maybe<double> getDesiredSize() override;
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override;
   kj::Maybe<v8::Local<v8::Value>> isErroredOrErroring(jsg::Lock& js);
@@ -1047,10 +1047,10 @@ void ReadableImpl<Self>::doError(jsg::Lock& js, jsg::Value reason) {
 }
 
 template <typename Self>
-kj::Maybe<int> ReadableImpl<Self>::getDesiredSize() {
+kj::Maybe<double> ReadableImpl<Self>::getDesiredSize() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return 0;
+      return 0.0;
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return kj::none;
@@ -1173,7 +1173,7 @@ kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
 }
 
 template <typename Self>
-ssize_t WritableImpl<Self>::getDesiredSize() {
+double WritableImpl<Self>::getDesiredSize() {
   return highWaterMark - amountBuffered;
 }
 
@@ -1505,7 +1505,7 @@ template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::write(
     jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> value) {
 
-  size_t size = 1;
+  double size = 1;
   KJ_IF_SOME(sizeFunc, algorithms.size) {
     kj::Maybe<jsg::Value> failure;
     js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
@@ -1722,7 +1722,7 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     }
   }
 
-  kj::Maybe<int> getDesiredSize() {
+  kj::Maybe<double> getDesiredSize() {
     KJ_IF_SOME(s, state) {
       return s.controller->getDesiredSize();
     }
@@ -1879,7 +1879,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
-  kj::Maybe<int> getDesiredSize() {
+  kj::Maybe<double> getDesiredSize() {
     KJ_IF_SOME(s, state) {
       return s.controller->getDesiredSize();
     }
@@ -1923,7 +1923,7 @@ bool ReadableStreamDefaultController::hasBackpressure() {
   return !impl.shouldCallPull();
 }
 
-kj::Maybe<int> ReadableStreamDefaultController::getDesiredSize() {
+kj::Maybe<double> ReadableStreamDefaultController::getDesiredSize() {
   return impl.getDesiredSize();
 }
 
@@ -1946,7 +1946,7 @@ void ReadableStreamDefaultController::enqueue(
 
   JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError, "Unable to enqueue");
 
-  size_t size = 1;
+  double size = 1;
   bool errored = false;
   KJ_IF_SOME(sizeFunc, impl.algorithms.size) {
     js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
@@ -2140,7 +2140,7 @@ bool ReadableByteStreamController::hasBackpressure() {
   return !impl.shouldCallPull();
 }
 
-kj::Maybe<int> ReadableByteStreamController::getDesiredSize() {
+kj::Maybe<double> ReadableByteStreamController::getDesiredSize() {
   return impl.getDesiredSize();
 }
 
@@ -2576,7 +2576,7 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(lock);
 };
 
-kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
+kj::Maybe<double> ReadableStreamJsController::getDesiredSize() {
   if (maybePendingState != kj::none) {
     return kj::none;
   }
@@ -3217,7 +3217,7 @@ void WritableStreamDefaultController::error(
   impl.error(js, JSG_THIS, reason.orDefault(js.undefined()));
 }
 
-ssize_t WritableStreamDefaultController::getDesiredSize() {
+double WritableStreamDefaultController::getDesiredSize() {
   return impl.getDesiredSize();
 }
 
@@ -3363,10 +3363,10 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   }
 }
 
-kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
+kj::Maybe<double> WritableStreamJsController::getDesiredSize() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return 0;
+      return 0.0;
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return kj::none;
@@ -3678,7 +3678,7 @@ TransformStreamDefaultController::TransformStreamDefaultController(jsg::Lock& js
     : ioContext(tryGetIoContext()),
       startPromise(js.newPromiseAndResolver<void>()) {}
 
-kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
+kj::Maybe<double> TransformStreamDefaultController::getDesiredSize() {
   KJ_IF_SOME(readableController, tryGetReadableController()) {
     return readableController.getDesiredSize();
   }
