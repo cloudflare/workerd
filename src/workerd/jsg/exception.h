@@ -30,6 +30,7 @@ namespace workerd::jsg {
 #define JSG_ERROR_TypeError "jsg.TypeError"
 #define JSG_ERROR_Error "jsg.Error"
 #define JSG_ERROR_RangeError "jsg.RangeError"
+#define JSG_ERROR_SyntaxError "jsg.SyntaxError"
 
 #define JSG_ERROR_InternalDOMOperationError JSG_INTERNAL_DOM_EXCEPTION("OperationError")
 

@@ -893,7 +893,17 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
-  return text(js).then(js, [](jsg::Lock& js, kj::String text) { return js.parseJson(text); });
+  return arrayBuffer(js).then(js, [](jsg::Lock& js, jsg::BufferSource buffer) {
+    auto bytes = buffer.asArrayPtr();
+
+    // UTF-8 BOM (0xEF 0xBB 0xBF) should be stripped before parsing
+    // See https://infra.spec.whatwg.org/#parse-json-bytes-to-a-javascript-value
+    if (buffer.size() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
+      bytes = bytes.slice(3);
+    }
+
+    return js.parseJson(bytes.asChars());
+  });
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {

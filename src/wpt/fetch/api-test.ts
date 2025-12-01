@@ -741,11 +741,9 @@ export default {
   },
 
   'response/json.any.js': {
-    comment: 'Investigate issues with our JSON parser',
-    expectedFailures: [
-      'Ensure UTF-16 results in an error',
-      'Ensure the correct JSON parser is used',
-    ],
+    comment:
+      'UTF-16 test requires /xhr/resources/utf16-bom.json which is in a different test module',
+    expectedFailures: ['Ensure UTF-16 results in an error'],
   },
   'response/response-arraybuffer-realm.window.js': {
     comment: 'Skipped because it involves iframes',
