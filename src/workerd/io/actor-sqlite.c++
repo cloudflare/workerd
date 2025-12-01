@@ -932,7 +932,7 @@ kj::Promise<kj::String> ActorSqlite::getCurrentBookmark(SpanParent parentSpan) {
       paddedHex(0), '-', pad);
 }
 
-kj::Promise<void> ActorSqlite::waitForBookmark(kj::StringPtr bookmark) {
+kj::Promise<void> ActorSqlite::waitForBookmark(kj::StringPtr bookmark, SpanParent parentSpan) {
   // This is an ersatz implementation that's good enough for local dev with D1's Session API.
   requireNotBroken();
   return kj::READY_NOW;

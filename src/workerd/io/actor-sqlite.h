@@ -95,7 +95,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
   kj::Promise<kj::String> getCurrentBookmark(SpanParent parentSpan) override;
-  kj::Promise<void> waitForBookmark(kj::StringPtr bookmark) override;
+  kj::Promise<void> waitForBookmark(kj::StringPtr bookmark, SpanParent parentSpan) override;
   // See ActorCacheInterface
 
  private:
