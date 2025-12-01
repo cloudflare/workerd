@@ -19,6 +19,9 @@ oci_image(
     base = "@node_25_slim",
     cmd = ["/{}/app".format(package_name())],
     exposed_ports = ["8080"],
+    tags = [
+        "requires-container-engine",
+    ],
     tars = [
         ":layers",
     ],
