@@ -125,17 +125,13 @@ export default {
   },
   'streams/encode-bad-chunks.any.js': {},
   'streams/encode-utf8.any.js': {
-    comment: 'TODO investigate this',
+    comment: 'Surrogate pair handling across chunks not yet implemented',
     expectedFailures: [
-      'an empty string should result in no output chunk',
       'a character split between chunks should be correctly encoded',
       'a character following one split between chunks should be correctly encoded',
       'an unmatched surrogate at the end of a chunk followed by an astral character in the next chunk should be replaced with the replacement character at the start of the next output chunk',
       'an unmatched surrogate at the end of a chunk followed by an ascii character in the next chunk should be replaced with the replacement character at the start of the next output chunk',
       'a non-terminal unpaired leading surrogate should immediately be replaced',
-      "a leading surrogate chunk should error when it is clear it didn't form a pair",
-      'a leading empty chunk should be ignored',
-      'a trailing empty chunk should be ignored',
       'two consecutive astral characters each split down the middle should be correctly reassembled',
       'two consecutive astral characters each split down the middle with an invalid surrogate in the middle should be correctly encoded',
       'an unmatched surrogate at the end of a chunk followed by a plane 1 character split into two chunks should result in the encoded plane 1 character appearing in the last output chunk',
