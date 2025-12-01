@@ -31,6 +31,31 @@ class TransformStreamDefaultController;
 
 using rpc::StreamEncoding;
 
+enum class ReadAllTextOption : uint8_t {
+  NONE = 0,
+  NULL_TERMINATE = 1 << 0,
+  STRIP_BOM = 1 << 1,
+};
+
+inline ReadAllTextOption operator|(ReadAllTextOption a, ReadAllTextOption b) {
+  return static_cast<ReadAllTextOption>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+
+inline ReadAllTextOption& operator|=(ReadAllTextOption& a, ReadAllTextOption b) {
+  return a = a | b;
+}
+
+inline bool operator&(ReadAllTextOption a, ReadAllTextOption b) {
+  return (static_cast<uint8_t>(a) & static_cast<uint8_t>(b)) != 0;
+}
+
+static constexpr kj::byte UTF8_BOM[] = {0xEF, 0xBB, 0xBF};
+static constexpr size_t UTF8_BOM_SIZE = sizeof(UTF8_BOM);
+
+inline bool hasUtf8Bom(kj::ArrayPtr<const kj::byte> data) {
+  return data.size() >= UTF8_BOM_SIZE && memcmp(data.begin(), UTF8_BOM, UTF8_BOM_SIZE) == 0;
+}
+
 struct ReadResult {
   jsg::Optional<jsg::Value> value;
   bool done;
@@ -235,7 +260,8 @@ class ReadableStreamSource {
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
   kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit);
-  kj::Promise<kj::String> readAllText(uint64_t limit);
+  kj::Promise<kj::String> readAllText(
+      uint64_t limit, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE);
 
   // Hook to inform this ReadableStreamSource that the ReadableStream has been canceled. This only
   // really means anything to TransformStreams, which are supposed to propagate the error to the
@@ -518,7 +544,11 @@ class ReadableStreamController {
   //
   // limit specifies an upper maximum bound on the number of bytes permitted to be read.
   // The promise will reject if the read will produce more bytes than the limit.
-  virtual jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) = 0;
+  //
+  // option specifies how the text should be processed (e.g., null termination, BOM stripping).
+  virtual jsg::Promise<kj::String> readAllText(jsg::Lock& js,
+      uint64_t limit,
+      ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) = 0;
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) = 0;
 

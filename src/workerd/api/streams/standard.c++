@@ -692,7 +692,9 @@ class ReadableStreamJsController final: public ReadableStreamController {
   kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController();
 
   jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit) override;
-  jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
+  jsg::Promise<kj::String> readAllText(jsg::Lock& js,
+      uint64_t limit,
+      ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) override;
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
@@ -729,7 +731,8 @@ class ReadableStreamJsController final: public ReadableStreamController {
   bool disturbed = false;
 
   template <typename T>
-  jsg::Promise<T> readAll(jsg::Lock& js, uint64_t limit);
+  jsg::Promise<T> readAll(
+      jsg::Lock& js, uint64_t limit, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE);
 
   void setPendingState(kj::OneOf<StreamStates::Closed, StreamStates::Errored> pending) {
     if (maybePendingState == kj::none) {
@@ -2675,15 +2678,23 @@ class AllReader {
   jsg::Promise<jsg::BufferSource> allBytes(jsg::Lock& js) {
     return loop(js).then(js, [this](auto& js, PartList&& partPtrs) -> jsg::BufferSource {
       auto out = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, runningTotal);
-      copyInto(out.asArrayPtr(), kj::mv(partPtrs));
+      copyInto(out.asArrayPtr(), partPtrs.asPtr());
       return jsg::BufferSource(js, kj::mv(out));
     });
   }
 
-  jsg::Promise<kj::String> allText(jsg::Lock& js) {
-    return loop(js).then(js, [this](auto& js, PartList&& partPtrs) {
+  jsg::Promise<kj::String> allText(
+      jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
+    return loop(js).then(js, [this, option](auto& js, PartList&& partPtrs) {
+      // Strip UTF-8 BOM if requested
+      if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
+          hasUtf8Bom(partPtrs[0])) {
+        partPtrs[0] = partPtrs[0].slice(UTF8_BOM_SIZE);
+        runningTotal -= UTF8_BOM_SIZE;
+      }
+
       auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(out.first(out.size() - 1).asBytes(), kj::mv(partPtrs));
+      copyInto(out.first(out.size() - 1).asBytes(), partPtrs.asPtr());
       out.back() = '\0';
       return kj::String(kj::mv(out));
     });
@@ -2771,7 +2782,7 @@ class AllReader {
     KJ_UNREACHABLE;
   }
 
-  void copyInto(kj::ArrayPtr<byte> out, PartList in) {
+  void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
     for (auto& part: in) {
       KJ_ASSERT(part.size() <= out.size());
       out.first(part.size()).copyFrom(part);
@@ -3047,7 +3058,8 @@ class PumpToReader {
 }  // namespace
 
 template <typename T>
-jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limit) {
+jsg::Promise<T> ReadableStreamJsController::readAll(
+    jsg::Lock& js, uint64_t limit, ReadAllTextOption option) {
   if (isLockedToReader()) {
     return js.rejectedPromise<T>(KJ_EXCEPTION(
         FAILED, "jsg.TypeError: This ReadableStream is currently locked to a reader."));
@@ -3057,15 +3069,16 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
   // This operation leaves the stream locked and disturbed. The loop will read until
   // the stream is closed or errored. If the limit is reached, the loop will error.
 
-  const auto readAll = [this, limit](auto& js) -> jsg::Promise<T> {
+  const auto readAll = [this, limit, option](auto& js) -> jsg::Promise<T> {
     KJ_ASSERT(lock.lock());
     // The AllReader will hold a traceable reference to the ReadableStream.
     auto reader = kj::heap<AllReader>(addRef(), limit);
-    auto promise = ([&js, &reader]() -> jsg::Promise<T> {
+    auto promise = ([&js, &reader, option]() -> jsg::Promise<T> {
       if constexpr (kj::isSameType<T, jsg::BufferSource>()) {
+        (void)option;  // Unused in this branch
         return reader->allBytes(js);
       } else {
-        return reader->allText(js);
+        return reader->allText(js, option);
       }
     })();
 
@@ -3110,8 +3123,9 @@ jsg::Promise<jsg::BufferSource> ReadableStreamJsController::readAllBytes(
   return readAll<jsg::BufferSource>(js, limit);
 }
 
-jsg::Promise<kj::String> ReadableStreamJsController::readAllText(jsg::Lock& js, uint64_t limit) {
-  return readAll<kj::String>(js, limit);
+jsg::Promise<kj::String> ReadableStreamJsController::readAllText(
+    jsg::Lock& js, uint64_t limit, ReadAllTextOption option) {
+  return readAll<kj::String>(js, limit, option);
 }
 
 kj::Own<ReadableStreamController> ReadableStreamJsController::detach(

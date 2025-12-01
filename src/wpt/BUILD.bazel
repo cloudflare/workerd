@@ -70,6 +70,7 @@ wpt_test(
 wpt_test(
     name = "fetch/api",
     size = "large",
+    compat_flags = ["pedantic_wpt"],
     config = "fetch/api-test.ts",
     start_server = True,
     target_compatible_with = select({

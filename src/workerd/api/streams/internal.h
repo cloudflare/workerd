@@ -96,7 +96,9 @@ class ReadableStreamInternalController: public ReadableStreamController {
   void visitForGc(jsg::GcVisitor& visitor) override;
 
   jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit) override;
-  jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
+  jsg::Promise<kj::String> readAllText(jsg::Lock& js,
+      uint64_t limit,
+      ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) override;
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
