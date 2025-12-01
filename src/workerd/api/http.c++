@@ -327,8 +327,13 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
         }
       }
 
+      auto option = ReadAllTextOption::NULL_TERMINATE;
+      if (FeatureFlags::get(js).getPedanticWpt()) {
+        option |= ReadAllTextOption::STRIP_BOM;
+      }
+
       return i.stream->getController().readAllText(
-          js, context.getLimitEnforcer().getBufferingLimit());
+          js, context.getLimitEnforcer().getBufferingLimit(), option);
     });
   }
 

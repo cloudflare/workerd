@@ -201,15 +201,7 @@ export default {
   },
   'basic/stream-response.any.js': {},
   'basic/stream-safe-creation.any.js': {},
-  'basic/text-utf8.any.js': {
-    comment: 'Some kind of unicode nitpickiness. Needs investigation',
-    expectedFailures: [
-      'UTF-8 with BOM with Request.text()',
-      'UTF-8 with BOM with Response.text()',
-      'UTF-8 with BOM with fetched data (UTF-8 charset)',
-      'UTF-8 with BOM with fetched data (UTF-16 charset)',
-    ],
-  },
+  'basic/text-utf8.any.js': {},
 
   'body/cloned-any.js': {
     comment:
@@ -741,11 +733,9 @@ export default {
   },
 
   'response/json.any.js': {
-    comment: 'Investigate issues with our JSON parser',
-    expectedFailures: [
-      'Ensure UTF-16 results in an error',
-      'Ensure the correct JSON parser is used',
-    ],
+    comment:
+      'UTF-16 test requires /xhr/resources/utf16-bom.json which is in a different test module',
+    expectedFailures: ['Ensure UTF-16 results in an error'],
   },
   'response/response-arraybuffer-realm.window.js': {
     comment: 'Skipped because it involves iframes',
