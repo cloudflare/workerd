@@ -113,67 +113,17 @@ export default {
     disabledTests: true,
   },
   'streams/decode-ignore-bom.any.js': {},
-  'streams/decode-incomplete-input.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      'incomplete input with error mode "fatal" should error the stream',
-      'incomplete input with error mode "replacement" should end with a replacement character',
-    ],
-  },
-  'streams/decode-non-utf8.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      'TextDecoderStream should be able to decode invalid sequences in UTF-16BE',
-      'TextDecoderStream should be able to decode invalid sequences in UTF-16LE',
-      'TextDecoderStream should be able to reject invalid sequences in UTF-16BE',
-      'TextDecoderStream should be able to reject invalid sequences in UTF-16LE',
-    ],
-  },
-  'streams/decode-split-character.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      'a code point split between chunks should not be emitted until all bytes are available; split point = 2',
-      'a code point split between chunks should not be emitted until all bytes are available; split point = 3',
-      'a code point split between chunks should not be emitted until all bytes are available; split point = 4',
-      'a code point split between chunks should not be emitted until all bytes are available; split point = 5',
-      'a code point should be emitted as soon as all bytes are available',
-      'an empty chunk inside a code point split between chunks should not change the output; split point = 1',
-      'an empty chunk inside a code point split between chunks should not change the output; split point = 2',
-      'an empty chunk inside a code point split between chunks should not change the output; split point = 3',
-      'an empty chunk inside a code point split between chunks should not change the output; split point = 4',
-      'an empty chunk inside a code point split between chunks should not change the output; split point = 5',
-      'an empty chunk inside a code point split between chunks should not change the output; split point = 6',
-    ],
-  },
+  'streams/decode-incomplete-input.any.js': {},
+  'streams/decode-non-utf8.any.js': {},
+  'streams/decode-split-character.any.js': {},
   'streams/decode-utf8.any.js': {
-    comment: 'See comments on each failure',
+    comment: 'Enable once MessageChannel is implemented',
     expectedFailures: [
-      // Enable once MessageChannel is implemented
       'decoding a transferred Uint8Array chunk should give no output',
       'decoding a transferred ArrayBuffer chunk should give no output',
-      // TODO investigate these
-      'decoding one UTF-8 chunk should give one output string - ArrayBuffer',
-      'decoding an empty chunk should give no output chunks - ArrayBuffer',
-      'UTF-8 EOF handling - ArrayBuffer',
-      'decoding one UTF-8 chunk should give one output string - SharedArrayBuffer',
-      'decoding an empty chunk should give no output chunks - SharedArrayBuffer',
-      'UTF-8 EOF handling - SharedArrayBuffer',
-      'an initial empty chunk should be ignored - ArrayBuffer',
-      'a trailing empty chunk should be ignored - ArrayBuffer',
-      'an initial empty chunk should be ignored - SharedArrayBuffer',
-      'a trailing empty chunk should be ignored - SharedArrayBuffer',
     ],
   },
-  'streams/encode-bad-chunks.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      'input of type undefined should be converted correctly to string',
-      'input of type null should be converted correctly to string',
-      'input of type numeric should be converted correctly to string',
-      'input of type object should be converted correctly to string',
-      'input of type array should be converted correctly to string',
-    ],
-  },
+  'streams/encode-bad-chunks.any.js': {},
   'streams/encode-utf8.any.js': {
     comment: 'TODO investigate this',
     expectedFailures: [
