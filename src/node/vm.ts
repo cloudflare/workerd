@@ -63,10 +63,11 @@ export const constants = {
 };
 Object.freeze(constants);
 
+const kContextSymbol = Symbol('vm_context_symbol');
+
 export function isContext(object: unknown): boolean {
   validateObject(object, 'object', kValidateObjectAllowArray);
-  // Non-functional stub
-  return false;
+  return kContextSymbol in object && object[kContextSymbol] === true;
 }
 
 export class Script {
@@ -100,8 +101,6 @@ export class Script {
       validateBuffer(cachedData, 'options.cachedData');
     }
     validateBoolean(produceCachedData, 'options.produceCachedData');
-
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Script');
   }
 
   createCachedData(): Buffer {
@@ -110,14 +109,12 @@ export class Script {
 
   runInThisContext(options: RunningScriptOptions = {}): unknown {
     validateObject(options, 'options');
-    const {
-      breakOnSigint = false,
-      displayErrors = true,
-      timeout = 0,
-    } = options;
+    const { breakOnSigint = false, displayErrors = true, timeout } = options;
     validateBoolean(breakOnSigint, 'options.breakOnSigint');
     validateBoolean(displayErrors, 'options.displayErrors');
-    validateUint32(timeout, 'options.timeout', true);
+    if (timeout !== undefined) {
+      validateUint32(timeout, 'options.timeout', true);
+    }
     throw new ERR_METHOD_NOT_IMPLEMENTED('runInThisContext');
   }
 
@@ -127,14 +124,12 @@ export class Script {
   ): unknown {
     validateContext(contextifiedObject);
     validateObject(options, 'options');
-    const {
-      breakOnSigint = false,
-      displayErrors = true,
-      timeout = 0,
-    } = options;
+    const { breakOnSigint = false, displayErrors = true, timeout } = options;
     validateBoolean(breakOnSigint, 'options.breakOnSigint');
     validateBoolean(displayErrors, 'options.displayErrors');
-    validateUint32(timeout, 'options.timeout', true);
+    if (timeout !== undefined) {
+      validateUint32(timeout, 'options.timeout', true);
+    }
     throw new ERR_METHOD_NOT_IMPLEMENTED('runInThisContext');
   }
 
@@ -227,7 +222,12 @@ export function createContext(
     'afterEvaluate',
     undefined,
   ]);
-  throw new ERR_METHOD_NOT_IMPLEMENTED('createContext');
+
+  return Object.create(null, {
+    [kContextSymbol]: {
+      value: true,
+    },
+  }) as object;
 }
 
 export function createScript(
