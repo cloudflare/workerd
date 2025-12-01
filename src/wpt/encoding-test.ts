@@ -10,11 +10,8 @@ export default {
   'api-replacement-encodings.any.js': {},
   'api-surrogates-utf8.any.js': {},
   'encodeInto.any.js': {
-    comment: 'See comments on each failure',
-    expectedFailures: [
-      // Enable once MessageChannel is implemented
-      'encodeInto() and a detached output buffer',
-    ],
+    comment: 'Requires MessageChannel.postMessage transfer list support',
+    expectedFailures: ['encodeInto() and a detached output buffer'],
   },
   'idlharness.any.js': {
     comment: 'Test file /resources/WebIDLParser.js not found',
