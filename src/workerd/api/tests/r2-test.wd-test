@@ -20,7 +20,7 @@ const unitTests :Workerd.Config = (
   ],
   extensions = [ (
     modules = [
-      ( name = "test:instumentation-tail", esModule = embed "tests/instrumentation-tail-worker.js" ),
+      ( name = "test:instumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
     ]
   ) ]
 );
