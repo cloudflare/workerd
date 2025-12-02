@@ -8,6 +8,7 @@ IMAGES = {
     command(
         name = name,
         command = target,
+        tags = ["requires-container-engine"],
     )
     for (name, target) in IMAGES.items()
 ]
@@ -15,5 +16,8 @@ IMAGES = {
 multirun(
     name = "load_all",
     commands = IMAGES.keys(),
-    tags = ["no-remote"],
+    tags = [
+        "no-remote",
+        "requires-container-engine",
+    ],
 )
