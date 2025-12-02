@@ -71,7 +71,7 @@ class FacetTreeIndex {
 
   // Offset at which to write the next entry. Typically points to the end of the file (except when
   // a corrupted tail was detected).
-  uint offset;
+  uint offset = 0;
 
   struct EntryPtr;
 
