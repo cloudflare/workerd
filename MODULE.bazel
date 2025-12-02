@@ -84,21 +84,4 @@ include("//build/deps:deps.MODULE.bazel")
 include("//build/deps:nodejs.MODULE.bazel")
 include("//build/deps:python.MODULE.bazel")
 include("//build/deps:v8.MODULE.bazel")
-
-# rules_oci and rules_multirun are used to build Docker images
-bazel_dep(name = "rules_oci", version = "2.2.6")
-bazel_dep(name = "rules_multirun", version = "0.10.0")
-
-oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
-
-# Pull any required base images used to build Docker images
-oci.pull(
-    name = "node_25_slim",
-    digest = "sha256:ab1a20f7e76e89392c8a0cb3ef5a4c70f243c6bbb555da22ef4ac259a5466448",
-    image = "node:25.2.1-trixie-slim",
-    platforms = [
-        "linux/amd64",
-        "linux/arm64/v8",
-    ],
-)
-use_repo(oci, "node_25_slim", "node_25_slim_linux_amd64", "node_25_slim_linux_arm64_v8")
+include("//build/deps:oci.MODULE.bazel")
