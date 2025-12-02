@@ -4112,7 +4112,7 @@ interface WorkerStubEntrypointOptions {
 }
 interface WorkerLoader {
   get(
-    name: string,
+    name: string | null,
     getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
   ): WorkerStub;
 }
