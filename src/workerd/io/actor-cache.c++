@@ -450,10 +450,9 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
       : cache(cache),
         cachedEntries(kj::mv(cachedEntries)),
         keysToFetch(kj::mv(keysToFetchParam)),
+        nextExpectedKey(keysToFetch.begin()),
         fulfiller(kj::mv(fulfiller)),
-        options(options) {
-    nextExpectedKey = keysToFetch.begin();
-  }
+        options(options) {}
 
   kj::Promise<void> values(ValuesContext context) override {
     if (!fulfiller->isWaiting()) {

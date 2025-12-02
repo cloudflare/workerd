@@ -1700,9 +1700,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
 class SpanSubmitter final: public kj::Refcounted {
  public:
-  SpanSubmitter(kj::Own<WorkerTracer> workerTracer)
-      : predictableSpanId(0),
-        workerTracer(kj::mv(workerTracer)) {}
+  SpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
@@ -1725,7 +1723,7 @@ class SpanSubmitter final: public kj::Refcounted {
   KJ_DISALLOW_COPY_AND_MOVE(SpanSubmitter);
 
  private:
-  uint64_t predictableSpanId;
+  uint64_t predictableSpanId = 0;
   kj::Own<WorkerTracer> workerTracer;
 };
 

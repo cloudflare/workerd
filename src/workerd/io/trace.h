@@ -43,7 +43,7 @@ namespace tracing {
 class TraceId final {
  public:
   // A null trace ID. This is only acceptable for use in tests.
-  constexpr TraceId(decltype(nullptr)): low(0), high(0) {}
+  constexpr TraceId(decltype(nullptr)) {}
 
   // A trace ID with the given low and high values.
   constexpr TraceId(uint64_t low, uint64_t high): low(low), high(high) {}

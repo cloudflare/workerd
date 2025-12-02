@@ -39,11 +39,11 @@ class GrowableBuffer final {
   // A copy of kj::Vector with some additional methods for use as a growable buffer with a maximum
   // size
  public:
-  inline explicit GrowableBuffer(size_t _chunkSize, size_t _maxCapacity) {
-    auto maxChunkSize = kj::min(_chunkSize, _maxCapacity);
+  inline explicit GrowableBuffer(size_t _chunkSize, size_t _maxCapacity)
+      : maxCapacity(_maxCapacity) {
+    auto maxChunkSize = kj::min(_chunkSize, maxCapacity);
     builder = kj::heapArrayBuilder<kj::byte>(maxChunkSize);
     chunkSize = maxChunkSize;
-    maxCapacity = _maxCapacity;
   }
 
   size_t size() const {

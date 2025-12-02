@@ -86,8 +86,7 @@ class Socket: public jsg::Object {
         isDefaultFetchPort(isDefaultFetchPort),
         openedResolver(kj::mv(openedPrPair.resolver)),
         openedPromiseCopy(openedPrPair.promise.whenResolved(js)),
-        openedPromise(kj::mv(openedPrPair.promise)),
-        isClosing(false) {};
+        openedPromise(kj::mv(openedPrPair.promise)) {};
 
   jsg::Ref<ReadableStream> getReadable() {
     return readable.addRef();
@@ -211,7 +210,7 @@ class Socket: public jsg::Object {
   jsg::Promise<void> openedPromiseCopy;
   jsg::MemoizedIdentity<jsg::Promise<SocketInfo>> openedPromise;
   // Used to keep track of a pending `close` operation on the socket.
-  bool isClosing;
+  bool isClosing = false;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
