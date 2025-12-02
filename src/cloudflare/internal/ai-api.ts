@@ -88,23 +88,11 @@ export class AiInternalError extends Error {
 }
 
 function isReadableStream(obj: unknown): obj is ReadableStream {
-  return !!(
-    obj &&
-    typeof obj === 'object' &&
-    'getReader' in obj &&
-    typeof obj.getReader === 'function'
-  );
+  return obj instanceof ReadableStream;
 }
 
 function isFormData(obj: unknown): obj is FormData {
-  return !!(
-    obj &&
-    typeof obj === 'object' &&
-    'append' in obj &&
-    typeof obj.append === 'function' &&
-    'entries' in obj &&
-    typeof obj.entries === 'function'
-  );
+  return obj instanceof FormData;
 }
 
 /**
