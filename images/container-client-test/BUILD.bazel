@@ -25,6 +25,9 @@ oci_image(
     tags = [
         "requires-container-engine",
     ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+    ],
     tars = [
         ":layers",
     ],

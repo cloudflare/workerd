@@ -15,5 +15,7 @@ IMAGES = {
 multirun(
     name = "load_all",
     commands = IMAGES.keys(),
-    tags = ["no-remote"],
+    tags = [
+        "no-remote",
+    ],
 )
