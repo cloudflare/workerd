@@ -82,7 +82,7 @@ const hiberWorker :Workerd.Worker = (
   compatibilityFlags = ["experimental", "nodejs_compat"],
 
   modules = [
-    (name = "worker", esModule = embed "tests/websocket-hibernation.js"),
+    (name = "worker", esModule = embed "websocket-hibernation.js"),
   ],
 
   durableObjectNamespaces = [
