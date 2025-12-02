@@ -5001,8 +5001,8 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     // Capnp server not initialized. Create it now.
-    auto bootstrap = kj::heap<WorkerdBootstrapImpl>(kj::addRef(*service), httpOverCapnpFactory);
-    auto& s = capnpServer.emplace(kj::mv(bootstrap));
+    auto& s = capnpServer.emplace(
+        kj::heap<WorkerdBootstrapImpl>(kj::addRef(*service), httpOverCapnpFactory));
     return s.accept(conn);
   }
 
@@ -5131,39 +5131,25 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
 // =======================================================================================
 // Debug port for exposing all services via RPC
 
-class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSet::ErrorHandler {
+class Server::DebugPortListener {
  public:
   DebugPortListener(Server& owner,
       kj::Own<kj::ConnectionReceiver> listener,
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
       : owner(owner),
         listener(kj::mv(listener)),
-        httpOverCapnpFactory(httpOverCapnpFactory),
-        tasks(*this) {}
+        httpOverCapnpFactory(httpOverCapnpFactory) {}
 
   kj::Promise<void> run() {
-    for (;;) {
-      auto conn = co_await listener->accept();
-      tasks.add(acceptLoop(kj::mv(conn)));
-    }
+    auto server = kj::heap<capnp::TwoPartyServer>(
+        kj::heap<WorkerdDebugPortImpl>(&owner, httpOverCapnpFactory));
+    co_return co_await server->listen(*listener);
   }
 
  private:
   Server& owner;
   kj::Own<kj::ConnectionReceiver> listener;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  kj::TaskSet tasks;
-
-  kj::Promise<void> acceptLoop(kj::Own<kj::AsyncIoStream> conn) {
-    auto server = kj::heap<capnp::TwoPartyServer>(
-        kj::heap<WorkerdDebugPortImpl>(&owner, httpOverCapnpFactory));
-    auto promise = server->accept(*conn);
-    co_return co_await promise.attach(kj::mv(conn), kj::mv(server));
-  }
-
-  void taskFailed(kj::Exception&& exception) override {
-    KJ_LOG(ERROR, exception);
-  }
 
   class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
    public:
@@ -5175,7 +5161,6 @@ class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSe
     kj::Promise<void> getEntrypoint(GetEntrypointContext context) override {
       auto params = context.getParams();
       auto serviceName = params.getService();
-      auto entrypointName = params.getEntrypoint();
       auto propsReader = params.getProps();
 
       // Look up the service
@@ -5183,8 +5168,11 @@ class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSe
           KJ_ASSERT_NONNULL(srv.services.find(serviceName), "Service not found", serviceName);
       auto service = serviceEntry->service();
 
-      // Convert props from Frankenvalue
-      Frankenvalue props = Frankenvalue::fromCapnp(propsReader);
+      // Convert props from Frankenvalue if provided
+      Frankenvalue props;
+      if (params.hasProps()) {
+        props = Frankenvalue::fromCapnp(propsReader);
+      }
 
       kj::Own<Service> targetService;
 
@@ -5193,20 +5181,20 @@ class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSe
       if (workerService != nullptr) {
         // This is a WorkerService, use getEntrypoint which supports both entrypoints and props
         kj::Maybe<kj::StringPtr> maybeEntrypoint;
-        if (entrypointName.size() > 0) {
-          maybeEntrypoint = kj::StringPtr(entrypointName);
+        if (params.hasEntrypoint()) {
+          maybeEntrypoint = params.getEntrypoint();
         }
 
         targetService =
             KJ_ASSERT_NONNULL(workerService->getEntrypoint(maybeEntrypoint, kj::mv(props)),
-                "Entrypoint not found", entrypointName);
+                "Entrypoint not found", maybeEntrypoint.orDefault("(default)"));
       } else {
         // Not a WorkerService
         KJ_ASSERT(
-            entrypointName.size() == 0, "Service does not support named entrypoints", serviceName);
+            !params.hasEntrypoint(), "Service does not support named entrypoints", serviceName);
 
         // Try to apply props if the service supports it
-        if (!propsReader.isEmptyObject()) {
+        if (params.hasProps()) {
           targetService = service->forProps(kj::mv(props));
         } else {
           // No props, just use the service as-is
@@ -5215,8 +5203,9 @@ class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSe
       }
 
       // Return a WorkerdBootstrap that wraps this service using the generic implementation.
-      auto bootstrap = kj::heap<WorkerdBootstrapImpl>(kj::mv(targetService), httpOverCapnpFactory);
-      context.initResults(capnp::MessageSize{4, 1}).setEntrypoint(kj::mv(bootstrap));
+      context.initResults(capnp::MessageSize{4, 1})
+          .setEntrypoint(
+              kj::heap<WorkerdBootstrapImpl>(kj::mv(targetService), httpOverCapnpFactory));
       return kj::READY_NOW;
     }
 
@@ -5239,18 +5228,22 @@ class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSe
       auto& actorNamespace = KJ_ASSERT_NONNULL(workerService->getActorNamespace(entrypointName),
           "Actor namespace not found", entrypointName);
 
-      // Validate actor ID size
-      KJ_REQUIRE(
-          actorIdData.size() == SHA256_DIGEST_LENGTH, "Invalid actor ID size", actorIdData.size());
-
-      // Create an ActorId from the provided bytes
-      kj::Own<ActorIdFactory::ActorId> actorId =
-          kj::heap<ActorIdFactoryImpl::ActorIdImpl>(actorIdData.begin(), kj::none);
+      // Create an actor ID - support both Durable Objects (SHA256) and ephemeral actors (plain strings)
+      Worker::Actor::Id actorId;
+      if (actorIdData.size() == SHA256_DIGEST_LENGTH) {
+        // Durable Object ID (SHA256 hash)
+        kj::Own<ActorIdFactory::ActorId> id =
+            kj::heap<ActorIdFactoryImpl::ActorIdImpl>(actorIdData.begin(), kj::none);
+        actorId = kj::mv(id);
+      } else {
+        // Ephemeral actor ID (plain string)
+        actorId = kj::str(actorIdData.asChars());
+      }
 
       // Wrap the actor channel using the generic WorkerdBootstrap implementation.
-      auto bootstrap = kj::heap<WorkerdBootstrapImpl>(
-          actorNamespace.getActorChannel(kj::mv(actorId)), httpOverCapnpFactory);
-      context.initResults(capnp::MessageSize{4, 1}).setActor(kj::mv(bootstrap));
+      context.initResults(capnp::MessageSize{4, 1})
+          .setActor(kj::heap<WorkerdBootstrapImpl>(
+              actorNamespace.getActorChannel(kj::mv(actorId)), httpOverCapnpFactory));
       return kj::READY_NOW;
     }
 
@@ -5261,9 +5254,8 @@ class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSe
 };
 
 kj::Promise<void> Server::listenDebugPort(kj::Own<kj::ConnectionReceiver> listener) {
-  auto obj = kj::refcounted<DebugPortListener>(
-      *this, kj::mv(listener), globalContext->httpOverCapnpFactory);
-  co_return co_await obj->run();
+  DebugPortListener obj(*this, kj::mv(listener), globalContext->httpOverCapnpFactory);
+  co_return co_await obj.run();
 }
 
 // =======================================================================================

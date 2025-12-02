@@ -5465,10 +5465,13 @@ KJ_TEST("Server: debug port RPC calls") {
   auto headerTable = headerTableBuilder.build();
 
   // Helper to get bootstrap from service and entrypoint
-  auto getBootstrap = [&](kj::StringPtr service, kj::StringPtr entrypoint, auto&& propsBuilder) {
+  auto getBootstrap = [&](kj::StringPtr service, kj::Maybe<kj::StringPtr> entrypoint,
+                          auto&& propsBuilder) {
     auto req = debugPort.getEntrypointRequest();
     req.setService(service);
-    req.setEntrypoint(entrypoint);
+    KJ_IF_SOME(e, entrypoint) {
+      req.setEntrypoint(e);
+    }
     auto props = req.initProps();
     propsBuilder(props);
     auto resp = req.send().wait(test.ws);
@@ -5482,7 +5485,8 @@ KJ_TEST("Server: debug port RPC calls") {
   };
 
   // Helper to get dispatcher from service and entrypoint (composes the two above)
-  auto getDispatcher = [&](kj::StringPtr service, kj::StringPtr entrypoint, auto&& propsBuilder) {
+  auto getDispatcher = [&](kj::StringPtr service, kj::Maybe<kj::StringPtr> entrypoint,
+                           auto&& propsBuilder) {
     return getDispatcherFromBootstrap(getBootstrap(service, entrypoint, propsBuilder));
   };
 
@@ -5509,29 +5513,30 @@ KJ_TEST("Server: debug port RPC calls") {
   };
 
   // Helper to make HTTP request through an entrypoint with custom props
-  auto makeHttpRequestImpl = [&](kj::StringPtr service, kj::StringPtr entrypoint,
+  auto makeHttpRequestImpl = [&](kj::StringPtr service, kj::Maybe<kj::StringPtr> entrypoint,
                                  auto&& propsBuilder) {
     return makeHttpRequestFromDispatcher(getDispatcher(service, entrypoint, propsBuilder), "/");
   };
 
   // Convenience wrapper with default empty props
-  auto makeHttpRequest = [&](kj::StringPtr service, kj::StringPtr entrypoint) {
+  auto makeHttpRequest = [&](kj::StringPtr service, kj::Maybe<kj::StringPtr> entrypoint) {
     return makeHttpRequestImpl(service, entrypoint, [](auto& props) { props.setEmptyObject(); });
   };
 
   // Test 1: Request a non-existent service should fail
   KJ_EXPECT_THROW_MESSAGE("Service not found",
-      getBootstrap("nonexistent", "", [](auto& props) { props.setEmptyObject(); }));
+      getBootstrap("nonexistent", kj::none, [](auto& props) { props.setEmptyObject(); }));
 
   // Test 2: Get entrypoint for different services
-  KJ_EXPECT(makeHttpRequest("hello", "") == "Hello from hello service");
-  KJ_EXPECT(makeHttpRequest("world", "") == "Hello from world service");
+  KJ_EXPECT(makeHttpRequest("hello", kj::none) == "Hello from hello service");
+  KJ_EXPECT(makeHttpRequest("world", kj::none) == "Hello from world service");
 
   // Test 3: Named entrypoint works
-  KJ_EXPECT(makeHttpRequest("named-entrypoint", "customHandler") == "Hello from custom entrypoint");
+  KJ_EXPECT(
+      makeHttpRequest("named-entrypoint", "customHandler"_kjc) == "Hello from custom entrypoint");
 
   // Test 4: Passing props object works
-  KJ_EXPECT(makeHttpRequestImpl("props-service", "", [](auto& props) {
+  KJ_EXPECT(makeHttpRequestImpl("props-service", kj::none, [](auto& props) {
     props.setEmptyObject();
     auto properties = props.initProperties(2);
     properties[0].setName("greeting");
@@ -5585,7 +5590,8 @@ KJ_TEST("Server: debug port RPC calls") {
   // Test 6: Call RPC methods using jsRpcSession with V8-serialized arguments
   {
     // Get dispatcher and JS RPC session - use pipelining because jsRpcSession() doesn't return until session closes
-    auto dispatcher = getDispatcher("rpc-service", "", [](auto& props) { props.setEmptyObject(); });
+    auto dispatcher =
+        getDispatcher("rpc-service", kj::none, [](auto& props) { props.setEmptyObject(); });
     auto rpcSessionReq = dispatcher.jsRpcSessionRequest();
     auto sessionPromise = rpcSessionReq.send();
     auto rpcTarget = sessionPromise.getTopLevel();
