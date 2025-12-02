@@ -4799,6 +4799,113 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
 
 // =======================================================================================
 
+class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
+ public:
+  WorkerdBootstrapImpl(kj::Own<IoChannelFactory::SubrequestChannel> service,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+      : service(kj::mv(service)),
+        httpOverCapnpFactory(httpOverCapnpFactory) {}
+
+  kj::Promise<void> startEvent(StartEventContext context) override {
+    // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
+    //   if we add that? (Note that if a connection-level cf blob exists, it should take
+    //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
+    //   configured, which hints that this service trusts the client to provide the cf blob.)
+
+    context.initResults(capnp::MessageSize{4, 1})
+        .setDispatcher(
+            kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->startRequest({})));
+    return kj::READY_NOW;
+  }
+
+ private:
+  kj::Own<IoChannelFactory::SubrequestChannel> service;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+
+  class EventDispatcherImpl final: public rpc::EventDispatcher::Server {
+   public:
+    EventDispatcherImpl(
+        capnp::HttpOverCapnpFactory& httpOverCapnpFactory, kj::Own<WorkerInterface> worker)
+        : httpOverCapnpFactory(httpOverCapnpFactory),
+          worker(kj::mv(worker)) {}
+
+    kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
+      context.initResults(capnp::MessageSize{4, 1})
+          .setHttp(httpOverCapnpFactory.kjToCapnp(getWorker()));
+      return kj::READY_NOW;
+    }
+
+    kj::Promise<void> sendTraces(SendTracesContext context) override {
+      auto traces =
+          KJ_MAP(trace, context.getParams().getTraces()){ return kj::refcounted<Trace>(trace); };
+      auto event = kj::heap<api::TraceCustomEvent>(api::TraceCustomEvent::TYPE, kj::mv(traces));
+      auto worker = getWorker();
+      auto result = co_await worker->customEvent(kj::mv(event));
+      auto resp = context.getResults().getResult();
+      resp.setOutcome(result.outcome);
+    }
+
+    kj::Promise<void> prewarm(PrewarmContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> runScheduled(RunScheduledContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> runAlarm(RunAlarmContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> queue(QueueContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
+      auto customEvent = kj::heap<api::JsRpcSessionCustomEvent>(
+          api::JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
+
+      auto cap = customEvent->getCap();
+      capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
+      pipelineBuilder.setTopLevel(cap);
+      context.setPipeline(pipelineBuilder.build());
+      context.getResults().setTopLevel(kj::mv(cap));
+
+      auto worker = getWorker();
+      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
+    }
+
+    kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
+      auto customEvent = kj::heap<tracing::TailStreamCustomEvent>();
+      auto cap = customEvent->getCap();
+      capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
+      pipelineBuilder.setTopLevel(cap);
+      context.setPipeline(pipelineBuilder.build());
+      context.getResults().setTopLevel(kj::mv(cap));
+
+      auto worker = getWorker();
+      auto result = co_await worker->customEvent(kj::mv(customEvent)).attach(kj::mv(worker));
+      auto response = context.getResults();
+      response.setResult(result.outcome);
+    }
+
+   private:
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+    kj::Maybe<kj::Own<WorkerInterface>> worker;
+
+    kj::Own<WorkerInterface> getWorker() {
+      auto result =
+          kj::mv(KJ_ASSERT_NONNULL(worker, "EventDispatcher can only be used for one request"));
+      worker = kj::none;
+      return result;
+    }
+
+    [[noreturn]] void throwUnsupported() {
+      JSG_FAIL_REQUIRE(Error, "RPC connections don't yet support this event type.");
+    }
+  };
+};
+
 class Server::HttpListener final: public kj::Refcounted {
  public:
   HttpListener(Server& owner,
@@ -4893,122 +5000,11 @@ class Server::HttpListener final: public kj::Refcounted {
       return s.accept(conn);
     }
 
-    // Capnp server not initialized. Create in now.
-    auto& s = capnpServer.emplace(kj::heap<WorkerdBootstrapImpl>(*this));
+    // Capnp server not initialized. Create it now.
+    auto bootstrap = kj::heap<WorkerdBootstrapImpl>(kj::addRef(*service), httpOverCapnpFactory);
+    auto& s = capnpServer.emplace(kj::mv(bootstrap));
     return s.accept(conn);
   }
-
- public:
-  class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
-   public:
-    WorkerdBootstrapImpl(HttpListener& parent)
-        : service(kj::addRef(*parent.service)),
-          httpOverCapnpFactory(parent.httpOverCapnpFactory) {}
-
-    WorkerdBootstrapImpl(kj::Own<IoChannelFactory::SubrequestChannel> service,
-        capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
-        : service(kj::mv(service)),
-          httpOverCapnpFactory(httpOverCapnpFactory) {}
-
-    kj::Promise<void> startEvent(StartEventContext context) override {
-      // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
-      //   if we add that? (Note that if a connection-level cf blob exists, it should take
-      //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
-      //   configured, which hints that this service trusts the client to provide the cf blob.)
-
-      context.initResults(capnp::MessageSize{4, 1})
-          .setDispatcher(
-              kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->startRequest({})));
-      return kj::READY_NOW;
-    }
-
-   private:
-    kj::Own<IoChannelFactory::SubrequestChannel> service;
-    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  };
-
-  class EventDispatcherImpl final: public rpc::EventDispatcher::Server {
-   public:
-    EventDispatcherImpl(
-        capnp::HttpOverCapnpFactory& httpOverCapnpFactory, kj::Own<WorkerInterface> worker)
-        : httpOverCapnpFactory(httpOverCapnpFactory),
-          worker(kj::mv(worker)) {}
-
-    kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
-      context.initResults(capnp::MessageSize{4, 1})
-          .setHttp(httpOverCapnpFactory.kjToCapnp(getWorker()));
-      return kj::READY_NOW;
-    }
-
-    kj::Promise<void> sendTraces(SendTracesContext context) override {
-      auto traces =
-          KJ_MAP(trace, context.getParams().getTraces()){ return kj::refcounted<Trace>(trace); };
-      auto event = kj::heap<api::TraceCustomEvent>(api::TraceCustomEvent::TYPE, kj::mv(traces));
-      auto worker = getWorker();
-      auto result = co_await worker->customEvent(kj::mv(event));
-      auto resp = context.getResults().getResult();
-      resp.setOutcome(result.outcome);
-    }
-
-    kj::Promise<void> prewarm(PrewarmContext context) override {
-      throwUnsupported();
-    }
-
-    kj::Promise<void> runScheduled(RunScheduledContext context) override {
-      throwUnsupported();
-    }
-
-    kj::Promise<void> runAlarm(RunAlarmContext context) override {
-      throwUnsupported();
-    }
-
-    kj::Promise<void> queue(QueueContext context) override {
-      throwUnsupported();
-    }
-
-    kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
-      auto customEvent = kj::heap<api::JsRpcSessionCustomEvent>(
-          api::JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
-
-      auto cap = customEvent->getCap();
-      capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
-      pipelineBuilder.setTopLevel(cap);
-      context.setPipeline(pipelineBuilder.build());
-      context.getResults().setTopLevel(kj::mv(cap));
-
-      auto worker = getWorker();
-      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
-    }
-
-    kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
-      auto customEvent = kj::heap<tracing::TailStreamCustomEvent>();
-      auto cap = customEvent->getCap();
-      capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
-      pipelineBuilder.setTopLevel(cap);
-      context.setPipeline(pipelineBuilder.build());
-      context.getResults().setTopLevel(kj::mv(cap));
-
-      auto worker = getWorker();
-      auto result = co_await worker->customEvent(kj::mv(customEvent)).attach(kj::mv(worker));
-      auto response = context.getResults();
-      response.setResult(result.outcome);
-    }
-
-   private:
-    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-    kj::Maybe<kj::Own<WorkerInterface>> worker;
-
-    kj::Own<WorkerInterface> getWorker() {
-      auto result =
-          kj::mv(KJ_ASSERT_NONNULL(worker, "EventDispatcher can only be used for one request"));
-      worker = kj::none;
-      return result;
-    }
-
-    [[noreturn]] void throwUnsupported() {
-      JSG_FAIL_REQUIRE(Error, "RPC connections don't yet support this event type.");
-    }
-  };
 
   struct Connection final: public kj::HttpService, public kj::HttpServerErrorHandler {
     Connection(HttpListener& parent, kj::Maybe<kj::String> cfBlobJson)
@@ -5219,9 +5215,8 @@ class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSe
       }
 
       // Return a WorkerdBootstrap that wraps this service using the generic implementation.
-      context.initResults(capnp::MessageSize{4, 1})
-          .setEntrypoint(kj::heap<HttpListener::WorkerdBootstrapImpl>(
-              kj::mv(targetService), httpOverCapnpFactory));
+      auto bootstrap = kj::heap<WorkerdBootstrapImpl>(kj::mv(targetService), httpOverCapnpFactory);
+      context.initResults(capnp::MessageSize{4, 1}).setEntrypoint(kj::mv(bootstrap));
       return kj::READY_NOW;
     }
 
@@ -5253,9 +5248,9 @@ class Server::DebugPortListener final: public kj::Refcounted, private kj::TaskSe
           kj::heap<ActorIdFactoryImpl::ActorIdImpl>(actorIdData.begin(), kj::none);
 
       // Wrap the actor channel using the generic WorkerdBootstrap implementation.
-      context.initResults(capnp::MessageSize{4, 1})
-          .setActor(kj::heap<HttpListener::WorkerdBootstrapImpl>(
-              actorNamespace.getActorChannel(kj::mv(actorId)), httpOverCapnpFactory));
+      auto bootstrap = kj::heap<WorkerdBootstrapImpl>(
+          actorNamespace.getActorChannel(kj::mv(actorId)), httpOverCapnpFactory);
+      context.initResults(capnp::MessageSize{4, 1}).setActor(kj::mv(bootstrap));
       return kj::READY_NOW;
     }
 

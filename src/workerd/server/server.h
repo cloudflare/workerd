@@ -260,6 +260,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class DiskDirectoryService;
   class WorkerService;
   class WorkerEntrypointService;
+  class WorkerdBootstrapImpl;
   class HttpListener;
   class DebugPortListener;
 
