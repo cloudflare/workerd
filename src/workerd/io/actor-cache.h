@@ -258,7 +258,7 @@ class ActorCacheInterface: public ActorCacheOps {
         Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
   }
 
-  virtual kj::Promise<void> waitForBookmark(kj::StringPtr bookmark) {
+  virtual kj::Promise<void> waitForBookmark(kj::StringPtr bookmark, SpanParent parentSpan) {
     JSG_FAIL_REQUIRE(
         Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
   }
