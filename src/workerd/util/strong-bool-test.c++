@@ -115,7 +115,7 @@ KJ_TEST("WD_STRONG_BOOL can be explicitly converted to and from `bool`") {
   static_assert(kj::isSameType<decltype(strongbadNo2), Strongbad>());
 
   // Literals can be explicitly converted in both directions, too.
-  static_assert(kj::isSameType<decltype(Strongbad::NO.toBool()), bool>());
+  static_assert(kj::isSameType<decltype(Strongbad(Strongbad::NO).toBool()), bool>());
   static_assert(kj::isSameType<decltype(Strongbad(false)), Strongbad>());
 
   // Can't use static_assert because they're not constexpr. We'll test constexpr elsewhere.
@@ -131,8 +131,6 @@ KJ_TEST("WD_STRONG_BOOL can be contextually converted to `bool`") {
 
   // It's a Strongbad ...
   static_assert(kj::isSameType<decltype(strongbadNo), Strongbad>());
-  static_assert(kj::isSameType<decltype(Strongbad::NO), const Strongbad>());
-  static_assert(kj::isSameType<decltype(Strongbad::YES), const Strongbad>());
 
   // ... until you use it in an explicitly boolean context.
   static_assert(kj::isSameType<decltype(!strongbadNo), bool>());
@@ -146,11 +144,11 @@ KJ_TEST("WD_STRONG_BOOL can be contextually converted to `bool`") {
 
   // Can't use static_assert because they're not constexpr. We'll test constexpr elsewhere.
   KJ_EXPECT(!strongbadNo);
-  KJ_EXPECT(!Strongbad::NO);
+  KJ_EXPECT(!Strongbad(Strongbad::NO));
 
   // TODO(someday): KJ magic asserts are not a boolean context :(
   KJ_EXPECT(!!burninatorYes);
-  KJ_EXPECT(!!Strongbad::YES);
+  KJ_EXPECT(!!Strongbad(Strongbad::YES));
 }
 
 KJ_TEST("WD_STRONG_BOOL is constexpr") {
@@ -161,9 +159,9 @@ KJ_TEST("WD_STRONG_BOOL is constexpr") {
   constexpr Strongbad strongbadValue{Strongbad::NO};
   if constexpr (strongbadValue) {}
   if constexpr (Strongbad(true)) {}
-  if constexpr (Strongbad::NO.toBool()) {}
-  if constexpr (Strongbad::NO || Strongbad::YES) {}
-  if constexpr (Strongbad::NO && Strongbad::YES) {}
+  if constexpr (Strongbad(Strongbad::NO).toBool()) {}
+  if constexpr ((Strongbad(Strongbad::NO) || Strongbad(Strongbad::YES))) {}
+  if constexpr (Strongbad(Strongbad::NO) && Strongbad(Strongbad::YES)) {}
   [[maybe_unused]] constexpr auto order = Strongbad::YES <=> Strongbad::NO;
 
   static_assert(!strongbadValue);
@@ -229,6 +227,39 @@ KJ_TEST("WD_STRONG_BOOL can be stringified") {
 
   static_assert(kj::_::STR * Burninator::NO == "Burninator::NO"_kjc);
   static_assert(kj::_::STR * Burninator::YES == "Burninator::YES"_kjc);
+}
+
+// Test that WD_STRONG_BOOL can be used inside classes
+class TestClassWithNestedBool {
+ public:
+  WD_STRONG_BOOL(NestedBool);
+
+  void testNestedBool() {
+    NestedBool nb{NestedBool::YES};
+    KJ_EXPECT(nb.toBool());
+    KJ_EXPECT(nb == NestedBool::YES);
+    KJ_EXPECT(nb != NestedBool::NO);
+  }
+};
+
+KJ_TEST("WD_STRONG_BOOL works inside classes") {
+  TestClassWithNestedBool test;
+  test.testNestedBool();
+
+  // Test static access to constants
+  TestClassWithNestedBool::NestedBool nb1 = TestClassWithNestedBool::NestedBool::YES;
+  TestClassWithNestedBool::NestedBool nb2 = TestClassWithNestedBool::NestedBool::NO;
+
+  KJ_EXPECT(nb1 != nb2);
+  KJ_EXPECT(nb1.toBool());
+  KJ_EXPECT(!nb2.toBool());
+
+  // Test logical operators
+  auto nb3 = nb1 && nb2;
+  auto nb4 = nb1 || nb2;
+
+  KJ_EXPECT(!nb3.toBool());
+  KJ_EXPECT(nb4.toBool());
 }
 
 }  // namespace workerd

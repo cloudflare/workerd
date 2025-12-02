@@ -32,37 +32,36 @@ namespace workerd {
 // Logical operators (&& and ||) preserve the type of their operands when the operands are the same
 // `StrongBool` type. Otherwise, contextual boolean conversion applies, and the operands will be
 // converted to `bool` before the operator is invoked.
+//
+// This macro can be used both at namespace scope and inside class definitions.
 #define WD_STRONG_BOOL(Type)                                                                       \
   class Type final {                                                                               \
+    enum class InitValue : bool { NO = false, YES = true };                                        \
+                                                                                                   \
    public:                                                                                         \
-    static const Type NO;                                                                          \
-    static const Type YES;                                                                         \
-    constexpr explicit Type(bool booleanValue): value(booleanValue ? Value::YES : Value::NO) {}    \
+    static constexpr auto NO = InitValue::NO;                                                      \
+    static constexpr auto YES = InitValue::YES;                                                    \
+    constexpr Type(const InitValue& initValue): value(initValue == InitValue::YES) {}              \
+    constexpr explicit Type(bool booleanValue): value(booleanValue) {}                             \
     constexpr explicit operator bool() const {                                                     \
       return toBool();                                                                             \
     }                                                                                              \
     constexpr bool toBool() const {                                                                \
-      return value == YES;                                                                         \
+      return value;                                                                                \
     }                                                                                              \
     constexpr auto operator<=>(const Type&) const = default;                                       \
     constexpr Type operator&&(const Type& other) const {                                           \
-      return Type(value == YES && other.value == YES);                                             \
+      return Type(value && other.value);                                                           \
     }                                                                                              \
     constexpr Type operator||(const Type& other) const {                                           \
-      return Type(value == YES || other.value == YES);                                             \
+      return Type(value || other.value);                                                           \
+    }                                                                                              \
+    friend constexpr kj::LiteralStringConst KJ_STRINGIFY(const Type& val) {                        \
+      return val ? #Type "::YES"_kjc : #Type "::NO"_kjc;                                           \
     }                                                                                              \
                                                                                                    \
    private:                                                                                        \
-    enum class Value : std::uint8_t { NO, YES };                                                   \
-    constexpr Type(Value value): value(value) {}                                                   \
-    Value value;                                                                                   \
-  };                                                                                               \
-  constexpr inline kj::LiteralStringConst KJ_STRINGIFY(Type value) {                               \
-    return value ? #Type "::YES"_kjc : #Type "::NO"_kjc;                                           \
-  }                                                                                                \
-  inline constexpr Type Type::NO{Type::Value::NO};                                                 \
-  inline constexpr Type Type::YES {                                                                \
-    Type::Value::YES                                                                               \
+    bool value;                                                                                    \
   }
 
 }  // namespace workerd
