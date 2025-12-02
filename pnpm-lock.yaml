@@ -39,6 +39,9 @@ importers:
       typescript-eslint:
         specifier: ^8.46.1
         version: 8.46.1(eslint@9.37.0)(typescript@5.9.2)
+
+  images/container-client-test:
+    devDependencies:
       ws:
         specifier: ^8.18.3
         version: 8.18.3
