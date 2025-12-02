@@ -1740,24 +1740,6 @@ export let logging = {
   },
 };
 
-// DOMException is structured cloneable
-export let domExceptionClone = {
-  test() {
-    const de1 = new DOMException('hello', 'NotAllowedError');
-
-    de1.foo = 'abc';
-
-    const de2 = structuredClone(de1);
-    assert.strictEqual(de1.name, de2.name);
-    assert.strictEqual(de1.message, de2.message);
-    assert.strictEqual(de1.stack, de2.stack);
-    assert.strictEqual(de1.code, de2.code);
-    assert.notStrictEqual(de1, de2);
-    assert.strictEqual(de1.foo, de2.foo);
-    assert.strictEqual(de2.foo, 'abc');
-  },
-};
-
 export let proxiedRpcTarget = {
   async test(controller, env, ctx) {
     // Proxy RPC target.

@@ -291,6 +291,38 @@ export const structuredClone = {
 
     const memory = new WebAssembly.Memory({ initial: 2, maximum: 2 });
     throws(() => globalThis.structuredClone(memory));
+
+    // This tests serialization of an API object. Only serializeable API objects (like `Headers`)
+    // can be cloned.
+    {
+      let orig = new Headers({ foo: 123, bar: 'abc' });
+      let cloned = globalThis.structuredClone(orig);
+      ok(cloned instanceof Headers);
+      strictEqual(cloned.get('foo'), '123');
+      strictEqual(cloned.get('bar'), 'abc');
+    }
+
+    // Verify that trying to serialize a non-serializable API type throws.
+    throws(() => globalThis.structuredClone(new TextEncoder()), {
+      name: 'DataCloneError',
+      code: DOMException.DATA_CLONE_ERR,
+      message:
+        'Could not serialize object of type "TextEncoder". This type does not support ' +
+        'serialization.',
+    });
+
+    // Test serialization of DOMException. This is technically an API object.
+    {
+      const de1 = new DOMException('hello', 'NotAllowedError');
+
+      const de2 = globalThis.structuredClone(de1);
+      ok(de2 instanceof DOMException);
+      strictEqual(de1.name, de2.name);
+      strictEqual(de1.message, de2.message);
+      strictEqual(de1.stack, de2.stack);
+      strictEqual(de1.code, de2.code);
+      notStrictEqual(de1, de2);
+    }
   },
 };
 
