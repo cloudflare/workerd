@@ -4,6 +4,8 @@
 
 #include "io-context.h"
 
+#include <workerd/api/events.h>
+#include <workerd/api/global-scope.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
@@ -496,8 +498,8 @@ void IoContext::addTask(kj::Promise<void> promise) {
   tasks.add(kj::mv(promise));
 }
 
-void IoContext::addWaitUntil(kj::Promise<void> promise) {
-  if (actor == kj::none) {
+void IoContext::addWaitUntil(kj::Promise<void> promise, bool isUnload) {
+  if (actor == kj::none && !isUnload) {
     // This metric won't work correctly in actors since it's being tracked per-request, but tasks
     // are not tied to requests in actors. So we just skip it in actors.
     auto& metrics = getMetrics();
@@ -506,7 +508,7 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
     }
   }
 
-  if (incomingRequests.empty()) {
+  if (!isUnload && incomingRequests.empty()) {
     DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
   }
@@ -584,7 +586,29 @@ class IoContext::PendingEvent: public kj::Refcounted {
   kj::Maybe<IoContext&> maybeContext;
 };
 
+void IoContext::setUnloadListener(jsg::Ref<api::EventTarget> target) {
+  unloadTarget = kj::mv(target);
+}
+
+void IoContext::dispatchUnload() {
+  // Dispatch unload event if a target was attached.
+  // TODO: bring back optimization for not waiting if no handlers
+  //       using, in basics.c++:
+  //       // Notify listener callback if registered
+  //       KJ_IF_SOME(callback, maybeListenerCallback) {
+  //         callback(js, type, getHandlerCount(type));
+  //       }
+  //       and then having a thread-safe field to check.
+  KJ_IF_SOME(target, unloadTarget) {
+    worker->runInUnloadScope(*this, [target = kj::mv(target)](jsg::Lock& js) mutable {
+      target->dispatchEvent(js, js.alloc<api::Event>("unload"_kjc));
+    });
+  }
+}
+
 IoContext::~IoContext() noexcept(false) {
+  dispatchUnload();
+
   if (!canceler.isEmpty()) {
     KJ_IF_SOME(e, abortException) {
       // Assume the abort exception is why we are canceling.

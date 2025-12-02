@@ -9,12 +9,14 @@
 
 #include <workerd/api/actor.h>
 #include <workerd/api/container.h>
+#include <workerd/api/events.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-own.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/weak-refs.h>
 
 #include <kj/async.h>
 
@@ -559,7 +561,7 @@ class WebSocketRequestResponsePair: public jsg::Object {
 };
 
 // The type passed as the first parameter to durable object class's constructor.
-class DurableObjectState: public jsg::Object {
+class DurableObjectState: public EventTarget {
  public:
   DurableObjectState(jsg::Lock& js,
       Worker::Actor::Id actorId,
@@ -569,6 +571,8 @@ class DurableObjectState: public jsg::Object {
       kj::Maybe<rpc::Container::Client> container,
       bool containerRunning,
       kj::Maybe<Worker::Actor::FacetManager&> facetManager);
+
+  static jsg::Ref<DurableObjectState> constructor() = delete;
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -655,6 +659,7 @@ class DurableObjectState: public jsg::Object {
   kj::Array<kj::StringPtr> getTags(jsg::Lock& js, jsg::Ref<api::WebSocket> ws);
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
+    JSG_INHERIT(EventTarget);
     JSG_METHOD(waitUntil);
     if (flags.getEnableCtxExports()) {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);

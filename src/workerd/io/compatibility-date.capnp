@@ -680,6 +680,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("nonclass_entrypoint_reuses_ctx_across_invocations");
   # Just in case someone somewhere somehow actually relied on every event receiving the same `ctx`
   # object, this restores the original behavior. We do not recommend this.
+  # Using this feature will disable the ability to dispatch unload events.
 
   queueConsumerNoWaitForWaitUntil @75 :Bool
       $compatEnableFlag("queue_consumer_no_wait_for_wait_until")
