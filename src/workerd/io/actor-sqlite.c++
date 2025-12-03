@@ -525,7 +525,9 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
     // brokenness through other means.
     if (broken == kj::none) {
       // the safe thing to do is to require confirmation.
-      metadata.setAlarm(kj::none, /*allowUnconfirmed=*/false);
+      if (metadata.setAlarm(kj::none, /*allowUnconfirmed=*/false)) {
+        ++alarmVersion;
+      }
     }
     haveDeferredDelete = false;
   }
@@ -657,13 +659,15 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
 
-  // Increment version counter on any alarm modification
-  ++alarmVersion;
-
   // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
   // free up resources?
 
-  metadata.setAlarm(newAlarmTime, options.allowUnconfirmed);
+  // Only increment version counter if the alarm value actually changed. This is important because
+  // if the value didn't change, no SQLite write occurs, so no implicit transaction is started,
+  // and we don't want to invalidate in-flight commits without a replacement commit.
+  if (metadata.setAlarm(newAlarmTime, options.allowUnconfirmed)) {
+    ++alarmVersion;
+  }
 
   KJ_IF_SOME(exp, currentTxn.tryGet<ExplicitTxn*>()) {
     exp->setAlarmDirty();
@@ -748,7 +752,9 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
   // Reset alarm state, if necessary.  If no alarm is set, OK to just leave metadata table
   // uninitialized.
   if (localAlarmState != kj::none) {
-    metadata.setAlarm(localAlarmState, options.allowUnconfirmed);
+    if (metadata.setAlarm(localAlarmState, options.allowUnconfirmed)) {
+      ++alarmVersion;
+    }
   }
 
   return {

@@ -25,8 +25,9 @@ class SqliteMetadata final: private SqliteDatabase::ResetListener {
   // Return currently set alarm time, or none.
   kj::Maybe<kj::Date> getAlarm();
 
-  // Sets current alarm time, or none.
-  void setAlarm(kj::Maybe<kj::Date> currentTime, bool allowUnconfirmed);
+  // Sets current alarm time, or none. Returns true if the value changed, false if it was already
+  // set to the same value.
+  bool setAlarm(kj::Maybe<kj::Date> currentTime, bool allowUnconfirmed);
 
   // Return the current local development bookmark, or none if no bookmark has been set.
   kj::Maybe<uint64_t> getLocalDevelopmentBookmark();
