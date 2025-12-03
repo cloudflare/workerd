@@ -10,6 +10,12 @@
 
 using namespace kj_rs;
 
+namespace {
+// Enable predictable mode so RequestGarbageCollectionForTesting actually triggers GC.
+// Without this, V8 may defer or skip the requested collection.
+bool initPredictableMode = (workerd::setPredictableModeForTest(), true);
+}  // namespace
+
 namespace workerd {
 
 struct TestContext: public jsg::Object, public jsg::ContextGlobal {
@@ -44,6 +50,11 @@ void TestHarness::run_in_context(::rust::Fn<void(Isolate*)> callback) const {
 
     callback(isolate->getIsolate());
   });
+}
+
+void request_gc(Isolate* isolate) {
+  isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }
 
 }  // namespace rust::jsg_test

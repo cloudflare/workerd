@@ -1,10 +1,8 @@
 use std::pin::Pin;
 
-use crate::v8::ffi;
+pub use ffi::ModuleType;
 
-pub enum Type {
-    INTERNAL,
-}
+use crate::v8::ffi;
 
 /// Registers a builtin module with the given specifier.
 ///
@@ -14,8 +12,9 @@ pub fn add_builtin(
     registry: Pin<&mut ffi::ModuleRegistry>,
     specifier: &str,
     callback: fn(*mut ffi::Isolate) -> ffi::Local,
+    module_type: ModuleType,
 ) {
     unsafe {
-        ffi::register_add_builtin_module(registry, specifier, callback);
+        ffi::register_add_builtin_module(registry, specifier, callback, module_type);
     }
 }
