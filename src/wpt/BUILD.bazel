@@ -96,6 +96,7 @@ wpt_test(
 wpt_test(
     name = "WebCryptoAPI",
     size = "enormous",
+    compat_flags = ["disable_fast_jsg_struct"],
     config = "WebCryptoAPI-test.ts",
     target_compatible_with = select({
         # Too slow on Windows
@@ -108,7 +109,6 @@ wpt_test(
 wpt_test(
     name = "streams",
     size = "large",
-    compat_flags = ["enable_fast_jsg_struct"],
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )
