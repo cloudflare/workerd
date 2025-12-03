@@ -79,6 +79,9 @@ new-wpt-test test_name:
   ./tools/cross/format.py
   bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
 
+new-test test_name:
+  ./tools/unix/new-test.sh {{test_name}}
+
 format: rustfmt
   python3 tools/cross/format.py
 

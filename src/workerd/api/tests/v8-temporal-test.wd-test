@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "v8-temporal-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "v8-temporal-test.js")
+        ],
+       compatibilityDate = "2025-12-02",
+       compatibilityFlags = ["nodejs_compat_v2"],
+      )
+    ),
+  ],
+  v8Flags = ["--harmony-temporal"],
+);
