@@ -440,6 +440,13 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
         typeId(typeId),
         wrapperModule(kj::mv(wrapperModule)) {}
 
+  ~JsRpcSessionCustomEvent() noexcept(false) {
+    if (capFulfiller->isWaiting()) {
+      capFulfiller->reject(
+          KJ_EXCEPTION(DISCONNECTED, "JsRpcSessionCustomEvent was destroyed before completion"));
+    }
+  }
+
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,

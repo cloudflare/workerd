@@ -19,6 +19,13 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
         clientCap(kj::mv(paf.promise)),
         typeId(typeId) {}
 
+  ~TailStreamCustomEvent() noexcept(false) {
+    if (capFulfiller->isWaiting()) {
+      capFulfiller->reject(
+          KJ_EXCEPTION(DISCONNECTED, "TailStreamCustomEvent was destroyed before completion"));
+    }
+  }
+
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
@@ -37,6 +44,10 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
   }
 
   kj::Maybe<tracing::EventInfo> getEventInfo() const override;
+
+  void failed(const kj::Exception& e) override {
+    capFulfiller->reject(kj::cp(e));
+  }
 
   // Specify same type as with TraceCustomEvent here by default.
   static constexpr uint16_t TYPE = 2;
