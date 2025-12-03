@@ -5141,9 +5141,8 @@ class Server::DebugPortListener {
         httpOverCapnpFactory(httpOverCapnpFactory) {}
 
   kj::Promise<void> run() {
-    auto server = kj::heap<capnp::TwoPartyServer>(
-        kj::heap<WorkerdDebugPortImpl>(&owner, httpOverCapnpFactory));
-    co_return co_await server->listen(*listener);
+    capnp::TwoPartyServer server(kj::heap<WorkerdDebugPortImpl>(&owner, httpOverCapnpFactory));
+    co_return co_await server.listen(*listener);
   }
 
  private:
@@ -5213,7 +5212,7 @@ class Server::DebugPortListener {
       auto params = context.getParams();
       auto serviceName = params.getService();
       auto entrypointName = params.getEntrypoint();
-      auto actorIdData = params.getActorId();
+      auto actorIdStr = params.getActorId();
 
       // Look up the service
       auto& serviceEntry =
@@ -5228,16 +5227,22 @@ class Server::DebugPortListener {
       auto& actorNamespace = KJ_ASSERT_NONNULL(workerService->getActorNamespace(entrypointName),
           "Actor namespace not found", entrypointName);
 
-      // Create an actor ID - support both Durable Objects (SHA256) and ephemeral actors (plain strings)
+      // Create an actor ID - use the namespace config to determine if it's durable or ephemeral
       Worker::Actor::Id actorId;
-      if (actorIdData.size() == SHA256_DIGEST_LENGTH) {
-        // Durable Object ID (SHA256 hash)
-        kj::Own<ActorIdFactory::ActorId> id =
-            kj::heap<ActorIdFactoryImpl::ActorIdImpl>(actorIdData.begin(), kj::none);
-        actorId = kj::mv(id);
-      } else {
-        // Ephemeral actor ID (plain string)
-        actorId = kj::str(actorIdData.asChars());
+      KJ_SWITCH_ONEOF(actorNamespace.getConfig()) {
+        KJ_CASE_ONEOF(c, Durable) {
+          // Durable Object ID (hex-encoded SHA256 hash)
+          auto decoded = kj::decodeHex(actorIdStr);
+          KJ_REQUIRE(decoded.size() == SHA256_DIGEST_LENGTH,
+              "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
+          kj::Own<ActorIdFactory::ActorId> id =
+              kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none);
+          actorId = kj::mv(id);
+        }
+        KJ_CASE_ONEOF(c, Ephemeral) {
+          // Ephemeral actor ID (plain string)
+          actorId = kj::str(actorIdStr);
+        }
       }
 
       // Wrap the actor channel using the generic WorkerdBootstrap implementation.

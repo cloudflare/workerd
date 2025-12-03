@@ -5558,7 +5558,8 @@ KJ_TEST("Server: debug port RPC calls") {
       auto req = debugPort.getActorRequest();
       req.setService("actor-service");
       req.setEntrypoint("MyActor");
-      req.setActorId(kj::arrayPtr(actorIdBytes, sizeof(actorIdBytes)));
+      // Convert actor ID bytes to hex string
+      req.setActorId(kj::encodeHex(kj::arrayPtr(actorIdBytes, sizeof(actorIdBytes))));
       auto resp = req.send().wait(test.ws);
       return makeHttpRequestFromBootstrap(resp.getActor(), path);
     };
