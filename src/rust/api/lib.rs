@@ -1,10 +1,9 @@
 use std::pin::Pin;
 
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::Resource;
+use jsg::Type;
 
 use crate::dns::DnsUtil;
-use crate::dns::DnsUtilTemplate;
 
 pub mod dns;
 
@@ -22,20 +21,20 @@ mod ffi {
 }
 
 pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
-    jsg::modules::add_builtin(registry, "node-internal:dns", |isolate| unsafe {
-        let mut lock = jsg::Lock::from_isolate(isolate);
-        let dns_util = jsg::Ref::new(DnsUtil {
-            _state: ResourceState::default(),
-        });
-        let mut dns_util_template = DnsUtilTemplate::new(&mut lock);
-
-        jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template).into_ffi()
-    });
+    jsg::modules::add_builtin(
+        registry,
+        "node-internal:dns",
+        |isolate| unsafe {
+            let mut lock = jsg::Lock::from_isolate(isolate);
+            let dns_util = DnsUtil::alloc(&mut lock, DnsUtil { _unused: 0 });
+            DnsUtil::wrap(dns_util, &mut lock).into_ffi()
+        },
+        jsg::modules::ModuleType::Internal,
+    );
 }
 
 #[cfg(test)]
 mod tests {
-    use jsg::ResourceTemplate;
     use jsg_test::Harness;
 
     use super::*;
@@ -45,13 +44,10 @@ mod tests {
         let harness = Harness::new();
         harness.run_in_context(|isolate| unsafe {
             let mut lock = jsg::Lock::from_isolate(isolate);
-            let dns_util = jsg::Ref::new(DnsUtil {
-                _state: ResourceState::default(),
-            });
-            let mut dns_util_template = DnsUtilTemplate::new(&mut lock);
+            let dns_util = DnsUtil::alloc(&mut lock, DnsUtil { _unused: 0 });
 
-            let lhs = jsg::wrap_resource(&mut lock, dns_util.clone(), &mut dns_util_template);
-            let rhs = jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template);
+            let lhs = DnsUtil::wrap(dns_util.clone(), &mut lock);
+            let rhs = DnsUtil::wrap(dns_util, &mut lock);
 
             assert_eq!(lhs, rhs);
         });

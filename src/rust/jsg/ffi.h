@@ -21,6 +21,10 @@ enum class ExceptionType : ::std::uint8_t;
 using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
 using WeakCallback = ::rust::Fn<void(Isolate*, size_t)>;
 
+// CXX generates the ModuleType enum definition in v8.rs.h from the Rust shared enum.
+// This forward declaration allows ffi.h to reference the type before that header is included.
+enum class ModuleType : ::std::uint8_t;
+
 struct ResourceDescriptor;
 
 // Function declarations
@@ -47,7 +51,7 @@ void global_make_weak(
     Isolate* isolate, Global* value, size_t /* void* */ data, WeakCallback callback);
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback);
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl);
 
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value);
@@ -62,12 +66,13 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value);
 
 struct ModuleRegistry {
   virtual ~ModuleRegistry() = default;
-  virtual void addBuiltinModule(::rust::Str specifier, ModuleCallback moduleCallback) = 0;
+  virtual void addBuiltinModule(
+      ::rust::Str specifier, ModuleCallback moduleCallback, ModuleType moduleType) = 0;
 };
 
 inline void register_add_builtin_module(
-    ModuleRegistry& registry, ::rust::Str specifier, ModuleCallback callback) {
-  registry.addBuiltinModule(specifier, kj::mv(callback));
+    ModuleRegistry& registry, ::rust::Str specifier, ModuleCallback callback, ModuleType type) {
+  registry.addBuiltinModule(specifier, kj::mv(callback), type);
 }
 
 Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);

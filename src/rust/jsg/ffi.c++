@@ -84,7 +84,7 @@ kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object
 }
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl) {
   auto self = reinterpret_cast<void*>(resource);
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
@@ -136,12 +136,22 @@ Local global_to_local(Isolate* isolate, const Global& value) {
   return to_ffi(kj::mv(local));
 }
 
+// Data passed to V8's weak callback, containing the Rust callback and user data
+struct WeakCallbackData {
+  WeakCallback callback;
+  size_t data;
+
+  WeakCallbackData(WeakCallback cb, size_t d): callback(kj::mv(cb)), data(d) {}
+};
+
 void global_make_weak(Isolate* isolate, Global* value, size_t data, WeakCallback callback) {
-  // callback is unused; GC-based cleanup not yet implemented.
-  // Cleanup happens in Realm::drop() during context disposal.
   auto glbl = global_as_ref_from_ffi<v8::Object>(*value);
-  glbl->SetWeak(reinterpret_cast<void*>(data), [](const v8::WeakCallbackInfo<void>& info) {
-    KJ_UNIMPLEMENTED("global_make_weak");
+  // Heap-allocate the callback data so it survives until the weak callback fires
+  auto* weakData = new WeakCallbackData(kj::mv(callback), data);
+  glbl->SetWeak(weakData, [](const v8::WeakCallbackInfo<WeakCallbackData>& info) {
+    auto* weakData = info.GetParameter();
+    weakData->callback(info.GetIsolate(), weakData->data);
+    delete weakData;
   }, v8::WeakCallbackType::kParameter);
 }
 

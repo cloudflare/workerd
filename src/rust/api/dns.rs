@@ -1,4 +1,4 @@
-use jsg::ResourceState;
+use jsg::Type;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
@@ -104,9 +104,8 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
 
 #[jsg_resource]
 pub struct DnsUtil {
-    // TODO(soon): Generated code. Move this to jsg-macros.
-    #[expect(clippy::pub_underscore_fields)]
-    pub _state: ResourceState,
+    #[expect(clippy::pub_underscore_fields)] // Placeholder until real fields are added
+    pub _unused: u32,
 }
 
 #[jsg_resource]
@@ -258,9 +257,7 @@ mod tests {
 
     #[test]
     fn test_parse_caa_record_issue() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil { _unused: 0 };
         let record = dns_util
             .parse_caa_record("\\# 15 00 05 69 73 73 75 65 70 6b 69 2e 67 6f 6f 67")
             .unwrap();
@@ -272,9 +269,7 @@ mod tests {
 
     #[test]
     fn test_parse_caa_record_issuewild() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil { _unused: 0 };
         let record = dns_util
             .parse_caa_record(
                 "\\# 21 00 09 69 73 73 75 65 77 69 6c 64 6c 65 74 73 65 6e 63 72 79 70 74",
@@ -288,9 +283,7 @@ mod tests {
 
     #[test]
     fn test_parse_caa_record_invalid_field() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil { _unused: 0 };
         let result =
             dns_util.parse_caa_record("\\# 15 00 05 69 6e 76 61 6c 69 64 70 6b 69 2e 67 6f 6f 67");
 
@@ -299,9 +292,7 @@ mod tests {
 
     #[test]
     fn test_parse_naptr_record() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil { _unused: 0 };
         let record = dns_util
             .parse_naptr_record("\\# 37 15 b3 08 ae 01 73 0a 6d 79 2d 73 65 72 76 69 63 65 06 72 65 67 65 78 70 0b 72 65 70 6c 61 63 65 6d 65 6e 74 00")
             .unwrap();
