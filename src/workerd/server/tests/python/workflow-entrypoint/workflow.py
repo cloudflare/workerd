@@ -44,7 +44,7 @@ class WorkflowEntrypointExample(WorkflowEntrypoint):
         await await_step(step_3)
 
         # `step_1` and `step_2` run serially
-        @step.do("step_4", depends=[step_1, step_2], concurrent=False)
+        @step.do("step_4", depends=[step_1, step_2], concurrent=True)
         async def step_4(result1, result2):
             print("Executing step 4 (depends on step 1 and step 2)")
             assert result1["foo"] == "foo"
@@ -52,15 +52,41 @@ class WorkflowEntrypointExample(WorkflowEntrypoint):
 
         await await_step(step_4)
 
+        # tests step memoization - steps 1 and 2 are already resolved
         @step.do("step_5", depends=[step_1, step_2], concurrent=False)
-        async def step_5(result1, result2):
+        async def step_5(result1=(), result2=()):
             print("Executing step 5 (depends on step 1 and step 2)")
             assert result1["foo"] == "foo"
             assert result2["bar"] == "bar"
 
             return result1["foo"] + result2["bar"]
 
-        return await await_step(step_5)
+        return await step_5()
+
+
+class WorkflowEntrypointWithCtx(WorkflowEntrypoint):
+    async def run(self, event, step):
+        @step.do("step_1")
+        async def step_1():
+            # tests backwards compat with workflows that don't have ctx in the step callback
+            print("Executing step 1")
+            return {"foo": "foo"}
+
+        @step.do("step_2")
+        async def step_2(ctx):
+            print("Executing step 2")
+            return {"bar": "bar"}
+
+        @step.do("step_3", depends=[step_1, step_2], concurrent=False)
+        async def step_3(context, result1=(), result2=()):
+            print(f"context exists and is {context}")
+            print("Executing step 5 (depends on step 1 and step 2)")
+            assert result1["foo"] == "foo"
+            assert result2["bar"] == "bar"
+            assert context["attempt"] == "1"
+            return context["metadata"]
+
+        return await step_3()
 
 
 async def test(ctrl, env, ctx):

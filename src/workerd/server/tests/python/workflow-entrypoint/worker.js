@@ -4,7 +4,8 @@ import * as assert from 'node:assert';
 class Context extends RpcTarget {
   async do(name, fn) {
     try {
-      const result = await fn();
+      const ctx = { attempt: '1', metadata: 'expected_return_metadata' };
+      const result = await fn(ctx);
       return result;
     } catch (e) {
       console.log(`Error received: ${e.name} Message: ${e.message}`);
@@ -19,12 +20,20 @@ export default {
     // JS types
     const stubStep = new Context();
 
-    const resp = await env.PythonWorkflow.run(
+    let resp = await env.PythonWorkflow.run(
       {
         foo: 'bar',
       },
       stubStep
     );
     assert.deepStrictEqual(resp, 'foobar');
+
+    resp = await env.PythonWorkflowWithCtx.run(
+      {
+        foo: 'bar',
+      },
+      stubStep
+    );
+    assert.deepStrictEqual(resp, 'expected_return_metadata');
   },
 };

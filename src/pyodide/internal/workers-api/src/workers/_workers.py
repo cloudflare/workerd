@@ -1163,8 +1163,20 @@ class _WorkflowStepWrapper:
 
 
 async def _do_call(entrypoint, name, config, callback, *results):
-    async def _callback():
-        result = callback(*results)
+    async def _callback(ctx=None):
+        sig = inspect.signature(callback)
+        params = [
+            p
+            for p in sig.parameters.values()
+            if p.kind
+            not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        ]
+        wants_ctx = len(params) > len(results)
+
+        if wants_ctx and ctx is not None:
+            result = callback(python_from_rpc(ctx), *results)
+        else:
+            result = callback(*results)
 
         if inspect.iscoroutine(result):
             result = await result
