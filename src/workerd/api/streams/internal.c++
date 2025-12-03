@@ -232,7 +232,7 @@ class AllReader final {
       auto size = part.size() - skipBytes;
       skipBytes = 0;
       KJ_DASSERT(size <= out.size() - pos);
-      memcpy(out.begin() + pos, begin, size);
+      out.slice(pos, pos + size).copyFrom(kj::arrayPtr(begin, size));
       pos += size;
     }
   }
