@@ -88,6 +88,7 @@ pub mod ffi {
         ) -> Local;
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
+
     }
 
     pub struct ConstructorDescriptor {
@@ -122,13 +123,22 @@ pub mod ffi {
             isolate: *mut Isolate,
             resource: usize,      /* R* */
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-            drop_callback: usize, /* R* -> () */
         ) -> Local /* v8::Local<Value> */;
 
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> usize /* R* */;
+    }
+
+    /// Module visibility level, mirroring workerd::jsg::ModuleType from modules.capnp.
+    ///
+    /// CXX shared enums cannot reference existing C++ enums, so we define matching values here.
+    /// The conversion to workerd::jsg::ModuleType happens in jsg.h's RustModuleRegistry.
+    enum ModuleType {
+        Bundle = 0,
+        Builtin = 1,
+        Internal = 2,
     }
 
     unsafe extern "C++" {
@@ -138,6 +148,7 @@ pub mod ffi {
             registry: Pin<&mut ModuleRegistry>,
             specifier: &str,
             callback: unsafe fn(*mut Isolate) -> Local,
+            module_type: ModuleType,
         );
     }
 }
