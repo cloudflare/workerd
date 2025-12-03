@@ -129,7 +129,7 @@ jobs:
         # dependencies of header targets properly).
         if: inputs.parse_headers
         run: |
-          bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util
+          bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util //src/workerd/io:actor-storage
       - name: Upload test logs
         if: inputs.upload_test_logs
         uses: actions/upload-artifact@v4
