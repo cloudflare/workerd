@@ -123,15 +123,15 @@ export class ToMarkdownService {
 
     const data = (await res.json()) as { result: ConversionResponse[] };
 
+    // If the user sent a list of files, return an array of results, otherwise, return just the first object
+    if (Array.isArray(files)) {
+      return data.result;
+    }
+
     if (data.result.length === 0) {
       throw new AiInternalError(
         'Internal Error Converting files into Markdown'
       );
-    }
-
-    // If the user sent a list of files, return an array of results, otherwise, return just the first object
-    if (Array.isArray(files)) {
-      return data.result;
     }
 
     const obj = data.result.at(0);
