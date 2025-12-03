@@ -79,6 +79,11 @@ new-wpt-test test_name:
   ./tools/cross/format.py
   bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
 
+# Specify the full Bazel target name for the test to be created.
+# e.g. just new-test //src/workerd/api/tests:v8-temporal-test
+new-test test_name:
+  ./tools/unix/new-test.sh {{test_name}}
+
 format: rustfmt
   python3 tools/cross/format.py
 
