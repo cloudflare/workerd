@@ -2,31 +2,35 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import {
-  beforeRequest,
-  loadPyodide,
-  clearSignals,
-} from 'pyodide-internal:python';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
-import { patchLoadPackage } from 'pyodide-internal:setupPackages';
-import {
-  IS_WORKERD,
-  LOCKFILE,
-  TRANSITIVE_REQUIREMENTS,
-  MAIN_MODULE_NAME,
-  WORKERD_INDEX_URL,
-  SHOULD_SNAPSHOT_TO_DISK,
-  WORKFLOWS_ENABLED,
-  LEGACY_GLOBAL_HANDLERS,
-  LEGACY_INCLUDE_SDK,
-} from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import {
-  PythonWorkersInternalError,
+  IS_WORKERD,
+  LEGACY_GLOBAL_HANDLERS,
+  LEGACY_INCLUDE_SDK,
+  LOCKFILE,
+  MAIN_MODULE_NAME,
+  SHOULD_SNAPSHOT_TO_DISK,
+  TRANSITIVE_REQUIREMENTS,
+  WORKERD_INDEX_URL,
+  WORKFLOWS_ENABLED,
+  WORKFLOWS_IMPLICIT_DEPS,
+} from 'pyodide-internal:metadata';
+import {
+  beforeRequest,
+  clearSignals,
+  loadPyodide,
+} from 'pyodide-internal:python';
+import { patchLoadPackage } from 'pyodide-internal:setupPackages';
+import {
+  LOADED_SNAPSHOT_TYPE,
+  maybeCollectDedicatedSnapshot,
+} from 'pyodide-internal:snapshot';
+import {
   PythonUserError,
+  PythonWorkersInternalError,
   reportError,
 } from 'pyodide-internal:util';
-import { LOADED_SNAPSHOT_TYPE } from 'pyodide-internal:snapshot';
 
 type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
 
@@ -69,8 +73,8 @@ export type PyodideEntrypointHelper = {
   cloudflareSocketsModule: any;
   workerEntrypoint: any;
   patchWaitUntil: typeof patchWaitUntil;
+  workflowsImplicitDeps: boolean;
 };
-import { maybeCollectDedicatedSnapshot } from 'pyodide-internal:snapshot';
 
 // Function to import JavaScript modules from Python
 let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
@@ -96,6 +100,7 @@ export function setDoAnImport(
     cloudflareSocketsModule,
     workerEntrypoint,
     patchWaitUntil,
+    workflowsImplicitDeps: WORKFLOWS_IMPLICIT_DEPS,
   };
 }
 
