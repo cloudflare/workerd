@@ -3,13 +3,13 @@ using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     (name = "py", worker = .pyWorker),
+    (name = "pyOld", worker = .pyWorkerOld),
     (name = "js", worker = .jsWorker),
   ],
 );
 
 const pyWorker :Workerd.Worker = (
-
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "rpc", "disable_python_no_global_handlers"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "python_workflows_implicit_dependencies"],
 
   modules = [
     (name = "workflow.py", pythonModule = embed "workflow.py"),
@@ -17,12 +17,24 @@ const pyWorker :Workerd.Worker = (
 
   bindings = [
     (name = "PythonWorkflow", service = (name = "py", entrypoint = "WorkflowEntrypointExample")),
+    (name = "PythonWorkflowBackwardsCompat", service = (name = "py", entrypoint = "WorkflowEntrypointBackwardsCompat")),
+  ],
+);
+
+const pyWorkerOld :Workerd.Worker = (
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "no_python_workflows_implicit_dependencies"],
+
+  modules = [
+    (name = "workflow-old.py", pythonModule = embed "workflow-old.py"),
+  ],
+
+  bindings = [
+    (name = "PythonWorkflowDepends", service = (name = "pyOld", entrypoint = "PythonWorkflowDepends")),
   ],
 );
 
 const jsWorker :Workerd.Worker = (
-
-  compatibilityFlags = ["nodejs_compat", "rpc", "disable_python_no_global_handlers"],
+  compatibilityFlags = ["nodejs_compat", "rpc"],
 
   modules = [
     (name = "worker", esModule = embed "worker.js"),
@@ -30,5 +42,7 @@ const jsWorker :Workerd.Worker = (
 
   bindings = [
     (name = "PythonWorkflow", service = (name = "py", entrypoint = "WorkflowEntrypointExample")),
+    (name = "PythonWorkflowBackwardsCompat", service = (name = "py", entrypoint = "WorkflowEntrypointBackwardsCompat")),
+    (name = "PythonWorkflowDepends", service = (name = "pyOld", entrypoint = "PythonWorkflowDepends")),
   ],
 );

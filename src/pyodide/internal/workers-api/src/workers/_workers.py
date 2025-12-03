@@ -20,6 +20,8 @@ from http import HTTPMethod, HTTPStatus
 from types import LambdaType
 from typing import Any, Never, Protocol, TypedDict, Unpack
 
+import _cloudflare_compat_flags
+
 # Get globals modules and import function from the entrypoint-helper
 import _pyodide_entrypoint_helper
 import js
@@ -1130,28 +1132,60 @@ class _WorkflowStepWrapper:
         self._js_step = js_step
         self._memoized_dependencies = {}
         self._in_flight = {}
+        self.step_closures = {}
 
-    def do(self, name, depends=None, concurrent=False, config=None):
+    def do(self, name=None, *, depends=None, concurrent=False, config=None):
         def decorator(func):
             async def wrapper():
+                # if implicit params are enabled, each param that is not context should be treated as a dependency and resolved
+                # In other words, we introspect the declaration and call a function (need to make sure it's a step) with the same name as the corresponding param
+                # This new code path should discard depends, as we encourage users to implicitly declare their invariant steps in the signature
+                # if the compat flag is disabled, then we just maintain the same legacy behavior
+                results_future_list = depends
+
+                if python_from_rpc(_cloudflare_compat_flags)[
+                    "python_workflows_implicit_dependencies"
+                ]:
+                    if depends is not None:
+                        TypeError(
+                            "Received unexpected parameter depends. This was deprecated and dependencies can be declared using callable names"
+                        )
+                    sig = inspect.signature(func)
+                    results_future_list = []
+                    for p in sig.parameters.values():
+                        if p.name in self.step_closures:
+                            results_future_list.append(self.step_closures[p.name])
+                        elif p.name == "ctx":
+                            results_future_list.append(p)
+
                 if concurrent:
                     results = await gather(
-                        *[self._resolve_dependency(dep) for dep in depends or []]
+                        *[
+                            self._resolve_dependency(dep)
+                            for dep in results_future_list or []
+                        ]
                     )
                 else:
                     results = [
-                        await self._resolve_dependency(dep) for dep in depends or []
+                        await self._resolve_dependency(dep)
+                        for dep in results_future_list or []
                     ]
-                python_results = [python_from_rpc(result) for result in results]
-                return await _do_call(self, name, config, func, *python_results)
+                python_results = [
+                    result
+                    if (hasattr(result, "name") and result.name == "ctx")
+                    else python_from_rpc(result)
+                    for result in results
+                ]
+                step_name = func.__name__ if name is None else name
+                return await _do_call(self, step_name, config, func, *python_results)
 
             wrapper._step_name = name
+            self.step_closures[name] = wrapper
             return wrapper
 
         return decorator
 
     def sleep(self, *args, **kwargs):
-        # all types should be primitives - no need for explicit translation
         return self._js_step.sleep(*args, **kwargs)
 
     def sleep_until(self, name, timestamp):
@@ -1170,7 +1204,9 @@ class _WorkflowStepWrapper:
         )
 
     async def _resolve_dependency(self, dep):
-        if dep._step_name in self._memoized_dependencies:
+        if hasattr(dep, "name") and dep.name == "ctx":
+            return dep
+        elif dep._step_name in self._memoized_dependencies:
             return self._memoized_dependencies[dep._step_name]
         elif dep._step_name in self._in_flight:
             return await self._in_flight[dep._step_name]
@@ -1179,8 +1215,13 @@ class _WorkflowStepWrapper:
 
 
 async def _do_call(entrypoint, name, config, callback, *results):
-    async def _callback():
-        result = callback(*results)
+    async def _callback(ctx=None):
+        # deconstruct the actual ctx object
+        resolved_results = tuple(
+            python_from_rpc(ctx) if hasattr(r, "name") and r.name == "ctx" else r
+            for r in results
+        )
+        result = callback(*resolved_results)
 
         if inspect.iscoroutine(result):
             result = await result

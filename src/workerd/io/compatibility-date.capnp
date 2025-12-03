@@ -1316,4 +1316,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Node.js-compatible versions from node:timers. setTimeout and setInterval return
   # Timeout objects with methods like refresh(), ref(), unref(), and hasRef().
   # This flag requires nodejs_compat or nodejs_compat_v2 to be enabled.
+
+  pythonWorkflowsImplicitDeps @154 :Bool
+    $compatEnableFlag("python_workflows_implicit_dependencies")
+    $compatDisableFlag("no_python_workflows_implicit_dependencies")
+    $impliedByAfterDate(name = "pythonWorkers", date = "2026-01-15");
+  # replaces depends param on steps to an implicit approach with step callables passed as params
+  # these steps are called internally and act as dependencies
 }

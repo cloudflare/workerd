@@ -2,9 +2,15 @@ import { RpcTarget } from 'cloudflare:workers';
 import * as assert from 'node:assert';
 
 class Context extends RpcTarget {
+  constructor(shouldSendCtx) {
+    super();
+    this.shouldSendCtx = shouldSendCtx;
+  }
+
   async do(name, fn) {
     try {
-      const result = await fn();
+      const ctx = { attempt: '1', metadata: 'expected_return_metadata' };
+      const result = this.shouldSendCtx ? await fn(ctx) : await fn();
       return result;
     } catch (e) {
       console.log(`Error received: ${e.name} Message: ${e.message}`);
@@ -16,10 +22,35 @@ class Context extends RpcTarget {
 
 export default {
   async test(ctrl, env, ctx) {
-    // JS types
-    const stubStep = new Context();
+    let stubStep = new Context(true);
 
-    const resp = await env.PythonWorkflow.run(
+    // Tests forward compat - i.e.: python workflows should be compatible with steps that pass a ctx argument
+    // this param is optional and searched by name. Meaning it's not positional
+    let resp = await env.PythonWorkflow.run(
+      {
+        foo: 'bar',
+      },
+      stubStep
+    );
+    assert.deepStrictEqual(resp, 'foobar');
+
+    // Tests backwards compat - i.e.: new logic shouldn't break workflows until a release is done with
+    // ctx being passed as a step argument - this is not controlled via compat flag
+    // Moreover, this workflow also tests that dependencies are no longer resolved through the old code path
+    stubStep = new Context(false);
+    resp = await env.PythonWorkflowBackwardsCompat.run(
+      {
+        foo: 'bar',
+      },
+      stubStep
+    );
+    assert.deepStrictEqual(resp, 'foo');
+
+    // Tests backwards compat for dependency resolution - previously deps were not following a name based
+    // approach. Instead, they were passed in the same order as they were declared in the depends param
+    // This test also doesn't pass any ctx to steps
+    stubStep = new Context(false);
+    resp = await env.PythonWorkflowDepends.run(
       {
         foo: 'bar',
       },
