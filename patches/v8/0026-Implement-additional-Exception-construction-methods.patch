@@ -6,7 +6,7 @@ Subject: Implement additional Exception construction methods
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-exception.h b/include/v8-exception.h
-index 5441a0ab6a403c566e7b0b6002e720c971480893..b9933027aaf9f7842740d6a6742a2c73da65a46a 100644
+index 5441a0ab6a403c566e7b0b6002e720c971480893..5a4f964beb948a5115d7e9065fcb5092e898a99c 100644
 --- a/include/v8-exception.h
 +++ b/include/v8-exception.h
 @@ -48,6 +48,14 @@ class V8_EXPORT Exception {
@@ -16,7 +16,7 @@ index 5441a0ab6a403c566e7b0b6002e720c971480893..b9933027aaf9f7842740d6a6742a2c73
 +  static Local<Value> URIError(Local<String> message,
 +                               Local<Value> options = {});
 +  static Local<Value> EvalError(Local<String> message,
-+                               Local<Value> options = {});
++                                Local<Value> options = {});
 +  static Local<Value> AggregateError(Local<String> message,
 +                                     Local<Value> options = {});
 +  static Local<Value> SuppressedError(Local<String> message,

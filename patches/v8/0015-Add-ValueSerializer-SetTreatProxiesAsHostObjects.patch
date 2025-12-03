@@ -83,7 +83,7 @@ index b47d11d402cb7855d8682ba966f3551738e3c621..e638bcea0b5efcfef177e45726dca308
    if (!delegate_) {
      isolate_->Throw(*isolate_->factory()->NewError(
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 2d0a746c90522500fcf17d73f3024512b1bb5481..7ec442c5e002e8a7e00c7d0ea5dc3e77744bb55d 100644
+index 2d0a746c90522500fcf17d73f3024512b1bb5481..eb870051ab48a61dcbd558163f945ec1284646dc 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -111,6 +111,15 @@ class ValueSerializer {
@@ -102,17 +102,16 @@ index 2d0a746c90522500fcf17d73f3024512b1bb5481..7ec442c5e002e8a7e00c7d0ea5dc3e77
   private:
    // Managing allocations of the internal buffer.
    Maybe<bool> ExpandBuffer(size_t required_capacity);
-@@ -161,8 +170,7 @@ class ValueSerializer {
+@@ -161,7 +170,7 @@ class ValueSerializer {
  #endif  // V8_ENABLE_WEBASSEMBLY
    Maybe<bool> WriteSharedObject(DirectHandle<HeapObject> object)
        V8_WARN_UNUSED_RESULT;
 -  Maybe<bool> WriteHostObject(DirectHandle<JSObject> object)
--      V8_WARN_UNUSED_RESULT;
-+  Maybe<bool> WriteHostObject(DirectHandle<JSReceiver> object) V8_WARN_UNUSED_RESULT;
++  Maybe<bool> WriteHostObject(DirectHandle<JSReceiver> object)
+       V8_WARN_UNUSED_RESULT;
  
    /*
-    * Reads the specified keys from the object and writes key-value pairs to the
-@@ -195,6 +203,7 @@ class ValueSerializer {
+@@ -195,6 +204,7 @@ class ValueSerializer {
    bool has_custom_host_objects_ = false;
    bool treat_array_buffer_views_as_host_objects_ = false;
    bool treat_functions_as_host_objects_ = false;
