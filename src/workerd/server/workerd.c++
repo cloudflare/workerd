@@ -846,6 +846,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         .addOptionWithArg({"control-fd"}, CLI_METHOD(enableControl), "<fd>",
             "Enable sending of control messages on descriptor <fd>. Currently this "
             "only reports the port each socket is listening on when ready.")
+        .addOptionWithArg({"debug-port"}, CLI_METHOD(enableDebugPort), "<addr>",
+            "Listen on the specified address for debug RPC connections. This exposes "
+            "a privileged interface that allows access to all services in the process. "
+            "For use by miniflare and local development only.")
         .callAfterParsing(CLI_METHOD(serve))
         .build();
   }
@@ -1085,6 +1089,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     int fd = KJ_UNWRAP_OR(param.tryParseAs<uint>(),
         CLI_ERROR("Output value must be a file descriptor (non-negative integer)."));
     server->enableControl(fd);
+  }
+
+  void enableDebugPort(kj::StringPtr param) {
+    server->enableDebugPort(kj::str(param));
   }
 
   void setPackageDiskCacheDir(kj::StringPtr pathStr) {

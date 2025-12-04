@@ -201,7 +201,7 @@ void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
 }
 
 bool Serializer::HasCustomHostObject(v8::Isolate* isolate) {
-  // V8 will always call WriteHostObject() for objects that have internal fields. We only need
+  // By default, V8 will call WriteHostObject() for objects that have internal fields. We only need
   // to override IsHostObject() if we want to treat pure-JS objects differently, which we do if
   // treatClassInstancesAsPlainObjects is false, or if treatErrorsAsHostObjects is true.
   return !treatClassInstancesAsPlainObjects || treatErrorsAsHostObjects;
@@ -211,10 +211,19 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
   // This is only called if HasCustomHostObject() returned true.
   KJ_ASSERT(!treatClassInstancesAsPlainObjects || treatErrorsAsHostObjects);
 
+  // Any object with internal fields is DEFINITELY a host object!
+  if (object->InternalFieldCount() > 0) {
+    return v8::Just(true);
+  }
+
+  // Native errors are host object if the enhanced_error_serialization compat flag is enalbed.
   if (object->IsNativeError()) {
     return v8::Just(treatErrorsAsHostObjects);
   }
 
+  // If `treatClassInstancesAsPlainObjects` is on (the historical default), then nothing else is
+  // a host object. If it has been turned off (e.g. for RPC), then any object that isn't a raw
+  // object will be treated as a host object (mainly so that we can error out on these).
   if (treatClassInstancesAsPlainObjects) return v8::Just(false);
   KJ_ASSERT(!prototypeOfObject.IsEmpty());
 

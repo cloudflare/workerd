@@ -303,27 +303,29 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
         "Cannot cache response to a range request (206 Partial Content).");
 
     auto responseHeadersRef = jsResponse->getHeaders(js);
-    auto cacheControl = responseHeadersRef->getNoChecks(js, "cache-control"_kj);
+    auto cacheControl = responseHeadersRef->getCommon(js, capnp::CommonHeaderName::CACHE_CONTROL);
 
-    KJ_IF_SOME(vary, responseHeadersRef->getNoChecks(js, "vary"_kj)) {
+    KJ_IF_SOME(vary, responseHeadersRef->getCommon(js, capnp::CommonHeaderName::VARY)) {
       JSG_REQUIRE(vary.findFirst('*') == kj::none, TypeError,
           "Cannot cache response with 'Vary: *' header.");
     }
 
-    KJ_IF_SOME(cacheControl, responseHeadersRef->getNoChecks(js, "cache-control"_kj)) {
+    KJ_IF_SOME(cacheControl,
+        responseHeadersRef->getCommon(js, capnp::CommonHeaderName::CACHE_CONTROL)) {
       traceContext.userSpan.setTag(
           "cache.request.payload.header.cache_control"_kjc, cacheControl.asPtr());
     }
-    KJ_IF_SOME(cacheTag, responseHeadersRef->getNoChecks(js, "cache-tag"_kj)) {
+    KJ_IF_SOME(cacheTag, responseHeadersRef->getPtr(js, "cache-tag"_kj)) {
       traceContext.userSpan.setTag("cache.request.payload.header.cache_tag"_kjc, cacheTag.asPtr());
     }
-    KJ_IF_SOME(etag, responseHeadersRef->getNoChecks(js, "etag"_kj)) {
+    KJ_IF_SOME(etag, responseHeadersRef->getCommon(js, capnp::CommonHeaderName::ETAG)) {
       traceContext.userSpan.setTag("cache.request.payload.header.etag"_kjc, etag.asPtr());
     }
-    KJ_IF_SOME(expires, responseHeadersRef->getNoChecks(js, "expires"_kj)) {
+    KJ_IF_SOME(expires, responseHeadersRef->getCommon(js, capnp::CommonHeaderName::EXPIRES)) {
       traceContext.userSpan.setTag("cache.request.payload.header.expires"_kjc, expires.asPtr());
     }
-    KJ_IF_SOME(lastModified, responseHeadersRef->getNoChecks(js, "last-modified"_kj)) {
+    KJ_IF_SOME(lastModified,
+        responseHeadersRef->getCommon(js, capnp::CommonHeaderName::LAST_MODIFIED)) {
       traceContext.userSpan.setTag(
           "cache.request.payload.header.last_modified"_kjc, lastModified.asPtr());
     }

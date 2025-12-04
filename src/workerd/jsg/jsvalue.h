@@ -5,6 +5,7 @@
 #include <v8-container.h>
 #include <v8-date.h>
 #include <v8-external.h>
+#include <v8-proxy.h>
 
 namespace workerd::jsg {
 
@@ -60,7 +61,6 @@ inline void requireOnStack(void* self) {
   V(WasmModuleObject)                                                                              \
   JS_TYPE_CLASSES(V)
 
-template <typename TypeWrapper>
 struct JsValueWrapper;
 
 // Filters for `JsObject::getPropertyNames()`
@@ -163,7 +163,6 @@ class JsValue final {
  private:
   v8::Local<v8::Value> inner;
   friend class Lock;
-  template <typename TypeWrapper>
   friend struct JsValueWrapper;
   template <typename T, typename Self>
   friend class JsBase;
@@ -205,7 +204,6 @@ class JsBase {
 #define V(Name) friend class Js##Name;
   JS_TYPE_CLASSES(V)
 #undef V
-  template <typename TypeWrapper>
   friend struct JsValueWrapper;
   template <typename U>
   friend class JsRef;
@@ -274,7 +272,6 @@ class JsString final: public JsBase<v8::String, JsString> {
   size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  jsg::ByteString toByteString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   int hashCode() const;
@@ -328,7 +325,7 @@ class JsRegExp final: public JsBase<v8::RegExp, JsRegExp> {
 
 class JsDate final: public JsBase<v8::Date, JsDate> {
  public:
-  jsg::ByteString toUTCString(Lock& js) const;
+  kj::String toUTCString(Lock& js) const;
   kj::String toISOString(Lock& js) const;
   operator kj::Date() const;
   using JsBase<v8::Date, JsDate>::JsBase;
@@ -716,7 +713,6 @@ inline kj::String KJ_STRINGIFY(const JsValue& value) {
 template <typename T>
 concept JsValueType = std::is_assignable_v<JsValue, T>;
 
-template <typename TypeWrapper>
 struct JsValueWrapper {
 #define TYPES_TO_WRAP(V)                                                                           \
   V(Value)                                                                                         \
@@ -772,9 +768,7 @@ struct JsValueWrapper {
       v8::Local<v8::Value> handle,
       JsRef<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto isolate = js.v8Isolate;
-    KJ_IF_SOME(result,
-        TypeWrapper::from(isolate).tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+    KJ_IF_SOME(result, tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
       return JsRef(js, result);
     }
     return kj::none;

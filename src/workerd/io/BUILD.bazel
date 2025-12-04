@@ -124,6 +124,8 @@ wd_cc_library(
         "//src/workerd/jsg:script",
         "//src/workerd/util:checked-queue",
         "//src/workerd/util:exception",
+        "//src/workerd/util:header-validation",
+        "//src/workerd/util:immediate-crash",
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:small-set",
         "//src/workerd/util:sqlite",
@@ -351,6 +353,7 @@ wd_capnp_library(src = "cdp.capnp")
 wd_capnp_library(
     src = "worker-interface.capnp",
     deps = [
+        ":frankenvalue_capnp",
         ":outcome_capnp",
         ":script-version_capnp",
         ":trace_capnp",

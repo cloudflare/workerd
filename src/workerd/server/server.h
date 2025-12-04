@@ -66,6 +66,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
+  void enableDebugPort(kj::String addr) {
+    debugPortOverride = kj::mv(addr);
+  }
   void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
     pythonConfig.packageDiskCacheRoot = kj::mv(dkr);
   }
@@ -146,6 +149,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Maybe<kj::String> inspectorOverride;
   kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorIsolateRegistrar;
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
+  kj::Maybe<kj::String> debugPortOverride;
 
   struct GlobalContext;
   // General context needed to construct workers. Initialized early in run().
@@ -246,6 +250,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
 
+  kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
+
   class InvalidConfigService;
   class InvalidConfigActorClass;
   class ExternalHttpService;
@@ -254,7 +260,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class DiskDirectoryService;
   class WorkerService;
   class WorkerEntrypointService;
+  class WorkerdBootstrapImpl;
   class HttpListener;
+  class DebugPortListener;
 
   struct ErrorReporter;
   struct ConfigErrorReporter;

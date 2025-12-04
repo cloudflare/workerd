@@ -1596,7 +1596,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   auto cs = lock.startCriticalSection();
   auto cs2 = kj::addRef(*cs);
 
-  using T = jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>>;
+  using T = jsg::RemovePromise<jsg::ReturnType<Func, void, true>>;
   auto [result, resolver] = js.newPromiseAndResolver<T>();
 
   addTask(

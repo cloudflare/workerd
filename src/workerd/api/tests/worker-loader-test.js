@@ -510,7 +510,21 @@ export let isolateUniqueness = {
     assert.strictEqual(await anonymousAgain.increment(), 2);
     assert.strictEqual(await anonymousAgain.increment(), 3);
 
-    assert.strictEqual(loadCount, 5);
+    // Test that null/undefined name parameter creates unique isolates each time
+    // Each call should generate a unique name internally.
+    let noName1 = env.loader.get(null, loadCodeCallback).getEntrypoint();
+    let noName2 = env.loader.get(undefined, loadCodeCallback).getEntrypoint();
+    let noName3 = env.loader.get(undefined, loadCodeCallback).getEntrypoint();
+
+    // Each should be a different isolate
+    assert.strictEqual(await noName1.increment(), 0);
+    assert.strictEqual(await noName1.increment(), 1);
+    assert.strictEqual(await noName2.increment(), 0);
+    assert.strictEqual(await noName2.increment(), 1);
+    assert.strictEqual(await noName3.increment(), 0);
+    assert.strictEqual(await noName3.increment(), 1);
+
+    assert.strictEqual(loadCount, 8);
   },
 };
 

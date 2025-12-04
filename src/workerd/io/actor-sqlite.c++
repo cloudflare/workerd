@@ -842,8 +842,15 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         // We have a clean local alarm time that is earlier than the handler's scheduled time,
         // which suggests that either the alarm manager is working with stale data or that local
         // alarm time has somehow gotten out of sync with the scheduled alarm time.
-        LOG_WARNING_PERIODICALLY("NOSENTRY SQLite alarm handler canceled.", scheduledTime, actorId,
-            localAlarmState.orDefault(kj::UNIX_EPOCH));
+
+        // Only log if the alarm manager is significantly late (>10 seconds behind SQLite)
+        // We know localAlarmState has a value here because we're in the branch where it's earlier
+        // than scheduledTime (not equal, and not later).
+        auto localTime = KJ_ASSERT_NONNULL(localAlarmState);
+        if (scheduledTime - localTime > 10 * kj::SECONDS) {
+          LOG_WARNING_PERIODICALLY(
+              "NOSENTRY SQLite alarm handler canceled.", scheduledTime, actorId, localTime);
+        }
 
         // Tell the caller to wait for successful rescheduling before cancelling the current
         // handler invocation.
@@ -925,7 +932,7 @@ kj::Promise<kj::String> ActorSqlite::getCurrentBookmark(SpanParent parentSpan) {
       paddedHex(0), '-', pad);
 }
 
-kj::Promise<void> ActorSqlite::waitForBookmark(kj::StringPtr bookmark) {
+kj::Promise<void> ActorSqlite::waitForBookmark(kj::StringPtr bookmark, SpanParent parentSpan) {
   // This is an ersatz implementation that's good enough for local dev with D1's Session API.
   requireNotBroken();
   return kj::READY_NOW;

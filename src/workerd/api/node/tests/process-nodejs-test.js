@@ -1133,3 +1133,9 @@ export const processToStringTag = {
     );
   },
 };
+
+export const processGetReport = {
+  test() {
+    assert.deepStrictEqual(process.report.getReport(), {});
+  },
+};

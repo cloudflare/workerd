@@ -1019,8 +1019,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   emailSendingQueuing @116 :Bool
       $compatEnableFlag("enable_email_sending_queuing")
-      $compatDisableFlag("disable_email_sending_queuing")
-      $experimental;
+      $compatDisableFlag("disable_email_sending_queuing");
   # Enables Queuing on the `.send(message: EmailMessage)` function on send_email binding if there's
   # a temporary error on email delivery.
   # Note that by enabling this, user-provided Message-IDs are stripped and

@@ -245,11 +245,9 @@ class IoChannelFactory {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 
-  // Use a dynamic Worker loader binding to obtain an Worker by name. If the named Worker
-  // doesn't already exist, the callback will be called to fetch the source code from which the
-  // Worker should be created.
+  // Use a dynamic Worker loader binding to obtain an Worker by name. If name is null, or if the named Worker doesn't already exist, the callback will be called to fetch the source code from which the Worker should be created.
   virtual kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
-      kj::String name,
+      kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
     JSG_FAIL_REQUIRE(Error, "Dynamic worker loading is not supported by this runtime.");
   }

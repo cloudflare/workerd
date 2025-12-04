@@ -57,10 +57,10 @@ BENCHMARK_F(Response, bodyWithHeaders)(benchmark::State& state) {
     auto& js = env.js;
     for (auto _: state) {
       api::Response::InitializerDict init;
-      jsg::Dict<jsg::ByteString, jsg::ByteString> headersDict;
-      headersDict.fields = kj::heapArray<jsg::Dict<jsg::ByteString, jsg::ByteString>::Field>(1);
-      headersDict.fields[0].name = jsg::ByteString(kj::str("Content-Type"));
-      headersDict.fields[0].value = jsg::ByteString(kj::str("text/html"));
+      jsg::Dict<kj::String, kj::String> headersDict;
+      headersDict.fields = kj::heapArray<jsg::Dict<kj::String, kj::String>::Field>(1);
+      headersDict.fields[0].name = kj::str("Content-Type");
+      headersDict.fields[0].value = kj::str("text/html");
       init.headers = kj::mv(headersDict);
 
       auto body = api::Body::Initializer(kj::str("Hello World"));

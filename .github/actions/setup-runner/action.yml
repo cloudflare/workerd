@@ -38,6 +38,12 @@ runs:
         git config --show-scope --show-origin core.symlinks
         git config --system core.longpaths true
         [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=\\\\?\\C:\\tmp')
+    - name: Setup macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        # Build using Xcode 16.3 (equivalent to Clang 19)
+        sudo xcode-select -s "/Applications/Xcode_16.3.app"
     - name: Configure git hooks
       shell: bash
       # Configure git to quell an irrelevant warning for runners (they never commit / push).

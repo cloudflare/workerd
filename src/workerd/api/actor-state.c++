@@ -854,7 +854,10 @@ kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestoreBookmark(kj::S
 }
 
 kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
-  return cache->waitForBookmark(bookmark);
+  auto& context = IoContext::current();
+  auto span = context.makeTraceSpan("durable_object_storage_waitForBookmark"_kjc);
+
+  return cache->waitForBookmark(bookmark, span).attach(kj::mv(span));
 }
 
 void DurableObjectStorage::ensureReplicas() {

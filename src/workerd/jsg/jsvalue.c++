@@ -355,26 +355,6 @@ jsg::USVString JsString::toUSVString(Lock& js) const {
   return jsg::USVString(kj::mv(buf));
 }
 
-jsg::ByteString JsString::toByteString(Lock& js) const {
-  auto result = jsg::ByteString(toString(js));
-
-  if (!simdutf::validate_ascii(result.begin(), result.size())) {
-    // If storage is one-byte or the string contains only one-byte
-    // characters, we know that it contains extended ASCII characters.
-    //
-    // The order of execution matters, since ContainsOnlyOneByte()
-    // will scan the whole string for two-byte storage.
-    if (inner->ContainsOnlyOneByte()) {
-      result.warning = ByteString::Warning::CONTAINS_EXTENDED_ASCII;
-    } else {
-      // Storage is two-bytes and it contains two-byte characters.
-      result.warning = ByteString::Warning::CONTAINS_UNICODE;
-    }
-  }
-
-  return kj::mv(result);
-}
-
 jsg::DOMString JsString::toDOMString(Lock& js) const {
   auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
   inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
@@ -455,9 +435,9 @@ bool JsRegExp::match(Lock& js, kj::StringPtr input) {
   return !result->IsNull();
 }
 
-jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
+kj::String JsDate::toUTCString(jsg::Lock& js) const {
   JsString str(inner->ToUTCString());
-  return jsg::ByteString(str.toString(js));
+  return str.toString(js);
 }
 
 kj::String JsDate::toISOString(jsg::Lock& js) const {

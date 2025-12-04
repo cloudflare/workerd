@@ -59,7 +59,7 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
 }
 
 jsg::Ref<WorkerStub> WorkerLoader::get(
-    jsg::Lock& js, kj::String name, jsg::Function<jsg::Promise<WorkerCode>()> getCode) {
+    jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode) {
   auto& ioctx = IoContext::current();
 
   auto reenterAndGetCode = ioctx.makeReentryCallback(

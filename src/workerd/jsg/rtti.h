@@ -246,7 +246,6 @@ FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
   F(kj::String)                                                                                    \
   F(kj::StringPtr)                                                                                 \
   F(v8::String)                                                                                    \
-  F(ByteString)                                                                                    \
   F(USVString)                                                                                     \
   F(DOMString)                                                                                     \
   F(jsg::JsString)
@@ -579,7 +578,7 @@ struct MemberCounter {
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() { /* not a member */ }
 
-  template <const char* name, typename Method, Method method>
+  template <const char* name, auto Method>
   inline void registerMethod() {
     ++members;
   }
@@ -801,14 +800,14 @@ struct MembersBuilder {
     BuildRtti<Configuration, Property>::build(prop.initType(), rtti);
   }
 
-  template <const char* name, typename Method, Method>
+  template <const char* name, auto Method>
   inline void registerMethod() {
     auto method = members[memberIndex++].initMethod();
 
     method.setName(name);
-    method.setFastApiCompatible(isFastApiCompatible<Method>);
+    method.setFastApiCompatible(isFastApiCompatible<decltype(Method)>);
 
-    using Traits = FunctionTraits<Method>;
+    using Traits = FunctionTraits<decltype(Method)>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);

@@ -50,7 +50,7 @@ static kj::Date parseDate(jsg::Lock& js, kj::StringPtr value) {
   return js.date(value);
 }
 
-static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
+static kj::String toUTCString(jsg::Lock& js, kj::Date date) {
   return js.date(date).toUTCString(js);
 }
 
@@ -419,7 +419,7 @@ void initGetOptions(TraceContext& traceContext, jsg::Lock& js, Builder& builder,
       }
 
       KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
-        KJ_IF_SOME(e, h->getNoChecks(js, "range"_kj)) {
+        KJ_IF_SOME(e, h->getCommon(js, capnp::CommonHeaderName::RANGE)) {
           builder.setRangeHeader(kj::str(e));
           traceContext.userSpan.setTag("cloudflare.r2.request.range"_kjc, e.asPtr());
         }
@@ -1318,7 +1318,7 @@ kj::Array<R2Bucket::Etag> buildSingleEtagArray(kj::StringPtr etagValue) {
 
 R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     : secondsGranularity(true) {
-  KJ_IF_SOME(e, h.getNoChecks(js, "if-match"_kj)) {
+  KJ_IF_SOME(e, h.getCommon(js, capnp::CommonHeaderName::IF_MATCH)) {
     etagMatches = parseConditionalEtagHeader(e);
     KJ_IF_SOME(arr, etagMatches) {
       if (arr.size() == 0) {
@@ -1326,7 +1326,7 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
       }
     }
   }
-  KJ_IF_SOME(e, h.getNoChecks(js, "if-none-match"_kj)) {
+  KJ_IF_SOME(e, h.getCommon(js, capnp::CommonHeaderName::IF_NONE_MATCH)) {
     etagDoesNotMatch = parseConditionalEtagHeader(e);
     KJ_IF_SOME(arr, etagDoesNotMatch) {
       if (arr.size() == 0) {
@@ -1334,11 +1334,11 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
       }
     }
   }
-  KJ_IF_SOME(d, h.getNoChecks(js, "if-modified-since"_kj)) {
+  KJ_IF_SOME(d, h.getCommon(js, capnp::CommonHeaderName::IF_MODIFIED_SINCE)) {
     auto date = parseDate(js, d);
     uploadedAfter = date;
   }
-  KJ_IF_SOME(d, h.getNoChecks(js, "if-unmodified-since"_kj)) {
+  KJ_IF_SOME(d, h.getCommon(js, capnp::CommonHeaderName::IF_UNMODIFIED_SINCE)) {
     auto date = parseDate(js, d);
     uploadedBefore = date;
   }
@@ -1366,22 +1366,22 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(const Conditional& c)
 
 R2Bucket::HttpMetadata R2Bucket::HttpMetadata::fromRequestHeaders(jsg::Lock& js, Headers& h) {
   HttpMetadata result;
-  KJ_IF_SOME(ct, h.getNoChecks(js, "content-type")) {
+  KJ_IF_SOME(ct, h.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
     result.contentType = kj::mv(ct);
   }
-  KJ_IF_SOME(ce, h.getNoChecks(js, "content-encoding"_kj)) {
+  KJ_IF_SOME(ce, h.getCommon(js, capnp::CommonHeaderName::CONTENT_ENCODING)) {
     result.contentEncoding = kj::mv(ce);
   }
-  KJ_IF_SOME(cd, h.getNoChecks(js, "content-disposition"_kj)) {
+  KJ_IF_SOME(cd, h.getCommon(js, capnp::CommonHeaderName::CONTENT_DISPOSITION)) {
     result.contentDisposition = kj::mv(cd);
   }
-  KJ_IF_SOME(cl, h.getNoChecks(js, "content-language"_kj)) {
+  KJ_IF_SOME(cl, h.getCommon(js, capnp::CommonHeaderName::CONTENT_LANGUAGE)) {
     result.contentLanguage = kj::mv(cl);
   }
-  KJ_IF_SOME(cc, h.getNoChecks(js, "cache-control"_kj)) {
+  KJ_IF_SOME(cc, h.getCommon(js, capnp::CommonHeaderName::CACHE_CONTROL)) {
     result.cacheControl = kj::mv(cc);
   }
-  KJ_IF_SOME(ceStr, h.getNoChecks(js, "expires"_kj)) {
+  KJ_IF_SOME(ceStr, h.getCommon(js, capnp::CommonHeaderName::EXPIRES)) {
     result.cacheExpiry = parseDate(js, ceStr);
   }
 
@@ -1405,22 +1405,22 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
   const auto& m = KJ_REQUIRE_NONNULL(httpMetadata);
 
   KJ_IF_SOME(ct, m.contentType) {
-    headers.set(js, jsg::ByteString(kj::str("content-type")), jsg::ByteString(kj::str(ct)));
+    headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::str(ct));
   }
   KJ_IF_SOME(cl, m.contentLanguage) {
-    headers.set(js, jsg::ByteString(kj::str("content-language")), jsg::ByteString(kj::str(cl)));
+    headers.setCommon(capnp::CommonHeaderName::CONTENT_LANGUAGE, kj::str(cl));
   }
   KJ_IF_SOME(cd, m.contentDisposition) {
-    headers.set(js, jsg::ByteString(kj::str("content-disposition")), jsg::ByteString(kj::str(cd)));
+    headers.setCommon(capnp::CommonHeaderName::CONTENT_DISPOSITION, kj::str(cd));
   }
   KJ_IF_SOME(ce, m.contentEncoding) {
-    headers.set(js, jsg::ByteString(kj::str("content-encoding")), jsg::ByteString(kj::str(ce)));
+    headers.setCommon(capnp::CommonHeaderName::CONTENT_ENCODING, kj::str(ce));
   }
   KJ_IF_SOME(cc, m.cacheControl) {
-    headers.set(js, jsg::ByteString(kj::str("cache-control")), jsg::ByteString(kj::str(cc)));
+    headers.setCommon(capnp::CommonHeaderName::CACHE_CONTROL, kj::str(cc));
   }
   KJ_IF_SOME(ce, m.cacheExpiry) {
-    headers.set(js, jsg::ByteString(kj::str("expires")), toUTCString(js, ce));
+    headers.setCommon(capnp::CommonHeaderName::EXPIRES, toUTCString(js, ce));
   }
 }
 

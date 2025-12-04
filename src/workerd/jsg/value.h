@@ -458,12 +458,9 @@ class StringWrapper {
   }
 
   template <typename T>
-    requires(kj::isSameType<T, ByteString>() || kj::isSameType<T, USVString>() ||
-        kj::isSameType<T, DOMString>())
+    requires(kj::isSameType<T, USVString>() || kj::isSameType<T, DOMString>())
   static constexpr const char* getName(T*) {
-    if constexpr (kj::isSameType<T, ByteString>()) {
-      return "ByteString";
-    } else if constexpr (kj::isSameType<T, USVString>()) {
+    if constexpr (kj::isSameType<T, USVString>()) {
       return "USVString";
     } else if constexpr (kj::isSameType<T, DOMString>()) {
       return "DOMString";
@@ -491,8 +488,7 @@ class StringWrapper {
   }
 
   template <typename T>
-    requires(kj::isSameType<T, const ByteString&>() || kj::isSameType<T, const USVString&>() ||
-        kj::isSameType<T, const DOMString&>())
+    requires(kj::isSameType<T, const USVString&>() || kj::isSameType<T, const DOMString&>())
   v8::Local<v8::String> wrap(
       Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
@@ -500,8 +496,8 @@ class StringWrapper {
   }
 
   template <typename T>
-    requires(kj::isSameType<T, kj::String>() || kj::isSameType<T, ByteString>() ||
-        kj::isSameType<T, USVString>() || kj::isSameType<T, DOMString>())
+    requires(kj::isSameType<T, kj::String>() || kj::isSameType<T, USVString>() ||
+        kj::isSameType<T, DOMString>())
   kj::Maybe<T> tryUnwrap(Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
@@ -515,8 +511,6 @@ class StringWrapper {
     JsString str(check(handle->ToString(context)));
     if constexpr (kj::isSameType<T, kj::String>()) {
       return str.toString(js);
-    } else if constexpr (kj::isSameType<T, ByteString>()) {
-      return str.toByteString(js);
     } else if constexpr (kj::isSameType<T, USVString>()) {
       return str.toUSVString(js);
     } else if constexpr (kj::isSameType<T, DOMString>()) {
