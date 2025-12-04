@@ -285,6 +285,10 @@ class IsolateBase {
     deferDestruction(kj::mv(item));
   }
 
+  v8::Isolate* getIsolate() const {
+    return ptr;
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
