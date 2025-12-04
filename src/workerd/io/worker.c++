@@ -633,6 +633,10 @@ struct Worker::Isolate::Impl {
       }
       ::workerd::rust::jsg::context_set_realm(
           context, ::workerd::rust::jsg::realm_create(lock->v8Isolate));
+      // If Worker::setupContext throws, dispose the Realm to avoid a memory leak.
+      // The context will be destroyed anyway during stack unwinding.
+      KJ_ON_SCOPE_FAILURE(
+          ::workerd::rust::jsg::realm_dispose(::workerd::rust::jsg::realm_from_context(context)));
       Worker::setupContext(*lock, context, loggingOptions);
     }
 
