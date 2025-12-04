@@ -353,6 +353,7 @@ wd_capnp_library(src = "cdp.capnp")
 wd_capnp_library(
     src = "worker-interface.capnp",
     deps = [
+        ":frankenvalue_capnp",
         ":outcome_capnp",
         ":script-version_capnp",
         ":trace_capnp",

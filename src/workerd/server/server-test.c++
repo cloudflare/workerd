@@ -4,11 +4,15 @@
 
 #include "server.h"
 
+#include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 
+#include <capnp/compat/http-over-capnp.h>
+#include <capnp/rpc-twoparty.h>
 #include <kj/async-queue.h>
+#include <kj/encoding.h>
 #include <kj/test.h>
 
 #include <cstdlib>
@@ -5251,5 +5255,368 @@ service hello: Uncaught TypeError: Main module must be an ES module.
 }
 
 #endif  // __linux__
+
+// Helper types for V8 serialization in tests
+class SerializationContextGlobalObject: public jsg::Object, public jsg::ContextGlobal {};
+struct SerializationTestContext: public SerializationContextGlobalObject {
+  JSG_RESOURCE_TYPE(SerializationTestContext) {}
+};
+JSG_DECLARE_ISOLATE_TYPE(SerializationTestIsolate, SerializationTestContext);
+
+// Helper function to serialize JavaScript values using V8
+kj::Array<kj::byte> serializeJsArguments(
+    std::initializer_list<std::function<jsg::JsValue(jsg::Lock&)>> argBuilders) {
+  // Create an evaluator to get access to a V8 isolate
+  jsg::test::Evaluator<SerializationTestContext, SerializationTestIsolate> evaluator(v8System);
+
+  kj::Array<kj::byte> result;
+  evaluator.run([&](auto& lock) {
+    jsg::Lock& js = lock;
+
+    // Create an array with the arguments
+    auto argsArray = js.arr();
+    for (auto& builder: argBuilders) {
+      argsArray.add(js, builder(js));
+    }
+
+    // Serialize the array using jsg::Serializer
+    jsg::Serializer serializer(js,
+        jsg::Serializer::Options{
+          .version = 15,
+          .omitHeader = false,
+        });
+    serializer.write(js, jsg::JsValue(argsArray));
+    result = serializer.release().data;
+  });
+
+  return result;
+}
+
+// Helper function to deserialize V8 data and convert to JSON string
+kj::String deserializeV8ToJson(kj::ArrayPtr<const kj::byte> data) {
+  jsg::test::Evaluator<SerializationTestContext, SerializationTestIsolate> evaluator(v8System);
+
+  kj::String result;
+  evaluator.run([&](auto& lock) {
+    jsg::Lock& js = lock;
+
+    // Deserialize the V8 data
+    jsg::Deserializer deserializer(js, data, kj::none, kj::none, jsg::Deserializer::Options{});
+    auto value = deserializer.readValue(js);
+
+    // Convert to JSON string
+    result = js.serializeJson(value);
+  });
+
+  return result;
+}
+
+KJ_TEST("Server: debug port RPC calls") {
+  // This test connects to the debug port via Cap'n Proto RPC and makes actual RPC calls.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request) {
+                `    return new Response("Hello from hello service");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "world",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request) {
+                `    return new Response("Hello from world service");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "named-entrypoint",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export let customHandler = {
+                `  async fetch(request) {
+                `    return new Response("Hello from custom entrypoint");
+                `  }
+                `}
+                `export default {
+                `  async fetch(request) {
+                `    return new Response("Default handler");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "props-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const greeting = ctx?.props?.greeting || "no greeting";
+                `    const name = ctx?.props?.name || "no name";
+                `    return new Response("Props: " + greeting + " " + name);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "actor-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export class MyActor {
+                `  constructor(state, env) {
+                `    this.state = state;
+                `  }
+                `  async fetch(request) {
+                `    const url = new URL(request.url);
+                `    if (url.pathname === "/increment") {
+                `      let count = (await this.state.storage.get("count")) || 0;
+                `      count++;
+                `      await this.state.storage.put("count", count);
+                `      return new Response("Count: " + count);
+                `    }
+                `    return new Response("Actor: " + this.state.id.toString());
+                `  }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActor", uniqueKey = "test-actor" )
+          ],
+          durableObjectStorage = ( inMemory = void )
+        )
+      ),
+      ( name = "rpc-service",
+        worker = (
+          compatibilityDate = "2024-09-02",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export default class extends WorkerEntrypoint {
+                `  async add(a, b) {
+                `    return a + b;
+                `  }
+                `  async multiply(x, y) {
+                `    return x * y;
+                `  }
+                `  async greet(name) {
+                `    return "Hello, " + name + "!";
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" )
+    ]
+  ))"_kj);
+
+  // Enable the debug port on a unique address
+  test.server.enableDebugPort(kj::str("debug-addr"));
+
+  // Allow experimental features for RPC service
+  test.server.allowExperimental();
+
+  test.start();
+
+  // Connect to the debug port
+  auto debugConn = test.connect("debug-addr");
+
+  // Create a TwoPartyClient for Cap'n Proto RPC
+  capnp::TwoPartyClient client(debugConn.getStream());
+
+  // Get the debug port capability
+  auto debugPort = client.bootstrap().castAs<rpc::WorkerdDebugPort>();
+
+  // Set up HTTP-over-Cap'n-Proto factory to convert Cap'n Proto HttpService to KJ HttpService
+  capnp::ByteStreamFactory byteStreamFactory;
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  capnp::HttpOverCapnpFactory httpOverCapnpFactory(
+      byteStreamFactory, headerTableBuilder, capnp::HttpOverCapnpFactory::LEVEL_2);
+  auto headerTable = headerTableBuilder.build();
+
+  // Helper to get bootstrap from service and entrypoint
+  auto getBootstrap = [&](kj::StringPtr service, kj::Maybe<kj::StringPtr> entrypoint,
+                          auto&& propsBuilder) {
+    auto req = debugPort.getEntrypointRequest();
+    req.setService(service);
+    KJ_IF_SOME(e, entrypoint) {
+      req.setEntrypoint(e);
+    }
+    auto props = req.initProps();
+    propsBuilder(props);
+    auto resp = req.send().wait(test.ws);
+    return resp.getEntrypoint();
+  };
+
+  // Helper to get a dispatcher from a bootstrap client
+  auto getDispatcherFromBootstrap = [&](rpc::WorkerdBootstrap::Client bootstrap) {
+    auto eventResp = bootstrap.startEventRequest().send().wait(test.ws);
+    return eventResp.getDispatcher();
+  };
+
+  // Helper to get dispatcher from service and entrypoint (composes the two above)
+  auto getDispatcher = [&](kj::StringPtr service, kj::Maybe<kj::StringPtr> entrypoint,
+                           auto&& propsBuilder) {
+    return getDispatcherFromBootstrap(getBootstrap(service, entrypoint, propsBuilder));
+  };
+
+  // Helper to make HTTP request from a dispatcher
+  auto makeHttpRequestFromDispatcher = [&](rpc::EventDispatcher::Client dispatcher,
+                                           kj::StringPtr path) -> kj::String {
+    auto capnpHttpService = dispatcher.getHttpServiceRequest().send().wait(test.ws).getHttp();
+
+    // Convert to KJ HttpService and make request
+    auto kjHttpService = httpOverCapnpFactory.capnpToKj(kj::mv(capnpHttpService));
+    auto httpClient = kj::newHttpClient(*kjHttpService);
+    auto url = kj::str("http://test", path);
+    auto httpResponse = httpClient->request(kj::HttpMethod::GET, url, kj::HttpHeaders(*headerTable))
+                            .response.wait(test.ws);
+
+    KJ_EXPECT(httpResponse.statusCode == 200);
+    return httpResponse.body->readAllText().wait(test.ws);
+  };
+
+  // Helper to make HTTP request from a bootstrap client (works for both entrypoints and actors)
+  auto makeHttpRequestFromBootstrap = [&](rpc::WorkerdBootstrap::Client bootstrap,
+                                          kj::StringPtr path) -> kj::String {
+    return makeHttpRequestFromDispatcher(getDispatcherFromBootstrap(kj::mv(bootstrap)), path);
+  };
+
+  // Helper to make HTTP request through an entrypoint with custom props
+  auto makeHttpRequestImpl = [&](kj::StringPtr service, kj::Maybe<kj::StringPtr> entrypoint,
+                                 auto&& propsBuilder) {
+    return makeHttpRequestFromDispatcher(getDispatcher(service, entrypoint, propsBuilder), "/");
+  };
+
+  // Convenience wrapper with default empty props
+  auto makeHttpRequest = [&](kj::StringPtr service, kj::Maybe<kj::StringPtr> entrypoint) {
+    return makeHttpRequestImpl(service, entrypoint, [](auto& props) { props.setEmptyObject(); });
+  };
+
+  // Test 1: Request a non-existent service should fail
+  KJ_EXPECT_THROW_MESSAGE("Service not found",
+      getBootstrap("nonexistent", kj::none, [](auto& props) { props.setEmptyObject(); }));
+
+  // Test 2: Get entrypoint for different services
+  KJ_EXPECT(makeHttpRequest("hello", kj::none) == "Hello from hello service");
+  KJ_EXPECT(makeHttpRequest("world", kj::none) == "Hello from world service");
+
+  // Test 3: Named entrypoint works
+  KJ_EXPECT(
+      makeHttpRequest("named-entrypoint", "customHandler"_kjc) == "Hello from custom entrypoint");
+
+  // Test 4: Passing props object works
+  KJ_EXPECT(makeHttpRequestImpl("props-service", kj::none, [](auto& props) {
+    props.setEmptyObject();
+    auto properties = props.initProperties(2);
+    properties[0].setName("greeting");
+    properties[0].setJson("\"Hello\"");
+    properties[1].setName("name");
+    properties[1].setJson("\"World\"");
+  }) == "Props: Hello World");
+
+  // Test 5: Getting an actor works and we can call methods on it
+  {
+    // Create a deterministic actor ID
+    kj::byte actorIdBytes[32] = {};
+    for (size_t i = 0; i < sizeof(actorIdBytes); i++) {
+      actorIdBytes[i] = static_cast<kj::byte>(i);
+    }
+
+    // Helper to make an HTTP request to the actor
+    auto makeActorRequest = [&](kj::StringPtr path) -> kj::String {
+      auto req = debugPort.getActorRequest();
+      req.setService("actor-service");
+      req.setEntrypoint("MyActor");
+      // Convert actor ID bytes to hex string
+      req.setActorId(kj::encodeHex(kj::arrayPtr(actorIdBytes, sizeof(actorIdBytes))));
+      auto resp = req.send().wait(test.ws);
+      return makeHttpRequestFromBootstrap(resp.getActor(), path);
+    };
+
+    // Make a first request to increment the counter
+    {
+      auto bodyText = makeActorRequest("/increment");
+      KJ_EXPECT(bodyText == "Count: 1");
+    }
+
+    // Make a second request to increment again - verifies state persistence
+    {
+      auto bodyText = makeActorRequest("/increment");
+      KJ_EXPECT(bodyText == "Count: 2");
+    }
+
+    // Make a request to verify the actor ID is correct
+    {
+      auto bodyText = makeActorRequest("/");
+
+      // The actor should return its ID as a hex string
+      // Convert our actor ID bytes to hex string to compare
+      kj::String expectedId = kj::encodeHex(kj::arrayPtr(actorIdBytes, sizeof(actorIdBytes)));
+      kj::String expectedResponse = kj::str("Actor: ", expectedId);
+      KJ_EXPECT(bodyText == expectedResponse, bodyText, expectedResponse);
+    }
+  }
+
+  // Test 6: Call RPC methods using jsRpcSession with V8-serialized arguments
+  {
+    // Get dispatcher and JS RPC session - use pipelining because jsRpcSession() doesn't return until session closes
+    auto dispatcher =
+        getDispatcher("rpc-service", kj::none, [](auto& props) { props.setEmptyObject(); });
+    auto rpcSessionReq = dispatcher.jsRpcSessionRequest();
+    auto sessionPromise = rpcSessionReq.send();
+    auto rpcTarget = sessionPromise.getTopLevel();
+
+    // Test calling add(5, 3) -> 8
+    auto v8SerializedArgs = serializeJsArguments({[](jsg::Lock& js) {
+      return jsg::JsValue(js.num(5));
+    }, [](jsg::Lock& js) { return jsg::JsValue(js.num(3)); }});
+
+    auto callReq = rpcTarget.callRequest();
+    callReq.setMethodName("add");
+    auto operation = callReq.initOperation();
+    auto jsValue = operation.initCallWithArgs();
+    jsValue.setV8Serialized(v8SerializedArgs);
+
+    auto callResp = callReq.send().wait(test.ws);
+    auto result = callResp.getResult();
+
+    auto resultData = result.getV8Serialized();
+    KJ_EXPECT(resultData.size() > 0, "Result should be non-empty");
+
+    auto jsonResult = deserializeV8ToJson(resultData);
+    KJ_EXPECT(jsonResult == "8", jsonResult, "Expected result to be 8");
+  }
+}
 }  // namespace
 }  // namespace workerd::server
