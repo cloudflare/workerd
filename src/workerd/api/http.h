@@ -1007,6 +1007,7 @@ class Response final: public Body {
 
   int getStatus();
   kj::StringPtr getStatusText();
+  kj::StringPtr getStatusTextForHttp();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
 
   bool getOk();

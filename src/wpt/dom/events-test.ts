@@ -22,7 +22,7 @@ export default {
     ],
   },
   'Event-constructors.any.js': {
-    comment: 'TODO this is triggering a harness bug',
+    comment: 'Tests fail because timeStamp is deliberately 0 in workerd',
     disabledTests: true,
   },
   'Event-dispatch-listener-order.window.js': {
