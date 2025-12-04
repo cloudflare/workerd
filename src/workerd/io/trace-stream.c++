@@ -15,6 +15,12 @@
 namespace workerd::tracing {
 namespace {
 
+// Maximum size for streaming tail worker log messages before triggering truncation/error.
+static constexpr size_t MAX_LOG_MESSAGE_SIZE = 256 * 1024;
+
+// Maximum number of truncation attempts before giving up and returning an error.
+static constexpr size_t MAX_TRUNCATION_ATTEMPTS = 3;
+
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
@@ -471,11 +477,42 @@ jsg::JsValue ToJs(jsg::Lock& js, const LogLevel& level, StringCache& cache) {
   return cache.get(js, toLower(enumToStr<LogLevel>(level)));
 }
 
+// TODO(mar): Implement this function to reduce the size of the value by removing the largest
+// element. Returns true if the value was successfully reduced, false otherwise.
+bool reduceSize(jsg::Lock& js, v8::Local<v8::Value> value) {
+  KJ_UNIMPLEMENTED("reduceSize not yet implemented");
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, LOG_STR));
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
-  obj.set(js, MESSAGE_STR, js.str(log.message));
+
+  // The message is a JSON-encoded array of arguments (e.g., '["foo", "bar"]').
+  auto value = js.parseJson(log.message).getHandle(js);
+
+  // If message is small enough, use as-is.
+  if (log.message.size() <= MAX_LOG_MESSAGE_SIZE) {
+    obj.set(js, MESSAGE_STR, jsg::JsValue(value));
+    return obj;
+  }
+
+  // Message is too large - try reducing size.
+  for (size_t attempt = 0; attempt < MAX_TRUNCATION_ATTEMPTS; attempt++) {
+    if (!reduceSize(js, value)) {
+      break;
+    }
+    kj::String serialized = js.serializeJson(value);
+    if (serialized.size() <= MAX_LOG_MESSAGE_SIZE) {
+      obj.set(js, MESSAGE_STR, jsg::JsValue(value));
+      return obj;
+    }
+  }
+
+  // Still too big after reduction attempts. Return an error object.
+  auto errObj = js.obj();
+  errObj.set(js, ERROR_STR, js.str("Log message too large"_kj));
+  obj.set(js, MESSAGE_STR, errObj);
   return obj;
 }
 
