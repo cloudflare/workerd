@@ -28,6 +28,9 @@ class TestHarness {
 
 kj::Own<TestHarness> create_test_harness();
 
+// Triggers a full garbage collection for testing purposes.
+void request_gc(Isolate* isolate);
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd
