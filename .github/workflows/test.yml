@@ -48,6 +48,10 @@ jobs:
           # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
           - os: { name: linux, arch: X64, image: ubuntu-22.04 }
             config: { suffix: -asan }
+          # Add an Address Sanitizer (ASAN) build with release optimizations to catch
+          # optimization-dependent bugs.
+          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
+            config: { suffix: -asan-release }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
           # has been resolved we can likely re-enable it and possibly fold up the custom
