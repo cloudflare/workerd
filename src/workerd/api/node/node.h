@@ -17,9 +17,6 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
-#include <workerd/rust/api/lib.rs.h>
-#include <workerd/rust/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 
 #include <node/node.capnp.h>
 
@@ -37,6 +34,7 @@ namespace workerd::api::node {
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
   V(UrlUtil, "node-internal:url")                                                                  \
+  V(DnsUtil, "node-internal:dns")                                                                  \
   V(TimersUtil, "node-internal:timers")                                                            \
   V(SqliteUtil, "node-internal:sqlite")
 
@@ -87,12 +85,6 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
   }
 
 #undef V
-
-  // Only register C++ DnsUtil if Rust implementation is not enabled
-  if (!util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    registry.template addBuiltinModule<DnsUtil>(
-        "node-internal:dns", workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  }
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
@@ -215,11 +207,6 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       }
     }
   }
-
-  if (util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    ::workerd::rust::jsg::RustModuleRegistry r(registry);
-    ::workerd::rust::api::register_nodejs_modules(r);
-  }
 }
 
 template <class TypeWrapper>
@@ -234,11 +221,6 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
     NODEJS_MODULES_EXPERIMENTAL(V)
   }
 #undef V
-  // Only register C++ DnsUtil if Rust implementation is not enabled
-  if (!util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    static const auto kDnsUtilSpecifier = "node-internal:dns"_url;
-    builder.addObject<DnsUtil, TypeWrapper>(kDnsUtilSpecifier);
-  }
   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
   return builder.finish();
 }
