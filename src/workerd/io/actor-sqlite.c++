@@ -913,7 +913,7 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
   haveDeferredDelete = false;
 }
 
-kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
+kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush(SpanParent parentSpan) {
   // This implements sync().
   //
   // sync() should wait for ALL writes (both confirmed and unconfirmed) that are outstanding at the
@@ -921,7 +921,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   // formed. We join with the outputGate because there are a lot of edge cases where we break the
   // output gate and it's easiest to catch all of those instances here rather than updating
   // everything to also break lastCommit.
-  return kj::joinPromisesFailFast(kj::arr(lastCommit.addBranch(), outputGate.wait()));
+  return kj::joinPromisesFailFast(kj::arr(lastCommit.addBranch(), outputGate.wait(kj::mv(parentSpan))));
 }
 
 kj::Promise<kj::String> ActorSqlite::getCurrentBookmark(SpanParent parentSpan) {

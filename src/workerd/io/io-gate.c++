@@ -321,10 +321,11 @@ kj::Own<kj::PromiseFulfiller<void>> OutputGate::lock() {
   return kj::mv(paf.fulfiller);
 }
 
-kj::Promise<void> OutputGate::wait() {
+kj::Promise<void> OutputGate::wait(SpanParent parentSpan) {
   hooks.outputGateWaiterAdded();
+  SpanBuilder waitSpan = parentSpan.newChild("output_gate_lock_wait"_kjc);
   return pastLocksPromise.addBranch().attach(
-      kj::defer([this]() { hooks.outputGateWaiterRemoved(); }));
+      kj::defer([this]() { hooks.outputGateWaiterRemoved(); }), kj::mv(waitSpan));
 }
 
 kj::Promise<void> OutputGate::onBroken() {

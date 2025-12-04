@@ -93,7 +93,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
       kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
-  kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
+  kj::Maybe<kj::Promise<void>> onNoPendingFlush(SpanParent parentSpan) override;
   kj::Promise<kj::String> getCurrentBookmark(SpanParent parentSpan) override;
   kj::Promise<void> waitForBookmark(kj::StringPtr bookmark, SpanParent parentSpan) override;
   // See ActorCacheInterface
