@@ -315,19 +315,15 @@ declare namespace CloudflareWorkersModule {
     type: string;
   };
 
-  export type WorkflowStepContext = {
-	  attempt: Readonly<number>;
-  };
-
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
-      callback: (ctx: WorkflowStepContext) => Promise<T>
+      callback: () => Promise<T>
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
-      callback: (ctx: WorkflowStepContext) => Promise<T>
+      callback: () => Promise<T>
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
