@@ -24,8 +24,6 @@ enum class AutogateKey {
   BODY_BUFFER_INPUT_STREAM_REPLACEMENT,
   // Enable the fetch request memory adjustment
   FETCH_REQUEST_MEMORY_ADJUSTMENT,
-  // Enable Rust-backed Node.js DNS implementation
-  RUST_BACKED_NODE_DNS,
   NumOfKeys  // Reserved for iteration.
 };
 

@@ -147,12 +147,6 @@ struct EncoderModuleRegistryImpl {
     modules.add(kj::mv(info));
   }
 
-  void addBuiltinModule(kj::StringPtr specifier,
-      jsg::ModuleRegistry::ModuleCallback callback,
-      jsg::ModuleRegistry::Type type = jsg::ModuleRegistry::Type::BUILTIN) {
-    // TODO(soon): Implement this function
-  }
-
   template <typename T>
   void addBuiltinModule(kj::StringPtr specifier,
       jsg::ModuleRegistry::Type type = jsg::ModuleRegistry::Type::BUILTIN) {

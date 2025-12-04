@@ -1,6 +1,3 @@
-// NOTE: This file is a somewhat duplicate of src/rust/api/dns.rs, and will be removed once
-// autogate is unnecessary.
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]

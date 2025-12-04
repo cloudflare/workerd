@@ -21,7 +21,6 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         ":url",
-        "//src/rust/jsg",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
@@ -118,10 +117,6 @@ wd_cc_library(
     ],
     local_defines = ["JSG_IMPLEMENTATION"],
     tags = ["no-clang-tidy"],
-    visibility = [
-        "//src/rust/jsg:__pkg__",
-        "//src/rust/jsg-test:__pkg__",
-    ],
     deps = [
         ":exception",
         ":exception_metadata_capnp",
