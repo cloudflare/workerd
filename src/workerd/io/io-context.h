@@ -1170,7 +1170,7 @@ template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
-    return cs.get()->wait().then(
+    return cs.get()->wait(getCurrentTraceSpan()).then(
         [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
       return run(kj::fwd<Func>(func), kj::mv(inputLock));
     });
@@ -1191,7 +1191,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
-      return a.getInputGate().wait().then(
+      return a.getInputGate().wait(getCurrentTraceSpan()).then(
           [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
         return run(kj::fwd<Func>(func), kj::mv(inputLock));
       });
@@ -1600,7 +1600,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   auto [result, resolver] = js.newPromiseAndResolver<T>();
 
   addTask(
-      cs->wait()
+      cs->wait(getCurrentTraceSpan())
           .then([this, callback = kj::mv(callback),
                     maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](
                     InputGate::Lock inputLock) mutable {
