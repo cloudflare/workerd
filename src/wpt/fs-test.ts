@@ -23,14 +23,8 @@ export default {
     comment: 'StorageBuckets is not implemented in workers',
     disabledTests: true,
   },
-  'FileSystemBaseHandle-getUniqueId.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
-  'FileSystemBaseHandle-isSameEntry.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
+  'FileSystemBaseHandle-getUniqueId.https.any.js': {},
+  'FileSystemBaseHandle-isSameEntry.https.any.js': {},
   'FileSystemBaseHandle-postMessage-BroadcastChannel.https.window.js': {
     comment: 'BroadcastChannel is not implemented in workers',
     disabledTests: true,
@@ -70,22 +64,10 @@ export default {
       'can remove the root of a sandbox file system',
     ],
   },
-  'FileSystemDirectoryHandle-getDirectoryHandle.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
-  'FileSystemDirectoryHandle-getFileHandle.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
-  'FileSystemDirectoryHandle-iteration.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
-  'FileSystemDirectoryHandle-removeEntry.https.any.js': {
-    comment: '...',
-    expectedFailures: [],
-  },
+  'FileSystemDirectoryHandle-getDirectoryHandle.https.any.js': {},
+  'FileSystemDirectoryHandle-getFileHandle.https.any.js': {},
+  'FileSystemDirectoryHandle-iteration.https.any.js': {},
+  'FileSystemDirectoryHandle-removeEntry.https.any.js': {},
   'FileSystemDirectoryHandle-resolve.https.any.js': {
     comment:
       'We currently do not implement the resolve() method on directories',
