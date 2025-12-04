@@ -21,6 +21,8 @@
 #include <workerd/jsg/script.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/jsg/lib.rs.h>
+#include <workerd/rust/jsg/v8.rs.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
@@ -29,6 +31,7 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
+#include <rust/jsg/ffi.h>
 #include <v8-inspector.h>
 #include <v8-profiler.h>
 
@@ -627,14 +630,18 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
+      ::workerd::rust::jsg::context_set_realm(
+          context, ::workerd::rust::jsg::realm_create(lock->v8Isolate));
       Worker::setupContext(*lock, context, loggingOptions);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
       lock->withinHandleScope([&] {
+        auto v8Context = context.getHandle(*lock);
+        ::workerd::rust::jsg::realm_dispose(::workerd::rust::jsg::realm_from_context(v8Context));
         context->clear();
         KJ_IF_SOME(i, impl.inspector) {
-          i.get()->contextDestroyed(context.getHandle(*lock));
+          i.get()->contextDestroyed(v8Context);
         }
         { auto drop = kj::mv(context); }
         lock->v8Isolate->ContextDisposedNotification(v8::ContextDependants::kNoDependants);
