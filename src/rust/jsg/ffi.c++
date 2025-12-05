@@ -7,6 +7,12 @@
 
 #include <kj/common.h>
 
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/lsan_interface.h>
+#else
+static void __lsan_ignore_object(const void* p) {}
+#endif
+
 using namespace kj_rs;
 
 namespace workerd::rust::jsg {
@@ -256,6 +262,9 @@ Realm* realm_from_context(Context context) {
 }
 
 void context_set_realm(Context context, Realm* realm) {
+  // Tell LSAN to ignore this allocation - the Realm is held alive through V8's embedder data
+  // which LSAN cannot trace. The Realm is properly disposed in disposeContext().
+  __lsan_ignore_object(realm);
   ::workerd::jsg::setAlignedPointerInEmbedderData(
       context, ::workerd::jsg::ContextPointerSlot::RUST_REALM, realm);
 }
