@@ -999,6 +999,13 @@ namespace {
 // The TailStreamWriterState holds the current client-side state for a collection
 // of streaming tail workers that a worker is reporting events to.
 struct TailStreamWriterState {
+  // The maximum size of the queue, in bytes.
+  const size_t maxQueueSize = 2 * 1024 * 1024;
+  // The estimated overhead of TailEvent wrapping per message. This does not need to be very
+  // accurate, but should be enough to avoid allocating too much memory/hitting capnp RPC message
+  // size limits when sending many tiny events.
+  const size_t tailSerializationOverhead = 64;
+
   // The initial state of our tail worker writer is that it is pending the first
   // onset event. During this time we will only have a collection of WorkerInterface
   // instances. When our first event is reported (the onset) we will arrange to acquire
@@ -1016,6 +1023,11 @@ struct TailStreamWriterState {
     kj::Maybe<rpc::TailStreamTarget::Client> capability;
     bool pumping = false;
     bool onsetSeen = false;
+    // Estimated byte size of the queue, used to drop events to avoid excessive memory usage.
+    size_t queueSize = 0;
+    // The number of tail events we had to drop. We'll send a warning indicating this at the end of
+    // the stream.
+    size_t droppedEvents = 0;
     workerd::util::Queue<TailEvent> queue;
 
     Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
@@ -1055,7 +1067,32 @@ struct TailStreamWriterState {
 
     // Deliver the event to the queue and make sure we are processing.
     for (auto& active: actives) {
-      active->queue.push(event.clone());
+      // Only queue the event if we don't have an excessive queue size yet. Return and Outcome
+      // events are only provided once and thus won't be dropped.
+      if (active->queueSize < maxQueueSize || event.event.is<Outcome>() ||
+          event.event.is<Return>()) {
+        // When we get to the outcome, no more events will be dropped. Inject a log message
+        // stating how many we dropped if applicable.
+        if (event.event.is<Outcome>() && active->droppedEvents > 0) {
+          TailEvent droppedEventsLog(event.spanContext.clone(), event.invocationId, event.timestamp,
+              event.sequence,
+              tracing::Log(event.timestamp, LogLevel::WARN,
+                  kj::str(
+                      "Dropped ", active->droppedEvents, "tail events due to excessive queueing")),
+              0);
+          active->queue.push(kj::mv(droppedEventsLog));
+          // Increment the outcome sequence number to keep things consistent.
+          event.sequence++;
+        }
+
+        active->queue.push(event.clone());
+        // Adjust estimated queue size based on size hint and an arbitrary amount for serialization
+        // overhead. As long as this estimate is reasonably accurate, we won't need to check the
+        // size again when serializing the message.
+        active->queueSize += tailSerializationOverhead + event.sizeHint;
+      } else {
+        active->droppedEvents++;
+      }
       if (!active->pumping) {
         waitUntilTasks.add(pump(kj::addRef(*active)));
       }
@@ -1108,6 +1145,9 @@ struct TailStreamWriterState {
         auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
         auto eventsBuilder = builder.initEvents(current->queue.size());
         size_t n = 0;
+        // KJ_LOG(WARNING, "queue: sending", current->queue.size(), "events", current->queueSize);
+        // We're synchronously draining the queue – reset its size.
+        current->queueSize = 0;
         current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
 
         auto result = co_await builder.send();

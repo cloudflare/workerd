@@ -22,7 +22,10 @@ class TailStreamWriter final: public kj::Refcounted {
   TailStreamWriter(Reporter reporter);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  void report(const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date time);
+  void report(const InvocationSpanContext& context,
+      TailEvent::Event&& event,
+      kj::Date time,
+      size_t sizeHint);
 
   inline bool isClosed() const {
     return state == kj::none;

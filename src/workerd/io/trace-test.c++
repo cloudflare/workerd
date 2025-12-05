@@ -511,7 +511,7 @@ KJ_TEST("Read/Write TailEvent works") {
   Log log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
   auto invocationId = TraceId(0, 0);
   TailEvent info(
-      context.getTraceId(), invocationId, context.getSpanId(), kj::UNIX_EPOCH, 0, kj::mv(log));
+      context.getTraceId(), invocationId, context.getSpanId(), kj::UNIX_EPOCH, 0, kj::mv(log), 0);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -551,7 +551,7 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   attrs.add(Attribute("foo"_kjc, true));
   attrs.add(Attribute("bar"_kjc, static_cast<int64_t>(123)));
 
-  TailEvent info(kj::mv(context), traceId, kj::UNIX_EPOCH, 0, attrs.releaseAsArray());
+  TailEvent info(kj::mv(context), traceId, kj::UNIX_EPOCH, 0, attrs.releaseAsArray(), 0);
   info.copyTo(infoBuilder);
 
   TailEvent info2(infoBuilder.asReader());
