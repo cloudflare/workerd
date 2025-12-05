@@ -74,13 +74,11 @@ Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate);
-Realm* realm_from_context(Context context);
-
-// Context
-void context_set_realm(Context context, Realm* realm);
 
 // Errors
 Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::Str message);
+
+// Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 

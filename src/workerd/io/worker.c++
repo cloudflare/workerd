@@ -533,6 +533,9 @@ struct Worker::Isolate::Impl {
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
 
+  // Used by JSG/Rust integration.
+  ::rust::Box<::workerd::rust::jsg::Realm> realm;
+
   // UUID for this isolate, initialized first time getUuid() is called.
   kj::Lazy<kj::String> uuid;
 
@@ -631,19 +634,14 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
-      ::workerd::rust::jsg::context_set_realm(
-          context, ::workerd::rust::jsg::realm_create(lock->v8Isolate));
-      // If Worker::setupContext throws, dispose the Realm to avoid a memory leak.
-      // The context will be destroyed anyway during stack unwinding.
-      KJ_ON_SCOPE_FAILURE(
-          ::workerd::rust::jsg::realm_dispose(::workerd::rust::jsg::realm_from_context(context)));
+      jsg::setAlignedPointerInEmbedderData(context, ::workerd::jsg::ContextPointerSlot::RUST_REALM,
+          const_cast<::workerd::rust::jsg::Realm*>(&*impl.realm));
       Worker::setupContext(*lock, context, loggingOptions);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
       lock->withinHandleScope([&] {
         auto v8Context = context.getHandle(*lock);
-        ::workerd::rust::jsg::realm_dispose(::workerd::rust::jsg::realm_from_context(v8Context));
         context->clear();
         KJ_IF_SOME(i, impl.inspector) {
           i.get()->contextDestroyed(v8Context);
@@ -709,18 +707,22 @@ struct Worker::Isolate::Impl {
       InspectorPolicy inspectorPolicy)
       : metrics(metrics),
         inspectorPolicy(inspectorPolicy),
-        actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      auto lock = api.lock(stackScope);
-
-      limitEnforcer.customizeIsolate(lock->v8Isolate);
-      if (inspectorPolicy != InspectorPolicy::DISALLOW) {
-        // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
-        KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
-        inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, &inspectorClient);
-      }
-    });
-  }
+        actorCacheLru(limitEnforcer.getActorCacheLruOptions()),
+        realm([&]() -> ::rust::Box<::workerd::rust::jsg::Realm> {
+          // Default constructor of ::rust::Box is deleted, so we use a Maybe to delay initialization.
+          kj::Maybe<::rust::Box<::workerd::rust::jsg::Realm>> realm;
+          jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+            auto lock = api.lock(stackScope);
+            realm = ::workerd::rust::jsg::realm_create(lock->v8Isolate);
+            limitEnforcer.customizeIsolate(lock->v8Isolate);
+            if (inspectorPolicy != InspectorPolicy::DISALLOW) {
+              // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
+              KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
+              inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, &inspectorClient);
+            }
+          });
+          return kj::mv(KJ_REQUIRE_NONNULL(realm));
+        }()) {}
 };
 
 namespace {

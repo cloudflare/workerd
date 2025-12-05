@@ -39,11 +39,9 @@ void TestHarness::run_in_context(::rust::Fn<void(Isolate*)> callback) const {
 
     auto realm = ::workerd::rust::jsg::realm_create(isolate->getIsolate());
     ::workerd::jsg::setAlignedPointerInEmbedderData(context.getHandle(isolate->getIsolate()),
-        ::workerd::jsg::ContextPointerSlot::RUST_REALM, realm);
+        ::workerd::jsg::ContextPointerSlot::RUST_REALM, &*realm);
 
     callback(isolate->getIsolate());
-
-    ::workerd::rust::jsg::realm_dispose(realm);
   });
 }
 
