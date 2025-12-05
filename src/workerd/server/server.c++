@@ -2163,7 +2163,7 @@ class Server::WorkerService final: public Service,
     if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
       // Setting up buffered tail workers support, but only if we actually have tail workers
       // configured.
-      auto tracer = kj::rc<PipelineTracer>();
+      auto tracer = kj::rc<PipelineTracer>(bufferedTailWorkers.size() > 0);
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
       auto tailStreamWriter = tracing::initializeTailStreamWriter(
