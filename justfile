@@ -44,17 +44,11 @@ run *args="-- --help":
 build-asan *args="//...":
   just build {{args}} --config=asan
 
-build-asan-release *args="//...":
-  just build {{args}} --config=asan-release
-
 test *args="//...":
   bazel test {{args}}
 
 test-asan *args="//...":
   just test {{args}} --config=asan
-
-test-asan-release *args="//...":
-  just test {{args}} --config=asan-release
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:

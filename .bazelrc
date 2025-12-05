@@ -3,7 +3,6 @@ build --verbose_failures
 build --build_tag_filters=-off-by-default
 test --test_tag_filters=-off-by-default,-requires-fuzzilli
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli
-test:asan-release --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli
 # exclude enormous tests by default
 build --test_size_filters=-enormous
 
@@ -192,14 +191,6 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
-
-# address sanitizer with release optimizations – useful for catching bugs that only manifest
-# with higher optimization levels or to test production-like performance with sanitizers.
-# Overrides sanitizer-common's -Og and -g with release-appropriate settings.
-build:asan-release --config=asan
-build:asan-release --copt="-O3"
-build:asan-release --copt="-g1"
-build:asan-release --strip=never
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
 build:fuzzilli --config=asan
