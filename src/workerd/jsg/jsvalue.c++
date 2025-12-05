@@ -311,7 +311,25 @@ JS_IS_TYPES(V)
 #undef V
 
 kj::String JsValue::toJson(Lock& js) const {
-  return kj::str(check(v8::JSON::Stringify(js.v8Context(), inner)));
+  // Check for non-JSON-encodable types upfront
+  if (inner->IsSymbol() || inner->IsFunction() || inner->IsUndefined()) {
+    throwTypeError(js.v8Isolate, "Value is not JSON-encodable");
+  }
+
+  auto result = v8::JSON::Stringify(js.v8Context(), inner);
+  v8::Local<v8::String> str;
+  if (!result.ToLocal(&str)) {
+    // JSON::Stringify returns an empty MaybeLocal either because there's a pending
+    // exception (e.g., circular reference, getter threw) or because the value is not
+    // JSON-encodable (e.g., Symbol). In the latter case, no exception is pending.
+    if (js.v8Isolate->HasPendingException()) {
+      // There's a pending exception (e.g., circular reference or getter threw)
+      throw JsExceptionThrown();
+    }
+    // No pending exception means the value is not JSON-encodable
+    throwTypeError(js.v8Isolate, "Value is not JSON-encodable");
+  }
+  return kj::str(str);
 }
 
 JsValue JsValue::fromJson(Lock& js, kj::ArrayPtr<const char> input) {

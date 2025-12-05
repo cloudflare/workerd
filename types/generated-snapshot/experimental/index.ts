@@ -853,14 +853,14 @@ export declare class Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
    */
-  get target(): EventTarget | undefined;
+  get target(): EventTarget | null;
   /**
    * The deprecated **`Event.srcElement`** is an alias for the Event.target property.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/srcElement)
    */
-  get srcElement(): EventTarget | undefined;
+  get srcElement(): EventTarget | null;
   /**
    * The **`timeStamp`** read-only property of the Event interface returns the time (in milliseconds) at which the event was created.
    *
@@ -911,6 +911,13 @@ export declare class Event {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/composedPath)
    */
   composedPath(): EventTarget[];
+  /**
+   * The **`Event.initEvent()`** method is used to initialize the value of an event created using Document.createEvent().
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/initEvent)
+   */
+  initEvent(type: string, bubbles?: boolean, cancelable?: boolean): void;
   static readonly NONE: number;
   static readonly CAPTURING_PHASE: number;
   static readonly AT_TARGET: number;
