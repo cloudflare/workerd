@@ -78,10 +78,6 @@ build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-asan --config=asan --copt="-g0" --strip=always
 build:ci-linux-arm-asan --config=ci-linux-asan
 
-# asan with release optimizations to catch optimization-dependent bugs
-build:ci-linux-asan-release --config=ci-linux-common --config=ci-limit-storage
-build:ci-linux-asan-release --config=asan-release --copt="-g0" --strip=always
-
 # Speculatively disable asynchronous remote cache uploads on macOS to debug CI job freezes. This is
 # a no-op when remote caching is disabled, so we can always enable it on macOS.
 build:macos --noremote_cache_async
