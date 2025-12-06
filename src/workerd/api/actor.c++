@@ -204,34 +204,69 @@ kj::Own<IoChannelFactory::ActorClassChannel> DurableObjectClass::getChannel(IoCo
 }
 
 void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
-      "DurableObjectClass cannot be serialized in this context.");
-  auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler);
-  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
-      "DurableObjectClass cannot be serialized in this context.");
-
   auto channel = getChannel(IoContext::current());
   channel->requireAllowsTransfer();
-  serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
+
+  IoChannelFactory::ChannelTokenUsage usage = IoChannelFactory::ChannelTokenUsage::STORAGE;
+
+  KJ_IF_SOME(handler, serializer.getExternalHandler()) {
+    KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableBuilder>(handler)) {
+      // Encoding a Frankenvalue (e.g. for dynamic loopback props or dynammic isolate env).
+      serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
+      return;
+    } else if (kj::tryDowncast<RpcSerializerExternalHandler>(handler) != kj::none) {
+      usage = IoChannelFactory::ChannelTokenUsage::RPC;
+    }
+    // TODO(someday): structuredClone() should have special handling that just reproduces the same
+    //   local object. At present we have no way to recognize structuredClone() here though.
+  }
+
+  // Not serializing for dynamic props or env. In all other cases we want to serialize to a token.
+  // But at present, serializing for storage requires allow_irrevocable_stub_storage.
+  if (usage == IoChannelFactory::ChannelTokenUsage::RPC ||
+      FeatureFlags::get(js).getAllowIrrevocableStubStorage()) {
+    serializer.writeLengthDelimited(channel->getToken(usage));
+  } else {
+    // TODO(someday): Support serializing to DO storage in a way that is auditable and revocable.
+    JSG_FAIL_REQUIRE(DOMDataCloneError, "DurableObjectClass cannot be serialized in this context.");
+  }
 }
 
 jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  auto& handler = KJ_REQUIRE_NONNULL(
-      deserializer.getExternalHandler(), "got DurableObjectClass in unexpected context?");
-  auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler);
-  KJ_REQUIRE(externalHandler != nullptr, "got DurableObjectClass in unexpected context?");
+  IoChannelFactory::ChannelTokenUsage usage = IoChannelFactory::ChannelTokenUsage::STORAGE;
 
-  auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
-      "serialized DurableObjectClass had invalid cap table index");
+  KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
+    KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableReader>(handler)) {
+      // Decoding a Frankenvalue (e.g. for dynamic loopback props or dynammic isolate env).
+      auto& cap = KJ_REQUIRE_NONNULL(frankenvalueHandler.get(deserializer.readRawUint32()),
+          "serialized DurableObjectClass had invalid cap table index");
 
-  if (auto channel = dynamic_cast<IoChannelFactory::ActorClassChannel*>(&cap)) {
-    return js.alloc<DurableObjectClass>(IoContext::current().addObject(kj::addRef(*channel)));
-  } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
-    return js.alloc<DurableObjectClass>(
-        channel->getChannelNumber(IoChannelCapTableEntry::Type::ACTOR_CLASS));
+      KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::ActorClassChannel>(cap)) {
+        // Probably decoding dynamic ctx.props.
+        return js.alloc<DurableObjectClass>(IoContext::current().addObject(kj::addRef(channel)));
+      } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
+        // Probably decoding dynamic isolate env.
+        return js.alloc<DurableObjectClass>(
+            channel.getChannelNumber(IoChannelCapTableEntry::Type::ACTOR_CLASS));
+      } else {
+        KJ_FAIL_REQUIRE(
+            "DurableObjectClass capability in Frankenvalue is not an ActorClassChannel?");
+      }
+    } else if (kj::tryDowncast<RpcDeserializerExternalHandler>(handler) != kj::none) {
+      usage = IoChannelFactory::ChannelTokenUsage::RPC;
+    }
+  }
+
+  if (usage == IoChannelFactory::ChannelTokenUsage::RPC ||
+      FeatureFlags::get(js).getAllowIrrevocableStubStorage()) {
+    auto& ioctx = IoContext::current();
+    auto channel = ioctx.getIoChannelFactory().actorClassFromToken(
+        usage, deserializer.readLengthDelimitedBytes());
+    return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channel)));
   } else {
-    KJ_FAIL_REQUIRE("DurableObjectClass capability in Frankenvalue is not an ActorClassChannel?");
+    JSG_FAIL_REQUIRE(
+        DOMDataCloneError, "DurableObjectClass cannot be deserialized in this context.");
   }
 }
 

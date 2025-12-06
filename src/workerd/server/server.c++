@@ -190,6 +190,7 @@ Server::Server(kj::Filesystem& fs,
       reportConfigError(kj::mv(reportConfigError)),
       loggingOptions(loggingOptions),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
+      channelTokenHandler(*this),
       tasks(*this) {}
 
 struct Server::GlobalContext {
@@ -1914,7 +1915,9 @@ class Server::WorkerService final: public Service,
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
   using AbortActorsCallback = kj::Function<void(kj::Maybe<const kj::Exception&> reason)>;
 
-  WorkerService(ThreadContext& threadContext,
+  WorkerService(ChannelTokenHandler& channelTokenHandler,
+      kj::Maybe<kj::StringPtr> serviceName,
+      ThreadContext& threadContext,
       kj::Own<const Worker> worker,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
@@ -1923,7 +1926,9 @@ class Server::WorkerService final: public Service,
       AbortActorsCallback abortActorsCallback,
       kj::Maybe<kj::String> dockerPathParam,
       bool isDynamic)
-      : threadContext(threadContext),
+      : channelTokenHandler(channelTokenHandler),
+        serviceName(serviceName),
+        threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
@@ -3021,6 +3026,16 @@ class Server::WorkerService final: public Service,
       worker->requireAllowsTransfer();
     }
 
+    kj::Array<byte> getToken(ChannelTokenUsage usage) override {
+      worker->requireAllowsTransfer();
+
+      // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
+      // Unspecialized loopback entrypoints are not serializable, so if we get here we must have
+      // props.
+      return worker->channelTokenHandler.encodeSubrequestChannelToken(
+          usage, KJ_ASSERT_NONNULL(worker->serviceName), entrypoint, KJ_ASSERT_NONNULL(props));
+    }
+
    private:
     kj::Own<WorkerService> worker;
     kj::Maybe<kj::StringPtr> entrypoint;
@@ -3083,11 +3098,27 @@ class Server::WorkerService final: public Service,
       return kj::refcounted<ActorClassImpl>(*service, className, kj::mv(props));
     }
 
+    kj::Array<byte> getToken(ChannelTokenUsage usage) override {
+      service->requireAllowsTransfer();
+
+      // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
+      // Unspecialized loopback entrypoints are not serializable, so if we get here we must have
+      // props.
+      return service->channelTokenHandler.encodeActorClassChannelToken(
+          usage, KJ_ASSERT_NONNULL(service->serviceName), className, KJ_ASSERT_NONNULL(props));
+    }
+
    private:
     kj::Own<WorkerService> service;
     kj::StringPtr className;
     kj::Maybe<Frankenvalue> props;
   };
+
+  ChannelTokenHandler& channelTokenHandler;
+
+  // This service's name as defined in the original config, or null if it's a dynamic isolate.
+  // Used only for serialization.
+  kj::Maybe<kj::StringPtr> serviceName;
 
   ThreadContext& threadContext;
 
@@ -3321,6 +3352,16 @@ class Server::WorkerService final: public Service,
   kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
       kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
+
+  kj::Own<SubrequestChannel> subrequestChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) override {
+    return channelTokenHandler.decodeSubrequestChannelToken(usage, token);
+  }
+
+  kj::Own<ActorClassChannel> actorClassFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) override {
+    return channelTokenHandler.decodeActorClassChannelToken(usage, token);
+  }
 
   // ---------------------------------------------------------------------------
   // implements TimerChannel
@@ -4638,10 +4679,14 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       break;
   }
 
-  auto result = kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
-      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath), def.isDynamic);
+  kj::Maybe<kj::StringPtr> serviceName;
+  if (!def.isDynamic) serviceName = name;
+
+  auto result = kj::refcounted<WorkerService>(channelTokenHandler, serviceName,
+      globalContext->threadContext, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
+      kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
+      kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath),
+      def.isDynamic);
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }
@@ -4795,6 +4840,32 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
 
     return kj::addRef(*invalidConfigActorClassSingleton);
   }
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> Server::resolveEntrypoint(
+    kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) {
+  auto& service = *JSG_REQUIRE_NONNULL(services.find(serviceName), Error,
+      "Stub refers to a service that doesn't exist: ", serviceName);
+
+  auto& worker = JSG_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(service), Error,
+      "Stub refers to a service that is not a Worker: ", serviceName);
+
+  return JSG_REQUIRE_NONNULL(worker.getEntrypoint(entrypoint, kj::mv(props)), Error,
+      "Stub refers to a an entrypoint of the target service that doesn't exist: ",
+      entrypoint.orDefault("default"));
+}
+
+kj::Own<IoChannelFactory::ActorClassChannel> Server::resolveActorClass(
+    kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) {
+  auto& service = *JSG_REQUIRE_NONNULL(services.find(serviceName), Error,
+      "Stub refers to a service that doesn't exist: ", serviceName);
+
+  auto& worker = JSG_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(service), Error,
+      "Stub refers to a service that is not a Worker: ", serviceName);
+
+  return JSG_REQUIRE_NONNULL(worker.getActorClass(entrypoint, kj::mv(props)), Error,
+      "Stub refers to a an entrypoint of the target service that doesn't exist: ",
+      entrypoint.orDefault("default"));
 }
 
 // =======================================================================================
