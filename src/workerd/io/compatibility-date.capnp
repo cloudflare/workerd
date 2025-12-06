@@ -1272,4 +1272,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableDate("2026-01-13")
     $impliedByAfterDate(name = "pedanticWpt", date = "2026-01-13");
   # Instructs the readAllText method in streams to strip the leading UTF8 BOM if present.
+
+  allowIrrevocableStubStorage @151 :Bool
+    $compatEnableFlag("allow_irrevocable_stub_storage")
+    $experimental;
+  # Permits various stub types (e.g. ServiceStub aka Fetcher, DurableObjectClass) to be stored in
+  # long-term Durable Object storage without any mechanism for the stub target to audit or revoke
+  # incoming connections.
+  #
+  # This feature exists for experimental use only, and will be removed once we have a properly
+  # auditable and revocable storage mechanism.
 }

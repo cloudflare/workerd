@@ -2029,3 +2029,30 @@ export let portAbortCall = {
     }
   },
 };
+
+export class Greeter extends WorkerEntrypoint {
+  async greet(name) {
+    return `${this.ctx.props.greeting}, ${name}!`;
+  }
+}
+
+export class GreeterFactory extends WorkerEntrypoint {
+  async makeGreeter(greeting) {
+    return this.ctx.exports.Greeter({ props: { greeting } });
+  }
+}
+
+export let sendServiceStubOverRpc = {
+  async test(controller, env, ctx) {
+    {
+      let greeter = await env.GreeterFactory.makeGreeter('Yo');
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
+
+    // TODO(now): Allow pipelining on service stub. Currently doesn't work.
+    // {
+    //   let greeter = ctx.exports.GreeterFactory.makeGreeter("Yo");
+    //   assert.strictEqual(await greeter.greet("Alice"), "Yo, Alice!");
+    // }
+  },
+};
