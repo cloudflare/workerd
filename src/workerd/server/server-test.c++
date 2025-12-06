@@ -5618,5 +5618,258 @@ KJ_TEST("Server: debug port RPC calls") {
     KJ_EXPECT(jsonResult == "8", jsonResult, "Expected result to be 8");
   }
 }
+
+KJ_TEST("Server: workerdDebugPort binding loopback test") {
+  // This test verifies that a worker can use the workerdDebugPort binding to connect
+  // back to the same workerd instance's debug port and access other services.
+  TestServer test(R"((
+    services = [
+      ( name = "target-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request) {
+                `    return new Response("Hello from target!");
+                `  }
+                `}
+                `export let namedHandler = {
+                `  async fetch(request) {
+                `    return new Response("Hello from named entrypoint!");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "test-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    // Test 1: Access the default entrypoint
+                `    const defaultFetcher = await env.debugPort.getEntrypoint("target-service");
+                `    const defaultResp = await defaultFetcher.fetch("http://fake-host/");
+                `    const defaultText = await defaultResp.text();
+                `    if (defaultText !== "Hello from target!") {
+                `      throw new Error("Expected 'Hello from target!' but got: " + defaultText);
+                `    }
+                `
+                `    // Test 2: Access a named entrypoint
+                `    const namedFetcher = await env.debugPort.getEntrypoint("target-service", "namedHandler");
+                `    const namedResp = await namedFetcher.fetch("http://fake-host/");
+                `    const namedText = await namedResp.text();
+                `    if (namedText !== "Hello from named entrypoint!") {
+                `      throw new Error("Expected 'Hello from named entrypoint!' but got: " + namedText);
+                `    }
+                `
+                `    return new Response("All tests passed!");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "debugPort",
+              workerdDebugPort = (
+                address = "debug-addr"
+              )
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "test-service" )
+    ]
+  ))"_kj);
+
+  // Enable the debug port on a known address
+  test.server.enableDebugPort(kj::str("debug-addr"));
+  test.server.allowExperimental();
+
+  test.start();
+
+  // Run the test by invoking the fetch handler
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "All tests passed!");
+}
+
+KJ_TEST("Server: workerdDebugPort binding with props") {
+  // This test verifies that props can be passed through the workerdDebugPort binding.
+  TestServer test(R"((
+    services = [
+      ( name = "target-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export class PropsHandler extends WorkerEntrypoint {
+                `  async fetch(request) {
+                `    const props = this.ctx.props;
+                `    return new Response(JSON.stringify(props));
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "test-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    // Test passing props to the entrypoint
+                `    const fetcher = await env.debugPort.getEntrypoint(
+                `        "target-service", "PropsHandler", {foo: "bar", num: 42});
+                `    const resp = await fetcher.fetch("http://fake-host/");
+                `    const props = await resp.json();
+                `
+                `    if (props.foo !== "bar") {
+                `      throw new Error("Expected props.foo to be 'bar' but got: " + props.foo);
+                `    }
+                `    if (props.num !== 42) {
+                `      throw new Error("Expected props.num to be 42 but got: " + props.num);
+                `    }
+                `
+                `    return new Response("Props test passed!");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "debugPort",
+              workerdDebugPort = (
+                address = "debug-addr"
+              )
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "test-service" )
+    ]
+  ))"_kj);
+
+  test.server.enableDebugPort(kj::str("debug-addr"));
+  test.server.allowExperimental();
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Props test passed!");
+}
+
+KJ_TEST("Server: workerdDebugPort binding getActor") {
+  // This test verifies that getActor can be used to access Durable Objects via the debug port.
+  TestServer test(R"((
+    services = [
+      ( name = "do-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `import {DurableObject} from "cloudflare:workers";
+                `export default {
+                `  async fetch(request) {
+                `    return new Response("DO service default handler");
+                `  }
+                `}
+                `export class Counter extends DurableObject {
+                `  counter = 0;
+                `  async fetch(request) {
+                `    this.counter++;
+                `    return new Response("Counter: " + this.counter);
+                `  }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "Counter",
+              uniqueKey = "test-do-key"
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+      ( name = "test-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    // Get the same actor twice using a fixed ID
+                `    const actorId = "0".repeat(64);
+                `
+                `    const actor1 = await env.debugPort.getActor("do-service", "Counter", actorId);
+                `    const resp1 = await actor1.fetch("http://fake-host/");
+                `    const text1 = await resp1.text();
+                `    if (text1 !== "Counter: 1") {
+                `      throw new Error("Expected 'Counter: 1' but got: " + text1);
+                `    }
+                `
+                `    // Second request to same actor should increment counter
+                `    const actor2 = await env.debugPort.getActor("do-service", "Counter", actorId);
+                `    const resp2 = await actor2.fetch("http://fake-host/");
+                `    const text2 = await resp2.text();
+                `    if (text2 !== "Counter: 2") {
+                `      throw new Error("Expected 'Counter: 2' but got: " + text2);
+                `    }
+                `
+                `    // Different actor ID should have independent state (counter starts at 1)
+                `    const differentActorId = "1".repeat(64);
+                `    const actor3 = await env.debugPort.getActor("do-service", "Counter", differentActorId);
+                `    const resp3 = await actor3.fetch("http://fake-host/");
+                `    const text3 = await resp3.text();
+                `    if (text3 !== "Counter: 1") {
+                `      throw new Error("Expected 'Counter: 1' for different actor but got: " + text3);
+                `    }
+                `
+                `    return new Response("DO actor test passed!");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "debugPort",
+              workerdDebugPort = (
+                address = "debug-addr"
+              )
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "test-service" )
+    ]
+  ))"_kj);
+
+  test.server.enableDebugPort(kj::str("debug-addr"));
+  test.server.allowExperimental();
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "DO actor test passed!");
+}
 }  // namespace
 }  // namespace workerd::server

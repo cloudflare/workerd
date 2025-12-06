@@ -251,6 +251,12 @@ class IoChannelFactory {
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
     JSG_FAIL_REQUIRE(Error, "Dynamic worker loading is not supported by this runtime.");
   }
+
+  // Get a workerd debug port capability by channel number.
+  // This is used by the workerdDebugPort binding to access remote workerd instances.
+  virtual capnp::Capability::Client getWorkerdDebugPort(uint channel) {
+    JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings are not supported by this runtime.");
+  }
 };
 
 // Represents a dynamically-loaded Worker to which requests can be sent.

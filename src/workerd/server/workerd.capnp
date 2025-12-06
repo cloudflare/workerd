@@ -460,6 +460,17 @@ struct Worker {
         # (If omitted, the binding will not share a cache with any other binding.)
       }
 
+      workerdDebugPort :group {
+        # A binding representing a connection to another workerd instance's debug port.
+        # This allows dynamic access to worker entrypoints in the remote workerd process
+        # via the WorkerdDebugPort RPC interface.
+        #
+        # This is a workerd-only API intended for local development and testing.
+
+        address @28 :Text;
+        # Address of the remote workerd debug port (e.g., "localhost:1234").
+      }
+
       # TODO(someday): dispatch, other new features
     }
 
@@ -484,6 +495,7 @@ struct Worker {
         analyticsEngine @12 : Void;
         hyperdrive @13: Void;
         durableObjectClass @14: Void;
+        workerdDebugPort @15: Void;
       }
     }
 
