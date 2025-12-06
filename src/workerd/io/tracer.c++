@@ -104,10 +104,6 @@ void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
   traces.add(kj::refcounted<Trace>(reader));
 }
 
-void PipelineTracer::addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer) {
-  tailStreamWriters.add(kj::mv(writer));
-}
-
 WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
