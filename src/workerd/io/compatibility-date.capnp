@@ -1256,4 +1256,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
   # measurements and time-sensitive operations.
+
+  allowIrrevocableStubStorage @149 :Bool
+    $compatEnableFlag("allow_irrevocable_stub_storage")
+    $experimental;
+  # Permits various stub types (e.g. ServiceStub aka Fetcher, DurableObjectClass) to be stored in
+  # long-term Durable Object storage without any mechanism for the stub target to audit or revoke
+  # incoming connections.
+  #
+  # This feature exists for experimental use only, and will be removed once we have a properly
+  # auditable and revocable storage mechanism.
 }
