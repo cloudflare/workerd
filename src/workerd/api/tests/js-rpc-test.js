@@ -2040,6 +2040,9 @@ export class GreeterFactory extends WorkerEntrypoint {
   async makeGreeter(greeting) {
     return this.ctx.exports.Greeter({ props: { greeting } });
   }
+  async makeGreeterWrapped(greeting) {
+    return { greeter: this.ctx.exports.Greeter({ props: { greeting } }) };
+  }
 }
 
 export let sendServiceStubOverRpc = {
@@ -2049,10 +2052,17 @@ export let sendServiceStubOverRpc = {
       assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
     }
 
-    // TODO(now): Allow pipelining on service stub. Currently doesn't work.
-    // {
-    //   let greeter = ctx.exports.GreeterFactory.makeGreeter("Yo");
-    //   assert.strictEqual(await greeter.greet("Alice"), "Yo, Alice!");
-    // }
+    // Test that we can pipeline on service stubs.
+    {
+      let greeter = env.GreeterFactory.makeGreeter('Yo');
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
+
+    // Pipelining works a little differently when the service stub is returned as the top-level
+    // value vs. an inner value, so test an inner value too.
+    {
+      let greeter = env.GreeterFactory.makeGreeterWrapped('Yo').greeter;
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
   },
 };
