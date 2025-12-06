@@ -29,6 +29,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "body-buffer-input-stream-replacement"_kj;
     case AutogateKey::FETCH_REQUEST_MEMORY_ADJUSTMENT:
       return "fetch-request-memory-adjustment"_kj;
+    case AutogateKey::RUST_BACKED_NODE_DNS:
+      return "rust-backed-node-dns"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

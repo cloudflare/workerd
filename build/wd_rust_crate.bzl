@@ -8,7 +8,10 @@ def rust_cxx_bridge(
         deps = [],
         visibility = [],
         strip_include_prefix = None,
-        include_prefix = None):
+        include_prefix = None,
+        tags = [],
+        local_defines = [],
+        features = []):
     native.genrule(
         name = "%s/generated" % name,
         srcs = [src],
@@ -29,12 +32,15 @@ def rust_cxx_bridge(
         hdrs = [src + ".h"] + hdrs,
         strip_include_prefix = strip_include_prefix,
         include_prefix = include_prefix,
+        local_defines = local_defines,
+        features = features,
         linkstatic = select({
             "@platforms//os:windows": True,
             "//conditions:default": False,
         }),
         deps = deps,
         visibility = visibility,
+        tags = tags,
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -53,6 +59,9 @@ def wd_rust_crate(
         test_deps = [],
         test_proc_macro_deps = [],
         cxx_bridge_deps = [],
+        cxx_bridge_tags = [],
+        cxx_bridge_local_defines = [],
+        cxx_bridge_features = [],
         visibility = None):
     """Define rust crate.
 
@@ -100,6 +109,9 @@ def wd_rust_crate(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps,
+            tags = cxx_bridge_tags,
+            local_defines = cxx_bridge_local_defines,
+            features = cxx_bridge_features,
         )
 
     for bridge_src in cxx_bridge_srcs:
