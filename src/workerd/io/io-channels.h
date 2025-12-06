@@ -139,6 +139,17 @@ class IoChannelFactory {
   virtual kj::Promise<void> writeLogfwdr(
       uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) = 0;
 
+  enum ChannelTokenUsage {
+    // Token is to be sent over RPC and hence will be converted back into a SubrequestChannel
+    // soon. Such tokens have limited lifetime but are otherwise irrevocable.
+    RPC,
+
+    // Token is to be stored in long-term storage. At present this must only be allowed to be
+    // used in workers that have the allow_irrevocable_stub_storage compat flag (checked by the
+    // caller). In the future the format for such tokens will change.
+    STORAGE,
+  };
+
   // Object representing somehere where generic workers subrequests can be sent. Multiple requests
   // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
   // created.
@@ -168,6 +179,11 @@ class IoChannelFactory {
     // dynamically-loaded workers cannot be serialized because the system does not know how to
     // reconstruct a dynamically-loaded worker from scratch.
     virtual void requireAllowsTransfer() = 0;
+
+    // Get a token representing this SubrequestChannel which can be converted back into a
+    // SubrequestChannel using subrequestChannelFromToken(). Default implementation throws a
+    // TypeError.
+    virtual kj::Array<byte> getToken(ChannelTokenUsage usage);
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -220,8 +236,9 @@ class IoChannelFactory {
       return kj::addRef(*this);
     }
 
-    // Same as SubrequestChannel::requireAllowsTransfer().
+    // Same as the corresponding methods on SubrequestChannel.
     virtual void requireAllowsTransfer() = 0;
+    virtual kj::Array<byte> getToken(ChannelTokenUsage usage);
 
     // This class has no functional methods, since it serves as a token to be passed to other
     // interfaces (namely the facets API).
@@ -254,6 +271,13 @@ class IoChannelFactory {
   virtual kj::Network& getWorkerdDebugPortNetwork() {
     JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings are not supported by this runtime.");
   }
+
+  // Converts a token created with {SubrequestChannel,ActorClassChannel}::getToken() back into a
+  // live channel. Default implementations throw.
+  virtual kj::Own<SubrequestChannel> subrequestChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+  virtual kj::Own<ActorClassChannel> actorClassFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 };
 
 // Represents a dynamically-loaded Worker to which requests can be sent.
