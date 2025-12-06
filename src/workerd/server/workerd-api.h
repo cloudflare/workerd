@@ -284,6 +284,14 @@ class WorkerdApi final: public Worker::Api {
       }
     };
 
+    struct WorkerdDebugPort {
+      uint channel;
+
+      WorkerdDebugPort clone() const {
+        return *this;
+      }
+    };
+
     kj::String name;
     kj::OneOf<Json,
         Fetcher,
@@ -306,7 +314,8 @@ class WorkerdApi final: public Worker::Api {
         MemoryCache,
         ActorClass,
         LoopbackActorClass,
-        WorkerLoader>
+        WorkerLoader,
+        WorkerdDebugPort>
         value;
 
     Global clone() const;
