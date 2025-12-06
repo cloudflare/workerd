@@ -196,14 +196,17 @@ wd_cc_library(
 wd_cc_library(
     name = "server",
     srcs = [
+        "channel-token.c++",
         "server.c++",
     ],
     hdrs = [
+        "channel-token.h",
         "server.h",
     ],
     deps = [
         ":actor-id-impl",
         ":alarm-scheduler",
+        ":channel-token_capnp",
         ":container-client",
         ":facet-tree-index",
         ":fallback-service",
@@ -228,6 +231,13 @@ wd_cc_library(
 wd_capnp_library(src = "docker-api.capnp")
 
 wd_capnp_library(src = "log-schema.capnp")
+
+wd_capnp_library(
+    src = "channel-token.capnp",
+    deps = [
+        "//src/workerd/io:frankenvalue_capnp",
+    ],
+)
 
 wd_cc_library(
     name = "json-logger",
@@ -319,6 +329,13 @@ kj_test(
     deps = [
         ":server",
         "//src/workerd/util:test-util",
+    ],
+)
+
+kj_test(
+    src = "channel-token-test.c++",
+    deps = [
+        ":server",
     ],
 )
 
