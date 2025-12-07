@@ -104,14 +104,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.48",
-    actual = "@crates_vendor__cc-1.2.48//:cc",
+    name = "cc-1.2.49",
+    actual = "@crates_vendor__cc-1.2.49//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.48//:cc",
+    actual = "@crates_vendor__cc-1.2.49//:cc",
     tags = ["manual"],
 )
 
@@ -152,14 +152,14 @@ alias(
 )
 
 alias(
-    name = "flate2-1.1.5",
-    actual = "@crates_vendor__flate2-1.1.5//:flate2",
+    name = "flate2-1.1.7",
+    actual = "@crates_vendor__flate2-1.1.7//:flate2",
     tags = ["manual"],
 )
 
 alias(
     name = "flate2",
-    actual = "@crates_vendor__flate2-1.1.5//:flate2",
+    actual = "@crates_vendor__flate2-1.1.7//:flate2",
     tags = ["manual"],
 )
 

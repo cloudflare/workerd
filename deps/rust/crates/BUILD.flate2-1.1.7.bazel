@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_proc_macro(
-    name = "derive_more_impl",
+rust_library(
+    name = "flate2",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,26 +29,26 @@ rust_proc_macro(
         ],
     ),
     crate_features = [
-        "add",
-        "add_assign",
+        "any_impl",
         "default",
+        "miniz_oxide",
+        "rust_backend",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=derive_more-impl",
+        "crate-name=flate2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.1",
+    version = "1.1.7",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.103//:proc_macro2",
-        "@crates_vendor__quote-1.0.42//:quote",
-        "@crates_vendor__syn-2.0.111//:syn",
+        "@crates_vendor__crc32fast-1.5.0//:crc32fast",
+        "@crates_vendor__miniz_oxide-0.8.9//:miniz_oxide",
     ],
 )

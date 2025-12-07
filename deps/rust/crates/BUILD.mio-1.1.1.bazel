@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "cc",
+    name = "mio",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,37 +29,38 @@ rust_library(
         ],
     ),
     crate_features = [
-        "parallel",
+        "net",
+        "os-ext",
+        "os-poll",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cc",
+        "crate-name=mio",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.48",
-    deps = [
-        "@crates_vendor__find-msvc-tools-0.1.5//:find_msvc_tools",
-        "@crates_vendor__jobserver-0.1.34//:jobserver",
-        "@crates_vendor__shlex-1.3.0//:shlex",
-    ] + select({
+    version = "1.1.1",
+    deps = select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.177//:libc",  # aarch64-apple-darwin
+            "@crates_vendor__libc-0.2.178//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.177//:libc",  # aarch64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.178//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.177//:libc",  # x86_64-apple-darwin
+            "@crates_vendor__libc-0.2.178//:libc",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # cfg(windows)
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.177//:libc",  # x86_64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.178//:libc",  # cfg(unix)
         ],
         "//conditions:default": [],
     }),
