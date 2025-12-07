@@ -8,19 +8,26 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 
+#include <capnp/rpc-twoparty.h>
+
 namespace workerd::api {
 class Fetcher;
 }  // namespace workerd::api
 
 namespace workerd::server {
 
-// JS interface for a workerd debug port binding.
-// This binding provides access to a remote workerd instance's WorkerdDebugPort RPC interface,
-// allowing dynamic access to worker entrypoints without requiring static configuration.
+// JS interface for a connected workerd debug port.
+// This class is returned from WorkerdDebugPortConnector::connect() and provides
+// access to a remote workerd instance's WorkerdDebugPort RPC interface.
 class WorkerdDebugPortClient: public jsg::Object {
  public:
-  // Create a WorkerdDebugPortClient backed by the given channel number.
-  explicit WorkerdDebugPortClient(uint channel): channel(channel) {}
+  // Create a WorkerdDebugPortClient with an established connection.
+  WorkerdDebugPortClient(kj::Own<kj::AsyncIoStream> connection,
+      kj::Own<capnp::TwoPartyClient> rpcClient,
+      rpc::WorkerdDebugPort::Client debugPort)
+      : connection(kj::mv(connection)),
+        rpcClient(kj::mv(rpcClient)),
+        debugPort(kj::mv(debugPort)) {}
 
   // Get access to a stateless entrypoint on the remote workerd instance.
   //
@@ -56,9 +63,30 @@ class WorkerdDebugPortClient: public jsg::Object {
   }
 
  private:
-  uint channel;
+  kj::Own<kj::AsyncIoStream> connection;
+  kj::Own<capnp::TwoPartyClient> rpcClient;
+  rpc::WorkerdDebugPort::Client debugPort;
 };
 
-#define EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES workerd::server::WorkerdDebugPortClient
+// JS interface for the workerdDebugPort binding.
+// This binding provides a connect() method to dynamically connect to any workerd
+// instance's debug port.
+class WorkerdDebugPortConnector: public jsg::Object {
+ public:
+  WorkerdDebugPortConnector() = default;
+
+  // Connect to a remote workerd debug port at the given address.
+  //
+  // @param address - The address of the remote workerd debug port (e.g., "localhost:1234")
+  // @returns A Promise<WorkerdDebugPortClient> that can be used to access the remote instance
+  jsg::Promise<jsg::Ref<WorkerdDebugPortClient>> connect(jsg::Lock& js, kj::String address);
+
+  JSG_RESOURCE_TYPE(WorkerdDebugPortConnector) {
+    JSG_METHOD(connect);
+  }
+};
+
+#define EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES                                                 \
+  workerd::server::WorkerdDebugPortClient, workerd::server::WorkerdDebugPortConnector
 
 }  // namespace workerd::server

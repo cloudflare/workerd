@@ -285,8 +285,6 @@ class WorkerdApi final: public Worker::Api {
     };
 
     struct WorkerdDebugPort {
-      uint channel;
-
       WorkerdDebugPort clone() const {
         return *this;
       }

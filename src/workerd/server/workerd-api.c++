@@ -828,8 +828,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
               workerLoader.channel, CompatibilityDateValidation::CODE_VERSION));
     }
 
-    KJ_CASE_ONEOF(workerdDebugPort, Global::WorkerdDebugPort) {
-      value = lock.wrap(context, lock.alloc<WorkerdDebugPortClient>(workerdDebugPort.channel));
+    KJ_CASE_ONEOF(_, Global::WorkerdDebugPort) {
+      value = lock.wrap(context, lock.alloc<WorkerdDebugPortConnector>());
     }
   }
 

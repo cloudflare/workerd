@@ -55,8 +55,6 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getEntrypoint(jsg::
     jsg::Optional<jsg::JsRef<jsg::JsObject>> props) {
   auto& context = IoContext::current();
 
-  auto debugPort =
-      context.getIoChannelFactory().getWorkerdDebugPort(channel).castAs<rpc::WorkerdDebugPort>();
   auto req = debugPort.getEntrypointRequest();
   req.setService(service);
   KJ_IF_SOME(e, entrypoint) {
@@ -76,8 +74,6 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
     jsg::Lock& js, kj::String service, kj::String entrypoint, kj::String actorId) {
   auto& context = IoContext::current();
 
-  auto debugPort =
-      context.getIoChannelFactory().getWorkerdDebugPort(channel).castAs<rpc::WorkerdDebugPort>();
   auto req = debugPort.getActorRequest();
   req.setService(service);
   req.setEntrypoint(entrypoint);
@@ -86,6 +82,22 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
   return context.awaitIo(
       js, req.send(), [&context](jsg::Lock& js, auto result) -> jsg::Ref<api::Fetcher> {
     return wrapBootstrapAsFetcher(js, context, result.getActor());
+  });
+}
+
+jsg::Promise<jsg::Ref<WorkerdDebugPortClient>> WorkerdDebugPortConnector::connect(
+    jsg::Lock& js, kj::String address) {
+  auto& context = IoContext::current();
+  auto connectPromise =
+      context.getIoChannelFactory().getWorkerdDebugPortNetwork().parseAddress(address).then(
+          [](kj::Own<kj::NetworkAddress> addr) { return addr->connect(); });
+
+  return context.awaitIo(js, kj::mv(connectPromise),
+      [](jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection) -> jsg::Ref<WorkerdDebugPortClient> {
+    auto rpcClient = kj::heap<capnp::TwoPartyClient>(*connection);
+    auto debugPort = rpcClient->bootstrap().castAs<rpc::WorkerdDebugPort>();
+    return js.alloc<WorkerdDebugPortClient>(
+        kj::mv(connection), kj::mv(rpcClient), kj::mv(debugPort));
   });
 }
 

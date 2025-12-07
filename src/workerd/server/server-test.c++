@@ -5653,8 +5653,11 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
               esModule =
                 `export default {
                 `  async fetch(request, env, ctx) {
+                `    // Connect to the debug port
+                `    const client = await env.debugPort.connect("debug-addr");
+                `
                 `    // Test 1: Access the default entrypoint
-                `    const defaultFetcher = await env.debugPort.getEntrypoint("target-service");
+                `    const defaultFetcher = await client.getEntrypoint("target-service");
                 `    const defaultResp = await defaultFetcher.fetch("http://fake-host/");
                 `    const defaultText = await defaultResp.text();
                 `    if (defaultText !== "Hello from target!") {
@@ -5662,7 +5665,7 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
                 `    }
                 `
                 `    // Test 2: Access a named entrypoint
-                `    const namedFetcher = await env.debugPort.getEntrypoint("target-service", "namedHandler");
+                `    const namedFetcher = await client.getEntrypoint("target-service", "namedHandler");
                 `    const namedResp = await namedFetcher.fetch("http://fake-host/");
                 `    const namedText = await namedResp.text();
                 `    if (namedText !== "Hello from named entrypoint!") {
@@ -5676,9 +5679,7 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
           ],
           bindings = [
             ( name = "debugPort",
-              workerdDebugPort = (
-                address = "debug-addr"
-              )
+              workerdDebugPort = void
             )
           ]
         )
@@ -5731,8 +5732,11 @@ KJ_TEST("Server: workerdDebugPort binding with props") {
               esModule =
                 `export default {
                 `  async fetch(request, env, ctx) {
+                `    // Connect to the debug port
+                `    const client = await env.debugPort.connect("debug-addr");
+                `
                 `    // Test passing props to the entrypoint
-                `    const fetcher = await env.debugPort.getEntrypoint(
+                `    const fetcher = await client.getEntrypoint(
                 `        "target-service", "PropsHandler", {foo: "bar", num: 42});
                 `    const resp = await fetcher.fetch("http://fake-host/");
                 `    const props = await resp.json();
@@ -5751,9 +5755,7 @@ KJ_TEST("Server: workerdDebugPort binding with props") {
           ],
           bindings = [
             ( name = "debugPort",
-              workerdDebugPort = (
-                address = "debug-addr"
-              )
+              workerdDebugPort = void
             )
           ]
         )
@@ -5816,10 +5818,13 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
               esModule =
                 `export default {
                 `  async fetch(request, env, ctx) {
+                `    // Connect to the debug port
+                `    const client = await env.debugPort.connect("debug-addr");
+                `
                 `    // Get the same actor twice using a fixed ID
                 `    const actorId = "0".repeat(64);
                 `
-                `    const actor1 = await env.debugPort.getActor("do-service", "Counter", actorId);
+                `    const actor1 = await client.getActor("do-service", "Counter", actorId);
                 `    const resp1 = await actor1.fetch("http://fake-host/");
                 `    const text1 = await resp1.text();
                 `    if (text1 !== "Counter: 1") {
@@ -5827,7 +5832,7 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
                 `    }
                 `
                 `    // Second request to same actor should increment counter
-                `    const actor2 = await env.debugPort.getActor("do-service", "Counter", actorId);
+                `    const actor2 = await client.getActor("do-service", "Counter", actorId);
                 `    const resp2 = await actor2.fetch("http://fake-host/");
                 `    const text2 = await resp2.text();
                 `    if (text2 !== "Counter: 2") {
@@ -5836,7 +5841,7 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
                 `
                 `    // Different actor ID should have independent state (counter starts at 1)
                 `    const differentActorId = "1".repeat(64);
-                `    const actor3 = await env.debugPort.getActor("do-service", "Counter", differentActorId);
+                `    const actor3 = await client.getActor("do-service", "Counter", differentActorId);
                 `    const resp3 = await actor3.fetch("http://fake-host/");
                 `    const text3 = await resp3.text();
                 `    if (text3 !== "Counter: 1") {
@@ -5850,9 +5855,7 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
           ],
           bindings = [
             ( name = "debugPort",
-              workerdDebugPort = (
-                address = "debug-addr"
-              )
+              workerdDebugPort = void
             )
           ]
         )

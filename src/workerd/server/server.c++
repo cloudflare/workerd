@@ -1898,32 +1898,6 @@ class Server::WorkerService final: public Service,
  public:
   class ActorNamespace;
 
-  // Manages a lazy connection to a remote workerd debug port.
-  class DebugPortConnection {
-   public:
-    DebugPortConnection(kj::Own<kj::NetworkAddress> addr): addr(kj::mv(addr)) {}
-
-    rpc::WorkerdDebugPort::Client getDebugPort() {
-      KJ_IF_SOME(port, debugPort) {
-        return port;
-      }
-      debugPort = connect();
-      return KJ_ASSERT_NONNULL(debugPort);
-    }
-
-   private:
-    kj::Promise<rpc::WorkerdDebugPort::Client> connect() {
-      connection = co_await addr->connect();
-      rpcClient = kj::heap<capnp::TwoPartyClient>(*connection);
-      co_return rpcClient->bootstrap().castAs<rpc::WorkerdDebugPort>();
-    }
-
-    kj::Own<kj::NetworkAddress> addr;
-    kj::Own<kj::AsyncIoStream> connection;
-    kj::Own<capnp::TwoPartyClient> rpcClient;
-    kj::Maybe<rpc::WorkerdDebugPort::Client> debugPort;
-  };
-
   // I/O channels, delivered when link() is called.
   struct LinkedIoChannels {
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> subrequest;
@@ -1935,7 +1909,7 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
-    kj::Array<kj::Own<DebugPortConnection>> workerdDebugPorts;
+    kj::Maybe<kj::Network&> workerdDebugPortNetwork;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
@@ -3349,12 +3323,11 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
 
-  capnp::Capability::Client getWorkerdDebugPort(uint channel) override {
+  kj::Network& getWorkerdDebugPortNetwork() override {
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
-    KJ_REQUIRE(channel < channels.workerdDebugPorts.size(), "invalid workerd debug port channel");
-
-    return channels.workerdDebugPorts[channel]->getDebugPort();
+    return KJ_REQUIRE_NONNULL(channels.workerdDebugPortNetwork,
+        "workerdDebugPort binding is not enabled for this worker");
   }
 
   // ---------------------------------------------------------------------------
@@ -3459,11 +3432,6 @@ struct FutureWorkerLoaderChannel {
   kj::Maybe<kj::String> id;
 };
 
-struct FutureWorkerdDebugPortChannel {
-  kj::String name;     // for error logging
-  kj::String address;  // Remote server address (e.g., "localhost:1234")
-};
-
 static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     config::Worker::Reader conf,
     config::Worker::Binding::Reader binding,
@@ -3472,7 +3440,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     kj::Vector<FutureActorChannel>& actorChannels,
     kj::Vector<FutureActorClassChannel>& actorClassChannels,
     kj::Vector<FutureWorkerLoaderChannel>& workerLoaderChannels,
-    kj::Vector<FutureWorkerdDebugPortChannel>& workerdDebugPortChannels,
+    bool& hasWorkerdDebugPortBinding,
     kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
     bool experimental) {
   // creates binding object or returns null and reports an error
@@ -3697,7 +3665,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_SOME(global,
             createBinding(workerName, conf, innerBinding, errorReporter, subrequestChannels,
-                actorChannels, actorClassChannels, workerLoaderChannels, workerdDebugPortChannels,
+                actorChannels, actorClassChannels, workerLoaderChannels, hasWorkerdDebugPortBinding,
                 actorConfigs, experimental)) {
           innerGlobals.add(kj::mv(global));
         } else {
@@ -3828,16 +3796,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::WORKERD_DEBUG_PORT: {
-      auto debugPortConf = binding.getWorkerdDebugPort();
-
-      FutureWorkerdDebugPortChannel channel{
-        .name = kj::str(bindingName),
-        .address = kj::str(debugPortConf.getAddress()),
-      };
-
-      uint channelNumber = workerdDebugPortChannels.size();
-      workerdDebugPortChannels.add(kj::mv(channel));
-      return makeGlobal(Global::WorkerdDebugPort{.channel = channelNumber});
+      hasWorkerdDebugPortBinding = true;
+      return makeGlobal(Global::WorkerdDebugPort{});
     }
   }
   errorReporter.addError(kj::str(errorContext,
@@ -3884,7 +3844,7 @@ struct Server::WorkerDef {
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
-  kj::Vector<FutureWorkerdDebugPortChannel> workerdDebugPortChannels;
+  bool hasWorkerdDebugPortBinding = false;
   kj::Array<FutureSubrequestChannel> tails;
   kj::Array<FutureSubrequestChannel> streamingTails;
 
@@ -4241,14 +4201,14 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
-  kj::Vector<FutureWorkerdDebugPortChannel> workerdDebugPortChannels;
+  bool hasWorkerdDebugPortBinding = false;
 
   auto confBindings = conf.getBindings();
   kj::Vector<WorkerdApi::Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_SOME(global,
         createBinding(name, conf, binding, errorReporter, subrequestChannels, actorChannels,
-            actorClassChannels, workerLoaderChannels, workerdDebugPortChannels, actorConfigs,
+            actorClassChannels, workerLoaderChannels, hasWorkerdDebugPortBinding, actorConfigs,
             experimental)) {
       globals.add(kj::mv(global));
     }
@@ -4278,7 +4238,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     .actorChannels = kj::mv(actorChannels),
     .actorClassChannels = kj::mv(actorClassChannels),
     .workerLoaderChannels = kj::mv(workerLoaderChannels),
-    .workerdDebugPortChannels = kj::mv(workerdDebugPortChannels),
+    .hasWorkerdDebugPortBinding = hasWorkerdDebugPortBinding,
 
     // clang-format off
     .tails = KJ_MAP(tail, conf.getTails()) -> FutureSubrequestChannel {
@@ -4683,10 +4643,9 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       }
     };
 
-    result.workerdDebugPorts = KJ_MAP(channel, def.workerdDebugPortChannels) {
-      auto addr = kj::heap<PromisedNetworkAddress>(network.parseAddress(channel.address));
-      return kj::heap<WorkerService::DebugPortConnection>(kj::mv(addr));
-    };
+    if (def.hasWorkerdDebugPortBinding) {
+      result.workerdDebugPortNetwork = network;
+    }
 
     return result;
   };
