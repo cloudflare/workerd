@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "mio",
+    name = "derive_more",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,39 +29,25 @@ rust_library(
         ],
     ),
     crate_features = [
-        "net",
-        "os-ext",
-        "os-poll",
+        "add",
+        "add_assign",
+        "default",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__derive_more-impl-2.1.0//:derive_more_impl",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=mio",
+        "crate-name=derive_more",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.1.0",
-    deps = select({
-        "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.177//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.177//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.177//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # cfg(windows)
-        ],
-        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.177//:libc",  # cfg(unix)
-        ],
-        "//conditions:default": [],
-    }),
+    version = "2.1.0",
 )

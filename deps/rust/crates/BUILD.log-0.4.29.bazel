@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "ppv_lite86",
+    name = "log",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,10 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "simd",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -39,13 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=ppv-lite86",
+        "crate-name=log",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.21",
-    deps = [
-        "@crates_vendor__zerocopy-0.8.31//:zerocopy",
-    ],
+    version = "0.4.29",
 )
