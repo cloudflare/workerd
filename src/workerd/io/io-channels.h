@@ -17,7 +17,8 @@
 
 namespace kj {
 class HttpClient;
-}
+class Network;
+}  // namespace kj
 
 namespace workerd {
 
@@ -250,6 +251,12 @@ class IoChannelFactory {
       kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
     JSG_FAIL_REQUIRE(Error, "Dynamic worker loading is not supported by this runtime.");
+  }
+
+  // Get the network for connecting to workerd debug ports.
+  // This is used by the workerdDebugPort binding to connect to remote workerd instances.
+  virtual kj::Network& getWorkerdDebugPortNetwork() {
+    JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings are not supported by this runtime.");
   }
 };
 

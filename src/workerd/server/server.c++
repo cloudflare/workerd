@@ -1909,6 +1909,7 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
+    kj::Maybe<kj::Network&> workerdDebugPortNetwork;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
@@ -3322,6 +3323,13 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
 
+  kj::Network& getWorkerdDebugPortNetwork() override {
+    auto& channels =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+    return KJ_REQUIRE_NONNULL(channels.workerdDebugPortNetwork,
+        "workerdDebugPort binding is not enabled for this worker");
+  }
+
   // ---------------------------------------------------------------------------
   // implements TimerChannel
 
@@ -3432,6 +3440,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     kj::Vector<FutureActorChannel>& actorChannels,
     kj::Vector<FutureActorClassChannel>& actorClassChannels,
     kj::Vector<FutureWorkerLoaderChannel>& workerLoaderChannels,
+    bool& hasWorkerdDebugPortBinding,
     kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
     bool experimental) {
   // creates binding object or returns null and reports an error
@@ -3656,8 +3665,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_SOME(global,
             createBinding(workerName, conf, innerBinding, errorReporter, subrequestChannels,
-                actorChannels, actorClassChannels, workerLoaderChannels, actorConfigs,
-                experimental)) {
+                actorChannels, actorClassChannels, workerLoaderChannels, hasWorkerdDebugPortBinding,
+                actorConfigs, experimental)) {
           innerGlobals.add(kj::mv(global));
         } else {
           // we've already communicated the error
@@ -3785,6 +3794,18 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       workerLoaderChannels.add(kj::mv(channel));
       return makeGlobal(Global::WorkerLoader{.channel = channelNumber});
     }
+
+    case config::Worker::Binding::WORKERD_DEBUG_PORT: {
+      if (!experimental) {
+        errorReporter.addError(kj::str(
+            "workerdDebugPort bindings are an experimental feature which may change or go away "
+            "in the future. You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
+      }
+
+      hasWorkerdDebugPortBinding = true;
+      return makeGlobal(Global::WorkerdDebugPort{});
+    }
   }
   errorReporter.addError(kj::str(errorContext,
       "has unrecognized type. Was the config compiled with a newer version of "
@@ -3830,6 +3851,7 @@ struct Server::WorkerDef {
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
+  bool hasWorkerdDebugPortBinding = false;
   kj::Array<FutureSubrequestChannel> tails;
   kj::Array<FutureSubrequestChannel> streamingTails;
 
@@ -4186,13 +4208,15 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
+  bool hasWorkerdDebugPortBinding = false;
 
   auto confBindings = conf.getBindings();
   kj::Vector<WorkerdApi::Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_SOME(global,
         createBinding(name, conf, binding, errorReporter, subrequestChannels, actorChannels,
-            actorClassChannels, workerLoaderChannels, actorConfigs, experimental)) {
+            actorClassChannels, workerLoaderChannels, hasWorkerdDebugPortBinding, actorConfigs,
+            experimental)) {
       globals.add(kj::mv(global));
     }
   }
@@ -4221,6 +4245,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     .actorChannels = kj::mv(actorChannels),
     .actorClassChannels = kj::mv(actorClassChannels),
     .workerLoaderChannels = kj::mv(workerLoaderChannels),
+    .hasWorkerdDebugPortBinding = hasWorkerdDebugPortBinding,
 
     // clang-format off
     .tails = KJ_MAP(tail, conf.getTails()) -> FutureSubrequestChannel {
@@ -4624,6 +4649,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
             .addRef();
       }
     };
+
+    if (def.hasWorkerdDebugPortBinding) {
+      result.workerdDebugPortNetwork = network;
+    }
 
     return result;
   };
