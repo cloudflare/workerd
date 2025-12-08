@@ -461,14 +461,14 @@ struct Worker {
       }
 
       workerdDebugPort @28 :Void;
-        # A binding that provides a connect() method to dynamically connect to any workerd
-        # instance's debug port. This allows dynamic access to worker entrypoints via the
-        # WorkerdDebugPort RPC interface.
-        #
-        # Usage: const client = await env.DEBUG_PORT.connect("localhost:1234");
-        #        const fetcher = await client.getEntrypoint("service", "entrypoint");
-        #
-        # This is a workerd-only API intended for local development and testing.
+      # A binding that provides a connect() method to dynamically connect to any workerd
+      # instance's debug port. This allows dynamic access to worker entrypoints via the
+      # WorkerdDebugPort RPC interface.
+      #
+      # Usage: const client = await env.DEBUG_PORT.connect("localhost:1234");
+      #        const fetcher = await client.getEntrypoint("service", "entrypoint");
+      #
+      # This is a workerd-only API intended for local development and testing.
 
       # TODO(someday): dispatch, other new features
     }

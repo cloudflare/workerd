@@ -3796,6 +3796,13 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::WORKERD_DEBUG_PORT: {
+      if (!experimental) {
+        errorReporter.addError(kj::str(
+            "workerdDebugPort bindings are an experimental feature which may change or go away "
+            "in the future. You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
+      }
+
       hasWorkerdDebugPortBinding = true;
       return makeGlobal(Global::WorkerdDebugPort{});
     }

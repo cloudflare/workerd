@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/io-channels.h>
+#include <workerd/io/io-own.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 
@@ -16,18 +17,20 @@ class Fetcher;
 
 namespace workerd::server {
 
+// Holds the I/O state for a debug port connection.
+struct DebugPortConnectionState {
+  kj::Own<kj::AsyncIoStream> connection;
+  kj::Own<capnp::TwoPartyClient> rpcClient;
+  rpc::WorkerdDebugPort::Client debugPort;
+};
+
 // JS interface for a connected workerd debug port.
 // This class is returned from WorkerdDebugPortConnector::connect() and provides
 // access to a remote workerd instance's WorkerdDebugPort RPC interface.
 class WorkerdDebugPortClient: public jsg::Object {
  public:
   // Create a WorkerdDebugPortClient with an established connection.
-  WorkerdDebugPortClient(kj::Own<kj::AsyncIoStream> connection,
-      kj::Own<capnp::TwoPartyClient> rpcClient,
-      rpc::WorkerdDebugPort::Client debugPort)
-      : connection(kj::mv(connection)),
-        rpcClient(kj::mv(rpcClient)),
-        debugPort(kj::mv(debugPort)) {}
+  explicit WorkerdDebugPortClient(IoOwn<DebugPortConnectionState> state): state(kj::mv(state)) {}
 
   // Get access to a stateless entrypoint on the remote workerd instance.
   //
@@ -63,9 +66,7 @@ class WorkerdDebugPortClient: public jsg::Object {
   }
 
  private:
-  kj::Own<kj::AsyncIoStream> connection;
-  kj::Own<capnp::TwoPartyClient> rpcClient;
-  rpc::WorkerdDebugPort::Client debugPort;
+  IoOwn<DebugPortConnectionState> state;
 };
 
 // JS interface for the workerdDebugPort binding.
