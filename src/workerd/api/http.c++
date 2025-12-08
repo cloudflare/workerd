@@ -117,6 +117,48 @@ class BodyBufferInputStream final: public ReadableStreamSource {
   kj::OneOf<kj::Own<Body::RefcountedBytes>, jsg::Ref<Blob>> ownBytes;
 };
 
+// Transitional alternative impl of BodyBufferInputStream that wrap a
+// MemoryInputStream. Used when the Autogate is enabled. Will be replaced
+// later as part of the larger streams refactor/cleanup that will
+// make ReadableStreamSource a pure virtual base. This is an incremental
+// step to move towards that goal.
+//
+// We use this instead of system-streams.h because the system-streams
+// assumes that the inner stream is suitable for deferred proxying,
+// while here it is not specifically because the backing data may be
+// backed by a v8::BackingStore that is not permitted to outlive the
+// associated isolate.
+class BodyBufferInputStreamV2 final: public ReadableStreamSource {
+ public:
+  BodyBufferInputStreamV2(kj::Own<kj::AsyncInputStream> inner): inner(kj::mv(inner)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) {
+      return inner->tryGetLength();
+    } else {
+      return kj::none;
+    }
+  }
+
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+    auto length = tryGetLength(StreamEncoding::IDENTITY).orDefault(16384);
+    kj::SmallArray<kj::byte, 16384> buf(length);
+    while (true) {
+      size_t n = co_await inner->tryRead(buf.begin(), 1, buf.size());
+      if (n == 0) break;
+      co_await output.write(kj::arrayPtr(buf.begin(), n));
+    }
+    co_return;
+  }
+
+ private:
+  kj::Own<kj::AsyncInputStream> inner;
+};
+
 }  // namespace
 
 Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
@@ -203,9 +245,9 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
 
   if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
     auto memStream = newMemoryInputStream(buf.view, kj::heap(kj::mv(buf.ownBytes)));
-    auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
+    auto bodyStream = kj::heap<BodyBufferInputStreamV2>(kj::mv(memStream));
 
-    return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
+    return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream)), kj::mv(buffer),
       kj::mv(contentType)};
   } else {
     // TODO(cleanup): Remove once the Autogate is removed.
