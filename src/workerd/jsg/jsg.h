@@ -2729,7 +2729,8 @@ class Lock {
   JsObject objNoProto(
       kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<jsg::JsValue> values) KJ_WARN_UNUSED_RESULT;
   JsMap map() KJ_WARN_UNUSED_RESULT;
-  JsValue external(void*) KJ_WARN_UNUSED_RESULT;
+  template <typename T>
+  JsValue external(T*) KJ_WARN_UNUSED_RESULT;
   JsValue error(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
   JsValue typeError(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
   JsValue rangeError(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;

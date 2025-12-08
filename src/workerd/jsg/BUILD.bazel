@@ -94,6 +94,7 @@ wd_cc_library(
         "async-context.h",
         "buffersource.h",
         "dom-exception.h",
+        "external-tags.h",
         "fast-api.h",
         "function.h",
         "jsg.h",
