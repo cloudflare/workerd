@@ -1,5 +1,6 @@
 #pragma once
 
+#include "external-tags.h"
 #include "jsg.h"
 
 #include <v8-container.h>
@@ -530,7 +531,12 @@ inline kj::Maybe<T> JsValue::tryCast() const {
 template <typename T>
 inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
   if (!value.isExternal()) return kj::none;
+  [[maybe_unused]] constexpr auto tag = ExternalTagFor<T>::get();
+#if V8_HAS_EXTERNAL_POINTER_TAGS
+  return kj::Maybe<T&>(*static_cast<T*>(value.inner.As<v8::External>()->Value(tag)));
+#else
   return kj::Maybe<T&>(*static_cast<T*>(value.inner.As<v8::External>()->Value()));
+#endif
 }
 
 template <typename T>
@@ -907,8 +913,14 @@ inline JsMap Lock::map() {
   return JsMap(v8::Map::New(v8Isolate));
 }
 
-inline JsValue Lock::external(void* ptr) {
+template <typename T>
+inline JsValue Lock::external(T* ptr) {
+  [[maybe_unused]] constexpr auto tag = ExternalTagFor<T>::get();
+#if V8_HAS_EXTERNAL_POINTER_TAGS
+  return JsValue(v8::External::New(v8Isolate, ptr, tag));
+#else
   return JsValue(v8::External::New(v8Isolate, ptr));
+#endif
 }
 
 inline JsValue Lock::error(kj::StringPtr message) {
