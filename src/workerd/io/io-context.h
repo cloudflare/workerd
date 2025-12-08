@@ -1533,8 +1533,10 @@ auto IoContext::makeReentryCallback(Func func) {
     fulfiller->fulfill();
   });
 
+  auto ioFunc = addObjectReverse(kj::heap(kj::fwd<Func>(func)));
+
   return [self = getWeakRef(), cs = getCriticalSection(), releaseNotifier = kj::mv(releaseNotifier),
-             func = kj::fwd<Func>(func)](auto&&... params) mutable {
+             ioFunc = kj::mv(ioFunc)](auto&&... params) mutable {
     auto& ctx = JSG_REQUIRE_NONNULL(self->tryGet(), Error,
         "The execution context which hosts this callback is no longer running.");
 
@@ -1543,8 +1545,11 @@ auto IoContext::makeReentryCallback(Func func) {
     }
 
     return ctx.canceler.wrap(ctx.run(
-        [&ctx, &func, ... params = kj::fwd<decltype(params)>(params)](Worker::Lock& lock) mutable {
+        [&ctx, &ioFunc, ... params = kj::fwd<decltype(params)>(params)](
+            Worker::Lock& lock) mutable {
       using ResultType = kj::Decay<decltype(func(lock, kj::fwd<decltype(params)>(params)...))>;
+
+      auto& func = *ioFunc;
 
       if constexpr (kj::isSameType<ResultType, void>()) {
         (void)ctx;
@@ -1555,7 +1560,8 @@ auto IoContext::makeReentryCallback(Func func) {
         (void)ctx;
         return func(lock, kj::fwd<decltype(params)>(params)...);
       }
-    }, kj::mv(cs)));
+    },
+        kj::mv(cs)));
   };
 }
 
