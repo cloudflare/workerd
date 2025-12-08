@@ -69,6 +69,7 @@ archive_override(
         "//:patches/sqlite/0001-row-counts-plain.patch",
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+        "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
     ],
     remote_file_integrity = {
         "MODULE.bazel": "sha256-suM9kn7sG4wxGdvTSb1g2wH5qY0k1HULxYcj5khrP54=",
