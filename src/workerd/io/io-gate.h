@@ -20,6 +20,8 @@
 //   to the application are still being flushed to disk. If the flush fails, these messages will
 //   never be sent, so that the rest of the world cannot observe a prematurely-confirmed write.
 
+#include <workerd/io/trace.h>
+
 #include <kj/async.h>
 #include <kj/list.h>
 #include <kj/one-of.h>
@@ -62,7 +64,7 @@ class InputGate {
   class Lock {
    public:
     KJ_DISALLOW_COPY(Lock);
-    Lock(Lock&& other): gate(other.gate), cs(kj::mv(other.cs)) {
+    Lock(Lock&& other): gate(other.gate), cs(kj::mv(other.cs)), lockSpan(kj::mv(other.lockSpan)) {
       other.gate = nullptr;
     }
     ~Lock() noexcept(false) {
@@ -71,8 +73,8 @@ class InputGate {
 
     // Increments the lock's refcount, returning a duplicate `Lock`. All `Lock`s must be dropped
     // before the gate is unlocked.
-    Lock addRef() {
-      return Lock(*gate);
+    Lock addRef(SpanParent parentSpan) {
+      return Lock(*gate, kj::mv(parentSpan));
     }
 
     // Start a new critical section from this lock. After `wait()` has been called on the returned
@@ -99,12 +101,17 @@ class InputGate {
 
     kj::Maybe<kj::Own<CriticalSection>> cs;
 
-    Lock(InputGate& gate);
+    SpanBuilder lockSpan;
+
+    Lock(InputGate& gate, SpanParent parentSpan);
     friend class InputGate;
   };
 
   // Wait until there are no `Lock`s, then create a new one and return it.
-  kj::Promise<Lock> wait();
+  // If parentSpan is provided, child spans will be created to track:
+  // - Time spent waiting for the lock (if waiting is required)
+  // - Time spent holding the lock
+  kj::Promise<Lock> wait(SpanParent parentSpan = nullptr);
 
   // Rejects if and when calls to `wait()` become broken due to a failed critical section. The
   // actor should be shut down in this case. This promise never resolves, only rejects.
@@ -122,13 +129,21 @@ class InputGate {
   bool isCriticalSection = false;
 
   struct Waiter {
-    Waiter(kj::PromiseFulfiller<Lock>& fulfiller, InputGate& gate, bool isChildWaiter);
+    Waiter(kj::PromiseFulfiller<Lock>& fulfiller,
+        InputGate& gate,
+        bool isChildWaiter,
+        SpanParent parentSpan);
     ~Waiter() noexcept(false);
 
     kj::PromiseFulfiller<Lock>& fulfiller;
     InputGate* gate;
     bool isChildWaiter;
     kj::ListLink<Waiter> link;
+
+    // Span tracking how long we wait for the lock. Ends when Waiter is destroyed.
+    SpanBuilder waitSpan;
+    // Parent span to pass to Lock when it's created.
+    SpanParent lockSpanParent;
   };
 
   kj::List<Waiter, &Waiter::link> waiters;
@@ -173,7 +188,7 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
   // The first call to wait() begins the CriticalSection. After that wait completes, until the
   // CriticalSection is done and dropped, no other locks will be allowed on this InputGate, except
   // locks requested by calling wait() on this CriticalSection -- or one of its children.
-  kj::Promise<Lock> wait();
+  kj::Promise<Lock> wait(SpanParent parentSpan = nullptr);
 
   // Call when the critical section has completed successfully. If this is not called before the
   // CriticalSection is dropped, then failed() is called implicitly.

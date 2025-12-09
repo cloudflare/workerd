@@ -29,7 +29,7 @@ KJ_TEST("InputGate basics") {
     KJ_EXPECT(!promise2.poll(ws));
     KJ_EXPECT(!promise3.poll(ws));
 
-    auto lock2 = lock.addRef();
+    auto lock2 = lock.addRef(nullptr);
     { auto drop = kj::mv(lock); }
 
     KJ_EXPECT(!promise2.poll(ws));
@@ -299,7 +299,7 @@ KJ_TEST("InputGate critical section lock outlives critical section") {
   KJ_ASSERT(lock.isFor(gate));
 
   // Adding a ref and dropping it shouldn't cause trouble.
-  lock.addRef();
+  lock.addRef(nullptr);
 
   // The gate should still be locked
   auto waiter = gate.wait();

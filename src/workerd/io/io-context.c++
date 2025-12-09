@@ -338,7 +338,8 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
 }
 
 InputGate::Lock IoContext::getInputLock() {
-  return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context").addRef();
+  return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context")
+      .addRef(getCurrentTraceSpan());
 }
 
 kj::Maybe<kj::Own<InputGate::CriticalSection>> IoContext::getCriticalSection() {

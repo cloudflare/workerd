@@ -24,11 +24,15 @@ InputGate::~InputGate() noexcept {
   KJ_ASSERT(waiters.empty());
 }
 
-InputGate::Waiter::Waiter(
-    kj::PromiseFulfiller<Lock>& fulfiller, InputGate& gate, bool isChildWaiter)
+InputGate::Waiter::Waiter(kj::PromiseFulfiller<Lock>& fulfiller,
+    InputGate& gate,
+    bool isChildWaiter,
+    SpanParent parentSpan)
     : fulfiller(fulfiller),
       gate(&gate),
-      isChildWaiter(isChildWaiter) {
+      isChildWaiter(isChildWaiter),
+      waitSpan(parentSpan.newChild("input_gate_lock_wait"_kjc)),
+      lockSpanParent(kj::mv(parentSpan)) {
   gate.hooks.inputGateWaiterAdded();
   if (isChildWaiter) {
     gate.waitingChildren.add(*this);
@@ -47,13 +51,13 @@ InputGate::Waiter::~Waiter() noexcept(false) {
   }
 }
 
-kj::Promise<InputGate::Lock> InputGate::wait() {
+kj::Promise<InputGate::Lock> InputGate::wait(SpanParent parentSpan) {
   KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
     return kj::cp(e);
   } else if (lockCount == 0) {
-    return Lock(*this);
+    return Lock(*this, kj::mv(parentSpan));
   } else {
-    return kj::newAdaptedPromise<Lock, Waiter>(*this, false);
+    return kj::newAdaptedPromise<Lock, Waiter>(*this, false, kj::mv(parentSpan));
   }
 }
 
@@ -65,10 +69,11 @@ kj::Promise<void> InputGate::onBroken() {
   }
 }
 
-InputGate::Lock::Lock(InputGate& gate)
+InputGate::Lock::Lock(InputGate& gate, SpanParent parentSpan)
     : gate(&gate),
       cs(gate.isCriticalSection ? kj::Maybe(kj::addRef(static_cast<CriticalSection&>(gate)))
-                                : kj::none) {
+                                : kj::none),
+      lockSpan(parentSpan.newChild("input_gate_lock_hold"_kjc)) {
   InputGate* gateToLock = &gate;
 
   KJ_IF_SOME(c, cs) {
@@ -107,11 +112,11 @@ void InputGate::releaseLock() {
     if (!waitingChildren.empty()) {
       auto& waiter = waitingChildren.front();
       waitingChildren.remove(waiter);
-      waiter.fulfiller.fulfill(Lock(*this));
+      waiter.fulfiller.fulfill(Lock(*this, kj::mv(waiter.lockSpanParent)));
     } else if (!waiters.empty()) {
       auto& waiter = waiters.front();
       waiters.remove(waiter);
-      waiter.fulfiller.fulfill(Lock(*this));
+      waiter.fulfiller.fulfill(Lock(*this, kj::mv(waiter.lockSpanParent)));
     }
   }
 }
@@ -167,7 +172,7 @@ InputGate::CriticalSection::~CriticalSection() noexcept(false) {
   }
 }
 
-kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
+kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentSpan) {
   for (;;) {
     switch (state) {
       case NOT_STARTED: {
@@ -183,11 +188,12 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
         // Add ourselves to this parent's child waiter list.
         if (target.lockCount == 0) {
           state = RUNNING;
-          parentLock = Lock(target);
+          parentLock = Lock(target, parentSpan.addRef());
           continue;
         } else {
           try {
-            auto lock = co_await kj::newAdaptedPromise<Lock, Waiter>(target, true);
+            auto lock =
+                co_await kj::newAdaptedPromise<Lock, Waiter>(target, true, parentSpan.addRef());
             state = RUNNING;
             parentLock = kj::mv(lock);
             continue;
@@ -206,7 +212,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
         KJ_FAIL_REQUIRE("CriticalSection::wait() should be called once initially");
       case RUNNING:
         // CriticalSection is active, so defer to InputGate implementation.
-        co_return co_await InputGate::wait();
+        co_return co_await InputGate::wait(kj::mv(parentSpan));
       case REPARENTED:
         // Once the CriticalSection has declared itself done, then any straggler tasks it initiated
         // are adopted by the parent.
@@ -214,10 +220,10 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
         //   the parent is a CriticalSection itself.
         KJ_SWITCH_ONEOF(parent) {
           KJ_CASE_ONEOF(p, InputGate*) {
-            co_return co_await p->wait();
+            co_return co_await p->wait(kj::mv(parentSpan));
           }
           KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
-            co_return co_await c->wait();
+            co_return co_await c->wait(kj::mv(parentSpan));
           }
         }
         KJ_UNREACHABLE;
