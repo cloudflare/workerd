@@ -499,8 +499,9 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
   // they want immediate execution.
   kj::Date dateNowKjDate = static_cast<int64_t>(dateNow()) * kj::MILLISECONDS + kj::UNIX_EPOCH;
 
-  auto maybeBackpressure = transformMaybeBackpressure(
-      js, options, getCache(OP_PUT_ALARM).setAlarm(kj::max(scheduledTime, dateNowKjDate), options));
+  auto maybeBackpressure = transformMaybeBackpressure(js, options,
+      getCache(OP_PUT_ALARM)
+          .setAlarm(kj::max(scheduledTime, dateNowKjDate), options, context.getCurrentTraceSpan()));
 
   // setAlarm() is billed as a single write unit.
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), 1));
@@ -515,10 +516,11 @@ jsg::Promise<void> DurableObjectStorageOperations::putOne(
 
   auto units = billingUnits(key.size() + buffer.size());
 
-  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(
-      js, options, getCache(OP_PUT).put(kj::mv(key), kj::mv(buffer), options));
-
   auto& context = IoContext::current();
+
+  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(js, options,
+      getCache(OP_PUT).put(kj::mv(key), kj::mv(buffer), options, context.getCurrentTraceSpan()));
+
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), units));
   return maybeBackpressure;
 }
@@ -555,8 +557,8 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
   }).orDefault(PutOptions{}));
 
   return context.attachSpans(js,
-      transformMaybeBackpressure(
-          js, options, getCache(OP_DELETE_ALARM).setAlarm(kj::none, options)),
+      transformMaybeBackpressure(js, options,
+          getCache(OP_DELETE_ALARM).setAlarm(kj::none, options, context.getCurrentTraceSpan())),
       kj::mv(userSpan));
 }
 
@@ -566,7 +568,7 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
   auto userSpan = context.makeUserTraceSpan("durable_object_storage_deleteAll"_kjc);
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
 
-  auto deleteAll = cache->deleteAll(options);
+  auto deleteAll = cache->deleteAll(options, context.getCurrentTraceSpan());
 
   context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
@@ -580,8 +582,11 @@ void DurableObjectTransaction::deleteAll() {
 
 jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
     jsg::Lock& js, kj::String key, const PutOptions& options) {
-  return transformCacheResult(
-      js, getCache(OP_DELETE).delete_(kj::mv(key), options), options, [](jsg::Lock&, bool value) {
+  auto& context = IoContext::current();
+
+  return transformCacheResult(js,
+      getCache(OP_DELETE).delete_(kj::mv(key), options, context.getCurrentTraceSpan()), options,
+      [](jsg::Lock&, bool value) {
     currentActorMetrics().addStorageDeletes(1);
     return value;
   });
@@ -613,10 +618,11 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     kvs.add(ActorCacheOps::KeyValuePair{kj::mv(field.name), kj::mv(buffer)});
   }
 
-  jsg::Promise<void> maybeBackpressure =
-      transformMaybeBackpressure(js, options, getCache(OP_PUT).put(kvs.releaseAsArray(), options));
-
   auto& context = IoContext::current();
+
+  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(js, options,
+      getCache(OP_PUT).put(kvs.releaseAsArray(), options, context.getCurrentTraceSpan()));
+
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), units));
 
   return maybeBackpressure;
@@ -626,7 +632,10 @@ jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
     jsg::Lock& js, kj::Array<kj::String> keys, const PutOptions& options) {
   auto numKeys = keys.size();
 
-  return transformCacheResult(js, getCache(OP_DELETE).delete_(kj::mv(keys), options), options,
+  auto& context = IoContext::current();
+
+  return transformCacheResult(js,
+      getCache(OP_DELETE).delete_(kj::mv(keys), options, context.getCurrentTraceSpan()), options,
       [numKeys](jsg::Lock&, uint count) -> int {
     currentActorMetrics().addStorageDeletes(numKeys);
     return count;

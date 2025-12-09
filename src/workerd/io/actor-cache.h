@@ -145,20 +145,29 @@ class ActorCacheOps {
   // delay further puts until the promise resolves. This happens when too much data is pinned in
   // cache because writes haven't been flushed to disk yet. Dropping this promise will not cancel
   // the put.
-  virtual kj::Maybe<kj::Promise<void>> put(Key key, Value value, WriteOptions options) = 0;
-  virtual kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) = 0;
+  //
+  // The traceSpan parameter is used for output gate lock hold tracing. It is captured only by
+  // the first write that starts a new flush batch.
+  virtual kj::Maybe<kj::Promise<void>> put(
+      Key key, Value value, WriteOptions options, SpanParent traceSpan) = 0;
+  virtual kj::Maybe<kj::Promise<void>> put(
+      kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) = 0;
 
   // Writes a new alarm time into cache and schedules it to be flushed to disk later, same as put().
   virtual kj::Maybe<kj::Promise<void>> setAlarm(
-      kj::Maybe<kj::Date> newTime, WriteOptions options) = 0;
+      kj::Maybe<kj::Date> newTime, WriteOptions options, SpanParent traceSpan) = 0;
 
-  // Delete the gives keys.
+  // Delete the given keys.
   //
   // Returns a `bool` or `uint` if it can be immediately determined from cache how many keys were
   // present before the call. Otherwise, returns a promise which resolves after getting a response
   // from underlying storage. The promise also applies backpressure if needed, as with put().
-  virtual kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) = 0;
-  virtual kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) = 0;
+  //
+  // The traceSpan parameter is used for output gate lock hold tracing.
+  virtual kj::OneOf<bool, kj::Promise<bool>> delete_(
+      Key key, WriteOptions options, SpanParent traceSpan) = 0;
+  virtual kj::OneOf<uint, kj::Promise<uint>> delete_(
+      kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) = 0;
 };
 
 // Abstract interface that is implemented by ActorCache as well as ActorSqlite.
@@ -205,7 +214,7 @@ class ActorCacheInterface: public ActorCacheOps {
   // The returned count only includes keys that were actually deleted from storage, not keys in
   // cache -- we only use the returned deleteAll count for billing, and not counting deletes of
   // entries that are only in cache is no problem for billing, those deletes don't cost us anything.
-  virtual DeleteAllResults deleteAll(WriteOptions options) = 0;
+  virtual DeleteAllResults deleteAll(WriteOptions options, SpanParent traceSpan) = 0;
 
   // Call each time the isolate lock is taken to evict stale entries. If this returns a promise,
   // then the caller must hold off on JavaScript execution until the promise resolves -- this
@@ -234,8 +243,10 @@ class ActorCacheInterface: public ActorCacheOps {
   };
 
   // Call when entering the alarm handler.
-  virtual kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") = 0;
+  virtual kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
+      SpanParent parentSpan,
+      bool noCache = false,
+      kj::StringPtr actorId = "") = 0;
 
   virtual void cancelDeferredAlarmDeletion() = 0;
 
@@ -333,21 +344,27 @@ class ActorCache final: public ActorCacheInterface {
       Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> listReverse(
       Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
-  kj::Maybe<kj::Promise<void>> put(Key key, Value value, WriteOptions options) override;
-  kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) override;
-  kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
-  kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> put(
+      Key key, Value value, WriteOptions options, SpanParent traceSpan) override;
+  kj::Maybe<kj::Promise<void>> put(
+      kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) override;
+  kj::OneOf<bool, kj::Promise<bool>> delete_(
+      Key key, WriteOptions options, SpanParent traceSpan) override;
+  kj::OneOf<uint, kj::Promise<uint>> delete_(
+      kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) override;
   kj::Maybe<kj::Promise<void>> setAlarm(
-      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) override;
   // See ActorCacheOps.
 
   kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
-  DeleteAllResults deleteAll(WriteOptions options) override;
+  DeleteAllResults deleteAll(WriteOptions options, SpanParent traceSpan) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
 
-  kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
+  kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
+      SpanParent parentSpan,
+      bool noCache = false,
+      kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush(SpanParent parentSpan) override;
   // See ActorCacheInterface
@@ -367,7 +384,7 @@ class ActorCache final: public ActorCacheInterface {
       auto p = reinterpret_cast<ActorCache*>(pointer);
       KJ_IF_SOME(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
         d.status = DeferredAlarmDelete::Status::READY;
-        p->ensureFlushScheduled(WriteOptions{.noCache = d.noCache});
+        p->ensureFlushScheduled(WriteOptions{.noCache = d.noCache}, kj::mv(d.traceSpan));
       }
     }
   };
@@ -699,6 +716,9 @@ class ActorCache final: public ActorCacheInterface {
     kj::Maybe<bool> wasDeleted;
 
     bool noCache = false;
+
+    // Trace span for the alarm handler, used when scheduling the deferred alarm deletion flush.
+    SpanParent traceSpan = nullptr;
   };
 
   kj::OneOf<UnknownAlarmTime, KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime =
@@ -721,6 +741,10 @@ class ActorCache final: public ActorCacheInterface {
   // flush. The first write that does *not* set `allowUnconfirmed` causes the output gate to be
   // applied.
   bool flushScheduledWithOutputGate = false;
+
+  // Trace span for the current flush operation, captured from the first write that triggers
+  // a flush batch. Used for the output gate lock hold trace.
+  SpanParent currentFlushSpan = nullptr;
 
   // The count of the number of flushes that have been queued without yet resolving.
   size_t flushesEnqueued = 0;
@@ -799,12 +823,14 @@ class ActorCache final: public ActorCacheInterface {
   void putImpl(Lock& lock,
       kj::Own<Entry> newEntry,
       const WriteOptions& options,
-      kj::Maybe<CountedDelete&> counted);
+      kj::Maybe<CountedDelete&> counted,
+      SpanParent traceSpan);
 
   kj::Promise<kj::Maybe<Value>> getImpl(kj::Own<Entry> entry, ReadOptions options);
 
   // Ensure that we will flush dirty entries soon.
-  void ensureFlushScheduled(const WriteOptions& options);
+  // The traceSpan is captured only on the first call that starts a new flush batch.
+  void ensureFlushScheduled(const WriteOptions& options, SpanParent traceSpan);
 
   // Schedule a read RPC. The given function will be invoked and provided with an
   // ActorStorage::Operations::Client on which the read operation should be performed. The function
@@ -864,7 +890,7 @@ class ActorCache final: public ActorCacheInterface {
   void clear(Lock& lock);
 
   // Throws OOM exception if `oom` is true.
-  void requireNotTerminal();
+  void requireNotTerminal(SpanParent traceSpan);
 
   // Evict cache entries as needed to reach the target memory usage. If the cache has exceeded the
   // hard limit, trigger an OOM, canceling all RPCs and breaking the output gate.
@@ -1041,12 +1067,16 @@ class ActorCache::Transaction final: public ActorCacheInterface::Transaction {
       Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> listReverse(
       Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
-  kj::Maybe<kj::Promise<void>> put(Key key, Value value, WriteOptions options) override;
-  kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) override;
-  kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
-  kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> put(
+      Key key, Value value, WriteOptions options, SpanParent traceSpan) override;
+  kj::Maybe<kj::Promise<void>> put(
+      kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) override;
+  kj::OneOf<bool, kj::Promise<bool>> delete_(
+      Key key, WriteOptions options, SpanParent traceSpan) override;
+  kj::OneOf<uint, kj::Promise<uint>> delete_(
+      kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) override;
   kj::Maybe<kj::Promise<void>> setAlarm(
-      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) override;
   // Same interface as ActorCache.
   //
   // Read ops will reflect the previous writes made to the transaction even though they aren't
@@ -1082,6 +1112,9 @@ class ActorCache::Transaction final: public ActorCacheInterface::Transaction {
   kj::Table<Change, kj::TreeIndex<ChangeTableCallbacks>> entriesToWrite;
 
   kj::Maybe<DirtyAlarmWithOptions> alarmChange;
+
+  // Trace span captured from each write, to be used when commit() flushes changes.
+  SpanParent commitSpan = nullptr;
 
   // Merge the changes in the transaction with the results from reading from the underlying
   // ActorCache.

@@ -271,7 +271,7 @@ class OutputGate {
   // If `promise` rejects, the exception will propagate to all future `wait()`s. If the returned
   // promise is canceled before completion, all future `wait()`s will also throw.
   template <typename T>
-  kj::Promise<T> lockWhile(kj::Promise<T> promise, SpanParent parentSpan = nullptr);
+  kj::Promise<T> lockWhile(kj::Promise<T> promise, SpanParent parentSpan);
 
   // Wait until all preceding locks are released. The wait will not be affected by any future
   // call to `lockWhile()`.
