@@ -239,7 +239,7 @@ class ActorCacheInterface: public ActorCacheOps {
 
   virtual void cancelDeferredAlarmDeletion() = 0;
 
-  virtual kj::Maybe<kj::Promise<void>> onNoPendingFlush() = 0;
+  virtual kj::Maybe<kj::Promise<void>> onNoPendingFlush(SpanParent parentSpan) = 0;
 
   // Implements the respective PITR API calls. The default implementations throw JSG errors saying
   // PITR is not implemented. These methods are meant to be implemented internally.
@@ -349,7 +349,7 @@ class ActorCache final: public ActorCacheInterface {
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
       kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
-  kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
+  kj::Maybe<kj::Promise<void>> onNoPendingFlush(SpanParent parentSpan) override;
   // See ActorCacheInterface
 
   class Transaction;

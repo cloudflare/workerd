@@ -744,7 +744,7 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   auto& context = IoContext::current();
   auto userSpan = context.makeUserTraceSpan("durable_object_storage_sync"_kjc);
-  KJ_IF_SOME(p, cache->onNoPendingFlush()) {
+  KJ_IF_SOME(p, cache->onNoPendingFlush(context.getCurrentTraceSpan())) {
     // Note that we're not actually flushing since that will happen anyway once we go async. We're
     // merely checking if we have any pending or in-flight operations, and providing a promise that
     // resolves when they succeed. This promise only covers operations that were scheduled before

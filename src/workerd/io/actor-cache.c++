@@ -2224,7 +2224,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
 // a resolved jsg::Promise. This is meaningfully different from a ready kj::Promise because it
 // allows the next continuation to run immediately on the microtask queue instead of returning to
 // the kj event loop and fulfilling a resolver that enqueues the continuation.
-kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush() {
+kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush(SpanParent parentSpan) {
   if (lru.options.neverFlush) {
     // We won't ever flush (usually because we're a preview session), so return a falsy maybe.
     return kj::none;
