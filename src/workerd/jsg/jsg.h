@@ -2729,6 +2729,8 @@ class Lock {
   JsObject objNoProto(
       kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<jsg::JsValue> values) KJ_WARN_UNUSED_RESULT;
   JsMap map() KJ_WARN_UNUSED_RESULT;
+  // Template argument needed so we can tag the external value with its type in
+  // V8, see v8::External::New and External::Value.
   template <typename T>
   JsValue external(T*) KJ_WARN_UNUSED_RESULT;
   JsValue error(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
