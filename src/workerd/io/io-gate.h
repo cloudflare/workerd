@@ -275,7 +275,7 @@ class OutputGate {
 
   // Wait until all preceding locks are released. The wait will not be affected by any future
   // call to `lockWhile()`.
-  kj::Promise<void> wait();
+  kj::Promise<void> wait(SpanParent parentSpan = nullptr);
 
   // Rejects if and when calls to `wait()` become broken due to a failed lockWhile(). The actor
   // should be shut down in this case. This promise never resolves, only rejects.
