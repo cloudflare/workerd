@@ -736,7 +736,7 @@ KJ_TEST("ActorCache deleteAll()") {
   test.put("baz", "789");  // overwrites a counted delete
   test.delete_("garply");  // uncounted delete
 
-  auto deleteAll = test.cache.deleteAll({});
+  auto deleteAll = test.cache.deleteAll({}, nullptr);
 
   // Post-deleteAll writes.
   test.put("grault", "12345");
@@ -819,7 +819,7 @@ KJ_TEST("ActorCache deleteAll() during transaction commit") {
 
     // Issue a put and a deleteAll() here!
     test.put("bar", "456");
-    test.cache.deleteAll({});
+    test.cache.deleteAll({}, nullptr);
 
     kj::mv(inProgressFlush).thenReturn(CAPNP());
   }
@@ -861,7 +861,7 @@ KJ_TEST("ActorCache deleteAll() again when previous one isn't done yet") {
   test.put("baz", "789");  // overwrites a counted delete
   test.delete_("garply");  // uncounted delete
 
-  auto deleteAllA = test.cache.deleteAll({});
+  auto deleteAllA = test.cache.deleteAll({}, nullptr);
 
   // Post-deleteAll writes.
   test.put("grault", "12345");
@@ -884,7 +884,7 @@ KJ_TEST("ActorCache deleteAll() again when previous one isn't done yet") {
   }
 
   // Do another deleteAll() before the first one is done.
-  auto deleteAllB = test.cache.deleteAll({});
+  auto deleteAllB = test.cache.deleteAll({}, nullptr);
 
   // And a write after that.
   test.put("fred", "2323");
@@ -4979,7 +4979,8 @@ KJ_TEST("ActorCache alarm get/put") {
 
   {
     // we have a cached time == nullptr, so we should not attempt to run an alarm
-    auto armResult = test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, false);
+    auto armResult =
+        test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, false, "", nullptr);
     KJ_ASSERT(armResult.is<ActorCache::CancelAlarmHandler>());
     auto cancelResult = kj::mv(armResult.get<ActorCache::CancelAlarmHandler>());
     KJ_ASSERT(cancelResult.waitBeforeCancel.poll(ws));
@@ -4997,7 +4998,7 @@ KJ_TEST("ActorCache alarm get/put") {
   {
     // Test that alarm handler handle clears alarm when dropped with no writes
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, false);
+      auto armResult = test.cache.armAlarmHandler(oneMs, false, "", nullptr);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
@@ -5010,7 +5011,7 @@ KJ_TEST("ActorCache alarm get/put") {
 
     // Test that alarm handler handle does not clear alarm when dropped with writes
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, false);
+      auto armResult = test.cache.armAlarmHandler(oneMs, false, "", nullptr);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
       test.setAlarm(twoMs);
     }
@@ -5024,7 +5025,7 @@ KJ_TEST("ActorCache alarm get/put") {
 
     // Test that alarm handler handle does not cache delete when it fails
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, false);
+      auto armResult = test.cache.armAlarmHandler(oneMs, false, "", nullptr);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
@@ -5036,7 +5037,7 @@ KJ_TEST("ActorCache alarm get/put") {
   {
     // Test that alarm handler handle does not cache alarm delete when noCache == true
     {
-      auto armResult = test.cache.armAlarmHandler(twoMs, true);
+      auto armResult = test.cache.armAlarmHandler(twoMs, true, "", nullptr);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
@@ -5090,7 +5091,7 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   // we want to test that even if a flush is retried
   // that the post-delete actions for a checked delete happen.
   {
-    auto handle = test.cache.armAlarmHandler(oneMs, false);
+    auto handle = test.cache.armAlarmHandler(oneMs, false, "", nullptr);
 
     auto time = expectCached(test.getAlarm());
     KJ_ASSERT(time == kj::none);
@@ -5283,7 +5284,7 @@ KJ_TEST("ActorCache can wait for flush") {
 
   {
     // Join in on a scheduled deleteAll.
-    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = false});
+    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = false}, nullptr);
 
     verify(
         [&]() {
@@ -5301,7 +5302,7 @@ KJ_TEST("ActorCache can wait for flush") {
 
   {
     // Join in on a scheduled deleteAll with allowUnconfirmed.
-    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = true});
+    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = true}, nullptr);
 
     verify(
         [&]() {

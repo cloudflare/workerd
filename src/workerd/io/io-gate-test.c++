@@ -369,13 +369,13 @@ KJ_TEST("OutputGate basics") {
   KJ_EXPECT(gate.wait().poll(ws));
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
-  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise));
+  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise), nullptr);
 
   auto promise1 = gate.wait();
   auto promise2 = gate.wait();
 
   auto paf2 = kj::newPromiseAndFulfiller<void>();
-  auto blocker2 = gate.lockWhile(kj::mv(paf2.promise));
+  auto blocker2 = gate.lockWhile(kj::mv(paf2.promise), nullptr);
 
   auto promise3 = gate.wait();
 
@@ -414,13 +414,13 @@ KJ_TEST("OutputGate out-of-order") {
   KJ_EXPECT(gate.wait().poll(ws));
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
-  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise));
+  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise), nullptr);
 
   auto promise1 = gate.wait();
   auto promise2 = gate.wait();
 
   auto paf2 = kj::newPromiseAndFulfiller<void>();
-  auto blocker2 = gate.lockWhile(kj::mv(paf2.promise));
+  auto blocker2 = gate.lockWhile(kj::mv(paf2.promise), nullptr);
 
   auto promise3 = gate.wait();
 
@@ -466,13 +466,13 @@ KJ_TEST("OutputGate exception") {
   KJ_EXPECT(gate.wait().poll(ws));
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
-  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise));
+  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise), nullptr);
 
   auto promise1 = gate.wait();
   auto promise2 = gate.wait();
 
   auto paf2 = kj::newPromiseAndFulfiller<void>();
-  auto blocker2 = gate.lockWhile(kj::mv(paf2.promise));
+  auto blocker2 = gate.lockWhile(kj::mv(paf2.promise), nullptr);
 
   auto promise3 = gate.wait();
 
@@ -525,12 +525,12 @@ KJ_TEST("OutputGate canceled") {
   KJ_EXPECT(gate.wait().poll(ws));
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
-  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise));
+  auto blocker1 = gate.lockWhile(kj::mv(paf1.promise), nullptr);
 
   auto promise1 = gate.wait();
   auto promise2 = gate.wait();
 
-  auto blocker2 = gate.lockWhile(kj::Promise<void>(kj::NEVER_DONE));
+  auto blocker2 = gate.lockWhile(kj::Promise<void>(kj::NEVER_DONE), nullptr);
 
   auto promise3 = gate.wait();
 

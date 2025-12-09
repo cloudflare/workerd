@@ -20,10 +20,11 @@
 //   to the application are still being flushed to disk. If the flush fails, these messages will
 //   never be sent, so that the rest of the world cannot observe a prematurely-confirmed write.
 
+#include <workerd/io/trace.h>
+
 #include <kj/async.h>
 #include <kj/list.h>
 #include <kj/one-of.h>
-#include <workerd/io/trace.h>
 
 namespace workerd {
 
@@ -128,7 +129,10 @@ class InputGate {
   bool isCriticalSection = false;
 
   struct Waiter {
-    Waiter(kj::PromiseFulfiller<Lock>& fulfiller, InputGate& gate, bool isChildWaiter, SpanParent parentSpan);
+    Waiter(kj::PromiseFulfiller<Lock>& fulfiller,
+        InputGate& gate,
+        bool isChildWaiter,
+        SpanParent parentSpan);
     ~Waiter() noexcept(false);
 
     kj::PromiseFulfiller<Lock>& fulfiller;
@@ -266,7 +270,7 @@ class OutputGate {
   // If `promise` rejects, the exception will propagate to all future `wait()`s. If the returned
   // promise is canceled before completion, all future `wait()`s will also throw.
   template <typename T>
-  kj::Promise<T> lockWhile(kj::Promise<T> promise, SpanParent parentSpan = nullptr);
+  kj::Promise<T> lockWhile(kj::Promise<T> promise, SpanParent parentSpan);
 
   // Wait until all preceding locks are released. The wait will not be affected by any future
   // call to `lockWhile()`.

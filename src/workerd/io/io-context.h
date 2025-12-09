@@ -1163,15 +1163,16 @@ struct SuppressIoContextScope {
 
 template <typename T>
 kj::Promise<T> IoContext::lockOutputWhile(kj::Promise<T> promise) {
-  return getActorOrThrow().getOutputGate().lockWhile(kj::mv(promise));
+  return getActorOrThrow().getOutputGate().lockWhile(kj::mv(promise), getCurrentTraceSpan());
 }
 
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
-    return cs.get()->wait(getCurrentTraceSpan()).then(
-        [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+    return cs.get()
+        ->wait(getCurrentTraceSpan())
+        .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
       return run(kj::fwd<Func>(func), kj::mv(inputLock));
     });
   } else {
@@ -1191,8 +1192,9 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
-      return a.getInputGate().wait(getCurrentTraceSpan()).then(
-          [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+      return a.getInputGate()
+          .wait(getCurrentTraceSpan())
+          .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
         return run(kj::fwd<Func>(func), kj::mv(inputLock));
       });
     }

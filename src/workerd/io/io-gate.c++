@@ -24,8 +24,10 @@ InputGate::~InputGate() noexcept {
   KJ_ASSERT(waiters.empty());
 }
 
-InputGate::Waiter::Waiter(
-    kj::PromiseFulfiller<Lock>& fulfiller, InputGate& gate, bool isChildWaiter, SpanParent parentSpan)
+InputGate::Waiter::Waiter(kj::PromiseFulfiller<Lock>& fulfiller,
+    InputGate& gate,
+    bool isChildWaiter,
+    SpanParent parentSpan)
     : fulfiller(fulfiller),
       gate(&gate),
       isChildWaiter(isChildWaiter),
@@ -190,7 +192,8 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
           continue;
         } else {
           try {
-            auto lock = co_await kj::newAdaptedPromise<Lock, Waiter>(target, true, parentSpan.addRef());
+            auto lock =
+                co_await kj::newAdaptedPromise<Lock, Waiter>(target, true, parentSpan.addRef());
             state = RUNNING;
             parentLock = kj::mv(lock);
             continue;

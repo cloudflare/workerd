@@ -78,20 +78,24 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> listReverse(
       Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
-  kj::Maybe<kj::Promise<void>> put(Key key, Value value, WriteOptions options) override;
-  kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) override;
-  kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
-  kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> put(
+      Key key, Value value, WriteOptions options, SpanParent traceSpan) override;
+  kj::Maybe<kj::Promise<void>> put(
+      kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) override;
+  kj::OneOf<bool, kj::Promise<bool>> delete_(
+      Key key, WriteOptions options, SpanParent traceSpan) override;
+  kj::OneOf<uint, kj::Promise<uint>> delete_(
+      kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) override;
   kj::Maybe<kj::Promise<void>> setAlarm(
-      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) override;
   // See ActorCacheOps.
 
   kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
-  DeleteAllResults deleteAll(WriteOptions options) override;
+  DeleteAllResults deleteAll(WriteOptions options, SpanParent traceSpan) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
+      kj::Date scheduledTime, bool noCache, kj::StringPtr actorId, SpanParent parentSpan) override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush(SpanParent parentSpan) override;
   kj::Promise<kj::String> getCurrentBookmark(SpanParent parentSpan) override;
@@ -165,12 +169,16 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
         Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
     kj::OneOf<GetResultList, kj::Promise<GetResultList>> listReverse(
         Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
-    kj::Maybe<kj::Promise<void>> put(Key key, Value value, WriteOptions options) override;
-    kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) override;
-    kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
-    kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
+    kj::Maybe<kj::Promise<void>> put(
+        Key key, Value value, WriteOptions options, SpanParent traceSpan) override;
+    kj::Maybe<kj::Promise<void>> put(
+        kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) override;
+    kj::OneOf<bool, kj::Promise<bool>> delete_(
+        Key key, WriteOptions options, SpanParent traceSpan) override;
+    kj::OneOf<uint, kj::Promise<uint>> delete_(
+        kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) override;
     kj::Maybe<kj::Promise<void>> setAlarm(
-        kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+        kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) override;
     // Implements ActorCacheOps. These will all forward to the ActorSqlite instance.
 
    private:
@@ -218,6 +226,10 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // actually want to persist that deletion until after the handler has successfully completed.
   bool haveDeferredDelete = false;
 
+  // Trace span for the deferred alarm deletion, captured from armAlarmHandler and used when
+  // the alarm is actually deleted.
+  SpanParent deferredAlarmSpan = nullptr;
+
   // Some state only used for tracking calling invariants.
   bool inAlarmHandler = false;
 
@@ -234,6 +246,14 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
 
   kj::TaskSet commitTasks;
+
+  // Trace span for the current commit operation. Captured from the first write
+  // that triggers a commit, used for the output gate lock hold trace.
+  SpanParent currentCommitSpan = nullptr;
+
+  // Whether we've already captured a span for the current commit batch.
+  // Reset when the commit completes.
+  bool hasCommitSpan = false;
 
   // Promise chain for serializing "move alarm later" operations to prevent races
   // at the alarm manager. Each update waits for the previous one to complete.
