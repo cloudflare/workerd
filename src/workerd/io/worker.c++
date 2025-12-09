@@ -3749,7 +3749,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 }
 
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
-  InputGate::Lock inputLock = co_await impl->inputGate.wait();
+  InputGate::Lock inputLock = co_await impl->inputGate.wait(context.getCurrentTraceSpan());
 
   try {
     bool containerRunning = false;

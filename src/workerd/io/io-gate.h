@@ -108,10 +108,11 @@ class InputGate {
   };
 
   // Wait until there are no `Lock`s, then create a new one and return it.
+  //
   // If parentSpan is provided, child spans will be created to track:
   // - Time spent waiting for the lock (if waiting is required)
   // - Time spent holding the lock
-  kj::Promise<Lock> wait(SpanParent parentSpan = nullptr);
+  kj::Promise<Lock> wait(SpanParent parentSpan);
 
   // Rejects if and when calls to `wait()` become broken due to a failed critical section. The
   // actor should be shut down in this case. This promise never resolves, only rejects.
@@ -188,7 +189,7 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
   // The first call to wait() begins the CriticalSection. After that wait completes, until the
   // CriticalSection is done and dropped, no other locks will be allowed on this InputGate, except
   // locks requested by calling wait() on this CriticalSection -- or one of its children.
-  kj::Promise<Lock> wait(SpanParent parentSpan = nullptr);
+  kj::Promise<Lock> wait(SpanParent parentSpan);
 
   // Call when the critical section has completed successfully. If this is not called before the
   // CriticalSection is dropped, then failed() is called implicitly.

@@ -15,9 +15,9 @@ KJ_TEST("InputGate basics") {
 
   InputGate gate;
 
-  kj::Promise<InputGate::Lock> promise1 = gate.wait();
-  kj::Promise<InputGate::Lock> promise2 = gate.wait();
-  kj::Promise<InputGate::Lock> promise3 = gate.wait();
+  kj::Promise<InputGate::Lock> promise1 = gate.wait(nullptr);
+  kj::Promise<InputGate::Lock> promise2 = gate.wait(nullptr);
+  kj::Promise<InputGate::Lock> promise3 = gate.wait(nullptr);
 
   KJ_ASSERT(promise1.poll(ws));
   KJ_EXPECT(!promise2.poll(ws));
@@ -51,17 +51,17 @@ KJ_TEST("InputGate critical section") {
   kj::Own<InputGate::CriticalSection> cs;
 
   {
-    auto lock = gate.wait().wait(ws);
+    auto lock = gate.wait(nullptr).wait(ws);
     cs = lock.startCriticalSection();
   }
 
   {
     // Take the first lock.
-    auto firstLock = cs->wait().wait(ws);
+    auto firstLock = cs->wait(nullptr).wait(ws);
 
     // Other locks are blocked.
-    auto wait1 = cs->wait();
-    auto wait2 = cs->wait();
+    auto wait1 = cs->wait(nullptr);
+    auto wait2 = cs->wait(nullptr);
     KJ_EXPECT(!wait1.poll(ws));
     KJ_EXPECT(!wait2.poll(ws));
 
@@ -77,11 +77,11 @@ KJ_TEST("InputGate critical section") {
   }
 
   // Can't lock the top-level gate while CriticalSection still exists.
-  auto outerWait = gate.wait();
+  auto outerWait = gate.wait(nullptr);
   KJ_EXPECT(!outerWait.poll(ws));
 
   {
-    auto lock = cs->wait().wait(ws);
+    auto lock = cs->wait(nullptr).wait(ws);
     cs->succeeded();
     KJ_EXPECT(!outerWait.poll(ws));
   }
@@ -99,16 +99,16 @@ KJ_TEST("InputGate multiple critical sections start together") {
   kj::Own<InputGate::CriticalSection> cs2;
 
   {
-    auto lock = gate.wait().wait(ws);
+    auto lock = gate.wait(nullptr).wait(ws);
     cs1 = lock.startCriticalSection();
     cs2 = lock.startCriticalSection();
   }
 
   // Start cs1.
-  cs1->wait().wait(ws);
+  cs1->wait(nullptr).wait(ws);
 
   // Can't start cs2 yet.
-  auto cs2Wait = cs2->wait();
+  auto cs2Wait = cs2->wait(nullptr);
   KJ_EXPECT(!cs2Wait.poll(ws));
 
   cs1->succeeded();
@@ -126,20 +126,20 @@ KJ_TEST("InputGate nested critical sections") {
   kj::Own<InputGate::CriticalSection> cs2;
 
   {
-    auto lock = gate.wait().wait(ws);
+    auto lock = gate.wait(nullptr).wait(ws);
     cs1 = lock.startCriticalSection();
   }
 
   {
-    auto lock = cs1->wait().wait(ws);
+    auto lock = cs1->wait(nullptr).wait(ws);
     cs2 = lock.startCriticalSection();
   }
 
   // Start cs2.
-  cs2->wait().wait(ws);
+  cs2->wait(nullptr).wait(ws);
 
   // Can't start new tasks in cs1 until cs2 finishes.
-  auto cs1Wait = cs1->wait();
+  auto cs1Wait = cs1->wait(nullptr);
   KJ_EXPECT(!cs1Wait.poll(ws));
 
   cs2->succeeded();
@@ -157,17 +157,17 @@ KJ_TEST("InputGate nested critical section outlives parent") {
   kj::Own<InputGate::CriticalSection> cs2;
 
   {
-    auto lock = gate.wait().wait(ws);
+    auto lock = gate.wait(nullptr).wait(ws);
     cs1 = lock.startCriticalSection();
   }
 
   {
-    auto lock = cs1->wait().wait(ws);
+    auto lock = cs1->wait(nullptr).wait(ws);
     cs2 = lock.startCriticalSection();
   }
 
   // Start cs2.
-  cs2->wait().wait(ws);
+  cs2->wait(nullptr).wait(ws);
 
   // Mark cs1 done. (Note that, in a real program, this probably can't happen like this, because a
   // lock would be taken on cs1 before marking it done, and that lock would wait for cs2 to
@@ -175,7 +175,7 @@ KJ_TEST("InputGate nested critical section outlives parent") {
   cs1->succeeded();
 
   // Can't start new tasks in at root until cs2 finishes.
-  auto rootWait = gate.wait();
+  auto rootWait = gate.wait(nullptr);
   KJ_EXPECT(!rootWait.poll(ws));
 
   cs2->succeeded();
@@ -195,32 +195,32 @@ KJ_TEST("InputGate deeply nested critical sections") {
   kj::Own<InputGate::CriticalSection> cs4;
 
   {
-    auto lock = gate.wait().wait(ws);
+    auto lock = gate.wait(nullptr).wait(ws);
     cs1 = lock.startCriticalSection();
   }
 
   {
-    auto lock = cs1->wait().wait(ws);
+    auto lock = cs1->wait(nullptr).wait(ws);
     cs2 = lock.startCriticalSection();
   }
 
   {
-    auto lock = cs2->wait().wait(ws);
+    auto lock = cs2->wait(nullptr).wait(ws);
     cs3 = lock.startCriticalSection();
     cs4 = lock.startCriticalSection();
   }
 
   // Start cs2
-  cs2->wait().wait(ws);
+  cs2->wait(nullptr).wait(ws);
 
   // Add some waiters to cs2, some of which are waiting to start more nested critical sections
-  auto lock = cs2->wait().wait(ws);
-  auto waiter1 = cs2->wait();
-  auto waiter2 = cs2->wait();
+  auto lock = cs2->wait(nullptr).wait(ws);
+  auto waiter1 = cs2->wait(nullptr);
+  auto waiter2 = cs2->wait(nullptr);
 
   // Both of these wait on cs2 indirectly, as they are nested under cs2
-  auto waiter3 = cs3->wait();
-  auto waiter4 = cs4->wait();
+  auto waiter3 = cs3->wait(nullptr);
+  auto waiter4 = cs4->wait(nullptr);
 
   KJ_EXPECT(!waiter1.poll(ws));
   KJ_EXPECT(!waiter2.poll(ws));
@@ -250,12 +250,12 @@ KJ_TEST("InputGate deeply nested critical sections") {
   auto lock2 = waiter3.wait(ws);
 
   // Add a waiter on cs3
-  auto waiter5 = cs3->wait();
+  auto waiter5 = cs3->wait(nullptr);
   KJ_ASSERT(!waiter5.poll(ws));
 
   // Can't start new tasks on the root until both cs1 and cs3 have succeeded, and all outstanding
   // tasks have either been dropped or completed.
-  auto waiter6 = gate.wait();
+  auto waiter6 = gate.wait(nullptr);
   KJ_ASSERT(!waiter6.poll(ws));
 
   cs1->succeeded();
@@ -281,12 +281,12 @@ KJ_TEST("InputGate critical section lock outlives critical section") {
   kj::Own<InputGate::CriticalSection> cs;
 
   {
-    auto lock = gate.wait().wait(ws);
+    auto lock = gate.wait(nullptr).wait(ws);
     cs = lock.startCriticalSection();
   }
 
   // Start critical section.
-  auto lock = cs->wait().wait(ws);
+  auto lock = cs->wait(nullptr).wait(ws);
   KJ_ASSERT(lock.isFor(gate));
 
   // Mark it done, even though a lock is still outstanding.
@@ -302,7 +302,7 @@ KJ_TEST("InputGate critical section lock outlives critical section") {
   lock.addRef(nullptr);
 
   // The gate should still be locked
-  auto waiter = gate.wait();
+  auto waiter = gate.wait(nullptr);
   KJ_EXPECT(!waiter.poll(ws));
 
   // Drop the outstanding lock
@@ -326,26 +326,26 @@ KJ_TEST("InputGate broken") {
   kj::Own<InputGate::CriticalSection> cs3;
 
   {
-    auto lock = gate.wait().wait(ws);
+    auto lock = gate.wait(nullptr).wait(ws);
     cs1 = lock.startCriticalSection();
     cs3 = lock.startCriticalSection();
   }
 
   {
-    auto lock = cs1->wait().wait(ws);
+    auto lock = cs1->wait(nullptr).wait(ws);
     cs2 = lock.startCriticalSection();
   }
 
   // start cs2
-  cs2->wait().wait(ws);
+  cs2->wait(nullptr).wait(ws);
 
-  auto cs1Wait = cs1->wait();
+  auto cs1Wait = cs1->wait(nullptr);
   KJ_EXPECT(!cs1Wait.poll(ws));
 
-  auto cs3Wait = cs3->wait();
+  auto cs3Wait = cs3->wait(nullptr);
   KJ_EXPECT(!cs3Wait.poll(ws));
 
-  auto rootWait = gate.wait();
+  auto rootWait = gate.wait(nullptr);
   KJ_EXPECT(!rootWait.poll(ws));
 
   cs2->failed(KJ_EXCEPTION(FAILED, "foobar"));
@@ -353,7 +353,7 @@ KJ_TEST("InputGate broken") {
   KJ_EXPECT_THROW_MESSAGE("foobar", cs1Wait.wait(ws));
   KJ_EXPECT_THROW_MESSAGE("foobar", cs3Wait.wait(ws));
   KJ_EXPECT_THROW_MESSAGE("foobar", rootWait.wait(ws));
-  KJ_EXPECT_THROW_MESSAGE("foobar", cs2->wait().wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("foobar", cs2->wait(nullptr).wait(ws));
   KJ_EXPECT_THROW_MESSAGE("foobar", brokenPromise.wait(ws));
   KJ_EXPECT_THROW_MESSAGE("foobar", gate.onBroken().wait(ws));
 }
