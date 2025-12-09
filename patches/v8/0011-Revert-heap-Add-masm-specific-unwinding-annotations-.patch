@@ -14,10 +14,10 @@ of getting our V8 upgrade unblocked.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 52a9c860841b53b6ad91f94f4a411641732a5a79..26d7a19f603bb1cf6d52edec368a60a28f9e03b4 100644
+index 3a51ee81fadd133ce8e44150a5c80d0ef4e326a6..34fd73b6c2ad1e12d5cda97526e14199baf3b22b 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4411,8 +4411,8 @@ v8_header_set("v8_internal_headers") {
+@@ -4416,8 +4416,8 @@ v8_header_set("v8_internal_headers") {
      "src/tasks/operations-barrier.h",
      "src/tasks/task-utils.h",
      "src/torque/runtime-macro-shims.h",
@@ -27,7 +27,7 @@ index 52a9c860841b53b6ad91f94f4a411641732a5a79..26d7a19f603bb1cf6d52edec368a60a2
      "src/tracing/trace-id.h",
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
-@@ -7191,12 +7191,7 @@ v8_source_set("v8_heap_base") {
+@@ -7195,12 +7195,7 @@ v8_source_set("v8_heap_base") {
    ]
  
    if (current_cpu == "x64") {
@@ -42,7 +42,7 @@ index 52a9c860841b53b6ad91f94f4a411641732a5a79..26d7a19f603bb1cf6d52edec368a60a2
      sources += [ "src/heap/base/asm/ia32/push_registers_asm.cc" ]
    } else if (current_cpu == "arm") {
 diff --git a/src/heap/base/asm/x64/push_registers_asm.cc b/src/heap/base/asm/x64/push_registers_asm.cc
-index b0eb0d8c64176e0d31c48cb53975dfa2af61808a..2ca24727ae6d261df1f14b6ef06b21b005db787a 100644
+index d1d79dcfd5a8fce8240d8981b25c8027e220b03b..3f17db19310ff64e9316d0bb8308e399f5ce1422 100644
 --- a/src/heap/base/asm/x64/push_registers_asm.cc
 +++ b/src/heap/base/asm/x64/push_registers_asm.cc
 @@ -14,16 +14,61 @@
@@ -112,7 +112,7 @@ index b0eb0d8c64176e0d31c48cb53975dfa2af61808a..2ca24727ae6d261df1f14b6ef06b21b0
  asm(
  #ifdef __APPLE__
      ".globl _PushAllRegistersAndIterateStack            \n"
-@@ -71,3 +116,5 @@ asm(
+@@ -81,3 +126,5 @@ asm(
      ".Lfunc_end0-PushAllRegistersAndIterateStack        \n"
  #endif  // !defined(__APPLE__)
      ".cfi_endproc                                      \n");
