@@ -1287,17 +1287,16 @@ jsg::Promise<R2Bucket::ListMultipartUploadsResult> R2Bucket::listMultipartUpload
       json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
 
       result.uploads = KJ_MAP(u, responseBuilder.getUploads()) {
-        MultipartUploadInfo info;
-        info.key = kj::str(u.getObject());
-        info.uploadId = kj::str(u.getUploadId());
-        if (u.getInitiatedMillisecondsSinceEpoch() != 0) {
-          info.initiated =
-              kj::UNIX_EPOCH + u.getInitiatedMillisecondsSinceEpoch() * kj::MILLISECONDS;
-        }
+        jsg::Optional<kj::String> storageClass;
         if (u.hasStorageClass()) {
-          info.storageClass = kj::str(u.getStorageClass());
+          storageClass = kj::str(u.getStorageClass());
         }
-        return info;
+        return MultipartUploadInfo{
+          .key = kj::str(u.getObject()),
+          .uploadId = kj::str(u.getUploadId()),
+          .initiated = kj::UNIX_EPOCH + u.getInitiatedMillisecondsSinceEpoch() * kj::MILLISECONDS,
+          .storageClass = kj::mv(storageClass),
+        };
       };
       result.truncated = responseBuilder.getTruncated();
       if (responseBuilder.hasCursor()) {

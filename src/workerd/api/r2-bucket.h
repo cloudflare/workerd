@@ -463,14 +463,14 @@ class R2Bucket: public jsg::Object {
   struct MultipartUploadInfo {
     kj::String key;
     kj::String uploadId;
-    jsg::Optional<kj::Date> initiated;
+    kj::Date initiated;
     jsg::Optional<kj::String> storageClass;
 
     JSG_STRUCT(key, uploadId, initiated, storageClass);
     JSG_STRUCT_TS_OVERRIDE(R2MultipartUploadListing {
       key: string;
       uploadId: string;
-      initiated?: Date;
+      initiated: Date;
       storageClass?: string;
     });
   };
