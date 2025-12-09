@@ -366,18 +366,18 @@ KJ_TEST("OutputGate basics") {
 
   OutputGate gate;
 
-  KJ_EXPECT(gate.wait().poll(ws));
+  KJ_EXPECT(gate.wait(nullptr).poll(ws));
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
   auto blocker1 = gate.lockWhile(kj::mv(paf1.promise));
 
-  auto promise1 = gate.wait();
-  auto promise2 = gate.wait();
+  auto promise1 = gate.wait(nullptr);
+  auto promise2 = gate.wait(nullptr);
 
   auto paf2 = kj::newPromiseAndFulfiller<void>();
   auto blocker2 = gate.lockWhile(kj::mv(paf2.promise));
 
-  auto promise3 = gate.wait();
+  auto promise3 = gate.wait(nullptr);
 
   KJ_EXPECT(!promise1.poll(ws));
   KJ_EXPECT(!promise2.poll(ws));
@@ -411,18 +411,18 @@ KJ_TEST("OutputGate out-of-order") {
 
   OutputGate gate;
 
-  KJ_EXPECT(gate.wait().poll(ws));
+  KJ_EXPECT(gate.wait(nullptr).poll(ws));
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
   auto blocker1 = gate.lockWhile(kj::mv(paf1.promise));
 
-  auto promise1 = gate.wait();
-  auto promise2 = gate.wait();
+  auto promise1 = gate.wait(nullptr);
+  auto promise2 = gate.wait(nullptr);
 
   auto paf2 = kj::newPromiseAndFulfiller<void>();
   auto blocker2 = gate.lockWhile(kj::mv(paf2.promise));
 
-  auto promise3 = gate.wait();
+  auto promise3 = gate.wait(nullptr);
 
   KJ_EXPECT(!promise1.poll(ws));
   KJ_EXPECT(!promise2.poll(ws));
@@ -463,18 +463,18 @@ KJ_TEST("OutputGate exception") {
   OutputGate gate;
   auto onBroken = gate.onBroken();
 
-  KJ_EXPECT(gate.wait().poll(ws));
+  KJ_EXPECT(gate.wait(nullptr).poll(ws));
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
   auto blocker1 = gate.lockWhile(kj::mv(paf1.promise));
 
-  auto promise1 = gate.wait();
-  auto promise2 = gate.wait();
+  auto promise1 = gate.wait(nullptr);
+  auto promise2 = gate.wait(nullptr);
 
   auto paf2 = kj::newPromiseAndFulfiller<void>();
   auto blocker2 = gate.lockWhile(kj::mv(paf2.promise));
 
-  auto promise3 = gate.wait();
+  auto promise3 = gate.wait(nullptr);
 
   KJ_EXPECT(!promise1.poll(ws));
   KJ_EXPECT(!promise2.poll(ws));
@@ -522,17 +522,17 @@ KJ_TEST("OutputGate canceled") {
   OutputGate gate;
   auto onBroken = gate.onBroken();
 
-  KJ_EXPECT(gate.wait().poll(ws));
+  KJ_EXPECT(gate.wait(nullptr).poll(ws));
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
   auto blocker1 = gate.lockWhile(kj::mv(paf1.promise));
 
-  auto promise1 = gate.wait();
-  auto promise2 = gate.wait();
+  auto promise1 = gate.wait(nullptr);
+  auto promise2 = gate.wait(nullptr);
 
   auto blocker2 = gate.lockWhile(kj::Promise<void>(kj::NEVER_DONE));
 
-  auto promise3 = gate.wait();
+  auto promise3 = gate.wait(nullptr);
 
   KJ_EXPECT(!promise1.poll(ws));
   KJ_EXPECT(!promise2.poll(ws));

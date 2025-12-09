@@ -743,14 +743,15 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   auto& context = IoContext::current();
   auto userSpan = context.makeUserTraceSpan("durable_object_storage_sync"_kjc);
-  KJ_IF_SOME(p, cache->onNoPendingFlush()) {
+  auto span = context.makeTraceSpan("durable_object_storage_sync"_kjc);
+  KJ_IF_SOME(p, cache->onNoPendingFlush(span)) {
     // Note that we're not actually flushing since that will happen anyway once we go async. We're
     // merely checking if we have any pending or in-flight operations, and providing a promise that
     // resolves when they succeed. This promise only covers operations that were scheduled before
     // this method was invoked. If the cache has to flush again later from future operations, this
     // promise will resolve before they complete. If this promise were to reject, then the actor's
     // output gate will be broken first and the isolate will not resume synchronous execution.
-    return context.attachSpans(js, context.awaitIo(js, kj::mv(p)), kj::mv(userSpan));
+    return context.attachSpans(js, context.awaitIo(js, kj::mv(p)), kj::mv(userSpan), kj::mv(span));
   } else {
     return js.resolvedPromise();
   }
