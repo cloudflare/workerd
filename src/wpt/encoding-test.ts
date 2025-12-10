@@ -104,11 +104,7 @@ export default {
       'a throwing ignoreBOM member should cause the constructor to throw',
     ],
   },
-  'streams/decode-bad-chunks.any.js': {
-    comment: 'Failed V8 assert',
-    //  external/v8/src/api/api-inl.h:163; message = v8::internal::ValueHelper::IsEmpty(that) || IsJSArrayBufferView(v8::internal::Tagged<v8::internal::Object>( v8::internal::ValueHelper::ValueAsAddress(that)))
-    disabledTests: true,
-  },
+  'streams/decode-bad-chunks.any.js': {},
   'streams/decode-ignore-bom.any.js': {},
   'streams/decode-incomplete-input.any.js': {},
   'streams/decode-non-utf8.any.js': {},
