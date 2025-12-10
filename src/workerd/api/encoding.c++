@@ -4,8 +4,10 @@
 
 #include "encoding.h"
 
+#include "simdutf.h"
 #include "util.h"
 
+#include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/strings.h>
 
@@ -289,7 +291,7 @@ kj::Maybe<IcuDecoder> IcuDecoder::create(Encoding encoding, bool fatal, bool ign
     if (U_FAILURE(status)) return kj::none;
   }
 
-  return IcuDecoder(encoding, inner, ignoreBom);
+  return IcuDecoder(encoding, inner, fatal, ignoreBom);
 }
 
 kj::Maybe<jsg::JsString> IcuDecoder::decode(
@@ -350,7 +352,32 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
           omitInitialBom = data[0] == 0xfeff;
           bomSeen = true;
         }
-        return js.str(data.slice(omitInitialBom ? 1 : 0, data.size()));
+
+        auto slice = data.slice(omitInitialBom ? 1 : 0, data.size());
+
+        // If pedanticWpt flag is enabled, then we follow the spec and fix invalid
+        // surrogates on the UTF-16 input.
+        if (slice.size() == 0 || !FeatureFlags::get(js).getPedanticWpt()) {
+          return js.str(slice);
+        }
+
+        if (simdutf::validate_utf16(slice.begin(), slice.size())) {
+          return js.str(slice);
+        }
+
+        if (fatal) {
+          // In fatal mode, return error for invalid surrogates
+          return kj::none;
+        }
+
+        // In non-fatal mode, replace invalid surrogates with U+FFFD.
+        // Output size equals input size because each invalid surrogate (1 code unit)
+        // is replaced with U+FFFD (also 1 code unit).
+        // Use stack allocation for small strings (up to 256 code units) to avoid
+        // heap allocation overhead.
+        kj::SmallArray<char16_t, 256> fixed(slice.size());
+        simdutf::to_well_formed_utf16(slice.begin(), slice.size(), fixed.begin());
+        return js.str(fixed.asPtr());
       }
     }
   }

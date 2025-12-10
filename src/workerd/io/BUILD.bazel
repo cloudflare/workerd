@@ -47,7 +47,6 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "compatibility-date.h",
-        "features.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -90,6 +89,7 @@ wd_cc_library(
         ":actor-storage_capnp",
         ":cdp_capnp",
         ":container_capnp",
+        ":features",
         ":frankenvalue",
         ":io-gate",
         ":io-helpers",
@@ -122,6 +122,19 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async",
         "@ncrypto",
         "@ssl",
+    ],
+)
+
+# Headers only target to avoid having circular dependencies.
+wd_cc_library(
+    name = "features",
+    hdrs = ["features.h"],
+    implementation_deps = [
+        "//src/workerd/jsg",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compatibility-date_capnp",
     ],
 )
 
