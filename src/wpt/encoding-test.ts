@@ -140,11 +140,7 @@ export default {
   },
   'textdecoder-arguments.any.js': {},
   'textdecoder-byte-order-marks.any.js': {},
-  'textdecoder-copy.any.js': {
-    comment:
-      "Failed to execute 'decode' on 'TextDecoder': parameter 1 is not of type 'Array'.",
-    expectedFailures: ['Modify buffer after passing it in (SharedArrayBuffer)'],
-  },
+  'textdecoder-copy.any.js': {},
   'textdecoder-eof.any.js': {},
   'textdecoder-fatal-single-byte.any.js': {},
   'textdecoder-fatal-streaming.any.js': {},
