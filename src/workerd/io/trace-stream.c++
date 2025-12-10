@@ -173,9 +173,9 @@ jsg::JsValue ToJs(jsg::Lock& js, kj::ArrayPtr<const Attribute> attributes, Strin
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cache) {
-  static kj::StringPtr keys[] = {TYPE_STR, STATUSCODE_STR};
+  static const kj::StringPtr keys[] = {TYPE_STR, STATUSCODE_STR};
   jsg::JsValue values[] = {cache.get(js, FETCH_STR), js.num(info.statusCode)};
-  return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
+  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache) {
@@ -202,9 +202,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache)
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const JsRpcEventInfo& info, StringCache& cache) {
-  static kj::StringPtr keys[] = {TYPE_STR};
+  static const kj::StringPtr keys[] = {TYPE_STR};
   jsg::JsValue values[] = {cache.get(js, JSRPC_STR)};
-  return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
+  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const ScheduledEventInfo& info, StringCache& cache) {
@@ -231,17 +231,17 @@ jsg::JsValue ToJs(jsg::Lock& js, const AlarmEventInfo& info, StringCache& cache)
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const QueueEventInfo& info, StringCache& cache) {
-  static kj::StringPtr keys[] = {TYPE_STR, QUEUENAME_STR, BATCHSIZE_STR};
+  static const kj::StringPtr keys[] = {TYPE_STR, QUEUENAME_STR, BATCHSIZE_STR};
   jsg::JsValue values[] = {
     cache.get(js, QUEUE_STR), js.str(info.queueName), js.num(info.batchSize)};
-  return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
+  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const EmailEventInfo& info, StringCache& cache) {
-  static kj::StringPtr keys[] = {TYPE_STR, MAILFROM_STR, RCPTTO_STR, RAWSIZE_STR};
+  static const kj::StringPtr keys[] = {TYPE_STR, MAILFROM_STR, RCPTTO_STR, RAWSIZE_STR};
   jsg::JsValue values[] = {
     cache.get(js, EMAIL_STR), js.str(info.mailFrom), js.str(info.rcptTo), js.num(info.rawSize)};
-  return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
+  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const TraceEventInfo& info, StringCache& cache) {
