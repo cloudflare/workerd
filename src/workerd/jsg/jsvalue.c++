@@ -458,7 +458,7 @@ JsRegExp Lock::regexp(kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> 
       v8::RegExp::New(v8Context(), v8Str(v8Isolate, str), static_cast<v8::RegExp::Flags>(flags))));
 }
 
-JsObject Lock::obj(kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<JsValue> values) {
+JsObject Lock::obj(kj::ArrayPtr<const kj::StringPtr> keys, kj::ArrayPtr<JsValue> values) {
   KJ_DASSERT(keys.size() == values.size());
   v8::LocalVector<v8::Name> keys_(v8Isolate, keys.size());
   v8::LocalVector<v8::Value> values_(v8Isolate, keys.size());

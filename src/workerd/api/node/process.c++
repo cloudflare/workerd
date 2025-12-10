@@ -112,9 +112,9 @@ namespace {
 jsg::JsObject ProcessModule::getVersions(jsg::Lock& js) const {
   // Node.js version - represents the most current Node.js version supported
   // by the platform, as defined in node-version.h
-  static kj::StringPtr keys[] = {"node"_kj};
-  jsg::JsValue values[] = {js.str(nodeVersion)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  static const kj::StringPtr key = "node"_kj;
+  jsg::JsValue value = js.str(nodeVersion);
+  return js.obj(kj::arrayPtr(key), kj::arrayPtr(value));
 }
 
 kj::StringPtr ProcessModule::getPlatform(jsg::Lock& js) const {

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
@@ -21,45 +22,6 @@ namespace {
 // so that developers can understand why this happens.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 }  // namespace
-
-namespace tracing {
-TailStreamWriter::TailStreamWriter(Reporter reporter): state(State(kj::mv(reporter))) {}
-
-void TailStreamWriter::report(
-    const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
-  // Becomes a no-op if a terminal event (close) has been reported, or if the stream closed due to
-  // not receiving a well-formed event handler. We need to disambiguate these cases as the former
-  // indicates an implementation error resulting in trailing events whereas the latter case is
-  // caused by a user error and events being reported after the stream being closed are expected –
-  // reject events following an outcome event, but otherwise just exit if the state has been closed.
-  // This could be an assert, but just log an error in case this is prevalent in some edge case.
-  if (outcomeSeen) {
-    KJ_LOG(ERROR, "reported tail stream event after stream close ", event, kj::getStackTrace());
-  }
-  auto& s = KJ_UNWRAP_OR_RETURN(state);
-
-  // The onset event must be first and must only happen once.
-  if (event.is<Onset>()) {
-    KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
-    onsetSeen = true;
-  } else {
-    KJ_ASSERT(onsetSeen, "Tail stream onset was not reported");
-    if (event.is<Outcome>()) {
-      outcomeSeen = true;
-    }
-  }
-
-  // A zero spanId at the TailEvent level signifies that no spanId should be provided to the tail
-  // worker (for Onset events). We go to great lengths to rule out getting an all-zero spanId by
-  // chance (see SpanId::fromEntropy()), so this should be safe.
-  TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
-      context.getSpanId() == SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()), timestamp,
-      s.sequence++, kj::mv(event));
-
-  // If the reporter returns false, then we will treat it as a close signal.
-  if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
-}
-}  // namespace tracing
 
 kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == kj::none, "onComplete() can only be called once");
