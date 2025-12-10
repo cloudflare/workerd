@@ -1088,8 +1088,6 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
 
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(l, o.limit) {
-        JSG_REQUIRE(l >= 1 && l <= 1000, RangeError,
-            "limit must be between 1 and 1000 (inclusive). Actual value was: ", l);
         listBuilder.setLimit(l);
         traceContext.userSpan.setTag("cloudflare.r2.request.limit"_kjc, static_cast<int64_t>(l));
       }
@@ -1242,8 +1240,6 @@ jsg::Promise<R2Bucket::ListMultipartUploadsResult> R2Bucket::listMultipartUpload
 
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(l, o.limit) {
-        JSG_REQUIRE(l >= 1 && l <= 1000, RangeError,
-            "limit must be between 1 and 1000 (inclusive). Actual value was: ", l);
         listBuilder.setLimit(l);
         traceContext.userSpan.setTag("cloudflare.r2.request.limit"_kjc, static_cast<int64_t>(l));
       }
