@@ -20,4 +20,9 @@ CompatibilityFlags::Reader FeatureFlags::get(jsg::Lock&) {
   return Worker::Api::current().getFeatureFlags();
 }
 
+kj::Maybe<CompatibilityFlags::Reader> FeatureFlags::tryGet(jsg::Lock& lock) {
+  return Worker::Api::tryCurrent().map(
+      [](const Worker::Api& api) { return api.getFeatureFlags(); });
+}
+
 }  // namespace workerd

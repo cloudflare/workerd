@@ -1256,4 +1256,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
   # measurements and time-sensitive operations.
+
+  stripBomInReadAllText @149 :Bool
+    $compatEnableFlag("strip_bom_in_read_all_text")
+    $compatDisableFlag("do_not_strip_bom_in_read_all_text")
+    $compatEnableDate("2026-01-06")
+    $impliedByAfterDate(name = "pedanticWpt", date = "2026-01-06");
+  # Instructs the readAllText method in streams to strip the leading UTF8 BOM if present.
 }
