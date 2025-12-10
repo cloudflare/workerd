@@ -17,8 +17,8 @@ pub use v8::ffi::ExceptionType;
 mod ffi {
     extern "Rust" {
         type Realm;
-        unsafe fn realm_create(isolate: *mut Isolate) -> *mut Realm;
-        unsafe fn realm_dispose(value: *mut Realm);
+        #[expect(clippy::unnecessary_box_returns)]
+        unsafe fn realm_create(isolate: *mut Isolate) -> Box<Realm>;
     }
 
     unsafe extern "C++" {
@@ -472,6 +472,11 @@ impl Realm {
 
 impl Drop for Realm {
     fn drop(&mut self) {
+        debug_assert!(
+            unsafe { v8::ffi::isolate_is_locked(self.isolate) },
+            "Realm must be dropped while holding the isolate lock"
+        );
+
         // Clean up all leaked Refs during deterministic context disposal.
         // Each resource_ptr points to a ResourceState embedded in a Resource.
         // When wrapping a resource, we leak a Ref<R> and store the raw pointer
@@ -495,14 +500,9 @@ impl Drop for Realm {
     }
 }
 
-unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> *mut Realm {
-    Box::into_raw(Box::new(Realm::new(isolate)))
-}
-
-unsafe fn realm_dispose(this: *mut Realm) {
-    // Reconstruct the Box from the raw pointer and drop it
-    let _realm = unsafe { Box::from_raw(this) };
-    // The Box drops here, calling Realm::drop() which cleans up resources
+#[expect(clippy::unnecessary_box_returns)]
+unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
+    Box::new(Realm::new(isolate))
 }
 
 /// Handles a result by setting the return value or throwing an error.

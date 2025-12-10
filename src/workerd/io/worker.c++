@@ -526,11 +526,14 @@ struct Worker::Impl {
 // noted.
 struct Worker::Isolate::Impl {
   IsolateObserver& metrics;
-  InspectorClient inspectorClient;
+  kj::Own<InspectorClient> inspectorClient;
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
   InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
+
+  // Used by JSG/Rust integration.
+  ::rust::Box<::workerd::rust::jsg::Realm> realm;
 
   // UUID for this isolate, initialized first time getUuid() is called.
   kj::Lazy<kj::String> uuid;
@@ -630,15 +633,15 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
-      ::workerd::rust::jsg::context_set_realm(
-          context, ::workerd::rust::jsg::realm_create(lock->v8Isolate));
+      // &* dereferences the kj::Own smart pointer and takes its address to get a raw pointer
+      jsg::setAlignedPointerInEmbedderData(context, ::workerd::jsg::ContextPointerSlot::RUST_REALM,
+          const_cast<::workerd::rust::jsg::Realm*>(&*impl.realm));
       Worker::setupContext(*lock, context, loggingOptions);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
       lock->withinHandleScope([&] {
         auto v8Context = context.getHandle(*lock);
-        ::workerd::rust::jsg::realm_dispose(::workerd::rust::jsg::realm_from_context(v8Context));
         context->clear();
         KJ_IF_SOME(i, impl.inspector) {
           i.get()->contextDestroyed(v8Context);
@@ -698,24 +701,50 @@ struct Worker::Isolate::Impl {
   //   because our GlobalScope object needs to have a function called on it, and any attached
   //   inspector needs to be notified. JSG doesn't know about these things.
 
-  Impl(const Api& api,
-      IsolateObserver& metrics,
-      IsolateLimitEnforcer& limitEnforcer,
-      InspectorPolicy inspectorPolicy)
-      : metrics(metrics),
-        inspectorPolicy(inspectorPolicy),
-        actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
+  struct IsolateState {
+    kj::Own<InspectorClient> inspectorClient;
+    kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
+    ::rust::Box<::workerd::rust::jsg::Realm> realm;
+  };
+
+  static IsolateState initIsolate(
+      const Api& api, IsolateLimitEnforcer& limitEnforcer, InspectorPolicy inspectorPolicy) {
+    auto inspectorClient = kj::heap<InspectorClient>();
+    // Default constructor of ::rust::Box is deleted, so we use a Maybe to delay initialization.
+    kj::Maybe<::rust::Box<::workerd::rust::jsg::Realm>> realm;
+    kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
-
+      realm = ::workerd::rust::jsg::realm_create(lock->v8Isolate);
       limitEnforcer.customizeIsolate(lock->v8Isolate);
       if (inspectorPolicy != InspectorPolicy::DISALLOW) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
-        inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, &inspectorClient);
+        inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, inspectorClient.get());
       }
     });
+    return {kj::mv(inspectorClient), kj::mv(inspector), kj::mv(KJ_REQUIRE_NONNULL(realm))};
   }
+
+  Impl(IsolateObserver& metrics,
+      IsolateLimitEnforcer& limitEnforcer,
+      InspectorPolicy inspectorPolicy,
+      IsolateState state)
+      : metrics(metrics),
+        inspectorClient(kj::mv(state.inspectorClient)),
+        inspector(kj::mv(state.inspector)),
+        inspectorPolicy(inspectorPolicy),
+        actorCacheLru(limitEnforcer.getActorCacheLruOptions()),
+        realm(kj::mv(state.realm)) {}
+
+  Impl(const Api& api,
+      IsolateObserver& metrics,
+      IsolateLimitEnforcer& limitEnforcer,
+      InspectorPolicy inspectorPolicy)
+      : Impl(metrics,
+            limitEnforcer,
+            inspectorPolicy,
+            initIsolate(api, limitEnforcer, inspectorPolicy)) {}
 };
 
 namespace {
@@ -1511,6 +1540,9 @@ Worker::Isolate::~Isolate() noexcept(false) {
     metrics->teardownLockAcquired();
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
+    // The Rust Realm must be dropped under lock since Realm::drop() accesses V8 globals
+    // and calls drop functions that may interact with V8.
+    auto dropRealm = kj::mv(impl->realm);
   });
 }
 
@@ -3308,12 +3340,12 @@ kj::Promise<void> Worker::Isolate::attachInspector(
     // just not.
     lockedSelf.disconnectInspector();
 
-    lockedSelf.impl->inspectorClient.setInspectorTimerInfo(timer, timerOffset);
+    lockedSelf.impl->inspectorClient->setInspectorTimerInfo(timer, timerOffset);
 
     auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(
         kj::atomicAddRef(*this), kj::mv(isolateThreadExecutor), webSocket);
     lockedSelf.currentInspectorSession = *channel;
-    lockedSelf.impl->inspectorClient.setChannel(*channel);
+    lockedSelf.impl->inspectorClient->setChannel(*channel);
 
     // Send any queued notifications.
     lock.withinHandleScope([&] {
@@ -3334,7 +3366,7 @@ void Worker::Isolate::disconnectInspector() {
     current.disconnect();
     currentInspectorSession = kj::none;
   }
-  impl->inspectorClient.resetChannel();
+  impl->inspectorClient->resetChannel();
 }
 
 void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
@@ -3409,7 +3441,7 @@ void Worker::Isolate::logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr des
       params.setType(static_cast<cdp::LogType>(type));
       params.initArgs(1)[0].initString().setValue(description);
       params.setExecutionContextId(v8_inspector::V8ContextInfo::executionContextId(js.v8Context()));
-      params.setTimestamp(impl->inspectorClient.currentTimeMS());
+      params.setTimestamp(impl->inspectorClient->currentTimeMS());
       stackTraceToCDP(js, params.initStackTrace());
 
       auto notification = getCdpJsonCodec().encode(event);

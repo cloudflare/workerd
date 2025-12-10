@@ -12,7 +12,6 @@ using namespace kj_rs;
 namespace workerd::rust::jsg {
 
 // Local<T>
-
 void local_drop(Local value) {
   // Convert from FFI representation and let v8::Local destructor handle cleanup
   local_from_ffi<v8::Value>(kj::mv(value));
@@ -245,19 +244,9 @@ Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
 }
 
 Realm* realm_from_isolate(Isolate* isolate) {
-  // Note: calls GetCurrentContext() which is not safe during teardown
-  return realm_from_context(isolate->GetCurrentContext());
-}
-
-Realm* realm_from_context(Context context) {
   auto realm = ::workerd::jsg::getAlignedPointerFromEmbedderData<Realm>(
-      context, ::workerd::jsg::ContextPointerSlot::RUST_REALM);
+      isolate->GetCurrentContext(), ::workerd::jsg::ContextPointerSlot::RUST_REALM);
   return &KJ_ASSERT_NONNULL(realm);
-}
-
-void context_set_realm(Context context, Realm* realm) {
-  ::workerd::jsg::setAlignedPointerInEmbedderData(
-      context, ::workerd::jsg::ContextPointerSlot::RUST_REALM, realm);
 }
 
 // Errors
@@ -280,6 +269,7 @@ Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::S
   }
 }
 
+// Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception) {
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
@@ -288,6 +278,10 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
   auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
       isolate, description.data(), v8::NewStringType::kInternalized, description.size()));
   isolate->ThrowError(message);
+}
+
+bool isolate_is_locked(Isolate* isolate) {
+  return v8::Locker::IsLocked(isolate);
 }
 
 }  // namespace workerd::rust::jsg
