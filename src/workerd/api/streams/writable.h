@@ -6,6 +6,7 @@
 
 #include "common.h"
 
+#include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
@@ -80,7 +81,9 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   kj::Maybe<jsg::Promise<void>> isReady(jsg::Lock& js);
 
  private:
-  struct Initial {};
+  struct Initial {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "initial"_kj;
+  };
   // While a Writer is attached to a WritableStream, it holds a strong reference to the
   // WritableStream to prevent it from being GC'ed so long as the Writer is available.
   // Once the writer is closed, released, or GC'ed the reference to the WritableStream
@@ -88,11 +91,40 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   // it being held anywhere. If the writer is still attached to the WritableStream when
   // it is destroyed, the WritableStream's reference to the writer is cleared but the
   // WritableStream remains in the "writer locked" state, per the spec.
-  using Attached = jsg::Ref<WritableStream>;
-  struct Released {};
+  struct Attached {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "attached"_kj;
+    jsg::Ref<WritableStream> stream;
+  };
+  // Released: The user explicitly called releaseLock() to detach the writer from the stream.
+  // The stream remains usable and can be locked by a new writer.
+  struct Released {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "released"_kj;
+  };
+  // Closed: The underlying stream ended (closed or errored) while the writer was attached.
+  // The stream is no longer usable.
+  struct Closed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+
+  // State machine for WritableStreamDefaultWriter:
+  //   Initial -> Attached (attach() called)
+  //   Attached -> Closed (detach() called when stream closes)
+  //   Attached -> Released (releaseLock() called)
+  // Closed and Released are terminal states.
+  // Initial is not terminal but most methods assert if called in this state.
+  using WriterState = StateMachine<TerminalStates<Closed, Released>,
+      ActiveState<Attached>,
+      Initial,
+      Attached,
+      Closed,
+      Released>;
 
   kj::Maybe<IoContext&> ioContext;
-  kj::OneOf<Initial, Attached, Released, StreamStates::Closed> state = Initial();
+  WriterState state;
+
+  inline void assertAttachedOrTerminal() const {
+    KJ_ASSERT(!state.is<Initial>(), "this writer was never attached");
+  }
 
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> readyPromise;

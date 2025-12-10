@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "streams-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors", "workers_api_getters_setters_on_prototype"],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors", "transformstream_enable_standard_constructor", "workers_api_getters_setters_on_prototype"],
         bindings = [ ( name = "KV", kvNamespace = "kv" ) ],
       )
     ),

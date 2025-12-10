@@ -1,5 +1,6 @@
 #include "readable.h"
 #include "standard.h"
+#include "writable.h"
 
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
@@ -1817,6 +1818,139 @@ KJ_TEST("DrainingReader cancel while read pending - UAF safety (byte stream)") {
     } else {
       KJ_FAIL_ASSERT("Failed to create DrainingReader");
     }
+  });
+}
+
+// ======================================================================================
+// Execution Termination Tests
+
+// Test that execution termination during a read doesn't cause an assertion failure.
+// This tests the fix for the production error:
+// "expected !js.v8Isolate->IsExecutionTerminating()"
+//
+// Note: This test verifies that if IsExecutionTerminating() is true after readCallback()
+// returns, we handle it gracefully instead of asserting. However, actually triggering
+// the termination check in the exact right spot in a unit test is difficult because
+// V8 only checks the termination flag during JS execution, not during C++ callbacks.
+// The production scenario occurs when the termination happens during actual JS execution
+// inside readCallback() (e.g., user's pull function runs too long).
+KJ_TEST("ReadableStream handles execution termination during read") {
+  preamble([](jsg::Lock& js) {
+    // We need to handle termination at this level because the context scope
+    // will propagate the termination exception.
+    v8::TryCatch outerTryCatch(js.v8Isolate);
+    bool testCompleted = false;
+
+    try {
+      v8::TryCatch tryCatch(js.v8Isolate);
+
+      auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+
+      // Set up a stream where the pull callback terminates execution
+      rs->getController().setup(js,
+          UnderlyingSource{
+            .pull =
+                [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        // Terminate execution - this simulates CPU time limit exceeded
+        js.terminateNextExecution();
+
+        // Force V8 to check the termination flag by doing JS work.
+        // This is similar to what terminateExecutionNow() does.
+        jsg::check(v8::JSON::Stringify(js.v8Context(), js.str("test"_kj)));
+
+        // We shouldn't get here - termination should have been triggered
+        return js.resolvedPromise();
+      },
+          },
+          StreamQueuingStrategy{.highWaterMark = 0});
+
+      // Start a read - this will call pull which terminates execution
+      auto promise = rs->getController().readAllText(js, 100);
+
+      // Run microtasks - this will propagate the termination
+      js.runMicrotasks();
+
+      // If we get here without the assertion failing, the fix works
+      testCompleted = true;
+    } catch (jsg::JsExceptionThrown&) {
+      // Expected - execution was terminated
+      // The important thing is we didn't hit the assertion failure
+      testCompleted = true;
+    }
+
+    // Cancel termination so cleanup can proceed
+    if (js.v8Isolate->IsExecutionTerminating()) {
+      js.v8Isolate->CancelTerminateExecution();
+    }
+
+    // The test passes if we got here without an assertion failure
+    KJ_ASSERT(testCompleted, "Test did not complete as expected");
+  });
+}
+
+// ======================================================================================
+// WritableStream re-entrancy tests
+
+KJ_TEST("WritableStream close during abort algorithm returns rejected promise") {
+  // Regression test for a bug where calling writer.close() re-entrantly from
+  // the underlying sink's abort algorithm would hit a KJ_ASSERT in WritableImpl::close.
+  //
+  // The issue: finishErroring transitions WritableImpl to Errored state, then runs
+  // the abort algorithm (user JS code). During that window, WritableStreamJsController
+  // is still in Controller state (doError hasn't propagated yet). If the abort
+  // algorithm calls writer.close(), the JsController delegates to WritableImpl::close
+  // which previously asserted isWritable()||isErroring() -- but state was Errored.
+  //
+  // The fix adds defensive checks in WritableImpl::close for Closed/Errored states
+  // that return rejected promises instead of asserting.
+  preamble([](jsg::Lock& js) {
+    bool abortCalled = false;
+    bool closeRejected = false;
+    bool abortResolved = false;
+
+    auto ws = js.alloc<WritableStream>(newWritableStreamJsController());
+
+    // We capture a raw pointer to the writer so the abort callback can call close().
+    WritableStreamDefaultWriter* writerPtr = nullptr;
+
+    // clang-format off
+    ws->getController().setup(js, UnderlyingSink{
+      .abort = [&](jsg::Lock& js, v8::Local<v8::Value> reason) -> jsg::Promise<void> {
+        abortCalled = true;
+        // Re-entrantly call close() on the writer during the abort algorithm.
+        // At this point, WritableImpl has already transitioned to Errored state
+        // but WritableStreamJsController hasn't been updated yet.
+        // This should return a rejected promise instead of crashing.
+        writerPtr->close(js).then(js,
+            [](jsg::Lock& js) {},
+            [&](jsg::Lock& js, jsg::Value reason) {
+              closeRejected = true;
+            });
+        return js.resolvedPromise();
+      }
+    }, StreamQueuingStrategy{});
+    // clang-format on
+
+    auto writer = js.alloc<WritableStreamDefaultWriter>();
+    writer->lockToStream(js, *ws);
+    writerPtr = &*writer;
+
+    // Abort the writer. This triggers:
+    // 1. WritableImpl::abort() sets pending abort, KJ_DEFER fires startErroring
+    // 2. startErroring -> finishErroring (no in-flight ops, stream is started)
+    // 3. finishErroring transitions WritableImpl to Errored
+    // 4. finishErroring calls the abort algorithm (our callback above)
+    // 5. The abort callback calls writer.close() while WritableImpl is Errored
+    //    but WritableStreamJsController still shows Controller state
+    writer->abort(js, kj::none).then(js, [&](jsg::Lock& js) {
+      abortResolved = true;
+    }, [&](jsg::Lock& js, jsg::Value reason) {});
+
+    js.runMicrotasks();
+
+    KJ_ASSERT(abortCalled, "abort algorithm was not called");
+    KJ_ASSERT(closeRejected, "re-entrant close() should have been rejected");
+    KJ_ASSERT(abortResolved, "abort should have resolved successfully");
   });
 }
 
