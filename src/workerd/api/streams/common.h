@@ -544,11 +544,7 @@ class ReadableStreamController {
   //
   // limit specifies an upper maximum bound on the number of bytes permitted to be read.
   // The promise will reject if the read will produce more bytes than the limit.
-  //
-  // option specifies how the text should be processed (e.g., null termination, BOM stripping).
-  virtual jsg::Promise<kj::String> readAllText(jsg::Lock& js,
-      uint64_t limit,
-      ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) = 0;
+  virtual jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) = 0;
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) = 0;
 

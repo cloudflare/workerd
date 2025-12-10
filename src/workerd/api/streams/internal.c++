@@ -225,15 +225,20 @@ class AllReader final {
 
   template <typename T>
   void copyInto(kj::ArrayPtr<T> out, kj::ArrayPtr<kj::Array<T>> in, size_t skipBytes = 0) {
-    size_t pos = 0;
     for (auto& part: in) {
+      if (out.size() == 0) {
+        break;
+      }
+      // The skipBytes are used to skip the BOM on the first part only.
       KJ_DASSERT(skipBytes <= part.size());
-      auto begin = part.begin() + skipBytes;
-      auto size = part.size() - skipBytes;
+      auto slicedPart = skipBytes ? part.slice(skipBytes) : part;
       skipBytes = 0;
-      KJ_DASSERT(size <= out.size() - pos);
-      out.slice(pos, pos + size).copyFrom(kj::arrayPtr(begin, size));
-      pos += size;
+      if (slicedPart.size() == 0) {
+        continue;
+      }
+      KJ_DASSERT(slicedPart.size() <= out.size());
+      out.first(slicedPart.size()).copyFrom(slicedPart);
+      out = out.slice(slicedPart.size());
     }
   }
 };
@@ -2120,7 +2125,7 @@ jsg::Promise<jsg::BufferSource> ReadableStreamInternalController::readAllBytes(
 }
 
 jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
-    jsg::Lock& js, uint64_t limit, ReadAllTextOption option) {
+    jsg::Lock& js, uint64_t limit) {
   if (isLockedToReader()) {
     return js.rejectedPromise<kj::String>(KJ_EXCEPTION(
         FAILED, "jsg.TypeError: This ReadableStream is currently locked to a reader."));
@@ -2139,6 +2144,12 @@ jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
     KJ_CASE_ONEOF(readable, Readable) {
       auto source = KJ_ASSERT_NONNULL(removeSource(js));
       auto& context = IoContext::current();
+      auto option = ReadAllTextOption::NULL_TERMINATE;
+      KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+        if (flags.getStripBomInReadAllText()) {
+          option |= ReadAllTextOption::STRIP_BOM;
+        }
+      }
       return context.awaitIoLegacy(js, source->readAllText(limit, option).attach(kj::mv(source)));
     }
   }

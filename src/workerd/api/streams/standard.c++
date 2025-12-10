@@ -692,9 +692,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController();
 
   jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit) override;
-  jsg::Promise<kj::String> readAllText(jsg::Lock& js,
-      uint64_t limit,
-      ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) override;
+  jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
@@ -731,8 +729,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   bool disturbed = false;
 
   template <typename T>
-  jsg::Promise<T> readAll(
-      jsg::Lock& js, uint64_t limit, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE);
+  jsg::Promise<T> readAll(jsg::Lock& js, uint64_t limit);
 
   void setPendingState(kj::OneOf<StreamStates::Closed, StreamStates::Errored> pending) {
     if (maybePendingState == kj::none) {
@@ -3058,26 +3055,35 @@ class PumpToReader {
 }  // namespace
 
 template <typename T>
-jsg::Promise<T> ReadableStreamJsController::readAll(
-    jsg::Lock& js, uint64_t limit, ReadAllTextOption option) {
+jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limit) {
   if (isLockedToReader()) {
     return js.rejectedPromise<T>(KJ_EXCEPTION(
         FAILED, "jsg.TypeError: This ReadableStream is currently locked to a reader."));
   }
   disturbed = true;
 
+  bool stripBom = false;
+  KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+    stripBom = flags.getStripBomInReadAllText();
+  }
+
   // This operation leaves the stream locked and disturbed. The loop will read until
   // the stream is closed or errored. If the limit is reached, the loop will error.
 
-  const auto readAll = [this, limit, option](auto& js) -> jsg::Promise<T> {
+  const auto readAll = [this, limit, stripBom](auto& js) -> jsg::Promise<T> {
     KJ_ASSERT(lock.lock());
     // The AllReader will hold a traceable reference to the ReadableStream.
     auto reader = kj::heap<AllReader>(addRef(), limit);
-    auto promise = ([&js, &reader, option]() -> jsg::Promise<T> {
+
+    auto promise = ([&js, &reader, stripBom]() -> jsg::Promise<T> {
       if constexpr (kj::isSameType<T, jsg::BufferSource>()) {
-        (void)option;  // Unused in this branch
+        (void)stripBom;  // Unused in this branch.
         return reader->allBytes(js);
       } else {
+        auto option = ReadAllTextOption::NULL_TERMINATE;
+        if (stripBom) {
+          option |= ReadAllTextOption::STRIP_BOM;
+        }
         return reader->allText(js, option);
       }
     })();
@@ -3123,9 +3129,8 @@ jsg::Promise<jsg::BufferSource> ReadableStreamJsController::readAllBytes(
   return readAll<jsg::BufferSource>(js, limit);
 }
 
-jsg::Promise<kj::String> ReadableStreamJsController::readAllText(
-    jsg::Lock& js, uint64_t limit, ReadAllTextOption option) {
-  return readAll<kj::String>(js, limit, option);
+jsg::Promise<kj::String> ReadableStreamJsController::readAllText(jsg::Lock& js, uint64_t limit) {
+  return readAll<kj::String>(js, limit);
 }
 
 kj::Own<ReadableStreamController> ReadableStreamJsController::detach(

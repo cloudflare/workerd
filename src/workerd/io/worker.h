@@ -595,6 +595,9 @@ class Worker::Api {
   // TODO(cleanup): This is a hack thrown in quickly because IoContext::current() doesn't work in
   //   the global scope (when no request is running). We need a better design here.
 
+  // Like `current()`, but returns `kj::none` if there is no current Api instance.
+  static kj::Maybe<const Api&> tryCurrent();
+
   // Take a lock on the isolate.
   virtual kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const = 0;
   // TODO(cleanup): Change all locking to a synchronous callback style rather than RAII style, so
