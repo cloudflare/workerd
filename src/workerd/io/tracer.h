@@ -13,7 +13,7 @@ namespace workerd {
 namespace tracing {
 
 // A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final: public kj::Refcounted {
+class TailStreamWriter final {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
@@ -41,51 +41,6 @@ class TailStreamWriter final: public kj::Refcounted {
 }  // namespace tracing
 
 class WorkerTracer;
-
-// A tracer which records traces for a set of stages. All traces for a pipeline's stages and
-// possible subpipeline stages are recorded here, where they can be used to call a pipeline's
-// trace worker.
-class PipelineTracer: public kj::Refcounted {
- public:
-  // Creates a pipeline tracer (with a possible parent).
-  explicit PipelineTracer() = default;
-  virtual ~PipelineTracer() noexcept(false);
-  KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
-
-  // Returns a promise that fulfills when traces are complete.  Only one such promise can
-  // exist at a time.
-  kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
-
-  // Makes a tracer for a worker stage.
-  kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
-      ExecutionModel executionModel,
-      kj::Maybe<kj::String> scriptId,
-      kj::Maybe<kj::String> stableId,
-      kj::Maybe<kj::String> scriptName,
-      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-      kj::Maybe<kj::String> dispatchNamespace,
-      kj::Array<kj::String> scriptTags,
-      kj::Maybe<kj::String> entrypoint,
-      kj::Maybe<kj::String> durableObjectId,
-      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
-
-  // Adds a trace from the contents of `reader` this is used in sharded workers to send traces back
-  // to the host where tracing was initiated.
-  void addTrace(rpc::Trace::Reader reader);
-
-  // When collecting traces from multiple stages in a pipeline, this is called by the
-  // tracer for a subordinate stage to add its collected traces to the parent pipeline.
-  void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
-
-  void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer);
-
- private:
-  kj::Vector<kj::Own<Trace>> traces;
-  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
-  kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
-
-  friend class WorkerTracer;
-};
 
 // An abstract class that defines shares functionality for tracers that have different
 // characteristics. This interface is used to submit both buffered and streaming tail events.
@@ -171,13 +126,16 @@ class BaseTracer: public kj::Refcounted {
 // Tracer are released, its Trace is considered complete and ready for submission.
 class WorkerTracer final: public BaseTracer {
  public:
-  explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
+  explicit WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel,
       kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
-  explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
   virtual ~WorkerTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
+
+  // Returns a promise that fulfills when trace is complete. Only one such promise can
+  // exist at a time. Used in workerd, where we don't have to worry about pipelines.
+  kj::Promise<kj::Own<Trace>> onComplete();
 
   void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -229,8 +187,10 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<tracing::InvocationSpanContext> topLevelInvocationSpanContext;
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
-  // before we're finished tracing
-  kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
+  // before we're finished tracing. kj::Refcounted serves as a fill-in here since the pipeline
+  // tracer is not needed otherwise.
+  kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Own<Trace>>>> completeFulfiller;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
 };
