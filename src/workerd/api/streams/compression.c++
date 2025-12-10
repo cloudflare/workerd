@@ -9,6 +9,7 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/io/features.h>
 #include <workerd/util/ring-buffer.h>
+#include <workerd/util/state-machine.h>
 
 namespace workerd::api {
 CompressionAllocator::CompressionAllocator(
@@ -244,49 +245,33 @@ class CompressionStreamImpl: public kj::Refcounted,
   explicit CompressionStreamImpl(kj::String format,
       Context::ContextFlags flags,
       kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
-      : context(mode, format, flags, kj::mv(externalMemoryTarget)) {}
+      : context(mode, format, flags, kj::mv(externalMemoryTarget)) {
+    state.template transitionTo<Open>();
+  }
 
   // WritableStreamSink implementation ---------------------------------------------------
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(ended, Ended) {
-        JSG_FAIL_REQUIRE(Error, "Write after close");
-      }
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(kj::cp(exception));
-      }
-      KJ_CASE_ONEOF(open, Open) {
-        context.setInput(buffer.begin(), buffer.size());
-        writeInternal(Z_NO_FLUSH);
-        co_return;
-      }
-    }
-    KJ_UNREACHABLE;
+    requireActive("Write after close");
+    context.setInput(buffer.begin(), buffer.size());
+    writeInternal(Z_NO_FLUSH);
+    co_return;
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    // We check for Ended, Exception here so that we catch
-    // these even if pieces is empty.
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(ended, Ended) {
-        JSG_FAIL_REQUIRE(Error, "Write after close");
-      }
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(kj::cp(exception));
-      }
-      KJ_CASE_ONEOF(open, Open) {
-        for (auto piece: pieces) {
-          co_await write(piece);
-        }
-        co_return;
-      }
+    // We check state here so that we catch errors even if pieces is empty.
+    requireActive("Write after close");
+    for (auto piece: pieces) {
+      co_await write(piece);
     }
-    KJ_UNREACHABLE;
+    co_return;
   }
 
   kj::Promise<void> end() override {
-    state = Ended();
+    // Use transitionFromTo to ensure we're in Open state before ending.
+    // This provides a clearer error if end() is called twice.
+    auto result = state.template transitionFromTo<Open, Ended>();
+    KJ_REQUIRE(result != kj::none, "Stream already ended or errored");
     writeInternal(Z_FINISH);
     co_return;
   }
@@ -303,27 +288,30 @@ class CompressionStreamImpl: public kj::Refcounted,
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     KJ_ASSERT(minBytes <= maxBytes);
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(ended, Ended) {
-        // There might still be data in the output buffer remaining to read.
-        if (output.empty()) {
-          co_return static_cast<size_t>(0);
-        }
-        co_return co_await tryReadInternal(
-            kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
-      }
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(kj::cp(exception));
-      }
-      KJ_CASE_ONEOF(open, Open) {
-        co_return co_await tryReadInternal(
-            kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
-      }
+    // Re-throw any stored exception
+    KJ_IF_SOME(exception, state.tryGetError()) {
+      kj::throwFatalException(kj::cp(exception));
     }
-    KJ_UNREACHABLE;
+    // If stream has ended normally and no buffered data, return EOF
+    if (state.isTerminal() && output.empty()) {
+      co_return static_cast<size_t>(0);
+    }
+    // Active or terminal with data remaining
+    co_return co_await tryReadInternal(
+        kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
   }
 
  private:
+  // Helper to check that the stream is still active (Open state).
+  // Throws an appropriate error if the stream has ended or errored.
+  void requireActive(kj::StringPtr errorMessage) {
+    KJ_IF_SOME(exception, state.tryGetError()) {
+      kj::throwFatalException(kj::cp(exception));
+    }
+    // isActive() returns true only if in Open state (the ActiveState)
+    JSG_REQUIRE(state.isActive(), Error, errorMessage);
+  }
+
   struct PendingRead {
     kj::ArrayPtr<kj::byte> buffer;
     size_t minBytes = 1;
@@ -343,7 +331,9 @@ class CompressionStreamImpl: public kj::Refcounted,
     }
 
     canceler.cancel(kj::cp(reason));
-    state = kj::mv(reason);
+    // Use forceTransitionTo because cancelInternal may be called when already
+    // in an error state (e.g., from writeInternal error handling).
+    state.template forceTransitionTo<kj::Exception>(kj::mv(reason));
   }
 
   kj::Promise<size_t> tryReadInternal(kj::ArrayPtr<kj::byte> dest, size_t minBytes) {
@@ -357,9 +347,9 @@ class CompressionStreamImpl: public kj::Refcounted,
     // If the output currently contains >= minBytes, then we'll fulfill
     // the read immediately, removing as many bytes as possible from the
     // output queue.
-    // If we reached the end, resolve the read immediately as well, since no
-    // new data is expected.
-    if (output.size() >= minBytes || state.template is<Ended>()) {
+    // If we reached the end (terminal state), resolve the read immediately
+    // as well, since no new data is expected.
+    if (output.size() >= minBytes || state.isTerminal()) {
       co_return copyIntoBuffer(dest);
     }
 
@@ -385,7 +375,8 @@ class CompressionStreamImpl: public kj::Refcounted,
   void writeInternal(int flush) {
     // TODO(later): This does not yet implement any backpressure. A caller can keep calling
     // write without reading, which will continue to fill the internal buffer.
-    KJ_ASSERT(flush == Z_FINISH || state.template is<Open>());
+    // Either we're finishing (state is Ended) or we must still be active (Open)
+    KJ_ASSERT(flush == Z_FINISH || state.isActive());
     Context::Result result;
 
     while (true) {
@@ -477,10 +468,24 @@ class CompressionStreamImpl: public kj::Refcounted,
     }
   }
 
-  struct Ended {};
-  struct Open {};
+  struct Ended {
+    static constexpr kj::StringPtr NAME = "ended"_kj;
+  };
+  struct Open {
+    static constexpr kj::StringPtr NAME = "open"_kj;
+  };
 
-  kj::OneOf<Open, Ended, kj::Exception> state = Open();
+  // State machine for tracking compression stream lifecycle:
+  //   Open -> Ended (normal close via end())
+  //   Open -> kj::Exception (error via abortWrite())
+  // Both Ended and kj::Exception are terminal states.
+  ComposableStateMachine<TerminalStates<Ended, kj::Exception>,
+      ErrorState<kj::Exception>,
+      ActiveState<Open>,
+      Open,
+      Ended,
+      kj::Exception>
+      state;
   Context context;
 
   kj::Canceler canceler;
