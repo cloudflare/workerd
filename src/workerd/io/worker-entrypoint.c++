@@ -217,8 +217,9 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     TRACE_EVENT("workerd", "WorkerEntrypoint::init() create new IoContext");
     auto actorRef = actor.map([](kj::Own<Worker::Actor>& ptr) -> Worker::Actor& { return *ptr; });
 
+    // TODO: Does this refcounted instane always live long enough for ioContextDependency here?
     return kj::refcounted<IoContext>(threadContext, kj::mv(worker), actorRef, kj::mv(limitEnforcer))
-        .attach(kj::mv(ioContextDependency));
+        .attachToThisReference(kj::mv(ioContextDependency));
   };
 
   kj::Own<IoContext> context;
