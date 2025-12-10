@@ -58,20 +58,23 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
   // The controller will store c++ references to both the readable and writable
   // streams underlying controllers.
   auto transformer = TransformStream::constructor(js,
-      Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>(
-                      JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()), (decoder),
-                          (jsg::Lock& js, auto chunk, auto controller) {
-                            jsg::BufferSource source(js, chunk);
-                            auto decoded = JSG_REQUIRE_NONNULL(
-                                decoder->decodePtr(js, source.asArrayPtr(), false), TypeError,
-                                "Failed to decode input.");
-                            // Only enqueue if there's actual output - don't emit empty chunks
-                            // for incomplete multi-byte sequences
-                            if (decoded.length(js) > 0) {
-                            controller->enqueue(js, decoded);
-                            }
-                            return js.resolvedPromise();
-                          })),
+      Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>( JSG_VISITABLE_LAMBDA(
+                      (decoder = decoder.addRef()), (decoder),
+                      (jsg::Lock& js, auto chunk, auto controller) {
+                        JSG_REQUIRE(chunk->IsArrayBuffer() || chunk->IsArrayBufferView(), TypeError,
+                            "This TransformStream is being used as a byte stream, "
+                            "but received a value that is not a BufferSource.");
+                        jsg::BufferSource source(js, chunk);
+                        auto decoded =
+                            JSG_REQUIRE_NONNULL(decoder->decodePtr(js, source.asArrayPtr(), false),
+                                TypeError, "Failed to decode input.");
+                        // Only enqueue if there's actual output - don't emit empty chunks
+                        // for incomplete multi-byte sequences
+                        if (decoded.length(js) > 0) {
+                        controller->enqueue(js, decoded);
+                        }
+                        return js.resolvedPromise();
+                      })),
         .flush = jsg::Function<Transformer::FlushAlgorithm>(
             JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()), (decoder),
                 (jsg::Lock& js, auto controller) {
