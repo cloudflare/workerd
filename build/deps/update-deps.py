@@ -34,93 +34,44 @@ GITHUB_RELEASE_FILE_URL_TEMPLATE = (
     "https://github.com/{owner}/{repo}/releases/download/v{version}/{file}"
 )
 
-HTTP_ARCHIVE_TEMPLATE = (
+DEP_TEMPLATE = (
     TOP
     + """
-load("@//:build/http.bzl", "http_archive")
-
-URL = "{url}"
-STRIP_PREFIX = "{prefix}"
-SHA256 = "{sha256}"
-TYPE = "{type}"{extra_exports}
+load("{rule_file}", "{rule_name}")
 
 def {macro_name}():
-    http_archive(
-        name = "{name}",
-        url = URL,
-        strip_prefix = STRIP_PREFIX,
-        type = TYPE,
-        sha256 = SHA256,{extra_attrs}
+    {rule_name}({attrs}
     )
 """
 )
 
-GITHUB_RELEASE_ARCHIVE_TEMPLATE = (
-    TOP
-    + """
-load("@//:build/http.bzl", "http_archive")
-
-TAG_NAME = "{tag_name}"
-URL = "{url}"
-STRIP_PREFIX = "{prefix}"
-SHA256 = "{sha256}"
-TYPE = "{type}"
-
-def {macro_name}():
-    http_archive(
-        name = "{name}",
-        url = URL,
-        strip_prefix = STRIP_PREFIX,
-        type = TYPE,
-        sha256 = SHA256,{extras}
-    )
-"""
-)
-
-GITHUB_RELEASE_FILE_TEMPLATE = (
-    TOP
-    + """
-load("@//:build/http.bzl", "http_file")
-
-TAG_NAME = "{tag_name}"
-URL = "{url}"
-SHA256 = "{sha256}"
-
-def {macro_name}():
-    http_file(
-        name = "{name}",
-        url = URL,
-        executable = True,
-        sha256 = SHA256,{extras}
-    )
-"""
-)
-
-NEW_GIT_REPOSITORY_TEMPLATE = (
-    TOP
-    + """
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
-
-URL = "{url}"
-COMMIT = "{commit}"
-
-def {macro_name}():
-    git_repository(
-        name = "{name}",
-        remote = URL,
-        commit = COMMIT,{extras}
-    )
-"""
-)
-
-V8_REVISION_TEMPLATE = (
-    TOP
-    + """
-V8_COMMIT="{v8_commit}"
-"""
-)
 
 GITHUB_ACCESS_TOKEN = ""
+
+
+def format_attr_list(attr_list):
+    if not attr_list:
+        return ""
+
+    return "\n" + "\n".join(
+        f"        {k} = {format_attr(v)}," for k, v in attr_list.items()
+    )
+
+
+def format_attr(v):
+    if isinstance(v, (bool, int)):
+        return str(v)
+    else:
+        return json.dumps(v)
+
+
+def format_dep(repo, rule_file, rule_name, attrs):
+    return DEP_TEMPLATE.format(
+        rule_file=rule_file,
+        rule_name=rule_name,
+        macro_name=macro_name(repo),
+        attrs=format_attr_list(repo_attributes(repo) | attrs),
+    )
 
 
 def macro_name(repo):
@@ -183,23 +134,24 @@ def get_url_content_sha256(url):
     return hashlib.sha256(urllib.request.urlopen(url).read()).hexdigest()
 
 
-def extra_attributes(repo):
-    extras = ""
-    if "build_file" in repo:
-        extras += f'\n        build_file = "{repo["build_file"]}",'
-    if "build_file_content" in repo:
-        extras += f'\n        build_file_content = "{repo["build_file_content"]}",'
-    if "repo_mapping" in repo:
-        extras += f"\n        repo_mapping = {json.dumps(repo['repo_mapping'])},"
-    if "patches" in repo:
-        patches = str(repo["patches"]).replace("'", '"')
-        extras += f"\n        patches = {patches},"
-        extras += '\n        patch_args = ["-p1"],'
-    if "downloaded_file_path" in repo:
-        p = repo["downloaded_file_path"]
-        extras += f'\n        downloaded_file_path = "{p}",'
+def repo_attributes(repo):
+    repo_attrs = {}
 
-    return extras
+    for option in (
+        "name",
+        "build_file",
+        "repo_mapping",
+        "downloaded_file_path",
+        "build_file_content",
+        "patches",
+    ):
+        if option in repo:
+            repo_attrs[option] = repo[option]
+
+    if "patches" in repo_attrs:
+        repo_attrs["patch_args"] = ["-p1"]
+
+    return repo_attrs
 
 
 def gen_github_tarball(repo):
@@ -235,19 +187,16 @@ def gen_github_tarball(repo):
     else:
         sha256 = get_url_content_sha256(url)
 
-    extra_exports = f'\nCOMMIT = "{commit}"'
-    if "patches" in repo:
-        extra_exports += f"\nPATCHES = {repo['patches']}".replace("'", '"')
-
-    return HTTP_ARCHIVE_TEMPLATE.format(
-        name=repo["name"],
-        url=url,
-        prefix=prefix,
-        sha256=sha256,
-        macro_name=macro_name(repo),
-        extra_attrs=extra_attributes(repo),
-        extra_exports=extra_exports,
-        type="tgz",
+    return format_dep(
+        repo,
+        rule_file="@//:build/http.bzl",
+        rule_name="http_archive",
+        attrs=dict(
+            url=url,
+            strip_prefix=prefix,
+            sha256=sha256,
+            type="tgz",
+        ),
     )
 
 
@@ -323,24 +272,23 @@ def gen_github_release(repo):
             with tarfile.open(fileobj=io.BytesIO(content)) as tgz:
                 prefix = os.path.commonprefix(tgz.getnames())
 
-        return GITHUB_RELEASE_ARCHIVE_TEMPLATE.format(
-            name=repo["name"],
-            url=url,
-            prefix=prefix,
-            sha256=sha256,
-            macro_name=macro_name(repo),
-            type=type,
-            extras=extra_attributes(repo),
-            tag_name=release["tag_name"],
+        return format_dep(
+            repo,
+            rule_file="@//:build/http.bzl",
+            rule_name="http_archive",
+            attrs=dict(
+                url=url,
+                strip_prefix=prefix,
+                sha256=sha256,
+                type=type,
+            ),
         )
     elif file_type == "executable":
-        return GITHUB_RELEASE_FILE_TEMPLATE.format(
-            name=repo["name"],
-            url=url,
-            sha256=sha256,
-            macro_name=macro_name(repo),
-            extras=extra_attributes(repo),
-            tag_name=release["tag_name"],
+        return format_dep(
+            repo,
+            rule_file="@//:build/http.bzl",
+            rule_name="http_file",
+            attrs=dict(url=url, sha256=sha256, executable=True),
         )
     else:
         raise UnsupportedException("Unsupported file_type: " + file_type)
@@ -388,52 +336,14 @@ def gen_git_clone(repo):
         else:
             print(commit[:7], end="")
 
-    return NEW_GIT_REPOSITORY_TEMPLATE.format(
-        name=repo["name"],
-        macro_name=macro_name(repo),
-        url=url,
-        commit=commit,
-        extras=extra_attributes(repo),
-    )
-
-
-def gen_crate(repo):
-    name = repo["name"]
-
-    # find crate's latest version
-    crates_json_url = f"https://crates.io/api/v1/crates/{name}"
-    crate = json.loads(urllib.request.urlopen(crates_json_url).read())
-    version = crate["versions"][0]
-
-    if "freeze_version" in repo:
-        last_version = version
-        version = next(
-            v for v in crate["versions"] if v["num"] == repo["freeze_version"]
-        )
-        if last_version["num"] != version["num"]:
-            print(
-                "frozen, update available ",
-                version["num"],
-                " -> ",
-                last_version["num"],
-                end="",
-            )
-    else:
-        print(version["num"], end="")
-
-    prefix = f"{name}-{version['num']}"
-    url = f"https://crates.io{version['dl_path']}"
-    extra_exports = f'\nVERSION = "{version["num"]}"'
-
-    return HTTP_ARCHIVE_TEMPLATE.format(
-        name=repo["name"],
-        url=url,
-        prefix=prefix,
-        sha256=version["checksum"],
-        macro_name=macro_name(repo),
-        extra_attrs=extra_attributes(repo),
-        extra_exports=extra_exports,
-        type="tgz",
+    return format_dep(
+        repo,
+        rule_file="@bazel_tools//tools/build_defs/repo:git.bzl",
+        rule_name="git_repository",
+        attrs=dict(
+            remote=url,
+            commit=commit,
+        ),
     )
 
 
@@ -444,8 +354,6 @@ def gen_repo_str(repo):
         return gen_github_release(repo)
     elif repo["type"] == "git_clone":
         return gen_git_clone(repo)
-    elif repo["type"] == "crate":
-        return gen_crate(repo)
     else:
         raise UnsupportedException(f"Unsupported repo type: {repo['type']}")
 

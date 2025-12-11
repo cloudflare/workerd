@@ -2,14 +2,10 @@
 
 load("@//:build/http.bzl", "http_file")
 
-TAG_NAME = "llvm-18.1.8"
-URL = "https://github.com/cloudflare/workerd-tools/releases/download/llvm-18.1.8/llvm-18.1.8-linux-arm64-clang-format"
-SHA256 = "e1eb317d1ccceb3d1b544a841bfb7a74a52969d8aa033f40b1796af3821c2a96"
-
 def dep_clang_format_linux_arm64():
     http_file(
         name = "clang-format-linux-arm64",
-        url = URL,
+        url = "https://github.com/cloudflare/workerd-tools/releases/download/llvm-18.1.8/llvm-18.1.8-linux-arm64-clang-format",
+        sha256 = "e1eb317d1ccceb3d1b544a841bfb7a74a52969d8aa033f40b1796af3821c2a96",
         executable = True,
-        sha256 = SHA256,
     )
