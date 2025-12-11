@@ -411,9 +411,8 @@ class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
   double currentTimeMS() override {
     auto timePoint = kj::UNIX_EPOCH;
 
-    if (IoContext::hasCurrent()) {
+    KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
       // We're on a request-serving thread.
-      auto& ioContext = IoContext::current();
       timePoint = ioContext.now();
     } else {
       auto lockedState = state.lockExclusive();
@@ -894,11 +893,9 @@ struct Worker::Script::Impl {
     };
 
     modules.setDynamicImportCallback([](jsg::Lock& js, DynamicImportHandler handler) mutable {
-      if (IoContext::hasCurrent()) {
+      KJ_IF_SOME(context, IoContext::tryCurrent()) {
         // If we are within the scope of a IoContext, then we are going to pop
         // out of it to perform the actual module instantiation.
-
-        auto& context = IoContext::current();
 
         return context.awaitIo(js,
             handleDynamicImport(kj::atomicAddRef(context.getWorker()), kj::mv(handler),
@@ -1091,8 +1088,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       lock->setErrorReporterCallback([this](jsg::Lock& js, kj::String desc,
                                          const jsg::JsValue& error, const jsg::JsMessage& message) {
         // Only add exception to trace when running within an I/O context with a tracer.
-        if (IoContext::hasCurrent()) {
-          auto& ioContext = IoContext::current();
+        KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
           KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
             addExceptionToTrace(js, ioContext, tracer, UncaughtExceptionSource::REQUEST_HANDLER,
                 error, api->getErrorInterfaceTypeHandler(js));
@@ -1143,9 +1139,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       // a method of ServiceWorkerGlobalScope, which is the context object. So we should be able to
       // do something like unwrap(lock, isolate->GetCurrentContext()).emitPromiseRejection().
       // However, JSG doesn't currently provide an easy way to do this.
-      if (IoContext::hasCurrent()) {
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
         try {
-          IoContext::current().getCurrentLock().reportPromiseRejectEvent(message);
+          ioContext.getCurrentLock().reportPromiseRejectEvent(message);
         } catch (jsg::JsExceptionThrown&) {
           // V8 expects us to just return.
           return;
@@ -2025,8 +2021,7 @@ void Worker::handleLog(jsg::Lock& js,
   };
 
   // Only check tracing if console.log() was not invoked at the top level.
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
       tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message());
@@ -2251,8 +2246,7 @@ void Worker::Lock::logUncaughtException(kj::StringPtr description) {
 void Worker::Lock::logUncaughtException(
     UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message) {
   // Only add exception to trace when running within an I/O context with a tracer.
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
         addExceptionToTrace(impl->inner, ioContext, tracer, source, exception,
@@ -3351,8 +3345,7 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     fflush(stderr);
   }
 
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       // json encoding is required over simply wrapping it in quotes to correctly escape the string.
       capnp::JsonCodec json;

@@ -215,8 +215,7 @@ kj::Promise<void> updateStorageDeletes(
 
 // Return the id of the current actor (or the empty string if there is no current actor).
 kj::Maybe<kj::String> getCurrentActorId() {
-  if (IoContext::hasCurrent()) {
-    IoContext& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(actor, ioContext.getActor()) {
       KJ_SWITCH_ONEOF(actor.getId()) {
         KJ_CASE_ONEOF(s, kj::String) {

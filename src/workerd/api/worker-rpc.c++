@@ -702,8 +702,8 @@ JsRpcStub::~JsRpcStub() noexcept(false) {
     //   which is usually sooner (and more deterministic). But logging a warning during
     //   IoContext tear-down is problematic since logWarningOnce() is a method on
     //   IoContext...
-    if (IoContext::hasCurrent()) {
-      IoContext::current().logWarningOnce(
+    KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+      ioContext.logWarningOnce(
           "An RPC stub was not disposed properly. You must call dispose() on all stubs in order to "
           "let the other side know that you are no longer using them. You cannot rely on "
           "the garbage collector for this because it may take arbitrarily long before actually "
@@ -737,8 +737,8 @@ RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
       // In preview, let's try to warn the developer about the problem.
       //
       // TODO(cleanup): Same comment as in ~JsRpcStub().
-      if (IoContext::hasCurrent()) {
-        IoContext::current().logWarningOnce(
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+        ioContext.logWarningOnce(
             "An RPC result was not disposed properly. One of the RPC calls you made expects you "
             "to call dispose() on the return value, but you didn't do so. You cannot rely on "
             "the garbage collector for this because it may take arbitrarily long before actually "

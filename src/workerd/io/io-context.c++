@@ -1348,6 +1348,14 @@ IoContext& IoContext::current() {
   }
 }
 
+kj::Maybe<IoContext&> IoContext::tryCurrent() {
+  if (threadLocalRequest == nullptr) {
+    return kj::none;
+  } else {
+    return *threadLocalRequest;
+  }
+}
+
 bool IoContext::hasCurrent() {
   return threadLocalRequest != nullptr;
 }
@@ -1357,8 +1365,8 @@ bool IoContext::isCurrent() {
 }
 
 auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
-  if (hasCurrent()) {
-    return IoContext::current().getWeakRef();
+  KJ_IF_SOME(ioContext, tryCurrent()) {
+    return ioContext.getWeakRef();
   } else {
     return kj::none;
   }
@@ -1528,11 +1536,10 @@ WarningAggregator::~WarningAggregator() noexcept(false) {
   if (!lock->empty()) {
     auto emitter = kj::mv(this->emitter);
     auto warnings = lock->releaseAsArray();
-    if (IoContext::hasCurrent()) {
+    KJ_IF_SOME(context, IoContext::tryCurrent()) {
       // We are currently in a JavaScript execution context. The object is likely being
       // destroyed during garbage collection. V8 does not like having most of its API
       // invoked in the middle of GC. So we'll delay our warning until GC finished.
-      auto& context = IoContext::current();
       context.addTask(
           context.run([emitter = kj::mv(emitter), warnings = kj::mv(warnings)](
                           Worker::Lock& lock) mutable { emitter(lock, kj::mv(warnings)); }));
