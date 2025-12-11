@@ -761,7 +761,7 @@ class Request:
         result = http.client.HTTPMessage()
 
         for key, val in self.js_object.headers:
-            result[key] = subval.strip()
+            result[key] = val.strip()
 
         return result
 
