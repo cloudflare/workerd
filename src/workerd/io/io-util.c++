@@ -11,8 +11,7 @@
 namespace workerd {
 
 double dateNow() {
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     return (ioContext.now() - kj::UNIX_EPOCH) / kj::MILLISECONDS;
   }
 

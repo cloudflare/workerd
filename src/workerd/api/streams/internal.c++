@@ -22,8 +22,7 @@ namespace {
 // will not go anywhere, but we'll log the exception message to the console until the problem this
 // papers over is fixed.
 [[noreturn]] void throwTypeErrorAndConsoleWarn(kj::StringPtr message) {
-  if (IoContext::hasCurrent()) {
-    auto& context = IoContext::current();
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
     if (context.isInspectorEnabled()) {
       context.logWarning(message);
     }

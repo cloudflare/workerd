@@ -399,6 +399,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Throws an exception if there is no current context (see hasCurrent() below).
   static IoContext& current();
 
+  // Like current(), but returns kj::none if there is no current context.
+  static kj::Maybe<IoContext&> tryCurrent();
+
   // True if there is a current IoContext for the thread (current() will not throw).
   static bool hasCurrent();
 

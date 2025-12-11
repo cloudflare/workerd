@@ -884,10 +884,8 @@ jsg::Promise<T> rejectedMaybeHandledPromise(
 }
 
 inline kj::Maybe<IoContext&> tryGetIoContext() {
-  if (IoContext::hasCurrent()) {
-    return IoContext::current();
-  }
-  return kj::none;
+  // TODO(cleanup): This function is obsolete; callers should just call IoContext::tryCurrent()
+  return IoContext::tryCurrent();
 }
 
 }  // namespace workerd::api
