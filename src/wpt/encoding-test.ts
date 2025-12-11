@@ -96,14 +96,7 @@ export default {
       'additional writes should wait for backpressure to be relieved for class TextEncoderStream',
     ],
   },
-  'streams/decode-attributes.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      "setting fatal to 'undefined' should set the attribute to false",
-      'a throwing fatal member should cause the constructor to throw',
-      'a throwing ignoreBOM member should cause the constructor to throw',
-    ],
-  },
+  'streams/decode-attributes.any.js': {},
   'streams/decode-bad-chunks.any.js': {},
   'streams/decode-ignore-bom.any.js': {},
   'streams/decode-incomplete-input.any.js': {},
