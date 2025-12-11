@@ -1058,6 +1058,8 @@ class ArrayBufferWrapper {
       return asBytes(handle.As<v8::ArrayBufferView>());
     } else if (handle->IsArrayBuffer()) {
       return asBytes(handle.As<v8::ArrayBuffer>());
+    } else if (handle->IsSharedArrayBuffer()) {
+      return asBytes(handle.As<v8::SharedArrayBuffer>());
     }
     return kj::none;
   }
