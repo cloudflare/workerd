@@ -1047,20 +1047,11 @@ struct DeserializeInvoker<TypeWrapper,
   }
 };
 
-// SFINAE to detect if a type has a static method called `constructor`.
-template <typename T, typename Constructor = decltype(&T::constructor)>
-constexpr bool hasConstructorMethod(T*) {
-  static_assert(!std::is_member_function_pointer_v<Constructor>,
-      "JSG resource type `constructor` member functions must be static.");
-  // TODO(cleanup): Write our own isMemberFunctionPointer and put it in KJ so we don't have to pull
-  //   in <type_traits>. (See the "Motivation" section of Boost.CallableTraits for why I didn't just
-  //   dive in and do it.)
-  return true;
-}
-// SFINAE to detect if a type has a static method called `constructor`.
-constexpr bool hasConstructorMethod(...) {
-  return false;
-}
+// Concept to detect if a type has a static method called `constructor`.
+// The constructor must be a static method, not a non-static member function.
+template <typename T>
+concept HasConstructorMethod =
+    requires { &T::constructor; } && !std::is_member_function_pointer_v<decltype(&T::constructor)>;
 
 // Expose the global scope type as a nested type under the global scope itself, such that for some
 // global scope type `GlobalScope`, `this.GlobalScope === this.constructor` holds true. Note that
@@ -1860,7 +1851,7 @@ class ResourceWrapper {
       v8::EscapableHandleScope scope(isolate);
 
       v8::Local<v8::FunctionTemplate> constructor;
-      if constexpr (!isContext && hasConstructorMethod(static_cast<T*>(nullptr))) {
+      if constexpr (!isContext && HasConstructorMethod<T>) {
         constructor =
             v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback);
       } else {
