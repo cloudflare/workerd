@@ -49,36 +49,24 @@ class WrappableFunction<Ret(Args...)>: public WrappableFunctionBase {
   }
 };
 
-template <typename Signature, typename Impl, bool = hasPublicVisitForGc<Impl>()>
+template <typename Signature, typename Impl>
 class WrappableFunctionImpl;
 
 template <typename Ret, typename... Args, typename Impl>
-class WrappableFunctionImpl<Ret(Args...), Impl, false>: public WrappableFunction<Ret(Args...)> {
+class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Args...)> {
  public:
   WrappableFunctionImpl(Impl&& func)
-      : WrappableFunction<Ret(Args...)>(false),
+      : WrappableFunction<Ret(Args...)>(hasPublicVisitForGc<Impl>()),
         func(kj::fwd<Impl>(func)) {}
 
   Ret operator()(Lock& js, Args&&... args) override {
     return func(js, kj::fwd<Args>(args)...);
   }
 
- private:
-  Impl func;
-};
-
-template <typename Ret, typename... Args, typename Impl>
-class WrappableFunctionImpl<Ret(Args...), Impl, true>: public WrappableFunction<Ret(Args...)> {
- public:
-  WrappableFunctionImpl(Impl&& func)
-      : WrappableFunction<Ret(Args...)>(true),
-        func(kj::fwd<Impl>(func)) {}
-
-  Ret operator()(Lock& js, Args&&... args) override {
-    return func(js, kj::fwd<Args>(args)...);
-  }
   void jsgVisitForGc(GcVisitor& visitor) override {
-    visitor.visit(func);
+    if constexpr (hasPublicVisitForGc<Impl>()) {
+      visitor.visit(func);
+    }
   }
 
  private:
