@@ -1077,13 +1077,6 @@ class ArrayBufferWrapper {
 // =======================================================================================
 // Dicts
 
-// Helper function to convert a v8::String to a kj::String in UTF-8 encoding.
-inline kj::String v8StringToUtf8(v8::Isolate* isolate, v8::Local<v8::String> v8String) {
-  auto buf = kj::heapArray<char>(v8String->Utf8LengthV2(isolate) + 1);
-  v8String->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-  return kj::String(kj::mv(buf));
-}
-
 // TypeWrapper mixin for dictionaries (objects used as string -> value maps).
 template <typename TypeWrapper>
 class DictWrapper {
@@ -1136,7 +1129,7 @@ class DictWrapper {
       v8::Local<v8::Value> value = check(object->Get(context, name));
 
       if constexpr (kj::isSameType<K, kj::String>()) {
-        auto strName = v8StringToUtf8(js.v8Isolate, name);
+        auto strName = JsString(name).toString(js);
         const char* cstrName = strName.cStr();
         builder.add(typename Dict<V, K>::Field{kj::mv(strName),
           wrapper.template unwrap<V>(
@@ -1147,14 +1140,14 @@ class DictWrapper {
         // Thus, we do the unwrapping manually and UTF-8-convert the name only if it's needed.
         auto unwrappedName = wrapper.tryUnwrap(js, context, name, static_cast<K*>(nullptr), object);
         if (unwrappedName == kj::none) {
-          auto strName = v8StringToUtf8(js.v8Isolate, name);
+          auto strName = JsString(name).toString(js);
           throwTypeError(js.v8Isolate, TypeErrorContext::dictKey(strName.cStr()),
               TypeWrapper::getName(static_cast<K*>(nullptr)));
         }
         auto unwrappedValue =
             wrapper.tryUnwrap(js, context, value, static_cast<V*>(nullptr), object);
         if (unwrappedValue == kj::none) {
-          auto strName = v8StringToUtf8(js.v8Isolate, name);
+          auto strName = JsString(name).toString(js);
           throwTypeError(js.v8Isolate, TypeErrorContext::dictField(strName.cStr()),
               TypeWrapper::getName(static_cast<V*>(nullptr)));
         }

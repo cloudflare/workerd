@@ -1058,11 +1058,17 @@ struct DeserializeInvoker<TypeWrapper,
   }
 };
 
-// Concept to detect if a type has a static method called `constructor`.
-// The constructor must be a static method, not a non-static member function.
+// SFINAE helper to detect if a type has a static method called `constructor`.
+// Includes a static_assert to provide a clear error if the method exists but is non-static.
+template <typename T, typename = void>
+constexpr bool HasConstructorMethod = false;
+
 template <typename T>
-concept HasConstructorMethod =
-    requires { &T::constructor; } && !std::is_member_function_pointer_v<decltype(&T::constructor)>;
+constexpr bool HasConstructorMethod<T, std::void_t<decltype(&T::constructor)>> = [] {
+  static_assert(!std::is_member_function_pointer_v<decltype(&T::constructor)>,
+      "JSG_RESOURCE_TYPE constructor must be a static method.");
+  return true;
+}();
 
 // Expose the global scope type as a nested type under the global scope itself, such that for some
 // global scope type `GlobalScope`, `this.GlobalScope === this.constructor` holds true. Note that
