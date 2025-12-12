@@ -42,17 +42,15 @@ impl DnsUtil {
 
 Generates boilerplate for JSG resources. Applied to both struct definitions and impl blocks. Automatically implements `jsg::Type::class_name()` using the struct name, or a custom name if provided via the `name` parameter.
 
-**Important:** Resource structs must include a `_state: jsg::ResourceState` field for internal JSG state management.
-
 ```rust
 #[jsg_resource]
 pub struct DnsUtil {
-    pub _state: jsg::ResourceState,
+    pub _unused: u8,
 }
 
 #[jsg_resource(name = "CustomUtil")]
 pub struct MyUtil {
-    pub _state: jsg::ResourceState,
+    pub value: u32,
 }
 
 #[jsg_resource]

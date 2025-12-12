@@ -1,3 +1,6 @@
+use std::ptr::NonNull;
+
+use jsg::Lock;
 use jsg::v8;
 use kj_rs::KjOwn;
 
@@ -34,8 +37,22 @@ impl Harness {
         Self(unsafe { ffi::create_test_harness() })
     }
 
-    pub fn run_in_context(&self, callback: fn(*mut v8::ffi::Isolate)) {
-        unsafe { self.0.run_in_context(callback) }
+    pub fn run_in_context(&self, callback: fn(Lock)) {
+        static mut CALLBACK: Option<fn(Lock)> = None;
+
+        fn wrapper(isolate: *mut v8::ffi::Isolate) {
+            unsafe {
+                if let Some(cb) = CALLBACK {
+                    cb(Lock::from_isolate(NonNull::new_unchecked(isolate)));
+                }
+            }
+        }
+
+        unsafe {
+            CALLBACK = Some(callback);
+            self.0.run_in_context(wrapper);
+            CALLBACK = None;
+        }
     }
 }
 
@@ -52,7 +69,6 @@ mod tests {
 
     use jsg::Error;
     use jsg::ExceptionType;
-    use jsg::Lock;
     use jsg::Resource;
     use jsg::Type;
     use jsg::v8;
@@ -80,7 +96,7 @@ mod tests {
         pub inner: String,
     }
 
-    /// Counter to track how many GcTestResource instances have been dropped.
+    /// Counter to track how many SimpleResource instances have been dropped.
     static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[jsg_resource]
@@ -107,8 +123,7 @@ mod tests {
     #[test]
     fn objects_can_be_wrapped_and_unwrapped() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let instance = TestStruct {
                 str: "test".to_owned(),
             };
@@ -128,8 +143,7 @@ mod tests {
     #[test]
     fn struct_with_multiple_properties() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let instance = MultiPropertyStruct {
                 name: "Alice".to_owned(),
                 age: 30,
@@ -158,9 +172,7 @@ mod tests {
     #[test]
     fn number_type_conversions() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
-
+        harness.run_in_context(|mut lock| {
             let byte_val: u8 = 42;
             let byte_local = byte_val.to_local(&mut lock);
             assert!(byte_local.has_value());
@@ -174,8 +186,7 @@ mod tests {
     #[test]
     fn empty_object_and_property_setting() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let mut obj = lock.new_object();
 
             assert!(!obj.has(&mut lock, "nonexistent"));
@@ -201,9 +212,7 @@ mod tests {
     #[test]
     fn global_handle_conversion() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
-
+        harness.run_in_context(|mut lock| {
             let local_str = "global test".to_local(&mut lock);
             assert!(local_str.has_value());
 
@@ -216,8 +225,7 @@ mod tests {
     #[test]
     fn nested_object_properties() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let mut outer = lock.new_object();
 
             let inner_instance = NestedStruct {
@@ -271,8 +279,7 @@ mod tests {
         SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let resource = SimpleResource {
                 name: "test".to_owned(),
             };
@@ -288,8 +295,7 @@ mod tests {
         SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
 
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let resource = SimpleResource {
                 name: "test".to_owned(),
             };
@@ -301,9 +307,9 @@ mod tests {
             assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         });
 
-        harness.run_in_context(|isolate| unsafe {
+        harness.run_in_context(|lock| {
             assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-            ffi::request_gc(isolate);
+            unsafe { ffi::request_gc(lock.isolate().as_ptr()) };
             assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         });
     }

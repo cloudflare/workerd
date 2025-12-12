@@ -33,6 +33,8 @@ static ::workerd::jsg::V8System& getV8System() {
 
 TestHarness::TestHarness()
     : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
+      locker(isolate->getIsolate()),
+      isolateScope(isolate->getIsolate()),
       realm(::workerd::rust::jsg::realm_create(isolate->getIsolate())) {}
 
 kj::Own<TestHarness> create_test_harness() {

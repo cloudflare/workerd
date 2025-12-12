@@ -26,6 +26,8 @@ class TestHarness {
 
  private:
   mutable kj::Own<TestIsolate> isolate;
+  mutable v8::Locker locker;
+  mutable v8::Isolate::Scope isolateScope;
   mutable ::rust::Box<::workerd::rust::jsg::Realm> realm;
 };
 
