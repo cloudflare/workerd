@@ -3,6 +3,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/rust/jsg/ffi-inl.h>
+#include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
 #include <kj/common.h>
@@ -136,22 +137,14 @@ Local global_to_local(Isolate* isolate, const Global& value) {
   return to_ffi(kj::mv(local));
 }
 
-// Data passed to V8's weak callback, containing the Rust callback and user data
-struct WeakCallbackData {
-  WeakCallback callback;
-  size_t data;
-
-  WeakCallbackData(WeakCallback cb, size_t d): callback(kj::mv(cb)), data(d) {}
-};
-
-void global_make_weak(Isolate* isolate, Global* value, size_t data, WeakCallback callback) {
+void global_make_weak(Isolate* isolate, Global* value, size_t data) {
   auto glbl = global_as_ref_from_ffi<v8::Object>(*value);
-  // Heap-allocate the callback data so it survives until the weak callback fires
-  auto* weakData = new WeakCallbackData(kj::mv(callback), data);
-  glbl->SetWeak(weakData, [](const v8::WeakCallbackInfo<WeakCallbackData>& info) {
-    auto* weakData = info.GetParameter();
-    weakData->callback(info.GetIsolate(), weakData->data);
-    delete weakData;
+  // Pass the State pointer directly to V8's weak callback.
+  // When GC collects the object, we call back into Rust's invoke_weak_drop
+  // which reads the drop_fn from the State and invokes it.
+  glbl->SetWeak(reinterpret_cast<void*>(data), [](const v8::WeakCallbackInfo<void>& info) {
+    auto state = reinterpret_cast<size_t>(info.GetParameter());
+    invoke_weak_drop(state);
   }, v8::WeakCallbackType::kParameter);
 }
 
