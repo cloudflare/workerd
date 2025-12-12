@@ -76,6 +76,10 @@ class BaseTracer: public kj::Refcounted {
       kj::Date timestamp,
       const kj::ConstString& methodName) = 0;
 
+  // Mark this tracer as intentionally unused (e.g., for duplicate alarm requests).
+  // When set, the destructor will not log a warning about missing Onset event.
+  virtual void markUnused() {}
+
  protected:
   // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
   // worker must have wrapped up and reported its outcome event, we report completeTime in that case
@@ -149,6 +153,10 @@ class WorkerTracer final: public BaseTracer {
       kj::Date timestamp,
       const kj::ConstString& methodName) override;
 
+  void markUnused() override {
+    markedUnused = true;
+  }
+
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
@@ -167,5 +175,9 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Own<Trace>>>> completeFulfiller;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+
+  // When true, the destructor will not log a warning about missing Onset event.
+  // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
+  bool markedUnused = false;
 };
 }  // namespace workerd
