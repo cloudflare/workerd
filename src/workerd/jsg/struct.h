@@ -106,7 +106,7 @@ class FieldWrapper {
     } else if constexpr (kj::isSameType<T, Unimplemented>() || kj::isSameType<T, WontImplement>()) {
       // Fields with these types are required NOT to be present, so don't try to convert them.
     } else {
-      if constexpr (webidl::isOptional<Type>) {
+      if constexpr (webidl::OptionalType<Type>) {
         // Don't even set optional fields that aren't present.
         if (in.*field == kj::none) return;
       }
@@ -232,7 +232,7 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     // dictionary has required members, we throw.
 
     if (handle->IsUndefined() || handle->IsNull()) {
-      if constexpr (((webidl::isOptional<typename FieldWrappers::Type> ||
+      if constexpr (((webidl::OptionalType<typename FieldWrappers::Type> ||
                          kj::isSameType<typename FieldWrappers::Type, Unimplemented>()) &&
                         ...)) {
         return T{};
