@@ -21,6 +21,7 @@ import {
   PythonWorkersInternalError,
   PythonUserError,
   simpleRunPython,
+  unreachable,
 } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
@@ -556,6 +557,8 @@ ${describeValue(obj)}
   return new PythonUserError(error);
 }
 
+type CustomSerialized = { pyodide_entrypoint_helper: true } | { env: true };
+
 /**
  * Create memory snapshot by importing SNAPSHOT_IMPORTS to ensure these packages
  * are initialized in the linear memory snapshot and then saving a copy of the
@@ -567,9 +570,12 @@ function makeLinearMemorySnapshot(
   pyodide_entrypoint_helper: PyodideEntrypointHelper | null,
   snapshotType: ArtifactBundler.SnapshotType
 ): Uint8Array {
-  const customHiwireStateSerializer = (obj: any): Record<string, boolean> => {
+  const customHiwireStateSerializer = (obj: any): CustomSerialized => {
     if (obj === pyodide_entrypoint_helper) {
       return { pyodide_entrypoint_helper: true };
+    }
+    if (obj === pyodide_entrypoint_helper?.cloudflareWorkersModule.env) {
+      return { env: true };
     }
     throw createUnserializableObjectError(obj);
   };
@@ -843,11 +849,14 @@ export function finalizeBootstrap(
   Module: Module,
   pyodide_entrypoint_helper: PyodideEntrypointHelper
 ): void {
-  const customHiwireStateDeserializer = (obj: any): any => {
+  const customHiwireStateDeserializer = (obj: CustomSerialized): any => {
     if ('pyodide_entrypoint_helper' in obj) {
       return pyodide_entrypoint_helper;
     }
-    throw new PythonWorkersInternalError(`Can't deserialize ${obj}`);
+    if ('env' in obj) {
+      return pyodide_entrypoint_helper.cloudflareWorkersModule.env;
+    }
+    unreachable(obj, `Can't deserialize ${obj}`);
   };
 
   Module.API.config._makeSnapshot =

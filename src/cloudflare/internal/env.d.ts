@@ -8,3 +8,6 @@ export function withEnvAndExports(
   newExports: unknown,
   fn: () => unknown
 ): unknown;
+export function pythonPatchEnv(newEnv: unknown): {
+  [Symbol.dispose](): void;
+};

@@ -79,6 +79,12 @@ export function invalidateCaches(Module: Module): void {
   );
 }
 
-export function unreachable(msg: never): never {
+export function unreachable(
+  obj: never,
+  msg: string | undefined = undefined
+): never {
+  if (msg === undefined) {
+    msg = obj;
+  }
   throw new PythonWorkersInternalError(`Unreachable: ${msg}`);
 }

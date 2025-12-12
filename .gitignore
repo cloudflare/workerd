@@ -40,3 +40,6 @@ coverage
 perf.data
 
 .claude
+
+# python
+__pycache__
