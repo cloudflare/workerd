@@ -332,6 +332,15 @@ unsafe fn invoke_weak_drop(state: usize) {
         .this_ptr()
         .expect("this_ptr must be set when invoke_weak_drop is called");
 
+    // Remove from instance tracking before dropping to prevent double-free.
+    // Get the Realm from isolate and remove this instance from Resources.
+    if let (Some(isolate), Some(type_id)) = (state.isolate(), state.type_id()) {
+        let realm = unsafe { &mut *crate::ffi::realm_from_isolate(isolate.as_ptr()) };
+        realm
+            .resources
+            .remove_instance_by_type_id(type_id, this_ptr);
+    }
+
     // Call the drop function with the instance pointer
     unsafe { drop_fn(this_ptr.as_ptr()) };
 }
