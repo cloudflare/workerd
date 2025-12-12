@@ -63,11 +63,13 @@ pub mod ffi {
         pub unsafe fn global_drop(value: Global);
         pub unsafe fn global_clone(value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
+        /// Makes the global handle weak. The `data` parameter should be a pointer to a
+        /// resource::State struct. When V8 GC collects the object, the weak callback will
+        /// retrieve the drop_fn from the State and invoke it.
         pub unsafe fn global_make_weak(
             isolate: *mut Isolate,
             value: *mut Global,
-            data: usize, /* void* */
-            callback: unsafe fn(isolate: *mut Isolate, data: usize) -> (),
+            data: usize, /* *mut State */
         );
 
         // Unwrappers
@@ -338,22 +340,21 @@ impl<T> Global<T> {
         }
     }
 
-    /// Makes this global handle weak, allowing V8 to garbage collect the object
-    /// and invoke the callback when the object is being collected.
+    /// Makes this global handle weak, allowing V8 to garbage collect the object.
+    ///
+    /// When V8's garbage collector determines the object is no longer reachable,
+    /// it will invoke the weak callback which retrieves the `drop_fn` from the
+    /// `State` struct pointed to by `data` and calls it to clean up the resource.
     ///
     /// # Safety
     /// The caller must ensure:
     /// - `isolate` is a valid pointer to a V8 isolate
-    /// - `data` encodes a value that remains valid until the callback is invoked
-    /// - `callback` can safely handle the provided data value
-    pub unsafe fn make_weak(
-        &mut self,
-        isolate: *mut ffi::Isolate,
-        data: *mut c_void,
-        callback: fn(*mut ffi::Isolate, usize) -> (),
-    ) {
+    /// - `data` points to a valid `resource::State` struct that remains valid until
+    ///   the weak callback is invoked
+    /// - The `State::drop_fn` field is properly initialized
+    pub unsafe fn make_weak(&mut self, isolate: *mut ffi::Isolate, data: *mut c_void) {
         unsafe {
-            ffi::global_make_weak(isolate, &raw mut self.handle, data as usize, callback);
+            ffi::global_make_weak(isolate, &raw mut self.handle, data as usize);
         }
     }
 }

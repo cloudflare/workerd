@@ -1,9 +1,11 @@
 use std::any::Any;
 use std::any::TypeId;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::ptr::NonNull;
 
 use crate::Lock;
 use crate::Realm;
@@ -21,44 +23,53 @@ impl<R: Resource> Instance<R> {
     pub fn new(resource: R) -> Ref<R> {
         let instance = Self {
             resource,
-            state: State::default(),
+            state: State::new(Self::drop_instance),
         };
-        unsafe { Ref::new(instance) }
+        Ref::new(instance)
     }
 
-    pub(crate) unsafe fn dec_strong_ref_count(this: *mut Self) {
-        let state = unsafe { &mut (*this).state };
-        state.strong_ref_count -= 1;
-        if state.strong_ref_count == 0 {
-            match &mut state.strong_wrapper {
-                Some(wrapper) => {
-                    let state_ptr = this.cast::<c_void>();
-                    let isolate = state.isolate;
+    /// Static function that can be stored as a function pointer to drop this Instance type.
+    ///
+    /// # Safety
+    /// The `ptr` must point to a valid, heap-allocated `Instance<R>` that was created via
+    /// `Box::into_raw` in `Ref::new`. This function takes ownership and deallocates the memory.
+    unsafe fn drop_instance(ptr: *mut c_void) {
+        debug_assert!(!ptr.is_null(), "drop_instance called with null pointer");
+        // Reconstruct the Box to run destructors and deallocate memory.
+        // Using Box::from_raw because the instance was allocated via Box::into_raw.
+        let _ = unsafe { Box::from_raw(ptr.cast::<Self>()) };
+    }
 
-                    unsafe {
-                        wrapper.make_weak(isolate, state_ptr, Self::weak_callback);
-                    }
+    pub(crate) fn dec_strong_ref_count(this: NonNull<Self>) {
+        // SAFETY: this is valid because it comes from a valid Ref
+        let state = unsafe { &(*this.as_ptr()).state };
+        let new_count = state.dec_ref_count();
+
+        if new_count == 0 {
+            // Count just became 0, need to handle cleanup
+            // SAFETY: We need mutable access to strong_wrapper for make_weak
+            let state_mut = unsafe { &mut (*this.as_ptr()).state };
+            match &mut state_mut.strong_wrapper {
+                Some(wrapper) => {
+                    // Pass a pointer to the State, not to the Instance.
+                    // The weak callback will read drop_fn and this from the State.
+                    let state_ptr =
+                        unsafe { std::ptr::addr_of_mut!((*this.as_ptr()).state).cast::<c_void>() };
+                    // isolate is guaranteed to be set when strong_wrapper is Some
+                    let isolate = state_mut
+                        .isolate
+                        .expect("isolate must be set when wrapper exists")
+                        .as_ptr();
+                    // SAFETY: V8 FFI call
+                    unsafe { wrapper.make_weak(isolate, state_ptr) };
                 }
                 None => {
-                    // Reconstruct the Box to run destructors and deallocate memory
-                    let _ = unsafe { Box::from_raw(this) };
+                    // Reconstruct the Box to run destructors and deallocate memory.
+                    // Using Box::from_raw because the instance was allocated via Box::into_raw.
+                    let _ = unsafe { Box::from_raw(this.as_ptr()) };
                 }
             }
         }
-    }
-
-    fn weak_callback(_isolate: *mut v8::ffi::Isolate, data: usize) {
-        // data is a pointer to Instance<R>
-        let instance = data as *mut Self;
-
-        // Global became weak when count reached 0. Meaning that
-        // Rust side doesn't hold any reference to the instance anymore.
-        // This means it could not have incremented the counter when GC
-        // is triggered.
-        assert_eq!(unsafe { (*instance).state.strong_ref_count }, 0);
-
-        // Reconstruct the Box to run destructors and deallocate memory
-        let _ = unsafe { Box::from_raw(instance) };
     }
 }
 
@@ -69,25 +80,88 @@ impl<R: Resource> Instance<R> {
 /// count reaches zero and a wrapper exists, the Global is made weak so V8 can garbage collect
 /// the wrapper and trigger cleanup via the weak callback.
 pub struct State {
-    /// This is *mut Instance<R>
-    pub this: *mut c_void,
-    pub strong_wrapper: Option<v8::Global<v8::Object>>,
-    pub isolate: *mut v8::ffi::Isolate,
-    pub strong_ref_count: usize,
+    /// Pointer to the owning Instance<R>. `None` until wrapped for JavaScript.
+    /// Using `Option<NonNull>` makes the "not yet initialized" state explicit.
+    this: Option<NonNull<c_void>>,
+    /// V8 Global handle to the JavaScript wrapper object.
+    strong_wrapper: Option<v8::Global<v8::Object>>,
+    /// The V8 isolate this state is bound to. `None` until wrapped for JavaScript.
+    isolate: Option<NonNull<v8::ffi::Isolate>>,
+    /// Reference count using Cell for interior mutability (allows mutation through &self).
+    /// This follows the same pattern as Rc in the standard library.
+    strong_ref_count: Cell<usize>,
+    /// Function pointer to drop the Instance<R>. Called from the weak callback
+    /// triggered by the v8 garbage collector.
+    drop_fn: Option<unsafe fn(*mut c_void)>,
 }
 
 impl Default for State {
     fn default() -> Self {
         Self {
-            this: std::ptr::null_mut(),
+            this: None,
             strong_wrapper: None,
-            isolate: std::ptr::null_mut(),
-            strong_ref_count: 0,
+            isolate: None,
+            strong_ref_count: Cell::new(0),
+            drop_fn: None,
         }
     }
 }
 
 impl State {
+    pub fn new(drop_fn: unsafe fn(*mut c_void)) -> Self {
+        Self {
+            this: None,
+            strong_wrapper: None,
+            isolate: None,
+            strong_ref_count: Cell::new(0),
+            drop_fn: Some(drop_fn),
+        }
+    }
+
+    /// Returns the pointer to the owning Instance, or `None` if not yet set.
+    pub fn this_ptr(&self) -> Option<NonNull<c_void>> {
+        self.this
+    }
+
+    /// Sets the pointer to the owning Instance.
+    ///
+    /// # Panics
+    /// Panics in debug mode if `ptr` is null.
+    pub(crate) fn set_this(&mut self, ptr: *mut c_void) {
+        self.this = NonNull::new(ptr);
+        debug_assert!(self.this.is_some(), "set_this called with null pointer");
+    }
+
+    /// Returns the drop function for cleaning up the Instance.
+    pub fn drop_fn(&self) -> Option<unsafe fn(*mut c_void)> {
+        self.drop_fn
+    }
+
+    /// Returns a reference to the strong wrapper if present.
+    pub(crate) fn strong_wrapper(&self) -> Option<&v8::Global<v8::Object>> {
+        self.strong_wrapper.as_ref()
+    }
+
+    /// Returns the current reference count.
+    pub(crate) fn ref_count(&self) -> usize {
+        self.strong_ref_count.get()
+    }
+
+    /// Increments the reference count and returns the new value.
+    pub(crate) fn inc_ref_count(&self) -> usize {
+        let count = self.strong_ref_count.get();
+        self.strong_ref_count.set(count + 1);
+        count + 1
+    }
+
+    /// Decrements the reference count and returns the new value.
+    pub(crate) fn dec_ref_count(&self) -> usize {
+        let count = self.strong_ref_count.get();
+        debug_assert!(count > 0, "dec_ref_count called when count is already 0");
+        self.strong_ref_count.set(count - 1);
+        count - 1
+    }
+
     /// Attaches a V8 wrapper object to this resource state.
     ///
     /// # Safety
@@ -97,7 +171,9 @@ impl State {
     /// - `self.this` pointer remains valid until either the weak callback fires or `Realm::drop()` is called
     ///
     /// # Panics
-    /// Panics if a wrapper has already been attached (i.e., `strong_wrapper` is not `None`).
+    /// - Panics if a wrapper has already been attached (i.e., `strong_wrapper` is not `None`).
+    /// - Panics if `this` has not been set.
+    /// - Panics in debug mode if the isolate pointer is null.
     pub unsafe fn attach_wrapper<R: Resource + 'static>(
         &mut self,
         realm: &mut Realm,
@@ -105,12 +181,16 @@ impl State {
     ) where
         <R as Resource>::Template: 'static,
     {
-        assert!(self.strong_wrapper.is_none());
+        debug_assert!(self.strong_wrapper.is_none());
 
         self.strong_wrapper = Some(object.into());
-        self.isolate = realm.isolate();
+        self.isolate = unsafe { Some(NonNull::new_unchecked(realm.isolate())) };
+        debug_assert!(self.isolate.is_some(), "isolate pointer is null");
 
-        realm.get_resources::<R>().add_instance(self.this.cast());
+        let this_ptr = self.this.expect("this must be set before attach_wrapper");
+        realm
+            .get_resources::<R>()
+            .add_instance(this_ptr.as_ptr().cast());
     }
 }
 
@@ -125,39 +205,55 @@ impl State {
 /// `Ref<T>` is **not thread-safe**. Resources are bound to the V8 isolate's thread and must
 /// not be sent or accessed from other threads. The raw pointer field prevents automatic
 /// `Send` and `Sync` implementations.
+///
+/// # Invariants
+///
+/// - `instance` is always a valid, non-null pointer to a heap-allocated `Instance<R>`
+/// - The pointed-to instance was allocated via `Box::into_raw`
 pub struct Ref<R: Resource> {
-    instance: *mut Instance<R>,
+    instance: NonNull<Instance<R>>,
 }
 
 impl<R: Resource> Deref for Ref<R> {
     type Target = R;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &(*self.instance).resource }
+        // SAFETY: self.instance is always valid while Ref exists (invariant maintained by new/clone/drop)
+        unsafe { &self.instance.as_ref().resource }
     }
 }
 
 impl<T: Resource> DerefMut for Ref<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut (*self.instance).resource }
+        // SAFETY: self.instance is always valid while Ref exists, and we have &mut self
+        unsafe { &mut self.instance.as_mut().resource }
     }
 }
 
 impl<R: Resource> Ref<R> {
-    pub(crate) unsafe fn new(instance: Instance<R>) -> Self {
-        let mut instance = Box::new(instance);
-        instance.state.strong_ref_count = 1;
-        Self {
-            instance: Box::into_raw(instance),
-        }
+    /// Creates a new `Ref` from an `Instance`.
+    ///
+    /// This allocates the instance on the heap and initializes the reference count to 1.
+    pub(crate) fn new(instance: Instance<R>) -> Self {
+        let instance = Box::new(instance);
+        debug_assert_eq!(instance.state.ref_count(), 0);
+        instance.state.inc_ref_count();
+        // SAFETY: Box::into_raw never returns null
+        let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(instance)) };
+        Self { instance: ptr }
+    }
+
+    /// Returns a raw pointer to the instance for FFI purposes.
+    pub(crate) fn as_ptr(&self) -> *mut Instance<R> {
+        self.instance.as_ptr()
     }
 }
 
 impl<T: Resource> Clone for Ref<T> {
     fn clone(&self) -> Self {
-        unsafe {
-            (*self.instance).state.strong_ref_count += 1;
-        }
+        // SAFETY: self.instance is always valid while Ref exists
+        let state = unsafe { &self.instance.as_ref().state };
+        state.inc_ref_count();
         Self {
             instance: self.instance,
         }
@@ -166,16 +262,18 @@ impl<T: Resource> Clone for Ref<T> {
 
 impl<R: Resource> Drop for Ref<R> {
     fn drop(&mut self) {
-        unsafe { Instance::<R>::dec_strong_ref_count(self.instance) };
+        Instance::<R>::dec_strong_ref_count(self.instance);
     }
 }
 
 /// Wraps a Rust resource for exposure to JavaScript.
 ///
-/// # Safety
 /// The caller must ensure V8 operations are performed within the correct isolate/context and
 /// that the resource's lifetime is properly managed via the Realm.
-#[expect(clippy::needless_pass_by_value)] // Intentionally takes ownership to manage ref count
+///
+/// # Panics
+/// Panics if the internal state pointer fails to initialize (indicates a bug).
+#[expect(clippy::needless_pass_by_value)] // Takes ownership intentionally
 pub fn wrap<'a, R: Resource + 'static>(
     lock: &mut Lock,
     resource: Ref<R>,
@@ -183,38 +281,34 @@ pub fn wrap<'a, R: Resource + 'static>(
 where
     <R as Resource>::Template: 'static,
 {
-    let instance = resource.instance;
-    let state = unsafe { &mut (*instance).state };
+    let instance_ptr = resource.as_ptr();
+    // SAFETY: instance_ptr is valid because resource (Ref) maintains the invariant
+    let state = unsafe { &mut (*instance_ptr).state };
 
-    if let Some(ref wrapped) = state.strong_wrapper {
+    if let Some(wrapped) = state.strong_wrapper() {
         let local = wrapped.as_local(lock);
         if local.has_value() {
             return local.into();
         }
     }
 
-    match state.strong_wrapper.as_ref().map(|val| val.as_local(lock)) {
-        Some(value) if value.has_value() => value.into(),
-        _ => {
-            let resources = lock.get_realm().get_resources::<R>();
-            let constructor = resources.get_constructor(lock);
+    let resources = lock.get_realm().get_resources::<R>();
+    let constructor = resources.get_constructor(lock);
 
-            state.this = instance.cast();
+    state.set_this(instance_ptr.cast());
 
-            let instance: v8::Local<'a, v8::Value> = unsafe {
-                v8::Local::from_ffi(
-                    lock.isolate(),
-                    v8::ffi::wrap_resource(
-                        lock.isolate(),
-                        state.this as usize,
-                        constructor.as_ffi_ref(),
-                    ),
-                )
-            };
-            unsafe { state.attach_wrapper::<R>(lock.get_realm(), instance.clone().into()) };
-            instance
-        }
-    }
+    // SAFETY: V8 FFI calls require valid isolate and constructor
+    // this_ptr() is guaranteed to be Some after set_this()
+    let this_ptr = state.this_ptr().expect("this_ptr should be set").as_ptr();
+    let wrapped_instance: v8::Local<'a, v8::Value> = unsafe {
+        v8::Local::from_ffi(
+            lock.isolate(),
+            v8::ffi::wrap_resource(lock.isolate(), this_ptr as usize, constructor.as_ffi_ref()),
+        )
+    };
+    // SAFETY: attach_wrapper requires valid V8 context
+    unsafe { state.attach_wrapper::<R>(lock.get_realm(), wrapped_instance.clone().into()) };
+    wrapped_instance
 }
 
 pub fn unwrap<'a, R: Resource>(lock: &'a mut Lock, value: v8::Local<v8::Value>) -> &'a mut R {
@@ -259,7 +353,7 @@ impl Resources {
 // TODO(soon): Find a better name for this struct.
 pub struct ResourceImpl<R: Resource> {
     template: Option<R::Template>,
-    instances: Vec<*mut Instance<R>>,
+    instances: Vec<NonNull<Instance<R>>>,
 }
 
 impl<R: Resource> Default for ResourceImpl<R> {
@@ -273,7 +367,9 @@ impl<R: Resource> Default for ResourceImpl<R> {
 
 impl<R: Resource> ResourceImpl<R> {
     pub(crate) fn add_instance(&mut self, instance: *mut Instance<R>) {
-        self.instances.push(instance);
+        if let Some(ptr) = NonNull::new(instance) {
+            self.instances.push(ptr);
+        }
     }
 
     /// Returns the V8 function template constructor for this resource type.

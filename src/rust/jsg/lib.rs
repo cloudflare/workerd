@@ -19,6 +19,10 @@ mod ffi {
         type Realm;
         #[expect(clippy::unnecessary_box_returns)]
         unsafe fn realm_create(isolate: *mut Isolate) -> Box<Realm>;
+
+        /// Called from C++ weak callback to invoke the drop function stored in State.
+        /// The `state` must point to a valid `resource::State` struct.
+        unsafe fn invoke_weak_drop(state: usize);
     }
 
     unsafe extern "C++" {
@@ -307,6 +311,29 @@ impl Drop for Realm {
 #[expect(clippy::unnecessary_box_returns)]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
     Box::new(Realm::new(isolate))
+}
+
+/// Called from C++ weak callback to invoke the drop function stored in State.
+///
+/// # Safety
+/// The `state` must point to a valid `resource::State` struct with `drop_fn` set.
+/// The `State::this` pointer must still be valid.
+unsafe fn invoke_weak_drop(state: usize) {
+    let state_ptr = state as *mut resource::State;
+    let state = unsafe { &*state_ptr };
+
+    // The drop_fn must be set - it's always initialized in State::new()
+    let drop_fn = state
+        .drop_fn()
+        .expect("drop_fn must be set when invoke_weak_drop is called");
+
+    // The this_ptr must be set - it's set when the resource is wrapped
+    let this_ptr = state
+        .this_ptr()
+        .expect("this_ptr must be set when invoke_weak_drop is called");
+
+    // Call the drop function with the instance pointer
+    unsafe { drop_fn(this_ptr.as_ptr()) };
 }
 
 /// Handles a result by setting the return value or throwing an error.
