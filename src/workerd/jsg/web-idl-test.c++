@@ -21,10 +21,6 @@ static_assert(!webidl::NonCallbackInterfaceType<kj::Maybe<NumberBox>>);
 static_assert(webidl::NonCallbackInterfaceType<Ref<NumberBox>>);
 
 // Backward-compatible variable template tests (these delegate to concepts)
-static_assert(webidl::isDictionaryType<TestStruct> == true);
-static_assert(webidl::isDictionaryType<NumberBox> == false);
-static_assert(webidl::isDictionaryType<kj::Maybe<TestStruct>> == false);
-
 static_assert(webidl::isNonCallbackInterfaceType<TestStruct> == false);
 static_assert(webidl::isNonCallbackInterfaceType<NumberBox> == true);
 static_assert(webidl::isNonCallbackInterfaceType<kj::Maybe<NumberBox>> == false);

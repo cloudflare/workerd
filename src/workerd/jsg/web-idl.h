@@ -195,38 +195,19 @@ concept IndistinguishableType = !DistinguishableType<T>;
 // =======================================================================================
 // Backward-compatible variable templates
 //
-// These provide backward compatibility with code that uses the old constexpr bool style.
+// These provide backward compatibility with code that uses the old constexpr bool style
+// that cannot use the concepts directly.
 
 template <typename T>
-constexpr bool isDictionaryType = DictionaryType<T>;
-template <typename T>
 constexpr bool isNonCallbackInterfaceType = NonCallbackInterfaceType<T>;
-template <typename T>
-constexpr bool isBufferSourceType = BufferSourceType<T>;
 template <typename T>
 constexpr bool isRecordType = RecordType<T>;
 template <typename T>
 constexpr bool isBooleanType = BooleanType<T>;
 template <typename T>
-constexpr bool isIntegerType = IntegerType<T>;
-template <typename T>
 constexpr bool isNumericType = NumericType<T>;
 template <typename T>
 constexpr bool isStringType = StringType<T>;
-template <typename T>
-constexpr bool isObjectType = ObjectType<T>;
-template <typename T>
-constexpr bool isSymbolType = SymbolType<T>;
-template <typename T>
-constexpr bool isCallbackFunctionType = CallbackFunctionType<T>;
-template <typename T>
-constexpr bool isInterfaceLikeType = InterfaceLikeType<T>;
-template <typename T>
-constexpr bool isDictionaryLikeType = DictionaryLikeType<T>;
-template <typename T>
-constexpr bool isSequenceLikeType = SequenceLikeType<T>;
-template <typename T>
-constexpr bool isIndistinguishableType = IndistinguishableType<T>;
 
 // =======================================================================================
 // Type list utilities
