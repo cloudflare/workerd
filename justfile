@@ -158,3 +158,19 @@ profile path:
 
 watch *args="build":
   watchexec -rc -w src -w build just {{args}}
+
+# Play WORKERD WORDLE - guess the 5-letter workerd term!
+wordle:
+  python3 tools/games/wordle.py
+
+# Play WORKERD MADLIBS - fill in the blanks for hilarious stories!
+madlibs:
+  python3 tools/games/madlibs.py
+
+# Play WORKERD I SPY - guess the concept from the clues!
+ispy:
+  python3 tools/games/ispy.py
+
+# Play WORKERD SCRAMBLE - unscramble the jumbled terms!
+scramble:
+  python3 tools/games/scramble.py
