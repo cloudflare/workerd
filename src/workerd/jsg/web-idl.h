@@ -94,7 +94,7 @@ concept NonCallbackInterfaceType_ = HasJsgKind<T> && (T::JSG_KIND == JsgKind::RE
 template <typename T>
 constexpr bool isRefToResource_() {
   if constexpr (IsRef<T>) {
-    return NonCallbackInterfaceType_<typename RefTraits_<T>::Type>;
+    return NonCallbackInterfaceType_<RefType<T>>;
   } else {
     return false;
   }
