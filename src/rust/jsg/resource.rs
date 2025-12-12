@@ -3,6 +3,7 @@ use std::any::TypeId;
 use std::cell::Cell;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::ops::Deref;
 use std::ptr::NonNull;
@@ -532,13 +533,13 @@ impl Resources {
 
 /// Tracks the V8 function template and all live instances for a single resource type.
 ///
-/// The template is lazily initialized on first use. Instances are tracked so they
-/// can be cleaned up when the Realm is dropped.
+/// The template is lazily initialized on first use. Instances are tracked in a `HashSet`
+/// for O(1) insertion and removal, enabling efficient cleanup when the Realm is dropped.
 pub struct ResourceImpl<R: Resource> {
     template: Option<R::Template>,
     /// Type-erased instance pointers for cleanup tracking.
-    /// Uses `NonNull<c_void>` because `ResourceCleanup` trait is not generic.
-    instances: Vec<NonNull<c_void>>,
+    /// Uses raw pointers because `NonNull` doesn't implement `Hash`.
+    instances: HashSet<*mut c_void>,
     /// `PhantomData` to tie the type parameter
     _marker: std::marker::PhantomData<R>,
 }
@@ -547,7 +548,7 @@ impl<R: Resource> Default for ResourceImpl<R> {
     fn default() -> Self {
         Self {
             template: None,
-            instances: Vec::new(),
+            instances: HashSet::new(),
             _marker: std::marker::PhantomData,
         }
     }
@@ -560,19 +561,15 @@ where
     fn cleanup(&mut self) {
         // Drop all tracked instances directly.
         // This is called during Realm shutdown.
-        for erased_ptr in self.instances.drain(..) {
+        for raw_ptr in self.instances.drain() {
             // SAFETY: ptr was created from InstancePtr<R>, instance is still valid
-            let ptr = unsafe { InstancePtr::<R>::from_erased(erased_ptr) };
+            let ptr = unsafe { InstancePtr::<R>::from_erased(NonNull::new_unchecked(raw_ptr)) };
             unsafe { ptr.drop_in_place() };
         }
     }
 
     fn remove_instance(&mut self, ptr: NonNull<c_void>) {
-        // TODO(soon): This O(n) approach is going to get slower and slower with large instances list.
-        // Remove from tracking (called from weak callback before dropping)
-        if let Some(pos) = self.instances.iter().position(|p| *p == ptr) {
-            self.instances.swap_remove(pos);
-        }
+        self.instances.remove(&ptr.as_ptr());
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
@@ -583,7 +580,7 @@ where
 impl<R: Resource> ResourceImpl<R> {
     /// Adds an instance to tracking.
     pub(crate) fn add_instance(&mut self, ptr: NonNull<c_void>) {
-        self.instances.push(ptr);
+        self.instances.insert(ptr.as_ptr());
     }
 
     /// Returns the V8 function template constructor for this resource type.
