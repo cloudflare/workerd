@@ -250,7 +250,7 @@ impl<T> Clone for Local<'_, T> {
 // Value-specific implementations
 impl<'a> Local<'a, Value> {
     pub fn to_global(self, lock: &'a mut Lock) -> Global<Value> {
-        unsafe { ffi::local_to_global(lock.isolate(), self.into_ffi()).into() }
+        unsafe { ffi::local_to_global(lock.isolate().as_ptr(), self.into_ffi()).into() }
     }
 }
 
@@ -277,12 +277,17 @@ impl<'a> From<Local<'a, FunctionTemplate>> for Local<'a, Value> {
 impl<'a> Local<'a, Object> {
     pub fn set(&mut self, lock: &mut Lock, key: &str, value: Local<'a, Value>) {
         unsafe {
-            ffi::local_object_set_property(lock.isolate(), &mut self.handle, key, value.into_ffi());
+            ffi::local_object_set_property(
+                lock.isolate().as_ptr(),
+                &mut self.handle,
+                key,
+                value.into_ffi(),
+            );
         }
     }
 
     pub fn has(&self, lock: &mut Lock, key: &str) -> bool {
-        unsafe { ffi::local_object_has_property(lock.isolate(), &self.handle, key) }
+        unsafe { ffi::local_object_has_property(lock.isolate().as_ptr(), &self.handle, key) }
     }
 
     pub fn get(&self, lock: &mut Lock, key: &str) -> Option<Local<'a, Value>> {
@@ -291,9 +296,10 @@ impl<'a> Local<'a, Object> {
         }
 
         unsafe {
-            let maybe_local = ffi::local_object_get_property(lock.isolate(), &self.handle, key);
+            let maybe_local =
+                ffi::local_object_get_property(lock.isolate().as_ptr(), &self.handle, key);
             let opt_local: Option<ffi::Local> = maybe_local.into();
-            opt_local.map(|local| Local::from_ffi(lock.isolate(), local))
+            opt_local.map(|local| Local::from_ffi(lock.isolate().as_ptr(), local))
         }
     }
 }
@@ -334,8 +340,8 @@ impl<T> Global<T> {
     pub fn as_local<'a>(&self, lock: &mut Lock) -> Local<'a, FunctionTemplate> {
         unsafe {
             Local::from_ffi(
-                lock.isolate(),
-                ffi::global_to_local(lock.isolate(), &self.handle),
+                lock.isolate().as_ptr(),
+                ffi::global_to_local(lock.isolate().as_ptr(), &self.handle),
             )
         }
     }
@@ -403,8 +409,8 @@ impl ToLocalValue for u8 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe {
             Local::from_ffi(
-                lock.isolate(),
-                ffi::local_new_number(lock.isolate(), f64::from(*self)),
+                lock.isolate().as_ptr(),
+                ffi::local_new_number(lock.isolate().as_ptr(), f64::from(*self)),
             )
         }
     }
@@ -414,8 +420,8 @@ impl ToLocalValue for u32 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe {
             Local::from_ffi(
-                lock.isolate(),
-                ffi::local_new_number(lock.isolate(), f64::from(*self)),
+                lock.isolate().as_ptr(),
+                ffi::local_new_number(lock.isolate().as_ptr(), f64::from(*self)),
             )
         }
     }
@@ -429,7 +435,12 @@ impl ToLocalValue for String {
 
 impl ToLocalValue for &str {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        unsafe { Local::from_ffi(lock.isolate(), ffi::local_new_string(lock.isolate(), self)) }
+        unsafe {
+            Local::from_ffi(
+                lock.isolate().as_ptr(),
+                ffi::local_new_string(lock.isolate().as_ptr(), self),
+            )
+        }
     }
 }
 
