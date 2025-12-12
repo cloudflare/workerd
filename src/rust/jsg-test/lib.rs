@@ -54,6 +54,13 @@ impl Harness {
             CALLBACK = None;
         }
     }
+
+    /// Triggers a full garbage collection for testing purposes.
+    pub fn request_gc(lock: &mut jsg::Lock) {
+        unsafe {
+            ffi::request_gc(lock.isolate().as_ptr());
+        }
+    }
 }
 
 impl Default for Harness {
@@ -76,8 +83,6 @@ mod tests {
     use jsg_macros::jsg_method;
     use jsg_macros::jsg_resource;
     use jsg_macros::jsg_struct;
-
-    use crate::ffi;
 
     #[jsg_struct]
     struct TestStruct {
@@ -307,9 +312,9 @@ mod tests {
             assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         });
 
-        harness.run_in_context(|lock| {
+        harness.run_in_context(|mut lock| {
             assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-            unsafe { ffi::request_gc(lock.isolate().as_ptr()) };
+            crate::Harness::request_gc(&mut lock);
             assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
         });
     }
