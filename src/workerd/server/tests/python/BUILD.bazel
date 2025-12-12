@@ -7,6 +7,14 @@ py_wd_test("hello")
 
 py_wd_test("env-param")
 
+py_wd_test(
+    "top-level-env",
+    # TODO: snapshot for env
+    make_snapshot = False,
+    skip_python_flags = ["0.26.0a2"],
+    use_snapshot = None,
+)
+
 py_wd_test("asgi")
 
 py_wd_test("asgi-sse")
