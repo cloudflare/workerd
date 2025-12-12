@@ -639,12 +639,14 @@ struct GetterCallback;
         auto& js = Lock::from(isolate);                                                            \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
-        if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
+        if (!isContext &&                                                                          \
+            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
         return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...));            \
+            (self.*method)(                                                                        \
+                wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));          \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -660,8 +662,8 @@ struct GetterCallback;
       auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
       return liftKj<ReturnType>(isolate, [&]() {                                                   \
-        return (self.*method)(                                                                     \
-            wrapper.template unwrapFastApi<Args>(lock, context, (kj::Decay<Args>*)nullptr)...);    \
+        return (self.*method)(wrapper.template unwrapFastApi<Args>(                                \
+            lock, context, static_cast<kj::Decay<Args>*>(nullptr))...);                            \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -683,12 +685,14 @@ struct GetterCallback;
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
-        if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
+        if (!isContext &&                                                                          \
+            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
         return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(js, wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...));        \
+            (self.*method)(                                                                        \
+                js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));      \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -704,8 +708,9 @@ struct GetterCallback;
       auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
       return liftKj<ReturnType>(isolate, [&]() {                                                   \
-        return (self.*method)(                                                                     \
-            js, wrapper.template unwrapFastApi<Args>(js, context, (kj::Decay<Args>*)nullptr)...);  \
+        return (self.*method)(js,                                                                  \
+            wrapper.template unwrapFastApi<Args>(                                                  \
+                js, context, static_cast<kj::Decay<Args>*>(nullptr))...);                          \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -757,12 +762,14 @@ struct PropertyGetterCallback;
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
-        if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
+        if (!isContext &&                                                                          \
+            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
         return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...));            \
+            (self.*method)(                                                                        \
+                wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));          \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -779,7 +786,8 @@ struct PropertyGetterCallback;
       auto& js = Lock::from(isolate);                                                              \
                                                                                                    \
       return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
-        return (self.*method)(wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...);          \
+        return (self.*method)(                                                                     \
+            wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...);               \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -801,12 +809,14 @@ struct PropertyGetterCallback;
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
-        if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
+        if (!isContext &&                                                                          \
+            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
         return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(js, wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...));        \
+            (self.*method)(                                                                        \
+                js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));      \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -823,7 +833,8 @@ struct PropertyGetterCallback;
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
                                                                                                    \
       return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
-        return (self.*method)(js, wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...);      \
+        return (self.*method)(                                                                     \
+            js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...);           \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -1501,7 +1512,7 @@ struct ResourceTypeBuilder {
   template <typename Type, const char* name>
   inline void registerNestedType() {
     static_assert(Type::JSG_KIND == ::workerd::jsg::JsgKind::RESOURCE,
-        "Type is not a resource type, and therefore cannot not be declared nested");
+        "Type is not a resource type, and therefore cannot be declared nested");
 
     constexpr auto hasGetTemplate =
         ::workerd::jsg::isDetected<::workerd::jsg::HasGetTemplateOverload, decltype(typeWrapper),
@@ -1836,7 +1847,7 @@ class ResourceWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // Try to unwrap a value of type Ref<T>.
 
-    KJ_IF_SOME(p, tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+    KJ_IF_SOME(p, tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject)) {
       return Ref<T>(kj::addRef(p));
     } else {
       return kj::none;
