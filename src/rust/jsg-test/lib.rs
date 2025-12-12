@@ -101,7 +101,7 @@ mod tests {
         pub inner: String,
     }
 
-    /// Counter to track how many SimpleResource instances have been dropped.
+    /// Counter to track how many `SimpleResource` instances have been dropped.
     static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[jsg_resource]
@@ -117,9 +117,11 @@ mod tests {
 
     #[jsg_resource]
     impl SimpleResource {
-        #[jsg_method]
         // TODO: Replace String error with jsg::Error
         // TODO: Support non-fallable return values (without std::Result)
+        #[expect(clippy::allow_attributes)]
+        #[allow(clippy::unnecessary_wraps)]
+        #[jsg_method]
         fn get_name(&self) -> Result<String, String> {
             Ok(self.name.clone())
         }

@@ -145,6 +145,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fn_vis = &input_fn.vis;
     let fn_sig = &input_fn.sig;
     let fn_block = &input_fn.block;
+    let fn_attrs = &input_fn.attrs;
 
     let callback_name = syn::Ident::new(&format!("{fn_name}_callback"), fn_name.span());
 
@@ -189,6 +190,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .collect();
 
     let expanded = quote! {
+        #(#fn_attrs)*
         #fn_vis #fn_sig {
             #fn_block
         }
