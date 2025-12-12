@@ -740,12 +740,10 @@ concept HasStructTypeScriptDefine = requires { T::_JSG_STRUCT_TS_DEFINE_DO_NOT_U
     registerMembersInternal<Registry, Self, jsg::GetConfiguration<Self>>(registry, arg);           \
   }
 
-namespace {
 template <size_t N>
-consteval size_t prefixLengthToStrip(const char (&s)[N]) {
+inline consteval size_t prefixLengthToStrip(const char (&s)[N]) {
   return s[0] == '$' ? 1 : 0;
 }
-}  // namespace
 
 // This string may not be what's actually exported to v8. For example, if it starts with a `$`, then
 // this value will still contain the `$` even though the `FieldWrapper` template argument will have
@@ -1143,14 +1141,10 @@ template <typename T>
 struct IsArguments_ {
   static constexpr bool value = false;
 };
-
-// Is `T` some specialization of `Arguments<U>`?
 template <typename T>
 struct IsArguments_<Arguments<T>> {
   static constexpr bool value = true;
 };
-
-// Is `T` some specialization of `Arguments<U>`?
 template <typename T>
 constexpr bool isArguments() {
   return IsArguments_<T>::value;
@@ -1619,14 +1613,10 @@ template <typename T>
 struct IsPromise_ {
   static constexpr bool value = false;
 };
-
-// Convenience template to detect a `jsg::Promise` type.
 template <typename T>
 struct IsPromise_<Promise<T>> {
   static constexpr bool value = true;
 };
-
-// Convenience template to detect a `jsg::Promise` type.
 template <typename T>
 constexpr bool isPromise() {
   return IsPromise_<T>::value;
@@ -1637,29 +1627,22 @@ template <typename T>
 struct RemovePromise_ {
   using Type = T;
 };
-
-// Convenience template to strip off `jsg::Promise`.
 template <typename T>
 struct RemovePromise_<Promise<T>> {
   using Type = T;
 };
-
-// Convenience template to strip off `jsg::Promise`.
 template <typename T>
 using RemovePromise = typename RemovePromise_<T>::Type;
 
+// Convenience template to add `jsg::Promise` if it is not present.
 template <typename T>
 struct MaintainPromise_ {
   using Type = Promise<T>;
 };
-
-// Convenience template to add `jsg::Promise` if it is not present.
 template <typename T>
 struct MaintainPromise_<Promise<T>> {
   using Type = Promise<T>;
 };
-
-// Convenience template to add `jsg::Promise` if it is not present.
 template <typename T>
 using MaintainPromise = typename MaintainPromise_<T>::Type;
 
@@ -1667,37 +1650,22 @@ using MaintainPromise = typename MaintainPromise_<T>::Type;
 // `T = void` is understood to mean no parameters.
 template <typename Func, typename T, bool passLock>
 struct ReturnType_;
-
-// Convenience template to calculate the return type of a function when passed parameter type T.
-// `T = void` is understood to mean no parameters.
 template <typename Func, typename T>
 struct ReturnType_<Func, T, false> {
   using Type = decltype(kj::instance<Func>()(kj::instance<T>()));
 };
-
-// Convenience template to calculate the return type of a function when passed parameter type T.
-// `T = void` is understood to mean no parameters.
 template <typename Func, typename T>
 struct ReturnType_<Func, T, true> {
   using Type = decltype(kj::instance<Func>()(kj::instance<Lock&>(), kj::instance<T>()));
 };
-
-// Convenience template to calculate the return type of a function when passed parameter type T.
-// `T = void` is understood to mean no parameters.
 template <typename Func>
 struct ReturnType_<Func, void, false> {
   using Type = decltype(kj::instance<Func>()());
 };
-
-// Convenience template to calculate the return type of a function when passed parameter type T.
-// `T = void` is understood to mean no parameters.
 template <typename Func>
 struct ReturnType_<Func, void, true> {
   using Type = decltype(kj::instance<Func>()(kj::instance<Lock&>()));
 };
-
-// Convenience template to calculate the return type of a function when passed parameter type T.
-// `T = void` is understood to mean no parameters.
 template <typename Func, typename T, bool passLock = false>
 using ReturnType = typename ReturnType_<Func, T, passLock>::Type;
 
@@ -2905,11 +2873,11 @@ class Lock {
 // The lock must be assignable to a jsg::Lock, and the context must be or be assignable
 // to a v8::Local<v8::Context>. The context will be evaluated within the handle scope.
 #define JSG_WITHIN_CONTEXT_SCOPE(lock, context, fn)                                                \
-  ((jsg::Lock&)lock).withinHandleScope([&]() -> auto {                                             \
+  (static_cast<jsg::Lock&>(lock)).withinHandleScope([&]() -> auto {                                \
     v8::Local<v8::Context> ctx = context;                                                          \
     KJ_ASSERT(!ctx.IsEmpty(), "unable to enter invalid v8::Context");                              \
     v8::Context::Scope scope(ctx);                                                                 \
-    return fn((jsg::Lock&)lock);                                                                   \
+    return fn(static_cast<jsg::Lock&>(lock));                                                      \
   })
 
 // The V8StackScope is used only as a marker to prove that we are running in the V8 stack
@@ -2995,9 +2963,6 @@ template <typename T>
 inline V8Ref<T> V8Ref<T>::addRef(jsg::Lock& js) {
   return js.v8Ref(getHandle(js));
 }
-
-// v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
-// Already defined in util.c++.
 
 template <typename T>
 V8Ref<T> V8Ref<T>::deepClone(jsg::Lock& js) {
