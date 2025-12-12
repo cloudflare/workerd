@@ -32,7 +32,8 @@ static ::workerd::jsg::V8System& getV8System() {
 }
 
 TestHarness::TestHarness()
-    : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())) {}
+    : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
+      realm(::workerd::rust::jsg::realm_create(isolate->getIsolate())) {}
 
 kj::Own<TestHarness> create_test_harness() {
   return kj::heap<TestHarness>();
@@ -43,7 +44,6 @@ void TestHarness::run_in_context(::rust::Fn<void(Isolate*)> callback) const {
     auto context = lock.newContext<TestContext>();
     v8::Context::Scope contextScope(context.getHandle(isolate->getIsolate()));
 
-    auto realm = ::workerd::rust::jsg::realm_create(isolate->getIsolate());
     // &* dereferences the kj::Own smart pointer and takes its address to get a raw pointer
     ::workerd::jsg::setAlignedPointerInEmbedderData(context.getHandle(isolate->getIsolate()),
         ::workerd::jsg::ContextPointerSlot::RUST_REALM, &*realm);

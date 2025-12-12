@@ -1,5 +1,7 @@
 #pragma once
 
+#include <workerd/rust/jsg/v8.rs.h>
+
 #include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 #include <v8.h>
@@ -24,6 +26,7 @@ class TestHarness {
 
  private:
   mutable kj::Own<TestIsolate> isolate;
+  mutable ::rust::Box<::workerd::rust::jsg::Realm> realm;
 };
 
 kj::Own<TestHarness> create_test_harness();
