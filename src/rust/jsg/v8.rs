@@ -60,7 +60,7 @@ pub mod ffi {
         ) -> KjMaybe<Local>;
 
         // Global<T>
-        pub unsafe fn global_drop(value: Global);
+        pub unsafe fn global_reset(value: *mut Global);
         pub unsafe fn global_clone(value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
         /// Makes the global handle weak. The `data` parameter should be a pointer to a
@@ -363,6 +363,16 @@ impl<T> Global<T> {
             ffi::global_make_weak(isolate, &raw mut self.handle, data as usize);
         }
     }
+
+    /// Resets this global handle, releasing the persistent reference.
+    ///
+    /// # Safety
+    /// The caller must ensure the global handle is valid.
+    pub unsafe fn reset(&mut self) {
+        unsafe {
+            ffi::global_reset(&raw mut self.handle);
+        }
+    }
 }
 
 impl<T> From<Local<'_, T>> for Global<T> {
@@ -386,12 +396,7 @@ impl<T> From<ffi::Global> for Global<T> {
 
 impl<T> Drop for Global<T> {
     fn drop(&mut self) {
-        let handle = ffi::Global {
-            ptr: self.handle.ptr,
-        };
-        unsafe {
-            ffi::global_drop(handle);
-        }
+        unsafe { self.reset() };
     }
 }
 

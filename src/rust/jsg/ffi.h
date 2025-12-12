@@ -10,7 +10,6 @@
 // Forward declarations needed by v8.rs.h
 namespace workerd::rust::jsg {
 using Isolate = v8::Isolate;
-using Context = v8::Local<v8::Context>;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
 struct ModuleRegistry;
 struct Local;
@@ -42,7 +41,7 @@ bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::St
 kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
 
 // Global<T>
-void global_drop(Global value);
+void global_reset(Global* value);
 Global global_clone(const Global& value);
 Local global_to_local(Isolate* isolate, const Global& value);
 /// Makes the global handle weak. The `data` parameter should be a pointer to a

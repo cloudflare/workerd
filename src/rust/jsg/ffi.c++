@@ -1,5 +1,6 @@
 #include "ffi.h"
 
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -122,9 +123,9 @@ size_t unwrap_resource(Isolate* isolate, Local value) {
 }
 
 // Global<T>
-
-void global_drop(Global value) {
-  global_from_ffi<v8::Value>(kj::mv(value));
+void global_reset(Global* value) {
+  auto* glbl = global_as_ref_from_ffi<v8::Value>(*value);
+  glbl->Reset();
 }
 
 Global global_clone(const Global& value) {
@@ -247,9 +248,10 @@ Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
 }
 
 Realm* realm_from_isolate(Isolate* isolate) {
-  auto realm = ::workerd::jsg::getAlignedPointerFromEmbedderData<Realm>(
-      isolate->GetCurrentContext(), ::workerd::jsg::ContextPointerSlot::RUST_REALM);
-  return &KJ_ASSERT_NONNULL(realm);
+  auto* realm =
+      static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
+  KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
+  return realm;
 }
 
 // Errors

@@ -633,9 +633,6 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
-      // &* dereferences the kj::Own smart pointer and takes its address to get a raw pointer
-      jsg::setAlignedPointerInEmbedderData(context, ::workerd::jsg::ContextPointerSlot::RUST_REALM,
-          const_cast<::workerd::rust::jsg::Realm*>(&*impl.realm));
       Worker::setupContext(*lock, context, loggingOptions);
     }
 

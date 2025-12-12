@@ -91,24 +91,6 @@ impl<R: Resource> InstancePtr<R> {
     unsafe fn drop_in_place(self) {
         let _ = unsafe { Box::from_raw(self.0.as_ptr()) };
     }
-
-    /// Returns a reference to the instance.
-    ///
-    /// # Safety
-    /// The instance must still be valid.
-    #[expect(dead_code)]
-    unsafe fn as_ref(&self) -> &Instance<R> {
-        unsafe { self.0.as_ref() }
-    }
-
-    /// Returns a mutable reference to the instance.
-    ///
-    /// # Safety
-    /// The instance must still be valid and no other references must exist.
-    #[expect(dead_code)]
-    unsafe fn as_mut(&mut self) -> &mut Instance<R> {
-        unsafe { self.0.as_mut() }
-    }
 }
 
 // ============================================================================
@@ -154,7 +136,7 @@ pub struct State {
     /// from the V8 weak callback.
     drop_fn: unsafe fn(*mut c_void),
     /// Wrapper information, set when exposed to JavaScript.
-    wrapper: Option<WrapperInfo>,
+    info: Option<WrapperInfo>,
 }
 
 impl State {
@@ -166,7 +148,7 @@ impl State {
         Self {
             ref_count: Cell::new(0),
             drop_fn,
-            wrapper: None,
+            info: None,
         }
     }
 
@@ -195,27 +177,27 @@ impl State {
 
     /// Returns whether this instance has been wrapped for JavaScript.
     pub(crate) fn is_wrapped(&self) -> bool {
-        self.wrapper.is_some()
+        self.info.is_some()
     }
 
     /// Returns the V8 Global wrapper handle if wrapped.
     pub(crate) fn wrapper(&self) -> Option<&v8::Global<v8::Object>> {
-        self.wrapper.as_ref().map(|w| &w.wrapper)
+        self.info.as_ref().map(|w| &w.wrapper)
     }
 
     /// Returns the isolate pointer if wrapped.
     pub fn isolate(&self) -> Option<NonNull<v8::ffi::Isolate>> {
-        self.wrapper.as_ref().map(|w| w.isolate)
+        self.info.as_ref().map(|w| w.isolate)
     }
 
     /// Returns the `TypeId` if wrapped.
     pub fn type_id(&self) -> Option<TypeId> {
-        self.wrapper.as_ref().map(|w| w.type_id)
+        self.info.as_ref().map(|w| w.type_id)
     }
 
     /// Returns the instance pointer if wrapped.
     pub fn this_ptr(&self) -> Option<NonNull<c_void>> {
-        self.wrapper.as_ref().map(|w| w.this)
+        self.info.as_ref().map(|w| w.this)
     }
 
     /// Returns the drop function.
@@ -230,7 +212,7 @@ impl State {
     pub(crate) unsafe fn make_weak(&mut self) {
         // Get state_ptr before borrowing wrapper to avoid double mutable borrow
         let state_ptr = std::ptr::from_mut(self).cast::<c_void>();
-        if let Some(ref mut info) = self.wrapper {
+        if let Some(ref mut info) = self.info {
             unsafe { info.wrapper.make_weak(info.isolate.as_ptr(), state_ptr) };
         }
     }
@@ -248,11 +230,11 @@ impl State {
         <R as Resource>::Template: 'static,
     {
         debug_assert!(
-            self.wrapper.is_none(),
+            self.info.is_none(),
             "attach_wrapper called on already-wrapped instance"
         );
 
-        self.wrapper = Some(WrapperInfo {
+        self.info = Some(WrapperInfo {
             this: this_ptr,
             wrapper: object.into(),
             isolate: realm.isolate(),
@@ -455,7 +437,7 @@ where
         }
     }
 
-    let resources = lock.get_realm().get_resources::<R>();
+    let resources = lock.realm().get_resources::<R>();
     let constructor = resources.get_constructor(lock);
 
     let this_ptr = ptr.as_erased();
@@ -472,7 +454,7 @@ where
         )
     };
 
-    state.attach_wrapper::<R>(lock.get_realm(), wrapped.clone().into(), this_ptr);
+    state.attach_wrapper::<R>(lock.realm(), wrapped.clone().into(), this_ptr);
 
     wrapped
 }
@@ -586,6 +568,7 @@ where
     }
 
     fn remove_instance(&mut self, ptr: NonNull<c_void>) {
+        // TODO(soon): This O(n) approach is going to get slower and slower with large instances list.
         // Remove from tracking (called from weak callback before dropping)
         if let Some(pos) = self.instances.iter().position(|p| *p == ptr) {
             self.instances.swap_remove(pos);
