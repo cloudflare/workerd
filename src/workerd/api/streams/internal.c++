@@ -2190,33 +2190,25 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
     }
   };
 
-  auto holder = kj::refcounted<Holder>(kj::mv(sink), kj::mv(source));
+  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
   return holder->source->pumpTo(*holder->sink, end)
-      .then([&holder = *holder](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-    proxy.proxyTask = proxy.proxyTask.attach(kj::addRef(holder));
-    holder.done = true;
+      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+    proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
+    holder->done = true;
     return kj::mv(proxy);
-  }, [&holder = *holder](kj::Exception&& ex) mutable {
-    holder.sink->abort(kj::cp(ex));
-    holder.source->cancel(kj::cp(ex));
-    holder.done = true;
+  }, [holder = holder.addRef()](kj::Exception&& ex) mutable {
+    holder->sink->abort(kj::cp(ex));
+    holder->source->cancel(kj::cp(ex));
+    holder->done = true;
     return kj::mv(ex);
-  }).attach(kj::mv(holder));
+  });
 }
 
 StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return StreamEncoding::IDENTITY;
-    }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return StreamEncoding::IDENTITY;
-    }
-    KJ_CASE_ONEOF(readable, Readable) {
-      return readable->getPreferredEncoding();
-    }
-  }
-  KJ_UNREACHABLE;
+  return state.tryGet<Readable>()
+      .map([](Readable& readable) {
+    return readable->getPreferredEncoding();
+  }).orDefault(StreamEncoding::IDENTITY);
 }
 
 kj::Own<ReadableStreamController> newReadableStreamInternalController(
