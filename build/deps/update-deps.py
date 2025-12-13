@@ -37,11 +37,10 @@ GITHUB_RELEASE_FILE_URL_TEMPLATE = (
 DEP_TEMPLATE = (
     TOP
     + """
-load("{rule_file}", "{rule_name}")
+{rule_name} = use_repo_rule("{rule_file}", "{rule_name}")
 
-def {macro_name}():
-    {rule_name}({attrs}
-    )
+{rule_name}({attrs}
+)
 """
 )
 
@@ -54,7 +53,7 @@ def format_attr_list(attr_list):
         return ""
 
     return "\n" + "\n".join(
-        f"        {k} = {format_attr(v)}," for k, v in attr_list.items()
+        f"    {k} = {format_attr(v)}," for k, v in attr_list.items()
     )
 
 
@@ -363,7 +362,7 @@ def gen_repo_bzl(repo):
     if TARGET_FILTER is not None and not repo["name"].startswith(TARGET_FILTER):
         print("skipped")
         return
-    with (GEN_DIR / f"{macro_name(repo)}.bzl").open("w") as bzl_file:
+    with (GEN_DIR / f"{macro_name(repo)}.MODULE.bazel").open("w") as bzl_file:
         bzl_file.write(gen_repo_str(repo))
     print()
 
@@ -371,14 +370,10 @@ def gen_repo_bzl(repo):
 def gen_deps_bzl(deps, deps_bzl, is_shared=False):
     deps_bzl_content = TOP
     macro_names = [macro_name(repo) for repo in deps["repositories"]]
-    package = "@workerd" if is_shared else "@"
 
     for name in sorted(macro_names):
         # Buildifier prefers load statements to be sorted alphabetically.
-        deps_bzl_content += f'\nload("{package}//build/deps:gen/{name}.bzl", "{name}")'
-    deps_bzl_content += "\n\ndef deps_gen():\n"
-    for name in macro_names:
-        deps_bzl_content += f"    {name}()\n"
+        deps_bzl_content += f'\ninclude("//build/deps:gen/{name}.MODULE.bazel")'
 
     with deps_bzl.open("w") as f:
         f.write(deps_bzl_content)
@@ -438,7 +433,7 @@ Alternatively, install the gh CLI tool to save time <https://github.com/cli/cli#
 
 def process_config(deps_file):
     deps_path = SCRIPT_DIR / deps_file
-    bzl_path = (GEN_DIR / deps_file).with_suffix(".bzl")
+    bzl_path = (GEN_DIR / deps_file).with_suffix(".MODULE.bazel")
     is_shared = deps_file == "shared_deps.jsonc"
 
     try:
@@ -454,7 +449,7 @@ def run():
         global GITHUB_ACCESS_TOKEN
         GITHUB_ACCESS_TOKEN = read_access_token()
 
-        for f in GEN_DIR.glob("*.bzl"):
+        for f in GEN_DIR.glob("*.bazel"):
             f.unlink()
 
     for deps in ALL_DEPS:
