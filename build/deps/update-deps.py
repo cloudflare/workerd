@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import types
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -344,6 +345,24 @@ def gen_git_clone(repo):
             commit=commit,
         ),
     )
+
+
+ResolvedVersion = str | None
+
+
+def get_bcr_version(name: str) -> ResolvedVersion:
+    module_versions_url = f"https://bcr.bazel.build/modules/{name}/metadata.json"
+    with urllib.request.urlopen(module_versions_url) as res:
+        try:
+            meta = json.load(res, object_hook=types.SimpleNamespace)
+            # FIXME: Is the last version listed always latest?
+            new_version = meta.versions[-1]
+            print(f"{name} = {new_version}")
+        except Exception as exc:
+            print(exc)
+            return None
+        else:
+            return new_version
 
 
 def gen_repo_str(repo):
