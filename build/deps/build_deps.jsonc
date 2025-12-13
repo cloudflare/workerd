@@ -42,6 +42,33 @@
       "file_regex": "^cargo-bazel-x86_64-pc-windows-msvc.exe$",
       "file_type": "executable",
       "downloaded_file_path": "downloaded.exe"
+    },
+    {
+      "name": "clang_tidy_linux_amd64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-linux-amd64-clang-tidy",
+      "file_type": "executable",
+      "freeze_version": "clang-tidy-21.1.4"
+    },
+    {
+      "name": "clang_tidy_linux_arm64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-linux-arm64-clang-tidy",
+      "file_type": "executable",
+      "freeze_version": "clang-tidy-21.1.4"
+    },
+    {
+      "name": "clang_tidy_darwin_arm64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-darwin-arm64-clang-tidy",
+      "file_type": "executable",
+      "freeze_version": "clang-tidy-21.1.4"
     }
   ]
 }

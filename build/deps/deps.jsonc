@@ -8,6 +8,36 @@
       "repo": "capnproto",
       "branch": "v2",
       "extra_strip_prefix": "/c++"
+    },
+    {
+      "name": "nbytes",
+      "type": "github_release",
+      "owner": "nodejs",
+      "repo": "nbytes",
+      "build_file": "//:build/BUILD.nbytes"
+    },
+    {
+      "name": "ncrypto",
+      "type": "github_tarball",
+      "owner": "nodejs",
+      "repo": "ncrypto",
+      "branch": "main"
+    },
+    {
+      "name": "dragonbox",
+      "type": "github_tarball",
+      "build_file_content": "cc_library(name = \"dragonbox\", hdrs = glob([\"include/dragonbox/*.h\"]), visibility = [\"//visibility:public\"], include_prefix = \"third_party/dragonbox/src\")",
+      "owner": "jk-jeon",
+      "repo": "dragonbox",
+      "branch": "master"
+    },
+    {
+      "name": "simdutf",
+      "type": "github_release",
+      "owner": "simdutf",
+      "repo": "simdutf",
+      "build_file": "//:build/BUILD.simdutf",
+      "file_regex": "singleheader.zip"
     }
   ]
 }
