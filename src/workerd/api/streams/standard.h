@@ -166,7 +166,7 @@ class ReadableImpl {
 
   // When a negative number is returned, indicates that we are above the highwatermark
   // and backpressure should be signaled.
-  kj::Maybe<int> getDesiredSize();
+  kj::Maybe<double> getDesiredSize();
 
   // Invokes the pull algorithm only if we're in a state where the queue the
   // queue is below the watermark and we actually need data right now.
@@ -257,7 +257,7 @@ class WritableImpl {
   struct WriteRequest {
     jsg::Promise<void>::Resolver resolver;
     jsg::Value value;
-    size_t size;
+    double size;
 
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(resolver, value);
@@ -295,7 +295,7 @@ class WritableImpl {
   void finishInFlightWrite(
       jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
 
-  ssize_t getDesiredSize();
+  double getDesiredSize();
 
   bool isCloseQueuedOrInFlight();
 
@@ -372,8 +372,8 @@ class WritableImpl {
       Writable();
   Algorithms algorithms;
 
-  size_t highWaterMark = 1;
-  size_t amountBuffered = 0;
+  double highWaterMark = 1;
+  double amountBuffered = 0;
 
   // `writeRequests` is often going to be empty in common usage patterns, in which case std::list
   // is more memory efficient than a std::deque, for example.
@@ -415,7 +415,7 @@ class ReadableStreamDefaultController: public jsg::Object {
 
   bool canCloseOrEnqueue();
   bool hasBackpressure();
-  kj::Maybe<int> getDesiredSize();
+  kj::Maybe<double> getDesiredSize();
 
   void enqueue(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk);
 
@@ -545,7 +545,7 @@ class ReadableByteStreamController: public jsg::Object {
 
   bool canCloseOrEnqueue();
   bool hasBackpressure();
-  kj::Maybe<int> getDesiredSize();
+  kj::Maybe<double> getDesiredSize();
 
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> getByobRequest(jsg::Lock& js);
 
@@ -600,7 +600,7 @@ class WritableStreamDefaultController: public jsg::Object {
 
   void error(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
-  ssize_t getDesiredSize();
+  double getDesiredSize();
 
   jsg::Ref<AbortSignal> getSignal();
 
@@ -659,7 +659,7 @@ class TransformStreamDefaultController: public jsg::Object {
     return startPromise.promise.whenResolved(js);
   }
 
-  kj::Maybe<int> getDesiredSize();
+  kj::Maybe<double> getDesiredSize();
 
   void enqueue(jsg::Lock& js, v8::Local<v8::Value> chunk);
 

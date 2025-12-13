@@ -147,7 +147,7 @@ class WritableStreamSinkJsAdapter final {
   // that can be written before we exceed the high water mark. If the
   // return value is <= 0 then backpressure is being signaled. If we are
   // in the closed or errored states, returns kj::none.
-  kj::Maybe<ssize_t> getDesiredSize();
+  kj::Maybe<double> getDesiredSize();
 
   // Writes a chunk to the underlying sink via the queued write mechanism.
   // The implementation ensures that only one write is in flight with the
