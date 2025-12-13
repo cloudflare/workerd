@@ -2,6 +2,7 @@
 
 module(name = "workerd")
 
+bazel_dep(name = "rules_rust", version = "0.68.1")
 bazel_dep(name = "aspect_bazel_lib", version = "2.21.2")
 bazel_dep(name = "aspect_rules_lint", version = "1.10.2")
 bazel_dep(name = "bazel_features", version = "1.38.0")
@@ -84,3 +85,6 @@ include("//build/deps:deps.MODULE.bazel")
 include("//build/deps:nodejs.MODULE.bazel")
 include("//build/deps:python.MODULE.bazel")
 include("//build/deps:v8.MODULE.bazel")
+include("//build/deps:gen/deps.MODULE.bazel")
+include("//build/deps:gen/build_deps.MODULE.bazel")
+include("//build/deps:gen/shared_deps.MODULE.bazel")

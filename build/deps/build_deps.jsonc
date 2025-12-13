@@ -3,17 +3,6 @@
   "repositories": [
     // rust
     {
-      "name": "rules_rust",
-      "type": "git_clone",
-      "owner": "bazelbuild",
-      "repo": "rules_rust",
-      "url": "https://github.com/bazelbuild/rules_rust",
-      "branch": "main",
-      // Support for Rust 1.91 is in this commit. Remove freeze once new rules_rust release comes out.
-      "freeze_commit": "f3ccfa44f6636aa38e14f095e17d95797ae2f720",
-      "file_regex": "^rules_rust-.*\\.tar\\.gz$"
-    },
-    {
       "name": "cargo_bazel_linux_x64",
       "type": "github_release",
       "owner": "bazelbuild",
