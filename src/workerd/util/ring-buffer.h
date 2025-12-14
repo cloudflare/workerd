@@ -229,6 +229,15 @@ class RingBuffer final {
     storage[head].~T();
     head = (head + 1) % storage.size();
     count--;
+    generation++;
+  }
+
+  // Returns a generation counter that is incremented each time pop_front() is called.
+  // This can be used to detect if the front of the queue has changed during async operations,
+  // since RingBuffer may relocate elements when it grows and pointer/reference comparisons
+  // are not reliable.
+  uint64_t currentGeneration() const {
+    return generation;
   }
 
   T& front() {
@@ -259,6 +268,7 @@ class RingBuffer final {
   size_t head = 0;
   size_t tail = 0;
   size_t count = 0;
+  uint64_t generation = 0;  // Incremented on each pop_front()
 
   void grow() {
     size_t newCapacity = storage.size() * 2;
