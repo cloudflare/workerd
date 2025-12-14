@@ -43,11 +43,11 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.1.1",
+    version = "2.1.2",
     deps = [
         "@crates_vendor__icu_collections-2.1.1//:icu_collections",
         "@crates_vendor__icu_locale_core-2.1.1//:icu_locale_core",
-        "@crates_vendor__icu_properties_data-2.1.1//:icu_properties_data",
+        "@crates_vendor__icu_properties_data-2.1.2//:icu_properties_data",
         "@crates_vendor__icu_provider-2.1.1//:icu_provider",
         "@crates_vendor__zerotrie-0.2.3//:zerotrie",
         "@crates_vendor__zerovec-0.11.5//:zerovec",
