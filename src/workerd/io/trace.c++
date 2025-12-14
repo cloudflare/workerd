@@ -1300,25 +1300,32 @@ Outcome Outcome::clone() const {
   return Outcome(outcome, cpuTime, wallTime);
 }
 
-TailEvent::TailEvent(
-    SpanContext context, TraceId invocationId, kj::Date timestamp, kj::uint sequence, Event&& event)
+TailEvent::TailEvent(SpanContext context,
+    TraceId invocationId,
+    kj::Date timestamp,
+    kj::uint sequence,
+    Event&& event,
+    size_t sizeHint)
     : spanContext(kj::mv(context)),
       invocationId(invocationId),
       timestamp(timestamp),
       sequence(sequence),
-      event(kj::mv(event)) {}
+      event(kj::mv(event)),
+      sizeHint(sizeHint) {}
 
 TailEvent::TailEvent(TraceId traceId,
     TraceId invocationId,
     kj::Maybe<SpanId> spanId,
     kj::Date timestamp,
     kj::uint sequence,
-    Event&& event)
+    Event&& event,
+    size_t sizeHint)
     : spanContext(kj::mv(traceId), kj::mv(spanId)),
       invocationId(kj::mv(invocationId)),
       timestamp(timestamp),
       sequence(sequence),
-      event(kj::mv(event)) {}
+      event(kj::mv(event)),
+      sizeHint(sizeHint) {}
 
 namespace {
 TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& reader) {
@@ -1374,6 +1381,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSequence(sequence);
   auto eventBuilder = builder.initEvent();
+  // Serialize tail events to RPC. Note that sizeHint is not being propagated here: When tail events
+  // are being sent via RPC over the tail stream, they have already passed the tail event queue
+  // where we apply a size limit, so the size hint is not needed anymore.
   KJ_SWITCH_ONEOF(event) {
     KJ_CASE_ONEOF(onset, Onset) {
       onset.copyTo(eventBuilder.initOnset());
@@ -1443,7 +1453,7 @@ TailEvent TailEvent::clone() const {
     KJ_UNREACHABLE;
   };
   return TailEvent(spanContext.getTraceId(), invocationId, spanContext.getSpanId(), timestamp,
-      sequence, cloneEvent(event));
+      sequence, cloneEvent(event), sizeHint);
 }
 
 void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {
