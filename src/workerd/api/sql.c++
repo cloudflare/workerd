@@ -25,7 +25,9 @@ SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
-  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_exec"_kjc);
+  auto& context = IoContext::current();
+  auto span = context.makeTraceSpan("durable_object_storage_exec"_kjc);
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage_exec"_kjc);
   userSpan.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
   userSpan.setTag("db.operation.name"_kjc, "exec"_kjc);
   userSpan.setTag("db.query.text"_kjc, kj::str(querySql));
@@ -52,6 +54,20 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   }
   statementCache.lru.add(*slot.get());
 
+  // In order to get accurate statistics, we have to keep the spans around until the query is
+  // actually done, which for read queries that iterate over a cursor won't be until later.
+  kj::Maybe<kj::Function<void(Cursor&)>> doneCallback;
+  if (span.isObserved() || userSpan.isObserved()) {
+    doneCallback = [span = kj::mv(span), userSpan = kj::mv(userSpan)](Cursor& cursor) mutable {
+      int64_t rowsRead = cursor.getRowsRead();
+      int64_t rowsWritten = cursor.getRowsWritten();
+      span.setTag("rows_read"_kjc, rowsRead);
+      span.setTag("rows_written"_kjc, rowsWritten);
+      userSpan.setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
+      userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
+    };
+  }
+
   if (slot->isShared()) {
     // Oops, this CachedStatement is currently in-use (presumably by a Cursor).
     //
@@ -61,10 +77,11 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     // In theory we could try to cache multiple copies of the statement, but as this is probably
     // exceedingly rare, it is not worth the added code complexity.
     SqliteDatabase::Regulator& regulator = *this;
-    return js.alloc<Cursor>(js, db, regulator, js.toString(querySql), kj::mv(bindings));
+    return js.alloc<Cursor>(
+        js, kj::mv(doneCallback), db, regulator, js.toString(querySql), kj::mv(bindings));
   }
 
-  auto result = js.alloc<Cursor>(js, slot.addRef(), kj::mv(bindings));
+  auto result = js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings));
 
   // If the statement cache grew too big, drop the least-recently-used entry.
   while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
@@ -75,23 +92,26 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     KJ_ASSERT(statementCache.map.eraseMatch(oldQuery));
   }
 
-  userSpan.setTag("cloudflare.durable_object.response.rows_read"_kjc,
-      static_cast<int64_t>(result->getRowsRead()));
-  userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc,
-      static_cast<int64_t>(result->getRowsWritten()));
   return result;
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
-  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_ingest"_kjc);
+  auto& context = IoContext::current();
+  auto span = context.makeTraceSpan("durable_object_storage_ingest"_kjc);
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage_ingest"_kjc);
   SqliteDatabase::Regulator& regulator = *this;
   auto result = getDb(js).ingestSql(regulator, querySql);
+
+  span.setTag("rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
+  span.setTag("rows_written"_kjc, static_cast<int64_t>(result.rowsWritten));
+  span.setTag("statement_count"_kjc, static_cast<int64_t>(result.statementCount));
   userSpan.setTag(
       "cloudflare.durable_object.response.rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
   userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc,
       static_cast<int64_t>(result.rowsWritten));
   userSpan.setTag("cloudflare.durable_object.response.statement_count"_kjc,
       static_cast<int64_t>(result.statementCount));
+
   return IngestResult(
       kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
@@ -375,6 +395,11 @@ void SqlStorage::Cursor::endQuery(State& stateRef) {
   // Save off row counts before the query goes away.
   rowsRead = stateRef.query.getRowsRead();
   rowsWritten = stateRef.query.getRowsWritten();
+
+  KJ_IF_SOME(cb, doneCallback) {
+    cb(*this);
+    doneCallback = kj::none;
+  }
 
   // Clean up the query proactively.
   state = kj::none;

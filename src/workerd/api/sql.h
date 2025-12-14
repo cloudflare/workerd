@@ -179,7 +179,8 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 class SqlStorage::Cursor final: public jsg::Object {
  public:
   template <typename... Params>
-  Cursor(jsg::Lock& js, Params&&... params) {
+  Cursor(jsg::Lock& js, kj::Maybe<kj::Function<void(Cursor&)>> doneCb, Params&&... params)
+      : doneCallback(kj::mv(doneCb)) {
     auto stateObj = kj::heap<State>(kj::fwd<Params>(params)...);
     initColumnNames(js, *stateObj);
     if (stateObj->query.isDone()) {
@@ -258,6 +259,9 @@ class SqlStorage::Cursor final: public jsg::Object {
 
   // Nulled out when query is done or canceled.
   kj::Maybe<IoOwn<State>> state;
+
+  // Called when the query is done or canceled.
+  kj::Maybe<kj::Function<void(Cursor&)>> doneCallback;
 
   // True if the cursor was canceled by a new call to the same statement. This is used only to
   // flag an error if the application tries to reuse the cursor.
