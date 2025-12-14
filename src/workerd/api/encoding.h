@@ -95,9 +95,10 @@ class AsciiDecoder final: public Decoder {
 // of encodings required by the Encoding specification.
 class IcuDecoder final: public Decoder {
  public:
-  IcuDecoder(Encoding encoding, UConverter* converter, bool ignoreBom)
+  IcuDecoder(Encoding encoding, UConverter* converter, bool fatal, bool ignoreBom)
       : encoding(encoding),
         inner(converter),
+        fatal(fatal),
         ignoreBom(ignoreBom),
         bomSeen(false) {}
   IcuDecoder(IcuDecoder&&) = default;
@@ -124,6 +125,7 @@ class IcuDecoder final: public Decoder {
   Encoding encoding;
   std::unique_ptr<UConverter, ConverterDeleter> inner;
 
+  bool fatal;
   bool ignoreBom;
   bool bomSeen;
 };
