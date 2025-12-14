@@ -156,6 +156,7 @@ class DurableObjectNamespace: public jsg::Object {
         kj::Maybe<kj::String> locationHint,
         ActorGetMode mode,
         bool enableReplicaRouting,
+        kj::Maybe<kj::String> routingMode,
         SpanParent parentSpan) = 0;
   };
 
@@ -195,13 +196,22 @@ class DurableObjectNamespace: public jsg::Object {
 
   struct GetDurableObjectOptions {
     jsg::Optional<kj::String> locationHint;
+    // `routingMode` may be be of interest to applications using Durable Objects replicas. It can be
+    // one of the following options:
+    //    - none: the default, indicates we will pick for the application.
+    //    - "primary-only": guarantees we route directly to the primary (skip any replicas).
+    jsg::Optional<kj::String> routingMode;
 
-    JSG_STRUCT(locationHint);
+    JSG_STRUCT(locationHint, routingMode);
 
-    JSG_STRUCT_TS_DEFINE(type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me");
-    // Possible values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#providing-a-location-hint
+    // DurableObjectLocationHint values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#providing-a-location-hint
+    JSG_STRUCT_TS_DEFINE(
+      type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me";
+      type DurableObjectRoutingMode = "primary-only");
+
     JSG_STRUCT_TS_OVERRIDE({
       locationHint?: DurableObjectLocationHint;
+      routingMode?: DurableObjectRoutingMode;
     });
   };
 
@@ -270,12 +280,14 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       jsg::Ref<DurableObjectId> id,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
-      bool enableReplicaRouting)
+      bool enableReplicaRouting,
+      kj::Maybe<kj::String> routingMode)
       : channelIdOrFactory(kj::mv(channelIdOrFactory)),
         id(kj::mv(id)),
         locationHint(kj::mv(locationHint)),
         mode(mode),
-        enableReplicaRouting(enableReplicaRouting) {}
+        enableReplicaRouting(enableReplicaRouting),
+        routingMode(kj::mv(routingMode)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
 
@@ -285,6 +297,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Maybe<kj::String> locationHint;
   ActorGetMode mode;
   bool enableReplicaRouting;
+  kj::Maybe<kj::String> routingMode;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
