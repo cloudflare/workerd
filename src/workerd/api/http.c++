@@ -974,6 +974,42 @@ constexpr bool isRedirectStatusCode(uint statusCode) {
       return false;
   }
 }
+
+// Validates statusText per Fetch spec (byte string with code points 0x00-0xFF) and
+// RFC 7230 (HTAB, SP, VCHAR, obs-text). Since the string is UTF-8 encoded:
+// - 0x00-0x7F: single-byte, allow only 0x09 (HTAB), 0x20-0x7E (SP/VCHAR)
+// - 0xC2-0xC3 + continuation: 2-byte sequence for U+0080-U+00FF (obs-text), allowed
+// - Anything else: invalid (control chars, code points > U+00FF)
+//
+// Lookup table values: 0 = invalid, 1 = valid ASCII, 2 = 2-byte UTF-8 lead (C2/C3)
+static constexpr kj::FixedArray<uint8_t, 256> kStatusTextValidChars = []() consteval {
+  kj::FixedArray<uint8_t, 256> result{};
+  // 0x09 (HTAB) is valid
+  result[0x09] = 1;
+  // 0x20-0x7E (SP + VCHAR) are valid
+  for (uint8_t c = 0x20; c <= 0x7E; c++) {
+    result[c] = 1;
+  }
+  // 0xC2-0xC3 are 2-byte UTF-8 lead bytes for U+0080-U+00FF
+  result[0xC2] = 2;
+  result[0xC3] = 2;
+  return result;
+}();
+
+void validateStatusText(kj::StringPtr s) {
+  for (size_t i = 0; i < s.size(); i++) {
+    uint8_t v = kStatusTextValidChars[static_cast<uint8_t>(s[i])];
+    if (v == 2) {
+      // 2-byte UTF-8 lead (C2/C3): next byte must be continuation (0x80-0xBF)
+      if (++i >= s.size() || (static_cast<uint8_t>(s[i]) & 0xC0) != 0x80) {
+        JSG_FAIL_REQUIRE(TypeError, "Invalid statusText");
+      }
+    } else if (v == 0) {
+      JSG_FAIL_REQUIRE(TypeError, "Invalid statusText");
+    }
+  }
+}
+
 }  // namespace
 
 Response::Response(jsg::Lock& js,
@@ -996,8 +1032,11 @@ Response::Response(jsg::Lock& js,
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
 jsg::Ref<Response> Response::error(jsg::Lock& js) {
-  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(), CfProperty(), kj::none);
-};
+  // Per the spec, error responses must have immutable headers.
+  kj::HttpHeaders kjHeaders(IoContext::current().getHeaderTable());
+  auto headers = js.alloc<Headers>(js, kjHeaders, Headers::Guard::IMMUTABLE);
+  return js.alloc<Response>(js, 0, kj::none, kj::mv(headers), CfProperty(), kj::none);
+}
 
 jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
@@ -1079,15 +1118,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
   }
 
   KJ_IF_SOME(s, statusText) {
-    // Disallow control characters (especially \r and \n) in statusText since it could allow
-    // header injection.
-    //
-    // TODO(cleanup): Once this is deployed, update open-source KJ HTTP to do this automatically.
-    for (char c: s) {
-      if (static_cast<byte>(c) < 0x20u) {
-        JSG_FAIL_REQUIRE(TypeError, "Invalid statusText");
-      }
-    }
+    validateStatusText(s);
   }
 
   KJ_IF_SOME(bi, bodyInit) {
@@ -1313,13 +1344,13 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
     auto maybeLength = jsBody->tryGetLength(encoding);
     auto stream =
-        newSystemStream(outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding);
+        newSystemStream(outer.send(statusCode, getStatusTextForWireProtocol(), outHeaders, maybeLength), encoding);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
     return jsBody->pumpTo(js, kj::mv(stream), true);
   } else {
-    outer.send(statusCode, getStatusText(), outHeaders, static_cast<uint64_t>(0));
+    outer.send(statusCode, getStatusTextForWireProtocol(), outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
   }
 }
@@ -1328,6 +1359,13 @@ int Response::getStatus() {
   return statusCode;
 }
 kj::StringPtr Response::getStatusText() {
+  KJ_IF_SOME(text, statusText) {
+    return text;
+  }
+  return ""_kj;
+}
+
+kj::StringPtr Response::getStatusTextForWireProtocol() {
   KJ_IF_SOME(text, statusText) {
     return text;
   }
@@ -1927,9 +1965,11 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
   }
 
   // TODO(someday): Fill response CF blob from somewhere?
-  kj::Maybe<kj::String> maybeStatusText = statusText == defaultStatusText(statusCode)
-      ? kj::Maybe<kj::String>()
-      : kj::str(statusText);
+  // For HTTP responses, we always store the statusText from the server (unless empty).
+  // This ensures getStatusText() returns the actual server response.
+  kj::Maybe<kj::String> maybeStatusText = statusText.size() > 0
+      ? kj::str(statusText)
+      : kj::Maybe<kj::String>();
   return js.alloc<Response>(js, statusCode, kj::mv(maybeStatusText), kj::mv(responseHeaders),
       nullptr, kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket), bodyEncoding);
 }
@@ -1993,9 +2033,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
 
       auto headers = js.alloc<Headers>();
       headers->setCommon(capnp::CommonHeaderName::CONTENT_TYPE, dataUrl.getMimeType().toString());
+      // Per Fetch spec for data URLs, the statusText should be "OK".
+      // See https://fetch.spec.whatwg.org/#data-url-processor step 11.
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,
+            .statusText = kj::str("OK"),
             .headers = kj::mv(headers),
           }));
     }
