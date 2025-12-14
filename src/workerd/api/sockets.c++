@@ -286,6 +286,11 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   writable->getController().setPendingClosure();
   readable->getController().setPendingClosure();
 
+  // Cancel the disconnect watcher task. whenWriteDisconnected() is not guaranteed to return,
+  // so since we've closed the socket we might as well cancel waiting on it to avoid holding
+  // the IoContext open.
+  watchForDisconnectTask = nullptr;
+
   // Wait until the socket connects (successfully or otherwise)
   return openedPromiseCopy.whenResolved(js)
       .then(js,
@@ -490,6 +495,11 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // This code shouldn't even run since we don't set up a callback which calls it unless
   // `allowHalfOpen` is false.
   KJ_ASSERT(!getAllowHalfOpen(options));
+
+  // Cancel the disconnect watcher task. whenWriteDisconnected() is not guaranteed to return,
+  // so since we've closed the socket we might as well cancel waiting on it to avoid holding
+  // the IoContext open.
+  watchForDisconnectTask = nullptr;
 
   // Do not call `close` on a controller that has already been closed or is in the process
   // of closing.
