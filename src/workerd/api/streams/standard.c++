@@ -2675,15 +2675,23 @@ class AllReader {
   jsg::Promise<jsg::BufferSource> allBytes(jsg::Lock& js) {
     return loop(js).then(js, [this](auto& js, PartList&& partPtrs) -> jsg::BufferSource {
       auto out = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, runningTotal);
-      copyInto(out.asArrayPtr(), kj::mv(partPtrs));
+      copyInto(out.asArrayPtr(), partPtrs.asPtr());
       return jsg::BufferSource(js, kj::mv(out));
     });
   }
 
-  jsg::Promise<kj::String> allText(jsg::Lock& js) {
-    return loop(js).then(js, [this](auto& js, PartList&& partPtrs) {
+  jsg::Promise<kj::String> allText(
+      jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
+    return loop(js).then(js, [this, option](auto& js, PartList&& partPtrs) {
+      // Strip UTF-8 BOM if requested
+      if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
+          hasUtf8Bom(partPtrs[0])) {
+        partPtrs[0] = partPtrs[0].slice(UTF8_BOM_SIZE);
+        runningTotal -= UTF8_BOM_SIZE;
+      }
+
       auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(out.first(out.size() - 1).asBytes(), kj::mv(partPtrs));
+      copyInto(out.first(out.size() - 1).asBytes(), partPtrs.asPtr());
       out.back() = '\0';
       return kj::String(kj::mv(out));
     });
@@ -2771,7 +2779,7 @@ class AllReader {
     KJ_UNREACHABLE;
   }
 
-  void copyInto(kj::ArrayPtr<byte> out, PartList in) {
+  void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
     for (auto& part: in) {
       KJ_ASSERT(part.size() <= out.size());
       out.first(part.size()).copyFrom(part);
@@ -3054,18 +3062,29 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
   }
   disturbed = true;
 
+  bool stripBom = false;
+  KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+    stripBom = flags.getStripBomInReadAllText();
+  }
+
   // This operation leaves the stream locked and disturbed. The loop will read until
   // the stream is closed or errored. If the limit is reached, the loop will error.
 
-  const auto readAll = [this, limit](auto& js) -> jsg::Promise<T> {
+  const auto readAll = [this, limit, stripBom](auto& js) -> jsg::Promise<T> {
     KJ_ASSERT(lock.lock());
     // The AllReader will hold a traceable reference to the ReadableStream.
     auto reader = kj::heap<AllReader>(addRef(), limit);
-    auto promise = ([&js, &reader]() -> jsg::Promise<T> {
+
+    auto promise = ([&js, &reader, stripBom]() -> jsg::Promise<T> {
       if constexpr (kj::isSameType<T, jsg::BufferSource>()) {
+        (void)stripBom;  // Unused in this branch.
         return reader->allBytes(js);
       } else {
-        return reader->allText(js);
+        auto option = ReadAllTextOption::NULL_TERMINATE;
+        if (stripBom) {
+          option |= ReadAllTextOption::STRIP_BOM;
+        }
+        return reader->allText(js, option);
       }
     })();
 
