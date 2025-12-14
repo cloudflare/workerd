@@ -342,14 +342,7 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
-  MessageChannel: typeof MessageChannel;
-  MessagePort: typeof MessagePort;
   EventSource: typeof EventSource;
-  ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
-  ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
-  ReadableByteStreamController: typeof ReadableByteStreamController;
-  WritableStreamDefaultController: typeof WritableStreamDefaultController;
-  TransformStreamDefaultController: typeof TransformStreamDefaultController;
   CompressionStream: typeof CompressionStream;
   DecompressionStream: typeof DecompressionStream;
   TextEncoderStream: typeof TextEncoderStream;
@@ -365,8 +358,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   AbortSignal: typeof AbortSignal;
   TextDecoder: typeof TextDecoder;
   TextEncoder: typeof TextEncoder;
-  navigator: Navigator;
-  Navigator: typeof Navigator;
   URL: typeof URL;
   URLSearchParams: typeof URLSearchParams;
   URLPattern: typeof URLPattern;
@@ -472,12 +463,10 @@ declare const scheduler: Scheduler;
 declare const performance: Performance;
 declare const Cloudflare: Cloudflare;
 declare const origin: string;
-declare const navigator: Navigator;
 interface TestController {}
 interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
-  readonly exports: Cloudflare.Exports;
   readonly props: Props;
 }
 type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
@@ -531,13 +520,6 @@ interface ExportedHandler<
 }
 interface StructuredSerializeOptions {
   transfer?: any[];
-}
-declare abstract class Navigator {
-  sendBeacon(url: string, body?: BodyInit): boolean;
-  readonly userAgent: string;
-  readonly hardwareConcurrency: number;
-  readonly language: string;
-  readonly languages: string[];
 }
 interface AlarmInvocationInfo {
   readonly isRetry: boolean;
@@ -617,7 +599,6 @@ interface DurableObjectClass<
 > {}
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
-  readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
@@ -756,89 +737,82 @@ declare class Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/type)
    */
-  get type(): string;
+  readonly type: string;
   /**
    * The **`eventPhase`** read-only property of the being evaluated.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/eventPhase)
    */
-  get eventPhase(): number;
+  readonly eventPhase: number;
   /**
    * The read-only **`composed`** property of the or not the event will propagate across the shadow DOM boundary into the standard DOM.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/composed)
    */
-  get composed(): boolean;
+  readonly composed: boolean;
   /**
    * The **`bubbles`** read-only property of the Event interface indicates whether the event bubbles up through the DOM tree or not.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/bubbles)
    */
-  get bubbles(): boolean;
+  readonly bubbles: boolean;
   /**
    * The **`cancelable`** read-only property of the Event interface indicates whether the event can be canceled, and therefore prevented as if the event never happened.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelable)
    */
-  get cancelable(): boolean;
+  readonly cancelable: boolean;
   /**
    * The **`defaultPrevented`** read-only property of the Event interface returns a boolean value indicating whether or not the call to Event.preventDefault() canceled the event.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/defaultPrevented)
    */
-  get defaultPrevented(): boolean;
+  readonly defaultPrevented: boolean;
   /**
    * The Event property **`returnValue`** indicates whether the default action for this event has been prevented or not.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
    */
-  get returnValue(): boolean;
+  readonly returnValue: boolean;
   /**
    * The **`currentTarget`** read-only property of the Event interface identifies the element to which the event handler has been attached.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/currentTarget)
    */
-  get currentTarget(): EventTarget | undefined;
+  readonly currentTarget?: EventTarget;
   /**
    * The read-only **`target`** property of the dispatched.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
    */
-  get target(): EventTarget | undefined;
+  readonly target?: EventTarget;
   /**
    * The deprecated **`Event.srcElement`** is an alias for the Event.target property.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/srcElement)
    */
-  get srcElement(): EventTarget | undefined;
+  readonly srcElement: EventTarget | null;
   /**
    * The **`timeStamp`** read-only property of the Event interface returns the time (in milliseconds) at which the event was created.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/timeStamp)
    */
-  get timeStamp(): number;
+  readonly timeStamp: number;
   /**
    * The **`isTrusted`** read-only property of the when the event was generated by the user agent (including via user actions and programmatic methods such as HTMLElement.focus()), and `false` when the event was dispatched via The only exception is the `click` event, which initializes the `isTrusted` property to `false` in user agents.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/isTrusted)
    */
-  get isTrusted(): boolean;
+  readonly isTrusted: boolean;
   /**
    * The **`cancelBubble`** property of the Event interface is deprecated.
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelBubble)
    */
-  get cancelBubble(): boolean;
-  /**
-   * The **`cancelBubble`** property of the Event interface is deprecated.
-   * @deprecated
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelBubble)
-   */
-  set cancelBubble(value: boolean);
+  cancelBubble: boolean;
   /**
    * The **`stopImmediatePropagation()`** method of the If several listeners are attached to the same element for the same event type, they are called in the order in which they were added.
    *
@@ -942,7 +916,7 @@ declare class AbortController {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortController/signal)
    */
-  get signal(): AbortSignal;
+  readonly signal: AbortSignal;
   /**
    * The **`abort()`** method of the AbortController interface aborts an asynchronous operation before it has completed.
    *
@@ -979,13 +953,13 @@ declare abstract class AbortSignal extends EventTarget {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/aborted)
    */
-  get aborted(): boolean;
+  readonly aborted: boolean;
   /**
    * The **`reason`** read-only property returns a JavaScript value that indicates the abort reason.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/reason)
    */
-  get reason(): any;
+  readonly reason: any;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_event) */
   get onabort(): any | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_event) */
@@ -1051,13 +1025,13 @@ declare class Blob {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/size)
    */
-  get size(): number;
+  readonly size: number;
   /**
    * The **`type`** read-only property of the Blob interface returns the MIME type of the file.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/type)
    */
-  get type(): string;
+  readonly type: string;
   /**
    * The **`slice()`** method of the Blob interface creates and returns a new `Blob` object which contains data from a subset of the blob on which it's called.
    *
@@ -1108,13 +1082,13 @@ declare class File extends Blob {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/name)
    */
-  get name(): string;
+  readonly name: string;
   /**
    * The **`lastModified`** read-only property of the File interface provides the last modified date of the file as the number of milliseconds since the Unix epoch (January 1, 1970 at midnight).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/lastModified)
    */
-  get lastModified(): number;
+  readonly lastModified: number;
 }
 interface FileOptions {
   type?: string;
@@ -1171,7 +1145,7 @@ declare abstract class Crypto {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/subtle)
    */
-  get subtle(): SubtleCrypto;
+  readonly subtle: SubtleCrypto;
   /**
    * The **`Crypto.getRandomValues()`** method lets you get cryptographically strong random values.
    *
@@ -1493,9 +1467,9 @@ declare class TextDecoder {
     input?: ArrayBuffer | ArrayBufferView,
     options?: TextDecoderDecodeOptions,
   ): string;
-  get encoding(): string;
-  get fatal(): boolean;
-  get ignoreBOM(): boolean;
+  readonly encoding: string;
+  readonly fatal: boolean;
+  readonly ignoreBOM: boolean;
 }
 /**
  * The **`TextEncoder`** interface takes a stream of code points as input and emits a stream of UTF-8 bytes.
@@ -1516,7 +1490,7 @@ declare class TextEncoder {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder/encodeInto)
    */
   encodeInto(input: string, buffer: Uint8Array): TextEncoderEncodeIntoResult;
-  get encoding(): string;
+  readonly encoding: string;
 }
 interface TextDecoderConstructorOptions {
   fatal: boolean;
@@ -1851,12 +1825,6 @@ declare class Headers {
   get(name: string): string | null;
   getAll(name: string): string[];
   /**
-   * The **`getSetCookie()`** method of the Headers interface returns an array containing the values of all Set-Cookie headers associated with a response.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie)
-   */
-  getSetCookie(): string[];
-  /**
    * The **`has()`** method of the Headers interface returns a boolean stating whether a `Headers` object contains a certain header.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has)
@@ -1899,14 +1867,12 @@ type BodyInit =
   | ArrayBufferView
   | Blob
   | URLSearchParams
-  | FormData
-  | Iterable<ArrayBuffer | ArrayBufferView>
-  | AsyncIterable<ArrayBuffer | ArrayBufferView>;
+  | FormData;
 declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
-  get body(): ReadableStream | null;
+  readonly body: ReadableStream | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bodyUsed) */
-  get bodyUsed(): boolean;
+  readonly bodyUsed: boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/arrayBuffer) */
   arrayBuffer(): Promise<ArrayBuffer>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bytes) */
@@ -1949,39 +1915,39 @@ interface Response extends Body {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/status)
    */
-  status: number;
+  readonly status: number;
   /**
    * The **`statusText`** read-only property of the Response interface contains the status message corresponding to the HTTP status code in Response.status.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/statusText)
    */
-  statusText: string;
+  readonly statusText: string;
   /**
    * The **`headers`** read-only property of the with the response.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/headers)
    */
-  headers: Headers;
+  readonly headers: Headers;
   /**
    * The **`ok`** read-only property of the Response interface contains a Boolean stating whether the response was successful (status in the range 200-299) or not.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/ok)
    */
-  ok: boolean;
+  readonly ok: boolean;
   /**
    * The **`redirected`** read-only property of the Response interface indicates whether or not the response is the result of a request you made which was redirected.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/redirected)
    */
-  redirected: boolean;
+  readonly redirected: boolean;
   /**
    * The **`url`** read-only property of the Response interface contains the URL of the response.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/url)
    */
-  url: string;
-  webSocket: WebSocket | null;
-  cf: any | undefined;
+  readonly url: string;
+  readonly webSocket: WebSocket | null;
+  readonly cf?: any;
   /**
    * The **`type`** read-only property of the Response interface contains the type of the response.
    *
@@ -2030,51 +1996,45 @@ interface Request<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/method)
    */
-  method: string;
+  readonly method: string;
   /**
    * The **`url`** read-only property of the Request interface contains the URL of the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/url)
    */
-  url: string;
+  readonly url: string;
   /**
    * The **`headers`** read-only property of the with the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/headers)
    */
-  headers: Headers;
+  readonly headers: Headers;
   /**
    * The **`redirect`** read-only property of the Request interface contains the mode for how redirects are handled.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/redirect)
    */
-  redirect: string;
-  fetcher: Fetcher | null;
+  readonly redirect: string;
+  readonly fetcher: Fetcher | null;
   /**
    * The read-only **`signal`** property of the Request interface returns the AbortSignal associated with the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/signal)
    */
-  signal: AbortSignal;
-  cf: Cf | undefined;
+  readonly signal: AbortSignal;
+  readonly cf?: Cf;
   /**
    * The **`integrity`** read-only property of the Request interface contains the subresource integrity value of the request.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/integrity)
    */
-  integrity: string;
+  readonly integrity: string;
   /**
    * The **`keepalive`** read-only property of the Request interface contains the request's `keepalive` setting (`true` or `false`), which indicates whether the browser will keep the associated request alive if the page that initiated it is unloaded before the request is complete.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
    */
-  keepalive: boolean;
-  /**
-   * The **`cache`** read-only property of the Request interface contains the cache mode of the request.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
-   */
-  cache?: "no-store" | "no-cache";
+  readonly keepalive: boolean;
 }
 interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -2087,8 +2047,6 @@ interface RequestInit<Cf = CfProperties> {
   redirect?: string;
   fetcher?: Fetcher | null;
   cf?: Cf;
-  /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store" | "no-cache";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
@@ -2117,6 +2075,10 @@ type Fetcher<
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   connect(address: SocketAddress | string, options?: SocketOptions): Socket;
 };
+interface FetcherPutOptions {
+  expiration?: number;
+  expirationTtl?: number;
+}
 interface KVNamespaceListKey<Metadata, Key extends string = string> {
   name: Key;
   expiration?: number;
@@ -2324,7 +2286,6 @@ interface R2ListOptions {
   cursor?: string;
   delimiter?: string;
   startAfter?: string;
-  include?: ("httpMetadata" | "customMetadata")[];
 }
 declare abstract class R2Bucket {
   head(key: string): Promise<R2Object | null>;
@@ -2637,7 +2598,7 @@ interface ReadableStream<R = any> {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/locked)
    */
-  get locked(): boolean;
+  readonly locked: boolean;
   /**
    * The **`cancel()`** method of the ReadableStream interface returns a Promise that resolves when the stream is canceled.
    *
@@ -2708,7 +2669,7 @@ declare const ReadableStream: {
  */
 declare class ReadableStreamDefaultReader<R = any> {
   constructor(stream: ReadableStream);
-  get closed(): Promise<void>;
+  readonly closed: Promise<void>;
   cancel(reason?: any): Promise<void>;
   /**
    * The **`read()`** method of the ReadableStreamDefaultReader interface returns a Promise providing access to the next chunk in the stream's internal queue.
@@ -2730,7 +2691,7 @@ declare class ReadableStreamDefaultReader<R = any> {
  */
 declare class ReadableStreamBYOBReader {
   constructor(stream: ReadableStream);
-  get closed(): Promise<void>;
+  readonly closed: Promise<void>;
   cancel(reason?: any): Promise<void>;
   /**
    * The **`read()`** method of the ReadableStreamBYOBReader interface is used to read data into a view on a user-supplied buffer from an associated readable byte stream.
@@ -2767,7 +2728,7 @@ interface ReadableStreamGetReaderOptions {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest)
  */
-declare abstract class ReadableStreamBYOBRequest {
+interface ReadableStreamBYOBRequest {
   /**
    * The **`view`** getter property of the ReadableStreamBYOBRequest interface returns the current view.
    *
@@ -2793,7 +2754,7 @@ declare abstract class ReadableStreamBYOBRequest {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController)
  */
-declare abstract class ReadableStreamDefaultController<R = any> {
+interface ReadableStreamDefaultController<R = any> {
   /**
    * The **`desiredSize`** read-only property of the required to fill the stream's internal queue.
    *
@@ -2824,7 +2785,7 @@ declare abstract class ReadableStreamDefaultController<R = any> {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController)
  */
-declare abstract class ReadableByteStreamController {
+interface ReadableByteStreamController {
   /**
    * The **`byobRequest`** read-only property of the ReadableByteStreamController interface returns the current BYOB request, or `null` if there are no pending requests.
    *
@@ -2861,7 +2822,7 @@ declare abstract class ReadableByteStreamController {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController)
  */
-declare abstract class WritableStreamDefaultController {
+interface WritableStreamDefaultController {
   /**
    * The read-only **`signal`** property of the WritableStreamDefaultController interface returns the AbortSignal associated with the controller.
    *
@@ -2880,7 +2841,7 @@ declare abstract class WritableStreamDefaultController {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController)
  */
-declare abstract class TransformStreamDefaultController<O = any> {
+interface TransformStreamDefaultController<O = any> {
   /**
    * The **`desiredSize`** read-only property of the TransformStreamDefaultController interface returns the desired size to fill the queue of the associated ReadableStream.
    *
@@ -2930,7 +2891,7 @@ declare class WritableStream<W = any> {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/locked)
    */
-  get locked(): boolean;
+  readonly locked: boolean;
   /**
    * The **`abort()`** method of the WritableStream interface aborts the stream, signaling that the producer can no longer successfully write to the stream and it is to be immediately moved to an error state, with any queued writes discarded.
    *
@@ -2962,19 +2923,19 @@ declare class WritableStreamDefaultWriter<W = any> {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/closed)
    */
-  get closed(): Promise<void>;
+  readonly closed: Promise<void>;
   /**
    * The **`ready`** read-only property of the that resolves when the desired size of the stream's internal queue transitions from non-positive to positive, signaling that it is no longer applying backpressure.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/ready)
    */
-  get ready(): Promise<void>;
+  readonly ready: Promise<void>;
   /**
    * The **`desiredSize`** read-only property of the to fill the stream's internal queue.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/desiredSize)
    */
-  get desiredSize(): number | null;
+  readonly desiredSize: number | null;
   /**
    * The **`abort()`** method of the the producer can no longer successfully write to the stream and it is to be immediately moved to an error state, with any queued writes discarded.
    *
@@ -3016,13 +2977,13 @@ declare class TransformStream<I = any, O = any> {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/readable)
    */
-  get readable(): ReadableStream<O>;
+  readonly readable: ReadableStream<O>;
   /**
    * The **`writable`** read-only property of the TransformStream interface returns the WritableStream instance controlled by this `TransformStream`.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/writable)
    */
-  get writable(): WritableStream<I>;
+  readonly writable: WritableStream<I>;
 }
 declare class FixedLengthStream extends IdentityTransformStream {
   constructor(
@@ -3260,169 +3221,85 @@ interface UnsafeTraceMetrics {
 declare class URL {
   constructor(url: string | URL, base?: string | URL);
   /**
+   * The **`href`** property of the URL interface is a string containing the whole URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
+   */
+  href: string;
+  /**
    * The **`origin`** read-only property of the URL interface returns a string containing the Unicode serialization of the origin of the represented URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin)
    */
-  get origin(): string;
-  /**
-   * The **`href`** property of the URL interface is a string containing the whole URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
-   */
-  get href(): string;
-  /**
-   * The **`href`** property of the URL interface is a string containing the whole URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
-   */
-  set href(value: string);
+  readonly origin: string;
   /**
    * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final `':'`.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
    */
-  get protocol(): string;
-  /**
-   * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final `':'`.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol)
-   */
-  set protocol(value: string);
+  protocol: string;
   /**
    * The **`username`** property of the URL interface is a string containing the username component of the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
    */
-  get username(): string;
-  /**
-   * The **`username`** property of the URL interface is a string containing the username component of the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username)
-   */
-  set username(value: string);
+  username: string;
   /**
    * The **`password`** property of the URL interface is a string containing the password component of the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
    */
-  get password(): string;
-  /**
-   * The **`password`** property of the URL interface is a string containing the password component of the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password)
-   */
-  set password(value: string);
+  password: string;
   /**
    * The **`host`** property of the URL interface is a string containing the host, which is the URL.hostname, and then, if the port of the URL is nonempty, a `':'`, followed by the URL.port of the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
    */
-  get host(): string;
-  /**
-   * The **`host`** property of the URL interface is a string containing the host, which is the URL.hostname, and then, if the port of the URL is nonempty, a `':'`, followed by the URL.port of the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host)
-   */
-  set host(value: string);
+  host: string;
   /**
    * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
    */
-  get hostname(): string;
-  /**
-   * The **`hostname`** property of the URL interface is a string containing either the domain name or IP address of the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname)
-   */
-  set hostname(value: string);
+  hostname: string;
   /**
    * The **`port`** property of the URL interface is a string containing the port number of the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
    */
-  get port(): string;
-  /**
-   * The **`port`** property of the URL interface is a string containing the port number of the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port)
-   */
-  set port(value: string);
+  port: string;
   /**
    * The **`pathname`** property of the URL interface represents a location in a hierarchical structure.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
    */
-  get pathname(): string;
-  /**
-   * The **`pathname`** property of the URL interface represents a location in a hierarchical structure.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname)
-   */
-  set pathname(value: string);
+  pathname: string;
   /**
    * The **`search`** property of the URL interface is a search string, also called a _query string_, that is a string containing a `'?'` followed by the parameters of the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
    */
-  get search(): string;
-  /**
-   * The **`search`** property of the URL interface is a search string, also called a _query string_, that is a string containing a `'?'` followed by the parameters of the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search)
-   */
-  set search(value: string);
-  /**
-   * The **`hash`** property of the URL interface is a string containing a `'#'` followed by the fragment identifier of the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
-   */
-  get hash(): string;
-  /**
-   * The **`hash`** property of the URL interface is a string containing a `'#'` followed by the fragment identifier of the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
-   */
-  set hash(value: string);
+  search: string;
   /**
    * The **`searchParams`** read-only property of the access to the [MISSING: httpmethod('GET')] decoded query arguments contained in the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
    */
-  get searchParams(): URLSearchParams;
+  readonly searchParams: URLSearchParams;
+  /**
+   * The **`hash`** property of the URL interface is a string containing a `'#'` followed by the fragment identifier of the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
+   */
+  hash: string;
+  /*function toString() { [native code] }*/
+  toString(): string;
   /**
    * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as ```js-nolint toJSON() ``` None.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON)
    */
   toJSON(): string;
-  /*function toString() { [native code] }*/
-  toString(): string;
-  /**
-   * The **`URL.canParse()`** static method of the URL interface returns a boolean indicating whether or not an absolute URL, or a relative URL combined with a base URL, are parsable and valid.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static)
-   */
-  static canParse(url: string, base?: string): boolean;
-  /**
-   * The **`URL.parse()`** static method of the URL interface returns a newly created URL object representing the URL defined by the parameters.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static)
-   */
-  static parse(url: string, base?: string): URL | null;
-  /**
-   * The **`createObjectURL()`** static method of the URL interface creates a string containing a URL representing the object given in the parameter.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static)
-   */
-  static createObjectURL(object: File | Blob): string;
-  /**
-   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling Call this method when you've finished using an object URL to let the browser know not to keep the reference to the file any longer.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static)
-   */
-  static revokeObjectURL(object_url: string): void;
 }
 /**
  * The **`URLSearchParams`** interface defines utility methods to work with the query string of a URL.
@@ -3431,7 +3308,11 @@ declare class URL {
  */
 declare class URLSearchParams {
   constructor(
-    init?: Iterable<Iterable<string>> | Record<string, string> | string,
+    init?:
+      | URLSearchParams
+      | string
+      | Record<string, string>
+      | [key: string, value: string][],
   );
   /**
    * The **`size`** read-only property of the URLSearchParams interface indicates the total number of search parameter entries.
@@ -3450,7 +3331,7 @@ declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
    */
-  delete(name: string, value?: string): void;
+  delete(name: string): void;
   /**
    * The **`get()`** method of the URLSearchParams interface returns the first value associated to the given search parameter.
    *
@@ -3468,7 +3349,7 @@ declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
    */
-  has(name: string, value?: string): boolean;
+  has(name: string): boolean;
   /**
    * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value.
    *
@@ -3514,7 +3395,6 @@ declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
-  get hasRegExpGroups(): boolean;
   test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
     input?: string | URLPatternInit,
@@ -3630,25 +3510,25 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/readyState)
    */
-  readyState: number;
+  readonly readyState: number;
   /**
    * The **`WebSocket.url`** read-only property returns the absolute URL of the WebSocket as resolved by the constructor.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/url)
    */
-  url: string | null;
+  readonly url: string | null;
   /**
    * The **`WebSocket.protocol`** read-only property returns the name of the sub-protocol the server selected; this will be one of the strings specified in the `protocols` parameter when creating the WebSocket object, or the empty string if no connection is established.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/protocol)
    */
-  protocol: string | null;
+  readonly protocol: string | null;
   /**
    * The **`WebSocket.extensions`** read-only property returns the extensions selected by the server.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/extensions)
    */
-  extensions: string | null;
+  readonly extensions: string | null;
 }
 declare const WebSocketPair: {
   new (): {
@@ -3785,7 +3665,7 @@ interface ContainerStartupOptions {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
  */
-declare abstract class MessagePort extends EventTarget {
+interface MessagePort extends EventTarget {
   /**
    * The **`postMessage()`** method of the transfers ownership of objects to other browsing contexts.
    *
@@ -3809,26 +3689,6 @@ declare abstract class MessagePort extends EventTarget {
   start(): void;
   get onmessage(): any | null;
   set onmessage(value: any | null);
-}
-/**
- * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
- */
-declare class MessageChannel {
-  constructor();
-  /**
-   * The **`port1`** read-only property of the the port attached to the context that originated the channel.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
-   */
-  readonly port1: MessagePort;
-  /**
-   * The **`port2`** read-only property of the the port attached to the context at the other end of the channel, which the message is initially sent to.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
-   */
-  readonly port2: MessagePort;
 }
 interface MessagePortPostMessageOptions {
   transfer?: any[];
@@ -3882,7 +3742,7 @@ interface WorkerStubEntrypointOptions {
 }
 interface WorkerLoader {
   get(
-    name: string | null,
+    name: string,
     getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
   ): WorkerStub;
 }
@@ -9378,7 +9238,7 @@ type AiOptions = {
    * Maximum 5 tags are allowed each request.
    * Duplicate tags will removed.
    */
-  tags?: string[];
+  tags: string[];
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
