@@ -41,9 +41,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.1.1",
+    version = "2.1.2",
     deps = [
-        "@crates_vendor__icu_properties_data-2.1.1//:build_script_build",
+        "@crates_vendor__icu_properties_data-2.1.2//:build_script_build",
     ],
 )
 
@@ -92,7 +92,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.1.1",
+    version = "2.1.2",
     visibility = ["//visibility:private"],
 )
 
