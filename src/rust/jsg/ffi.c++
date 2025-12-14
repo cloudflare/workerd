@@ -1,8 +1,10 @@
 #include "ffi.h"
 
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/rust/jsg/ffi-inl.h>
+#include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
 #include <kj/common.h>
@@ -84,7 +86,7 @@ kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object
 }
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl) {
   auto self = reinterpret_cast<void*>(resource);
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
@@ -121,9 +123,9 @@ size_t unwrap_resource(Isolate* isolate, Local value) {
 }
 
 // Global<T>
-
-void global_drop(Global value) {
-  global_from_ffi<v8::Value>(kj::mv(value));
+void global_reset(Global* value) {
+  auto* glbl = global_as_ref_from_ffi<v8::Value>(*value);
+  glbl->Reset();
 }
 
 Global global_clone(const Global& value) {
@@ -136,12 +138,14 @@ Local global_to_local(Isolate* isolate, const Global& value) {
   return to_ffi(kj::mv(local));
 }
 
-void global_make_weak(Isolate* isolate, Global* value, size_t data, WeakCallback callback) {
-  // callback is unused; GC-based cleanup not yet implemented.
-  // Cleanup happens in Realm::drop() during context disposal.
+void global_make_weak(Isolate* isolate, Global* value, size_t data) {
   auto glbl = global_as_ref_from_ffi<v8::Object>(*value);
+  // Pass the State pointer directly to V8's weak callback.
+  // When GC collects the object, we call back into Rust's invoke_weak_drop
+  // which reads the drop_fn from the State and invokes it.
   glbl->SetWeak(reinterpret_cast<void*>(data), [](const v8::WeakCallbackInfo<void>& info) {
-    KJ_UNIMPLEMENTED("global_make_weak");
+    auto state = reinterpret_cast<size_t>(info.GetParameter());
+    invoke_weak_drop(state);
   }, v8::WeakCallbackType::kParameter);
 }
 
@@ -244,9 +248,10 @@ Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
 }
 
 Realm* realm_from_isolate(Isolate* isolate) {
-  auto realm = ::workerd::jsg::getAlignedPointerFromEmbedderData<Realm>(
-      isolate->GetCurrentContext(), ::workerd::jsg::ContextPointerSlot::RUST_REALM);
-  return &KJ_ASSERT_NONNULL(realm);
+  auto* realm =
+      static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
+  KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
+  return realm;
 }
 
 // Errors

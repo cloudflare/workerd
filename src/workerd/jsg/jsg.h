@@ -777,6 +777,8 @@ enum SetDataIndex {
   // The address of the base of the 4Gbyte compressed pointer area.
   // If we are using the sandbox it's also the base of the sandbox.
   SET_DATA_CAGE_BASE,
+  // Used by JSG<->Rust integration.
+  SET_DATA_RUST_REALM,
   // The number of slots workerd uses in the API data for Isolate objects.
   SET_DATA_SLOTS_IN_USE,
 };

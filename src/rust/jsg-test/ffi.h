@@ -1,5 +1,7 @@
 #pragma once
 
+#include <workerd/rust/jsg/v8.rs.h>
+
 #include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 #include <v8.h>
@@ -24,9 +26,15 @@ class TestHarness {
 
  private:
   mutable kj::Own<TestIsolate> isolate;
+  mutable v8::Locker locker;
+  mutable v8::Isolate::Scope isolateScope;
+  mutable ::rust::Box<::workerd::rust::jsg::Realm> realm;
 };
 
 kj::Own<TestHarness> create_test_harness();
+
+// Triggers a full garbage collection for testing purposes.
+void request_gc(Isolate* isolate);
 
 }  // namespace rust::jsg_test
 

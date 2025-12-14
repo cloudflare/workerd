@@ -60,14 +60,16 @@ pub mod ffi {
         ) -> KjMaybe<Local>;
 
         // Global<T>
-        pub unsafe fn global_drop(value: Global);
+        pub unsafe fn global_reset(value: *mut Global);
         pub unsafe fn global_clone(value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
+        /// Makes the global handle weak. The `data` parameter should be a pointer to a
+        /// resource::State struct. When V8 GC collects the object, the weak callback will
+        /// retrieve the drop_fn from the State and invoke it.
         pub unsafe fn global_make_weak(
             isolate: *mut Isolate,
             value: *mut Global,
-            data: usize, /* void* */
-            callback: unsafe fn(isolate: *mut Isolate, data: usize) -> (),
+            data: usize, /* *mut State */
         );
 
         // Unwrappers
@@ -125,13 +127,22 @@ pub mod ffi {
             isolate: *mut Isolate,
             resource: usize,      /* R* */
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-            drop_callback: usize, /* R* -> () */
         ) -> Local /* v8::Local<Value> */;
 
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> usize /* R* */;
+    }
+
+    /// Module visibility level, mirroring workerd::jsg::ModuleType from modules.capnp.
+    ///
+    /// CXX shared enums cannot reference existing C++ enums, so we define matching values here.
+    /// The conversion to workerd::jsg::ModuleType happens in jsg.h's RustModuleRegistry.
+    enum ModuleType {
+        Bundle = 0,
+        Builtin = 1,
+        Internal = 2,
     }
 
     unsafe extern "C++" {
@@ -141,6 +152,7 @@ pub mod ffi {
             registry: Pin<&mut ModuleRegistry>,
             specifier: &str,
             callback: unsafe fn(*mut Isolate) -> Local,
+            module_type: ModuleType,
         );
     }
 }
@@ -238,7 +250,7 @@ impl<T> Clone for Local<'_, T> {
 // Value-specific implementations
 impl<'a> Local<'a, Value> {
     pub fn to_global(self, lock: &'a mut Lock) -> Global<Value> {
-        unsafe { ffi::local_to_global(lock.isolate(), self.into_ffi()).into() }
+        unsafe { ffi::local_to_global(lock.isolate().as_ptr(), self.into_ffi()).into() }
     }
 }
 
@@ -265,12 +277,17 @@ impl<'a> From<Local<'a, FunctionTemplate>> for Local<'a, Value> {
 impl<'a> Local<'a, Object> {
     pub fn set(&mut self, lock: &mut Lock, key: &str, value: Local<'a, Value>) {
         unsafe {
-            ffi::local_object_set_property(lock.isolate(), &mut self.handle, key, value.into_ffi());
+            ffi::local_object_set_property(
+                lock.isolate().as_ptr(),
+                &mut self.handle,
+                key,
+                value.into_ffi(),
+            );
         }
     }
 
     pub fn has(&self, lock: &mut Lock, key: &str) -> bool {
-        unsafe { ffi::local_object_has_property(lock.isolate(), &self.handle, key) }
+        unsafe { ffi::local_object_has_property(lock.isolate().as_ptr(), &self.handle, key) }
     }
 
     pub fn get(&self, lock: &mut Lock, key: &str) -> Option<Local<'a, Value>> {
@@ -279,9 +296,10 @@ impl<'a> Local<'a, Object> {
         }
 
         unsafe {
-            let maybe_local = ffi::local_object_get_property(lock.isolate(), &self.handle, key);
+            let maybe_local =
+                ffi::local_object_get_property(lock.isolate().as_ptr(), &self.handle, key);
             let opt_local: Option<ffi::Local> = maybe_local.into();
-            opt_local.map(|local| Local::from_ffi(lock.isolate(), local))
+            opt_local.map(|local| Local::from_ffi(lock.isolate().as_ptr(), local))
         }
     }
 }
@@ -322,28 +340,37 @@ impl<T> Global<T> {
     pub fn as_local<'a>(&self, lock: &mut Lock) -> Local<'a, FunctionTemplate> {
         unsafe {
             Local::from_ffi(
-                lock.isolate(),
-                ffi::global_to_local(lock.isolate(), &self.handle),
+                lock.isolate().as_ptr(),
+                ffi::global_to_local(lock.isolate().as_ptr(), &self.handle),
             )
         }
     }
 
-    /// Makes this global handle weak, allowing V8 to garbage collect the object
-    /// and invoke the callback when the object is being collected.
+    /// Makes this global handle weak, allowing V8 to garbage collect the object.
+    ///
+    /// When V8's garbage collector determines the object is no longer reachable,
+    /// it will invoke the weak callback which retrieves the `drop_fn` from the
+    /// `State` struct pointed to by `data` and calls it to clean up the resource.
     ///
     /// # Safety
     /// The caller must ensure:
     /// - `isolate` is a valid pointer to a V8 isolate
-    /// - `data` encodes a value that remains valid until the callback is invoked
-    /// - `callback` can safely handle the provided data value
-    pub unsafe fn make_weak(
-        &mut self,
-        isolate: *mut ffi::Isolate,
-        data: *mut c_void,
-        callback: fn(*mut ffi::Isolate, usize) -> (),
-    ) {
+    /// - `data` points to a valid `resource::State` struct that remains valid until
+    ///   the weak callback is invoked
+    /// - The `State::drop_fn` field is properly initialized
+    pub unsafe fn make_weak(&mut self, isolate: *mut ffi::Isolate, data: *mut c_void) {
         unsafe {
-            ffi::global_make_weak(isolate, &raw mut self.handle, data as usize, callback);
+            ffi::global_make_weak(isolate, &raw mut self.handle, data as usize);
+        }
+    }
+
+    /// Resets this global handle, releasing the persistent reference.
+    ///
+    /// # Safety
+    /// The caller must ensure the global handle is valid.
+    pub unsafe fn reset(&mut self) {
+        unsafe {
+            ffi::global_reset(&raw mut self.handle);
         }
     }
 }
@@ -369,12 +396,7 @@ impl<T> From<ffi::Global> for Global<T> {
 
 impl<T> Drop for Global<T> {
     fn drop(&mut self) {
-        let handle = ffi::Global {
-            ptr: self.handle.ptr,
-        };
-        unsafe {
-            ffi::global_drop(handle);
-        }
+        unsafe { self.reset() };
     }
 }
 
@@ -392,8 +414,8 @@ impl ToLocalValue for u8 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe {
             Local::from_ffi(
-                lock.isolate(),
-                ffi::local_new_number(lock.isolate(), f64::from(*self)),
+                lock.isolate().as_ptr(),
+                ffi::local_new_number(lock.isolate().as_ptr(), f64::from(*self)),
             )
         }
     }
@@ -403,8 +425,8 @@ impl ToLocalValue for u32 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe {
             Local::from_ffi(
-                lock.isolate(),
-                ffi::local_new_number(lock.isolate(), f64::from(*self)),
+                lock.isolate().as_ptr(),
+                ffi::local_new_number(lock.isolate().as_ptr(), f64::from(*self)),
             )
         }
     }
@@ -418,7 +440,12 @@ impl ToLocalValue for String {
 
 impl ToLocalValue for &str {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        unsafe { Local::from_ffi(lock.isolate(), ffi::local_new_string(lock.isolate(), self)) }
+        unsafe {
+            Local::from_ffi(
+                lock.isolate().as_ptr(),
+                ffi::local_new_string(lock.isolate().as_ptr(), self),
+            )
+        }
     }
 }
 

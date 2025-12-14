@@ -1,3 +1,6 @@
+use std::ptr::NonNull;
+
+use jsg::Lock;
 use jsg::v8;
 use kj_rs::KjOwn;
 
@@ -17,6 +20,13 @@ mod ffi {
 
         pub unsafe fn create_test_harness() -> KjOwn<TestHarness>;
         pub unsafe fn run_in_context(self: &TestHarness, callback: unsafe fn(*mut Isolate));
+
+        /// Triggers a full garbage collection for testing purposes.
+        /// Note: For GC to actually collect objects, they must not be reachable from the
+        /// current HandleScope.
+        #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
+        #[allow(dead_code)]
+        pub unsafe fn request_gc(isolate: *mut Isolate);
     }
 }
 
@@ -27,8 +37,29 @@ impl Harness {
         Self(unsafe { ffi::create_test_harness() })
     }
 
-    pub fn run_in_context(&self, callback: fn(*mut v8::ffi::Isolate)) {
-        unsafe { self.0.run_in_context(callback) }
+    pub fn run_in_context(&self, callback: fn(Lock)) {
+        static mut CALLBACK: Option<fn(Lock)> = None;
+
+        fn wrapper(isolate: *mut v8::ffi::Isolate) {
+            unsafe {
+                if let Some(cb) = CALLBACK {
+                    cb(Lock::from_isolate(NonNull::new_unchecked(isolate)));
+                }
+            }
+        }
+
+        unsafe {
+            CALLBACK = Some(callback);
+            self.0.run_in_context(wrapper);
+            CALLBACK = None;
+        }
+    }
+
+    /// Triggers a full garbage collection for testing purposes.
+    pub fn request_gc(lock: &mut jsg::Lock) {
+        unsafe {
+            ffi::request_gc(lock.isolate().as_ptr());
+        }
     }
 }
 
@@ -40,12 +71,17 @@ impl Default for Harness {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
     use jsg::Error;
     use jsg::ExceptionType;
-    use jsg::Lock;
+    use jsg::Resource;
     use jsg::Type;
     use jsg::v8;
     use jsg::v8::ToLocalValue;
+    use jsg_macros::jsg_method;
+    use jsg_macros::jsg_resource;
     use jsg_macros::jsg_struct;
 
     #[jsg_struct]
@@ -65,15 +101,38 @@ mod tests {
         pub inner: String,
     }
 
+    /// Counter to track how many SimpleResource instances have been dropped.
+    static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    #[jsg_resource]
+    struct SimpleResource {
+        pub name: String,
+    }
+
+    impl Drop for SimpleResource {
+        fn drop(&mut self) {
+            SIMPLE_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[jsg_resource]
+    impl SimpleResource {
+        #[jsg_method]
+        // TODO: Replace String error with jsg::Error
+        // TODO: Support non-fallable return values (without std::Result)
+        fn get_name(&self) -> Result<String, String> {
+            Ok(self.name.clone())
+        }
+    }
+
     #[test]
     fn objects_can_be_wrapped_and_unwrapped() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let instance = TestStruct {
                 str: "test".to_owned(),
             };
-            let wrapped = instance.wrap(&mut lock);
+            let wrapped = TestStruct::wrap(instance, &mut lock);
             let mut obj: v8::Local<'_, v8::Object> = wrapped.into();
             assert!(obj.has(&mut lock, "str"));
             let str_value = obj.get(&mut lock, "str");
@@ -89,14 +148,13 @@ mod tests {
     #[test]
     fn struct_with_multiple_properties() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let instance = MultiPropertyStruct {
                 name: "Alice".to_owned(),
                 age: 30,
                 active: "true".to_owned(),
             };
-            let wrapped = instance.wrap(&mut lock);
+            let wrapped = MultiPropertyStruct::wrap(instance, &mut lock);
             let obj: v8::Local<'_, v8::Object> = wrapped.into();
 
             assert!(obj.has(&mut lock, "name"));
@@ -119,9 +177,7 @@ mod tests {
     #[test]
     fn number_type_conversions() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
-
+        harness.run_in_context(|mut lock| {
             let byte_val: u8 = 42;
             let byte_local = byte_val.to_local(&mut lock);
             assert!(byte_local.has_value());
@@ -135,8 +191,7 @@ mod tests {
     #[test]
     fn empty_object_and_property_setting() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let mut obj = lock.new_object();
 
             assert!(!obj.has(&mut lock, "nonexistent"));
@@ -162,9 +217,7 @@ mod tests {
     #[test]
     fn global_handle_conversion() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
-
+        harness.run_in_context(|mut lock| {
             let local_str = "global test".to_local(&mut lock);
             assert!(local_str.has_value());
 
@@ -177,14 +230,13 @@ mod tests {
     #[test]
     fn nested_object_properties() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate(isolate);
+        harness.run_in_context(|mut lock| {
             let mut outer = lock.new_object();
 
             let inner_instance = NestedStruct {
                 inner: "nested value".to_owned(),
             };
-            let inner_wrapped = inner_instance.wrap(&mut lock);
+            let inner_wrapped = NestedStruct::wrap(inner_instance, &mut lock);
             outer.set(&mut lock, "nested", inner_wrapped);
 
             assert!(outer.has(&mut lock, "nested"));
@@ -225,5 +277,45 @@ mod tests {
         let error: Error = parse_result.unwrap_err().into();
         assert_eq!(error.name.to_string(), "TypeError");
         assert!(error.message.contains("Failed to parse integer"));
+    }
+
+    #[test]
+    fn supports_gc_via_realm_drop() {
+        SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+        let harness = crate::Harness::new();
+        harness.run_in_context(|mut lock| {
+            let resource = SimpleResource {
+                name: "test".to_owned(),
+            };
+            let resource = SimpleResource::alloc(&mut lock, resource);
+            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+            std::mem::drop(resource);
+            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    #[test]
+    fn supports_gc_via_weak_callback() {
+        SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+        let harness = crate::Harness::new();
+        harness.run_in_context(|mut lock| {
+            let resource = SimpleResource {
+                name: "test".to_owned(),
+            };
+            let resource = SimpleResource::alloc(&mut lock, resource);
+            let _wrapped = SimpleResource::wrap(resource.clone(), &mut lock);
+            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+            std::mem::drop(resource);
+            // There is a JS object that holds a reference to the resource
+            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        });
+
+        harness.run_in_context(|mut lock| {
+            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+            crate::Harness::request_gc(&mut lock);
+            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        });
     }
 }

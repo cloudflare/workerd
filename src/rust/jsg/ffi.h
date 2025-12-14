@@ -10,16 +10,17 @@
 // Forward declarations needed by v8.rs.h
 namespace workerd::rust::jsg {
 using Isolate = v8::Isolate;
-using Context = v8::Local<v8::Context>;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
-using WeakCallbackInfo = v8::WeakCallbackInfo<void>;
 struct ModuleRegistry;
 struct Local;
 struct Global;
 struct Realm;
 enum class ExceptionType : ::std::uint8_t;
 using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
-using WeakCallback = ::rust::Fn<void(Isolate*, size_t)>;
+
+// CXX generates the ModuleType enum definition in v8.rs.h from the Rust shared enum.
+// This forward declaration allows ffi.h to reference the type before that header is included.
+enum class ModuleType : ::std::uint8_t;
 
 struct ResourceDescriptor;
 
@@ -40,14 +41,16 @@ bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::St
 kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
 
 // Global<T>
-void global_drop(Global value);
+void global_reset(Global* value);
 Global global_clone(const Global& value);
 Local global_to_local(Isolate* isolate, const Global& value);
-void global_make_weak(
-    Isolate* isolate, Global* value, size_t /* void* */ data, WeakCallback callback);
+/// Makes the global handle weak. The `data` parameter should be a pointer to a
+/// State struct on the Rust side. When V8 GC collects the object, the weak callback
+/// will call back into Rust via invoke_weak_drop to retrieve and call the drop_fn.
+void global_make_weak(Isolate* isolate, Global* value, size_t /* *mut State */ data);
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback);
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl);
 
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value);
@@ -62,12 +65,13 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value);
 
 struct ModuleRegistry {
   virtual ~ModuleRegistry() = default;
-  virtual void addBuiltinModule(::rust::Str specifier, ModuleCallback moduleCallback) = 0;
+  virtual void addBuiltinModule(
+      ::rust::Str specifier, ModuleCallback moduleCallback, ModuleType moduleType) = 0;
 };
 
 inline void register_add_builtin_module(
-    ModuleRegistry& registry, ::rust::Str specifier, ModuleCallback callback) {
-  registry.addBuiltinModule(specifier, kj::mv(callback));
+    ModuleRegistry& registry, ::rust::Str specifier, ModuleCallback callback, ModuleType type) {
+  registry.addBuiltinModule(specifier, kj::mv(callback), type);
 }
 
 Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);

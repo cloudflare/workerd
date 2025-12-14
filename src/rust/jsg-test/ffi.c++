@@ -10,6 +10,12 @@
 
 using namespace kj_rs;
 
+namespace {
+// Enable predictable mode so RequestGarbageCollectionForTesting actually triggers GC.
+// Without this, V8 may defer or skip the requested collection.
+bool initPredictableMode = (workerd::setPredictableModeForTest(), true);
+}  // namespace
+
 namespace workerd {
 
 struct TestContext: public jsg::Object, public jsg::ContextGlobal {
@@ -26,7 +32,12 @@ static ::workerd::jsg::V8System& getV8System() {
 }
 
 TestHarness::TestHarness()
-    : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())) {}
+    : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
+      locker(isolate->getIsolate()),
+      isolateScope(isolate->getIsolate()),
+      realm(::workerd::rust::jsg::realm_create(isolate->getIsolate())) {
+  isolate->getIsolate()->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
+}
 
 kj::Own<TestHarness> create_test_harness() {
   return kj::heap<TestHarness>();
@@ -36,14 +47,13 @@ void TestHarness::run_in_context(::rust::Fn<void(Isolate*)> callback) const {
   isolate->runInLockScope([&](TestIsolate::Lock& lock) {
     auto context = lock.newContext<TestContext>();
     v8::Context::Scope contextScope(context.getHandle(isolate->getIsolate()));
-
-    auto realm = ::workerd::rust::jsg::realm_create(isolate->getIsolate());
-    // &* dereferences the kj::Own smart pointer and takes its address to get a raw pointer
-    ::workerd::jsg::setAlignedPointerInEmbedderData(context.getHandle(isolate->getIsolate()),
-        ::workerd::jsg::ContextPointerSlot::RUST_REALM, &*realm);
-
     callback(isolate->getIsolate());
   });
+}
+
+void request_gc(Isolate* isolate) {
+  isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }
 
 }  // namespace rust::jsg_test
