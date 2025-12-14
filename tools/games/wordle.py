@@ -1,0 +1,1233 @@
+#!/usr/bin/env python3
+"""
+WORKERD WORDLE - A Wordle-style game featuring workerd terminology!
+
+Guess the 5-letter workerd-related word in 6 tries.
+After each guess, the color of the tiles will change to show
+how close your guess was to the word.
+"""
+
+import random
+
+# 5-letter words related to workerd, KJ, Cap'n Proto, and web APIs
+WORD_LIST = [
+    # Core concepts
+    "FETCH",
+    "CACHE",
+    "ASYNC",
+    "AWAIT",
+    "EVENT",
+    "QUEUE",
+    "ACTOR",
+    "SCOPE",
+    "GUARD",
+    "MAYBE",
+    "TRACE",
+    "TIMER",
+    "PROXY",
+    "ROUTE",
+    "QUERY",
+    # Types and structures
+    "ARRAY",
+    "VALUE",
+    "BYTES",
+    "BLOB_",
+    "STACK",
+    "OWNED",
+    "CONST",
+    "CLASS",
+    "UNION",
+    "PROTO",
+    # Actions/verbs
+    "WRITE",
+    "CLONE",
+    "PARSE",
+    "THROW",
+    "YIELD",
+    "SPAWN",
+    "ABORT",
+    "DRAIN",
+    "FLUSH",
+    "BUILD",
+    # Web/HTTP related
+    "HTTPS",
+    "CORPS",
+    "HEADS",
+    "PATCH",
+    "POSTS",
+    # Storage/DB
+    "STORE",
+    "TABLE",
+    "INDEX",
+    "KEYED",
+    "SQLDB",
+    # Misc workerd terms
+    "ISOLX",
+    "WASM_",
+    "CAPNP",
+    "BAZEL",
+    "SCRIPT",
+    "LIMIT",
+    "TOKEN",
+    "CRYPT",
+    "HMACS",
+    "HASHS",
+    # More common programming terms used in workerd
+    "DEBUG",
+    "ERROR",
+    "CHUNK",
+    "BINDS",
+    "LINKS",
+    "MUTEX",
+    "LOCKS",
+    "TASKS",
+    "FUNCS",
+    "TYPES",
+    "NULLS",
+    "VOIDS",
+    "HEAPS",
+    "ALLOC",
+    "DEREF",
+    "LOOPS",
+    "ITERS",
+    "READS",
+    "SEEKS",
+    "PULLS",
+    "PUSHS",
+    "PINGS",
+    "WAITS",
+    "POLLS",
+    "HOOKS",
+]
+
+# Clean up - only use valid 5-letter words (no underscores)
+WORD_LIST = [w for w in WORD_LIST if len(w) == 5 and "_" not in w]
+
+# Extended valid guesses (includes more common words)
+VALID_GUESSES = set(
+    WORD_LIST
+    + [
+        "ABOUT",
+        "ABOVE",
+        "ABUSE",
+        "ACTOR",
+        "ACUTE",
+        "ADMIT",
+        "ADOPT",
+        "ADULT",
+        "AFTER",
+        "AGAIN",
+        "AGENT",
+        "AGREE",
+        "AHEAD",
+        "ALARM",
+        "ALBUM",
+        "ALERT",
+        "ALIEN",
+        "ALIGN",
+        "ALIKE",
+        "ALIVE",
+        "ALLOW",
+        "ALONE",
+        "ALONG",
+        "ALTER",
+        "AMINO",
+        "AMONG",
+        "ANGER",
+        "ANGLE",
+        "ANGRY",
+        "APART",
+        "APPLE",
+        "APPLY",
+        "ARENA",
+        "ARGUE",
+        "ARISE",
+        "ARRAY",
+        "ASIDE",
+        "ASSET",
+        "AVOID",
+        "AWAIT",
+        "AWARD",
+        "AWARE",
+        "BADLY",
+        "BASIC",
+        "BASIS",
+        "BEACH",
+        "BEGAN",
+        "BEGIN",
+        "BEING",
+        "BELOW",
+        "BENCH",
+        "BIRTH",
+        "BLACK",
+        "BLAME",
+        "BLANK",
+        "BLAST",
+        "BLEND",
+        "BLESS",
+        "BLIND",
+        "BLOCK",
+        "BLOOD",
+        "BOARD",
+        "BOOST",
+        "BOOTH",
+        "BOUND",
+        "BRAIN",
+        "BRAND",
+        "BRAVE",
+        "BREAD",
+        "BREAK",
+        "BREED",
+        "BRIEF",
+        "BRING",
+        "BROAD",
+        "BROKE",
+        "BROWN",
+        "BUILD",
+        "BUILT",
+        "BUNCH",
+        "BURST",
+        "BUYER",
+        "CABLE",
+        "CACHE",
+        "CAMEL",
+        "CARRY",
+        "CATCH",
+        "CAUSE",
+        "CHAIN",
+        "CHAIR",
+        "CHAOS",
+        "CHARM",
+        "CHART",
+        "CHASE",
+        "CHEAP",
+        "CHECK",
+        "CHESS",
+        "CHEST",
+        "CHIEF",
+        "CHILD",
+        "CHINA",
+        "CHOSE",
+        "CHUNK",
+        "CLAIM",
+        "CLASS",
+        "CLEAN",
+        "CLEAR",
+        "CLERK",
+        "CLICK",
+        "CLIMB",
+        "CLOCK",
+        "CLONE",
+        "CLOSE",
+        "CLOTH",
+        "CLOUD",
+        "COACH",
+        "COAST",
+        "CONST",
+        "COUNT",
+        "COURT",
+        "COVER",
+        "CRAFT",
+        "CRASH",
+        "CREAM",
+        "CRIME",
+        "CROSS",
+        "CROWD",
+        "CROWN",
+        "CURVE",
+        "CYCLE",
+        "DAILY",
+        "DANCE",
+        "DATUM",
+        "DEATH",
+        "DEBUT",
+        "DELAY",
+        "DELTA",
+        "DENSE",
+        "DEPTH",
+        "DIRTY",
+        "DOUBT",
+        "DRAFT",
+        "DRAIN",
+        "DRAMA",
+        "DRANK",
+        "DREAM",
+        "DRESS",
+        "DRIFT",
+        "DRILL",
+        "DRINK",
+        "DRIVE",
+        "DROPS",
+        "DROVE",
+        "DWELL",
+        "EAGER",
+        "EARLY",
+        "EARTH",
+        "EIGHT",
+        "ELITE",
+        "EMPTY",
+        "ENDED",
+        "ENEMY",
+        "ENJOY",
+        "ENTER",
+        "ENTRY",
+        "EQUAL",
+        "ERROR",
+        "ESSAY",
+        "EVENT",
+        "EVERY",
+        "EXACT",
+        "EXIST",
+        "EXTRA",
+        "FAITH",
+        "FALSE",
+        "FANCY",
+        "FATAL",
+        "FAULT",
+        "FAVOR",
+        "FEAST",
+        "FETCH",
+        "FEVER",
+        "FIBER",
+        "FIELD",
+        "FIFTH",
+        "FIFTY",
+        "FIGHT",
+        "FINAL",
+        "FIRST",
+        "FIXED",
+        "FLAME",
+        "FLASH",
+        "FLASK",
+        "FLEET",
+        "FLESH",
+        "FLOAT",
+        "FLOOD",
+        "FLOOR",
+        "FLOUR",
+        "FLUID",
+        "FLUSH",
+        "FOCUS",
+        "FORCE",
+        "FORGE",
+        "FORMA",
+        "FORTH",
+        "FORTY",
+        "FORUM",
+        "FOUND",
+        "FRAME",
+        "FRANK",
+        "FRAUD",
+        "FRESH",
+        "FRONT",
+        "FROZE",
+        "FRUIT",
+        "FULLY",
+        "GIANT",
+        "GIVEN",
+        "GLASS",
+        "GLOBE",
+        "GLORY",
+        "GOING",
+        "GRACE",
+        "GRADE",
+        "GRAIN",
+        "GRAND",
+        "GRANT",
+        "GRAPH",
+        "GRASP",
+        "GRASS",
+        "GRAVE",
+        "GREAT",
+        "GREEN",
+        "GREET",
+        "GROSS",
+        "GROUP",
+        "GROVE",
+        "GROWN",
+        "GUARD",
+        "GUESS",
+        "GUEST",
+        "GUIDE",
+        "GUILD",
+        "HABIT",
+        "HANDS",
+        "HAPPY",
+        "HARSH",
+        "HASTE",
+        "HAVEN",
+        "HEART",
+        "HEAVY",
+        "HELLO",
+        "HENCE",
+        "HERBS",
+        "HILLS",
+        "HOLDS",
+        "HONEY",
+        "HONOR",
+        "HORSE",
+        "HOTEL",
+        "HOURS",
+        "HOUSE",
+        "HUMAN",
+        "IDEAL",
+        "IMAGE",
+        "IMPLY",
+        "INDEX",
+        "INDIA",
+        "INNER",
+        "INPUT",
+        "INTRO",
+        "ISSUE",
+        "ITEMS",
+        "JAPAN",
+        "JESUS",
+        "JEWEL",
+        "JOINS",
+        "JOINT",
+        "JONES",
+        "JUDGE",
+        "JUICE",
+        "JUMPS",
+        "KEEPS",
+        "KICKS",
+        "KILLS",
+        "KINDS",
+        "KINGS",
+        "KNIFE",
+        "KNOCK",
+        "KNOWN",
+        "LABEL",
+        "LABOR",
+        "LACKS",
+        "LAKES",
+        "LANDS",
+        "LARGE",
+        "LASER",
+        "LATER",
+        "LAUGH",
+        "LAYER",
+        "LEADS",
+        "LEARN",
+        "LEASE",
+        "LEAST",
+        "LEAVE",
+        "LEGAL",
+        "LEMON",
+        "LEVEL",
+        "LEVER",
+        "LIGHT",
+        "LIMIT",
+        "LINES",
+        "LINKS",
+        "LINUX",
+        "LISTS",
+        "LIVES",
+        "LOANS",
+        "LOCAL",
+        "LODGE",
+        "LOGIC",
+        "LOGIN",
+        "LOOKS",
+        "LOOPS",
+        "LOOSE",
+        "LORDS",
+        "LOSES",
+        "LOWER",
+        "LOYAL",
+        "LUCKY",
+        "LUNCH",
+        "LUNAR",
+        "LYING",
+        "MACRO",
+        "MAGIC",
+        "MAJOR",
+        "MAKER",
+        "MAKES",
+        "MANOR",
+        "MAPLE",
+        "MARCH",
+        "MARKS",
+        "MARSH",
+        "MATCH",
+        "MAYBE",
+        "MAYOR",
+        "MEANS",
+        "MEANT",
+        "MEDAL",
+        "MEDIA",
+        "MEETS",
+        "MELEE",
+        "MERCY",
+        "MERGE",
+        "MERIT",
+        "MERRY",
+        "METAL",
+        "METER",
+        "MICRO",
+        "MIDST",
+        "MIGHT",
+        "MILLS",
+        "MINDS",
+        "MINOR",
+        "MINUS",
+        "MIXED",
+        "MODEL",
+        "MODES",
+        "MONEY",
+        "MONTH",
+        "MORAL",
+        "MOTOR",
+        "MOUNT",
+        "MOUSE",
+        "MOUTH",
+        "MOVED",
+        "MOVIE",
+        "MUSIC",
+        "MUTEX",
+        "NAIVE",
+        "NAMED",
+        "NAMES",
+        "NAVAL",
+        "NEEDS",
+        "NERVE",
+        "NEVER",
+        "NEWER",
+        "NEWLY",
+        "NIGHT",
+        "NINTH",
+        "NOBLE",
+        "NODES",
+        "NOISE",
+        "NORTH",
+        "NOTCH",
+        "NOTED",
+        "NOTES",
+        "NOVEL",
+        "NURSE",
+        "OCCUR",
+        "OCEAN",
+        "OFFER",
+        "OFTEN",
+        "OLDER",
+        "OLIVE",
+        "ONSET",
+        "OPENS",
+        "OPERA",
+        "ORBIT",
+        "ORDER",
+        "OTHER",
+        "OUGHT",
+        "OUTER",
+        "OWNED",
+        "OWNER",
+        "OXIDE",
+        "OZONE",
+        "PACKS",
+        "PAGES",
+        "PAINT",
+        "PAIRS",
+        "PANEL",
+        "PANIC",
+        "PANTS",
+        "PAPER",
+        "PARSE",
+        "PARTS",
+        "PARTY",
+        "PASTA",
+        "PASTE",
+        "PATCH",
+        "PATHS",
+        "PAUSE",
+        "PEACE",
+        "PEARL",
+        "PENNY",
+        "PHASE",
+        "PHONE",
+        "PHOTO",
+        "PIANO",
+        "PICKS",
+        "PIECE",
+        "PILOT",
+        "PINCH",
+        "PITCH",
+        "PIXEL",
+        "PLACE",
+        "PLAIN",
+        "PLANE",
+        "PLANS",
+        "PLANT",
+        "PLATE",
+        "PLAZA",
+        "PLAYS",
+        "PLAZA",
+        "PLEAD",
+        "PLOTS",
+        "PLUGS",
+        "POEMS",
+        "POINT",
+        "POLAR",
+        "POLLS",
+        "POOLS",
+        "PORCH",
+        "PORTS",
+        "POSED",
+        "POSTS",
+        "POUND",
+        "POWER",
+        "PRESS",
+        "PRICE",
+        "PRIDE",
+        "PRIME",
+        "PRINT",
+        "PRIOR",
+        "PRIZE",
+        "PROBE",
+        "PROMO",
+        "PROOF",
+        "PROPS",
+        "PROTO",
+        "PROUD",
+        "PROVE",
+        "PROXY",
+        "PULLS",
+        "PULSE",
+        "PUMPS",
+        "PUNCH",
+        "PUPIL",
+        "PURE_",
+        "PURSE",
+        "PUSH_",
+        "PUTS_",
+        "Qatar",
+        "QUEEN",
+        "QUERY",
+        "QUEST",
+        "QUEUE",
+        "QUICK",
+        "QUIET",
+        "QUITE",
+        "QUOTE",
+        "RACES",
+        "RADAR",
+        "RADIO",
+        "RAILS",
+        "RAISE",
+        "RALLY",
+        "RANCH",
+        "RANGE",
+        "RANKS",
+        "RAPID",
+        "RATES",
+        "RATIO",
+        "REACH",
+        "REACT",
+        "READS",
+        "READY",
+        "REALM",
+        "REBEL",
+        "REFER",
+        "REIGN",
+        "RELAX",
+        "RELAY",
+        "REMIX",
+        "REPLY",
+        "RESET",
+        "RETRY",
+        "RIDER",
+        "RIDGE",
+        "RIFLE",
+        "RIGHT",
+        "RIGID",
+        "RINGS",
+        "RISEN",
+        "RISKS",
+        "RIVER",
+        "ROADS",
+        "ROBOT",
+        "ROCKS",
+        "ROCKY",
+        "ROLES",
+        "ROMAN",
+        "ROOMS",
+        "ROOTS",
+        "ROSES",
+        "ROUGH",
+        "ROUND",
+        "ROUTE",
+        "ROYAL",
+        "RUGBY",
+        "RULED",
+        "RULER",
+        "RULES",
+        "RURAL",
+        "RUSTY",
+        "SADLY",
+        "SAFER",
+        "SAINT",
+        "SALAD",
+        "SALES",
+        "SALON",
+        "SANDY",
+        "SAVED",
+        "SAVES",
+        "SCALE",
+        "SCENE",
+        "SCOPE",
+        "SCORE",
+        "SCOUT",
+        "SCREW",
+        "SEEDS",
+        "SEEKS",
+        "SEIZE",
+        "SELLS",
+        "SENDS",
+        "SENSE",
+        "SERVE",
+        "SETUP",
+        "SEVEN",
+        "SHADE",
+        "SHAFT",
+        "SHAKE",
+        "SHALL",
+        "SHAME",
+        "SHAPE",
+        "SHARE",
+        "SHARK",
+        "SHARP",
+        "SHEEP",
+        "SHEER",
+        "SHEET",
+        "SHELF",
+        "SHELL",
+        "SHIFT",
+        "SHINY",
+        "SHIPS",
+        "SHIRT",
+        "SHOCK",
+        "SHOES",
+        "SHOOK",
+        "SHOOT",
+        "SHOPS",
+        "SHORE",
+        "SHORT",
+        "SHOTS",
+        "SHOWS",
+        "SIDES",
+        "SIEGE",
+        "SIGHT",
+        "SIGMA",
+        "SIGNS",
+        "SILLY",
+        "SINCE",
+        "SITES",
+        "SIXTH",
+        "SIXTY",
+        "SIZED",
+        "SIZES",
+        "SKILL",
+        "SKINS",
+        "SKIRT",
+        "SKULL",
+        "SLASH",
+        "SLATE",
+        "SLAVE",
+        "SLEEP",
+        "SLICE",
+        "SLIDE",
+        "SLOPE",
+        "SLOTS",
+        "SMALL",
+        "SMART",
+        "SMELL",
+        "SMILE",
+        "SMITH",
+        "SMOKE",
+        "SNAKE",
+        "SNAPS",
+        "SOCAL",
+        "SOLAR",
+        "SOLID",
+        "SOLVE",
+        "SONGS",
+        "SONIC",
+        "SORRY",
+        "SORTS",
+        "SOULS",
+        "SOUND",
+        "SOUTH",
+        "SPACE",
+        "SPAIN",
+        "SPARE",
+        "SPARK",
+        "SPAWN",
+        "SPEAK",
+        "SPECS",
+        "SPEED",
+        "SPELL",
+        "SPEND",
+        "SPENT",
+        "SPICE",
+        "SPICY",
+        "SPIKE",
+        "SPINE",
+        "SPLIT",
+        "SPOKE",
+        "SPORT",
+        "SPOTS",
+        "SPRAY",
+        "SQUAD",
+        "STACK",
+        "STAFF",
+        "STAGE",
+        "STAIN",
+        "STAKE",
+        "STAMP",
+        "STAND",
+        "STARK",
+        "STARS",
+        "START",
+        "STATE",
+        "STAYS",
+        "STEAK",
+        "STEAL",
+        "STEAM",
+        "STEEL",
+        "STEEP",
+        "STEMS",
+        "STEPS",
+        "STICK",
+        "STIFF",
+        "STILL",
+        "STOCK",
+        "STOLE",
+        "STONE",
+        "STOOD",
+        "STOPS",
+        "STORE",
+        "STORM",
+        "STORY",
+        "STOVE",
+        "STRAP",
+        "STRAW",
+        "STRIP",
+        "STUCK",
+        "STUDY",
+        "STUFF",
+        "STYLE",
+        "SUGAR",
+        "SUITE",
+        "SUITS",
+        "SUNNY",
+        "SUPER",
+        "SURGE",
+        "SWEET",
+        "SWEPT",
+        "SWIFT",
+        "SWING",
+        "SWISS",
+        "SWORD",
+        "SYRIA",
+        "TABLE",
+        "TAKEN",
+        "TAKES",
+        "TALES",
+        "TALKS",
+        "TANKS",
+        "TAPES",
+        "TASKS",
+        "TASTE",
+        "TAXES",
+        "TEACH",
+        "TEAMS",
+        "TEARS",
+        "TEETH",
+        "TELLS",
+        "TEMPO",
+        "TENDS",
+        "TENSE",
+        "TENTH",
+        "TERMS",
+        "TESTS",
+        "TEXAS",
+        "TEXTS",
+        "THANK",
+        "THEFT",
+        "THEME",
+        "THICK",
+        "THIEF",
+        "THING",
+        "THINK",
+        "THIRD",
+        "THREE",
+        "THREW",
+        "THROW",
+        "THUMB",
+        "TIGER",
+        "TIGHT",
+        "TIMER",
+        "TIMES",
+        "TINY_",
+        "TIRED",
+        "TITLE",
+        "TODAY",
+        "TOKEN",
+        "TONES",
+        "TOOLS",
+        "TOOTH",
+        "TOPIC",
+        "TOPS_",
+        "TOTAL",
+        "TOUCH",
+        "TOUGH",
+        "TOURS",
+        "TOWER",
+        "TOWNS",
+        "TRACE",
+        "TRACK",
+        "TRADE",
+        "TRAIL",
+        "TRAIN",
+        "TRAIT",
+        "TRANS",
+        "TRASH",
+        "TREAT",
+        "TREES",
+        "TREND",
+        "TRIAL",
+        "TRIBE",
+        "TRICK",
+        "TRIED",
+        "TRIES",
+        "TRIPS",
+        "TROOP",
+        "TRUCK",
+        "TRULY",
+        "TRUMP",
+        "TRUNK",
+        "TRUST",
+        "TRUTH",
+        "TUBES",
+        "TULIP",
+        "TUMOR",
+        "TUNES",
+        "TURNS",
+        "TUTOR",
+        "TWICE",
+        "TWIST",
+        "TYPES",
+        "ULTRA",
+        "UNCLE",
+        "UNDER",
+        "UNION",
+        "UNITE",
+        "UNITS",
+        "UNITY",
+        "UNTIL",
+        "UPPER",
+        "UPSET",
+        "URBAN",
+        "USAGE",
+        "USERS",
+        "USING",
+        "USUAL",
+        "VALID",
+        "VALUE",
+        "VALVE",
+        "VAULT",
+        "VEGAS",
+        "VENUE",
+        "VENUS",
+        "VERSE",
+        "VIDEO",
+        "VIEWS",
+        "VIRAL",
+        "VIRUS",
+        "VISIT",
+        "VISTA",
+        "VITAL",
+        "VOCAL",
+        "VOICE",
+        "VOTED",
+        "VOTER",
+        "VOTES",
+        "WAGES",
+        "WAIST",
+        "WAITS",
+        "WALKS",
+        "WALLS",
+        "WANTS",
+        "WARNS",
+        "WASTE",
+        "WATCH",
+        "WATER",
+        "WATTS",
+        "WAVES",
+        "WEEKS",
+        "WEIGH",
+        "WEIRD",
+        "WELLS",
+        "WELSH",
+        "WHEEL",
+        "WHERE",
+        "WHICH",
+        "WHILE",
+        "WHITE",
+        "WHOLE",
+        "WHOSE",
+        "WIDER",
+        "WIDTH",
+        "WINDS",
+        "WINES",
+        "WINGS",
+        "WITCH",
+        "WOMAN",
+        "WOMEN",
+        "WOODS",
+        "WORDS",
+        "WORKS",
+        "WORLD",
+        "WORRY",
+        "WORSE",
+        "WORST",
+        "WORTH",
+        "WOULD",
+        "WOUND",
+        "WRAPS",
+        "WRATH",
+        "WRITE",
+        "WRONG",
+        "WROTE",
+        "YARDS",
+        "YEARS",
+        "YIELD",
+        "YOUNG",
+        "YOURS",
+        "YOUTH",
+        "ZONES",
+    ]
+)
+
+
+# Colors for terminal output
+class Colors:
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    GRAY = "\033[90m"
+    WHITE = "\033[97m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+    BG_GREEN = "\033[42m"
+    BG_YELLOW = "\033[43m"
+    BG_GRAY = "\033[100m"
+
+
+def colorize(char, status):
+    """Return a colored character block based on status."""
+    if status == "correct":
+        return f"{Colors.BG_GREEN}{Colors.WHITE}{Colors.BOLD} {char} {Colors.RESET}"
+    elif status == "present":
+        return f"{Colors.BG_YELLOW}{Colors.WHITE}{Colors.BOLD} {char} {Colors.RESET}"
+    else:
+        return f"{Colors.BG_GRAY}{Colors.WHITE}{Colors.BOLD} {char} {Colors.RESET}"
+
+
+def evaluate_guess(guess, target):
+    """
+    Evaluate a guess against the target word.
+    Returns a list of (char, status) tuples.
+    """
+    result = [None] * 5
+    target_chars = list(target)
+    guess_chars = list(guess)
+
+    # First pass: mark correct positions (green)
+    for i in range(5):
+        if guess_chars[i] == target_chars[i]:
+            result[i] = (guess_chars[i], "correct")
+            target_chars[i] = None  # Mark as used
+            guess_chars[i] = None
+
+    # Second pass: mark present but wrong position (yellow)
+    for i in range(5):
+        if guess_chars[i] is not None:
+            if guess_chars[i] in target_chars:
+                result[i] = (guess[i], "present")
+                target_chars[target_chars.index(guess_chars[i])] = None
+            else:
+                result[i] = (guess[i], "absent")
+
+    return result
+
+
+def print_result(result):
+    """Print a colored result row."""
+    row = ""
+    for char, status in result:
+        row += colorize(char, status)
+    print(row)
+
+
+def print_keyboard(guessed_letters):
+    """Print a keyboard showing letter states."""
+    keyboard_rows = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]
+
+    print()
+    for row in keyboard_rows:
+        line = " " * (keyboard_rows.index(row))  # Indent for keyboard shape
+        for char in row:
+            status = guessed_letters.get(char, None)
+            if status == "correct":
+                line += f"{Colors.GREEN}{char}{Colors.RESET} "
+            elif status == "present":
+                line += f"{Colors.YELLOW}{char}{Colors.RESET} "
+            elif status == "absent":
+                line += f"{Colors.GRAY}{char}{Colors.RESET} "
+            else:
+                line += f"{char} "
+        print(line)
+    print()
+
+
+def print_header():
+    """Print the game header."""
+    print()
+    print(f"{Colors.BOLD}╔═══════════════════════════════════════════╗{Colors.RESET}")
+    print(f"{Colors.BOLD}║        WORKERD WORDLE                     ║{Colors.RESET}")
+    print(f"{Colors.BOLD}║  Guess the 5-letter workerd term!         ║{Colors.RESET}")
+    print(f"{Colors.BOLD}╚═══════════════════════════════════════════╝{Colors.RESET}")
+    print()
+    print(
+        f"  {Colors.BG_GREEN}{Colors.WHITE}{Colors.BOLD} X {Colors.RESET} = correct position"
+    )
+    print(
+        f"  {Colors.BG_YELLOW}{Colors.WHITE}{Colors.BOLD} X {Colors.RESET} = wrong position"
+    )
+    print(
+        f"  {Colors.BG_GRAY}{Colors.WHITE}{Colors.BOLD} X {Colors.RESET} = not in word"
+    )
+    print()
+    print("  Type 'quit' to exit, 'hint' for a hint")
+    print()
+
+
+def get_hint(target, guessed_letters, hint_count):
+    """Provide a hint based on hint count."""
+    hints = [
+        f"The word starts with '{target[0]}'",
+        f"The word ends with '{target[-1]}'",
+        f"The word has {len(set(target))} unique letters",
+        f"The middle letter is '{target[2]}'",
+    ]
+    if hint_count < len(hints):
+        return hints[hint_count]
+    return "No more hints available!"
+
+
+def play_game():
+    """Main game loop."""
+    target = random.choice(WORD_LIST)
+    guesses = []
+    guessed_letters = {}
+    max_attempts = 6
+    hint_count = 0
+
+    print_header()
+
+    for attempt in range(max_attempts):
+        remaining = max_attempts - attempt
+        print(f"  Attempt {attempt + 1}/{max_attempts} ({remaining} remaining)")
+
+        while True:
+            try:
+                guess = input("  Enter guess: ").strip().upper()
+            except (EOFError, KeyboardInterrupt):
+                print("\n\n  Thanks for playing!")
+                return False
+
+            if guess.lower() == "quit":
+                print(f"\n  The word was: {Colors.BOLD}{target}{Colors.RESET}")
+                print("  Thanks for playing!")
+                return False
+
+            if guess.lower() == "hint":
+                print(f"  Hint: {get_hint(target, guessed_letters, hint_count)}")
+                hint_count += 1
+                continue
+
+            if len(guess) != 5:
+                print("  Please enter a 5-letter word")
+                continue
+
+            if not guess.isalpha():
+                print("  Please use only letters")
+                continue
+
+            if guess not in VALID_GUESSES:
+                print("  Not in word list. Try another word.")
+                continue
+
+            break
+
+        result = evaluate_guess(guess, target)
+        guesses.append(result)
+
+        # Update guessed letters (for keyboard display)
+        for char, status in result:
+            current = guessed_letters.get(char)
+            # Only upgrade status: absent -> present -> correct
+            if current is None:
+                guessed_letters[char] = status
+            elif current == "absent" and status in ("present", "correct"):
+                guessed_letters[char] = status
+            elif current == "present" and status == "correct":
+                guessed_letters[char] = status
+
+        # Print all guesses so far
+        print()
+        for past_result in guesses:
+            print("  ", end="")
+            print_result(past_result)
+
+        print_keyboard(guessed_letters)
+
+        # Check for win
+        if guess == target:
+            messages = [
+                "Genius!",
+                "Magnificent!",
+                "Impressive!",
+                "Splendid!",
+                "Great!",
+                "Phew!",
+            ]
+            print(f"  {Colors.GREEN}{Colors.BOLD}{messages[attempt]}{Colors.RESET}")
+            print(f"  You got it in {attempt + 1} attempt(s)!")
+            return True
+
+    # Out of attempts
+    print(f"  {Colors.BOLD}Game Over!{Colors.RESET}")
+    print(f"  The word was: {Colors.BOLD}{target}{Colors.RESET}")
+    return False
+
+
+def main():
+    """Main entry point."""
+    while True:
+        won = play_game()
+
+        try:
+            again = input("\n  Play again? (y/n): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n\n  Thanks for playing WORKERD WORDLE!")
+            break
+
+        if again != "y":
+            print("\n  Thanks for playing WORKERD WORDLE!")
+            break
+
+        print("\n" + "=" * 45 + "\n")
+
+
+if __name__ == "__main__":
+    main()
