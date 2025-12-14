@@ -689,7 +689,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
           // If we don't wait, it's possible for alarm manager to pull the wrong alarm value (the
           // same alarm that just completed) from CRDB before these changes are actually made,
           // rerunning it, when it shouldn't.
-          co_await actor.getOutputGate().wait();
+          co_await actor.getOutputGate().wait(context.getCurrentTraceSpan());
         }
 
         // We succeeded, inform any other entrypoints that may be waiting upon us.
