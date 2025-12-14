@@ -1087,6 +1087,14 @@ SpanParent IoContext_IncomingRequest::getCurrentUserTraceSpan() {
   return currentUserTraceSpan.addRef();
 }
 
+void IoContext_IncomingRequest::startInputGateHoldSpan() {
+  inputGateHoldSpan = getContext().getCurrentTraceSpan().newChild("actor_input_gate_hold"_kjc);
+}
+
+void IoContext_IncomingRequest::stopInputGateHoldSpan() {
+  inputGateHoldSpan = kj::none;
+}
+
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
 }
