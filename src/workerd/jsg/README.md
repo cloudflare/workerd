@@ -1886,6 +1886,286 @@ void compareValues(jsg::Lock& js, JsValue a, JsValue b) {
   `.then()`, `.catch_()` methods and integrates with the JSG type system. Use this for most
   promise handling.
 
+### Serialization
+
+JSG provides a serialization system built on V8's `ValueSerializer` that supports the
+[structured clone algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm).
+This is used for `structuredClone()`, passing data between workers, and storing data in
+Durable Objects.
+
+#### Basic Usage
+
+For simple structured clone operations on JavaScript values:
+
+```cpp
+void cloneExample(jsg::Lock& js, JsValue value) {
+  // Simple clone
+  JsValue cloned = jsg::structuredClone(js, value);
+
+  // Clone with transferables (e.g., ArrayBuffers)
+  kj::Array<JsValue> transfers = kj::heapArray<JsValue>({someArrayBuffer});
+  JsValue cloned2 = jsg::structuredClone(js, value, kj::mv(transfers));
+}
+```
+
+#### Using Serializer and Deserializer Directly
+
+For more control, use `Serializer` and `Deserializer` directly:
+
+```cpp
+void serializeExample(jsg::Lock& js, JsValue value) {
+  // Serialize
+  Serializer::Released serialized = ({
+    Serializer ser(js);
+    ser.write(js, value);
+    ser.release();
+  });
+
+  // serialized.data contains the serialized bytes
+  // serialized.sharedArrayBuffers contains any SharedArrayBuffers
+  // serialized.transferredArrayBuffers contains any transferred ArrayBuffers
+
+  // Deserialize
+  JsValue result = ({
+    Deserializer deser(js, serialized);
+    deser.readValue(js);
+  });
+}
+```
+
+You can serialize multiple values:
+
+```cpp
+void multiValueExample(jsg::Lock& js) {
+  Serializer ser(js);
+  ser.write(js, js.str("first"));
+  ser.write(js, js.num(42));
+  ser.write(js, js.obj());
+  auto released = ser.release();
+
+  Deserializer deser(js, released);
+  JsValue first = deser.readValue(js);   // "first"
+  JsValue second = deser.readValue(js);  // 42
+  JsValue third = deser.readValue(js);   // {}
+}
+```
+
+#### Serializer Options
+
+```cpp
+Serializer::Options options {
+  .version = kj::none,              // Override wire format version
+  .omitHeader = false,              // Skip serialization header
+  .treatClassInstancesAsPlainObjects = true,  // How to handle class instances
+  .externalHandler = kj::none,      // Handler for external resources
+};
+Serializer ser(js, options);
+```
+
+#### Transferring ArrayBuffers
+
+Use `transfer()` to move ArrayBuffers instead of copying:
+
+```cpp
+void transferExample(jsg::Lock& js, JsArrayBuffer buffer) {
+  Serializer ser(js);
+  ser.transfer(js, buffer);  // Mark for transfer before writing
+  ser.write(js, buffer);
+  auto released = ser.release();
+  // buffer is now detached (neutered)
+
+  // On the receiving side, pass the transferred buffers
+  Deserializer deser(js, released.data,
+      released.transferredArrayBuffers.asPtr(),
+      released.sharedArrayBuffers.asPtr());
+  JsValue result = deser.readValue(js);
+}
+```
+
+#### Making Resource Types Serializable (`JSG_SERIALIZABLE`)
+
+To make a JSG Resource Type serializable via structured clone, implement `serialize()` and
+`deserialize()` methods and use the `JSG_SERIALIZABLE` macro:
+
+```cpp
+// Define a tag enum for your serializable types (Cap'n Proto enum recommended)
+enum class SerializationTag {
+  MY_TYPE_V1 = 1,
+  MY_TYPE_V2 = 2,  // For versioning
+};
+
+class MyType: public jsg::Object {
+public:
+  MyType(uint32_t id, kj::String name): id(id), name(kj::mv(name)) {}
+
+  static jsg::Ref<MyType> constructor(jsg::Lock& js, uint32_t id, kj::String name) {
+    return js.alloc<MyType>(id, kj::mv(name));
+  }
+
+  JSG_RESOURCE_TYPE(MyType) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(id, getId);
+    JSG_READONLY_PROTOTYPE_PROPERTY(name, getName);
+  }
+
+  // Serialize the object's state
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    serializer.writeRawUint32(id);
+    serializer.writeLengthDelimited(name);
+  }
+
+  // Deserialize and reconstruct the object
+  static jsg::Ref<MyType> deserialize(
+      jsg::Lock& js,
+      SerializationTag tag,
+      jsg::Deserializer& deserializer) {
+    uint32_t id = deserializer.readRawUint32();
+    kj::String name = deserializer.readLengthDelimitedString();
+    return js.alloc<MyType>(id, kj::mv(name));
+  }
+
+  // Declare serializable with current tag (can list old tags for backwards compat)
+  JSG_SERIALIZABLE(SerializationTag::MY_TYPE_V1);
+
+private:
+  uint32_t id;
+  kj::String name;
+
+  uint32_t getId() { return id; }
+  kj::String getName() { return kj::str(name); }
+};
+```
+
+**Important notes:**
+
+- `JSG_SERIALIZABLE` must appear **after** the `JSG_RESOURCE_TYPE` block, not inside it
+- The tag enum values must never change once data has been serialized
+- `deserialize()` receives the tag so it can handle multiple versions
+
+#### Versioning Serializable Types
+
+To evolve a serializable type while maintaining backwards compatibility:
+
+```cpp
+enum class SerializationTag {
+  MY_TYPE_V1 = 1,
+  MY_TYPE_V2 = 2,
+};
+
+class MyType: public jsg::Object {
+public:
+  // V2 adds an optional description field
+  MyType(uint32_t id, kj::String name, kj::Maybe<kj::String> description = kj::none)
+      : id(id), name(kj::mv(name)), description(kj::mv(description)) {}
+
+  // ... constructor and JSG_RESOURCE_TYPE ...
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    // Always write the current (V2) format
+    serializer.writeRawUint32(id);
+    serializer.writeLengthDelimited(name);
+    KJ_IF_SOME(desc, description) {
+      serializer.writeRawUint32(1);  // has description
+      serializer.writeLengthDelimited(desc);
+    } else {
+      serializer.writeRawUint32(0);  // no description
+    }
+  }
+
+  static jsg::Ref<MyType> deserialize(
+      jsg::Lock& js,
+      SerializationTag tag,
+      jsg::Deserializer& deserializer) {
+    uint32_t id = deserializer.readRawUint32();
+    kj::String name = deserializer.readLengthDelimitedString();
+
+    kj::Maybe<kj::String> description;
+    if (tag == SerializationTag::MY_TYPE_V2) {
+      // V2 format includes optional description
+      if (deserializer.readRawUint32() == 1) {
+        description = deserializer.readLengthDelimitedString();
+      }
+    }
+    // V1 format has no description field
+
+    return js.alloc<MyType>(id, kj::mv(name), kj::mv(description));
+  }
+
+  // First tag is current version, others are accepted old versions
+  JSG_SERIALIZABLE(SerializationTag::MY_TYPE_V2, SerializationTag::MY_TYPE_V1);
+
+private:
+  uint32_t id;
+  kj::String name;
+  kj::Maybe<kj::String> description;
+};
+```
+
+#### Using TypeHandlers in Serialization
+
+Both `serialize()` and `deserialize()` can request `TypeHandler` arguments for converting
+between C++ and JavaScript types:
+
+```cpp
+void serialize(jsg::Lock& js, jsg::Serializer& serializer,
+               const jsg::TypeHandler<kj::String>& stringHandler) {
+  // Convert C++ string to JS string and serialize as a JS value
+  serializer.write(js, JsValue(stringHandler.wrap(js, kj::str(text))));
+}
+
+static jsg::Ref<MyType> deserialize(
+    jsg::Lock& js,
+    SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<kj::String>& stringHandler) {
+  // Deserialize JS value and convert to C++ string
+  JsValue jsVal = deserializer.readValue(js);
+  kj::String text = KJ_ASSERT_NONNULL(stringHandler.tryUnwrap(js, jsVal));
+  return js.alloc<MyType>(kj::mv(text));
+}
+```
+
+#### Raw Read/Write Methods
+
+The `Serializer` and `Deserializer` provide low-level methods for custom binary formats:
+
+```cpp
+// Serializer write methods
+serializer.writeRawUint32(uint32_t value);
+serializer.writeRawUint64(uint64_t value);
+serializer.writeRawBytes(kj::ArrayPtr<const kj::byte> bytes);
+serializer.writeLengthDelimited(kj::ArrayPtr<const kj::byte> bytes);  // size + bytes
+serializer.writeLengthDelimited(kj::StringPtr text);
+serializer.write(js, JsValue value);  // Full V8 serialization
+
+// Deserializer read methods
+uint32_t u32 = deserializer.readRawUint32();
+uint64_t u64 = deserializer.readRawUint64();
+kj::ArrayPtr<const kj::byte> bytes = deserializer.readRawBytes(size);
+kj::ArrayPtr<const kj::byte> delimited = deserializer.readLengthDelimitedBytes();
+kj::String str = deserializer.readLengthDelimitedString();
+JsValue val = deserializer.readValue(js);  // Full V8 deserialization
+uint32_t version = deserializer.getVersion();  // Wire format version
+```
+
+#### One-Way Serialization (`JSG_SERIALIZABLE_ONEWAY`)
+
+For types that serialize to a different type (e.g., a legacy type that should deserialize
+as a newer type):
+
+```cpp
+class LegacyType: public jsg::Object {
+  // ...
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    // Serialize in NewType's format
+    serializer.writeRawUint32(value);
+  }
+
+  // No deserialize() method - uses NewType's deserializer
+  JSG_SERIALIZABLE_ONEWAY(SerializationTag::NEW_TYPE);
+};
+```
+
 ### Errors
 
 JSG provides a comprehensive error handling system that bridges C++ exceptions and JavaScript
