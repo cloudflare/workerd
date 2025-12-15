@@ -23,6 +23,7 @@ oci_image(
     cmd = ["/{}/app".format(package_name())],
     exposed_ports = ["8080"],
     tags = [
+        "no-remote",
         "requires-container-engine",
     ],
     target_compatible_with = [
