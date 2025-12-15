@@ -10,6 +10,13 @@ the same interface on top of different JavaScript engines. However, as of today,
 quite the case. At present application code will still need to use V8 APIs directly in some
 cases. We would like to improve this in the future.
 
+---
+
+# Part 1: Getting Started
+
+This section covers the prerequisites and foundational concepts you need to understand
+before working with JSG.
+
 ## The Basics
 
 If you haven't done so already, I recommend reading through both the ["KJ Style Guide"][]
@@ -52,6 +59,259 @@ public:
 ```
 
 Refer to the `jsg.h` header file for more detail on the specific methods available on the `jsg::Lock`.
+
+## V8 System Setup
+
+Before using any JSG functionality, you must initialize V8 by creating a `V8System` instance.
+This performs process-wide initialization and should be created once, typically in `main()`.
+
+### `V8System`
+
+```cpp
+#include <workerd/jsg/setup.h>
+
+int main() {
+  // Basic initialization with default platform
+  jsg::V8System v8System;
+
+  // Or with V8 flags
+  kj::ArrayPtr<const kj::StringPtr> flags = {"--expose-gc"_kj, "--single-threaded-gc"_kj};
+  jsg::V8System v8System(flags);
+
+  // Or with a custom platform
+  auto platform = jsg::defaultPlatform(4);  // 4 background threads
+  jsg::V8System v8System(*platform, flags, platform.get());
+
+  // ... use JSG APIs ...
+}
+```
+
+**Important:** Only one `V8System` can exist per process. It must be created before any other
+JSG operations and destroyed last.
+
+#### Custom Platform
+
+The default V8 platform uses a background thread pool for tasks like garbage collection and
+compilation. You can customize the thread pool size:
+
+```cpp
+// Create platform with specific thread count (0 = auto-detect, not recommended)
+kj::Own<v8::Platform> platform = jsg::defaultPlatform(4);
+```
+
+#### Fatal Error Handling
+
+You can set a custom callback for fatal V8 errors:
+
+```cpp
+void myFatalErrorHandler(kj::StringPtr location, kj::StringPtr message) {
+  // Log and handle the error
+  KJ_LOG(FATAL, "V8 fatal error", location, message);
+}
+
+jsg::V8System::setFatalErrorCallback(&myFatalErrorHandler);
+```
+
+### `Isolate<TypeWrapper>`
+
+An Isolate represents an independent V8 execution environment. Multiple isolates can run
+concurrently on different threads. Each isolate has its own heap and cannot directly share
+JavaScript objects with other isolates.
+
+To create an isolate, first declare your isolate type using `JSG_DECLARE_ISOLATE_TYPE`:
+
+```cpp
+// Declare an isolate type that can use MyGlobalObject and MyApiClass
+JSG_DECLARE_ISOLATE_TYPE(MyIsolate, MyGlobalObject, MyApiClass, AnotherClass);
+```
+
+Then instantiate it:
+
+```cpp
+// Create an isolate observer (for metrics/debugging)
+auto observer = kj::heap<jsg::IsolateObserver>();
+
+// Create the isolate
+MyIsolate isolate(v8System, kj::mv(observer));
+```
+
+#### Isolate with Configuration
+
+If your API types require configuration (e.g., compatibility flags):
+
+```cpp
+struct MyConfiguration {
+  bool enableFeatureX;
+  kj::StringPtr version;
+};
+
+MyIsolate isolate(v8System, MyConfiguration{.enableFeatureX = true, .version = "1.0"_kj},
+                  kj::mv(observer));
+```
+
+#### Isolate Groups (V8 Sandboxing)
+
+When using V8 sandboxing, isolates can be grouped to share a sandbox or isolated for security:
+
+```cpp
+// Create a new isolate group (isolated sandbox)
+auto group = v8::IsolateGroup::Create();
+MyIsolate isolate(v8System, group, config, kj::mv(observer));
+
+// Or use the default group (shared sandbox, less secure but more memory efficient)
+MyIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), config, kj::mv(observer));
+```
+
+### Taking a Lock
+
+Before executing JavaScript, you must acquire a lock on the isolate. Only one thread can
+hold the lock at a time:
+
+```cpp
+// Method 1: Using runInLockScope (recommended)
+isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+  // JavaScript execution happens here
+  auto context = lock.newContext<MyGlobalObject>();
+  // ...
+});
+
+// Method 2: Manual lock (when you need more control)
+jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+  MyIsolate::Lock lock(isolate, stackScope);
+  lock.withinHandleScope([&] {
+    // ...
+  });
+});
+```
+
+### Creating a Context
+
+A context provides the global object and scope for JavaScript execution:
+
+```cpp
+isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+  // Create a context with MyGlobalObject as the global
+  jsg::JsContext<MyGlobalObject> jsContext = lock.newContext<MyGlobalObject>();
+
+  // Access the context handle for V8 operations
+  v8::Local<v8::Context> v8Context = jsContext.getHandle(lock);
+
+  // Enter the context to execute JavaScript
+  v8::Context::Scope contextScope(v8Context);
+
+  // Now you can execute JavaScript...
+});
+```
+
+#### Context Options
+
+```cpp
+jsg::NewContextOptions options {
+  // Add options as needed
+};
+auto context = lock.newContext<MyGlobalObject>(options, constructorArg1, constructorArg2);
+```
+
+### Using the Lock
+
+The `Lock` class provides access to type wrapping and unwrapping:
+
+```cpp
+isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+  auto jsContext = lock.newContext<MyGlobalObject>();
+  v8::Local<v8::Context> context = jsContext.getHandle(lock);
+  v8::Context::Scope contextScope(context);
+
+  // Wrap a C++ value to JavaScript
+  v8::Local<v8::Value> jsValue = lock.wrap(context, kj::str("hello"));
+
+  // Unwrap a JavaScript value to C++
+  kj::String cppValue = lock.unwrap<kj::String>(context, jsValue);
+
+  // Get a type handler for specific operations
+  const auto& handler = lock.getTypeHandler<MyApiClass>();
+
+  // Get a constructor function
+  jsg::JsObject constructor = lock.getConstructor<MyApiClass>(context);
+});
+```
+
+### `IsolateBase`
+
+`IsolateBase` is the non-templated base class of `Isolate<T>`, providing common functionality:
+
+```cpp
+// Get the IsolateBase from a v8::Isolate pointer
+jsg::IsolateBase& base = jsg::IsolateBase::from(v8Isolate);
+
+// Terminate JavaScript execution (can be called from another thread)
+base.terminateExecution();
+
+// Configure isolate behavior
+base.setAllowEval(lock, true);           // Enable/disable eval()
+base.setCaptureThrowsAsRejections(lock, true);  // Convert throws to rejections
+base.setNodeJsCompatEnabled(lock, true);  // Enable Node.js compatibility
+
+// Check configuration
+bool nodeCompat = base.isNodeJsCompatEnabled();
+bool topLevelAwait = base.isTopLevelAwaitEnabled();
+```
+
+### Complete Example
+
+```cpp
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
+
+// Define your API types
+class MyGlobalObject: public jsg::Object, public jsg::ContextGlobal {
+public:
+  kj::String greet(kj::String name) {
+    return kj::str("Hello, ", name, "!");
+  }
+
+  JSG_RESOURCE_TYPE(MyGlobalObject) {
+    JSG_METHOD(greet);
+  }
+};
+
+// Declare the isolate type
+JSG_DECLARE_ISOLATE_TYPE(MyIsolate, MyGlobalObject);
+
+int main() {
+  // Initialize V8
+  jsg::V8System v8System;
+
+  // Create isolate
+  auto observer = kj::heap<jsg::IsolateObserver>();
+  MyIsolate isolate(v8System, kj::mv(observer));
+
+  // Execute JavaScript
+  isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+    auto jsContext = lock.newContext<MyGlobalObject>();
+    v8::Local<v8::Context> context = jsContext.getHandle(lock);
+    v8::Context::Scope contextScope(context);
+
+    // Compile and run JavaScript
+    auto source = lock.str("greet('World')");
+    auto script = jsg::check(v8::Script::Compile(context, source));
+    auto result = jsg::check(script->Run(context));
+
+    // Convert result to C++ string
+    kj::String greeting = lock.unwrap<kj::String>(context, result);
+    KJ_LOG(INFO, greeting);  // "Hello, World!"
+  });
+
+  return 0;
+}
+```
+
+---
+
+# Part 2: Core Concepts
+
+This section covers the fundamental type system that JSG provides for mapping between
+C++ and JavaScript.
 
 ## JSG Value Types
 
@@ -3822,252 +4082,6 @@ When V8 sandboxing is enabled, buffer memory must reside within the sandbox:
 - `BackingStore::from()` will copy data if the source array is outside the sandbox
 - `BackingStore::alloc()` always allocates inside the sandbox
 - A `BackingStore` cannot be passed to another isolate unless both are in the same `IsolateGroup`
-
-## V8 System Setup
-
-Before using any JSG functionality, you must initialize V8 by creating a `V8System` instance.
-This performs process-wide initialization and should be created once, typically in `main()`.
-
-### `V8System`
-
-```cpp
-#include <workerd/jsg/setup.h>
-
-int main() {
-  // Basic initialization with default platform
-  jsg::V8System v8System;
-
-  // Or with V8 flags
-  kj::ArrayPtr<const kj::StringPtr> flags = {"--expose-gc"_kj, "--single-threaded-gc"_kj};
-  jsg::V8System v8System(flags);
-
-  // Or with a custom platform
-  auto platform = jsg::defaultPlatform(4);  // 4 background threads
-  jsg::V8System v8System(*platform, flags, platform.get());
-
-  // ... use JSG APIs ...
-}
-```
-
-**Important:** Only one `V8System` can exist per process. It must be created before any other
-JSG operations and destroyed last.
-
-#### Custom Platform
-
-The default V8 platform uses a background thread pool for tasks like garbage collection and
-compilation. You can customize the thread pool size:
-
-```cpp
-// Create platform with specific thread count (0 = auto-detect, not recommended)
-kj::Own<v8::Platform> platform = jsg::defaultPlatform(4);
-```
-
-#### Fatal Error Handling
-
-You can set a custom callback for fatal V8 errors:
-
-```cpp
-void myFatalErrorHandler(kj::StringPtr location, kj::StringPtr message) {
-  // Log and handle the error
-  KJ_LOG(FATAL, "V8 fatal error", location, message);
-}
-
-jsg::V8System::setFatalErrorCallback(&myFatalErrorHandler);
-```
-
-### `Isolate<TypeWrapper>`
-
-An Isolate represents an independent V8 execution environment. Multiple isolates can run
-concurrently on different threads. Each isolate has its own heap and cannot directly share
-JavaScript objects with other isolates.
-
-To create an isolate, first declare your isolate type using `JSG_DECLARE_ISOLATE_TYPE`:
-
-```cpp
-// Declare an isolate type that can use MyGlobalObject and MyApiClass
-JSG_DECLARE_ISOLATE_TYPE(MyIsolate, MyGlobalObject, MyApiClass, AnotherClass);
-```
-
-Then instantiate it:
-
-```cpp
-// Create an isolate observer (for metrics/debugging)
-auto observer = kj::heap<jsg::IsolateObserver>();
-
-// Create the isolate
-MyIsolate isolate(v8System, kj::mv(observer));
-```
-
-#### Isolate with Configuration
-
-If your API types require configuration (e.g., compatibility flags):
-
-```cpp
-struct MyConfiguration {
-  bool enableFeatureX;
-  kj::StringPtr version;
-};
-
-MyIsolate isolate(v8System, MyConfiguration{.enableFeatureX = true, .version = "1.0"_kj},
-                  kj::mv(observer));
-```
-
-#### Isolate Groups (V8 Sandboxing)
-
-When using V8 sandboxing, isolates can be grouped to share a sandbox or isolated for security:
-
-```cpp
-// Create a new isolate group (isolated sandbox)
-auto group = v8::IsolateGroup::Create();
-MyIsolate isolate(v8System, group, config, kj::mv(observer));
-
-// Or use the default group (shared sandbox, less secure but more memory efficient)
-MyIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), config, kj::mv(observer));
-```
-
-### Taking a Lock
-
-Before executing JavaScript, you must acquire a lock on the isolate. Only one thread can
-hold the lock at a time:
-
-```cpp
-// Method 1: Using runInLockScope (recommended)
-isolate.runInLockScope([&](MyIsolate::Lock& lock) {
-  // JavaScript execution happens here
-  auto context = lock.newContext<MyGlobalObject>();
-  // ...
-});
-
-// Method 2: Manual lock (when you need more control)
-jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-  MyIsolate::Lock lock(isolate, stackScope);
-  lock.withinHandleScope([&] {
-    // ...
-  });
-});
-```
-
-### Creating a Context
-
-A context provides the global object and scope for JavaScript execution:
-
-```cpp
-isolate.runInLockScope([&](MyIsolate::Lock& lock) {
-  // Create a context with MyGlobalObject as the global
-  jsg::JsContext<MyGlobalObject> jsContext = lock.newContext<MyGlobalObject>();
-
-  // Access the context handle for V8 operations
-  v8::Local<v8::Context> v8Context = jsContext.getHandle(lock);
-
-  // Enter the context to execute JavaScript
-  v8::Context::Scope contextScope(v8Context);
-
-  // Now you can execute JavaScript...
-});
-```
-
-#### Context Options
-
-```cpp
-jsg::NewContextOptions options {
-  // Add options as needed
-};
-auto context = lock.newContext<MyGlobalObject>(options, constructorArg1, constructorArg2);
-```
-
-### Using the Lock
-
-The `Lock` class provides access to type wrapping and unwrapping:
-
-```cpp
-isolate.runInLockScope([&](MyIsolate::Lock& lock) {
-  auto jsContext = lock.newContext<MyGlobalObject>();
-  v8::Local<v8::Context> context = jsContext.getHandle(lock);
-  v8::Context::Scope contextScope(context);
-
-  // Wrap a C++ value to JavaScript
-  v8::Local<v8::Value> jsValue = lock.wrap(context, kj::str("hello"));
-
-  // Unwrap a JavaScript value to C++
-  kj::String cppValue = lock.unwrap<kj::String>(context, jsValue);
-
-  // Get a type handler for specific operations
-  const auto& handler = lock.getTypeHandler<MyApiClass>();
-
-  // Get a constructor function
-  jsg::JsObject constructor = lock.getConstructor<MyApiClass>(context);
-});
-```
-
-### `IsolateBase`
-
-`IsolateBase` is the non-templated base class of `Isolate<T>`, providing common functionality:
-
-```cpp
-// Get the IsolateBase from a v8::Isolate pointer
-jsg::IsolateBase& base = jsg::IsolateBase::from(v8Isolate);
-
-// Terminate JavaScript execution (can be called from another thread)
-base.terminateExecution();
-
-// Configure isolate behavior
-base.setAllowEval(lock, true);           // Enable/disable eval()
-base.setCaptureThrowsAsRejections(lock, true);  // Convert throws to rejections
-base.setNodeJsCompatEnabled(lock, true);  // Enable Node.js compatibility
-
-// Check configuration
-bool nodeCompat = base.isNodeJsCompatEnabled();
-bool topLevelAwait = base.isTopLevelAwaitEnabled();
-```
-
-### Complete Example
-
-```cpp
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/setup.h>
-
-// Define your API types
-class MyGlobalObject: public jsg::Object, public jsg::ContextGlobal {
-public:
-  kj::String greet(kj::String name) {
-    return kj::str("Hello, ", name, "!");
-  }
-
-  JSG_RESOURCE_TYPE(MyGlobalObject) {
-    JSG_METHOD(greet);
-  }
-};
-
-// Declare the isolate type
-JSG_DECLARE_ISOLATE_TYPE(MyIsolate, MyGlobalObject);
-
-int main() {
-  // Initialize V8
-  jsg::V8System v8System;
-
-  // Create isolate
-  auto observer = kj::heap<jsg::IsolateObserver>();
-  MyIsolate isolate(v8System, kj::mv(observer));
-
-  // Execute JavaScript
-  isolate.runInLockScope([&](MyIsolate::Lock& lock) {
-    auto jsContext = lock.newContext<MyGlobalObject>();
-    v8::Local<v8::Context> context = jsContext.getHandle(lock);
-    v8::Context::Scope contextScope(context);
-
-    // Compile and run JavaScript
-    auto source = lock.str("greet('World')");
-    auto script = jsg::check(v8::Script::Compile(context, source));
-    auto result = jsg::check(script->Run(context));
-
-    // Convert result to C++ string
-    kj::String greeting = lock.unwrap<kj::String>(context, result);
-    KJ_LOG(INFO, greeting);  // "Hello, World!"
-  });
-
-  return 0;
-}
-```
 
 ## V8 Platform Wrapper
 
