@@ -95,8 +95,33 @@ The default V8 platform uses a background thread pool for tasks like garbage col
 compilation. You can customize the thread pool size:
 
 ```cpp
-// Create platform with specific thread count (0 = auto-detect, not recommended)
-kj::Own<v8::Platform> platform = jsg::defaultPlatform(4);
+// Create platform with specific thread count
+// Pass 0 for auto-detect (uses available CPU cores)
+kj::Own<v8::Platform> platform = jsg::defaultPlatform(0);
+```
+
+In production (like workerd), you may want to wrap the platform to customize behavior.
+For example, workerd wraps the platform to control `Date.now()` timing:
+
+```cpp
+// In workerd/server/v8-platform-impl.h
+class WorkerdPlatform final: public v8::Platform {
+public:
+  explicit WorkerdPlatform(v8::Platform& inner): inner(inner) {}
+
+  // Override to return KJ time instead of system time
+  double CurrentClockTimeMillis() noexcept override;
+
+  // All other methods delegate to inner platform
+  // ...
+private:
+  v8::Platform& inner;
+};
+
+// Usage in main():
+auto platform = jsg::defaultPlatform(0);
+WorkerdPlatform v8Platform(*platform);
+jsg::V8System v8System(v8Platform, flags, platform.get());
 ```
 
 #### Fatal Error Handling
@@ -151,16 +176,24 @@ MyIsolate isolate(v8System, MyConfiguration{.enableFeatureX = true, .version = "
 
 #### Isolate Groups (V8 Sandboxing)
 
-When using V8 sandboxing, isolates can be grouped to share a sandbox or isolated for security:
+When V8 sandboxing is enabled, isolates can be grouped to share a sandbox or isolated for
+stronger security boundaries:
 
 ```cpp
-// Create a new isolate group (isolated sandbox)
-auto group = v8::IsolateGroup::Create();
+// Use the default group (shared sandbox - more memory efficient)
+// This is what workerd uses in production
+auto group = v8::IsolateGroup::GetDefault();
 MyIsolate isolate(v8System, group, config, kj::mv(observer));
 
-// Or use the default group (shared sandbox, less secure but more memory efficient)
-MyIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), config, kj::mv(observer));
+// Or create a new isolate group for stronger isolation
+// (separate sandbox, uses more memory)
+auto isolatedGroup = v8::IsolateGroup::Create();
+MyIsolate isolate(v8System, isolatedGroup, config, kj::mv(observer));
 ```
+
+In workerd, the default group is used for all worker isolates. This allows multiple
+isolates to share the V8 sandbox memory region, reducing overall memory usage while
+still maintaining isolate-level JavaScript isolation.
 
 ### Taking a Lock
 
@@ -304,6 +337,29 @@ int main() {
 
   return 0;
 }
+```
+
+### Real-World Reference: workerd Initialization
+
+For a production example, see how workerd initializes V8 in `src/workerd/server/workerd.c++`:
+
+```cpp
+// From workerd.c++ serveImpl()
+auto platform = jsg::defaultPlatform(0);
+WorkerdPlatform v8Platform(*platform);
+jsg::V8System v8System(v8Platform,
+    KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; },
+    platform.get());
+```
+
+And how isolates are created in `src/workerd/server/server.c++`:
+
+```cpp
+// From server.c++ when creating a worker
+auto isolateGroup = v8::IsolateGroup::GetDefault();
+auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
+    limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver),
+    *memoryCacheProvider, pythonConfig);
 ```
 
 ---
