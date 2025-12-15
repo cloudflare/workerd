@@ -68,31 +68,31 @@ crate_vendor(
     build_file = "//deps/rust/crates:BUILD.bazel",
     defs_module = "//deps/rust/crates:defs.bzl",
 )
-# crate_repositories = use_extension("//deps/rust/crates:extension.bzl", "crate_repositories")
+crate_repositories = use_extension("//deps/rust/crates:extension.bzl", "crate_repositories")
 
-# use_repo(
-#     crate_repositories,
-#     "crates_vendor__anyhow-1.0.100",
-#     "crates_vendor__clang-ast-0.1.35",
-#     "crates_vendor__clap-4.5.48",
-#     "crates_vendor__codespan-reporting-0.12.0",
-#     "crates_vendor__flate2-1.1.2",
-#     "crates_vendor__foldhash-0.2.0",
-#     "crates_vendor__lol_html_c_api-1.3.0",
-#     "crates_vendor__pico-args-0.5.0",
-#     "crates_vendor__proc-macro2-1.0.101",
-#     "crates_vendor__quote-1.0.41",
-#     "crates_vendor__rustversion-1.0.22",
-#     "crates_vendor__serde_json-1.0.145",
-#     "crates_vendor__serde-1.0.228",
-#     "crates_vendor__static_assertions-1.1.0",
-#     "crates_vendor__swc_core-35.0.0",
-#     "crates_vendor__swc_ts_fast_strip-29.0.0",
-#     "crates_vendor__syn-2.0.106",
-#     "crates_vendor__thiserror-2.0.17",
-#     "crates_vendor__tokio-1.47.1",
-#     "crates_vendor__tracing-0.1.41",
-# )
+use_repo(
+    crate_repositories,
+    "crates_vendor__anyhow-1.0.100",
+    "crates_vendor__clang-ast-0.1.35",
+    "crates_vendor__clap-4.5.53",
+    "crates_vendor__codespan-reporting-0.13.1",
+    "crates_vendor__flate2-1.1.5",
+    "crates_vendor__foldhash-0.2.0",
+    "crates_vendor__lol_html_c_api-1.3.0",
+    "crates_vendor__pico-args-0.5.0",
+    "crates_vendor__proc-macro2-1.0.103",
+    "crates_vendor__quote-1.0.42",
+    "crates_vendor__rustversion-1.0.22",
+    "crates_vendor__serde_json-1.0.145",
+    "crates_vendor__serde-1.0.228",
+    "crates_vendor__static_assertions-1.1.0",
+    "crates_vendor__swc_core-35.0.0",
+    "crates_vendor__swc_ts_fast_strip-29.0.0",
+    "crates_vendor__syn-2.0.111",
+    "crates_vendor__thiserror-2.0.17",
+    "crates_vendor__tokio-1.48.0",
+    "crates_vendor__tracing-0.1.43",
+)
 #     direct_deps = [struct(repo = "crates_vendor", is_dev_dep = False)]
 #     direct_deps.extend(_crate_repositories())
 #     return direct_deps
