@@ -1,6 +1,5 @@
 #pragma once
 
-#include "external-tags.h"
 #include "jsg.h"
 
 #include <v8-container.h>
