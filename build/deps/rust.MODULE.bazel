@@ -10,6 +10,8 @@ RUST_TARGET_TRIPLES = [
     "x86_64-apple-darwin",
     # Add support for macOS rosetta
     "aarch64-unknown-linux-gnu",
+    # "x86_64-pc-windows-msvc",
+    # "x86_64-unknown-linux-gnu",
 ]
 
 
@@ -96,3 +98,10 @@ use_repo(
 #     direct_deps = [struct(repo = "crates_vendor", is_dev_dep = False)]
 #     direct_deps.extend(_crate_repositories())
 #     return direct_deps
+
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+new_local_repository(
+    name = "com_cloudflare_lol_html",
+    build_file = "@workerd//deps/rust:BUILD.lolhtml",
+    path = "empty",
+)
