@@ -145,11 +145,18 @@ represented in JSG using `kj::OneOf<T...>`.
 For example, `kj::OneOf<kj::String, uint16_t, kj::Maybe<bool>>` can be either:
 a) a string, b) a 16-bit integer, c) `null`, or (d) `true` or `false`.
 
-TODO(soon): Open Question: What happens if you try `kj::OneOf<kj::Maybe<kj::String>,
-kj::Maybe<bool>>` and pass a `null`?
+**Important:** JSG validates union types at compile-time according to Web IDL rules. This means:
 
-TODO(soon): Open Question: What happens if you have a catch-all coercible like kj::String
-in the list?
+- A union can have at most one nullable type (`kj::Maybe<T>`) or dictionary type
+- A union can have at most one numeric type, one string type, one boolean type, etc.
+- Multiple interface types (JSG_RESOURCE types) are allowed as long as they are distinct
+
+For example, `kj::OneOf<int, double>` will produce a compile error because both are numeric
+types. See the "Web IDL Type Mapping" section for the complete list of validation rules.
+
+When a value could match multiple types in a union, JSG attempts to match types in a
+specific order based on their Web IDL category. Interface types are checked first, then
+dictionaries, then sequences, then primitives.
 
 ### Array types (`kj::Array<T>` and `kj::ArrayPtr<T>`)
 
