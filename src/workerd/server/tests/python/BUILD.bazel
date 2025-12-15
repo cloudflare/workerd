@@ -75,3 +75,5 @@ py_wd_test(
     make_snapshot = False,
     use_snapshot = "numpy",
 )
+
+py_wd_test("python-compat-flag")

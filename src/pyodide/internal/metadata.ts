@@ -47,8 +47,12 @@ export const TRANSITIVE_REQUIREMENTS =
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 
 export type CompatibilityFlags = MetadataReader.CompatibilityFlags;
-export const COMPATIBILITY_FLAGS: MetadataReader.CompatibilityFlags =
-  MetadataReader.getCompatibilityFlags();
+export const COMPATIBILITY_FLAGS: MetadataReader.CompatibilityFlags = {
+  // Compat flags returned from getCompatibilityFlags is immutable,
+  // but in Pyodide 0.26, we modify the JS object that is exposed to the Python through
+  // registerJsModule so we create a new object here by copying the values.
+  ...MetadataReader.getCompatibilityFlags(),
+};
 export const WORKFLOWS_ENABLED: boolean =
   !!COMPATIBILITY_FLAGS.python_workflows;
 const NO_GLOBAL_HANDLERS: boolean =
