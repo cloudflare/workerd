@@ -14,11 +14,9 @@ RUST_TARGET_TRIPLES = [
     # "x86_64-unknown-linux-gnu",
 ]
 
-
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     edition = "2024",
-    extra_target_triples = RUST_TARGET_TRIPLES,
     extra_rustc_flags_triples = {
         # Enable ISA extensions matching the ones used for C++. The clmul feature is included as
         # it is still "unstable" as of 1.86.0.
@@ -28,34 +26,35 @@ rust.toolchain(
         "aarch64-unknown-linux-gnu": ["-Ctarget-feature=+crc"],
         # No options needed for aarch64-apple-darwin: CRC feature is enabled by default.
     },
+    extra_target_triples = RUST_TARGET_TRIPLES,
     versions = [
         RUST_STABLE_VERSION,
         RUST_NIGHTLY_VERSION,
     ],
 )
 use_repo(rust, "rust_toolchains")
-register_toolchains("@rust_toolchains//:all")
 
+register_toolchains("@rust_toolchains//:all")
 
 # load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
 # load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains", "rustfmt_toolchain_repository")
 # load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
 # load("//deps/rust/crates:crates.bzl", "crate_repositories")
 
-    # for t in RUST_TARGET_TRIPLES:
-    #     rustfmt_toolchain_repository(
-    #         name = "rustfmt_toolchain_" + t,
-    #         exec_triple = t,
-    #         version = RUST_NIGHTLY_VERSION,
-    #     )
+# for t in RUST_TARGET_TRIPLES:
+#     rustfmt_toolchain_repository(
+#         name = "rustfmt_toolchain_" + t,
+#         exec_triple = t,
+#         version = RUST_NIGHTLY_VERSION,
+#     )
 
-    # crate_universe_dependencies()
+# crate_universe_dependencies()
 
-    # # Load rust crate dependencies.
-    # # These could be regenerated from cargo.bzl by using
-    # # `just update-rust` (consult `just --list` or justfile for more details)
-    # crate_repositories()
-    # rust_analyzer_dependencies()
+# # Load rust crate dependencies.
+# # These could be regenerated from cargo.bzl by using
+# # `just update-rust` (consult `just --list` or justfile for more details)
+# crate_repositories()
+# rust_analyzer_dependencies()
 
 # # buildifier: disable=bzl-visibility
 # load("@rules_rust//crate_universe/private:crates_vendor.bzl", "crates_vendor_remote_repository")
@@ -63,15 +62,15 @@ register_toolchains("@rust_toolchains//:all")
 # # buildifier: disable=bzl-visibility
 # load("//deps/rust/crates:defs.bzl", _crate_repositories = "crate_repositories")
 
-
 crate_vendor = use_repo_rule("@rules_rust//crate_universe/private:crates_vendor.bzl", "crates_vendor_remote_repository")
+
 crate_vendor(
     name = "crates_vendor",
     build_file = "//deps/rust/crates:BUILD.bazel",
     defs_module = "//deps/rust/crates:defs.bzl",
 )
-crate_repositories = use_extension("//deps/rust/crates:extension.bzl", "crate_repositories")
 
+crate_repositories = use_extension("//deps/rust/crates:extension.bzl", "crate_repositories")
 use_repo(
     crate_repositories,
     "crates_vendor__anyhow-1.0.100",
@@ -85,8 +84,8 @@ use_repo(
     "crates_vendor__proc-macro2-1.0.103",
     "crates_vendor__quote-1.0.42",
     "crates_vendor__rustversion-1.0.22",
-    "crates_vendor__serde_json-1.0.145",
     "crates_vendor__serde-1.0.228",
+    "crates_vendor__serde_json-1.0.145",
     "crates_vendor__static_assertions-1.1.0",
     "crates_vendor__swc_core-35.0.0",
     "crates_vendor__swc_ts_fast_strip-29.0.0",
@@ -100,6 +99,7 @@ use_repo(
 #     return direct_deps
 
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
 new_local_repository(
     name = "com_cloudflare_lol_html",
     build_file = "@workerd//deps/rust:BUILD.lolhtml",
