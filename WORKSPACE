@@ -28,6 +28,6 @@ deps_gen()
 #     path = "empty",
 # )
 
-# load("//build/deps:dep_pyodide.bzl", "dep_pyodide")
+load("//build/deps:dep_pyodide.bzl", "dep_pyodide")
 
-# dep_pyodide()
+dep_pyodide()
