@@ -32,6 +32,9 @@ git_override(
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
+# Rust
+bazel_dep(name = "rules_rust", version = "0.68.1")
+
 # clang-tidy
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
