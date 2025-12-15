@@ -14,7 +14,7 @@ index 5851af3a84e24e5229ab6e3588e62e7d3c5842fd..d4951fe3c0e46515ffe329f7c2c2b348
    static const int kExternalOneByteRepresentationTag = 0x0a;
  
 -  static const uint32_t kNumIsolateDataSlots = 4;
-+  static const uint32_t kNumIsolateDataSlots = 5;
++  static const uint32_t kNumIsolateDataSlots = 6;
    static const int kStackGuardSize = 8 * kApiSystemPointerSize;
    static const int kNumberOfBooleanFlags = 6;
    static const int kErrorMessageParamSize = 1;

@@ -6,6 +6,7 @@
 
 #include <workerd/api/encoding.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
@@ -48,9 +49,12 @@ TextDecoderStream::TextDecoderStream(jsg::Ref<TextDecoder> decoder,
 jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<TextDecoderStreamInit> options) {
 
-  auto decoder = TextDecoder::constructor(js, kj::mv(label), options.map([](auto& opts) {
+  auto decoder = TextDecoder::constructor(js, kj::mv(label), options.map([&js](auto& opts) {
     return TextDecoder::ConstructorOptions{
-      .fatal = opts.fatal.orDefault(true),
+      // Previously this would default to true. The spec requires a default
+      // of false, however. When the pedanticWpt flag is not set, we continue
+      // to default as true.
+      .fatal = opts.fatal.orDefault(!FeatureFlags::get(js).getPedanticWpt()),
       .ignoreBOM = opts.ignoreBOM.orDefault(false),
     };
   }));

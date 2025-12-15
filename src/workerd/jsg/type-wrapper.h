@@ -555,7 +555,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       // C++ parameters which don't unwrap JS values, like TypeHandlers or v8::FunctionCallbackInfo.
       return unwrap(js, context, static_cast<V*>(nullptr));
     } else {
-      if constexpr (!webidl::isOptional<V> && !kj::isSameType<V, Unimplemented>()) {
+      if constexpr (!webidl::OptionalType<V> && !kj::isSameType<V, Unimplemented>()) {
         // TODO(perf): Better to perform this parameter index check once, at the unwrap<U>() call
         //   site. We'll need function length properties implemented correctly for that, most
         //   likely -- see EW-386.

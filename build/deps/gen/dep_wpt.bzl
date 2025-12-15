@@ -2,18 +2,12 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "wpt-c1ad85a22"
-URL = "https://github.com/cloudflare/workerd-tools/releases/download/wpt-c1ad85a22/wpt-c1ad85a22.tar.gz"
-STRIP_PREFIX = "wpt-c1ad85a22"
-SHA256 = "b91e6024787d3c440525054fe161cdb1f28b6757613ef9ce1ab14685430d947c"
-TYPE = "tgz"
-
 def dep_wpt():
     http_archive(
         name = "wpt",
-        url = URL,
-        strip_prefix = STRIP_PREFIX,
-        type = TYPE,
-        sha256 = SHA256,
         build_file = "@workerd//:build/BUILD.wpt",
+        url = "https://github.com/cloudflare/workerd-tools/releases/download/wpt-c1ad85a22/wpt-c1ad85a22.tar.gz",
+        strip_prefix = "wpt-c1ad85a22",
+        sha256 = "b91e6024787d3c440525054fe161cdb1f28b6757613ef9ce1ab14685430d947c",
+        type = "tgz",
     )

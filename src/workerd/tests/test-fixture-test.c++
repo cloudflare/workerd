@@ -6,6 +6,18 @@
 
 #include <kj/test.h>
 
+#include <memory>
+
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/lsan_interface.h>
+#define LSAN_ENABLED 1
+#else
+#define LSAN_ENABLED 0
+static int __lsan_do_recoverable_leak_check() {
+  return 0;
+}
+#endif
+
 namespace workerd {
 namespace {
 
@@ -164,6 +176,33 @@ KJ_TEST("module import failure") {
     KJ_FAIL_REQUIRE("exception expected");
   } catch (kj::Exception& e) {
     KJ_EXPECT(e.getDescription() == "script startup threw exception"_kj);
+  }
+}
+
+// This test mimics the fuzzer pattern where a static TestFixture is reused across iterations.
+// The Rust Realm is stored in V8's embedder data. In fuzzers with incremental leak detection, this can cause false positive leak
+// reports because LSAN checks between iterations while the static TestFixture is still alive.
+//
+// Note: We use unique_ptr here because the test must properly clean up before V8System's
+// static destructor runs. Fuzzers typically use raw `new` and rely on _exit() to skip
+// static destructors, but tests must clean up properly.
+KJ_TEST("static fixture with multiple iterations") {
+  static std::unique_ptr<TestFixture> fixture;
+  if (fixture == nullptr) {
+    fixture = std::make_unique<TestFixture>();
+  }
+
+  uint runCount = 0;
+
+  for (uint i = 0; i < 10; i++) {
+    fixture->runInIoContext([&](const TestFixture::Environment& env) { runCount++; });
+  }
+
+  KJ_EXPECT(runCount == 10);
+
+  if (LSAN_ENABLED) {
+    int leaks = __lsan_do_recoverable_leak_check();
+    KJ_EXPECT(leaks == 0, "LSAN detected leaks");
   }
 }
 

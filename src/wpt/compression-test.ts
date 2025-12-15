@@ -10,12 +10,7 @@ export default {
       'V8 assertion - Cannot construct ArrayBuffer with a BackingStore of SharedArrayBuffer',
     disabledTests: true,
   },
-  'compression-constructor-error.tentative.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      'non-string input should cause the constructor to throw',
-    ],
-  },
+  'compression-constructor-error.tentative.any.js': {},
   'compression-including-empty-chunk.tentative.any.js': {},
   'compression-large-flush-output.any.js': {},
   'compression-multiple-chunks.tentative.any.js': {},
@@ -45,12 +40,7 @@ export default {
     disabledTests: true,
   },
   'decompression-buffersource.tentative.any.js': {},
-  'decompression-constructor-error.tentative.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      'non-string input should cause the constructor to throw',
-    ],
-  },
+  'decompression-constructor-error.tentative.any.js': {},
   'decompression-correct-input.tentative.any.js': {},
   'decompression-corrupt-input.tentative.any.js': {},
   'decompression-empty-input.tentative.any.js': {},
