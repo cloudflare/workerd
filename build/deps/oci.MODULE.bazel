@@ -1,6 +1,6 @@
 # rules_oci and rules_multirun are used to build Docker images
-bazel_dep(name = "rules_oci", version = "2.2.6")
-bazel_dep(name = "rules_multirun", version = "0.10.0")
+bazel_dep(name = "rules_oci", version = "2.2.7")
+bazel_dep(name = "rules_multirun", version = "0.13.0")
 
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 
