@@ -219,8 +219,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
       void* schemaAsPtr;
       memcpy(&schemaAsPtr, &schema, sizeof(schema));
 
-      [[maybe_unused]] constexpr auto tag =
-          static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpSchema);
+      constexpr auto tag = static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpSchema);
       auto constructor = v8::FunctionTemplate::New(
           js.v8Isolate, &constructorCallback, v8::External::New(js.v8Isolate, schemaAsPtr, tag));
 
@@ -324,8 +323,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
 
     for (auto& method: methods) {
       auto name = jsg::v8StrIntern(js.v8Isolate, method.getProto().getName());
-      [[maybe_unused]] constexpr auto tag =
-          static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpInterfaceMethod);
+      constexpr auto tag = static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpInterfaceMethod);
       prototype->Set(name,
           v8::FunctionTemplate::New(js.v8Isolate, &methodCallback,
               v8::External::New(js.v8Isolate, &method, tag), signature, 0,
@@ -337,8 +335,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     jsg::liftKj(args, [&]() {
       auto data = args.Data();
       KJ_ASSERT(data->IsExternal());
-      [[maybe_unused]] constexpr auto tag =
-          static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpSchema);
+      constexpr auto tag = static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpSchema);
       void* schemaAsPtr = data.As<v8::External>()->Value(tag);
       capnp::Schema schema;
       memcpy(&schema, &schemaAsPtr, sizeof(schema));
@@ -372,8 +369,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     jsg::liftKj(args, [&]() {
       auto data = args.Data();
       KJ_ASSERT(data->IsExternal());
-      [[maybe_unused]] constexpr auto tag =
-          static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpInterfaceMethod);
+      constexpr auto tag = static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpInterfaceMethod);
       auto& method =
           *reinterpret_cast<capnp::InterfaceSchema::Method*>(data.As<v8::External>()->Value(tag));
 
