@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::any::TypeId;
 use std::cell::Cell;
-use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::c_void;
@@ -15,7 +14,7 @@ use crate::ResourceTemplate;
 use crate::v8;
 
 // ============================================================================
-// ResourceCleanup trait for type-erased cleanup
+// ResourcesCleanup trait for type-erased cleanup
 // ============================================================================
 
 /// Trait for type-erased resource cleanup during Realm shutdown.
@@ -23,7 +22,7 @@ use crate::v8;
 /// This follows the C++ pattern where `HeapTracer::clearWrappers()` iterates all tracked
 /// wrappers at shutdown and cleans them up. Without this, instances that have JavaScript
 /// wrappers but are waiting for V8 GC would leak when the Realm is dropped.
-pub(crate) trait ResourceCleanup: Any {
+pub(crate) trait ResourcesCleanup: Any {
     /// Cleans up all tracked instances by dropping them directly.
     /// Called during Realm shutdown before V8 GC has a chance to run.
     fn cleanup(&mut self);
@@ -95,22 +94,30 @@ impl<R: Resource> InstancePtr<R> {
 }
 
 // ============================================================================
-// WrapperInfo - Data associated with a JavaScript-wrapped instance
+// WrapperState - Lifecycle state for JavaScript wrapper
 // ============================================================================
 
-/// Information stored when an instance is exposed to JavaScript.
+/// Wrapper state for a resource instance.
 ///
-/// All fields are set atomically when `attach_wrapper` is called, ensuring
-/// we never have a partially-initialized wrapper state.
-struct WrapperInfo {
-    /// Pointer to the owning Instance (for the weak callback).
-    this: NonNull<c_void>,
-    /// V8 Global handle to the JavaScript wrapper object.
-    wrapper: v8::Global<v8::Object>,
-    /// The V8 isolate this instance is bound to.
-    isolate: NonNull<v8::ffi::Isolate>,
-    /// `TypeId` of the resource type R (for finding `ResourceImpl` during cleanup).
-    type_id: TypeId,
+/// Represents whether an instance has been exposed to JavaScript and,
+/// if so, the associated wrapper information.
+enum WrapperState {
+    /// Instance has not been exposed to JavaScript.
+    NotWrapped,
+    /// Instance has a JavaScript wrapper.
+    ///
+    /// All fields are set atomically when `attach_wrapper` is called, ensuring
+    /// we never have a partially-initialized wrapper state.
+    Wrapped {
+        /// Pointer to the owning Instance (for the weak callback).
+        this: NonNull<c_void>,
+        /// V8 Global handle to the JavaScript wrapper object.
+        wrapper: v8::Global<v8::Object>,
+        /// The V8 isolate this instance is bound to.
+        isolate: NonNull<v8::ffi::Isolate>,
+        /// `TypeId` of the resource type R (for finding `ResourceImpl` during cleanup).
+        type_id: TypeId,
+    },
 }
 
 // ============================================================================
@@ -122,7 +129,7 @@ struct WrapperInfo {
 /// # Lifecycle
 ///
 /// 1. **Created**: Instance allocated with `ref_count` = 0, then `Ref::new` increments to 1
-/// 2. **Wrapped**: `attach_wrapper` called, wrapper = Some(WrapperInfo)
+/// 2. **Wrapped**: `attach_wrapper` called, state becomes `Wrapped { ... }`
 /// 3. **Ref count zero with wrapper**: Global made weak, waiting for GC
 /// 4. **Dropped**: Either via weak callback (GC) or Realm cleanup
 ///
@@ -136,8 +143,8 @@ pub struct State {
     /// Function pointer to drop the Instance. Required for type-erased dropping
     /// from the V8 weak callback.
     drop_fn: unsafe fn(*mut c_void),
-    /// Wrapper information, set when exposed to JavaScript.
-    info: Option<WrapperInfo>,
+    /// Wrapper state, tracks whether exposed to JavaScript.
+    wrapper: WrapperState,
 }
 
 impl State {
@@ -149,7 +156,7 @@ impl State {
         Self {
             ref_count: Cell::new(0),
             drop_fn,
-            info: None,
+            wrapper: WrapperState::NotWrapped,
         }
     }
 
@@ -178,27 +185,39 @@ impl State {
 
     /// Returns whether this instance has been wrapped for JavaScript.
     pub(crate) fn is_wrapped(&self) -> bool {
-        self.info.is_some()
+        matches!(self.wrapper, WrapperState::Wrapped { .. })
     }
 
     /// Returns the V8 Global wrapper handle if wrapped.
-    pub(crate) fn wrapper(&self) -> Option<&v8::Global<v8::Object>> {
-        self.info.as_ref().map(|w| &w.wrapper)
+    pub(crate) fn global(&self) -> Option<&v8::Global<v8::Object>> {
+        match &self.wrapper {
+            WrapperState::NotWrapped => None,
+            WrapperState::Wrapped { wrapper, .. } => Some(wrapper),
+        }
     }
 
     /// Returns the isolate pointer if wrapped.
     pub fn isolate(&self) -> Option<NonNull<v8::ffi::Isolate>> {
-        self.info.as_ref().map(|w| w.isolate)
+        match &self.wrapper {
+            WrapperState::NotWrapped => None,
+            WrapperState::Wrapped { isolate, .. } => Some(*isolate),
+        }
     }
 
     /// Returns the `TypeId` if wrapped.
     pub fn type_id(&self) -> Option<TypeId> {
-        self.info.as_ref().map(|w| w.type_id)
+        match &self.wrapper {
+            WrapperState::NotWrapped => None,
+            WrapperState::Wrapped { type_id, .. } => Some(*type_id),
+        }
     }
 
     /// Returns the instance pointer if wrapped.
     pub fn this_ptr(&self) -> Option<NonNull<c_void>> {
-        self.info.as_ref().map(|w| w.this)
+        match &self.wrapper {
+            WrapperState::NotWrapped => None,
+            WrapperState::Wrapped { this, .. } => Some(*this),
+        }
     }
 
     /// Returns the drop function.
@@ -213,8 +232,13 @@ impl State {
     pub(crate) unsafe fn make_weak(&mut self) {
         // Get state_ptr before borrowing wrapper to avoid double mutable borrow
         let state_ptr = std::ptr::from_mut(self).cast::<c_void>();
-        if let Some(ref mut info) = self.info {
-            unsafe { info.wrapper.make_weak(info.isolate.as_ptr(), state_ptr) };
+        if let WrapperState::Wrapped {
+            ref mut wrapper,
+            isolate,
+            ..
+        } = self.wrapper
+        {
+            unsafe { wrapper.make_weak(isolate.as_ptr(), state_ptr) };
         }
     }
 
@@ -231,16 +255,16 @@ impl State {
         <R as Resource>::Template: 'static,
     {
         debug_assert!(
-            self.info.is_none(),
+            matches!(self.wrapper, WrapperState::NotWrapped),
             "attach_wrapper called on already-wrapped instance"
         );
 
-        self.info = Some(WrapperInfo {
+        self.wrapper = WrapperState::Wrapped {
             this: this_ptr,
             wrapper: object.into(),
             isolate: realm.isolate(),
             type_id: TypeId::of::<R>(),
-        });
+        };
 
         realm.get_resources::<R>().add_instance(this_ptr);
     }
@@ -251,14 +275,11 @@ impl State {
 // ============================================================================
 
 /// Container holding a resource value and its lifecycle state.
-///
-/// Uses `UnsafeCell` for interior mutability, following Rust conventions
-/// for types that need mutable access through shared references.
 pub(crate) struct Instance<R: Resource> {
     /// The actual resource value.
-    resource: UnsafeCell<R>,
+    pub resource: R,
     /// Lifecycle state (ref count, wrapper info).
-    state: UnsafeCell<State>,
+    pub state: State,
 }
 
 impl<R: Resource> Instance<R> {
@@ -266,8 +287,8 @@ impl<R: Resource> Instance<R> {
     #[expect(clippy::new_ret_no_self)]
     pub fn new(resource: R) -> Ref<R> {
         let instance = Box::new(Self {
-            resource: UnsafeCell::new(resource),
-            state: UnsafeCell::new(State::new(Self::drop_instance)),
+            resource,
+            state: State::new(Self::drop_instance),
         });
         Ref::new(InstancePtr::new(instance))
     }
@@ -283,47 +304,13 @@ impl<R: Resource> Instance<R> {
         let _ = unsafe { Box::from_raw(ptr.cast::<Self>()) };
     }
 
-    /// Returns a reference to the state.
-    ///
-    /// # Safety
-    /// No mutable references to state may exist.
-    unsafe fn state(&self) -> &State {
-        unsafe { &*self.state.get() }
-    }
-
-    /// Returns a mutable reference to the state.
-    ///
-    /// # Safety
-    /// No other references to state may exist.
-    #[expect(clippy::mut_from_ref)]
-    unsafe fn state_mut(&self) -> &mut State {
-        unsafe { &mut *self.state.get() }
-    }
-
-    /// Returns a reference to the resource.
-    ///
-    /// # Safety
-    /// No mutable references to resource may exist.
-    unsafe fn resource(&self) -> &R {
-        unsafe { &*self.resource.get() }
-    }
-
-    /// Returns a mutable reference to the resource.
-    ///
-    /// # Safety
-    /// No other references to resource may exist.
-    #[expect(clippy::mut_from_ref)]
-    unsafe fn resource_mut(&self) -> &mut R {
-        unsafe { &mut *self.resource.get() }
-    }
-
     /// Handles reference count reaching zero.
     ///
     /// If wrapped, makes the Global weak so GC can collect it.
     /// If not wrapped, drops the instance immediately.
     pub(crate) fn handle_ref_count_zero(ptr: InstancePtr<R>) {
         // SAFETY: ptr is valid, we're the only accessor at this point
-        let state = unsafe { (*ptr.as_ptr()).state_mut() };
+        let state = unsafe { &mut (*ptr.as_ptr()).state };
 
         if state.is_wrapped() {
             // Make the V8 Global weak - GC will trigger drop via weak callback
@@ -366,7 +353,7 @@ impl<R: Resource> Ref<R> {
     /// Initializes the reference count to 1.
     pub(crate) fn new(ptr: InstancePtr<R>) -> Self {
         // SAFETY: ptr is valid, just created
-        let state = unsafe { (*ptr.as_ptr()).state() };
+        let state = unsafe { &(*ptr.as_ptr()).state };
         debug_assert_eq!(state.ref_count(), 0);
         state.inc_ref_count();
         Self { ptr }
@@ -383,14 +370,14 @@ impl<R: Resource> Deref for Ref<R> {
 
     fn deref(&self) -> &Self::Target {
         // SAFETY: Ref maintains invariant that ptr is valid
-        unsafe { (*self.ptr.as_ptr()).resource() }
+        unsafe { &(*self.ptr.as_ptr()).resource }
     }
 }
 
 impl<R: Resource> Clone for Ref<R> {
     fn clone(&self) -> Self {
         // SAFETY: ptr is valid while Ref exists
-        let state = unsafe { (*self.ptr.as_ptr()).state() };
+        let state = unsafe { &(*self.ptr.as_ptr()).state };
         state.inc_ref_count();
         Self { ptr: self.ptr }
     }
@@ -399,7 +386,7 @@ impl<R: Resource> Clone for Ref<R> {
 impl<R: Resource> Drop for Ref<R> {
     fn drop(&mut self) {
         // SAFETY: ptr is valid while Ref exists
-        let state = unsafe { (*self.ptr.as_ptr()).state() };
+        let state = unsafe { &(*self.ptr.as_ptr()).state };
         let new_count = state.dec_ref_count();
 
         if new_count == 0 {
@@ -429,10 +416,10 @@ where
 {
     let ptr = resource.instance_ptr();
     // SAFETY: ptr is valid because Ref maintains the invariant
-    let state = unsafe { (*ptr.as_ptr()).state_mut() };
+    let state = unsafe { &mut (*ptr.as_ptr()).state };
 
-    if let Some(wrapper) = state.wrapper() {
-        let local = wrapper.as_local(lock);
+    if let Some(global) = state.global() {
+        let local = global.as_local(lock);
         if local.has_value() {
             return local.into();
         }
@@ -474,7 +461,7 @@ pub fn unwrap<'a, R: Resource>(lock: &'a mut Lock, value: v8::Local<v8::Value>) 
     };
     // SAFETY: Caller guarantees no other references to this resource exist.
     // This is documented in the function's safety requirements.
-    unsafe { (*ptr).resource_mut() }
+    unsafe { &mut (*ptr).resource }
 }
 
 // ============================================================================
@@ -487,7 +474,7 @@ pub fn unwrap<'a, R: Resource>(lock: &'a mut Lock, value: v8::Local<v8::Value>) 
 /// the V8 function template and all live instances of that type.
 #[derive(Default)]
 pub struct Resources {
-    templates: HashMap<TypeId, Box<dyn ResourceCleanup>>,
+    templates: HashMap<TypeId, Box<dyn ResourcesCleanup>>,
 }
 
 impl Drop for Resources {
@@ -554,7 +541,7 @@ impl<R: Resource> Default for ResourceImpl<R> {
     }
 }
 
-impl<R: Resource + 'static> ResourceCleanup for ResourceImpl<R>
+impl<R: Resource + 'static> ResourcesCleanup for ResourceImpl<R>
 where
     <R as Resource>::Template: 'static,
 {
