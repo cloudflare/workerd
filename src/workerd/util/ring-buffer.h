@@ -4,17 +4,17 @@
 
 #pragma once
 
+#include <kj/array.h>
+#include <kj/common.h>
 #include <kj/debug.h>
-#include <kj/vector.h>
 
 #include <iterator>
 
 namespace workerd {
 
-// A simple ring buffer with amortized O(1) push/pop at both ends and O(1) random access
-// built on top of kj::Vector but with the same interface as std::list. The initial capacity
-// can be specified as a template parameter (default 16). The buffer will grow as needed.
-// The type T must be Moveable and/or Copyable.
+// A simple ring buffer with amortized O(1) push/pop at both ends and O(1) random access.
+// The initial capacity can be specified as a template parameter (default 16). The buffer
+// will grow as needed. The type T must be Moveable and/or Copyable.
 //
 // The purpose of this class is to provide a more memory-efficient alternative to std::list
 // for use in places where we need a double-ended queue with stable iterators and references
@@ -26,9 +26,43 @@ namespace workerd {
 template <typename T, size_t InitialCapacity = 16>
 class RingBuffer final {
  public:
-  RingBuffer() {
-    storage.resize(InitialCapacity);
+  RingBuffer(): storage(kj::heapArray<kj::byte>(sizeof(T) * InitialCapacity)) {}
+
+  ~RingBuffer() {
+    clear();
   }
+
+  RingBuffer(RingBuffer&& other) noexcept
+      : storage(kj::mv(other.storage)),
+        head(other.head),
+        tail(other.tail),
+        count(other.count),
+        generation(other.generation) {
+    other.head = 0;
+    other.tail = 0;
+    other.count = 0;
+    other.generation = 0;
+  }
+
+  RingBuffer& operator=(RingBuffer&& other) noexcept {
+    if (this != &other) {
+      clear();
+
+      storage = kj::mv(other.storage);
+      head = other.head;
+      tail = other.tail;
+      count = other.count;
+      generation = other.generation;
+
+      other.head = 0;
+      other.tail = 0;
+      other.count = 0;
+      other.generation = 0;
+    }
+    return *this;
+  }
+
+  KJ_DISALLOW_COPY(RingBuffer);
 
   bool empty() const {
     return count == 0;
@@ -52,14 +86,14 @@ class RingBuffer final {
 
     reference operator*() const {
       KJ_DREQUIRE(buffer != nullptr);
-      size_t physicalIndex = (buffer->head + index) % buffer->storage.size();
-      return buffer->storage[physicalIndex];
+      size_t physicalIndex = (buffer->head + index) % buffer->capacity();
+      return buffer->slot(physicalIndex);
     }
 
     pointer operator->() const {
       KJ_DREQUIRE(buffer != nullptr);
-      size_t physicalIndex = (buffer->head + index) % buffer->storage.size();
-      return &buffer->storage[physicalIndex];
+      size_t physicalIndex = (buffer->head + index) % buffer->capacity();
+      return &buffer->slot(physicalIndex);
     }
 
     iterator& operator++() {
@@ -118,14 +152,14 @@ class RingBuffer final {
 
     reference operator*() const {
       KJ_DREQUIRE(buffer != nullptr);
-      size_t physicalIndex = (buffer->head + index) % buffer->storage.size();
-      return buffer->storage[physicalIndex];
+      size_t physicalIndex = (buffer->head + index) % buffer->capacity();
+      return buffer->slot(physicalIndex);
     }
 
     pointer operator->() const {
       KJ_DREQUIRE(buffer != nullptr);
-      size_t physicalIndex = (buffer->head + index) % buffer->storage.size();
-      return &buffer->storage[physicalIndex];
+      size_t physicalIndex = (buffer->head + index) % buffer->capacity();
+      return &buffer->slot(physicalIndex);
     }
 
     const_iterator& operator++() {
@@ -194,59 +228,69 @@ class RingBuffer final {
   }
 
   void push_back(T&& item) {
-    if (count == storage.size()) {
+    if (count == capacity()) {
       grow();
     }
-    storage[tail] = kj::mv(item);
-    tail = (tail + 1) % storage.size();
+    // Use placement new - the slot is uninitialized raw memory
+    new (&slot(tail)) T(kj::mv(item));
+    tail = (tail + 1) % capacity();
     count++;
   }
 
   void push_back(const T& item) {
-    if (count == storage.size()) {
+    if (count == capacity()) {
       grow();
     }
-    storage[tail] = item;
-    tail = (tail + 1) % storage.size();
+    // Use placement new - the slot is uninitialized raw memory
+    new (&slot(tail)) T(item);
+    tail = (tail + 1) % capacity();
     count++;
   }
 
   template <typename... Args>
   T& emplace_back(Args&&... args) {
-    if (count == storage.size()) {
+    if (count == capacity()) {
       grow();
     }
-    // Construct in place at the tail position
-    storage[tail] = T(kj::fwd<Args>(args)...);
-    size_t insertedIndex = tail;
-    tail = (tail + 1) % storage.size();
+    // Use placement new to construct in place at the tail position
+    T* ptr = new (&slot(tail)) T(kj::fwd<Args>(args)...);
+    tail = (tail + 1) % capacity();
     count++;
-    return storage[insertedIndex];
+    return *ptr;
   }
 
   void pop_front() {
     KJ_DREQUIRE(count > 0);
-    storage[head].~T();
-    head = (head + 1) % storage.size();
+    slot(head).~T();
+    head = (head + 1) % capacity();
     count--;
+    generation++;
+  }
+
+  // Returns a generation counter that is incremented each time pop_front() is called.
+  // This can be used to detect if the front of the queue has changed during async operations,
+  // since RingBuffer may relocate elements when it grows and pointer/reference comparisons
+  // are not reliable.
+  uint64_t currentGeneration() const {
+    return generation;
   }
 
   T& front() {
     KJ_DREQUIRE(count > 0);
-    return storage[head];
+    return slot(head);
   }
 
   T& back() {
     KJ_DREQUIRE(count > 0);
-    size_t backIdx = (tail == 0) ? storage.size() - 1 : tail - 1;
-    KJ_REQUIRE(backIdx < storage.size());
-    return storage[backIdx];
+    size_t backIdx = (tail == 0) ? capacity() - 1 : tail - 1;
+    KJ_REQUIRE(backIdx < capacity());
+    return slot(backIdx);
   }
 
   void clear() {
     while (count > 0) {
-      storage[head].~T();
-      head = (head + 1) % storage.size();
+      slot(head).~T();
+      head = (head + 1) % capacity();
       count--;
     }
     // Reset to initial state
@@ -255,18 +299,34 @@ class RingBuffer final {
   }
 
  private:
-  kj::Vector<T> storage;
+  kj::Array<kj::byte> storage;
   size_t head = 0;
   size_t tail = 0;
   size_t count = 0;
+  uint64_t generation = 0;  // Incremented on each pop_front()
+
+  size_t capacity() const {
+    return storage.size() / sizeof(T);
+  }
+
+  T& slot(size_t index) {
+    return reinterpret_cast<T*>(storage.begin())[index];
+  }
+
+  const T& slot(size_t index) const {
+    return reinterpret_cast<const T*>(storage.begin())[index];
+  }
 
   void grow() {
-    size_t newCapacity = storage.size() * 2;
-    kj::Vector<T> newStorage;
-    newStorage.resize(newCapacity);
+    size_t oldCapacity = capacity();
+    size_t newCapacity = oldCapacity * 2;
+    auto newStorage = kj::heapArray<kj::byte>(sizeof(T) * newCapacity);
+    T* newSlots = reinterpret_cast<T*>(newStorage.begin());
 
+    // Move-construct elements to new storage using placement new
     for (size_t i = 0; i < count; i++) {
-      newStorage[i] = kj::mv(storage[(head + i) % storage.size()]);
+      new (&newSlots[i]) T(kj::mv(slot((head + i) % oldCapacity)));
+      slot((head + i) % oldCapacity).~T();
     }
 
     storage = kj::mv(newStorage);
