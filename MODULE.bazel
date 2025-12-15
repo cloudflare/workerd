@@ -83,4 +83,5 @@ archive_override(
 include("//build/deps:deps.MODULE.bazel")
 include("//build/deps:nodejs.MODULE.bazel")
 include("//build/deps:python.MODULE.bazel")
+include("//build/deps:rust.MODULE.bazel")
 include("//build/deps:v8.MODULE.bazel")
