@@ -99,7 +99,7 @@ update-rust package="full":
   bazel run //deps/rust:crates_vendor -- --repin {{package}}
 
 rustfmt:
-  bazel run @rules_rust//:rustfmt
+  bazel run @rules_rust//tools/upstream_wrapper:rustfmt
 
 # example: just bench mimetype
 bench path:
