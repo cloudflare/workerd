@@ -1684,6 +1684,13 @@ as a shortcut to make managing the list easier.
 
 The `JSG_DECLARE_ISOLATE_TYPE` macro should only be defined once in your application.
 
+---
+
+# Part 3: Memory Management
+
+This section covers garbage collection, GC visitation, memory tracking, and the
+mechanisms JSG provides for safe memory management across the C++/JavaScript boundary.
+
 ## Garbage Collection and GC Visitation
 
 Garbage Collection can be a tricky topic to understand. We're not going to delve into the details here.
@@ -1768,6 +1775,13 @@ support GC visitation. These types evolve over time so the list below may not be
 * `jsg::Generator<T>`
 * `jsg::AsyncGenerator<T>`
 * `kj::Maybe<T>` (when `T` is a GC-visitable type)
+
+---
+
+# Part 4: Utilities and Helpers
+
+This section covers utility functions, helper types, and performance optimizations
+provided by JSG for common development tasks.
 
 ## Utilities
 
@@ -2706,6 +2720,13 @@ V8 determines at runtime whether to use the fast or slow path:
 [Record]: https://webidl.spec.whatwg.org/#idl-record
 [Sequence]: https://webidl.spec.whatwg.org/#idl-sequence
 
+---
+
+# Part 5: TypeScript and Async
+
+This section covers TypeScript definition generation and asynchronous programming
+support in JSG.
+
 ## TypeScript
 
 TypeScript definitions are automatically generated from JSG RTTI using scripts in the `/types`
@@ -2944,6 +2965,13 @@ KJ_DEFER(key->reset());
 // The storage cell will be automatically reset to the previous context
 // with the scope exits.
 ```
+
+---
+
+# Part 6: Advanced Topics
+
+This section covers advanced JSG features including memory tracking, internal
+implementation details, performance optimization, and the module system.
 
 ## `jsg::MemoryTracker` and heap snapshot detail collection
 
