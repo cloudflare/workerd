@@ -19,7 +19,7 @@ rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     edition = "2024",
     extra_target_triples = RUST_TARGET_TRIPLES,
-    extra_rustc_flags = {
+    extra_rustc_flags_triples = {
         # Enable ISA extensions matching the ones used for C++. The clmul feature is included as
         # it is still "unstable" as of 1.86.0.
         "x86_64-unknown-linux-gnu": ["-Ctarget-feature=+sse4.2"],
