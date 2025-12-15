@@ -6,7 +6,6 @@ npm_link_all_packages(name = "node_modules")
 
 js_binary(
     name = "app",
-    chdir = package_name(),
     data = [":node_modules/ws"],
     entry_point = "app.js",
 )
