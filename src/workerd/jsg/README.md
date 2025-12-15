@@ -1507,6 +1507,385 @@ support GC visitation. These types evolve over time so the list below may not be
 This section covers utility functions and helper types provided by JSG for common tasks
 like error handling, string manipulation, and interacting with V8.
 
+### JsValue Types
+
+The `JsValue` family of types provides a modern abstraction layer over V8's `v8::Local<T>` handles.
+These types are designed to reduce direct use of the V8 API and make code more readable and
+type-safe.
+
+#### Overview
+
+```cpp
+void example(jsg::Lock& js) {
+  // Create values using jsg::Lock methods
+  JsString str = js.str("hello");
+  JsNumber num = js.num(42);
+  JsBoolean flag = js.boolean(true);
+  JsObject obj = js.obj();
+
+  // Set properties on objects
+  obj.set(js, "message", str);
+  obj.set(js, "count", num);
+
+  // Get properties
+  JsValue val = obj.get(js, "message");
+
+  // Type checking and casting
+  if (val.isString()) {
+    KJ_IF_SOME(s, val.tryCast<JsString>()) {
+      kj::String cppStr = s.toString(js);
+    }
+  }
+}
+```
+
+#### Key Characteristics
+
+1. **Stack-only allocation**: `JsValue` types can only be allocated on the stack (enforced in
+   debug builds). They are lightweight wrappers around V8 handles.
+
+2. **Implicit conversion to V8 types**: All `JsValue` types can be implicitly converted to their
+   underlying `v8::Local<T>` type, allowing seamless interop with V8 APIs.
+
+3. **Implicit conversion to `JsValue`**: All specific types (`JsString`, `JsNumber`, etc.) can
+   be implicitly converted to `JsValue`.
+
+4. **Use `JsRef<T>` for persistence**: To store a JavaScript value beyond the current scope,
+   use `JsRef<T>` (see below).
+
+#### Creating Values with `jsg::Lock`
+
+The `jsg::Lock` class provides factory methods for creating `JsValue` types:
+
+```cpp
+void createValues(jsg::Lock& js) {
+  // Primitives
+  JsValue undef = js.undefined();
+  JsValue null = js.null();
+  JsBoolean b = js.boolean(true);
+
+  // Numbers (various overloads for different integer types)
+  JsNumber n = js.num(3.14);
+  JsInt32 i32 = js.num(42);           // int8_t, int16_t, int32_t
+  JsUint32 u32 = js.num(42u);         // uint8_t, uint16_t, uint32_t
+  JsBigInt big = js.bigInt(INT64_MAX);
+
+  // Strings
+  JsString empty = js.str();
+  JsString s = js.str("hello");
+  JsString interned = js.strIntern("propertyName");  // Deduplicated in V8
+
+  // Objects and collections
+  JsObject obj = js.obj();
+  JsObject noProto = js.objNoProto();  // Object with null prototype
+  JsMap map = js.map();
+  JsArray arr = js.arr(js.num(1), js.num(2), js.num(3));
+  JsSet set = js.set(js.str("a"), js.str("b"));
+
+  // Symbols
+  JsSymbol sym = js.symbol("mySymbol");
+  JsSymbol shared = js.symbolShared("Symbol.for('shared')");
+
+  // Dates
+  JsDate date = js.date(1234567890.0);  // From timestamp
+  JsDate kjDate = js.date(kj::UNIX_EPOCH + 1000 * kj::MILLISECONDS);
+
+  // Errors
+  JsValue err = js.error("Something went wrong");
+  JsValue typeErr = js.typeError("Expected a string");
+  JsValue rangeErr = js.rangeError("Value out of range");
+
+  // Global object
+  JsObject global = js.global();
+}
+```
+
+#### Available Types
+
+| Type | V8 Equivalent | Description |
+|------|---------------|-------------|
+| `JsValue` | `v8::Value` | Generic value, can hold any JS value |
+| `JsBoolean` | `v8::Boolean` | Boolean value |
+| `JsNumber` | `v8::Number` | Double-precision number |
+| `JsInt32` | `v8::Int32` | 32-bit signed integer |
+| `JsUint32` | `v8::Uint32` | 32-bit unsigned integer |
+| `JsBigInt` | `v8::BigInt` | Arbitrary precision integer |
+| `JsString` | `v8::String` | String value |
+| `JsSymbol` | `v8::Symbol` | Symbol value |
+| `JsObject` | `v8::Object` | Object |
+| `JsArray` | `v8::Array` | Array |
+| `JsMap` | `v8::Map` | Map collection |
+| `JsSet` | `v8::Set` | Set collection |
+| `JsFunction` | `v8::Function` | Function |
+| `JsPromise` | `v8::Promise` | Promise (for state inspection only) |
+| `JsDate` | `v8::Date` | Date object |
+| `JsRegExp` | `v8::RegExp` | Regular expression |
+| `JsArrayBuffer` | `v8::ArrayBuffer` | ArrayBuffer |
+| `JsArrayBufferView` | `v8::ArrayBufferView` | TypedArray or DataView |
+| `JsUint8Array` | `v8::Uint8Array` | Uint8Array |
+| `JsProxy` | `v8::Proxy` | Proxy object |
+
+#### Type Checking and Casting
+
+`JsValue` provides numerous `is*()` methods for type checking:
+
+```cpp
+void checkTypes(jsg::Lock& js, JsValue value) {
+  // Check specific types
+  if (value.isString()) { /* ... */ }
+  if (value.isNumber()) { /* ... */ }
+  if (value.isObject()) { /* ... */ }
+  if (value.isArray()) { /* ... */ }
+  if (value.isFunction()) { /* ... */ }
+  if (value.isPromise()) { /* ... */ }
+
+  // Check for null/undefined
+  if (value.isNull()) { /* ... */ }
+  if (value.isUndefined()) { /* ... */ }
+  if (value.isNullOrUndefined()) { /* ... */ }
+
+  // Check typed arrays
+  if (value.isTypedArray()) { /* ... */ }
+  if (value.isUint8Array()) { /* ... */ }
+  if (value.isArrayBuffer()) { /* ... */ }
+}
+```
+
+Use `tryCast<T>()` to safely cast to a more specific type:
+
+```cpp
+void castExample(jsg::Lock& js, JsValue value) {
+  KJ_IF_SOME(str, value.tryCast<JsString>()) {
+    // str is a JsString
+    kj::String cppStr = str.toString(js);
+  }
+
+  KJ_IF_SOME(arr, value.tryCast<JsArray>()) {
+    // arr is a JsArray
+    uint32_t len = arr.size();
+  }
+}
+```
+
+#### Working with Objects
+
+```cpp
+void objectOperations(jsg::Lock& js) {
+  JsObject obj = js.obj();
+
+  // Set properties
+  obj.set(js, "name", js.str("Alice"));
+  obj.set(js, js.symbol("id"), js.num(123));
+
+  // Set read-only property
+  obj.setReadOnly(js, "version", js.str("1.0"));
+
+  // Get properties
+  JsValue name = obj.get(js, "name");
+  JsValue missing = obj.get(js, "nonexistent");  // Returns undefined
+
+  // Check property existence
+  if (obj.has(js, "name")) { /* ... */ }
+  if (obj.has(js, "name", JsObject::HasOption::OWN)) { /* own property only */ }
+
+  // Delete properties
+  obj.delete_(js, "name");
+
+  // Get all property names
+  JsArray names = obj.getPropertyNames(js,
+      KeyCollectionFilter::OWN_ONLY,
+      PropertyFilter::ONLY_ENUMERABLE,
+      IndexFilter::INCLUDE_INDICES);
+
+  // Get prototype
+  JsValue proto = obj.getPrototype(js);
+
+  // Check if object is instance of a JSG resource type
+  if (obj.isInstanceOf<MyResourceType>(js)) {
+    auto ref = KJ_ASSERT_NONNULL(obj.tryUnwrapAs<MyResourceType>(js));
+  }
+
+  // Freeze/seal
+  obj.seal(js);
+  obj.recursivelyFreeze(js);
+
+  // Clone via JSON (deep copy, loses non-JSON-serializable values)
+  JsObject clone = obj.jsonClone(js);
+}
+```
+
+#### Working with Strings
+
+```cpp
+void stringOperations(jsg::Lock& js) {
+  JsString str = js.str("Hello, World!");
+
+  // Get length
+  int len = str.length(js);          // UTF-16 code units
+  size_t utf8Len = str.utf8Length(js);  // UTF-8 bytes
+
+  // Convert to KJ string
+  kj::String cppStr = str.toString(js);
+
+  // Check string properties
+  bool flat = str.isFlat();
+  bool oneByte = str.containsOnlyOneByte();
+
+  // Concatenate strings
+  JsString combined = JsString::concat(js, js.str("Hello, "), js.str("World!"));
+
+  // Internalize (deduplicate)
+  JsString interned = str.internalize(js);
+
+  // Write to buffer
+  kj::Array<char> buf = kj::heapArray<char>(100);
+  auto status = str.writeInto(js, buf, JsString::WriteFlags::NULL_TERMINATION);
+  // status.read = characters read from string
+  // status.written = bytes written to buffer
+}
+```
+
+#### Working with Arrays
+
+```cpp
+void arrayOperations(jsg::Lock& js) {
+  // Create array with initial values
+  JsArray arr = js.arr(js.num(1), js.num(2), js.num(3));
+
+  // Or create from a C++ array
+  kj::Array<int> values = kj::heapArray<int>({1, 2, 3, 4, 5});
+  JsArray arr2 = js.arr(values.asPtr(), [](jsg::Lock& js, int v) {
+    return js.num(v);
+  });
+
+  // Get size
+  uint32_t len = arr.size();
+
+  // Get element
+  JsValue elem = arr.get(js, 0);
+
+  // Add element
+  arr.add(js, js.str("new item"));
+}
+```
+
+#### Working with Functions
+
+```cpp
+void functionOperations(jsg::Lock& js, JsFunction func) {
+  // Call with receiver
+  JsValue result = func.call(js, js.global(), js.num(1), js.str("arg"));
+
+  // Call without receiver (uses null, which becomes global in non-strict mode)
+  JsValue result2 = func.callNoReceiver(js, js.num(42));
+
+  // Get function properties
+  size_t length = func.length(js);  // Number of declared parameters
+  JsString name = func.name(js);
+
+  // Can be used as an object
+  JsObject funcAsObj = func;
+  funcAsObj.set(js, "customProp", js.num(123));
+}
+```
+
+#### JSON Operations
+
+```cpp
+void jsonOperations(jsg::Lock& js, JsValue value) {
+  // Convert to JSON string
+  kj::String json = value.toJson(js);
+
+  // Parse JSON string
+  JsValue parsed = JsValue::fromJson(js, R"({"key": "value"})");
+
+  // Parse JSON from another JsValue (string)
+  JsValue parsed2 = JsValue::fromJson(js, js.str(R"([1, 2, 3])"));
+}
+```
+
+#### Structured Clone
+
+```cpp
+void cloneExample(jsg::Lock& js, JsValue value) {
+  // Deep clone using structured clone algorithm
+  JsValue cloned = value.structuredClone(js);
+
+  // Clone with transferables (e.g., ArrayBuffers)
+  kj::Array<JsValue> transfers = kj::heapArray<JsValue>({someArrayBuffer});
+  JsValue cloned2 = value.structuredClone(js, kj::mv(transfers));
+}
+```
+
+#### Persisting Values with `JsRef<T>`
+
+`JsValue` types are only valid within the current scope. To store a JavaScript value persistently,
+use `JsRef<T>`:
+
+```cpp
+class MyClass: public jsg::Object {
+public:
+  void storeValue(jsg::Lock& js, JsValue value) {
+    stored = value.addRef(js);
+  }
+
+  JsValue getStored(jsg::Lock& js) {
+    return stored.getHandle(js);
+  }
+
+  JSG_RESOURCE_TYPE(MyClass) {
+    JSG_METHOD(storeValue);
+    JSG_METHOD(getStored);
+  }
+
+private:
+  JsRef<JsValue> stored;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(stored);  // Important for garbage collection!
+  }
+};
+```
+
+`JsRef<T>` can hold any `JsValue` type:
+
+```cpp
+JsRef<JsValue> genericRef;
+JsRef<JsString> stringRef;
+JsRef<JsObject> objectRef;
+JsRef<JsFunction> functionRef;
+```
+
+#### Comparison and Equality
+
+```cpp
+void compareValues(jsg::Lock& js, JsValue a, JsValue b) {
+  // Abstract equality (==)
+  bool equal = (a == b);
+
+  // Strict equality (===)
+  bool strictEqual = a.strictEquals(b);
+
+  // Truthiness
+  bool truthy = a.isTruthy(js);
+
+  // Type of
+  kj::String type = a.typeOf(js);  // "string", "number", "object", etc.
+}
+```
+
+#### Note on `JsPromise` vs `jsg::Promise<T>`
+
+`JsPromise` and `jsg::Promise<T>` serve different purposes:
+
+- **`JsPromise`**: A thin wrapper around `v8::Promise` for inspecting promise state. Cannot be
+  awaited in C++. Use when you need to check if a promise is pending/fulfilled/rejected or
+  access its result directly.
+
+- **`jsg::Promise<T>`**: A higher-level abstraction for working with promises in C++. Provides
+  `.then()`, `.catch_()` methods and integrates with the JSG type system. Use this for most
+  promise handling.
+
 ### Errors
 
 JSG provides a comprehensive error handling system that bridges C++ exceptions and JavaScript
