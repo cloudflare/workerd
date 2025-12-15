@@ -10,36 +10,6 @@ the same interface on top of different JavaScript engines. However, as of today,
 quite the case. At present application code will still need to use V8 APIs directly in some
 cases. We would like to improve this in the future.
 
-## V8 Fast API
-
-V8 Fast API allows V8 to compile JavaScript code that calls native functions in a way that directly jumps to the C++ implementation without going through the usual JavaScript-to-C++ binding layers. This is accomplished by having V8 generate specialized machine code that knows how to call the C++ function directly, skipping the overhead of value conversion and JavaScript calling conventions.
-
-### Requirements for Fast API compatibility
-
-For a method to be compatible with Fast API, it must adhere to several constraints due to v8 itself, and may change as the fast api mechanism continues to evolve:
-
-1. **Return Type**: Must be one of these primitive types: `void`, `bool`, `int32_t`, `uint32_t`, `float`, or `double`.
-
-2. **Parameter Types**: Can be the primitive types listed above, or V8 handle types like `v8::Local<v8::Value>` or `v8::Local<v8::Object>`, or types that can be unwrapped from a V8 value using the TypeWrapper.
-
-3. **Method Structure**: Can be a regular instance method, a const instance method, or a method that takes `jsg::Lock&` as its first parameter.
-
-### Using Fast API in workerd
-
-By default, any `JSG_METHOD(name)` will execute fast path if the method signature is compatible with Fast API requirements. To explicitly force the function to use v8 Fast API in workerd, you can use `JSG_ASSERT_FASTAPI`.
-
-### How it works
-
-When a method is registered with the v8 fast api, workerd automatically:
-
-1. Checks if the method signature is compatible with Fast API requirements
-2. Registers both a regular (slow path) method handler and a Fast API handler
-3. Let's V8 optimize calls to this method when possible
-
-V8 determines at runtime whether to use the fast or slow path:
-- The fast path is used when the method is called from optimized code
-- The slow path is used when called from unoptimized code or when handling complex cases
-
 ## The Basics
 
 If you haven't done so already, I recommend reading through both the ["KJ Style Guide"][]
@@ -498,18 +468,136 @@ func(1);  // prints 1
 The `jsg::Promise<T>` wraps a JavaScript promise with a syntax that makes it more
 natural and ergonomic to consume within C++.
 
-```cpp
-jsg::Lock& js = // ...
-jsg::Promise<int> promise = // ...
+#### Creating Promises
 
-promise.then(js, [&](jsg::Lock& js, int value) {
-  // Do something with value.
-}, [&](jsg::Lock& js, jsg::Value exception) {
-  // There was an error! Handle it!
-})
+Use `jsg::Lock` to create promises:
+
+```cpp
+// Create an already-resolved promise
+jsg::Promise<int> resolved = js.resolvedPromise(42);
+jsg::Promise<void> resolvedVoid = js.resolvedPromise();
+
+// Create a rejected promise
+jsg::Promise<int> rejected = js.rejectedPromise<int>(js.error("Something went wrong"));
+
+// Create a promise with a resolver for later fulfillment
+auto [promise, resolver] = js.newPromiseAndResolver<int>();
+// Later...
+resolver.resolve(js, 42);
+// Or reject:
+resolver.reject(js, js.error("Failed"));
 ```
 
-TODO(soon): Lots more to add here.
+#### Chaining with `.then()` and `.catch_()`
+
+```cpp
+jsg::Promise<int> promise = // ...
+
+// Chain with both success and error handlers
+promise.then(js, [](jsg::Lock& js, int value) {
+  // Called when the promise resolves successfully
+  return value * 2;  // Returns jsg::Promise<int>
+}, [](jsg::Lock& js, jsg::Value exception) {
+  // Called when the promise rejects
+  return 0;  // Must return the same type as the success handler
+});
+
+// Chain with only a success handler (errors propagate)
+promise.then(js, [](jsg::Lock& js, int value) {
+  return kj::str("Value: ", value);  // Returns jsg::Promise<kj::String>
+});
+
+// Chain with only an error handler
+promise.catch_(js, [](jsg::Lock& js, jsg::Value exception) {
+  // Handle error, must return the promise's type
+  return 0;
+});
+```
+
+**Important:** Both handlers passed to `.then()` must return exactly the same type.
+
+#### `Promise<void>`
+
+For promises that don't carry a value:
+
+```cpp
+jsg::Promise<void> promise = // ...
+
+promise.then(js, [](jsg::Lock& js) {
+  // No value parameter for Promise<void>
+});
+```
+
+#### The Resolver
+
+`jsg::Promise<T>::Resolver` allows you to fulfill or reject a promise from elsewhere:
+
+```cpp
+class MyAsyncOperation {
+  jsg::Promise<kj::String>::Resolver resolver;
+
+public:
+  jsg::Promise<kj::String> start(jsg::Lock& js) {
+    auto [promise, r] = js.newPromiseAndResolver<kj::String>();
+    resolver = kj::mv(r);
+    // Start async work...
+    return kj::mv(promise);
+  }
+
+  void complete(jsg::Lock& js, kj::String result) {
+    resolver.resolve(js, kj::mv(result));
+  }
+
+  void fail(jsg::Lock& js, kj::Exception error) {
+    resolver.reject(js, kj::mv(error));
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(resolver);  // Important for GC!
+  }
+};
+```
+
+#### `.whenResolved()`
+
+Unlike `.then()`, `whenResolved()` doesn't consume the promise and can be called multiple
+times to create branches:
+
+```cpp
+jsg::Promise<int> promise = // ...
+
+// Create a Promise<void> that resolves when the original resolves
+jsg::Promise<void> done = promise.whenResolved(js);
+```
+
+#### Consuming the Handle
+
+To pass a promise to V8 APIs or return it directly:
+
+```cpp
+v8::Local<v8::Promise> handle = promise.consumeHandle(js);
+```
+
+After calling `consumeHandle()`, the `jsg::Promise` is consumed and cannot be used again.
+
+#### Returning Promises from Methods
+
+Methods exposed to JavaScript can return promises:
+
+```cpp
+class MyApi: public jsg::Object {
+public:
+  jsg::Promise<kj::String> fetchData(jsg::Lock& js) {
+    auto [promise, resolver] = js.newPromiseAndResolver<kj::String>();
+    // ... start async operation ...
+    return kj::mv(promise);
+  }
+
+  JSG_RESOURCE_TYPE(MyApi) {
+    JSG_METHOD(fetchData);
+  }
+};
+```
 
 ### Symbols with `jsg::Name`
 
@@ -1264,7 +1352,36 @@ assert(true);  // error
 
 #### Additional configuration and compatibility flags
 
-TODO(soon): TBD
+The `JSG_RESOURCE_TYPE` macro can accept an optional second parameter: a
+`CompatibilityFlags::Reader` that allows you to conditionally expose different APIs based on
+the worker's compatibility date and flags.
+
+```cpp
+class MyApi: public jsg::Object {
+public:
+  kj::String oldMethod() { return kj::str("old"); }
+  kj::String newMethod() { return kj::str("new"); }
+
+  JSG_RESOURCE_TYPE(MyApi, workerd::CompatibilityFlags::Reader flags) {
+    // Always expose the old method
+    JSG_METHOD(oldMethod);
+
+    // Only expose the new method when the feature flag is enabled
+    if (flags.getMyNewFeature()) {
+      JSG_METHOD(newMethod);
+    }
+  }
+};
+```
+
+This pattern is used extensively in workerd to maintain backward compatibility while gradually
+rolling out new APIs and behaviors. The compatibility flags are defined in
+`src/workerd/io/compatibility-date.capnp`.
+
+Common use cases:
+- Adding new methods or properties that shouldn't be available to older workers
+- Changing behavior of existing methods based on compatibility settings
+- Enabling experimental features behind flags
 
 ## Declaring the Type System (advanced)
 
@@ -1387,28 +1504,276 @@ support GC visitation. These types evolve over time so the list below may not be
 
 ## Utilities
 
-TODO(soon): TBD
+This section covers utility functions and helper types provided by JSG for common tasks
+like error handling, string manipulation, and interacting with V8.
 
 ### Errors
 
-TODO(soon): TBD
+JSG provides a comprehensive error handling system that bridges C++ exceptions and JavaScript
+errors. The key components are:
 
-* `makeInternalError(...)`
-* `throwInternalError(...)`
-* `throwTypeError(...)`
-* //...
+#### Error Macros
+
+JSG provides macros that work similarly to KJ's assertion macros but produce JavaScript-friendly
+error messages:
+
+```cpp
+// Throws a TypeError if the condition is false
+JSG_REQUIRE(condition, TypeError, "Expected a valid value, got ", value);
+
+// Like JSG_REQUIRE but returns the unwrapped value from a kj::Maybe
+auto& val = JSG_REQUIRE_NONNULL(maybeValue, TypeError, "Value must not be null");
+
+// Unconditionally throws an error
+JSG_FAIL_REQUIRE(RangeError, "Index ", index, " is out of bounds");
+
+// Like KJ_ASSERT but produces a JSG-style error
+JSG_ASSERT(condition, Error, "Internal assertion failed");
+```
+
+The `jsErrorType` parameter can be one of:
+- `TypeError`, `Error`, `RangeError` - Standard JavaScript error types
+- `DOMOperationError`, `DOMDataError`, `DOMInvalidStateError`, etc. - DOMException types
+
+Unlike `KJ_REQUIRE`, `JSG_REQUIRE` passes all message arguments through `kj::str()`, so you are
+responsible for formatting the entire message string.
+
+#### `JsExceptionThrown`
+
+When C++ code needs to throw a JavaScript exception, it should:
+1. Call `isolate->ThrowException()` to set the JavaScript error value
+2. Throw `JsExceptionThrown()` as a C++ exception
+
+This C++ exception is caught by JSG's callback glue before returning to V8. This approach is
+more ergonomic than V8's convention of returning `v8::Maybe` values.
+
+```cpp
+void someMethod(jsg::Lock& js) {
+  if (somethingWrong) {
+    js.throwException(js.error("Something went wrong"));
+    // Or using the lower-level API:
+    // isolate->ThrowException(v8::Exception::Error(...));
+    // throw JsExceptionThrown();
+  }
+}
+```
+
+#### `makeInternalError()` and `throwInternalError()`
+
+These functions create JavaScript errors from internal C++ exceptions while obfuscating
+sensitive implementation details:
+
+```cpp
+// Creates a JS error value, logging the full details to stderr
+v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
+
+// Creates and throws the error
+void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
+void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+```
+
+If the exception was created using `throwTunneledException()`, the original JavaScript
+exception is reconstructed instead of being obfuscated.
+
+#### `throwTypeError()`
+
+Throws a JavaScript `TypeError` with contextual information about where the type mismatch occurred:
+
+```cpp
+// With context about the error location
+throwTypeError(isolate, TypeErrorContext::methodArgument(typeid(MyClass), "doThing", 0),
+               "string");
+
+// With a free-form message
+throwTypeError(isolate, "Expected a string but got a number"_kj);
+```
+
+#### `check()`
+
+A utility template for unwrapping V8's `MaybeLocal` and `Maybe` types, throwing
+`JsExceptionThrown` if the value is empty (indicating V8 has already scheduled an exception):
+
+```cpp
+// Instead of:
+v8::Local<v8::String> str;
+if (!maybeStr.ToLocal(&str)) {
+  throw JsExceptionThrown();
+}
+
+// Use:
+v8::Local<v8::String> str = check(maybeStr);
+```
 
 #### `jsg::DOMException`
 
-TODO(soon): TBD
+`jsg::DOMException` is a JSG Resource Type that implements the standard Web IDL [DOMException][]
+interface. It is the only non-builtin JavaScript exception type that standard web APIs are
+allowed to throw per Web IDL.
+
+```cpp
+class DOMException: public jsg::Object {
+public:
+  DOMException(kj::String message, kj::String name);
+
+  static Ref<DOMException> constructor(
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      Optional<kj::String> message,
+      Optional<kj::String> name);
+
+  kj::StringPtr getName() const;
+  kj::StringPtr getMessage() const;
+  int getCode() const;
+
+  // Standard DOMException error codes as static constants
+  static constexpr int INDEX_SIZE_ERR = 1;
+  static constexpr int NOT_FOUND_ERR = 8;
+  static constexpr int NOT_SUPPORTED_ERR = 9;
+  // ... and many more
+
+  JSG_RESOURCE_TYPE(DOMException) {
+    JSG_INHERIT_INTRINSIC(v8::kErrorPrototype);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getName);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(code, getCode);
+    // Static constants...
+  }
+};
+```
+
+To throw a DOMException from C++ code, use the `JSG_REQUIRE` macro with the appropriate
+DOMException error type:
+
+```cpp
+JSG_REQUIRE(isValid, DOMInvalidStateError, "The object is in an invalid state");
+JSG_REQUIRE(hasAccess, DOMNotSupportedError, "This operation is not supported");
+```
+
+[DOMException]: https://webidl.spec.whatwg.org/#idl-DOMException
 
 #### Tunneled Exceptions
 
-TODO(soon): TBD
+JSG supports "tunneling" JavaScript exceptions through KJ's exception system. This allows
+JavaScript exceptions to be thrown, caught as `kj::Exception`, passed across boundaries
+(like RPC), and then reconstructed back into the original JavaScript exception.
+
+To tunnel a JavaScript exception:
+
+```cpp
+// Given a JavaScript exception, create a KJ exception that can be tunneled
+kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
+
+// Or throw it directly
+[[noreturn]] void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
+```
+
+When a tunneled exception is later converted back to JavaScript via `makeInternalError()` or
+`exceptionToJs()`, the original JavaScript exception is reconstructed rather than being
+replaced with a generic internal error message.
+
+You can check if a `kj::Exception` contains a tunneled JavaScript exception:
+
+```cpp
+if (jsg::isTunneledException(exception.getDescription())) {
+  // This exception originated from JavaScript and can be reconstructed
+}
+```
+
+The tunneling mechanism encodes the JavaScript exception type and message in a special format
+within the KJ exception description. The format uses prefixes like `jsg.TypeError:` or
+`jsg.DOMException(NotFoundError):` to identify the exception type.
 
 ### `jsg::v8Str(...)` and `jsg::v8StrIntern(...)`
 
-TODO(soon): TBD
+These utility functions create V8 string values from C++ strings:
+
+```cpp
+// Create a V8 string from a kj::StringPtr (interpreted as UTF-8)
+v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::StringPtr str);
+
+// Create a V8 string from a kj::ArrayPtr<const char> (UTF-8)
+v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<const char> ptr);
+
+// Create a V8 string from a kj::ArrayPtr<const char16_t> (UTF-16)
+v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<const char16_t> ptr);
+
+// Create an internalized (deduplicated) V8 string - useful for property names
+v8::Local<v8::String> v8StrIntern(v8::Isolate* isolate, kj::StringPtr str);
+```
+
+**Note:** New code should prefer using the methods on `jsg::Lock` instead:
+
+```cpp
+void someMethod(jsg::Lock& js) {
+  // Preferred: use js.str() instead of v8Str()
+  JsString str = js.str("hello");
+
+  // For internalized strings
+  JsString internedStr = js.strIntern("propertyName");
+}
+```
+
+#### External Strings
+
+For static constant strings that will never be deallocated, you can use external strings
+which avoid copying the data into V8's heap:
+
+```cpp
+// For Latin-1 encoded static strings (NOT UTF-8!)
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
+
+// For UTF-16 encoded static strings
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+```
+
+**Important:** The `OneByteString` variant interprets the buffer as Latin-1, not UTF-8. For
+text outside the Latin-1 range, you must use the two-byte (UTF-16) variant.
+
+## V8 Fast API
+
+V8 Fast API allows V8 to compile JavaScript code that calls native functions in a way that directly
+jumps to the C++ implementation without going through the usual JavaScript-to-C++ binding layers.
+This is accomplished by having V8 generate specialized machine code that knows how to call the C++
+function directly, skipping the overhead of value conversion and JavaScript calling conventions.
+
+### Requirements for Fast API compatibility
+
+For a method to be compatible with Fast API, it must adhere to several constraints due to V8 itself,
+and may change as the Fast API mechanism continues to evolve:
+
+1. **Return Type**: Must be one of these primitive types: `void`, `bool`, `int32_t`, `uint32_t`,
+   `float`, or `double`.
+
+2. **Parameter Types**: Can be the primitive types listed above, or V8 handle types like
+   `v8::Local<v8::Value>` or `v8::Local<v8::Object>`, or types that can be unwrapped from a V8
+   value using the TypeWrapper.
+
+3. **Method Structure**: Can be a regular instance method, a const instance method, or a method
+   that takes `jsg::Lock&` as its first parameter.
+
+### Using Fast API in workerd
+
+By default, any `JSG_METHOD(name)` will execute the fast path if the method signature is compatible
+with Fast API requirements. To explicitly assert that a function uses V8 Fast API in workerd, you
+can use `JSG_ASSERT_FASTAPI`:
+
+```cpp
+JSG_ASSERT_FASTAPI(MyClass::myMethod);
+```
+
+This will produce a compile-time error if the method signature is not Fast API compatible.
+
+### How it works
+
+When a method is registered with the V8 Fast API, workerd automatically:
+
+1. Checks if the method signature is compatible with Fast API requirements
+2. Registers both a regular (slow path) method handler and a Fast API handler
+3. Lets V8 optimize calls to this method when possible
+
+V8 determines at runtime whether to use the fast or slow path:
+
+- The fast path is used when the method is called from optimized code
+- The slow path is used when called from unoptimized code or when handling complex cases
 
 ["KJ Style Guide"]: https://github.com/capnproto/capnproto/blob/master/style-guide.md
 ["KJ Tour"]: https://github.com/capnproto/capnproto/blob/master/kjdoc/tour.md
