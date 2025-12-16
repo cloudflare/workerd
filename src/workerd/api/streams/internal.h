@@ -205,7 +205,7 @@ class WritableStreamInternalController: public WritableStreamController {
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
   void detach(jsg::Lock& js) override;
 
-  kj::Maybe<int> getDesiredSize() override;
+  kj::Maybe<double> getDesiredSize() override;
 
   bool isLockedToWriter() const override {
     return !writeState.is<Unlocked>();

@@ -78,7 +78,7 @@ struct WritableStreamSinkJsAdapter::Active final {
 
   // Get the desired size based on the configured high water mark and
   // the number of bytes currently in flight.
-  ssize_t getDesiredSize() const {
+  double getDesiredSize() const {
     return options.highWaterMark - bytesInFlight;
   }
 
@@ -168,7 +168,7 @@ bool WritableStreamSinkJsAdapter::isClosing() {
   }
 }
 
-kj::Maybe<ssize_t> WritableStreamSinkJsAdapter::getDesiredSize() {
+kj::Maybe<double> WritableStreamSinkJsAdapter::getDesiredSize() {
   return state.tryGet<IoOwn<Active>>().map(
       [](IoOwn<Active>& active) { return active->getDesiredSize(); });
 }

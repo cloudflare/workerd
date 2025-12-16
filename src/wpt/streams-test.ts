@@ -442,15 +442,7 @@ export default {
       'getReader() should call ToString() on mode',
     ],
   },
-  'readable-streams/floating-point-total-queue-size.any.js': {
-    comment: 'Queue size needs to use double math',
-    expectedFailures: [
-      'Floating point arithmetic must manifest near NUMBER.MAX_SAFE_INTEGER (total ends up positive)',
-      'Floating point arithmetic must manifest near 0 (total ends up positive, but clamped)',
-      'Floating point arithmetic must manifest near 0 (total ends up positive, and not clamped)',
-      'Floating point arithmetic must manifest near 0 (total ends up zero)',
-    ],
-  },
+  'readable-streams/floating-point-total-queue-size.any.js': {},
   'readable-streams/from.any.js': {
     comment: 'See comments on tests',
     disabledTests: [
@@ -684,24 +676,17 @@ export default {
   'transform-streams/properties.any.js': {
     comment: 'The value cannot be converted because it is not an integer.',
     expectedFailures: [
-      'transformer method start should be called with the right number of arguments',
-      "transformer method start should be called even when it's located on the prototype chain",
       'transformer method transform should be called with the right number of arguments',
       "transformer method transform should be called even when it's located on the prototype chain",
-      'transformer method flush should be called with the right number of arguments',
-      "transformer method flush should be called even when it's located on the prototype chain",
     ],
   },
   'transform-streams/reentrant-strategies.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
-      'enqueue() inside size() should work',
       'terminate() inside size() should work',
       'error() inside size() should work',
       'readable cancel() inside size() should work',
       'read() inside of size() should work',
-      'writer.write() inside size() should work',
-      'synchronous writer.write() inside size() should work',
       'writer.close() inside size() should work',
       'writer.abort() inside size() should work',
     ],
@@ -762,13 +747,7 @@ export default {
       'write: returning a promise that becomes rejected after the writer write() should cause writer write() and ready to reject',
     ],
   },
-  'writable-streams/byte-length-queuing-strategy.any.js': {
-    comment:
-      'TypeError: The value cannot be converted because it is not an integer.',
-    expectedFailures: [
-      'Closing a writable stream with in-flight writes below the high water mark delays the close call properly',
-    ],
-  },
+  'writable-streams/byte-length-queuing-strategy.any.js': {},
   'writable-streams/close.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
@@ -783,12 +762,10 @@ export default {
       process.platform === 'win32'
         ? [
             'controller argument should be passed to start method',
-            'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
             "WritableStream can't be constructed with a defined type",
           ]
         : [
             'controller argument should be passed to start method',
-            'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
             "WritableStream can't be constructed with a defined type",
             'underlyingSink argument should be converted after queuingStrategy argument',
           ],
@@ -797,7 +774,7 @@ export default {
   'writable-streams/crashtests/garbage-collection.any.js': {},
   'writable-streams/error.any.js': {},
   'writable-streams/floating-point-total-queue-size.any.js': {
-    comment: 'Seems we should be using a double for queue size',
+    comment: 'To be investigated',
     expectedFailures: [
       'Floating point arithmetic must manifest near NUMBER.MAX_SAFE_INTEGER (total ends up positive)',
       'Floating point arithmetic must manifest near 0 (total ends up positive, but clamped)',

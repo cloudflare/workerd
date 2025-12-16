@@ -112,7 +112,7 @@ jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getClose
   return KJ_ASSERT_NONNULL(closedPromise, "the writer was never attached to a stream");
 }
 
-kj::Maybe<int> WritableStreamDefaultWriter::getDesiredSize(jsg::Lock& js) {
+kj::Maybe<double> WritableStreamDefaultWriter::getDesiredSize(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this writer was never attached");
@@ -121,7 +121,7 @@ kj::Maybe<int> WritableStreamDefaultWriter::getDesiredSize(jsg::Lock& js) {
       return stream->getController().getDesiredSize();
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
-      return 0;
+      return 0.0;
     }
     KJ_CASE_ONEOF(r, Released) {
       JSG_FAIL_REQUIRE(TypeError, "This WritableStream writer has been released.");
