@@ -363,9 +363,6 @@ class WritableStreamInternalController: public WritableStreamController {
     }
   };
 
-  // We use a ring buffer to keep memory overhead low when there are many streams with no or few
-  // pending events. This provides better cache locality than std::list and avoids per-node
-  // allocation overhead.
   RingBuffer<WriteEvent, 8> queue;
 };
 }  // namespace workerd::api
