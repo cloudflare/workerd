@@ -310,8 +310,6 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     }
   }
 
-  context->incomingRequests.remove(*this);
-
   KJ_IF_SOME(a, context->actor) {
     a.getMetrics().endRequest();
   }
@@ -338,6 +336,10 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
       context->waitUntilTasks.clear();
     }
   }
+
+  // Remove incoming request after canceling waitUntil tasks, which may have spans attached that
+  // require accessing a timer from the active request.
+  context->incomingRequests.remove(*this);
 }
 
 InputGate::Lock IoContext::getInputLock() {
