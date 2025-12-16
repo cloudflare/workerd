@@ -19,7 +19,6 @@
 namespace workerd::api {
 
 namespace {
-constexpr char16_t REPLACEMENT_CHAR = 0xFFFD;
 constexpr kj::byte REPLACEMENT_UTF8[] = {0xEF, 0xBF, 0xBD};
 
 struct Holder: public kj::Refcounted {
@@ -30,37 +29,14 @@ struct Holder: public kj::Refcounted {
 // TextEncoderStream encodes a stream of JavaScript strings into UTF-8 bytes.
 //
 // WHATWG Encoding spec requirement (https://encoding.spec.whatwg.org/#interface-textencoderstream):
-// The encoder must handle surrogate pairs that may be split across chunk boundaries.
-// This is tested by WPT's "encoding/streams/encode-utf8.any.js" which includes:
-//   - "a character split between chunks should be correctly encoded" test
-//   - Input: ["\uD83D", "\uDC99"] (U+1F499 💙 split into high/low surrogate chunks)
-//   - Expected output: [0xf0, 0x9f, 0x92, 0x99] (U+1F499 encoded as UTF-8)
+// The encoder must encode unpaired UTF-16 surrogates as replacement characters.
 //
-// The main complexity is handling UTF-16 surrogate pairs that may be split across chunks:
-// - JavaScript strings use UTF-16 encoding internally
-// - A surrogate pair consists of a high surrogate (0xD800-0xDBFF) followed by a low surrogate
-//   (0xDC00-0xDFFF), representing code points above U+FFFF (e.g., emoji, rare CJK characters)
-// - If a chunk ends with a high surrogate, we must wait for the next chunk to see if it starts
-//   with a matching low surrogate before encoding
-// - If no match arrives (chunk starts with non-low-surrogate, or stream ends), the orphaned
-//   high surrogate is replaced with U+FFFD (replacement character)
+// simdutf handles this for us, but we have to be careful of surrogate pairs
+//   (high surrogate, followed by low surrogate) split across chunk boundaries.
 //
-// State machine:
+// We do this with the pending field:
 //   holder->pending = kj::none    -> No pending high surrogate from previous chunk
 //   holder->pending = char16_t    -> High surrogate waiting for a matching low surrogate
-//
-// Transform algorithm for each chunk:
-//   1. Allocate buffer with prefix slot if we have a pending surrogate
-//   2. Write the chunk's UTF-16 code units into the buffer (after the prefix slot)
-//   3. If pending exists:
-//      - If chunk starts with low surrogate -> complete the pair (buf[0] = pending lead)
-//      - Otherwise -> replace pending with U+FFFD (buf[0] = REPLACEMENT_CHAR)
-//   4. If chunk ends with high surrogate -> save it as pending, exclude from output
-//   5. Sanitize remaining surrogates with simdutf::to_well_formed_utf16
-//   6. Convert to UTF-8 and enqueue
-//
-// Flush algorithm (when stream closes):
-//   - If pending high surrogate exists -> emit U+FFFD (3 UTF-8 bytes: 0xEF 0xBF 0xBD)
 //
 // Ref: https://github.com/web-platform-tests/wpt/blob/master/encoding/streams/encode-utf8.any.js
 jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
@@ -70,45 +46,34 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
                        jsg::Ref<TransformStreamDefaultController> controller) mutable {
     auto str = jsg::check(chunk->ToString(js.v8Context()));
     size_t length = str->Length();
-
-    // Early exit: empty chunk with no pending surrogate produces no output
-    if (length == 0 && holder->pending == kj::none) return js.resolvedPromise();
+    if (length == 0) return js.resolvedPromise();
 
     // Allocate buffer: reserve slot 0 for pending surrogate if we have one
-    size_t prefix = (holder->pending != kj::none) ? 1 : 0;
-    auto buf = kj::heapArray<char16_t>(prefix + length);
+    size_t prefix = (holder->pending == kj::none) ? 0 : 1;
+    size_t end = prefix + length;
+    auto buf = kj::heapArray<char16_t>(end);
     str->WriteV2(js.v8Isolate, 0, length, reinterpret_cast<uint16_t*>(buf.begin() + prefix));
 
-    // Handle pending high surrogate from previous chunk
     KJ_IF_SOME(lead, holder->pending) {
-      KJ_DASSERT(U_IS_LEAD(lead), "pending must be a high surrogate");
-      // Empty chunk: keep pending surrogate for next chunk
-      if (length == 0) return js.resolvedPromise();
+      buf.begin()[0] = lead;
       holder->pending = kj::none;
-      // If chunk starts with matching low surrogate, complete the pair; otherwise emit U+FFFD
-      buf[0] = U_IS_TRAIL(buf[prefix]) ? lead : REPLACEMENT_CHAR;
     }
-
-    size_t end = prefix + length;
-    KJ_DASSERT(end <= buf.size());
 
     // If chunk ends with high surrogate, save it for next chunk
     if (end > 0 && U_IS_LEAD(buf[end - 1])) {
       holder->pending = buf[--end];
     }
-
-    // Nothing to encode after handling surrogates
     if (end == 0) return js.resolvedPromise();
 
     auto slice = buf.first(end);
-    KJ_DASSERT(slice.size() > 0);
     auto result = simdutf::utf8_length_from_utf16_with_replacement(slice.begin(), slice.size());
-    // Only sanitize if there are unpaired surrogates in the middle of the buffer
+    // Only sanitize if there are surrogates in the buffer - UTF-16 without
+    // surrogates is always well-formed.
     if (result.error == simdutf::error_code::SURROGATE) {
       simdutf::to_well_formed_utf16(slice.begin(), slice.size(), slice.begin());
     }
     auto utf8Length = result.count;
-    KJ_DASSERT(utf8Length > 0);
+    KJ_DASSERT(utf8Length > 0 && utf8Length >= end);
 
     auto backingStore = js.allocBackingStore(utf8Length, jsg::Lock::AllocOption::UNINITIALIZED);
     auto dest = kj::ArrayPtr<char>(static_cast<char*>(backingStore->Data()), utf8Length);
