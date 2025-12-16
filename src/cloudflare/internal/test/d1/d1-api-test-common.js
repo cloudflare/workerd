@@ -50,6 +50,7 @@ const meta = (values) => ({
   served_by: anything,
   served_by_primary: anything,
   served_by_region: anything,
+  served_by_colo: anything,
   timings: anything,
   changes: anything,
   last_row_id: anything,
