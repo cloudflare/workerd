@@ -32,6 +32,9 @@ git_override(
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
+# Rust
+bazel_dep(name = "rules_rust", version = "0.68.1")
+
 # BoringSSL may subtly break backwards compatibility and behave differently than the latest FIPS
 # version, often by rejecting key values that it considers invalid/unsafe even though they are still
 # accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
