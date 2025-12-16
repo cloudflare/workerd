@@ -2,12 +2,9 @@
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-URL = "https://github.com/bazelbuild/rules_rust"
-COMMIT = "f3ccfa44f6636aa38e14f095e17d95797ae2f720"
-
 def dep_rules_rust():
     git_repository(
         name = "rules_rust",
-        remote = URL,
-        commit = COMMIT,
+        remote = "https://github.com/bazelbuild/rules_rust",
+        commit = "f3ccfa44f6636aa38e14f095e17d95797ae2f720",
     )

@@ -2,14 +2,10 @@
 
 load("@//:build/http.bzl", "http_file")
 
-TAG_NAME = "v8.2.1"
-URL = "https://github.com/bazelbuild/buildtools/releases/download/v8.2.1/buildifier-windows-amd64.exe"
-SHA256 = "802104da0bcda0424a397ac5be0004c372665a70289a6d5146e652ee497c0dc6"
-
 def dep_buildifier_windows_amd64():
     http_file(
         name = "buildifier-windows-amd64",
-        url = URL,
+        url = "https://github.com/bazelbuild/buildtools/releases/download/v8.2.1/buildifier-windows-amd64.exe",
+        sha256 = "802104da0bcda0424a397ac5be0004c372665a70289a6d5146e652ee497c0dc6",
         executable = True,
-        sha256 = SHA256,
     )

@@ -488,8 +488,7 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
 }
 
 auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure) {
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     return promise.then(
         js, ioContext.addFunctor(kj::mv(onSuccess)), ioContext.addFunctor(kj::mv(onFailure)));
   } else {
@@ -517,8 +516,7 @@ jsg::Promise<void> maybeRunAlgorithm(
     // onFailure case since such errors are generally indicative of a fatal
     // condition in the isolate (e.g. out of memory, other fatal exception, etc).
     return js.tryCatch([&] {
-      if (IoContext::hasCurrent()) {
-        auto& ioContext = IoContext::current();
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
         return js
             .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
                 [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
@@ -3512,8 +3510,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
             return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
           });
       auto promise = abort(js, errored);
-      if (IoContext::hasCurrent()) {
-        return promise.then(js, IoContext::current().addFunctor(kj::mv(onSuccess)));
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+        return promise.then(js, ioContext.addFunctor(kj::mv(onSuccess)));
       } else {
         return promise.then(js, kj::mv(onSuccess));
       }

@@ -59,6 +59,10 @@ on:
         type: boolean
         required: false
         default: false
+      build_container_images:
+        type: boolean
+        required: false
+        default: false
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -119,6 +123,10 @@ jobs:
         # 'Show timestamps' on the web interface)
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
+      - name: Build and load container images
+        if: inputs.build_container_images
+        run: |
+          bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
       - name: Bazel test
         if: inputs.run_tests
         run: |

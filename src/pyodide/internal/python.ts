@@ -241,7 +241,7 @@ export function loadPyodide(
       prepareWasmLinearMemory(Module, pyodide_entrypoint_helper);
     });
 
-    maybeCollectSnapshot(Module);
+    maybeCollectSnapshot(Module, pyodide_entrypoint_helper);
     // Mount worker files after doing snapshot upload so we ensure that data from the files is never
     // present in snapshot memory.
     mountWorkerFiles(Module);

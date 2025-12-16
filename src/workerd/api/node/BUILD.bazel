@@ -46,6 +46,7 @@ wd_cc_library(
     deps = [
         ":node-core",
         "//src/node",
+        "//src/rust/api",
         "//src/workerd/api:streams-compression",
         "//src/workerd/io",
         "//src/workerd/util:mimetype",

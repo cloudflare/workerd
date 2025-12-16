@@ -22,8 +22,7 @@ namespace {
 // will not go anywhere, but we'll log the exception message to the console until the problem this
 // papers over is fixed.
 [[noreturn]] void throwTypeErrorAndConsoleWarn(kj::StringPtr message) {
-  if (IoContext::hasCurrent()) {
-    auto& context = IoContext::current();
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
     if (context.isInspectorEnabled()) {
       context.logWarning(message);
     }
@@ -959,12 +958,12 @@ jsg::Promise<void> WritableStreamInternalController::write(
           kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset, byteLength);
       queue.push_back(
           WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-            .event = Write{
+            .event = kj::heap<Write>({
               .promise = kj::mv(prp.resolver),
               .totalBytes = store->ByteLength(),
               .ownBytes = js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(store))),
               .bytes = ptr,
-            }});
+            })});
 
       ensureWriting(js);
       return kj::mv(prp.promise);
@@ -1038,7 +1037,7 @@ jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bo
       }
       queue.push_back(
           WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-            .event = Close{.promise = kj::mv(prp.resolver)}});
+            .event = kj::heap<Close>({.promise = kj::mv(prp.resolver)})});
       ensureWriting(js);
       return kj::mv(prp.promise);
     }
@@ -1095,7 +1094,7 @@ jsg::Promise<void> WritableStreamInternalController::flush(jsg::Lock& js, bool m
       }
       queue.push_back(
           WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-            .event = Flush{.promise = kj::mv(prp.resolver)}});
+            .event = kj::heap<Flush>({.promise = kj::mv(prp.resolver)})});
       ensureWriting(js);
       return kj::mv(prp.promise);
     }
@@ -1274,13 +1273,13 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   }
   queue.push_back(WriteEvent{
     .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-    .event = Pipe{.parent = *this,
+    .event = kj::heap<Pipe>({.parent = *this,
       .source = sourceLock,
       .promise = kj::mv(prp.resolver),
       .preventAbort = preventAbort,
       .preventClose = preventClose,
       .preventCancel = preventCancel,
-      .maybeSignal = kj::mv(options.signal)},
+      .maybeSignal = kj::mv(options.signal)}),
   });
   ensureWriting(js);
   return kj::mv(prp.promise);
@@ -1409,13 +1408,13 @@ void WritableStreamInternalController::releaseWriter(
 
 bool WritableStreamInternalController::isClosedOrClosing() {
 
-  bool isClosing = !queue.empty() && queue.back().event.is<Close>();
-  bool isFlushing = !queue.empty() && queue.back().event.is<Flush>();
+  bool isClosing = !queue.empty() && queue.back().event.is<kj::Own<Close>>();
+  bool isFlushing = !queue.empty() && queue.back().event.is<kj::Own<Flush>>();
   return state.is<StreamStates::Closed>() || isClosing || isFlushing;
 }
 
 bool WritableStreamInternalController::isPiping() {
-  return state.is<IoOwn<Writable>>() && !queue.empty() && queue.back().event.is<Pipe>();
+  return state.is<IoOwn<Writable>>() && !queue.empty() && queue.back().event.is<kj::Own<Pipe>>();
 }
 
 bool WritableStreamInternalController::isErrored() {
@@ -1494,16 +1493,16 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       kj::Vector<kj::String> events;
       for (auto& event: queue) {
         KJ_SWITCH_ONEOF(event.event) {
-          KJ_CASE_ONEOF(write, Write) {
+          KJ_CASE_ONEOF(write, kj::Own<Write>) {
             events.add(kj::str("Write"));
           }
-          KJ_CASE_ONEOF(flush, Flush) {
+          KJ_CASE_ONEOF(flush, kj::Own<Flush>) {
             events.add(kj::str("Flush"));
           }
-          KJ_CASE_ONEOF(close, Close) {
+          KJ_CASE_ONEOF(close, kj::Own<Close>) {
             events.add(kj::str("Close"));
           }
-          KJ_CASE_ONEOF(pipe, Pipe) {
+          KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
             events.add(kj::str("Pipe"));
           }
         }
@@ -1514,16 +1513,17 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
     return kj::String();
   };
 
-  const auto makeChecker = [this](auto& request) {
+  const auto makeChecker = [this]() {
     // Make a helper function that asserts that the queue did not change state during a write/close
     // operation. We normally only pop/drain the queue after write/close completion. We drain the
     // queue concurrently during finalization, but finalization would also have canceled our
     // write/close promise. The helper function also helpfully returns a reference to the current
     // request in flight.
+    //
+    // We capture the current generation and verify it hasn't changed, rather than using pointer
+    // comparison, because RingBuffer may relocate elements when it grows.
 
-    using Request = kj::Decay<decltype(request)>;
-
-    return [this, &request]() -> decltype(auto) {
+    return [this, expectedGeneration = queue.currentGeneration()]<typename Request>() -> Request& {
       if constexpr (kj::isSameType<Request, Write>() || kj::isSameType<Request, Flush>()) {
         // Write and flush requests can have any number of requests backed up after them.
         KJ_ASSERT(!queue.empty());
@@ -1535,10 +1535,10 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue, "Pipe"));
       }
 
-      // The front of the queue is what we expect it to be.
-      KJ_ASSERT(&request == &queue.front().event.get<Request>());
+      // Verify nothing was popped from the queue while we were waiting.
+      KJ_ASSERT(queue.currentGeneration() == expectedGeneration);
 
-      return request;
+      return *queue.front().event.get<kj::Own<Request>>();
     };
   };
 
@@ -1558,12 +1558,12 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
   if (queue.empty()) return js.resolvedPromise();
 
   KJ_SWITCH_ONEOF(queue.front().event) {
-    KJ_CASE_ONEOF(request, Write) {
-      if (request.bytes.size() == 0) {
+    KJ_CASE_ONEOF(request, kj::Own<Write>) {
+      if (request->bytes.size() == 0) {
         // Zero-length writes are no-ops with a pending event. If we allowed them, we'd have a hard
         // time distinguishing between disconnections and zero-length reads on the other end of the
         // TransformStream.
-        maybeResolvePromise(js, request.promise);
+        maybeResolvePromise(js, request->promise);
         queue.pop_front();
 
         // Note: we don't bother checking for an abort() here because either this write was just
@@ -1574,11 +1574,11 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
       // writeLoop() is only called with the sink in the Writable state.
       auto& writable = state.get<IoOwn<Writable>>();
-      auto check = makeChecker(request);
+      auto check = makeChecker();
 
-      auto amountToWrite = request.bytes.size();
+      auto amountToWrite = request->bytes.size();
 
-      auto promise = writable->sink->write(request.bytes).attach(kj::mv(request.ownBytes));
+      auto promise = writable->sink->write(request->bytes).attach(kj::mv(request->ownBytes));
 
       // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript in
       // this same isolate, then the promise may actually be waiting on JavaScript to do something,
@@ -1594,7 +1594,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
                   [this, check, maybeAbort, amountToWrite](jsg::Lock& js) -> jsg::Promise<void> {
         // Under some conditions, the clean up has already happened.
         if (queue.empty()) return js.resolvedPromise();
-        auto& request = check();
+        auto& request = check.template operator()<Write>();
         maybeResolvePromise(js, request.promise);
         decreaseCurrentWriteBufferSize(js, amountToWrite);
         KJ_IF_SOME(o, observer) {
@@ -1609,7 +1609,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         // Under some conditions, the clean up has already happened.
         if (queue.empty()) return js.resolvedPromise();
         auto handle = reason.getHandle(js);
-        auto& request = check();
+        auto& request = check.template operator()<Write>();
         auto& writable = state.get<IoOwn<Writable>>();
         decreaseCurrentWriteBufferSize(js, amountToWrite);
         KJ_IF_SOME(o, observer) {
@@ -1625,24 +1625,24 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         return js.resolvedPromise();
       }));
     }
-    KJ_CASE_ONEOF(request, Pipe) {
+    KJ_CASE_ONEOF(request, kj::Own<Pipe>) {
       // The destination should still be Writable, because the only way to transition to an
       // errored state would have been if a write request in the queue ahead of us encountered an
       // error. But in that case, the queue would already have been drained and we wouldn't be here.
       auto& writable = state.get<IoOwn<Writable>>();
 
-      if (request.checkSignal(js)) {
+      if (request->checkSignal(js)) {
         // If the signal is triggered, checkSignal will handle erroring the source and destination.
         return js.resolvedPromise();
       }
 
       // The readable side should *should* still be readable here but let's double check, just
       // to be safe, both for closed state and errored states.
-      if (request.source.isClosed()) {
-        request.source.release(js);
+      if (request->source.isClosed()) {
+        request->source.release(js);
         // If the source is closed, the spec requires us to close the destination unless the
         // preventClose option is true.
-        if (!request.preventClose && !isClosedOrClosing()) {
+        if (!request->preventClose && !isClosedOrClosing()) {
           doClose(js);
         } else {
           writeState.init<Unlocked>();
@@ -1650,11 +1650,11 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         return js.resolvedPromise();
       }
 
-      KJ_IF_SOME(errored, request.source.tryGetErrored(js)) {
-        request.source.release(js);
+      KJ_IF_SOME(errored, request->source.tryGetErrored(js)) {
+        request->source.release(js);
         // If the source is errored, the spec requires us to error the destination unless the
         // preventAbort option is true.
-        if (!request.preventAbort) {
+        if (!request->preventAbort) {
           auto ex = js.exceptionToKj(js.v8Ref(errored));
           writable->abort(kj::mv(ex));
           drain(js, errored);
@@ -1672,14 +1672,14 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // ReadableStream is JavaScript-backed and we need to setup a JavaScript-promise read/write
       // loop to pass the data into the destination.
 
-      const auto handlePromise = [this, &ioContext, check = makeChecker(request),
-                                     preventAbort = request.preventAbort](
+      const auto handlePromise = [this, &ioContext, check = makeChecker(),
+                                     preventAbort = request->preventAbort](
                                      jsg::Lock& js, auto promise) {
         return promise.then(js, ioContext.addFunctor([this, check](jsg::Lock& js) mutable {
           // Under some conditions, the clean up has already happened.
           if (queue.empty()) return js.resolvedPromise();
 
-          auto& request = check();
+          auto& request = check.template operator()<Pipe>();
 
           // It's possible we got here because the source errored but preventAbort was set.
           // In that case, we need to treat preventAbort the same as preventClose. Be
@@ -1714,7 +1714,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
             ioContext.addFunctor(
                 [this, check, preventAbort](jsg::Lock& js, jsg::Value reason) mutable {
           auto handle = reason.getHandle(js);
-          auto& request = check();
+          auto& request = check.template operator()<Pipe>();
           maybeRejectPromise<void>(js, request.promise, handle);
           // TODO(conform): Remember all those checks we performed in ReadableStream::pipeTo()?
           // We're supposed to perform the same checks continually, e.g., errored writes should
@@ -1733,11 +1733,11 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         }));
       };
 
-      KJ_IF_SOME(promise, request.source.tryPumpTo(*writable->sink, !request.preventClose)) {
+      KJ_IF_SOME(promise, request->source.tryPumpTo(*writable->sink, !request->preventClose)) {
         return handlePromise(js,
             ioContext.awaitIo(js,
                 writable->canceler.wrap(
-                    AbortSignal::maybeCancelWrap(js, request.maybeSignal, kj::mv(promise)))));
+                    AbortSignal::maybeCancelWrap(js, request->maybeSignal, kj::mv(promise)))));
       }
 
       // The ReadableStream is JavaScript-backed. We can still pipe the data but it's going to be
@@ -1745,18 +1745,18 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // from the ReadableStream, then waiting on kj::Promises to write the data. We will keep
       // reading until either the source or destination errors or until the source signals that
       // it is done.
-      return handlePromise(js, request.pipeLoop(js));
+      return handlePromise(js, request->pipeLoop(js));
     }
-    KJ_CASE_ONEOF(request, Close) {
+    KJ_CASE_ONEOF(request, kj::Own<Close>) {
       // writeLoop() is only called with the sink in the Writable state.
       auto& writable = state.get<IoOwn<Writable>>();
-      auto check = makeChecker(request);
+      auto check = makeChecker();
 
       return ioContext.awaitIo(js, writable->canceler.wrap(writable->sink->end()))
           .then(js, ioContext.addFunctor([this, check](jsg::Lock& js) {
         // Under some conditions, the clean up has already happened.
         if (queue.empty()) return;
-        auto& request = check();
+        auto& request = check.template operator()<Close>();
         maybeResolvePromise(js, request.promise);
         queue.pop_front();
         finishClose(js);
@@ -1765,22 +1765,20 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         // Under some conditions, the clean up has already happened.
         if (queue.empty()) return;
         auto handle = reason.getHandle(js);
-        auto& request = check();
+        auto& request = check.template operator()<Close>();
         maybeRejectPromise<void>(js, request.promise, handle);
         queue.pop_front();
         finishError(js, handle);
       }));
     }
-    KJ_CASE_ONEOF(request, Flush) {
+    KJ_CASE_ONEOF(request, kj::Own<Flush>) {
       // This is not a standards-defined state for a WritableStream and is only used internally
       // for Socket's startTls call.
       //
       // Flushing is similar to closing the stream, the main difference is that `finishClose`
       // and `writable->end()` are never called.
-      auto check = makeChecker(request);
-
-      auto& checkReq = check();
-      maybeResolvePromise(js, checkReq.promise);
+      // Note: For Flush, we don't need makeChecker since we process immediately without async I/O.
+      maybeResolvePromise(js, request->promise);
       queue.pop_front();
 
       return js.resolvedPromise();
@@ -1974,20 +1972,20 @@ void WritableStreamInternalController::drain(jsg::Lock& js, v8::Local<v8::Value>
   doError(js, reason);
   while (!queue.empty()) {
     KJ_SWITCH_ONEOF(queue.front().event) {
-      KJ_CASE_ONEOF(writeRequest, Write) {
-        maybeRejectPromise<void>(js, writeRequest.promise, reason);
+      KJ_CASE_ONEOF(writeRequest, kj::Own<Write>) {
+        maybeRejectPromise<void>(js, writeRequest->promise, reason);
       }
-      KJ_CASE_ONEOF(pipeRequest, Pipe) {
-        if (!pipeRequest.preventCancel) {
-          pipeRequest.source.cancel(js, reason);
+      KJ_CASE_ONEOF(pipeRequest, kj::Own<Pipe>) {
+        if (!pipeRequest->preventCancel) {
+          pipeRequest->source.cancel(js, reason);
         }
-        maybeRejectPromise<void>(js, pipeRequest.promise, reason);
+        maybeRejectPromise<void>(js, pipeRequest->promise, reason);
       }
-      KJ_CASE_ONEOF(closeRequest, Close) {
-        maybeRejectPromise<void>(js, closeRequest.promise, reason);
+      KJ_CASE_ONEOF(closeRequest, kj::Own<Close>) {
+        maybeRejectPromise<void>(js, closeRequest->promise, reason);
       }
-      KJ_CASE_ONEOF(flushRequest, Flush) {
-        maybeRejectPromise<void>(js, flushRequest.promise, reason);
+      KJ_CASE_ONEOF(flushRequest, kj::Own<Flush>) {
+        maybeRejectPromise<void>(js, flushRequest->promise, reason);
       }
     }
     queue.pop_front();
@@ -1997,17 +1995,17 @@ void WritableStreamInternalController::drain(jsg::Lock& js, v8::Local<v8::Value>
 void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
   for (auto& event: queue) {
     KJ_SWITCH_ONEOF(event.event) {
-      KJ_CASE_ONEOF(write, Write) {
-        visitor.visit(write.promise);
+      KJ_CASE_ONEOF(write, kj::Own<Write>) {
+        visitor.visit(write->promise);
       }
-      KJ_CASE_ONEOF(close, Close) {
-        visitor.visit(close.promise);
+      KJ_CASE_ONEOF(close, kj::Own<Close>) {
+        visitor.visit(close->promise);
       }
-      KJ_CASE_ONEOF(flush, Flush) {
-        visitor.visit(flush.promise);
+      KJ_CASE_ONEOF(flush, kj::Own<Flush>) {
+        visitor.visit(flush->promise);
       }
-      KJ_CASE_ONEOF(pipe, Pipe) {
-        visitor.visit(pipe.maybeSignal, pipe.promise);
+      KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
+        visitor.visit(pipe->maybeSignal, pipe->promise);
       }
     }
   }
@@ -2191,33 +2189,25 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
     }
   };
 
-  auto holder = kj::refcounted<Holder>(kj::mv(sink), kj::mv(source));
+  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
   return holder->source->pumpTo(*holder->sink, end)
-      .then([&holder = *holder](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-    proxy.proxyTask = proxy.proxyTask.attach(kj::addRef(holder));
-    holder.done = true;
+      .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+    proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
+    holder->done = true;
     return kj::mv(proxy);
-  }, [&holder = *holder](kj::Exception&& ex) mutable {
-    holder.sink->abort(kj::cp(ex));
-    holder.source->cancel(kj::cp(ex));
-    holder.done = true;
+  }, [holder = holder.addRef()](kj::Exception&& ex) mutable {
+    holder->sink->abort(kj::cp(ex));
+    holder->source->cancel(kj::cp(ex));
+    holder->done = true;
     return kj::mv(ex);
-  }).attach(kj::mv(holder));
+  });
 }
 
 StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return StreamEncoding::IDENTITY;
-    }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return StreamEncoding::IDENTITY;
-    }
-    KJ_CASE_ONEOF(readable, Readable) {
-      return readable->getPreferredEncoding();
-    }
-  }
-  KJ_UNREACHABLE;
+  return state.tryGet<Readable>()
+      .map([](Readable& readable) {
+    return readable->getPreferredEncoding();
+  }).orDefault(StreamEncoding::IDENTITY);
 }
 
 kj::Own<ReadableStreamController> newReadableStreamInternalController(

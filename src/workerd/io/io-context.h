@@ -399,6 +399,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Throws an exception if there is no current context (see hasCurrent() below).
   static IoContext& current();
 
+  // Like current(), but returns kj::none if there is no current context.
+  static kj::Maybe<IoContext&> tryCurrent();
+
   // True if there is a current IoContext for the thread (current() will not throw).
   static bool hasCurrent();
 
@@ -855,12 +858,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<WorkerInterface> getSubrequestChannel(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
 
-  kj::Own<WorkerInterface> getSubrequestChannelWithSpans(uint channel,
-      bool isInHouse,
-      kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName,
-      kj::Vector<Span::Tag> tags);
-
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
       bool isInHouse,
@@ -876,13 +873,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Own<kj::HttpClient> getHttpClient(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
-
-  // As above, but with list of span tags to add, analogous to getSubrequestChannelWithSpans().
-  kj::Own<kj::HttpClient> getHttpClientWithSpans(uint channel,
-      bool isInHouse,
-      kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName,
-      kj::Vector<Span::Tag> tags);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.

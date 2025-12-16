@@ -1,8 +1,8 @@
 common --enable_platform_specific_config
 build --verbose_failures
-build --build_tag_filters=-off-by-default
-test --test_tag_filters=-off-by-default,-requires-fuzzilli
-test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli
+build --build_tag_filters=-off-by-default,-requires-container-engine
+test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
+test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
 

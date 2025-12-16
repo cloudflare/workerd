@@ -6,7 +6,7 @@ Subject: Enable V8 shared linkage
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 01f13e0cf264b4c363a4b53566432c699df61c69..b5e7e85d7188a2c6d9c0d558c0b2bf211e6f8d86 100644
+index 3458c6c0760df00505da5cd263c52458aabfac01..89473bb418f5949917f40761e42a72e1a0faac9d 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -1439,6 +1439,7 @@ filegroup(
@@ -25,7 +25,7 @@ index 01f13e0cf264b4c363a4b53566432c699df61c69..b5e7e85d7188a2c6d9c0d558c0b2bf21
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3207,7 +3207,6 @@ filegroup(
+@@ -3208,7 +3208,6 @@ filegroup(
  filegroup(
      name = "v8_compiler_files",
      srcs = [
@@ -33,7 +33,7 @@ index 01f13e0cf264b4c363a4b53566432c699df61c69..b5e7e85d7188a2c6d9c0d558c0b2bf21
          "src/compiler/access-builder.cc",
          "src/compiler/access-builder.h",
          "src/compiler/access-info.cc",
-@@ -3802,8 +3801,6 @@ filegroup(
+@@ -3806,8 +3805,6 @@ filegroup(
          "src/builtins/growable-fixed-array-gen.cc",
          "src/builtins/growable-fixed-array-gen.h",
          "src/builtins/number-builtins-reducer-inl.h",
@@ -42,7 +42,7 @@ index 01f13e0cf264b4c363a4b53566432c699df61c69..b5e7e85d7188a2c6d9c0d558c0b2bf21
          "src/builtins/setup-builtins-internal.cc",
          "src/builtins/torque-csa-header-includes.h",
          "src/codegen/turboshaft-builtins-assembler-inl.h",
-@@ -4079,6 +4076,7 @@ filegroup(
+@@ -4083,6 +4080,7 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -50,7 +50,7 @@ index 01f13e0cf264b4c363a4b53566432c699df61c69..b5e7e85d7188a2c6d9c0d558c0b2bf21
      ],
  )
  
-@@ -4189,6 +4187,10 @@ filegroup(
+@@ -4193,6 +4191,10 @@ filegroup(
      name = "noicu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -61,7 +61,7 @@ index 01f13e0cf264b4c363a4b53566432c699df61c69..b5e7e85d7188a2c6d9c0d558c0b2bf21
      ] + select({
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/noicu/embedded.S",
-@@ -4206,6 +4208,7 @@ filegroup(
+@@ -4210,6 +4212,7 @@ filegroup(
      name = "icu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",

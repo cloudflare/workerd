@@ -21,6 +21,8 @@
 #include <workerd/jsg/script.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/jsg/lib.rs.h>
+#include <workerd/rust/jsg/v8.rs.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
@@ -29,6 +31,7 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
+#include <rust/jsg/ffi.h>
 #include <v8-inspector.h>
 #include <v8-profiler.h>
 
@@ -411,9 +414,8 @@ class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
   double currentTimeMS() override {
     auto timePoint = kj::UNIX_EPOCH;
 
-    if (IoContext::hasCurrent()) {
+    KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
       // We're on a request-serving thread.
-      auto& ioContext = IoContext::current();
       timePoint = ioContext.now();
     } else {
       auto lockedState = state.lockExclusive();
@@ -524,11 +526,14 @@ struct Worker::Impl {
 // noted.
 struct Worker::Isolate::Impl {
   IsolateObserver& metrics;
-  InspectorClient inspectorClient;
+  kj::Own<InspectorClient> inspectorClient;
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
   InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
+
+  // Used by JSG/Rust integration.
+  ::rust::Box<::workerd::rust::jsg::Realm> realm;
 
   // UUID for this isolate, initialized first time getUuid() is called.
   kj::Lazy<kj::String> uuid;
@@ -628,14 +633,18 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
+      // &* dereferences the kj::Own smart pointer and takes its address to get a raw pointer
+      jsg::setAlignedPointerInEmbedderData(context, ::workerd::jsg::ContextPointerSlot::RUST_REALM,
+          const_cast<::workerd::rust::jsg::Realm*>(&*impl.realm));
       Worker::setupContext(*lock, context, loggingOptions);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
       lock->withinHandleScope([&] {
+        auto v8Context = context.getHandle(*lock);
         context->clear();
         KJ_IF_SOME(i, impl.inspector) {
-          i.get()->contextDestroyed(context.getHandle(*lock));
+          i.get()->contextDestroyed(v8Context);
         }
         { auto drop = kj::mv(context); }
         lock->v8Isolate->ContextDisposedNotification(v8::ContextDependants::kNoDependants);
@@ -692,24 +701,50 @@ struct Worker::Isolate::Impl {
   //   because our GlobalScope object needs to have a function called on it, and any attached
   //   inspector needs to be notified. JSG doesn't know about these things.
 
-  Impl(const Api& api,
-      IsolateObserver& metrics,
-      IsolateLimitEnforcer& limitEnforcer,
-      InspectorPolicy inspectorPolicy)
-      : metrics(metrics),
-        inspectorPolicy(inspectorPolicy),
-        actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
+  struct IsolateState {
+    kj::Own<InspectorClient> inspectorClient;
+    kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
+    ::rust::Box<::workerd::rust::jsg::Realm> realm;
+  };
+
+  static IsolateState initIsolate(
+      const Api& api, IsolateLimitEnforcer& limitEnforcer, InspectorPolicy inspectorPolicy) {
+    auto inspectorClient = kj::heap<InspectorClient>();
+    // Default constructor of ::rust::Box is deleted, so we use a Maybe to delay initialization.
+    kj::Maybe<::rust::Box<::workerd::rust::jsg::Realm>> realm;
+    kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
-
+      realm = ::workerd::rust::jsg::realm_create(lock->v8Isolate);
       limitEnforcer.customizeIsolate(lock->v8Isolate);
       if (inspectorPolicy != InspectorPolicy::DISALLOW) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
-        inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, &inspectorClient);
+        inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, inspectorClient.get());
       }
     });
+    return {kj::mv(inspectorClient), kj::mv(inspector), kj::mv(KJ_REQUIRE_NONNULL(realm))};
   }
+
+  Impl(IsolateObserver& metrics,
+      IsolateLimitEnforcer& limitEnforcer,
+      InspectorPolicy inspectorPolicy,
+      IsolateState state)
+      : metrics(metrics),
+        inspectorClient(kj::mv(state.inspectorClient)),
+        inspector(kj::mv(state.inspector)),
+        inspectorPolicy(inspectorPolicy),
+        actorCacheLru(limitEnforcer.getActorCacheLruOptions()),
+        realm(kj::mv(state.realm)) {}
+
+  Impl(const Api& api,
+      IsolateObserver& metrics,
+      IsolateLimitEnforcer& limitEnforcer,
+      InspectorPolicy inspectorPolicy)
+      : Impl(metrics,
+            limitEnforcer,
+            inspectorPolicy,
+            initIsolate(api, limitEnforcer, inspectorPolicy)) {}
 };
 
 namespace {
@@ -894,11 +929,9 @@ struct Worker::Script::Impl {
     };
 
     modules.setDynamicImportCallback([](jsg::Lock& js, DynamicImportHandler handler) mutable {
-      if (IoContext::hasCurrent()) {
+      KJ_IF_SOME(context, IoContext::tryCurrent()) {
         // If we are within the scope of a IoContext, then we are going to pop
         // out of it to perform the actual module instantiation.
-
-        auto& context = IoContext::current();
 
         return context.awaitIo(js,
             handleDynamicImport(kj::atomicAddRef(context.getWorker()), kj::mv(handler),
@@ -1091,8 +1124,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       lock->setErrorReporterCallback([this](jsg::Lock& js, kj::String desc,
                                          const jsg::JsValue& error, const jsg::JsMessage& message) {
         // Only add exception to trace when running within an I/O context with a tracer.
-        if (IoContext::hasCurrent()) {
-          auto& ioContext = IoContext::current();
+        KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
           KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
             addExceptionToTrace(js, ioContext, tracer, UncaughtExceptionSource::REQUEST_HANDLER,
                 error, api->getErrorInterfaceTypeHandler(js));
@@ -1143,9 +1175,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       // a method of ServiceWorkerGlobalScope, which is the context object. So we should be able to
       // do something like unwrap(lock, isolate->GetCurrentContext()).emitPromiseRejection().
       // However, JSG doesn't currently provide an easy way to do this.
-      if (IoContext::hasCurrent()) {
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
         try {
-          IoContext::current().getCurrentLock().reportPromiseRejectEvent(message);
+          ioContext.getCurrentLock().reportPromiseRejectEvent(message);
         } catch (jsg::JsExceptionThrown&) {
           // V8 expects us to just return.
           return;
@@ -1508,6 +1540,9 @@ Worker::Isolate::~Isolate() noexcept(false) {
     metrics->teardownLockAcquired();
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
+    // The Rust Realm must be dropped under lock since Realm::drop() accesses V8 globals
+    // and calls drop functions that may interact with V8.
+    auto dropRealm = kj::mv(impl->realm);
   });
 }
 
@@ -2025,8 +2060,7 @@ void Worker::handleLog(jsg::Lock& js,
   };
 
   // Only check tracing if console.log() was not invoked at the top level.
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
       tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message());
@@ -2251,8 +2285,7 @@ void Worker::Lock::logUncaughtException(kj::StringPtr description) {
 void Worker::Lock::logUncaughtException(
     UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message) {
   // Only add exception to trace when running within an I/O context with a tracer.
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
         addExceptionToTrace(impl->inner, ioContext, tracer, source, exception,
@@ -3307,12 +3340,12 @@ kj::Promise<void> Worker::Isolate::attachInspector(
     // just not.
     lockedSelf.disconnectInspector();
 
-    lockedSelf.impl->inspectorClient.setInspectorTimerInfo(timer, timerOffset);
+    lockedSelf.impl->inspectorClient->setInspectorTimerInfo(timer, timerOffset);
 
     auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(
         kj::atomicAddRef(*this), kj::mv(isolateThreadExecutor), webSocket);
     lockedSelf.currentInspectorSession = *channel;
-    lockedSelf.impl->inspectorClient.setChannel(*channel);
+    lockedSelf.impl->inspectorClient->setChannel(*channel);
 
     // Send any queued notifications.
     lock.withinHandleScope([&] {
@@ -3333,7 +3366,7 @@ void Worker::Isolate::disconnectInspector() {
     current.disconnect();
     currentInspectorSession = kj::none;
   }
-  impl->inspectorClient.resetChannel();
+  impl->inspectorClient->resetChannel();
 }
 
 void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
@@ -3351,8 +3384,7 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     fflush(stderr);
   }
 
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       // json encoding is required over simply wrapping it in quotes to correctly escape the string.
       capnp::JsonCodec json;
@@ -3409,7 +3441,7 @@ void Worker::Isolate::logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr des
       params.setType(static_cast<cdp::LogType>(type));
       params.initArgs(1)[0].initString().setValue(description);
       params.setExecutionContextId(v8_inspector::V8ContextInfo::executionContextId(js.v8Context()));
-      params.setTimestamp(impl->inspectorClient.currentTimeMS());
+      params.setTimestamp(impl->inspectorClient->currentTimeMS());
       stackTraceToCDP(js, params.initStackTrace());
 
       auto notification = getCdpJsonCodec().encode(event);

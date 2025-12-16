@@ -60,7 +60,7 @@ archive_override(
 bazel_dep(name = "sqlite3")
 
 # We have some patches that aren't included in BCR:
-# https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/sqlite3/3.51.1/patches
+# https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/sqlite3/3.47.0/patches
 archive_override(
     module_name = "sqlite3",
     build_file = "//:build/BUILD.sqlite3",
@@ -69,16 +69,17 @@ archive_override(
         "//:patches/sqlite/0001-row-counts-plain.patch",
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+        "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
     ],
     remote_file_integrity = {
-        "MODULE.bazel": "sha256-YgTah0CSnA9l6ERyXOm3/1ljRPSdlk72qn6TE1QyeFs=",
+        "MODULE.bazel": "sha256-TtpmqyHyks3o0WcSJO0XFyKkHfAIF98wq06+urs3oKI=",
     },
     remote_file_urls = {
-        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/sqlite3/3.51.1/MODULE.bazel"],
+        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/sqlite3/3.47.0/MODULE.bazel"],
     },
-    sha256 = "0f8e765ac8ea7c36cf8ea9bffdd5c103564f4a8a635f215f9f783b338a13d971",
-    strip_prefix = "sqlite-src-3510100",
-    url = "https://sqlite.org/2025/sqlite-src-3510100.zip",
+    sha256 = "f59c349bedb470203586a6b6d10adb35f2afefa49f91e55a672a36a09a8fedf7",
+    strip_prefix = "sqlite-src-3470000",
+    url = "https://sqlite.org/2024/sqlite-src-3470000.zip",
 )
 
 bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
@@ -119,6 +120,6 @@ http_archive(
 http_archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "52c319501f1c3ddd0d1e87feaeb1c97fb3ecefc1fd6f8f7e06ac7337367e5823",
-    url = "https://github.com/simdutf/simdutf/releases/download/v7.6.0/singleheader.zip",
+    sha256 = "6c80c566f9158b07330f96fa5e522756bdb229013b8b6e41d787d37a3147aec3",
+    url = "https://github.com/simdutf/simdutf/releases/download/v7.7.0/singleheader.zip",
 )

@@ -14,10 +14,10 @@ const unitTests :Workerd.Config = (
         durableObjectNamespaces = [
           ( className = "DurableObjectExample",
             uniqueKey = "container-client-test-DurableObjectExample",
-            container = (imageName = "cf-container-client-test") ),
+            container = (imageName = "cloudflare/workerd/container-client-test") ),
           ( className = "DurableObjectExample2",
             uniqueKey = "container-client-test-DurableObjectExample2",
-            container = (imageName = "cf-container-client-test") ),
+            container = (imageName = "cloudflare/workerd/container-client-test") ),
         ],
         durableObjectStorage = (localDisk = "TEST_TMPDIR"),
         bindings = [
