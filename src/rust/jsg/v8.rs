@@ -1,9 +1,33 @@
+//! V8 JavaScript engine bindings and garbage collector integration.
+//!
+//! This module provides Rust wrappers for V8 types and the cppgc (Oilpan) garbage collector,
+//! enabling safe interop between Rust and V8's JavaScript runtime.
+//!
+//! # Core Types
+//!
+//! - [`Isolate`] - Safe wrapper around `v8::Isolate*`, the V8 runtime instance
+//! - [`Local<'a, T>`] - Stack-allocated handle to a V8 value, tied to a `HandleScope`
+//! - [`Global<T>`] - Persistent handle that outlives `HandleScope`s
+//! - [`TracedReference<T>`] - Handle traced by the garbage collector for cppgc objects
+//!
+//! # Garbage Collection
+//!
+//! The [`cppgc`] submodule provides Rust wrappers for V8's C++ garbage collector types:
+//!
+//! - [`cppgc::Handle`] - Strong persistent reference (off-heap → on-heap)
+//! - [`cppgc::WeakHandle`] - Weak persistent reference (off-heap → on-heap)
+//! - [`cppgc::Member`] - Strong member reference (on-heap → on-heap, needs tracing)
+//! - [`cppgc::WeakMember`] - Weak member reference (on-heap → on-heap, needs tracing)
+//!
+//! Resources implement [`GarbageCollected`] to trace their V8 handles during GC.
+
 use core::ffi::c_void;
 use std::marker::PhantomData;
+use std::ptr::NonNull;
 
 use crate::Lock;
 
-#[expect(clippy::missing_safety_doc)]
+#[expect(clippy::missing_safety_doc, clippy::missing_panics_doc)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
     #[derive(Debug)]
@@ -16,6 +40,14 @@ pub mod ffi {
         ptr: usize,
     }
 
+    struct TracedReference {
+        ptr: usize,
+    }
+
+    struct CppgcVisitor {
+        ptr: usize,
+    }
+
     enum ExceptionType {
         RangeError,
         ReferenceError,
@@ -24,11 +56,35 @@ pub mod ffi {
         Error,
     }
 
+    /// Data stored in a cppgc-managed RustResource object.
+    /// This struct is shared between Rust and C++ via CXX.
+    struct RustResourceData {
+        /// Pointer to the Rust resource instance
+        instance_ptr: usize,
+        /// Function pointer to drop the instance: fn(*mut c_void)
+        drop_fn: usize,
+        /// Function pointer to trace the instance: fn(*mut c_void, *mut CppgcVisitor)
+        trace_fn: usize,
+    }
+
+    extern "Rust" {
+        /// Called from C++ RustResource destructor to drop the Rust instance.
+        unsafe fn cppgc_invoke_drop(data: &RustResourceData);
+
+        /// Called from C++ RustResource::Trace to trace nested handles.
+        unsafe fn cppgc_invoke_trace(data: &RustResourceData, visitor: *mut CppgcVisitor);
+    }
+
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
 
         type Isolate;
         type FunctionCallbackInfo;
+        type RustResource;
+        type CppgcPersistent;
+        type CppgcWeakPersistent;
+        type CppgcMember;
+        type CppgcWeakMember;
 
         // Local<T>
         pub unsafe fn local_drop(value: Local);
@@ -63,14 +119,18 @@ pub mod ffi {
         pub unsafe fn global_reset(value: *mut Global);
         pub unsafe fn global_clone(value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
-        /// Makes the global handle weak. The `data` parameter should be a pointer to a
-        /// resource::State struct. When V8 GC collects the object, the weak callback will
-        /// retrieve the drop_fn from the State and invoke it.
-        pub unsafe fn global_make_weak(
+
+        // TracedReference<T> (cppgc/Oilpan)
+        pub unsafe fn traced_reference_from_local(
             isolate: *mut Isolate,
-            value: *mut Global,
-            data: usize, /* *mut State */
-        );
+            value: Local,
+        ) -> TracedReference;
+        pub unsafe fn traced_reference_to_local(
+            isolate: *mut Isolate,
+            value: &TracedReference,
+        ) -> Local;
+        pub unsafe fn traced_reference_reset(value: *mut TracedReference);
+        pub unsafe fn traced_reference_is_empty(value: &TracedReference) -> bool;
 
         // Unwrappers
         pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> String;
@@ -93,6 +153,35 @@ pub mod ffi {
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
+
+        // cppgc
+        pub unsafe fn cppgc_allocate(
+            isolate: *mut Isolate,
+            data: RustResourceData,
+        ) -> *mut RustResource;
+        pub unsafe fn cppgc_visitor_trace(visitor: *mut CppgcVisitor, handle: &TracedReference);
+        pub unsafe fn cppgc_visitor_trace_member(visitor: *mut CppgcVisitor, member: &CppgcMember);
+        pub unsafe fn cppgc_visitor_trace_weak_member(
+            visitor: *mut CppgcVisitor,
+            member: &CppgcWeakMember,
+        );
+        pub unsafe fn cppgc_persistent_new(resource: *mut RustResource) -> KjOwn<CppgcPersistent>;
+        pub unsafe fn cppgc_persistent_get(persistent: &CppgcPersistent) -> *mut RustResource;
+        pub unsafe fn cppgc_weak_persistent_new(
+            resource: *mut RustResource,
+        ) -> KjOwn<CppgcWeakPersistent>;
+        pub unsafe fn cppgc_weak_persistent_get(
+            persistent: &CppgcWeakPersistent,
+        ) -> *mut RustResource;
+        pub unsafe fn cppgc_member_new(resource: *mut RustResource) -> KjOwn<CppgcMember>;
+        pub unsafe fn cppgc_member_get(member: &CppgcMember) -> *mut RustResource;
+        pub unsafe fn cppgc_member_set(member: Pin<&mut CppgcMember>, resource: *mut RustResource);
+        pub unsafe fn cppgc_weak_member_new(resource: *mut RustResource) -> KjOwn<CppgcWeakMember>;
+        pub unsafe fn cppgc_weak_member_get(member: &CppgcWeakMember) -> *mut RustResource;
+        pub unsafe fn cppgc_weak_member_set(
+            member: Pin<&mut CppgcWeakMember>,
+            resource: *mut RustResource,
+        );
     }
 
     pub struct ConstructorDescriptor {
@@ -182,7 +271,7 @@ pub struct FunctionTemplate;
 #[derive(Debug)]
 pub struct Local<'a, T> {
     handle: ffi::Local,
-    isolate: *mut ffi::Isolate,
+    isolate: Isolate,
     _marker: PhantomData<(&'a (), T)>,
 }
 
@@ -204,7 +293,7 @@ impl<'a, T> Local<'a, T> {
     /// # Safety
     /// The caller must ensure that `isolate` is valid and that `handle` points to a V8 value
     /// that is still alive within the current `HandleScope`.
-    pub unsafe fn from_ffi(isolate: *mut ffi::Isolate, handle: ffi::Local) -> Self {
+    pub unsafe fn from_ffi(isolate: Isolate, handle: ffi::Local) -> Self {
         Local {
             handle,
             isolate,
@@ -299,7 +388,7 @@ impl<'a> Local<'a, Object> {
             let maybe_local =
                 ffi::local_object_get_property(lock.isolate().as_ptr(), &self.handle, key);
             let opt_local: Option<ffi::Local> = maybe_local.into();
-            opt_local.map(|local| Local::from_ffi(lock.isolate().as_ptr(), local))
+            opt_local.map(|local| Local::from_ffi(lock.isolate(), local))
         }
     }
 }
@@ -337,30 +426,20 @@ impl<T> Global<T> {
         &self.handle
     }
 
+    /// Returns a mutable reference to the underlying FFI handle.
+    ///
+    /// # Safety
+    /// The caller must ensure the returned reference is not used after this `Global` is dropped.
+    pub unsafe fn as_ffi_mut(&mut self) -> *mut ffi::Global {
+        &raw mut self.handle
+    }
+
     pub fn as_local<'a>(&self, lock: &mut Lock) -> Local<'a, FunctionTemplate> {
         unsafe {
             Local::from_ffi(
-                lock.isolate().as_ptr(),
+                lock.isolate(),
                 ffi::global_to_local(lock.isolate().as_ptr(), &self.handle),
             )
-        }
-    }
-
-    /// Makes this global handle weak, allowing V8 to garbage collect the object.
-    ///
-    /// When V8's garbage collector determines the object is no longer reachable,
-    /// it will invoke the weak callback which retrieves the `drop_fn` from the
-    /// `State` struct pointed to by `data` and calls it to clean up the resource.
-    ///
-    /// # Safety
-    /// The caller must ensure:
-    /// - `isolate` is a valid pointer to a V8 isolate
-    /// - `data` points to a valid `resource::State` struct that remains valid until
-    ///   the weak callback is invoked
-    /// - The `State::drop_fn` field is properly initialized
-    pub unsafe fn make_weak(&mut self, isolate: *mut ffi::Isolate, data: *mut c_void) {
-        unsafe {
-            ffi::global_make_weak(isolate, &raw mut self.handle, data as usize);
         }
     }
 
@@ -378,7 +457,7 @@ impl<T> Global<T> {
 impl<T> From<Local<'_, T>> for Global<T> {
     fn from(local: Local<'_, T>) -> Self {
         Self {
-            handle: unsafe { ffi::local_to_global(local.isolate, local.into_ffi()) },
+            handle: unsafe { ffi::local_to_global(local.isolate.as_ptr(), local.into_ffi()) },
             _marker: PhantomData,
         }
     }
@@ -414,7 +493,7 @@ impl ToLocalValue for u8 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe {
             Local::from_ffi(
-                lock.isolate().as_ptr(),
+                lock.isolate(),
                 ffi::local_new_number(lock.isolate().as_ptr(), f64::from(*self)),
             )
         }
@@ -425,7 +504,7 @@ impl ToLocalValue for u32 {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe {
             Local::from_ffi(
-                lock.isolate().as_ptr(),
+                lock.isolate(),
                 ffi::local_new_number(lock.isolate().as_ptr(), f64::from(*self)),
             )
         }
@@ -442,7 +521,7 @@ impl ToLocalValue for &str {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe {
             Local::from_ffi(
-                lock.isolate().as_ptr(),
+                lock.isolate(),
                 ffi::local_new_string(lock.isolate().as_ptr(), self),
             )
         }
@@ -458,12 +537,8 @@ impl<'a> FunctionCallbackInfo<'a> {
         Self(info, PhantomData)
     }
 
-    /// Returns the V8 isolate associated with this function callback.
-    ///
-    /// # Safety
-    /// The returned isolate pointer must not be used after the callback returns.
-    pub unsafe fn isolate(&self) -> *mut ffi::Isolate {
-        unsafe { ffi::fci_get_isolate(self.0) }
+    pub fn isolate(&self) -> Isolate {
+        unsafe { Isolate::from_raw(ffi::fci_get_isolate(self.0)) }
     }
 
     pub fn this(&self) -> Local<'a, Value> {
@@ -487,5 +562,470 @@ impl<'a> FunctionCallbackInfo<'a> {
         unsafe {
             ffi::fci_set_return_value(self.0, value.into_ffi());
         }
+    }
+}
+
+/// A reference to a V8 value that is traced by the garbage collector.
+///
+/// Note: This type intentionally does NOT implement `Drop`. `TracedReference` is managed by V8's
+/// traced handles infrastructure. During cppgc finalization, the traced handle memory may already
+/// be freed, so calling `reset()` would cause a use-after-free. V8 automatically cleans up traced
+/// references during GC.
+pub struct TracedReference<T> {
+    handle: ffi::TracedReference,
+    _marker: PhantomData<T>,
+}
+
+impl<T> TracedReference<T> {
+    pub fn is_empty(&self) -> bool {
+        unsafe { ffi::traced_reference_is_empty(&self.handle) }
+    }
+
+    pub fn get<'a>(&self, lock: &mut Lock) -> Local<'a, T> {
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::traced_reference_to_local(lock.isolate().as_ptr(), &self.handle),
+            )
+        }
+    }
+
+    pub fn reset(&mut self) {
+        unsafe {
+            ffi::traced_reference_reset(&raw mut self.handle);
+        }
+    }
+
+    /// # Safety
+    /// The returned reference must not outlive this handle.
+    pub unsafe fn as_ffi_ref(&self) -> &ffi::TracedReference {
+        &self.handle
+    }
+}
+
+impl<T> From<Local<'_, T>> for TracedReference<T> {
+    fn from(local: Local<'_, T>) -> Self {
+        Self {
+            handle: unsafe {
+                ffi::traced_reference_from_local(local.isolate.as_ptr(), local.into_ffi())
+            },
+            _marker: PhantomData,
+        }
+    }
+}
+
+// ============================================================================
+// cppgc callbacks
+// ============================================================================
+
+/// Called from C++ `RustResource` destructor to drop the Rust instance.
+///
+/// # Safety
+/// The `data` must contain valid pointers.
+unsafe fn cppgc_invoke_drop(data: &ffi::RustResourceData) {
+    debug_assert!(data.instance_ptr != 0, "instance_ptr must be valid");
+    debug_assert!(data.drop_fn != 0, "drop_fn must be valid");
+    let drop_fn: unsafe fn(*mut c_void) = unsafe { std::mem::transmute(data.drop_fn) };
+    unsafe { drop_fn(data.instance_ptr as *mut c_void) };
+}
+
+/// Called from C++ `RustResource::Trace` to trace nested handles.
+///
+/// # Safety
+/// The `data` must contain valid pointers, and `visitor` must be valid.
+unsafe fn cppgc_invoke_trace(data: &ffi::RustResourceData, visitor: *mut ffi::CppgcVisitor) {
+    debug_assert!(data.instance_ptr != 0, "instance_ptr must be valid");
+    if data.trace_fn == 0 {
+        return;
+    }
+    let trace_fn: unsafe fn(*mut c_void, *mut ffi::CppgcVisitor) =
+        unsafe { std::mem::transmute(data.trace_fn) };
+    unsafe { trace_fn(data.instance_ptr as *mut c_void, visitor) };
+}
+
+// ============================================================================
+// cppgc module - V8's C++ garbage collector integration
+// ============================================================================
+
+/// Rust wrappers for cppgc (Oilpan) garbage collector types.
+///
+/// This module provides safe abstractions over V8's cppgc types for managing
+/// garbage-collected references to `RustResource` objects.
+///
+/// # Reference Types
+///
+/// | Type | C++ Equivalent | Description |
+/// |------|----------------|-------------|
+/// | [`Handle`] | `cppgc::Persistent<T>` | Strong off-heap → on-heap reference |
+/// | [`WeakHandle`] | `cppgc::WeakPersistent<T>` | Weak off-heap → on-heap reference |
+/// | [`Member`] | `cppgc::Member<T>` | Strong on-heap → on-heap reference |
+/// | [`WeakMember`] | `cppgc::WeakMember<T>` | Weak on-heap → on-heap reference |
+///
+/// # Tracing
+///
+/// Off-heap references (`Handle`, `WeakHandle`) do not need to be traced because
+/// they are persistent handles managed by cppgc. On-heap references (`Member`,
+/// `WeakMember`) must be traced during garbage collection via [`GcVisitor`].
+///
+/// [`GcVisitor`]: super::GcVisitor
+pub mod cppgc {
+    use std::ptr::NonNull;
+
+    use kj_rs::KjOwn;
+
+    use super::ffi;
+
+    // ========================================================================
+    // Handle - Strong persistent reference (off-heap → on-heap)
+    // ========================================================================
+
+    /// Strong persistent reference to a `RustResource`.
+    ///
+    /// Wraps `cppgc::Persistent<RustResource>` which keeps the resource alive
+    /// while Rust has `Ref<R>` handles. Used for off-heap → on-heap references.
+    /// Automatically releases when dropped via `KjOwn`.
+    #[derive(Default)]
+    pub struct Handle {
+        persistent: Option<KjOwn<ffi::CppgcPersistent>>,
+    }
+
+    impl Handle {
+        /// Creates a new empty `Handle`.
+        pub fn new() -> Self {
+            Self { persistent: None }
+        }
+
+        /// Creates a `Handle` from a `RustResource` pointer.
+        ///
+        /// # Safety
+        /// The resource pointer must be valid and allocated via `cppgc_allocate`.
+        pub unsafe fn from_resource(resource: *mut ffi::RustResource) -> Self {
+            Self {
+                persistent: Some(unsafe { ffi::cppgc_persistent_new(resource) }),
+            }
+        }
+
+        /// Returns whether this handle has a persistent reference.
+        pub fn has_persistent(&self) -> bool {
+            self.persistent.is_some()
+        }
+
+        /// Returns the `RustResource` pointer if this handle has a persistent reference.
+        pub fn get_resource(&self) -> Option<NonNull<ffi::RustResource>> {
+            self.persistent
+                .as_ref()
+                .and_then(|p| NonNull::new(unsafe { ffi::cppgc_persistent_get(p) }))
+        }
+
+        /// Releases the persistent handle, allowing cppgc to garbage collect.
+        pub fn release(&mut self) {
+            self.persistent.take();
+        }
+    }
+
+    // ========================================================================
+    // WeakHandle - Weak persistent reference (off-heap → on-heap)
+    // ========================================================================
+
+    /// Weak persistent reference to a `RustResource`.
+    ///
+    /// Wraps `cppgc::WeakPersistent<RustResource>` which doesn't prevent GC.
+    /// Used for off-heap → on-heap weak references that don't need tracing.
+    /// Automatically releases when dropped via `KjOwn`.
+    pub struct WeakHandle {
+        handle: Option<KjOwn<ffi::CppgcWeakPersistent>>,
+    }
+
+    impl WeakHandle {
+        /// Creates a `WeakHandle` from a `RustResource` pointer.
+        ///
+        /// # Safety
+        /// The resource pointer must be valid and allocated via `cppgc_allocate`.
+        pub unsafe fn from_resource(resource: *mut ffi::RustResource) -> Self {
+            Self {
+                handle: Some(unsafe { ffi::cppgc_weak_persistent_new(resource) }),
+            }
+        }
+
+        /// Returns the `RustResource` pointer if the target is still alive.
+        pub fn get(&self) -> Option<NonNull<ffi::RustResource>> {
+            self.handle
+                .as_ref()
+                .and_then(|p| NonNull::new(unsafe { ffi::cppgc_weak_persistent_get(p) }))
+        }
+
+        /// Returns whether the weak handle points to a live resource.
+        pub fn is_alive(&self) -> bool {
+            self.get().is_some()
+        }
+    }
+
+    // ========================================================================
+    // Member - Traceable strong reference (on-heap → on-heap)
+    // ========================================================================
+
+    /// Traceable strong reference to a `RustResource`.
+    ///
+    /// Wraps `cppgc::Member<RustResource>` for strong references stored inside
+    /// GC'd objects. Must be traced via `GcVisitor::trace_member()`.
+    /// Automatically releases when dropped via `KjOwn`.
+    #[derive(Default)]
+    pub struct Member {
+        pub(super) handle: Option<KjOwn<ffi::CppgcMember>>,
+    }
+
+    impl Member {
+        /// Creates a new empty `Member`.
+        pub fn new() -> Self {
+            Self { handle: None }
+        }
+
+        /// Creates a `Member` from a `RustResource` pointer.
+        pub fn from_resource(resource: NonNull<ffi::RustResource>) -> Self {
+            Self {
+                handle: Some(unsafe { ffi::cppgc_member_new(resource.as_ptr()) }),
+            }
+        }
+
+        /// Returns the `RustResource` pointer if set.
+        pub fn get(&self) -> Option<NonNull<ffi::RustResource>> {
+            self.handle
+                .as_ref()
+                .and_then(|m| NonNull::new(unsafe { ffi::cppgc_member_get(m) }))
+        }
+
+        /// Sets the target resource.
+        pub fn set(&mut self, resource: Option<NonNull<ffi::RustResource>>) {
+            let resource_ptr = resource.map_or(std::ptr::null_mut(), NonNull::as_ptr);
+            if let Some(ref mut m) = self.handle {
+                unsafe { ffi::cppgc_member_set(m.as_mut(), resource_ptr) };
+            } else if let Some(r) = resource {
+                self.handle = Some(unsafe { ffi::cppgc_member_new(r.as_ptr()) });
+            }
+        }
+    }
+
+    // ========================================================================
+    // WeakMember - Traceable weak reference (on-heap → on-heap)
+    // ========================================================================
+
+    /// Traceable weak reference to a `RustResource`.
+    ///
+    /// Wraps `cppgc::WeakMember<RustResource>` for weak references stored inside
+    /// GC'd objects. Must be traced via `GcVisitor::trace_weak_member()`.
+    /// When the target is collected, `get()` returns `None`.
+    /// Automatically releases when dropped via `KjOwn`.
+    #[derive(Default)]
+    pub struct WeakMember {
+        pub(super) handle: Option<KjOwn<ffi::CppgcWeakMember>>,
+    }
+
+    impl WeakMember {
+        /// Creates a new empty `WeakMember`.
+        pub fn new() -> Self {
+            Self { handle: None }
+        }
+
+        /// Creates a `WeakMember` from a `RustResource` pointer.
+        pub fn from_resource(resource: NonNull<ffi::RustResource>) -> Self {
+            Self {
+                handle: Some(unsafe { ffi::cppgc_weak_member_new(resource.as_ptr()) }),
+            }
+        }
+
+        /// Returns the `RustResource` pointer if the target is still alive.
+        pub fn get(&self) -> Option<NonNull<ffi::RustResource>> {
+            self.handle.as_ref().and_then(|m| {
+                // SAFETY: m.as_ref() returns a valid reference to the CppgcWeakMember
+                NonNull::new(unsafe { ffi::cppgc_weak_member_get(m.as_ref()) })
+            })
+        }
+
+        /// Returns whether the weak member points to a live resource.
+        pub fn is_alive(&self) -> bool {
+            self.handle.is_some()
+        }
+
+        /// Sets the target resource.
+        pub fn set(&mut self, resource: Option<NonNull<ffi::RustResource>>) {
+            let resource_ptr = resource.map_or(std::ptr::null_mut(), NonNull::as_ptr);
+            if let Some(ref mut m) = self.handle {
+                unsafe { ffi::cppgc_weak_member_set(m.as_mut(), resource_ptr) };
+            } else if let Some(r) = resource {
+                self.handle = Some(unsafe { ffi::cppgc_weak_member_new(r.as_ptr()) });
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn handle_default_is_empty() {
+            let handle = Handle::new();
+            assert!(!handle.has_persistent());
+            assert!(handle.get_resource().is_none());
+        }
+
+        #[test]
+        fn member_default_is_empty() {
+            let member = Member::new();
+            assert!(member.get().is_none());
+        }
+
+        #[test]
+        fn weak_member_default_is_empty() {
+            let weak_member = WeakMember::new();
+            assert!(!weak_member.is_alive());
+            assert!(weak_member.get().is_none());
+        }
+    }
+}
+
+// ============================================================================
+// GarbageCollected trait and GcVisitor
+// ============================================================================
+
+/// Trait for types that participate in V8's cppgc garbage collection.
+///
+/// Resources that hold references to JavaScript values must implement this trait
+/// to trace those references during garbage collection. This allows the GC to
+/// properly track the object graph and prevent premature collection.
+///
+/// # What to Trace
+///
+/// - `TracedReference<T>` - JavaScript handle stored in a cppgc object
+/// - `cppgc::Member` - Strong on-heap reference to another cppgc object
+/// - `cppgc::WeakMember` - Weak on-heap reference to another cppgc object
+///
+/// # Example
+///
+/// ```ignore
+/// impl GarbageCollected for MyResource {
+///     fn trace(&self, visitor: &mut GcVisitor) {
+///         // Trace JavaScript handles
+///         if let Some(ref callback) = self.js_callback {
+///             visitor.trace(callback);
+///         }
+///         // Trace weak members
+///         visitor.trace_weak_member(&self.weak_ref);
+///     }
+/// }
+/// ```
+pub trait GarbageCollected {
+    /// Traces any JavaScript handles held by this object.
+    ///
+    /// Called by the garbage collector during tracing. Implementations should
+    /// call the appropriate `visitor` methods for each traced field.
+    fn trace(&self, _visitor: &mut GcVisitor) {}
+}
+
+/// Visitor for tracing garbage-collected references.
+///
+/// Passed to [`GarbageCollected::trace`] to report which objects are reachable
+/// from the current object. The garbage collector uses this information to
+/// determine which objects are still alive.
+pub struct GcVisitor {
+    visitor: ffi::CppgcVisitor,
+}
+
+impl GcVisitor {
+    /// # Safety
+    /// The visitor must be valid for the lifetime of this `GcVisitor`.
+    pub unsafe fn from_raw(visitor: ffi::CppgcVisitor) -> Self {
+        Self { visitor }
+    }
+
+    /// Traces a `TracedReference` handle.
+    pub fn trace<T>(&mut self, handle: &TracedReference<T>) {
+        unsafe {
+            ffi::cppgc_visitor_trace(&raw mut self.visitor, handle.as_ffi_ref());
+        }
+    }
+
+    /// Traces a strong member reference.
+    pub fn trace_member(&mut self, member: &cppgc::Member) {
+        if let Some(ref m) = member.handle {
+            unsafe {
+                ffi::cppgc_visitor_trace_member(&raw mut self.visitor, m.as_ref());
+            }
+        }
+    }
+
+    /// Traces a weak member reference.
+    ///
+    /// This informs the garbage collector about a weak reference. If the target
+    /// is collected, the weak member will be automatically cleared.
+    pub fn trace_weak_member(&mut self, member: &cppgc::WeakMember) {
+        if let Some(ref m) = member.handle {
+            unsafe {
+                ffi::cppgc_visitor_trace_weak_member(&raw mut self.visitor, m.as_ref());
+            }
+        }
+    }
+}
+
+/// A safe wrapper around a V8 isolate pointer.
+///
+/// `Isolate` provides a type-safe abstraction over raw `v8::Isolate*` pointers,
+/// ensuring that the pointer is always non-null. This type is `Copy` and can be
+/// freely passed around without worrying about ownership.
+///
+/// # Thread Safety
+///
+/// V8 isolates are single-threaded. While `Isolate` itself is `Send` and `Sync`
+/// (as it's just a pointer wrapper), V8 operations must only be performed on the
+/// thread that owns the isolate lock. Use `is_locked()` to verify the current
+/// thread holds the lock before performing V8 operations.
+///
+/// # Example
+///
+/// ```ignore
+/// // Create from raw pointer (unsafe)
+/// let isolate = unsafe { v8::Isolate::from_raw(raw_ptr) };
+///
+/// // Check if locked before V8 operations
+/// assert!(isolate.is_locked());
+///
+/// // Get raw pointer for FFI calls
+/// let ptr = isolate.as_ptr();
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct Isolate {
+    handle: NonNull<ffi::Isolate>,
+}
+
+impl Isolate {
+    /// Creates an `Isolate` from a raw pointer.
+    ///
+    /// # Safety
+    /// The pointer must be non-null and point to a valid V8 isolate.
+    pub unsafe fn from_raw(handle: *mut ffi::Isolate) -> Self {
+        debug_assert!(unsafe { ffi::isolate_is_locked(handle) });
+        Self {
+            handle: unsafe { NonNull::new_unchecked(handle) },
+        }
+    }
+
+    /// Creates an `Isolate` from a `NonNull` pointer.
+    pub fn from_non_null(handle: NonNull<ffi::Isolate>) -> Self {
+        debug_assert!(unsafe { ffi::isolate_is_locked(handle.as_ptr()) });
+        Self { handle }
+    }
+
+    /// Returns whether this isolate is currently locked by the current thread.
+    pub fn is_locked(&self) -> bool {
+        unsafe { ffi::isolate_is_locked(self.handle.as_ptr()) }
+    }
+
+    /// Returns the raw pointer to the V8 isolate.
+    pub fn as_ptr(&self) -> *mut ffi::Isolate {
+        self.handle.as_ptr()
+    }
+
+    /// Returns the `NonNull` pointer to the V8 isolate.
+    pub fn as_non_null(&self) -> NonNull<ffi::Isolate> {
+        self.handle
     }
 }

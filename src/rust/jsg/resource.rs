@@ -1,39 +1,34 @@
-use std::any::Any;
+//! Resource management for Rust types exposed to JavaScript.
+//!
+//! This module provides the infrastructure for exposing Rust resources to JavaScript
+//! with proper lifetime management through V8's cppgc garbage collector.
+//!
+//! # Key Types
+//!
+//! - [`Ref<R>`] - Reference-counted handle to a resource, analogous to `jsg::Ref<T>` in C++
+//! - [`WeakRef<R>`] - Weak reference that doesn't prevent garbage collection
+//! - [`State`] - Internal lifecycle state tracking for resource instances
+//!
+//! # Lifecycle
+//!
+//! 1. Resource created via `Resource::alloc()`, returning a `Ref<R>`
+//! 2. When wrapped for JavaScript, a cppgc `RustResource` is allocated
+//! 3. While `Ref<R>` handles exist, cppgc persistent keeps resource alive
+//! 4. When last `Ref<R>` drops, persistent is released for GC
+//! 5. cppgc collects the resource, invoking the Rust destructor
+
 use std::any::TypeId;
 use std::cell::Cell;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ffi::c_void;
 use std::ops::Deref;
 use std::ptr::NonNull;
 
+use crate::GarbageCollected;
 use crate::Lock;
 use crate::Realm;
 use crate::Resource;
 use crate::ResourceTemplate;
 use crate::v8;
-
-// ============================================================================
-// ResourcesCleanup trait for type-erased cleanup
-// ============================================================================
-
-/// Trait for type-erased resource cleanup during Realm shutdown.
-///
-/// This follows the C++ pattern where `HeapTracer::clearWrappers()` iterates all tracked
-/// wrappers at shutdown and cleans them up. Without this, instances that have JavaScript
-/// wrappers but are waiting for V8 GC would leak when the Realm is dropped.
-pub(crate) trait ResourcesCleanup: Any {
-    /// Cleans up all tracked instances by dropping them directly.
-    /// Called during Realm shutdown before V8 GC has a chance to run.
-    fn cleanup(&mut self);
-
-    /// Removes an instance from tracking. Called from the weak callback when V8 GC
-    /// collects a wrapped resource. This prevents double-free when Realm later drops.
-    fn remove_instance(&mut self, ptr: NonNull<c_void>);
-
-    /// Returns self as `&mut dyn Any` for downcasting.
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-}
 
 // ============================================================================
 // InstancePtr - Type-safe wrapper for heap-allocated Instance pointers
@@ -100,7 +95,8 @@ impl<R: Resource> InstancePtr<R> {
 /// Wrapper state for a resource instance.
 ///
 /// Represents whether an instance has been exposed to JavaScript and,
-/// if so, the associated wrapper information.
+/// if so, the associated wrapper information. Uses `TracedReference` (cppgc/Oilpan)
+/// for proper GC integration.
 enum WrapperState {
     /// Instance has not been exposed to JavaScript.
     NotWrapped,
@@ -109,12 +105,12 @@ enum WrapperState {
     /// All fields are set atomically when `attach_wrapper` is called, ensuring
     /// we never have a partially-initialized wrapper state.
     Wrapped {
-        /// Pointer to the owning Instance (for the weak callback).
+        /// Pointer to the owning Instance (for cleanup).
         this: NonNull<c_void>,
-        /// V8 Global handle to the JavaScript wrapper object.
-        wrapper: v8::Global<v8::Object>,
+        /// `TracedReference` to the JavaScript wrapper object (cppgc-aware).
+        wrapper: v8::TracedReference<v8::Object>,
         /// The V8 isolate this instance is bound to.
-        isolate: NonNull<v8::ffi::Isolate>,
+        isolate: v8::Isolate,
         /// `TypeId` of the resource type R (for finding `ResourceImpl` during cleanup).
         type_id: TypeId,
     },
@@ -130,8 +126,8 @@ enum WrapperState {
 ///
 /// 1. **Created**: Instance allocated with `ref_count` = 0, then `Ref::new` increments to 1
 /// 2. **Wrapped**: `attach_wrapper` called, state becomes `Wrapped { ... }`
-/// 3. **Ref count zero with wrapper**: Global made weak, waiting for GC
-/// 4. **Dropped**: Either via weak callback (GC) or Realm cleanup
+/// 3. **Ref count zero**: `CppgcHandle` is released, allowing cppgc to GC
+/// 4. **Dropped**: Either via cppgc GC or Realm cleanup
 ///
 /// # Interior Mutability
 ///
@@ -141,10 +137,13 @@ pub struct State {
     /// Reference count. Modified through `&self` in Clone.
     ref_count: Cell<usize>,
     /// Function pointer to drop the Instance. Required for type-erased dropping
-    /// from the V8 weak callback.
+    /// from cppgc GC.
     drop_fn: unsafe fn(*mut c_void),
     /// Wrapper state, tracks whether exposed to JavaScript.
     wrapper: WrapperState,
+    /// cppgc handle that keeps the `RustResource` alive while Rust has references.
+    /// When released, cppgc can garbage collect the resource.
+    cppgc_handle: v8::cppgc::Handle,
 }
 
 impl State {
@@ -157,7 +156,18 @@ impl State {
             ref_count: Cell::new(0),
             drop_fn,
             wrapper: WrapperState::NotWrapped,
+            cppgc_handle: v8::cppgc::Handle::new(),
         }
+    }
+
+    /// Returns a reference to the cppgc handle.
+    pub fn cppgc_handle(&self) -> &v8::cppgc::Handle {
+        &self.cppgc_handle
+    }
+
+    /// Returns a mutable reference to the cppgc handle.
+    pub fn cppgc_handle_mut(&mut self) -> &mut v8::cppgc::Handle {
+        &mut self.cppgc_handle
     }
 
     /// Returns the current reference count.
@@ -165,11 +175,10 @@ impl State {
         self.ref_count.get()
     }
 
-    /// Increments the reference count and returns the new value.
-    pub(crate) fn inc_ref_count(&self) -> usize {
+    /// Increments the reference count.
+    pub(crate) fn inc_ref_count(&self) {
         let count = self.ref_count.get();
         self.ref_count.set(count + 1);
-        count + 1
     }
 
     /// Decrements the reference count and returns the new value.
@@ -183,21 +192,16 @@ impl State {
         count - 1
     }
 
-    /// Returns whether this instance has been wrapped for JavaScript.
-    pub(crate) fn is_wrapped(&self) -> bool {
-        matches!(self.wrapper, WrapperState::Wrapped { .. })
-    }
-
-    /// Returns the V8 Global wrapper handle if wrapped.
-    pub(crate) fn global(&self) -> Option<&v8::Global<v8::Object>> {
+    /// Returns the `TracedReference` wrapper handle if wrapped.
+    pub(crate) fn traced_reference(&self) -> Option<&v8::TracedReference<v8::Object>> {
         match &self.wrapper {
             WrapperState::NotWrapped => None,
             WrapperState::Wrapped { wrapper, .. } => Some(wrapper),
         }
     }
 
-    /// Returns the isolate pointer if wrapped.
-    pub fn isolate(&self) -> Option<NonNull<v8::ffi::Isolate>> {
+    /// Returns the isolate if wrapped.
+    pub fn isolate(&self) -> Option<v8::Isolate> {
         match &self.wrapper {
             WrapperState::NotWrapped => None,
             WrapperState::Wrapped { isolate, .. } => Some(*isolate),
@@ -225,35 +229,16 @@ impl State {
         self.drop_fn
     }
 
-    /// Makes the V8 Global handle weak, allowing GC to collect it.
-    ///
-    /// # Safety
-    /// The instance must still be valid and the isolate must be correct.
-    pub(crate) unsafe fn make_weak(&mut self) {
-        // Get state_ptr before borrowing wrapper to avoid double mutable borrow
-        let state_ptr = std::ptr::from_mut(self).cast::<c_void>();
-        if let WrapperState::Wrapped {
-            ref mut wrapper,
-            isolate,
-            ..
-        } = self.wrapper
-        {
-            unsafe { wrapper.make_weak(isolate.as_ptr(), state_ptr) };
-        }
-    }
-
     /// Attaches a V8 wrapper object to this resource state.
     ///
     /// # Panics
     /// Panics if already wrapped.
-    pub fn attach_wrapper<R: Resource + 'static>(
+    pub fn set_wrapper<R: Resource + 'static>(
         &mut self,
-        realm: &mut Realm,
+        realm: &Realm,
         object: v8::Local<v8::Object>,
         this_ptr: NonNull<c_void>,
-    ) where
-        <R as Resource>::Template: 'static,
-    {
+    ) {
         debug_assert!(
             matches!(self.wrapper, WrapperState::NotWrapped),
             "attach_wrapper called on already-wrapped instance"
@@ -265,8 +250,6 @@ impl State {
             isolate: realm.isolate(),
             type_id: TypeId::of::<R>(),
         };
-
-        realm.get_resources::<R>().add_instance(this_ptr);
     }
 }
 
@@ -303,25 +286,6 @@ impl<R: Resource> Instance<R> {
         debug_assert!(!ptr.is_null(), "drop_instance called with null pointer");
         let _ = unsafe { Box::from_raw(ptr.cast::<Self>()) };
     }
-
-    /// Handles reference count reaching zero.
-    ///
-    /// If wrapped, makes the Global weak so GC can collect it.
-    /// If not wrapped, drops the instance immediately.
-    pub(crate) fn handle_ref_count_zero(ptr: InstancePtr<R>) {
-        // SAFETY: ptr is valid, we're the only accessor at this point
-        let state = unsafe { &mut (*ptr.as_ptr()).state };
-
-        if state.is_wrapped() {
-            // Make the V8 Global weak - GC will trigger drop via weak callback
-            // SAFETY: Instance is still valid, isolate is correct
-            unsafe { state.make_weak() };
-        } else {
-            // No JavaScript wrapper, drop immediately
-            // SAFETY: No wrapper means no other references, safe to drop
-            unsafe { ptr.drop_in_place() };
-        }
-    }
 }
 
 // ============================================================================
@@ -353,7 +317,7 @@ impl<R: Resource> Ref<R> {
     /// Initializes the reference count to 1.
     pub(crate) fn new(ptr: InstancePtr<R>) -> Self {
         // SAFETY: ptr is valid, just created
-        let state = unsafe { &(*ptr.as_ptr()).state };
+        let state = unsafe { &mut (*ptr.as_ptr()).state };
         debug_assert_eq!(state.ref_count(), 0);
         state.inc_ref_count();
         Self { ptr }
@@ -378,6 +342,7 @@ impl<R: Resource> Clone for Ref<R> {
     fn clone(&self) -> Self {
         // SAFETY: ptr is valid while Ref exists
         let state = unsafe { &(*self.ptr.as_ptr()).state };
+        debug_assert!(state.ref_count() >= 1, "Clone called with ref_count < 1");
         state.inc_ref_count();
         Self { ptr: self.ptr }
     }
@@ -390,7 +355,113 @@ impl<R: Resource> Drop for Ref<R> {
         let new_count = state.dec_ref_count();
 
         if new_count == 0 {
-            Instance::handle_ref_count_zero(self.ptr);
+            // SAFETY: ref_count is 0, we're the only accessor
+            let state = unsafe { &mut (*self.ptr.as_ptr()).state };
+
+            if state.cppgc_handle.has_persistent() {
+                // Release the cppgc handle - GC will trigger drop via RustResource destructor
+                state.cppgc_handle.release();
+            } else {
+                // No cppgc allocation, drop immediately
+                // SAFETY: No cppgc handle means we own the instance, safe to drop
+                unsafe { self.ptr.drop_in_place() };
+            }
+        }
+    }
+}
+
+// ============================================================================
+// WeakRef - Weak reference to a resource
+// ============================================================================
+
+/// A weak reference to a Rust resource.
+///
+/// Unlike `Ref<R>`, a `WeakRef` does not prevent the resource from being
+/// garbage collected. Use `upgrade()` to attempt to get a strong `Ref<R>`.
+///
+/// `WeakRef` holds a `CppgcWeakMember` for proper GC integration. When traced,
+/// the garbage collector is informed of the weak relationship, and the weak
+/// member will be automatically cleared when the target is collected.
+pub struct WeakRef<R: Resource> {
+    ptr: InstancePtr<R>,
+    /// Weak member for cppgc tracing. Only set if the target resource has been wrapped.
+    weak_member: v8::cppgc::WeakMember,
+}
+
+impl<R: Resource> WeakRef<R> {
+    /// Attempts to upgrade this weak reference to a strong `Ref<R>`.
+    ///
+    /// Returns `Some(Ref<R>)` if the resource is still alive (cppgc weak member
+    /// is alive and `ref_count` > 0), or `None` otherwise.
+    pub fn upgrade(&self) -> Option<Ref<R>> {
+        // First check if cppgc has collected the target
+        if self.weak_member.get().is_none() && self.has_cppgc_member() {
+            return None;
+        }
+        // SAFETY: ptr is valid while any Ref or JS wrapper exists
+        let state = unsafe { &(*self.ptr.as_ptr()).state };
+        if state.ref_count() > 0 {
+            state.inc_ref_count();
+            Some(Ref { ptr: self.ptr })
+        } else {
+            None
+        }
+    }
+
+    /// Returns the number of strong references.
+    pub fn strong_count(&self) -> usize {
+        // SAFETY: ptr is valid while any Ref or JS wrapper exists
+        let state = unsafe { &(*self.ptr.as_ptr()).state };
+        state.ref_count()
+    }
+
+    /// Returns whether this weak ref has a cppgc member set.
+    fn has_cppgc_member(&self) -> bool {
+        self.weak_member.is_alive() || self.weak_member.get().is_some()
+    }
+}
+
+impl<R: Resource> GarbageCollected for WeakRef<R> {
+    /// Traces this weak reference for garbage collection.
+    ///
+    /// This should be called during the owning resource's trace method
+    /// to inform the GC about the weak relationship.
+    fn trace(&self, visitor: &mut v8::GcVisitor) {
+        visitor.trace_weak_member(&self.weak_member);
+    }
+}
+
+impl<R: Resource> From<&Ref<R>> for WeakRef<R> {
+    fn from(r: &Ref<R>) -> Self {
+        // SAFETY: Ref guarantees ptr is valid while the Ref exists
+        let state = unsafe { &(*r.ptr.as_ptr()).state };
+        let weak_member = state
+            .cppgc_handle()
+            .get_resource()
+            .map(v8::cppgc::WeakMember::from_resource)
+            .unwrap_or_default();
+
+        Self {
+            ptr: r.ptr,
+            weak_member,
+        }
+    }
+}
+
+impl<R: Resource> Clone for WeakRef<R> {
+    fn clone(&self) -> Self {
+        // SAFETY: WeakRef is only created from valid Ref, and ptr remains valid
+        // while any Ref or JS wrapper exists
+        let state = unsafe { &(*self.ptr.as_ptr()).state };
+        let weak_member = state
+            .cppgc_handle()
+            .get_resource()
+            .map(v8::cppgc::WeakMember::from_resource)
+            .unwrap_or_default();
+
+        Self {
+            ptr: self.ptr,
+            weak_member,
         }
     }
 }
@@ -399,10 +470,27 @@ impl<R: Resource> Drop for Ref<R> {
 // wrap/unwrap - JavaScript interop
 // ============================================================================
 
+/// Generic trace function for resources.
+///
+/// # Safety
+/// `ptr` must point to a valid Instance<R>.
+unsafe fn resource_trace<R: Resource>(ptr: *mut c_void, visitor: *mut v8::ffi::CppgcVisitor) {
+    if ptr.is_null() || visitor.is_null() {
+        return;
+    }
+    let instance = unsafe { &*(ptr as *const Instance<R>) };
+    let mut gc_visitor = unsafe {
+        v8::GcVisitor::from_raw(v8::ffi::CppgcVisitor {
+            ptr: visitor as usize,
+        })
+    };
+    instance.resource.trace(&mut gc_visitor);
+}
+
 /// Wraps a Rust resource for exposure to JavaScript.
 ///
 /// If the resource is already wrapped, returns the existing wrapper.
-/// Otherwise creates a new V8 object wrapper.
+/// Otherwise creates a new V8 object wrapper and allocates on cppgc heap.
 ///
 /// # Panics
 /// Panics if internal state is inconsistent (indicates a bug).
@@ -415,11 +503,11 @@ where
     <R as Resource>::Template: 'static,
 {
     let ptr = resource.instance_ptr();
-    // SAFETY: ptr is valid because Ref maintains the invariant
+    // SAFETY: Ref guarantees ptr is valid
     let state = unsafe { &mut (*ptr.as_ptr()).state };
 
-    if let Some(global) = state.global() {
-        let local = global.as_local(lock);
+    if let Some(traced) = state.traced_reference() {
+        let local = traced.get(lock);
         if local.has_value() {
             return local.into();
         }
@@ -427,13 +515,24 @@ where
 
     let resources = lock.realm().get_resources::<R>();
     let constructor = resources.get_constructor(lock);
-
     let this_ptr = ptr.as_erased();
 
-    // SAFETY: V8 FFI call with valid isolate and constructor
+    if !state.cppgc_handle.has_persistent() {
+        let data = v8::ffi::RustResourceData {
+            instance_ptr: this_ptr.as_ptr() as usize,
+            drop_fn: state.drop_fn() as usize,
+            trace_fn: resource_trace::<R> as usize,
+        };
+        // SAFETY: data contains valid function pointers from Instance<R>
+        let rust_resource = unsafe { lock.alloc(data) };
+        // SAFETY: rust_resource was just allocated on cppgc heap
+        *state.cppgc_handle_mut() = unsafe { v8::cppgc::Handle::from_resource(rust_resource) };
+    }
+
+    // SAFETY: Lock guarantees isolate is valid; constructor is a valid Global handle
     let wrapped: v8::Local<'a, v8::Value> = unsafe {
         v8::Local::from_ffi(
-            lock.isolate().as_ptr(),
+            lock.isolate(),
             v8::ffi::wrap_resource(
                 lock.isolate().as_ptr(),
                 this_ptr.as_ptr() as usize,
@@ -442,7 +541,7 @@ where
         )
     };
 
-    state.attach_wrapper::<R>(lock.realm(), wrapped.clone().into(), this_ptr);
+    state.set_wrapper::<R>(lock.realm(), wrapped.clone().into(), this_ptr);
 
     wrapped
 }
@@ -454,80 +553,48 @@ where
 /// - No other references (mutable or immutable) to the same resource instance
 ///   may exist for the duration of the returned borrow. This includes references
 ///   obtained via `Deref` on `Ref<R>` handles pointing to the same instance.
-pub fn unwrap<'a, R: Resource>(lock: &'a mut Lock, value: v8::Local<v8::Value>) -> &'a mut R {
+pub unsafe fn unwrap<'a, R: Resource>(
+    lock: &'a mut Lock,
+    value: v8::Local<v8::Value>,
+) -> &'a mut R {
     // SAFETY: Caller guarantees value wraps an Instance<R>
     let ptr = unsafe {
         v8::ffi::unwrap_resource(lock.isolate().as_ptr(), value.into_ffi()) as *mut Instance<R>
     };
-    // SAFETY: Caller guarantees no other references to this resource exist.
-    // This is documented in the function's safety requirements.
+    // SAFETY: Caller guarantees no other references to this resource exist
     unsafe { &mut (*ptr).resource }
 }
 
-// ============================================================================
-// Resources - Per-realm resource tracking
-// ============================================================================
-
-/// Stores per-type resource templates and instances, keyed by `TypeId`.
+/// Unwraps a JavaScript value to get a reference-counted handle to the resource.
 ///
-/// Each entry maps a Rust resource type to its `ResourceImpl<R>` which tracks
-/// the V8 function template and all live instances of that type.
-#[derive(Default)]
-pub struct Resources {
-    templates: HashMap<TypeId, Box<dyn ResourcesCleanup>>,
-}
+/// This creates a new `Ref<R>` handle, incrementing the reference count.
+/// If the wrapper was weak (no Rust Refs existed), it upgrades to strong.
+///
+/// # Safety
+/// - The `value` must be a valid JavaScript wrapper for type `R`.
+pub unsafe fn unwrap_ref<R: Resource>(lock: &mut Lock, value: v8::Local<v8::Value>) -> Ref<R> {
+    // SAFETY: Caller guarantees value wraps an Instance<R>
+    let ptr = unsafe {
+        v8::ffi::unwrap_resource(lock.isolate().as_ptr(), value.into_ffi()) as *mut Instance<R>
+    };
+    let ptr = unsafe { InstancePtr::from_erased(NonNull::new_unchecked(ptr.cast())) };
 
-impl Drop for Resources {
-    fn drop(&mut self) {
-        // Clean up all tracked instances during Realm shutdown.
-        // This follows the C++ HeapTracer::clearWrappers() pattern.
-        for resource_impl in self.templates.values_mut() {
-            resource_impl.cleanup();
-        }
-    }
-}
-
-impl Resources {
-    /// Gets or creates the resource tracking structure for a given resource type.
-    ///
-    /// # Panics
-    /// Panics if type mismatch (indicates a bug).
-    pub fn get_or_create<R: Resource + 'static>(&mut self, _lock: &mut Lock) -> &mut ResourceImpl<R>
-    where
-        <R as Resource>::Template: 'static,
-    {
-        self.templates
-            .entry(TypeId::of::<R>())
-            .or_insert_with(|| Box::new(ResourceImpl::<R>::default()))
-            .as_any_mut()
-            .downcast_mut::<ResourceImpl<R>>()
-            .expect("Template type mismatch")
-    }
-
-    /// Removes an instance from tracking by its `TypeId`.
-    ///
-    /// Called from the weak callback when V8 GC collects a wrapped resource.
-    pub(crate) fn remove_instance_by_type_id(&mut self, type_id: TypeId, ptr: NonNull<c_void>) {
-        if let Some(resource_impl) = self.templates.get_mut(&type_id) {
-            resource_impl.remove_instance(ptr);
-        }
-    }
+    // SAFETY: ptr is valid from the unwrap
+    let state = unsafe { &mut (*ptr.as_ptr()).state };
+    state.inc_ref_count();
+    Ref { ptr }
 }
 
 // ============================================================================
 // ResourceImpl - Per-type resource tracking
 // ============================================================================
 
-/// Tracks the V8 function template and all live instances for a single resource type.
+/// Tracks the V8 function template for a single resource type.
 ///
-/// The template is lazily initialized on first use. Instances are tracked in a `HashSet`
-/// for O(1) insertion and removal, enabling efficient cleanup when the Realm is dropped.
+/// The template is lazily initialized on first use. Instance cleanup is handled
+/// by cppgc when the isolate is destroyed.
 pub struct ResourceImpl<R: Resource> {
     template: Option<R::Template>,
-    /// Type-erased instance pointers for cleanup tracking.
-    /// Uses raw pointers because `NonNull` doesn't implement `Hash`.
-    instances: HashSet<*mut c_void>,
-    /// `PhantomData` to tie the type parameter
     _marker: std::marker::PhantomData<R>,
 }
 
@@ -535,41 +602,12 @@ impl<R: Resource> Default for ResourceImpl<R> {
     fn default() -> Self {
         Self {
             template: None,
-            instances: HashSet::new(),
             _marker: std::marker::PhantomData,
         }
     }
 }
 
-impl<R: Resource + 'static> ResourcesCleanup for ResourceImpl<R>
-where
-    <R as Resource>::Template: 'static,
-{
-    fn cleanup(&mut self) {
-        // Drop all tracked instances directly.
-        // This is called during Realm shutdown.
-        for raw_ptr in self.instances.drain() {
-            // SAFETY: ptr was created from InstancePtr<R>, instance is still valid
-            let ptr = unsafe { InstancePtr::<R>::from_erased(NonNull::new_unchecked(raw_ptr)) };
-            unsafe { ptr.drop_in_place() };
-        }
-    }
-
-    fn remove_instance(&mut self, ptr: NonNull<c_void>) {
-        self.instances.remove(&ptr.as_ptr());
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-}
-
 impl<R: Resource> ResourceImpl<R> {
-    /// Adds an instance to tracking.
-    pub(crate) fn add_instance(&mut self, ptr: NonNull<c_void>) {
-        self.instances.insert(ptr.as_ptr());
-    }
-
     /// Returns the V8 function template constructor for this resource type.
     ///
     /// Lazily creates the template on first access.

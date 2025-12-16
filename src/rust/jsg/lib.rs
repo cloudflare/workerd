@@ -1,6 +1,8 @@
+use std::any::Any;
+use std::any::TypeId;
+use std::collections::HashMap;
 use std::future::Future;
 use std::num::ParseIntError;
-use std::ptr::NonNull;
 
 use kj_rs::KjMaybe;
 
@@ -9,7 +11,11 @@ pub mod resource;
 pub mod v8;
 pub use resource::Ref;
 pub use resource::ResourceImpl;
-pub use resource::Resources;
+pub use resource::WeakRef;
+pub use v8::GarbageCollected;
+pub use v8::GcVisitor;
+pub use v8::Isolate;
+pub use v8::cppgc;
 pub use v8::ffi::ExceptionType;
 
 use crate::v8::ToLocalValue;
@@ -20,10 +26,6 @@ mod ffi {
         type Realm;
         #[expect(clippy::unnecessary_box_returns)]
         unsafe fn realm_create(isolate: *mut Isolate) -> Box<Realm>;
-
-        /// Called from C++ weak callback to invoke the drop function stored in State.
-        /// The `state` must point to a valid `resource::State` struct.
-        unsafe fn invoke_weak_drop(state: usize);
     }
 
     unsafe extern "C++" {
@@ -81,6 +83,7 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
 pub fn create_resource_constructor<R: Resource>(
     lock: &mut Lock,
 ) -> v8::Global<v8::FunctionTemplate> {
+    // SAFETY: Lock guarantees the isolate is valid and locked
     unsafe {
         v8::ffi::create_resource_template(lock.isolate().as_ptr(), &get_resource_descriptor::<R>())
             .into()
@@ -100,14 +103,11 @@ impl Error {
     /// # Safety
     /// The caller must ensure the isolate is valid and that the exception is thrown within the
     /// correct isolate/context.
-    pub unsafe fn as_exception<'a>(
-        &self,
-        isolate: *mut v8::ffi::Isolate,
-    ) -> v8::Local<'a, v8::Value> {
+    pub unsafe fn as_exception<'a>(&self, isolate: v8::Isolate) -> v8::Local<'a, v8::Value> {
         unsafe {
             v8::Local::from_ffi(
                 isolate,
-                v8::ffi::exception_create(isolate, self.name, &self.message),
+                v8::ffi::exception_create(isolate.as_ptr(), self.name, &self.message),
             )
         }
     }
@@ -137,7 +137,7 @@ impl From<ParseIntError> for Error {
 /// perform V8 operations like creating objects, wrapping values, and accessing the Realm.
 /// This is analogous to `jsg::Lock` in C++ JSG.
 pub struct Lock {
-    isolate: NonNull<v8::ffi::Isolate>,
+    isolate: v8::Isolate,
 }
 
 impl Lock {
@@ -145,26 +145,44 @@ impl Lock {
     /// The caller must ensure that `args` is a valid pointer to `FunctionCallbackInfo`.
     pub unsafe fn from_args(args: *mut v8::ffi::FunctionCallbackInfo) -> Self {
         // SAFETY: fci_get_isolate returns a valid, non-null isolate pointer
-        unsafe { Self::from_isolate(NonNull::new_unchecked(v8::ffi::fci_get_isolate(args))) }
+        unsafe { Self::from_isolate(v8::Isolate::from_raw(v8::ffi::fci_get_isolate(args))) }
     }
 
-    /// Creates a Lock from a non-null isolate pointer.
-    pub fn from_isolate(isolate: NonNull<v8::ffi::Isolate>) -> Self {
+    /// Creates a Lock from an Isolate.
+    pub fn from_isolate(isolate: v8::Isolate) -> Self {
         Self { isolate }
     }
 
-    /// Returns the isolate pointer.
-    pub fn isolate(&self) -> NonNull<v8::ffi::Isolate> {
+    /// Returns the isolate.
+    pub fn isolate(&self) -> v8::Isolate {
         self.isolate
     }
 
+    pub fn is_locked(&self) -> bool {
+        self.isolate.is_locked()
+    }
+
     pub fn new_object<'a>(&mut self) -> v8::Local<'a, v8::Object> {
+        // SAFETY: Lock guarantees the isolate is valid and locked
         unsafe {
             v8::Local::from_ffi(
-                self.isolate().as_ptr(),
+                self.isolate(),
                 v8::ffi::local_new_object(self.isolate().as_ptr()),
             )
         }
+    }
+
+    pub fn throw_error(&mut self, message: &str) {
+        // SAFETY: Lock guarantees the isolate is valid and locked
+        unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ptr(), message) }
+    }
+
+    /// Allocates a `RustResource` on the cppgc heap.
+    ///
+    /// # Safety
+    /// The data must contain valid pointers to drop and trace functions.
+    pub unsafe fn alloc(&mut self, data: v8::ffi::RustResourceData) -> *mut v8::ffi::RustResource {
+        unsafe { v8::ffi::cppgc_allocate(self.isolate().as_ptr(), data) }
     }
 
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
@@ -179,6 +197,8 @@ impl Lock {
     where
         'b: 'a,
     {
+        // SAFETY: realm_from_isolate returns a valid pointer to the Realm stored
+        // in the isolate's data slot, and Lock guarantees the isolate is locked
         unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate.as_ptr()) }
     }
 }
@@ -231,7 +251,7 @@ pub enum Member {
 /// Resource types are passed by reference and call back into Rust when JavaScript accesses
 /// their members. This is analogous to `JSG_RESOURCE_TYPE` in C++ JSG. Resources must provide
 /// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
-pub trait Resource: Type + Sized {
+pub trait Resource: Type + GarbageCollected + Sized {
     type Template: ResourceTemplate;
 
     /// Returns the list of methods, properties, and constructors exposed to JavaScript.
@@ -277,8 +297,9 @@ pub trait Struct: Type {}
 /// resource are dropped, the V8 wrapper becomes weak and V8 GC will trigger cleanup via the
 /// weak callback.
 pub struct Realm {
-    isolate: NonNull<v8::ffi::Isolate>,
-    pub resources: Resources,
+    isolate: v8::Isolate,
+    /// Resource templates keyed by `TypeId`.
+    templates: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl Realm {
@@ -289,29 +310,36 @@ impl Realm {
     pub unsafe fn new(isolate: *mut v8::ffi::Isolate) -> Self {
         Self {
             // SAFETY: Caller guarantees isolate is non-null
-            isolate: unsafe { NonNull::new_unchecked(isolate) },
-            resources: Resources::default(),
+            isolate: unsafe { v8::Isolate::from_raw(isolate) },
+            templates: HashMap::default(),
         }
     }
 
-    /// Returns the isolate pointer.
-    pub fn isolate(&self) -> NonNull<v8::ffi::Isolate> {
+    /// Returns the isolate.
+    pub fn isolate(&self) -> v8::Isolate {
         self.isolate
     }
 
+    /// Gets or creates the resource tracking structure for a given resource type.
+    ///
+    /// # Panics
+    /// Panics if type mismatch (indicates a bug).
     pub fn get_resources<R: Resource + 'static>(&mut self) -> &mut ResourceImpl<R>
     where
         <R as Resource>::Template: 'static,
     {
-        let mut lock = Lock::from_isolate(self.isolate);
-        self.resources.get_or_create::<R>(&mut lock)
+        self.templates
+            .entry(TypeId::of::<R>())
+            .or_insert_with(|| Box::new(ResourceImpl::<R>::default()))
+            .downcast_mut::<ResourceImpl<R>>()
+            .expect("Template type mismatch")
     }
 }
 
 impl Drop for Realm {
     fn drop(&mut self) {
         debug_assert!(
-            unsafe { v8::ffi::isolate_is_locked(self.isolate.as_ptr()) },
+            self.isolate.is_locked(),
             "Realm must be dropped while holding the isolate lock"
         );
     }
@@ -321,35 +349,6 @@ impl Drop for Realm {
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
     // SAFETY: Caller guarantees isolate is valid and non-null
     Box::new(unsafe { Realm::new(isolate) })
-}
-
-/// Called from C++ weak callback to invoke the drop function stored in State.
-///
-/// # Safety
-/// The `state` must point to a valid `resource::State` struct.
-/// The instance must still be valid (not already dropped).
-unsafe fn invoke_weak_drop(state: usize) {
-    let state_ptr = state as *mut resource::State;
-    let state = unsafe { &*state_ptr };
-
-    let drop_fn = state.drop_fn();
-
-    // this_ptr is set when the resource is wrapped for JavaScript
-    let this_ptr = state
-        .this_ptr()
-        .expect("this_ptr must be set when invoke_weak_drop is called");
-
-    // Remove from instance tracking before dropping to prevent double-free
-    // when Realm cleanup runs later.
-    if let (Some(isolate), Some(type_id)) = (state.isolate(), state.type_id()) {
-        let realm = unsafe { &mut *crate::ffi::realm_from_isolate(isolate.as_ptr()) };
-        realm
-            .resources
-            .remove_instance_by_type_id(type_id, this_ptr);
-    }
-
-    // Drop the instance
-    unsafe { drop_fn(this_ptr.as_ptr()) };
 }
 
 /// Handles a result by setting the return value or throwing an error.
@@ -365,8 +364,7 @@ pub unsafe fn handle_result<T: Type, E: std::fmt::Display>(
         Ok(result) => args.set_return_value(T::wrap(result, lock)),
         Err(err) => {
             // TODO(soon): Make sure to use jsg::Error trait here and dynamically call proper method to throw the error.
-            let description = err.to_string();
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ptr(), &description) };
+            lock.throw_error(&err.to_string());
         }
     }
 }
@@ -386,6 +384,7 @@ impl Type for String {
     }
 
     fn unwrap(lock: &mut Lock, value: v8::Local<v8::Value>) -> Self::This {
+        // SAFETY: Lock guarantees isolate is valid; value is consumed and converted to FFI handle
         unsafe { v8::ffi::unwrap_string(lock.isolate().as_ptr(), value.into_ffi()) }
     }
 }
