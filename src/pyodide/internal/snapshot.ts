@@ -21,6 +21,7 @@ import {
   PythonWorkersInternalError,
   PythonUserError,
   simpleRunPython,
+  unreachable,
 } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
@@ -556,6 +557,30 @@ ${describeValue(obj)}
   return new PythonUserError(error);
 }
 
+type CustomSerialized = { pyodide_entrypoint_helper: true };
+
+function getHiwireSerializer(
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
+): (obj: any) => CustomSerialized {
+  return function serializer(obj: any): CustomSerialized {
+    if (obj === pyodide_entrypoint_helper) {
+      return { pyodide_entrypoint_helper: true };
+    }
+    throw createUnserializableObjectError(obj);
+  };
+}
+
+function getHiwireDeserializer(
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
+): (obj: CustomSerialized) => any {
+  return function deserializer(obj) {
+    if ('pyodide_entrypoint_helper' in obj) {
+      return pyodide_entrypoint_helper;
+    }
+    unreachable(obj, `Can't deserialize ${obj}`);
+  };
+}
+
 /**
  * Create memory snapshot by importing SNAPSHOT_IMPORTS to ensure these packages
  * are initialized in the linear memory snapshot and then saving a copy of the
@@ -564,21 +589,16 @@ ${describeValue(obj)}
 function makeLinearMemorySnapshot(
   Module: Module,
   importedModulesList: string[],
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper,
   snapshotType: ArtifactBundler.SnapshotType
 ): Uint8Array {
-  const customHiwireStateSerializer = (obj: any): Record<string, boolean> => {
-    if (obj === pyodide_entrypoint_helper) {
-      return { pyodide_entrypoint_helper: true };
-    }
-    throw createUnserializableObjectError(obj);
-  };
-
   const dsoHandles = recordDsoHandles(Module);
-  const hiwire =
-    Module.API.version === '0.26.0a2'
-      ? undefined
-      : Module.API.serializeHiwireState(customHiwireStateSerializer);
+  let hiwire: SnapshotConfig | undefined;
+  if (Module.API.version !== '0.26.0a2') {
+    hiwire = Module.API.serializeHiwireState(
+      getHiwireSerializer(pyodide_entrypoint_helper)
+    );
+  }
   const settings: SnapshotSettings = {
     baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
     snapshotType,
@@ -751,7 +771,7 @@ export function maybeRestoreSnapshot(Module: Module): void {
 function collectSnapshot(
   Module: Module,
   importedModulesList: string[],
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper,
   snapshotType: ArtifactBundler.SnapshotType
 ): void {
   if (!IS_EW_VALIDATING && !SHOULD_SNAPSHOT_TO_DISK) {
@@ -817,7 +837,10 @@ export function maybeCollectDedicatedSnapshot(
  *
  * Dedicated snapshots are collected in `maybeCollectDedicatedSnapshot`.
  */
-export function maybeCollectSnapshot(Module: Module): void {
+export function maybeCollectSnapshot(
+  Module: Module,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
+): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
   const importedModulesList = memorySnapshotDoImports(Module);
@@ -834,7 +857,7 @@ export function maybeCollectSnapshot(Module: Module): void {
   collectSnapshot(
     Module,
     importedModulesList,
-    null,
+    pyodide_entrypoint_helper,
     IS_CREATING_BASELINE_SNAPSHOT ? 'baseline' : 'package'
   );
 }
@@ -843,19 +866,12 @@ export function finalizeBootstrap(
   Module: Module,
   pyodide_entrypoint_helper: PyodideEntrypointHelper
 ): void {
-  const customHiwireStateDeserializer = (obj: any): any => {
-    if ('pyodide_entrypoint_helper' in obj) {
-      return pyodide_entrypoint_helper;
-    }
-    throw new PythonWorkersInternalError(`Can't deserialize ${obj}`);
-  };
-
   Module.API.config._makeSnapshot =
     IS_CREATING_SNAPSHOT && Module.API.version !== '0.26.0a2';
   enterJaegerSpan('finalize_bootstrap', () => {
     Module.API.finalizeBootstrap(
       LOADED_SNAPSHOT_META?.hiwire,
-      customHiwireStateDeserializer
+      getHiwireDeserializer(pyodide_entrypoint_helper)
     );
   });
   // finalizeBootstrap overrides LD_LIBRARY_PATH. Restore it.
