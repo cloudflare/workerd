@@ -141,8 +141,11 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
       {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_savepoint_", depth));
 }
 ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
-  [&]() noexcept {
+  KJ_DEFER([&]() noexcept {
     // We'd better crash if any of this state update fails, otherwise dangling pointers.
+
+    // This is wrapped in a KJ_DEFER because we want it to run no matter what *after* the rollback
+    // fix and KJ_DEFER seemed like the cleanest way to do this.
 
     KJ_ASSERT(!hasChild);
     auto cur = KJ_ASSERT_NONNULL(actorSqlite.currentTxn.tryGet<ExplicitTxn*>());
@@ -153,7 +156,7 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
     } else {
       actorSqlite.currentTxn.init<NoTxn>();
     }
-  }();
+  }(););
 
   if (!committed && actorSqlite.broken == kj::none) {
     // Assume rollback if not committed.
