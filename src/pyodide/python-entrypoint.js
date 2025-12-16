@@ -11,27 +11,25 @@ import {
   WorkerEntrypoint,
   WorkflowEntrypoint,
 } from 'cloudflare:workers';
-import * as cloudflareWorkersModule from 'cloudflare:workers';
-import * as cloudflareSocketsModule from 'cloudflare:sockets';
 
 // The creation of `pythonDurableObjects` et al. has to be done here because
 // python-entrypoint-helper is a BUILTIN and so cannot import `DurableObject` et al.
 // (which are also builtins). As a workaround we call `makeEntrypointClass` here and pass it the
 // appropriate class.
-import { setDoAnImport, initPython } from 'pyodide:python-entrypoint-helper';
+import {
+  setDoAnImport,
+  initPython,
+  createImportProxy,
+} from 'pyodide:python-entrypoint-helper';
 
 // Function to dynamically import JavaScript modules from Python
 async function doAnImport(name) {
-  return await import(name);
+  const mod = await import(name);
+  return createImportProxy(name, mod);
 }
 
 // Pass the import function to the helper
-setDoAnImport(
-  doAnImport,
-  cloudflareWorkersModule,
-  cloudflareSocketsModule,
-  WorkerEntrypoint
-);
+await setDoAnImport(doAnImport, WorkerEntrypoint);
 
 // Initialise Python only after the import function has been set above.
 const { handlers, pythonEntrypointClasses, makeEntrypointClass } =
