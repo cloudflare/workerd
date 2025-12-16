@@ -104,9 +104,6 @@ use_repo(
     "crates_vendor__tokio-1.48.0",
     "crates_vendor__tracing-0.1.43",
 )
-#     direct_deps = [struct(repo = "crates_vendor", is_dev_dep = False)]
-#     direct_deps.extend(_crate_repositories())
-#     return direct_deps
 
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
 

@@ -27,7 +27,7 @@ wd_cc_library(
     ],
 )
 
-kj_test(
+ser-errors-test_binary(
     src = "test-fixture-test.c++",
     deps = [":test-fixture"],
 )
