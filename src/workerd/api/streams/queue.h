@@ -10,8 +10,6 @@
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/small-set.h>
 
-#include <list>
-
 namespace workerd::api {
 
 // ============================================================================
@@ -360,7 +358,7 @@ class ConsumerImpl final {
       KJ_CASE_ONEOF(errored, Errored) {}
       KJ_CASE_ONEOF(ready, Ready) {
         for (auto& request: ready.readRequests) {
-          request.resolveAsDone(js);
+          request->resolveAsDone(js);
         }
         state.template init<Closed>();
       }
@@ -450,7 +448,7 @@ class ConsumerImpl final {
   void resolveRead(jsg::Lock& js, ReadRequest& req) {
     auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>());
     KJ_REQUIRE(!ready.readRequests.empty());
-    KJ_REQUIRE(&req == &ready.readRequests.front());
+    KJ_REQUIRE(&req == ready.readRequests.front().get());
     req.resolve(js);
     ready.readRequests.pop_front();
   }
@@ -458,7 +456,7 @@ class ConsumerImpl final {
   void resolveReadAsDone(jsg::Lock& js, ReadRequest& req) {
     auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>());
     KJ_REQUIRE(!ready.readRequests.empty());
-    KJ_REQUIRE(&req == &ready.readRequests.front());
+    KJ_REQUIRE(&req == ready.readRequests.front().get());
     req.resolveAsDone(js);
     ready.readRequests.pop_front();
   }
@@ -511,7 +509,7 @@ class ConsumerImpl final {
       KJ_CASE_ONEOF(errored, Errored) {}
       KJ_CASE_ONEOF(ready, Ready) {
         for (auto& request: ready.readRequests) {
-          request.resolver.reject(js, reason);
+          request->resolver.reject(js, reason);
         }
         ready.readRequests.clear();
       }
@@ -549,7 +547,10 @@ class ConsumerImpl final {
   using Errored = jsg::Value;
   struct Ready {
     workerd::RingBuffer<kj::OneOf<QueueEntry, Close>, 16> buffer;
-    std::list<ReadRequest> readRequests;
+    // We use kj::Own<ReadRequest> because ByobRequest holds a reference to its associated
+    // ReadRequest. Using RingBuffer directly would invalidate those references when the buffer
+    // grows. By heap-allocating each ReadRequest, we ensure reference stability.
+    workerd::RingBuffer<kj::Own<ReadRequest>, 8> readRequests;
     size_t queueTotalSize = 0;
 
     inline kj::StringPtr jsgGetMemoryName() const;
@@ -590,7 +591,7 @@ class ConsumerImpl final {
         // In that case, we want to reset/clear the buffer and reject any remaining
         // pending read requests using the given reason.
         for (auto& request: ready.readRequests) {
-          request.reject(js, reason);
+          request->reject(js, reason);
         }
         state = reason.addRef(js);
         KJ_IF_SOME(listener, stateListener) {
@@ -614,7 +615,7 @@ class ConsumerImpl final {
           KJ_ASSERT(empty());
           KJ_REQUIRE(ready.buffer.size() == 1);  // The close should be the only item remaining.
           for (auto& request: ready.readRequests) {
-            request.resolveAsDone(js);
+            request->resolveAsDone(js);
           }
           state.template init<Closed>();
           KJ_IF_SOME(listener, stateListener) {
@@ -867,7 +868,9 @@ class ByteQueue final {
   };
 
   struct State {
-    std::list<kj::Own<ByobRequest>> pendingByobReadRequests;
+    // We use a ring buffer for pending BYOB read requests. Since we store kj::Own<ByobRequest>,
+    // the actual ByobRequest objects are heap-allocated and won't be invalidated by buffer growth.
+    workerd::RingBuffer<kj::Own<ByobRequest>, 8> pendingByobReadRequests;
 
     JSG_MEMORY_INFO(ByteQueue::State) {
       for (auto& request: pendingByobReadRequests) {
@@ -1070,7 +1073,7 @@ void ConsumerImpl<Self>::Ready::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) co
   }
 
   for (auto& request: readRequests) {
-    tracker.trackField("pendingRead", request);
+    tracker.trackField("pendingRead", *request);
   }
 }
 

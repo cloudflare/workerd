@@ -159,7 +159,7 @@ void ValueQueue::handlePush(
 
   // Otherwise, pop the next pending read and resolve it. There should be nothing in the queue.
   KJ_REQUIRE(state.buffer.empty() && state.queueTotalSize == 0);
-  state.readRequests.front().resolve(js, entry->getValue(js));
+  state.readRequests.front()->resolve(js, entry->getValue(js));
   state.readRequests.pop_front();
 }
 
@@ -212,7 +212,7 @@ void ValueQueue::handleRead(jsg::Lock& js,
     // Otherwise, push the read request into the pending readRequests. It will be
     // resolved either as soon as there is data available or the consumer closes
     // or errors.
-    state.readRequests.push_back(kj::mv(request));
+    state.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
     KJ_IF_SOME(listener, consumer.stateListener) {
       listener.onConsumerWantsData(js);
     }
@@ -540,8 +540,7 @@ ByteQueue::ByteQueue(size_t highWaterMark): impl(highWaterMark) {}
 void ByteQueue::close(jsg::Lock& js) {
   KJ_IF_SOME(ready, impl.state.tryGet<ByteQueue::QueueImpl::Ready>()) {
     while (!ready.pendingByobReadRequests.empty()) {
-      auto& req = ready.pendingByobReadRequests.front();
-      req->invalidate();
+      ready.pendingByobReadRequests.front()->invalidate();
       ready.pendingByobReadRequests.pop_front();
     }
   }
@@ -559,12 +558,17 @@ void ByteQueue::error(jsg::Lock& js, jsg::Value reason) {
 void ByteQueue::maybeUpdateBackpressure() {
   KJ_IF_SOME(state, impl.getState()) {
     // Invalidated byob read requests will accumulate if we do not take
-    // take of them from time to time since. Since maybeUpdateBackpressure
+    // care of them from time to time. Since maybeUpdateBackpressure
     // is going to be called regularly while the queue is actively in use,
     // this is as good a place to clean them out as any.
-    auto pivot = std::remove_if(state.pendingByobReadRequests.begin(),
-        state.pendingByobReadRequests.end(), [](auto& item) { return item->isInvalidated(); });
-    state.pendingByobReadRequests.erase(pivot, state.pendingByobReadRequests.end());
+    //
+    // We iterate through the ring buffer and remove invalidated items from the front.
+    // Since items are typically invalidated in order, this should be efficient for
+    // the common case.
+    while (!state.pendingByobReadRequests.empty() &&
+        state.pendingByobReadRequests.front()->isInvalidated()) {
+      state.pendingByobReadRequests.pop_front();
+    }
   }
   impl.maybeUpdateBackpressure();
 }
@@ -602,7 +606,7 @@ void ByteQueue::handlePush(
   size_t entryOffset = 0;
 
   while (!state.readRequests.empty() && amountAvailable > 0) {
-    auto& pending = state.readRequests.front();
+    auto& pending = *state.readRequests.front();
 
     // If the amountAvailable is less than the pending read request's atLeast,
     // then we're just going to buffer the data and bailout without fulfilling
@@ -728,7 +732,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
     ReadRequest request) {
   const auto pendingRead = [&]() {
     bool isByob = request.pullInto.type == ReadRequest::Type::BYOB;
-    state.readRequests.push_back(kj::mv(request));
+    state.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
     if (isByob) {
       // Because ReadRequest is movable, and because the ByobRequest captures
       // a reference to the ReadRequest, we wait until after it is added to
@@ -737,7 +741,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
       // been closed.
       KJ_IF_SOME(queueState, queue.getState()) {
         queueState.pendingByobReadRequests.push_back(
-            state.readRequests.back().makeByobReadRequest(consumer, queue));
+            state.readRequests.back()->makeByobReadRequest(consumer, queue));
       }
     }
     KJ_IF_SOME(listener, consumer.stateListener) {
@@ -878,7 +882,7 @@ bool ByteQueue::handleMaybeClose(
     // either case, the pending read is popped off the pending queue and resolved.
 
     KJ_ASSERT(!state.readRequests.empty());
-    auto& pending = state.readRequests.front();
+    auto& pending = *state.readRequests.front();
 
     while (!state.buffer.empty()) {
       auto& next = state.buffer.front();

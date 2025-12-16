@@ -485,8 +485,6 @@ class CompressionStreamImpl: public kj::Refcounted,
 
   kj::Canceler canceler;
   LazyBuffer output;
-  // We use std::list to keep memory overhead low when there are many streams with no or few pending
-  // reads.
   RingBuffer<PendingRead, 8> pendingReads;
 };
 
