@@ -9,10 +9,7 @@ py_wd_test("env-param")
 
 py_wd_test(
     "top-level-env",
-    # TODO: snapshot for env
-    make_snapshot = False,
     skip_python_flags = ["0.26.0a2"],
-    use_snapshot = None,
 )
 
 py_wd_test("asgi")
@@ -64,11 +61,7 @@ py_wd_test(
 
 py_wd_test("js-import")
 
-py_wd_test(
-    "importable-env",
-    # TODO: why doesn't dedicated snapshot work with this?
-    use_snapshot = None,
-)
+py_wd_test("importable-env")
 
 py_wd_test("python-rpc")
 
