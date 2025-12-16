@@ -102,10 +102,10 @@ mod tests {
     }
 
     /// Counter to track how many `SimpleResource` instances have been dropped.
-    pub(super) static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
+    pub static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[jsg_resource]
-    pub(super) struct SimpleResource {
+    pub struct SimpleResource {
         pub name: String,
         pub callback: Option<TracedReference<v8::Object>>,
     }
@@ -128,10 +128,10 @@ mod tests {
         }
     }
 
-    pub(super) static PARENT_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
+    pub static PARENT_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[jsg_resource]
-    pub(super) struct ParentResource {
+    pub struct ParentResource {
         pub child: jsg::Ref<SimpleResource>,
         pub optional_child: Option<jsg::Ref<SimpleResource>>,
     }

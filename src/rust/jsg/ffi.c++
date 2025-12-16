@@ -13,6 +13,9 @@ using namespace kj_rs;
 
 namespace workerd::rust::jsg {
 
+// TODO(soon): We currently do not support reusing this shim before major GC
+// like we do on the C++ side. This means there is a room for optimization in this
+// implementation.
 class RustResource final: public cppgc::GarbageCollected<RustResource> {
  public:
   explicit RustResource(RustResourceData data): data_(kj::mv(data)) {}

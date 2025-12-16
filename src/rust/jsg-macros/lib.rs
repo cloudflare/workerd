@@ -465,15 +465,13 @@ fn generate_trace_statements(
             if let Some(inner_ty) = extract_option_inner(ty) {
                 match get_traceable_type(inner_ty) {
                     TraceableType::Ref => {
-                        // Ref<T> implements Deref, so use &*inner to get &T
                         return Some(quote! {
                             if let Some(ref inner) = self.#field_name {
-                                jsg::GarbageCollected::trace(&**inner, visitor);
+                                (&*inner).trace(visitor);
                             }
                         });
                     }
                     TraceableType::WeakRef => {
-                        // WeakRef has a trace() method for cppgc integration
                         return Some(quote! {
                             if let Some(ref inner) = self.#field_name {
                                 inner.trace(visitor);
@@ -491,20 +489,13 @@ fn generate_trace_statements(
                 }
             }
 
-            // Check if it's directly traceable
             match get_traceable_type(ty) {
-                TraceableType::Ref => {
-                    // Ref<T> implements Deref, so use &*self.field to get &T
-                    Some(quote! {
-                        jsg::GarbageCollected::trace(&*self.#field_name, visitor);
-                    })
-                }
-                TraceableType::WeakRef => {
-                    // WeakRef has a trace() method for cppgc integration
-                    Some(quote! {
-                        self.#field_name.trace(visitor);
-                    })
-                }
+                TraceableType::Ref => Some(quote! {
+                    jsg::GarbageCollected::trace(&*self.#field_name, visitor);
+                }),
+                TraceableType::WeakRef => Some(quote! {
+                    self.#field_name.trace(visitor);
+                }),
                 TraceableType::TracedReference => Some(quote! {
                     visitor.trace(&self.#field_name);
                 }),
@@ -525,7 +516,6 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
     for item in &impl_block.items {
         if let syn::ImplItem::Fn(method) = item {
             for attr in &method.attrs {
-                // TODO: More reliable way to detect jsg_method attribute
                 if attr.path().is_ident("jsg")
                     || (attr.path().segments.len() == 1
                         && attr.path().segments[0].ident == "jsg_method")
