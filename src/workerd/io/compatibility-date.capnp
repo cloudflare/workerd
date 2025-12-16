@@ -1230,7 +1230,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   fetchIterableTypeSupport @146 :Bool
     $compatEnableFlag("fetch_iterable_type_support")
     $compatDisableFlag("no_fetch_iterable_type_support")
-    $compatEnableDate("2025-12-16");
   # Enables passing sync and async iterables as the body of fetch Request or Response.
   # Previously, sync iterables like Arrays would be accepted but stringified, and async
   # iterables would be treated as regular objects and not iterated over at all. With this
