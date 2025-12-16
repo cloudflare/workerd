@@ -1255,4 +1255,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
   # measurements and time-sensitive operations.
+
+  fetchIterableTypeSupportOverrideAdjustment @149 :Bool
+    $compatEnableFlag("fetch_iterable_type_support_override_adjustment")
+    $compatDisableFlag("no_fetch_iterable_type_support_override_adjustment")
+    $impliedByAfterDate(name = "fetchIterableTypeSupport", date = "2026-01-15");
+  # Further adapts the fetch iterable type support to adjust for toString/toPrimitive
+  # overrides on sync iterable objects. Specifically, if an object passed as the body
+  # of a fetch Request or Response is sync iterable but has a custom toString or
+  # toPrimitive method, we will skip treating it as a sync iterable and instead allow
+  # it to fall through to being handled as a stringified object.
 }

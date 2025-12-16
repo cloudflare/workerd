@@ -49,5 +49,75 @@ export const fetchGen = {
     // Regular strings work correctly.
     const resp4 = new Response('Hello');
     strictEqual(await resp4.text(), 'Hello');
+
+    const objIter = {
+      *[Symbol.iterator]() {
+        yield enc.encode('Hello ');
+        yield enc.encode('Object Iterator!');
+      },
+    };
+    const respIter = new Response(objIter);
+    strictEqual(await respIter.text(), 'Hello Object Iterator!');
+
+    // Custom toString prevents iterator treatment.
+    const obj = {
+      *[Symbol.iterator]() {
+        yield enc.encode('ignored');
+      },
+      toString() {
+        return 'Hello';
+      },
+    };
+    const resp5 = new Response(obj);
+    strictEqual(await resp5.text(), 'Hello');
+
+    class MyObj {
+      *[Symbol.iterator]() {
+        yield enc.encode('ignored');
+      }
+      toString() {
+        return 'Hello';
+      }
+    }
+    const resp6 = new Response(new MyObj());
+    strictEqual(await resp6.text(), 'Hello');
+
+    class Base {
+      toString() {
+        return 'Hello';
+      }
+    }
+    class SubObj extends Base {
+      *[Symbol.iterator]() {
+        yield enc.encode('ignored');
+      }
+    }
+    const resp7 = new Response(new SubObj());
+    strictEqual(await resp7.text(), 'Hello');
+
+    // Also custom toPrimitive prevents iterator treatment.
+    const objPrim = {
+      *[Symbol.iterator]() {
+        yield enc.encode('ignored');
+      },
+      [Symbol.toPrimitive]() {
+        return 'Hello';
+      },
+    };
+    const respPrim = new Response(objPrim);
+    strictEqual(await respPrim.text(), 'Hello');
+
+    // Unless it's specifically an async iterator.
+    const asyncIter = {
+      async *[Symbol.asyncIterator]() {
+        yield enc.encode('Hello ');
+        yield enc.encode('Async World!');
+      },
+      toString() {
+        return 'ignored';
+      },
+    };
+    const resp8 = new Response(asyncIter);
+    strictEqual(await resp8.text(), 'Hello Async World!');
   },
 };
