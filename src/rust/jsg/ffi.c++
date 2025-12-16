@@ -13,6 +13,28 @@ using namespace kj_rs;
 
 namespace workerd::rust::jsg {
 
+class RustResource final: public cppgc::GarbageCollected<RustResource> {
+ public:
+  explicit RustResource(RustResourceData data): data_(kj::mv(data)) {}
+  ~RustResource() {
+    cppgc_invoke_drop(data_);
+  }
+  void Trace(cppgc::Visitor* visitor) const {
+    auto ffi_visitor = to_ffi(visitor);
+    cppgc_invoke_trace(data_, &ffi_visitor);
+  }
+
+  RustResourceData& data() {
+    return data_;
+  }
+  const RustResourceData& data() const {
+    return data_;
+  }
+
+ private:
+  RustResourceData data_;
+};
+
 // Local<T>
 void local_drop(Local value) {
   // Convert from FFI representation and let v8::Local destructor handle cleanup
@@ -138,15 +160,25 @@ Local global_to_local(Isolate* isolate, const Global& value) {
   return to_ffi(kj::mv(local));
 }
 
-void global_make_weak(Isolate* isolate, Global* value, size_t data) {
-  auto glbl = global_as_ref_from_ffi<v8::Object>(*value);
-  // Pass the State pointer directly to V8's weak callback.
-  // When GC collects the object, we call back into Rust's invoke_weak_drop
-  // which reads the drop_fn from the State and invokes it.
-  glbl->SetWeak(reinterpret_cast<void*>(data), [](const v8::WeakCallbackInfo<void>& info) {
-    auto state = reinterpret_cast<size_t>(info.GetParameter());
-    invoke_weak_drop(state);
-  }, v8::WeakCallbackType::kParameter);
+// TracedReference
+TracedReference traced_reference_from_local(Isolate* isolate, Local value) {
+  v8::TracedReference<v8::Object> traced(isolate, local_from_ffi<v8::Object>(kj::mv(value)));
+  return to_ffi(kj::mv(traced));
+}
+
+Local traced_reference_to_local(Isolate* isolate, const TracedReference& value) {
+  auto& traced = traced_reference_as_ref_from_ffi<v8::Object>(value);
+  return to_ffi(traced.Get(isolate));
+}
+
+void traced_reference_reset(TracedReference* value) {
+  auto* traced = traced_reference_as_ref_from_ffi<v8::Object>(*value);
+  traced->Reset();
+}
+
+bool traced_reference_is_empty(const TracedReference& value) {
+  auto& traced = traced_reference_as_ref_from_ffi<v8::Object>(value);
+  return traced.IsEmpty();
 }
 
 // FunctionCallbackInfo
@@ -287,6 +319,69 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
 
 bool isolate_is_locked(Isolate* isolate) {
   return v8::Locker::IsLocked(isolate);
+}
+
+// cppgc
+RustResource* cppgc_allocate(Isolate* isolate, RustResourceData data) {
+  auto* heap = isolate->GetCppHeap();
+  KJ_ASSERT(heap != nullptr, "CppHeap not available on isolate");
+  return cppgc::MakeGarbageCollected<RustResource>(heap->GetAllocationHandle(), kj::mv(data));
+}
+
+kj::Own<CppgcPersistent> cppgc_persistent_new(RustResource* resource) {
+  return kj::heap<CppgcPersistent>(resource);
+}
+
+RustResource* cppgc_persistent_get(const CppgcPersistent& persistent) {
+  return persistent.Get();
+}
+
+void cppgc_visitor_trace(CppgcVisitor* visitor, const TracedReference& handle) {
+  auto* v8_visitor = cppgc_visitor_from_ffi(visitor);
+  auto& traced = traced_reference_as_ref_from_ffi<v8::Object>(handle);
+  v8_visitor->Trace(traced);
+}
+
+kj::Own<CppgcWeakPersistent> cppgc_weak_persistent_new(RustResource* resource) {
+  return kj::heap<CppgcWeakPersistent>(resource);
+}
+
+RustResource* cppgc_weak_persistent_get(const CppgcWeakPersistent& persistent) {
+  return persistent.Get();
+}
+
+kj::Own<CppgcMember> cppgc_member_new(RustResource* resource) {
+  return kj::heap<CppgcMember>(resource);
+}
+
+RustResource* cppgc_member_get(const CppgcMember& member) {
+  return member.Get();
+}
+
+void cppgc_member_set(CppgcMember& member, RustResource* resource) {
+  member = resource;
+}
+
+void cppgc_visitor_trace_member(CppgcVisitor* visitor, const CppgcMember& member) {
+  auto* v8_visitor = cppgc_visitor_from_ffi(visitor);
+  v8_visitor->Trace(member);
+}
+
+kj::Own<CppgcWeakMember> cppgc_weak_member_new(RustResource* resource) {
+  return kj::heap<CppgcWeakMember>(resource);
+}
+
+RustResource* cppgc_weak_member_get(const CppgcWeakMember& member) {
+  return member.Get();
+}
+
+void cppgc_weak_member_set(CppgcWeakMember& member, RustResource* resource) {
+  member = resource;
+}
+
+void cppgc_visitor_trace_weak_member(CppgcVisitor* visitor, const CppgcWeakMember& member) {
+  auto* v8_visitor = cppgc_visitor_from_ffi(visitor);
+  v8_visitor->Trace(member);
 }
 
 }  // namespace workerd::rust::jsg

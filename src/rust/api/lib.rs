@@ -1,8 +1,8 @@
 use std::pin::Pin;
-use std::ptr::NonNull;
 
 use jsg::Resource;
 use jsg::Type;
+use jsg::v8;
 
 use crate::dns::DnsUtil;
 
@@ -26,7 +26,7 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
         registry,
         "node-internal:dns",
         |isolate| unsafe {
-            let mut lock = jsg::Lock::from_isolate(NonNull::new_unchecked(isolate));
+            let mut lock = jsg::Lock::from_isolate(v8::Isolate::from_raw(isolate));
             let dns_util = DnsUtil::alloc(&mut lock, DnsUtil { _unused: 0 });
             DnsUtil::wrap(dns_util, &mut lock).into_ffi()
         },

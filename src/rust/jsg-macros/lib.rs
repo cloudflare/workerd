@@ -274,6 +274,12 @@ fn generate_unwrap_code(
 /// Automatically implements `jsg::Type::class_name()` using the struct name,
 /// or a custom name if provided via the `name` parameter.
 ///
+/// The generated `GarbageCollected` implementation automatically traces fields that
+/// need GC integration:
+/// - `Ref<T>` fields - traces the underlying resource
+/// - `TracedReference<T>` fields - traces the JavaScript handle
+/// - `Option<T>` where T is traceable - conditionally traces
+///
 /// # Example
 /// ```rust
 /// #[jsg::resource]
@@ -316,15 +322,46 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let template_name = template_name(name);
 
-    // Ensure it's a struct
-    if !matches!(&input.data, Data::Struct(_)) {
-        return syn::Error::new_spanned(
-            &input,
-            "#[jsg::resource] can only be applied to structs or impl blocks",
-        )
-        .to_compile_error()
-        .into();
-    }
+    // Extract fields for trace generation
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => &fields.named,
+            _ => {
+                return syn::Error::new_spanned(
+                    &input,
+                    "#[jsg::resource] only supports structs with named fields",
+                )
+                .to_compile_error()
+                .into();
+            }
+        },
+        _ => {
+            return syn::Error::new_spanned(
+                &input,
+                "#[jsg::resource] can only be applied to structs or impl blocks",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    // Generate trace statements for traceable fields
+    let trace_statements = generate_trace_statements(fields);
+    let gc_impl = if trace_statements.is_empty() {
+        quote! {
+            #[automatically_derived]
+            impl jsg::GarbageCollected for #name {}
+        }
+    } else {
+        quote! {
+            #[automatically_derived]
+            impl jsg::GarbageCollected for #name {
+                fn trace(&self, visitor: &mut jsg::GcVisitor) {
+                    #(#trace_statements)*
+                }
+            }
+        }
+    };
 
     let expanded = quote! {
         #input
@@ -349,6 +386,8 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
+        #gc_impl
+
         #[automatically_derived]
         pub struct #template_name {
             pub constructor: jsg::v8::Global<jsg::v8::FunctionTemplate>,
@@ -369,6 +408,110 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TraceableType {
+    /// `Ref<T>` - trace via `GarbageCollected` trait on the inner type
+    Ref,
+    /// `WeakRef<T>` - weak reference, no tracing needed (doesn't keep alive)
+    WeakRef,
+    /// `TracedReference<T>` - trace via `visitor.trace()`
+    TracedReference,
+    /// Not a traceable type
+    None,
+}
+
+/// Checks if a type path matches a known traceable type.
+/// Supports both unqualified (`Ref<T>`) and qualified (`jsg::Ref<T>`) paths.
+fn get_traceable_type(ty: &Type) -> TraceableType {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        match segment.ident.to_string().as_str() {
+            "Ref" => return TraceableType::Ref,
+            "WeakRef" => return TraceableType::WeakRef,
+            "TracedReference" => return TraceableType::TracedReference,
+            _ => {}
+        }
+    }
+    TraceableType::None
+}
+
+/// Extracts the inner type from `Option<T>` or `std::option::Option<T>` if present.
+fn extract_option_inner(ty: &Type) -> Option<&Type> {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && segment.ident == "Option"
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+    {
+        return Some(inner);
+    }
+    None
+}
+
+/// Generates trace statements for all traceable fields in a struct.
+fn generate_trace_statements(
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> Vec<quote::__private::TokenStream> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let field_name = field.ident.as_ref()?;
+            let ty = &field.ty;
+
+            // Check if it's Option<Traceable>
+            if let Some(inner_ty) = extract_option_inner(ty) {
+                match get_traceable_type(inner_ty) {
+                    TraceableType::Ref => {
+                        // Ref<T> implements Deref, so use &*inner to get &T
+                        return Some(quote! {
+                            if let Some(ref inner) = self.#field_name {
+                                jsg::GarbageCollected::trace(&**inner, visitor);
+                            }
+                        });
+                    }
+                    TraceableType::WeakRef => {
+                        // WeakRef has a trace() method for cppgc integration
+                        return Some(quote! {
+                            if let Some(ref inner) = self.#field_name {
+                                inner.trace(visitor);
+                            }
+                        });
+                    }
+                    TraceableType::TracedReference => {
+                        return Some(quote! {
+                            if let Some(ref inner) = self.#field_name {
+                                visitor.trace(inner);
+                            }
+                        });
+                    }
+                    TraceableType::None => {}
+                }
+            }
+
+            // Check if it's directly traceable
+            match get_traceable_type(ty) {
+                TraceableType::Ref => {
+                    // Ref<T> implements Deref, so use &*self.field to get &T
+                    Some(quote! {
+                        jsg::GarbageCollected::trace(&*self.#field_name, visitor);
+                    })
+                }
+                TraceableType::WeakRef => {
+                    // WeakRef has a trace() method for cppgc integration
+                    Some(quote! {
+                        self.#field_name.trace(visitor);
+                    })
+                }
+                TraceableType::TracedReference => Some(quote! {
+                    visitor.trace(&self.#field_name);
+                }),
+                TraceableType::None => None,
+            }
+        })
+        .collect()
 }
 
 fn template_name(name: &syn::Ident) -> syn::Ident {

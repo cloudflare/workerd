@@ -1,7 +1,14 @@
 #pragma once
 
+#include <cppgc/allocation.h>
+#include <cppgc/garbage-collected.h>
+#include <cppgc/member.h>
+#include <cppgc/name-provider.h>
+#include <cppgc/persistent.h>
+#include <cppgc/visitor.h>
 #include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
+#include <v8-cppgc.h>
 #include <v8.h>
 
 #include <kj/function.h>
@@ -15,8 +22,16 @@ struct ModuleRegistry;
 struct Local;
 struct Global;
 struct Realm;
+struct TracedReference;
+struct CppgcVisitor;
+struct RustResourceData;
+class RustResource;
 enum class ExceptionType : ::std::uint8_t;
 using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
+using CppgcPersistent = cppgc::Persistent<RustResource>;
+using CppgcWeakPersistent = cppgc::WeakPersistent<RustResource>;
+using CppgcMember = cppgc::Member<RustResource>;
+using CppgcWeakMember = cppgc::WeakMember<RustResource>;
 
 // CXX generates the ModuleType enum definition in v8.rs.h from the Rust shared enum.
 // This forward declaration allows ffi.h to reference the type before that header is included.
@@ -44,10 +59,12 @@ kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object
 void global_reset(Global* value);
 Global global_clone(const Global& value);
 Local global_to_local(Isolate* isolate, const Global& value);
-/// Makes the global handle weak. The `data` parameter should be a pointer to a
-/// State struct on the Rust side. When V8 GC collects the object, the weak callback
-/// will call back into Rust via invoke_weak_drop to retrieve and call the drop_fn.
-void global_make_weak(Isolate* isolate, Global* value, size_t /* *mut State */ data);
+
+// TracedReference (cppgc/Oilpan)
+TracedReference traced_reference_from_local(Isolate* isolate, Local value);
+Local traced_reference_to_local(Isolate* isolate, const TracedReference& value);
+void traced_reference_reset(TracedReference* value);
+bool traced_reference_is_empty(const TracedReference& value);
 
 // Wrappers
 Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl);
@@ -86,5 +103,21 @@ Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::S
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 bool isolate_is_locked(Isolate* isolate);
+
+// cppgc
+RustResource* cppgc_allocate(Isolate* isolate, RustResourceData data);
+void cppgc_visitor_trace(CppgcVisitor* visitor, const TracedReference& handle);
+void cppgc_visitor_trace_member(CppgcVisitor* visitor, const CppgcMember& member);
+void cppgc_visitor_trace_weak_member(CppgcVisitor* visitor, const CppgcWeakMember& member);
+kj::Own<CppgcPersistent> cppgc_persistent_new(RustResource* resource);
+RustResource* cppgc_persistent_get(const CppgcPersistent& persistent);
+kj::Own<CppgcWeakPersistent> cppgc_weak_persistent_new(RustResource* resource);
+RustResource* cppgc_weak_persistent_get(const CppgcWeakPersistent& persistent);
+kj::Own<CppgcMember> cppgc_member_new(RustResource* resource);
+RustResource* cppgc_member_get(const CppgcMember& member);
+void cppgc_member_set(CppgcMember& member, RustResource* resource);
+kj::Own<CppgcWeakMember> cppgc_weak_member_new(RustResource* resource);
+RustResource* cppgc_weak_member_get(const CppgcWeakMember& member);
+void cppgc_weak_member_set(CppgcWeakMember& member, RustResource* resource);
 
 }  // namespace workerd::rust::jsg

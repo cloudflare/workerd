@@ -1,5 +1,3 @@
-use std::ptr::NonNull;
-
 use jsg::Lock;
 use jsg::v8;
 use kj_rs::KjOwn;
@@ -43,7 +41,7 @@ impl Harness {
         fn wrapper(isolate: *mut v8::ffi::Isolate) {
             unsafe {
                 if let Some(cb) = CALLBACK {
-                    cb(Lock::from_isolate(NonNull::new_unchecked(isolate)));
+                    cb(Lock::from_isolate(v8::Isolate::from_raw(isolate)));
                 }
             }
         }
@@ -76,13 +74,15 @@ mod tests {
 
     use jsg::Error;
     use jsg::ExceptionType;
-    use jsg::Resource;
     use jsg::Type;
     use jsg::v8;
     use jsg::v8::ToLocalValue;
+    use jsg::v8::TracedReference;
     use jsg_macros::jsg_method;
     use jsg_macros::jsg_resource;
     use jsg_macros::jsg_struct;
+
+    mod gc;
 
     #[jsg_struct]
     struct TestStruct {
@@ -102,11 +102,12 @@ mod tests {
     }
 
     /// Counter to track how many `SimpleResource` instances have been dropped.
-    static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
+    pub(super) static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[jsg_resource]
-    struct SimpleResource {
+    pub(super) struct SimpleResource {
         pub name: String,
+        pub callback: Option<TracedReference<v8::Object>>,
     }
 
     impl Drop for SimpleResource {
@@ -126,6 +127,23 @@ mod tests {
             Ok(self.name.clone())
         }
     }
+
+    pub(super) static PARENT_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    #[jsg_resource]
+    pub(super) struct ParentResource {
+        pub child: jsg::Ref<SimpleResource>,
+        pub optional_child: Option<jsg::Ref<SimpleResource>>,
+    }
+
+    impl Drop for ParentResource {
+        fn drop(&mut self) {
+            PARENT_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[jsg_resource]
+    impl ParentResource {}
 
     #[test]
     fn objects_can_be_wrapped_and_unwrapped() {
@@ -279,45 +297,5 @@ mod tests {
         let error: Error = parse_result.unwrap_err().into();
         assert_eq!(error.name.to_string(), "TypeError");
         assert!(error.message.contains("Failed to parse integer"));
-    }
-
-    #[test]
-    fn supports_gc_via_realm_drop() {
-        SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
-
-        let harness = crate::Harness::new();
-        harness.run_in_context(|mut lock| {
-            let resource = SimpleResource {
-                name: "test".to_owned(),
-            };
-            let resource = SimpleResource::alloc(&mut lock, resource);
-            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-            std::mem::drop(resource);
-            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
-        });
-    }
-
-    #[test]
-    fn supports_gc_via_weak_callback() {
-        SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
-
-        let harness = crate::Harness::new();
-        harness.run_in_context(|mut lock| {
-            let resource = SimpleResource {
-                name: "test".to_owned(),
-            };
-            let resource = SimpleResource::alloc(&mut lock, resource);
-            let _wrapped = SimpleResource::wrap(resource.clone(), &mut lock);
-            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-            std::mem::drop(resource);
-            // There is a JS object that holds a reference to the resource
-            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-        });
-
-        harness.run_in_context(|mut lock| {
-            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
-            crate::Harness::request_gc(&mut lock);
-            assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
-        });
     }
 }
