@@ -46,20 +46,29 @@ export class DurableObjectExample extends DurableObject {
     // Test HTTP requests to container
     {
       let resp;
-      for (let i = 0; i < 6; i++) {
+      // The retry count here is arbitrary. Can increase it if necessary.
+      const maxRetries = 6;
+      for (let i = 1; i <= maxRetries; i++) {
         try {
           resp = await container
             .getTcpPort(8080)
             .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
           break;
         } catch (e) {
-          await scheduler.wait(500);
-          if (i === 5) {
+          if (!e.message.includes('container port not found')) {
+            throw e;
+          }
+          console.info(
+            `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+          );
+          console.info(e);
+          if (i === maxRetries) {
             console.error(
               `Failed to connect to container ${container.id}. Retried ${i} times`
             );
             throw e;
           }
+          await scheduler.wait(1000);
         }
       }
 
@@ -145,18 +154,38 @@ export class DurableObjectExample extends DurableObject {
       });
     }
 
-    // Wait for container to be ready
-    await scheduler.wait(2000);
-
-    // Test WebSocket upgrade request
-    const res = await container.getTcpPort(8080).fetch('http://foo/ws', {
-      headers: {
-        Upgrade: 'websocket',
-        Connection: 'Upgrade',
-        'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
-        'Sec-WebSocket-Version': '13',
-      },
-    });
+    // Wait for container to be ready with retry loop
+    let res;
+    // The retry count here is arbitrary. Can increase it if necessary.
+    const maxRetries = 6;
+    for (let i = 1; i <= maxRetries; i++) {
+      try {
+        res = await container.getTcpPort(8080).fetch('http://foo/ws', {
+          headers: {
+            Upgrade: 'websocket',
+            Connection: 'Upgrade',
+            'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
+            'Sec-WebSocket-Version': '13',
+          },
+        });
+        break;
+      } catch (e) {
+        if (!e.message.includes('container port not found')) {
+          throw e;
+        }
+        console.info(
+          `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+        );
+        console.info(e);
+        if (i === maxRetries) {
+          console.error(
+            `Failed to connect to container for WebSocket ${container.id}. Retried ${i} times`
+          );
+          throw e;
+        }
+        await scheduler.wait(1000);
+      }
+    }
 
     // Should get WebSocket upgrade response
     assert.strictEqual(res.status, 101);
