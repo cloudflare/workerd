@@ -1255,4 +1255,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
   # measurements and time-sensitive operations.
+
+  validatorReturnsCapnp @149 :Bool
+    $compatEnableFlag("validator_returns_capnp")
+    $compatDisableFlag("disable_validator_returns_capnp")
+    $experimental;
+  # When enabled, the validator will return ValidationReport encoded as capnp rather than JSON.
+  # The ValidationReport will also contain a complete WorkerBundle with validation outputs set on it
+  # (encodedFeatureFlags, memorySnapshot, encodedShardingHints).
 }
