@@ -218,7 +218,7 @@ fn generate_unwrap_code(
     if is_str_reference(ty) {
         quote! {
             let #arg_name = unsafe {
-                jsg::v8::ffi::unwrap_string(lock.isolate(), args.get(#index).into_ffi())
+                jsg::v8::ffi::unwrap_string(lock.isolate().as_ptr(), args.get(#index).into_ffi())
             };
         }
     } else {
