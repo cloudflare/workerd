@@ -956,6 +956,10 @@ jsg::Promise<void> WritableStreamInternalController::write(
       }
       auto ptr =
           kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset, byteLength);
+      if (store->IsShared()) {
+        throwTypeErrorAndConsoleWarn(
+            "Cannot construct an array buffer from a shared backing store");
+      }
       queue.push_back(
           WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
             .event = kj::heap<Write>({
