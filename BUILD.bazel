@@ -131,3 +131,9 @@ label_flag(
     build_setting_default = ":.clang-tidy",
     visibility = ["//visibility:public"],
 )
+
+# Doxygen configuration file
+exports_files(
+    ["doxyfile"],
+    visibility = ["//build/doxygen:__pkg__"],
+)

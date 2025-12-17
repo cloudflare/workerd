@@ -4,6 +4,8 @@ alias f := format
 alias st := stream-test
 alias c := coverage
 alias w := watch
+alias d := doxygen
+alias ds := doxygen-serve
 
 default:
   @just --list
@@ -158,3 +160,40 @@ profile path:
 
 watch *args="build":
   watchexec -rc -w src -w build just {{args}}
+
+# Generate doxygen API documentation (output in docs/api/)
+# Uses bazel-built doxygen with libclang support for accurate C++ parsing
+doxygen:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # Build doxygen if needed (this also builds it with libclang support)
+  echo "Ensuring doxygen is built..."
+  bazel build //build/doxygen:doxygen 2>&1 | grep -v "^Loading\|^Analyzing\|^INFO:" || true
+
+  # Get the path to the doxygen binary
+  DOXYGEN_BIN="$(bazel info output_base)/external/+_repo_rules3+doxygen/install/bin/doxygen"
+
+  if [ ! -x "$DOXYGEN_BIN" ]; then
+    echo "ERROR: Doxygen binary not found at $DOXYGEN_BIN"
+    exit 1
+  fi
+
+  # Check for graphviz
+  if ! command -v dot >/dev/null 2>&1; then
+    echo "WARNING: graphviz is not installed (needed for diagrams)."
+    echo "Install with: sudo apt-get install graphviz"
+  fi
+
+  # Create output directory
+  mkdir -p docs/api
+
+  # Run doxygen
+  echo "Running doxygen..."
+  "$DOXYGEN_BIN" doxyfile
+
+# Serve doxygen documentation on a local webserver (default port 8999)
+doxygen-serve port="8999":
+  just doxygen
+  @echo "Serving documentation at http://localhost:{{port}}"
+  python3 -m http.server {{port}} --directory docs/api/html

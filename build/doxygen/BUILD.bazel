@@ -1,0 +1,8 @@
+"""Build rules for generating doxygen documentation."""
+
+# Re-export the doxygen binary from the external repository
+alias(
+    name = "doxygen",
+    actual = "@doxygen//:doxygen",
+    visibility = ["//visibility:public"],
+)
