@@ -185,7 +185,7 @@ pub struct FunctionTemplate;
 #[derive(Debug)]
 pub struct Local<'a, T> {
     handle: ffi::Local,
-    isolate: Isolate,
+    isolate: IsolatePtr,
     _marker: PhantomData<(&'a (), T)>,
 }
 
@@ -207,7 +207,7 @@ impl<'a, T> Local<'a, T> {
     /// # Safety
     /// The caller must ensure that `isolate` is valid and that `handle` points to a V8 value
     /// that is still alive within the current `HandleScope`.
-    pub unsafe fn from_ffi(isolate: Isolate, handle: ffi::Local) -> Self {
+    pub unsafe fn from_ffi(isolate: IsolatePtr, handle: ffi::Local) -> Self {
         Local {
             handle,
             isolate,
@@ -244,7 +244,7 @@ impl<'a, T> Local<'a, T> {
     }
 
     /// Returns the isolate associated with this local handle.
-    pub fn isolate(&self) -> Isolate {
+    pub fn isolate(&self) -> IsolatePtr {
         self.isolate
     }
 }
@@ -258,7 +258,7 @@ impl<T> Clone for Local<'_, T> {
 // Value-specific implementations
 impl<'a> Local<'a, Value> {
     pub fn to_global(self, lock: &'a mut Lock) -> Global<Value> {
-        unsafe { ffi::local_to_global(lock.isolate().as_ptr(), self.into_ffi()).into() }
+        unsafe { ffi::local_to_global(lock.isolate().as_ffi(), self.into_ffi()).into() }
     }
 }
 
@@ -286,7 +286,7 @@ impl<'a> Local<'a, Object> {
     pub fn set(&mut self, lock: &mut Lock, key: &str, value: Local<'a, Value>) {
         unsafe {
             ffi::local_object_set_property(
-                lock.isolate().as_ptr(),
+                lock.isolate().as_ffi(),
                 &mut self.handle,
                 key,
                 value.into_ffi(),
@@ -295,7 +295,7 @@ impl<'a> Local<'a, Object> {
     }
 
     pub fn has(&self, lock: &mut Lock, key: &str) -> bool {
-        unsafe { ffi::local_object_has_property(lock.isolate().as_ptr(), &self.handle, key) }
+        unsafe { ffi::local_object_has_property(lock.isolate().as_ffi(), &self.handle, key) }
     }
 
     pub fn get(&self, lock: &mut Lock, key: &str) -> Option<Local<'a, Value>> {
@@ -305,7 +305,7 @@ impl<'a> Local<'a, Object> {
 
         unsafe {
             let maybe_local =
-                ffi::local_object_get_property(lock.isolate().as_ptr(), &self.handle, key);
+                ffi::local_object_get_property(lock.isolate().as_ffi(), &self.handle, key);
             let opt_local: Option<ffi::Local> = maybe_local.into();
             opt_local.map(|local| Local::from_ffi(lock.isolate(), local))
         }
@@ -349,7 +349,7 @@ impl<T> Global<T> {
         unsafe {
             Local::from_ffi(
                 lock.isolate(),
-                ffi::global_to_local(lock.isolate().as_ptr(), &self.handle),
+                ffi::global_to_local(lock.isolate().as_ffi(), &self.handle),
             )
         }
     }
@@ -364,13 +364,13 @@ impl<T> Global<T> {
     /// - `callback` can safely handle the provided data value
     pub unsafe fn make_weak(
         &mut self,
-        isolate: Isolate,
+        isolate: IsolatePtr,
         data: *mut c_void,
         callback: fn(*mut ffi::Isolate, usize) -> (),
     ) {
         unsafe {
             ffi::global_make_weak(
-                isolate.as_ptr(),
+                isolate.as_ffi(),
                 &raw mut self.handle,
                 data as usize,
                 callback,
@@ -382,7 +382,7 @@ impl<T> Global<T> {
 impl<T> From<Local<'_, T>> for Global<T> {
     fn from(local: Local<'_, T>) -> Self {
         Self {
-            handle: unsafe { ffi::local_to_global(local.isolate.as_ptr(), local.into_ffi()) },
+            handle: unsafe { ffi::local_to_global(local.isolate.as_ffi(), local.into_ffi()) },
             _marker: PhantomData,
         }
     }
@@ -424,7 +424,7 @@ impl ToLocalValue for u8 {
         unsafe {
             Local::from_ffi(
                 lock.isolate(),
-                ffi::local_new_number(lock.isolate().as_ptr(), f64::from(*self)),
+                ffi::local_new_number(lock.isolate().as_ffi(), f64::from(*self)),
             )
         }
     }
@@ -435,7 +435,7 @@ impl ToLocalValue for u32 {
         unsafe {
             Local::from_ffi(
                 lock.isolate(),
-                ffi::local_new_number(lock.isolate().as_ptr(), f64::from(*self)),
+                ffi::local_new_number(lock.isolate().as_ffi(), f64::from(*self)),
             )
         }
     }
@@ -452,7 +452,7 @@ impl ToLocalValue for &str {
         unsafe {
             Local::from_ffi(
                 lock.isolate(),
-                ffi::local_new_string(lock.isolate().as_ptr(), self),
+                ffi::local_new_string(lock.isolate().as_ffi(), self),
             )
         }
     }
@@ -468,8 +468,8 @@ impl<'a> FunctionCallbackInfo<'a> {
     }
 
     /// Returns the V8 isolate associated with this function callback.
-    pub fn isolate(&self) -> Isolate {
-        unsafe { Isolate::from_raw(ffi::fci_get_isolate(self.0)) }
+    pub fn isolate(&self) -> IsolatePtr {
+        unsafe { IsolatePtr::from_ffi(ffi::fci_get_isolate(self.0)) }
     }
 
     pub fn this(&self) -> Local<'a, Value> {
@@ -513,49 +513,42 @@ impl<'a> FunctionCallbackInfo<'a> {
 ///
 /// ```ignore
 /// // Create from raw pointer (unsafe)
-/// let isolate = unsafe { v8::Isolate::from_raw(raw_ptr) };
+/// let isolate = unsafe { v8::Isolate::from_ffi(raw_ptr) };
 ///
 /// // Check if locked before V8 operations
-/// assert!(isolate.is_locked());
+/// assert!(unsafe { isolate.is_locked() });
 ///
 /// // Get raw pointer for FFI calls
-/// let ptr = isolate.as_ptr();
+/// let ptr = isolate.as_ffi();
 /// ```
 #[derive(Clone, Copy, Debug)]
-pub struct Isolate {
+pub struct IsolatePtr {
     handle: NonNull<ffi::Isolate>,
 }
 
-impl Isolate {
+impl IsolatePtr {
     /// Creates an `Isolate` from a raw pointer.
     ///
     /// # Safety
     /// The pointer must be non-null and point to a valid V8 isolate.
-    pub unsafe fn from_raw(handle: *mut ffi::Isolate) -> Self {
+    pub unsafe fn from_ffi(handle: *mut ffi::Isolate) -> Self {
         debug_assert!(unsafe { ffi::isolate_is_locked(handle) });
         Self {
             handle: unsafe { NonNull::new_unchecked(handle) },
         }
     }
 
-    /// Creates an `Isolate` from a `NonNull` pointer.
-    pub fn from_non_null(handle: NonNull<ffi::Isolate>) -> Self {
-        debug_assert!(unsafe { ffi::isolate_is_locked(handle.as_ptr()) });
-        Self { handle }
-    }
-
     /// Returns whether this isolate is currently locked by the current thread.
-    pub fn is_locked(&self) -> bool {
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the isolate is still valid and not deallocated.
+    pub unsafe fn is_locked(&self) -> bool {
         unsafe { ffi::isolate_is_locked(self.handle.as_ptr()) }
     }
 
     /// Returns the raw pointer to the V8 isolate.
-    pub fn as_ptr(&self) -> *mut ffi::Isolate {
+    pub fn as_ffi(&self) -> *mut ffi::Isolate {
         self.handle.as_ptr()
-    }
-
-    /// Returns the `NonNull` pointer to the V8 isolate.
-    pub fn as_non_null(&self) -> NonNull<ffi::Isolate> {
-        self.handle
     }
 }

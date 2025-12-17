@@ -69,7 +69,7 @@ mod tests {
     fn objects_can_be_wrapped_and_unwrapped() {
         let harness = crate::Harness::new();
         harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_raw_isolate(isolate);
+            let mut lock = Lock::from_isolate_ptr(isolate);
             let instance = TestStruct {
                 str: "test".to_owned(),
             };
@@ -90,7 +90,7 @@ mod tests {
     fn struct_with_multiple_properties() {
         let harness = crate::Harness::new();
         harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_raw_isolate(isolate);
+            let mut lock = Lock::from_isolate_ptr(isolate);
             let instance = MultiPropertyStruct {
                 name: "Alice".to_owned(),
                 age: 30,
@@ -120,7 +120,7 @@ mod tests {
     fn number_type_conversions() {
         let harness = crate::Harness::new();
         harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_raw_isolate(isolate);
+            let mut lock = Lock::from_isolate_ptr(isolate);
 
             let byte_val: u8 = 42;
             let byte_local = byte_val.to_local(&mut lock);
@@ -136,7 +136,7 @@ mod tests {
     fn empty_object_and_property_setting() {
         let harness = crate::Harness::new();
         harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_raw_isolate(isolate);
+            let mut lock = Lock::from_isolate_ptr(isolate);
             let mut obj = lock.new_object();
 
             assert!(!obj.has(&mut lock, "nonexistent"));
@@ -163,7 +163,7 @@ mod tests {
     fn global_handle_conversion() {
         let harness = crate::Harness::new();
         harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_raw_isolate(isolate);
+            let mut lock = Lock::from_isolate_ptr(isolate);
 
             let local_str = "global test".to_local(&mut lock);
             assert!(local_str.has_value());
@@ -178,7 +178,7 @@ mod tests {
     fn nested_object_properties() {
         let harness = crate::Harness::new();
         harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_raw_isolate(isolate);
+            let mut lock = Lock::from_isolate_ptr(isolate);
             let mut outer = lock.new_object();
 
             let inner_instance = NestedStruct {

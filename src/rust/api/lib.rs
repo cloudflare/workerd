@@ -26,7 +26,7 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
         registry,
         "node-internal:dns",
         |isolate| unsafe {
-            let mut lock = jsg::Lock::from_raw_isolate(isolate);
+            let mut lock = jsg::Lock::from_isolate_ptr(isolate);
             let dns_util = jsg::Ref::new(DnsUtil {
                 _state: ResourceState::default(),
             });
@@ -49,7 +49,7 @@ mod tests {
     fn test_wrap_resource_equality() {
         let harness = Harness::new();
         harness.run_in_context(|isolate| unsafe {
-            let mut lock = jsg::Lock::from_raw_isolate(isolate);
+            let mut lock = jsg::Lock::from_isolate_ptr(isolate);
             let dns_util = jsg::Ref::new(DnsUtil {
                 _state: ResourceState::default(),
             });
