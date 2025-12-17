@@ -24,10 +24,33 @@ struct Global;
 struct Realm;
 struct TracedReference;
 struct CppgcVisitor;
-struct RustResourceData;
-class RustResource;
 enum class ExceptionType : ::std::uint8_t;
 using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
+
+// A cppgc-managed wrapper that allows Rust objects to live on V8's garbage-collected heap.
+//
+// We need this because cppgc can only trace C++ classes that inherit from GarbageCollected.
+// RustResource acts as a bridge: cppgc sees a normal C++ GC object, but the actual data
+// is a Rust object stored in cppgc's AdditionalBytes region right after this header.
+//
+// The data[] field stores a Rust fat pointer (data + vtable) to `dyn GarbageCollected`.
+// This lets us call back into Rust for tracing and destruction without knowing the
+// concrete type at compile time. When cppgc traces this object, we invoke the Rust
+// trace method through the vtable. When cppgc collects it, the destructor calls Rust's drop.
+class RustResource: public cppgc::GarbageCollected<RustResource>, public cppgc::NameProvider {
+ public:
+  ~RustResource();
+  void Trace(cppgc::Visitor* visitor) const;
+  const char* GetHumanReadableName() const final;
+
+  uintptr_t data[2];  // Rust fat pointer: [data_ptr, vtable_ptr]
+};
+
+// Used when allocating Rust objects that require 16-byte alignment.
+// cppgc's maximum supported alignment is 16 bytes. When the Rust type's alignment
+// exceeds 8 bytes, we use this class to ensure the cppgc allocation is 16-byte aligned.
+class alignas(16) RustResourceAlign16: public RustResource {};
+
 using CppgcPersistent = cppgc::Persistent<RustResource>;
 using CppgcWeakPersistent = cppgc::WeakPersistent<RustResource>;
 using CppgcMember = cppgc::Member<RustResource>;
@@ -104,20 +127,41 @@ void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 bool isolate_is_locked(Isolate* isolate);
 
-// cppgc
-RustResource* cppgc_allocate(Isolate* isolate, RustResourceData data);
+// Oilpan
+RustResource* cppgc_make_garbage_collected(Isolate* isolate, size_t size, size_t alignment);
+size_t cppgc_rust_resource_size();
+uintptr_t* cppgc_rust_resource_data(RustResource* resource);
+const uintptr_t* cppgc_rust_resource_data_const(const RustResource* resource);
 void cppgc_visitor_trace(CppgcVisitor* visitor, const TracedReference& handle);
-void cppgc_visitor_trace_member(CppgcVisitor* visitor, const CppgcMember& member);
-void cppgc_visitor_trace_weak_member(CppgcVisitor* visitor, const CppgcWeakMember& member);
-kj::Own<CppgcPersistent> cppgc_persistent_new(RustResource* resource);
-RustResource* cppgc_persistent_get(const CppgcPersistent& persistent);
-kj::Own<CppgcWeakPersistent> cppgc_weak_persistent_new(RustResource* resource);
-RustResource* cppgc_weak_persistent_get(const CppgcWeakPersistent& persistent);
-kj::Own<CppgcMember> cppgc_member_new(RustResource* resource);
-RustResource* cppgc_member_get(const CppgcMember& member);
-void cppgc_member_set(CppgcMember& member, RustResource* resource);
-kj::Own<CppgcWeakMember> cppgc_weak_member_new(RustResource* resource);
-RustResource* cppgc_weak_member_get(const CppgcWeakMember& member);
-void cppgc_weak_member_set(CppgcWeakMember& member, RustResource* resource);
+void cppgc_visitor_trace_member(CppgcVisitor* visitor, size_t member_storage);
+void cppgc_visitor_trace_weak_member(CppgcVisitor* visitor, size_t weak_member_storage);
+
+// cppgc - persistent
+size_t cppgc_persistent_size();
+void cppgc_persistent_construct(size_t storage, RustResource* resource);
+void cppgc_persistent_destruct(size_t storage);
+RustResource* cppgc_persistent_get(size_t storage);
+void cppgc_persistent_assign(size_t storage, RustResource* resource);
+
+// cppgc - weak persistent
+size_t cppgc_weak_persistent_size();
+void cppgc_weak_persistent_construct(size_t storage, RustResource* resource);
+void cppgc_weak_persistent_destruct(size_t storage);
+RustResource* cppgc_weak_persistent_get(size_t storage);
+void cppgc_weak_persistent_assign(size_t storage, RustResource* resource);
+
+// cppgc - member
+size_t cppgc_member_size();
+void cppgc_member_construct(size_t storage, RustResource* resource);
+void cppgc_member_destruct(size_t storage);
+RustResource* cppgc_member_get(size_t storage);
+void cppgc_member_assign(size_t storage, RustResource* resource);
+
+// cppgc - weak member
+size_t cppgc_weak_member_size();
+void cppgc_weak_member_construct(size_t storage, RustResource* resource);
+void cppgc_weak_member_destruct(size_t storage);
+RustResource* cppgc_weak_member_get(size_t storage);
+void cppgc_weak_member_assign(size_t storage, RustResource* resource);
 
 }  // namespace workerd::rust::jsg

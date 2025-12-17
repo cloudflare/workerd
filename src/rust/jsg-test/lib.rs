@@ -7,22 +7,15 @@ mod ffi {
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
-
         type Isolate = jsg::v8::ffi::Isolate;
     }
 
     unsafe extern "C++" {
         include!("workerd/rust/jsg-test/ffi.h");
-
         type TestHarness;
-
         pub unsafe fn create_test_harness() -> KjOwn<TestHarness>;
         pub unsafe fn run_in_context(self: &TestHarness, callback: unsafe fn(*mut Isolate));
-
-        /// Triggers a full garbage collection for testing purposes.
-        /// Note: For GC to actually collect objects, they must not be reachable from the
-        /// current HandleScope.
-        #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
+        #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn request_gc(isolate: *mut Isolate);
     }
@@ -53,11 +46,8 @@ impl Harness {
         }
     }
 
-    /// Triggers a full garbage collection for testing purposes.
     pub fn request_gc(lock: &mut jsg::Lock) {
-        unsafe {
-            ffi::request_gc(lock.isolate().as_ptr());
-        }
+        unsafe { ffi::request_gc(lock.isolate().as_ptr()) }
     }
 }
 
@@ -69,6 +59,7 @@ impl Default for Harness {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
@@ -101,7 +92,6 @@ mod tests {
         pub inner: String,
     }
 
-    /// Counter to track how many `SimpleResource` instances have been dropped.
     pub static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[jsg_resource]
@@ -144,6 +134,24 @@ mod tests {
 
     #[jsg_resource]
     impl ParentResource {}
+
+    pub static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    #[jsg_resource]
+    pub struct CyclicResource {
+        #[expect(dead_code)]
+        pub name: String,
+        pub other: RefCell<Option<jsg::Ref<CyclicResource>>>,
+    }
+
+    impl Drop for CyclicResource {
+        fn drop(&mut self) {
+            CYCLIC_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[jsg_resource]
+    impl CyclicResource {}
 
     #[test]
     fn objects_can_be_wrapped_and_unwrapped() {

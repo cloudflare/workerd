@@ -44,17 +44,124 @@ Per-isolate state for Rust resources exposed to JavaScript. Stores cached functi
 
 ## Garbage Collection with cppgc (Oilpan)
 
-Resources exposed to JavaScript are managed by V8's cppgc (Oilpan) garbage collector. This integration follows the pattern used by Deno and other V8 embedders.
+Resources exposed to JavaScript are managed by V8's cppgc (Oilpan) garbage collector with full support for cycle collection.
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        cppgc Heap                               │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ RustResource (C++ GarbageCollected object)               │  │
+│  │  ├─ data[2]: fat pointer to dyn GarbageCollected         │  │
+│  │  └─ [AdditionalBytes]: Instance<R>                       │  │
+│  │       ├─ resource: R (user's Rust struct)                │  │
+│  │       ├─ wrapper: Option<TracedReference<Object>>        │  │
+│  │       └─ strong_refcount: Cell<u32>                      │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                              ▲
+         │                              │
+    ┌────┴────┐                   ┌─────┴─────┐
+    │ Handle  │                   │  Member   │
+    │(Persist)│                   │ (traced)  │
+    └────┬────┘                   └─────┬─────┘
+         │                              │
+         └──────────┬───────────────────┘
+                    │
+              ┌─────┴─────┐
+              │  Ref<R>   │  ← dynamically switches between Handle/Member
+              │ (storage) │
+              └───────────┘
+```
+
+### RustResource: The Bridge Between C++ and Rust
+
+cppgc can only trace C++ classes that inherit from `cppgc::GarbageCollected`. `RustResource` acts as a bridge: cppgc sees a normal C++ GC object, but the actual data is a Rust object stored in cppgc's `AdditionalBytes` region.
+
+```cpp
+// C++ side (ffi.h)
+class RustResource: public cppgc::GarbageCollected<RustResource> {
+public:
+    ~RustResource();                    // Calls Rust drop
+    void Trace(cppgc::Visitor*) const;  // Calls Rust trace
+    uintptr_t data[2];                  // Fat pointer: [data_ptr, vtable_ptr]
+};
+```
+
+The `data[2]` field stores a Rust fat pointer (`dyn GarbageCollected`) enabling:
+- **Tracing**: When cppgc traces the object, it invokes `GarbageCollected::trace()` through the vtable
+- **Destruction**: When cppgc collects the object, the destructor calls Rust's `drop()`
+
+### Instance<R>: The Rust Wrapper
+
+Each resource is wrapped in `Instance<R>` which lives in the `AdditionalBytes` region:
+
+```rust
+struct Instance<R: Resource> {
+    resource: R,                                    // User's data
+    wrapper: Option<TracedReference<v8::Object>>,   // JS wrapper (if wrapped)
+    strong_refcount: Cell<u32>,                     // Active Ref<R> count
+}
+```
+
+### How Allocation Works
+
+```rust
+let resource = MyResource::alloc(&mut lock, MyResource { ... });
+```
+
+1. `cppgc::MakeGarbageCollected` allocates a `RustResource` with extra bytes for `Instance<R>`
+2. The Rust object is written into the `AdditionalBytes` region
+3. A fat pointer to `dyn GarbageCollected` is stored in `RustResource::data[2]`
+4. A `Ref<R>` with a `Handle` (strong mode) is returned
+
+### How GC Tracing Works
+
+When cppgc runs a GC cycle:
+
+1. **C++ Trace**: `RustResource::Trace()` is called by cppgc
+2. **FFI Bridge**: Calls `cppgc_invoke_trace()` which reads the fat pointer from `data[2]`
+3. **Rust Trace**: Invokes `GarbageCollected::trace()` on the Rust object
+4. **Visit Children**: The trace method visits all `Ref<T>`, `TracedReference<T>` fields
+
+### Dynamic Mode Switching in Ref<R>
+
+`Ref<R>` uses `RefStorage` to hold either a `Handle` (strong) or `Member` (traced):
+
+```rust
+enum RefStorage {
+    Strong(Handle),   // cppgc::Persistent - prevents collection
+    Traced(Member),   // cppgc::Member - traced, enables cycles
+}
+```
+
+The switch happens during GC visitation based on the parent's state:
+- **Switch to Traced**: When parent has a JS wrapper (reachable from JS)
+- **Switch to Strong**: When parent loses JS wrapper but still has Rust refs
+
+This enables cycle collection: when circular `Ref<R>` references use `Member` internally, cppgc can detect and collect the entire cycle when unreachable.
 
 ### How it works
 
-1. **Wrapping**: When a Rust resource is wrapped for JavaScript via `wrap()`, it's allocated on the cppgc heap as a `RustResource` object. A `cppgc::Persistent` handle keeps it alive while Rust holds `Ref<R>` references.
+1. **Allocation**: Resources are allocated on the cppgc heap via `Resource::alloc()`, returning a `Ref<R>` handle.
 
-2. **Reference counting**: `Ref<R>` handles track Rust-side references. While any `Ref<R>` exists, the cppgc persistent keeps the resource alive.
+2. **Dynamic mode switching**: `Ref<R>` dynamically switches between two modes:
+   - **Strong mode** (`cppgc::Persistent`): Used when held by Rust code outside the GC heap. Prevents collection.
+   - **Traced mode** (`cppgc::Member`): Used when owned by a parent resource that has a JavaScript wrapper. Enables cycle collection.
 
-3. **Release**: When the last `Ref<R>` is dropped, the persistent handle is released, allowing cppgc to garbage collect the resource.
+3. **Wrapping**: When a resource is wrapped for JavaScript via `wrap()`, the wrapper is stored as a `TracedReference`. Child `Ref<R>` fields automatically switch to traced mode during GC visitation.
 
-4. **Tracing**: Resources can implement `GarbageCollected::trace()` to trace nested JavaScript handles, ensuring proper GC integration.
+4. **Cycle collection**: Because traced `Ref<R>` fields use `cppgc::Member` internally, circular references between resources are properly collected when no JavaScript references remain.
+
+5. **Tracing**: The `#[jsg_resource]` macro generates `GarbageCollected::trace()` implementations that visit all `Ref<T>`, `TracedReference<T>`, and `RefCell<Option<Ref<T>>>` fields.
+
+### Resource Reference Types
+
+| Type | Description |
+|------|-------------|
+| `Ref<R>` | Smart pointer to a resource. Dynamically switches between strong and traced modes. Derefs to `&R`. |
+| `WeakRef<R>` | Weak reference that doesn't prevent collection. Use `upgrade()` to get `Option<Ref<R>>`. |
 
 ### cppgc Types
 
@@ -71,21 +178,28 @@ The `v8::cppgc` module provides Rust wrappers for cppgc's reference types:
 
 ```rust
 #[jsg_resource]
-pub struct MyResource {
-    data: String,
-    // TracedReference fields are automatically traced by the macro
+pub struct ParentResource {
+    name: String,
+    // Child resources - automatically traced
+    child: Ref<ChildResource>,
+    optional_child: Option<Ref<ChildResource>>,
+    // JavaScript callbacks - automatically traced
     callback: Option<TracedReference<v8::Object>>,
 }
 
-// For custom tracing logic, manually implement GarbageCollected:
-impl jsg::GarbageCollected for MyResource {
-    fn trace(&self, visitor: &mut jsg::GcVisitor) {
-        // Trace any nested TracedReference handles here
-        if let Some(ref callback) = self.callback {
-            visitor.trace(callback);
-        }
-    }
+// Cyclic references using RefCell
+#[jsg_resource]
+pub struct Node {
+    name: String,
+    next: RefCell<Option<Ref<Node>>>,
 }
+
+// Usage: create a cycle that will be properly collected
+let node_a = Node::alloc(&mut lock, Node { name: "A".into(), next: RefCell::new(None) });
+let node_b = Node::alloc(&mut lock, Node { name: "B".into(), next: RefCell::new(None) });
+*node_a.next.borrow_mut() = Some(node_b.clone());
+*node_b.next.borrow_mut() = Some(node_a.clone());
+// When wrapped and later unreferenced from JS, both nodes will be collected
 ```
 
 ## V8 Handle Types

@@ -9,34 +9,25 @@
 
 #include <kj/common.h>
 
+#include <memory>
+
 using namespace kj_rs;
 
 namespace workerd::rust::jsg {
 
-// TODO(soon): We currently do not support reusing this shim before major GC
-// like we do on the C++ side. This means there is a room for optimization in this
-// implementation.
-class RustResource final: public cppgc::GarbageCollected<RustResource> {
- public:
-  explicit RustResource(RustResourceData data): data_(kj::mv(data)) {}
-  ~RustResource() {
-    cppgc_invoke_drop(data_);
-  }
-  void Trace(cppgc::Visitor* visitor) const {
-    auto ffi_visitor = to_ffi(visitor);
-    cppgc_invoke_trace(data_, &ffi_visitor);
-  }
+// RustResource implementation - calls into Rust via CXX bridge
+RustResource::~RustResource() {
+  cppgc_invoke_drop(this);
+}
 
-  RustResourceData& data() {
-    return data_;
-  }
-  const RustResourceData& data() const {
-    return data_;
-  }
+void RustResource::Trace(cppgc::Visitor* visitor) const {
+  auto ffi_visitor = to_ffi(visitor);
+  cppgc_invoke_trace(this, &ffi_visitor);
+}
 
- private:
-  RustResourceData data_;
-};
+const char* RustResource::GetHumanReadableName() const {
+  return cppgc_invoke_get_name(this);
+}
 
 // Local<T>
 void local_drop(Local value) {
@@ -324,19 +315,33 @@ bool isolate_is_locked(Isolate* isolate) {
   return v8::Locker::IsLocked(isolate);
 }
 
-// cppgc
-RustResource* cppgc_allocate(Isolate* isolate, RustResourceData data) {
+// cppgc - Allocate Rust objects directly on the GC heap
+size_t cppgc_rust_resource_size() {
+  return sizeof(RustResource);
+}
+
+RustResource* cppgc_make_garbage_collected(Isolate* isolate, size_t size, size_t alignment) {
   auto* heap = isolate->GetCppHeap();
   KJ_ASSERT(heap != nullptr, "CppHeap not available on isolate");
-  return cppgc::MakeGarbageCollected<RustResource>(heap->GetAllocationHandle(), kj::mv(data));
+  KJ_ASSERT(alignment <= 16, "Alignment {} exceeds maximum of 16", alignment);
+
+  // Allocate RustResource with additional bytes for the Rust object.
+  // The Rust object will be written into the space after the RustResource header.
+  if (alignment <= 8) {
+    return cppgc::MakeGarbageCollected<RustResource>(
+        heap->GetAllocationHandle(), cppgc::AdditionalBytes(size));
+  }
+
+  return cppgc::MakeGarbageCollected<RustResourceAlign16>(
+      heap->GetAllocationHandle(), cppgc::AdditionalBytes(size));
 }
 
-kj::Own<CppgcPersistent> cppgc_persistent_new(RustResource* resource) {
-  return kj::heap<CppgcPersistent>(resource);
+uintptr_t* cppgc_rust_resource_data(RustResource* resource) {
+  return resource->data;
 }
 
-RustResource* cppgc_persistent_get(const CppgcPersistent& persistent) {
-  return persistent.Get();
+const uintptr_t* cppgc_rust_resource_data_const(const RustResource* resource) {
+  return resource->data;
 }
 
 void cppgc_visitor_trace(CppgcVisitor* visitor, const TracedReference& handle) {
@@ -345,46 +350,104 @@ void cppgc_visitor_trace(CppgcVisitor* visitor, const TracedReference& handle) {
   v8_visitor->Trace(traced);
 }
 
-kj::Own<CppgcWeakPersistent> cppgc_weak_persistent_new(RustResource* resource) {
-  return kj::heap<CppgcWeakPersistent>(resource);
+// Persistent inline storage functions
+// Note: cppgc::Persistent stores an internal pointer to a PersistentNode, so it can be
+// stored inline without issues. The internal node is heap-allocated by cppgc.
+
+size_t cppgc_persistent_size() {
+  return sizeof(CppgcPersistent);
 }
 
-RustResource* cppgc_weak_persistent_get(const CppgcWeakPersistent& persistent) {
-  return persistent.Get();
+void cppgc_persistent_construct(size_t storage, RustResource* resource) {
+  new (reinterpret_cast<void*>(storage)) CppgcPersistent(resource);
 }
 
-kj::Own<CppgcMember> cppgc_member_new(RustResource* resource) {
-  return kj::heap<CppgcMember>(resource);
+void cppgc_persistent_destruct(size_t storage) {
+  std::destroy_at(reinterpret_cast<CppgcPersistent*>(storage));
 }
 
-RustResource* cppgc_member_get(const CppgcMember& member) {
-  return member.Get();
+RustResource* cppgc_persistent_get(size_t storage) {
+  return reinterpret_cast<const CppgcPersistent*>(storage)->Get();
 }
 
-void cppgc_member_set(CppgcMember& member, RustResource* resource) {
-  member = resource;
+void cppgc_persistent_assign(size_t storage, RustResource* resource) {
+  *reinterpret_cast<CppgcPersistent*>(storage) = resource;
 }
 
-void cppgc_visitor_trace_member(CppgcVisitor* visitor, const CppgcMember& member) {
+// WeakPersistent inline storage functions
+
+size_t cppgc_weak_persistent_size() {
+  return sizeof(CppgcWeakPersistent);
+}
+
+void cppgc_weak_persistent_construct(size_t storage, RustResource* resource) {
+  new (reinterpret_cast<void*>(storage)) CppgcWeakPersistent(resource);
+}
+
+void cppgc_weak_persistent_destruct(size_t storage) {
+  std::destroy_at(reinterpret_cast<CppgcWeakPersistent*>(storage));
+}
+
+RustResource* cppgc_weak_persistent_get(size_t storage) {
+  return reinterpret_cast<const CppgcWeakPersistent*>(storage)->Get();
+}
+
+void cppgc_weak_persistent_assign(size_t storage, RustResource* resource) {
+  *reinterpret_cast<CppgcWeakPersistent*>(storage) = resource;
+}
+
+// Member inline storage functions
+
+size_t cppgc_member_size() {
+  return sizeof(CppgcMember);
+}
+
+void cppgc_member_construct(size_t storage, RustResource* resource) {
+  new (reinterpret_cast<void*>(storage)) CppgcMember(resource);
+}
+
+void cppgc_member_destruct(size_t storage) {
+  std::destroy_at(reinterpret_cast<CppgcMember*>(storage));
+}
+
+RustResource* cppgc_member_get(size_t storage) {
+  return reinterpret_cast<const CppgcMember*>(storage)->Get();
+}
+
+void cppgc_member_assign(size_t storage, RustResource* resource) {
+  *reinterpret_cast<CppgcMember*>(storage) = resource;
+}
+
+void cppgc_visitor_trace_member(CppgcVisitor* visitor, size_t storage) {
   auto* v8_visitor = cppgc_visitor_from_ffi(visitor);
-  v8_visitor->Trace(member);
+  v8_visitor->Trace(*reinterpret_cast<const CppgcMember*>(storage));
 }
 
-kj::Own<CppgcWeakMember> cppgc_weak_member_new(RustResource* resource) {
-  return kj::heap<CppgcWeakMember>(resource);
+// WeakMember inline storage functions
+
+size_t cppgc_weak_member_size() {
+  return sizeof(CppgcWeakMember);
 }
 
-RustResource* cppgc_weak_member_get(const CppgcWeakMember& member) {
-  return member.Get();
+void cppgc_weak_member_construct(size_t storage, RustResource* resource) {
+  new (reinterpret_cast<void*>(storage)) CppgcWeakMember(resource);
 }
 
-void cppgc_weak_member_set(CppgcWeakMember& member, RustResource* resource) {
-  member = resource;
+void cppgc_weak_member_destruct(size_t storage) {
+  std::destroy_at(reinterpret_cast<CppgcWeakMember*>(storage));
 }
 
-void cppgc_visitor_trace_weak_member(CppgcVisitor* visitor, const CppgcWeakMember& member) {
+RustResource* cppgc_weak_member_get(size_t storage) {
+  return reinterpret_cast<const CppgcWeakMember*>(storage)->Get();
+}
+
+void cppgc_weak_member_assign(size_t storage, RustResource* resource) {
+  *reinterpret_cast<CppgcWeakMember*>(storage) = resource;
+}
+
+void cppgc_visitor_trace_weak_member(CppgcVisitor* visitor, size_t storage) {
   auto* v8_visitor = cppgc_visitor_from_ffi(visitor);
-  v8_visitor->Trace(member);
+  v8_visitor->Trace(*reinterpret_cast<const CppgcWeakMember*>(storage));
 }
 
 }  // namespace workerd::rust::jsg

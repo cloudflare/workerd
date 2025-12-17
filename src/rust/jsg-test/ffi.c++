@@ -4,6 +4,7 @@
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
+#include <cppgc/common.h>
 #include <v8.h>
 
 #include <kj/common.h>
@@ -52,8 +53,14 @@ void TestHarness::run_in_context(::rust::Fn<void(Isolate*)> callback) const {
 }
 
 void request_gc(Isolate* isolate) {
+  // Request V8 garbage collection
   isolate->RequestGarbageCollectionForTesting(
       v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
+
+  // Also explicitly trigger cppgc collection for the CppHeap
+  if (auto* cppHeap = isolate->GetCppHeap()) {
+    cppHeap->CollectGarbageForTesting(cppgc::EmbedderStackState::kNoHeapPointers);
+  }
 }
 
 }  // namespace rust::jsg_test

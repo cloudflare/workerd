@@ -13,6 +13,7 @@ pub use resource::Ref;
 pub use resource::ResourceImpl;
 pub use resource::WeakRef;
 pub use v8::GarbageCollected;
+pub use v8::GcParent;
 pub use v8::GcVisitor;
 pub use v8::Isolate;
 pub use v8::cppgc;
@@ -177,14 +178,6 @@ impl Lock {
         unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ptr(), message) }
     }
 
-    /// Allocates a `RustResource` on the cppgc heap.
-    ///
-    /// # Safety
-    /// The data must contain valid pointers to drop and trace functions.
-    pub unsafe fn alloc(&mut self, data: v8::ffi::RustResourceData) -> *mut v8::ffi::RustResource {
-        unsafe { v8::ffi::cppgc_allocate(self.isolate().as_ptr(), data) }
-    }
-
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
     where
         F: Future<Output = I>,
@@ -251,7 +244,7 @@ pub enum Member {
 /// Resource types are passed by reference and call back into Rust when JavaScript accesses
 /// their members. This is analogous to `JSG_RESOURCE_TYPE` in C++ JSG. Resources must provide
 /// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
-pub trait Resource: Type + GarbageCollected + Sized {
+pub trait Resource: Type + GarbageCollected + Sized + 'static {
     type Template: ResourceTemplate;
 
     /// Returns the list of methods, properties, and constructors exposed to JavaScript.
@@ -259,13 +252,12 @@ pub trait Resource: Type + GarbageCollected + Sized {
     where
         Self: Sized;
 
-    /// Allocates a resource instance and returns a reference-counted handle.
+    /// Allocates a resource instance on the cppgc heap and returns a persistent handle.
     ///
     /// The returned `Ref<Self>` manages the resource's lifetime. When all `Ref` handles are
-    /// dropped and a JavaScript wrapper exists, the instance becomes weak and eligible for
-    /// garbage collection.
-    fn alloc(_lock: &mut Lock, this: Self) -> Ref<Self> {
-        resource::Instance::new(this)
+    /// dropped, the instance becomes eligible for garbage collection.
+    fn alloc(lock: &mut Lock, this: Self) -> Ref<Self> {
+        resource::Instance::alloc(lock, this)
     }
 }
 
