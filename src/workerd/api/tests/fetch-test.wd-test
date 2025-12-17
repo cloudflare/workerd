@@ -12,6 +12,9 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "upper_case_all_http_methods",
           "fetch_iterable_type_support",
+          # Note that the override adjustment flag will be enabled by default
+          # when fetch_iterable_type_support is enabled after 2026-01-15.
+          "fetch_iterable_type_support_override_adjustment",
         ],
       )
     ),

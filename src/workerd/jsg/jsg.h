@@ -2074,6 +2074,7 @@ struct JsgConfig {
   bool noSubstituteNull = false;
   bool unwrapCustomThenables = false;
   bool fetchIterableTypeSupport = false;
+  bool fetchIterableTypeSupportOverrideAdjustment = false;
   bool fastApiEnabled = false;
 };
 
