@@ -20,15 +20,16 @@ kj::Maybe<kj::Date> SqliteMetadata::getAlarm() {
   return KJ_ASSERT_NONNULL(cacheState).alarmTime;
 }
 
-void SqliteMetadata::setAlarm(kj::Maybe<kj::Date> currentTime, bool allowUnconfirmed) {
+bool SqliteMetadata::setAlarm(kj::Maybe<kj::Date> currentTime, bool allowUnconfirmed) {
   KJ_IF_SOME(c, cacheState) {
     if (c.alarmTime == currentTime) {
-      return;
+      return false;
     }
   }
   setAlarmUncached(currentTime, allowUnconfirmed);
   db.onRollback([this, oldCacheState = cacheState]() { cacheState = oldCacheState; });
   cacheState = Cache{.alarmTime = currentTime};
+  return true;
 }
 
 kj::Maybe<kj::Date> SqliteMetadata::getAlarmUncached() {

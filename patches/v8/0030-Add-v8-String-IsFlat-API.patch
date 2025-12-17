@@ -8,10 +8,10 @@ Tells us if a string is already flattened or not.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-primitive.h b/include/v8-primitive.h
-index 1bf21e60ad9a99bc98aa6a24c1888f1461ce7b46..481313c4de858ea06018f4a38639c87651be7337 100644
+index 87215cf6ece31d4d10392d93c3925ec10c3c138c..360bbe0bb33b58200f05f6d98b03e17316de9cce 100644
 --- a/include/v8-primitive.h
 +++ b/include/v8-primitive.h
-@@ -163,6 +163,11 @@ class V8_EXPORT String : public Name {
+@@ -157,6 +157,11 @@ class V8_EXPORT String : public Name {
     */
    bool ContainsOnlyOneByte() const;
  
@@ -20,14 +20,14 @@ index 1bf21e60ad9a99bc98aa6a24c1888f1461ce7b46..481313c4de858ea06018f4a38639c876
 +   */
 +  bool IsFlat() const;
 +
-   /**
-    * Write the contents of the string to an external buffer.
-    * If no arguments are given, expects the buffer to be large
+   struct WriteFlags {
+     enum {
+       kNone = 0,
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 3d58c933634e5c9b8bf271c8b7df1dad0ccd672e..56cb7911a9d609133ef964a49198ae8baf4937ed 100644
+index 3012edb6ce08c6417175c16e796eb4fb26b18af4..946a2154e793b1def5e783fd0eea2a286fa4ee54 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -5619,6 +5619,10 @@ bool String::IsOneByte() const {
+@@ -5591,6 +5591,10 @@ bool String::IsOneByte() const {
    return Utils::OpenDirectHandle(this)->IsOneByteRepresentation();
  }
  

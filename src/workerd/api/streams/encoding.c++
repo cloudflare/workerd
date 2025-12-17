@@ -6,6 +6,7 @@
 
 #include <workerd/api/encoding.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
@@ -48,9 +49,12 @@ TextDecoderStream::TextDecoderStream(jsg::Ref<TextDecoder> decoder,
 jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<TextDecoderStreamInit> options) {
 
-  auto decoder = TextDecoder::constructor(js, kj::mv(label), options.map([](auto& opts) {
+  auto decoder = TextDecoder::constructor(js, kj::mv(label), options.map([&js](auto& opts) {
     return TextDecoder::ConstructorOptions{
-      .fatal = opts.fatal.orDefault(true),
+      // Previously this would default to true. The spec requires a default
+      // of false, however. When the pedanticWpt flag is not set, we continue
+      // to default as true.
+      .fatal = opts.fatal.orDefault(!FeatureFlags::get(js).getPedanticWpt()),
       .ignoreBOM = opts.ignoreBOM.orDefault(false),
     };
   }));
@@ -58,20 +62,23 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
   // The controller will store c++ references to both the readable and writable
   // streams underlying controllers.
   auto transformer = TransformStream::constructor(js,
-      Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>(
-                      JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()), (decoder),
-                          (jsg::Lock& js, auto chunk, auto controller) {
-                            jsg::BufferSource source(js, chunk);
-                            auto decoded = JSG_REQUIRE_NONNULL(
-                                decoder->decodePtr(js, source.asArrayPtr(), false), TypeError,
-                                "Failed to decode input.");
-                            // Only enqueue if there's actual output - don't emit empty chunks
-                            // for incomplete multi-byte sequences
-                            if (decoded.length(js) > 0) {
-                            controller->enqueue(js, decoded);
-                            }
-                            return js.resolvedPromise();
-                          })),
+      Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>( JSG_VISITABLE_LAMBDA(
+                      (decoder = decoder.addRef()), (decoder),
+                      (jsg::Lock& js, auto chunk, auto controller) {
+                        JSG_REQUIRE(chunk->IsArrayBuffer() || chunk->IsArrayBufferView(), TypeError,
+                            "This TransformStream is being used as a byte stream, "
+                            "but received a value that is not a BufferSource.");
+                        jsg::BufferSource source(js, chunk);
+                        auto decoded =
+                            JSG_REQUIRE_NONNULL(decoder->decodePtr(js, source.asArrayPtr(), false),
+                                TypeError, "Failed to decode input.");
+                        // Only enqueue if there's actual output - don't emit empty chunks
+                        // for incomplete multi-byte sequences
+                        if (decoded.length(js) > 0) {
+                        controller->enqueue(js, decoded);
+                        }
+                        return js.resolvedPromise();
+                      })),
         .flush = jsg::Function<Transformer::FlushAlgorithm>(
             JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()), (decoder),
                 (jsg::Lock& js, auto controller) {

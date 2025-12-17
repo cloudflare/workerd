@@ -8,10 +8,10 @@ Similar to fp16, these dependencies now needs to be downloaded by bazel.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index b5e7e85d7188a2c6d9c0d558c0b2bf211e6f8d86..ac3d0f776840f18c33a5d47dafeb1436ea46cf2a 100644
+index 89473bb418f5949917f40761e42a72e1a0faac9d..4391b14790c1e8bdea5d63cf832cf69a7906f8e4 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4496,17 +4496,19 @@ cc_library(
+@@ -4500,17 +4500,19 @@ cc_library(
      ],
  )
  
@@ -42,7 +42,7 @@ index b5e7e85d7188a2c6d9c0d558c0b2bf211e6f8d86..ac3d0f776840f18c33a5d47dafeb1436
  
  v8_library(
      name = "v8_libshared",
-@@ -4537,15 +4539,15 @@ v8_library(
+@@ -4541,15 +4543,15 @@ v8_library(
      ],
      deps = [
          ":lib_dragonbox",
@@ -81,7 +81,7 @@ index 146e3f2854159cef6daa5820d25373cef07031f4..5b22cc10cdc23d3f524d63293ec20bed
  namespace v8::internal {
  
 diff --git a/src/objects/string-inl.h b/src/objects/string-inl.h
-index 3985369bbc065f1f203e816ebc6366f7d8f123ca..f54d769d1430842bb7bf1bc247d2514234ddb3a4 100644
+index e80cec42c33bd280f6083aea09c555256408b1c6..d9bfb2a3bcf360eb54f12eba1886f2faf46c59ce 100644
 --- a/src/objects/string-inl.h
 +++ b/src/objects/string-inl.h
 @@ -12,6 +12,8 @@
@@ -102,7 +102,7 @@ index 3985369bbc065f1f203e816ebc6366f7d8f123ca..f54d769d1430842bb7bf1bc247d25142
  // Has to be the last include (doesn't have include guards):
  #include "src/objects/object-macros.h"
 diff --git a/src/objects/string.h b/src/objects/string.h
-index 194e238a7677a5dd9439adb77993bb17544fb7ba..336d71d315881bc8602cdf4259c22e2f837ffcc4 100644
+index c09211a9823d8d21cf6a667a995621dbe80f42d5..5579468c41d154a8f161be7988285eb3914dc92f 100644
 --- a/src/objects/string.h
 +++ b/src/objects/string.h
 @@ -8,6 +8,7 @@

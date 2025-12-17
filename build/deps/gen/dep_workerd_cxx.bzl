@@ -2,18 +2,12 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-URL = "https://github.com/cloudflare/workerd-cxx/tarball/41cae2545679ef2cc9f52ea2c452cb51a0d4a3ae"
-STRIP_PREFIX = "cloudflare-workerd-cxx-41cae25"
-SHA256 = "bc82fc977c65e38c9767e9fa12cd2ea27222f96d927e794f261ba55f023d8451"
-TYPE = "tgz"
-COMMIT = "41cae2545679ef2cc9f52ea2c452cb51a0d4a3ae"
-
 def dep_workerd_cxx():
     http_archive(
         name = "workerd-cxx",
-        url = URL,
-        strip_prefix = STRIP_PREFIX,
-        type = TYPE,
-        sha256 = SHA256,
         repo_mapping = {"@crates.io": "@crates_vendor"},
+        url = "https://github.com/cloudflare/workerd-cxx/tarball/916f0e7be8f1d43fe5ece1b72edd3c5844243d7b",
+        strip_prefix = "cloudflare-workerd-cxx-916f0e7",
+        sha256 = "7ddce8e81d0b81adf6f07f18376a6fea9dca42e6b03b2fcf703c62196c270ad0",
+        type = "tgz",
     )

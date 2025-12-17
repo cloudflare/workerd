@@ -9,8 +9,7 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/observer.h>
-
-#include <list>
+#include <workerd/util/ring-buffer.h>
 
 namespace workerd::api {
 
@@ -341,31 +340,29 @@ class WritableStreamInternalController: public WritableStreamController {
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing
-    kj::OneOf<Write, Pipe, Close, Flush> event;
+    kj::OneOf<kj::Own<Write>, kj::Own<Pipe>, kj::Own<Close>, kj::Own<Flush>> event;
 
     JSG_MEMORY_INFO(WriteEvent) {
       if (outputLock != kj::none) {
         tracker.trackFieldWithSize("outputLock", sizeof(IoOwn<kj::Promise<void>>));
       }
       KJ_SWITCH_ONEOF(event) {
-        KJ_CASE_ONEOF(w, Write) {
+        KJ_CASE_ONEOF(w, kj::Own<Write>) {
           tracker.trackField("inner", w);
         }
-        KJ_CASE_ONEOF(p, Pipe) {
+        KJ_CASE_ONEOF(p, kj::Own<Pipe>) {
           tracker.trackField("inner", p);
         }
-        KJ_CASE_ONEOF(c, Close) {
+        KJ_CASE_ONEOF(c, kj::Own<Close>) {
           tracker.trackField("inner", c);
         }
-        KJ_CASE_ONEOF(f, Flush) {
+        KJ_CASE_ONEOF(f, kj::Own<Flush>) {
           tracker.trackField("inner", f);
         }
       }
     }
   };
 
-  // We use std::list to keep memory overhead low when there are many streams with no or few pending
-  // events.
-  std::list<WriteEvent> queue;
+  RingBuffer<WriteEvent, 8> queue;
 };
 }  // namespace workerd::api

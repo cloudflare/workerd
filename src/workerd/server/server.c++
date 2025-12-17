@@ -1584,8 +1584,8 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
       // for a more precise end time, set the end timestamp now, if available
-      if (IoContext::hasCurrent()) {
-        auto time = IoContext::current().now();
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+        auto time = ioContext.now();
         t->recordTimestamp(time);
       }
       t->setOutcome(
@@ -1909,6 +1909,7 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
+    kj::Maybe<kj::Network&> workerdDebugPortNetwork;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
@@ -2163,41 +2164,34 @@ class Server::WorkerService final: public Service,
     if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
       // Setting up buffered tail workers support, but only if we actually have tail workers
       // configured.
-      auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
       auto tailStreamWriter = tracing::initializeTailStreamWriter(
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
-      KJ_IF_SOME(t, tailStreamWriter) {
-        tracer->addTailStreamWriter(kj::addRef(*t));
-      }
-      workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
-          kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
-          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
-          mapCopyString(entrypointName) /* entrypoint */, kj::none /* durableObjectId */,
-          kj::mv(tailStreamWriter));
+      auto trace = kj::refcounted<Trace>(kj::none /* stableId */, kj::none /* scriptName */,
+          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, kj::none /* scriptId */,
+          nullptr /* scriptTags */, mapCopyString(entrypointName), executionModel,
+          kj::none /* durableObjectId */);
+      kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(
+          kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::mv(tailStreamWriter));
 
-      // When the tracer is complete, deliver the traces to both the parent
-      // and the buffered tail workers. We do NOT want to attach the tracer to the
-      // tracer->onComplete() promise here because it is the destructor of
-      // the PipelineTracer that resolves the onComplete promise. If we attach
-      // the tracer to the promise the tracer won't be destroyed while the
-      // promise is still pending! Fortunately, the WorkerTracer we created
-      // will hold a strong reference to the worker tracer for as long as it
-      // is needed. As long as the WorkerTracer is still alive, the PipelineTracer
-      // will be. See below, we end up creating two references to the WorkerTracer,
-      // one held by the observer and one that will be passed to the IoContext.
-      // The PipelineTracer will be destroyed once both of those are freed.
-      waitUntilTasks.add(tracer->onComplete().then(
-          kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
-                            kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
-        for (auto& worker: tailWorkers) {
-          auto event = kj::heap<workerd::api::TraceCustomEvent>(
-              workerd::api::TraceCustomEvent::TYPE, mapAddRef(traces));
-          co_await worker->customEvent(kj::mv(event)).ignoreResult();
-        }
-        co_return;
-      })));
+      // When the tracer is complete, deliver traces to any buffered tail workers. We end up
+      // creating two references to the WorkerTracer, one held by the observer and one that will be
+      // passed to the IoContext. This ensures that the tracer lives long enough to receive all
+      // events.
+      if (!bufferedTailWorkers.empty()) {
+        waitUntilTasks.add(tracer->onComplete().then(
+            kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
+                              kj::Own<Trace> trace) mutable -> kj::Promise<void> {
+          for (auto& worker: tailWorkers) {
+            auto event = kj::heap<workerd::api::TraceCustomEvent>(
+                workerd::api::TraceCustomEvent::TYPE, kj::arr(kj::addRef(*trace)));
+            co_await worker->customEvent(kj::mv(event)).ignoreResult();
+          }
+          co_return;
+        })));
+      }
+      workerTracer = kj::mv(tracer);
     }
 
     KJ_IF_SOME(w, workerTracer) {
@@ -3231,13 +3225,7 @@ class Server::WorkerService final: public Service,
     co_await context.waitForOutputLocks();
 
     auto innerReq = client->request(kj::HttpMethod::POST, urlStr, headers, requestJson.size());
-
-    struct RefcountedWrapper: public kj::Refcounted {
-      explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
-      kj::Own<kj::HttpClient> client;
-    };
-    auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
-    auto request = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
+    auto request = attachToRequest(kj::mv(innerReq), kj::refcountedWrapper(kj::mv(client)));
 
     co_await request.body->write(requestJson.asBytes())
         .attach(kj::mv(requestJson), kj::mv(request.body));
@@ -3321,6 +3309,13 @@ class Server::WorkerService final: public Service,
   kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
       kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
+
+  kj::Network& getWorkerdDebugPortNetwork() override {
+    auto& channels =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+    return KJ_REQUIRE_NONNULL(channels.workerdDebugPortNetwork,
+        "workerdDebugPort binding is not enabled for this worker");
+  }
 
   // ---------------------------------------------------------------------------
   // implements TimerChannel
@@ -3432,6 +3427,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     kj::Vector<FutureActorChannel>& actorChannels,
     kj::Vector<FutureActorClassChannel>& actorClassChannels,
     kj::Vector<FutureWorkerLoaderChannel>& workerLoaderChannels,
+    bool& hasWorkerdDebugPortBinding,
     kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
     bool experimental) {
   // creates binding object or returns null and reports an error
@@ -3656,8 +3652,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_SOME(global,
             createBinding(workerName, conf, innerBinding, errorReporter, subrequestChannels,
-                actorChannels, actorClassChannels, workerLoaderChannels, actorConfigs,
-                experimental)) {
+                actorChannels, actorClassChannels, workerLoaderChannels, hasWorkerdDebugPortBinding,
+                actorConfigs, experimental)) {
           innerGlobals.add(kj::mv(global));
         } else {
           // we've already communicated the error
@@ -3785,6 +3781,18 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       workerLoaderChannels.add(kj::mv(channel));
       return makeGlobal(Global::WorkerLoader{.channel = channelNumber});
     }
+
+    case config::Worker::Binding::WORKERD_DEBUG_PORT: {
+      if (!experimental) {
+        errorReporter.addError(kj::str(
+            "workerdDebugPort bindings are an experimental feature which may change or go away "
+            "in the future. You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
+      }
+
+      hasWorkerdDebugPortBinding = true;
+      return makeGlobal(Global::WorkerdDebugPort{});
+    }
   }
   errorReporter.addError(kj::str(errorContext,
       "has unrecognized type. Was the config compiled with a newer version of "
@@ -3830,6 +3838,7 @@ struct Server::WorkerDef {
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
+  bool hasWorkerdDebugPortBinding = false;
   kj::Array<FutureSubrequestChannel> tails;
   kj::Array<FutureSubrequestChannel> streamingTails;
 
@@ -4186,13 +4195,15 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
+  bool hasWorkerdDebugPortBinding = false;
 
   auto confBindings = conf.getBindings();
   kj::Vector<WorkerdApi::Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_SOME(global,
         createBinding(name, conf, binding, errorReporter, subrequestChannels, actorChannels,
-            actorClassChannels, workerLoaderChannels, actorConfigs, experimental)) {
+            actorClassChannels, workerLoaderChannels, hasWorkerdDebugPortBinding, actorConfigs,
+            experimental)) {
       globals.add(kj::mv(global));
     }
   }
@@ -4221,6 +4232,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     .actorChannels = kj::mv(actorChannels),
     .actorClassChannels = kj::mv(actorClassChannels),
     .workerLoaderChannels = kj::mv(workerLoaderChannels),
+    .hasWorkerdDebugPortBinding = hasWorkerdDebugPortBinding,
 
     // clang-format off
     .tails = KJ_MAP(tail, conf.getTails()) -> FutureSubrequestChannel {
@@ -4624,6 +4636,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
             .addRef();
       }
     };
+
+    if (def.hasWorkerdDebugPortBinding) {
+      result.workerdDebugPortNetwork = network;
+    }
 
     return result;
   };

@@ -674,6 +674,19 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   }
 }
 
+// TODO(soon): If the returned kj::Array<kj::byte> is used outside of the isolate lock,
+// we'll need to ensure it works correctly once MPK (Memory Protection Keys) enforcement
+// is fully in place.
+kj::Array<kj::byte> asBytes(v8::Local<v8::SharedArrayBuffer> sharedArrayBuffer) {
+  auto backing = sharedArrayBuffer->GetBackingStore();
+  kj::ArrayPtr bytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
+  if (bytes == nullptr) {
+    return getEmptyArray();
+  } else {
+    return bytes.attach(kj::mv(backing));
+  }
+}
+
 void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
   if (value->IsArray()) {
     // Optimize array freezing (Array is a subclass of Object, but we can iterate it faster).

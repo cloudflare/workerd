@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
@@ -22,93 +23,15 @@ namespace {
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 }  // namespace
 
-namespace tracing {
-TailStreamWriter::TailStreamWriter(Reporter reporter): state(State(kj::mv(reporter))) {}
-
-void TailStreamWriter::report(
-    const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
-  // Becomes a no-op if a terminal event (close) has been reported, or if the stream closed due to
-  // not receiving a well-formed event handler. We need to disambiguate these cases as the former
-  // indicates an implementation error resulting in trailing events whereas the latter case is
-  // caused by a user error and events being reported after the stream being closed are expected –
-  // reject events following an outcome event, but otherwise just exit if the state has been closed.
-  // This could be an assert, but just log an error in case this is prevalent in some edge case.
-  if (outcomeSeen) {
-    KJ_LOG(ERROR, "reported tail stream event after stream close ", event, kj::getStackTrace());
-  }
-  auto& s = KJ_UNWRAP_OR_RETURN(state);
-
-  // The onset event must be first and must only happen once.
-  if (event.is<Onset>()) {
-    KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
-    onsetSeen = true;
-  } else {
-    KJ_ASSERT(onsetSeen, "Tail stream onset was not reported");
-    if (event.is<Outcome>()) {
-      outcomeSeen = true;
-    }
-  }
-
-  // A zero spanId at the TailEvent level signifies that no spanId should be provided to the tail
-  // worker (for Onset events). We go to great lengths to rule out getting an all-zero spanId by
-  // chance (see SpanId::fromEntropy()), so this should be safe.
-  TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
-      context.getSpanId() == SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()), timestamp,
-      s.sequence++, kj::mv(event));
-
-  // If the reporter returns false, then we will treat it as a close signal.
-  if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
-}
-}  // namespace tracing
-
-PipelineTracer::~PipelineTracer() noexcept(false) {
-  KJ_IF_SOME(f, completeFulfiller) {
-    f.get()->fulfill(traces.releaseAsArray());
-  }
-}
-
-void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces) {
-  for (auto& t: traces) {
-    this->traces.add(kj::addRef(*t));
-  }
-}
-
-kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
+kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == kj::none, "onComplete() can only be called once");
 
-  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::Own<Trace>>>();
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<Trace>>();
   completeFulfiller = kj::mv(paf.fulfiller);
   return kj::mv(paf.promise);
 }
 
-kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
-    ExecutionModel executionModel,
-    kj::Maybe<kj::String> scriptId,
-    kj::Maybe<kj::String> stableId,
-    kj::Maybe<kj::String> scriptName,
-    kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-    kj::Maybe<kj::String> dispatchNamespace,
-    kj::Array<kj::String> scriptTags,
-    kj::Maybe<kj::String> entrypoint,
-    kj::Maybe<kj::String> durableObjectId,
-    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter) {
-  auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
-      kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
-      executionModel, kj::mv(durableObjectId));
-  traces.add(kj::addRef(*trace));
-  return kj::refcounted<WorkerTracer>(
-      addRefToThis(), kj::mv(trace), pipelineLogLevel, kj::mv(maybeTailStreamWriter));
-}
-
-void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
-  traces.add(kj::refcounted<Trace>(reader));
-}
-
-void PipelineTracer::addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer) {
-  tailStreamWriters.add(kj::mv(writer));
-}
-
-WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
+WorkerTracer::WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
     kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter)
@@ -116,11 +39,6 @@ WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
       maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {}
-
-WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
-    : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(
-          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)) {}
 
 WorkerTracer::~WorkerTracer() noexcept(false) {
   // Report the outcome event, which should have been delivered by now.
@@ -154,6 +72,11 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
       LOG_ERROR_PERIODICALLY(
           "destructed WorkerTracer with STW without reporting Onset event", kj::getStackTrace());
     }
+  }
+
+  // Report the completed trace, if fulfiller is set up.
+  KJ_IF_SOME(f, completeFulfiller) {
+    f.get()->fulfill(kj::mv(trace));
   }
 };
 
@@ -483,7 +406,7 @@ void BaseTracer::adjustSpanTime(tracing::CompleteSpan& span) {
           KJ_FAIL_ASSERT(
               "reported span without current request", span.operationName, hasCompleteTime);
         } else {
-          KJ_LOG(WARNING, "reported span without current request", span.operationName,
+          LOG_NOSENTRY(WARNING, "reported span without current request", span.operationName,
               hasCompleteTime);
         }
       }
@@ -572,8 +495,7 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     auto tag = tracing::Attribute("jsrpc.method"_kjc, methodName.clone());
-    kj::Array<tracing::Attribute> attrs(&tag, 1, kj::NullArrayDisposer::instance);
-    writer->report(context, kj::mv(attrs), timestamp);
+    writer->report(context, kj::arr(kj::mv(tag)), timestamp);
   }
 }
 

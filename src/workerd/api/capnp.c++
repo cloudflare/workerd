@@ -634,8 +634,8 @@ CapnpCapability::~CapnpCapability() noexcept(false) {
     //   which is usually sooner (and more deterministic). But logging a warning during
     //   IoContext tear-down is problematic since logWarningOnce() is a method on
     //   IoContext...
-    if (IoContext::hasCurrent()) {
-      IoContext::current().logWarningOnce(
+    KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+      ioContext.logWarningOnce(
           kj::str("A Cap'n Proto capability of type ", schema.getShortDisplayName(),
               " was not closed properly. You must call close() on all capabilities in order to "
               "let the other side know that you are no longer using them. You cannot rely on "

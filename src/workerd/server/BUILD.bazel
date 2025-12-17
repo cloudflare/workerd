@@ -134,6 +134,20 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "workerd-debug-port-client",
+    srcs = [
+        "workerd-debug-port-client.c++",
+    ],
+    hdrs = [
+        "workerd-debug-port-client.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
     name = "workerd-api",
     srcs = [
         "workerd-api.c++",
@@ -156,6 +170,7 @@ wd_cc_library(
         ":actor-id-impl",
         ":fallback-service",
         ":pyodide",
+        ":workerd-debug-port-client",
         ":workerd_capnp",
         "//src/cloudflare",
         "//src/node",
@@ -201,7 +216,6 @@ wd_cc_library(
         "//src/workerd/api:pyodide",
         "//src/workerd/io",
         "//src/workerd/io:bundle-fs",
-        "//src/workerd/io:trace-stream",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",

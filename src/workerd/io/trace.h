@@ -582,9 +582,6 @@ struct Attribute final {
   explicit Attribute(kj::ConstString name, Values&& values);
 
   template <AttributeValue V>
-  explicit Attribute(kj::ConstString name, V v): Attribute(kj::mv(name), Value(kj::mv(v))) {}
-
-  template <AttributeValue V>
   explicit Attribute(kj::ConstString name, kj::Array<V> vals)
       : Attribute(kj::mv(name), KJ_MAP(v, vals) { return Value(kj::mv(v)); }) {}
 

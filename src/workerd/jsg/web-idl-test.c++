@@ -7,14 +7,45 @@
 namespace workerd::jsg::test {
 namespace {
 
-// Static unit tests for certain Web IDL traits.
-static_assert(webidl::isDictionaryType<TestStruct> == true);
-static_assert(webidl::isDictionaryType<NumberBox> == false);
-static_assert(webidl::isDictionaryType<kj::Maybe<TestStruct>> == false);
+// Static unit tests for Web IDL type concepts.
 
+// DictionaryType concept tests
+static_assert(webidl::DictionaryType<TestStruct>);
+static_assert(!webidl::DictionaryType<NumberBox>);
+static_assert(!webidl::DictionaryType<kj::Maybe<TestStruct>>);
+
+// NonCallbackInterfaceType concept tests
+static_assert(!webidl::NonCallbackInterfaceType<TestStruct>);
+static_assert(webidl::NonCallbackInterfaceType<NumberBox>);
+static_assert(!webidl::NonCallbackInterfaceType<kj::Maybe<NumberBox>>);
+static_assert(webidl::NonCallbackInterfaceType<Ref<NumberBox>>);
+
+// Backward-compatible variable template tests (these delegate to concepts)
 static_assert(webidl::isNonCallbackInterfaceType<TestStruct> == false);
 static_assert(webidl::isNonCallbackInterfaceType<NumberBox> == true);
 static_assert(webidl::isNonCallbackInterfaceType<kj::Maybe<NumberBox>> == false);
+
+// Additional type category concept tests
+static_assert(webidl::StringType<kj::String>);
+static_assert(webidl::StringType<USVString>);
+static_assert(webidl::StringType<DOMString>);
+static_assert(!webidl::StringType<int>);
+
+static_assert(webidl::NumericType<int>);
+static_assert(webidl::NumericType<double>);
+static_assert(!webidl::NumericType<kj::String>);
+
+static_assert(webidl::BooleanType<bool>);
+static_assert(!webidl::BooleanType<int>);
+
+static_assert(webidl::InterfaceLikeType<NumberBox>);
+static_assert(webidl::InterfaceLikeType<kj::Array<kj::byte>>);
+static_assert(!webidl::InterfaceLikeType<kj::String>);
+
+static_assert(webidl::DistinguishableType<kj::String>);
+static_assert(webidl::DistinguishableType<int>);
+static_assert(webidl::DistinguishableType<bool>);
+static_assert(webidl::DistinguishableType<NumberBox>);
 
 static_assert(webidl::nullableTypeCount<int> == 0);
 static_assert(webidl::nullableTypeCount<kj::Maybe<int>> == 1);

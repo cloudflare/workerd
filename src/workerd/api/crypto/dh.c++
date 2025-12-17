@@ -77,13 +77,13 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
           // Generating a DH key with a reasonable size can be expensive.
           // We will only allow it if there is an active IoContext so that
           // we can enforce a timeout associate with the limit enforcer.
-          JSG_REQUIRE(IoContext::hasCurrent(), Error,
+          auto& ioContext = JSG_REQUIRE_NONNULL(IoContext::tryCurrent(), Error,
               "DiffieHellman key generation requires an active request");
 
           struct Status {
             IoContext& context;
             kj::Maybe<EventOutcome> status;
-          } status{.context = IoContext::current()};
+          } status{.context = ioContext};
 
           auto dh = OSSL_NEW(DH);
           BN_GENCB cb;

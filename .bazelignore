@@ -1,4 +1,5 @@
 node_modules
+images/container-client-test/node_modules
 
 # Nested modules
 build/google-benchmark

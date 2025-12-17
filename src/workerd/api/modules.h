@@ -19,6 +19,27 @@
 
 namespace workerd::api {
 
+// An object with a [Symbol.dispose]() method to remove patch to environment. Not exposed
+// publically, just used to implement Python's `patch_env()` context manager.
+// See src/pyodide/internal/envHelpers.ts
+class PythonPatchedEnv: public jsg::Object {
+ public:
+  PythonPatchedEnv(jsg::Lock& js, jsg::AsyncContextFrame::StorageKey& key, jsg::Value store) {
+    scope.emplace(js, key, kj::mv(store));
+  }
+
+  void dispose() {
+    scope = kj::none;
+  }
+
+  JSG_RESOURCE_TYPE(PythonPatchedEnv) {
+    JSG_DISPOSE(dispose);
+  }
+
+ private:
+  kj::Maybe<jsg::AsyncContextFrame::StorageScope> scope;
+};
+
 class EnvModule final: public jsg::Object {
  public:
   EnvModule() = default;
@@ -39,12 +60,18 @@ class EnvModule final: public jsg::Object {
       jsg::Value newExports,
       jsg::Function<jsg::JsRef<jsg::JsValue>()> fn);
 
+  // Patch environment and return an object with a [Symbol.dispose]() method to restore it.
+  // Not exposed publically, just used to implement Python's `patch_env()` context manager.
+  // See src/pyodide/internal/envHelpers.ts
+  jsg::Ref<PythonPatchedEnv> pythonPatchEnv(jsg::Lock& js, jsg::Value newEnv);
+
   JSG_RESOURCE_TYPE(EnvModule) {
     JSG_METHOD(getCurrentEnv);
     JSG_METHOD(getCurrentExports);
     JSG_METHOD(withEnv);
     JSG_METHOD(withExports);
     JSG_METHOD(withEnvAndExports);
+    JSG_METHOD(pythonPatchEnv);
   }
 };
 

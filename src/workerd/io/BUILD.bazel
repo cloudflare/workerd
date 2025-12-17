@@ -26,22 +26,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "trace-stream",
-    srcs = ["trace-stream.c++"],
-    hdrs = ["trace-stream.h"],
-    implementation_deps = [
-        "//src/workerd/util:completion-membrane",
-        "//src/workerd/util:strings",
-        "//src/workerd/util:uuid",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":io",
-        "//src/workerd/util:checked-queue",
-    ],
-)
-
-wd_cc_library(
     name = "io",
     # HACK: Currently, the `io` and `api` packages are interdependent. We fold all the sources
     #   from `api` into `io`. In principle, it should be possible to pull them apart so `api`
@@ -56,6 +40,7 @@ wd_cc_library(
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",
+        "trace-stream.c++",
         "tracer.c++",
         "worker.c++",
         "worker-fs.c++",
@@ -68,6 +53,7 @@ wd_cc_library(
         "io-context.h",
         "io-own.h",
         "io-util.h",
+        "trace-stream.h",
         "tracer.h",
         "worker.h",
         "worker-fs.h",
@@ -90,6 +76,7 @@ wd_cc_library(
         "//src/workerd/util:entropy",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:string-buffer",
+        "//src/workerd/util:strings",
         "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",

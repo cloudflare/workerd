@@ -38,12 +38,11 @@ void TestHarness::run_in_context(::rust::Fn<void(Isolate*)> callback) const {
     v8::Context::Scope contextScope(context.getHandle(isolate->getIsolate()));
 
     auto realm = ::workerd::rust::jsg::realm_create(isolate->getIsolate());
+    // &* dereferences the kj::Own smart pointer and takes its address to get a raw pointer
     ::workerd::jsg::setAlignedPointerInEmbedderData(context.getHandle(isolate->getIsolate()),
-        ::workerd::jsg::ContextPointerSlot::RUST_REALM, realm);
+        ::workerd::jsg::ContextPointerSlot::RUST_REALM, &*realm);
 
     callback(isolate->getIsolate());
-
-    ::workerd::rust::jsg::realm_dispose(realm);
   });
 }
 

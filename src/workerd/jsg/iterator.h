@@ -492,7 +492,7 @@ class GeneratorWrapper {
     // where we want to allow strings to be passed through as strings but also want to allow
     // sync and async generators to be handled as well. Without this, the strings would be
     // treated as sync iterables.
-    if (config.fetchIterableTypeSupport && handle->IsObject()) {
+    if (config.fetchIterableTypeSupport && handle->IsObject() && !handle->IsStringObject()) {
       auto isolate = js.v8Isolate;
       auto object = handle.As<v8::Object>();
       auto iter = check(object->Get(context, v8::Symbol::GetAsyncIterator(isolate)));

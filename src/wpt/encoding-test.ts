@@ -96,19 +96,8 @@ export default {
       'additional writes should wait for backpressure to be relieved for class TextEncoderStream',
     ],
   },
-  'streams/decode-attributes.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      "setting fatal to 'undefined' should set the attribute to false",
-      'a throwing fatal member should cause the constructor to throw',
-      'a throwing ignoreBOM member should cause the constructor to throw',
-    ],
-  },
-  'streams/decode-bad-chunks.any.js': {
-    comment: 'Failed V8 assert',
-    //  external/v8/src/api/api-inl.h:163; message = v8::internal::ValueHelper::IsEmpty(that) || IsJSArrayBufferView(v8::internal::Tagged<v8::internal::Object>( v8::internal::ValueHelper::ValueAsAddress(that)))
-    disabledTests: true,
-  },
+  'streams/decode-attributes.any.js': {},
+  'streams/decode-bad-chunks.any.js': {},
   'streams/decode-ignore-bom.any.js': {},
   'streams/decode-incomplete-input.any.js': {},
   'streams/decode-non-utf8.any.js': {},
@@ -151,11 +140,7 @@ export default {
   },
   'textdecoder-arguments.any.js': {},
   'textdecoder-byte-order-marks.any.js': {},
-  'textdecoder-copy.any.js': {
-    comment:
-      "Failed to execute 'decode' on 'TextDecoder': parameter 1 is not of type 'Array'.",
-    expectedFailures: ['Modify buffer after passing it in (SharedArrayBuffer)'],
-  },
+  'textdecoder-copy.any.js': {},
   'textdecoder-eof.any.js': {},
   'textdecoder-fatal-single-byte.any.js': {},
   'textdecoder-fatal-streaming.any.js': {},

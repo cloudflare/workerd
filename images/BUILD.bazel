@@ -1,0 +1,18 @@
+load("@rules_multirun//:defs.bzl", "command", "multirun")
+
+IMAGES = {
+    "container-client-test": "//images/container-client-test:load",
+}
+
+[
+    command(
+        name = name,
+        command = target,
+    )
+    for (name, target) in IMAGES.items()
+]
+
+multirun(
+    name = "load_all",
+    commands = IMAGES.keys(),
+)

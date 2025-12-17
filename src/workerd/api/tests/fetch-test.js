@@ -41,5 +41,13 @@ export const fetchGen = {
 
     const resp2 = new Response([enc.encode('Hello '), enc.encode('World!')]);
     strictEqual(await resp2.text(), 'Hello World!');
+
+    // Boxed strings work correctly.
+    const resp3 = new Response(new String('Hello'));
+    strictEqual(await resp3.text(), 'Hello');
+
+    // Regular strings work correctly.
+    const resp4 = new Response('Hello');
+    strictEqual(await resp4.text(), 'Hello');
   },
 };
