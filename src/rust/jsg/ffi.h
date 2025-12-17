@@ -1,5 +1,7 @@
 #pragma once
 
+#include <workerd/jsg/modules.capnp.h>
+
 #include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 #include <v8.h>
@@ -18,6 +20,7 @@ struct Local;
 struct Global;
 struct Realm;
 enum class ExceptionType : ::std::uint8_t;
+using ModuleType = ::workerd::jsg::ModuleType;
 using ModuleCallback = ::rust::Fn<Local(Isolate*)>;
 using WeakCallback = ::rust::Fn<void(Isolate*, size_t)>;
 
@@ -62,12 +65,15 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value);
 
 struct ModuleRegistry {
   virtual ~ModuleRegistry() = default;
-  virtual void addBuiltinModule(::rust::Str specifier, ModuleCallback moduleCallback) = 0;
+  virtual void addBuiltinModule(
+      ::rust::Str specifier, ModuleCallback moduleCallback, ModuleType moduleType) = 0;
 };
 
-inline void register_add_builtin_module(
-    ModuleRegistry& registry, ::rust::Str specifier, ModuleCallback callback) {
-  registry.addBuiltinModule(specifier, kj::mv(callback));
+inline void register_add_builtin_module(ModuleRegistry& registry,
+    ::rust::Str specifier,
+    ModuleCallback callback,
+    ModuleType moduleType) {
+  registry.addBuiltinModule(specifier, kj::mv(callback), moduleType);
 }
 
 Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);

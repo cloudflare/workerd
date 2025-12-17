@@ -24,6 +24,19 @@ pub mod ffi {
         Error,
     }
 
+    /// Module visibility level, corresponds to `workerd::jsg::ModuleType` from modules.capnp.
+    /// Values are automatically assigned by `cxx` because of extern declaration below.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    #[repr(u16)]
+    enum ModuleType {
+        BUNDLE,
+        BUILTIN,
+        INTERNAL,
+    }
+    unsafe extern "C++" {
+        type ModuleType;
+    }
+
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
 
@@ -141,6 +154,7 @@ pub mod ffi {
             registry: Pin<&mut ModuleRegistry>,
             specifier: &str,
             callback: unsafe fn(*mut Isolate) -> Local,
+            module_type: ModuleType,
         );
     }
 }
