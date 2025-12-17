@@ -433,7 +433,9 @@ wd_cc_library(
     srcs = ["encoding.c++"],
     hdrs = ["encoding.h"],
     implementation_deps = [
+        "//src/workerd/io:features",
         "//src/workerd/util:strings",
+        "@simdutf",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -537,6 +539,7 @@ kj_test(
     src = "data-url-test.c++",
     deps = [
         ":data-url",
+        "//src/workerd/io",
     ],
 )
 

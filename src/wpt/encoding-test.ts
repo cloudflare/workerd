@@ -165,21 +165,7 @@ export default {
     ],
   },
   'textdecoder-streaming.any.js': {},
-  'textdecoder-utf16-surrogates.any.js': {
-    comment: 'Investigate why we are not blocking invalid surrogates',
-    expectedFailures: [
-      'utf-16le - lone surrogate lead',
-      'utf-16le - lone surrogate lead (fatal flag set)',
-      'utf-16le - lone surrogate trail',
-      'utf-16le - lone surrogate trail (fatal flag set)',
-      'utf-16le - unmatched surrogate lead',
-      'utf-16le - unmatched surrogate lead (fatal flag set)',
-      'utf-16le - unmatched surrogate trail',
-      'utf-16le - unmatched surrogate trail (fatal flag set)',
-      'utf-16le - swapped surrogate pair',
-      'utf-16le - swapped surrogate pair (fatal flag set)',
-    ],
-  },
+  'textdecoder-utf16-surrogates.any.js': {},
   'textencoder-constructor-non-utf.any.js': {
     comment: 'Investigate this',
     expectedFailures: [
