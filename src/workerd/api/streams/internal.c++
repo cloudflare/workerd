@@ -950,7 +950,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
       }
 
       auto prp = js.newPromiseAndResolver<void>();
-      increaseCurrentWriteBufferSize(js, byteLength);
+      adjustWriteBufferSize(js, byteLength);
       KJ_IF_SOME(o, observer) {
         o->onChunkEnqueued(byteLength);
       }
@@ -977,21 +977,12 @@ jsg::Promise<void> WritableStreamInternalController::write(
   KJ_UNREACHABLE;
 }
 
-void WritableStreamInternalController::increaseCurrentWriteBufferSize(
-    jsg::Lock& js, uint64_t amount) {
+void WritableStreamInternalController::adjustWriteBufferSize(jsg::Lock& js, int64_t amount) {
+  KJ_DASSERT(amount >= 0 || std::abs(amount) <= currentWriteBufferSize);
   currentWriteBufferSize += amount;
   KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    int64_t amount = highWaterMark - currentWriteBufferSize;
-    updateBackpressure(js, amount <= 0);
-  }
-}
-
-void WritableStreamInternalController::decreaseCurrentWriteBufferSize(
-    jsg::Lock& js, uint64_t amount) {
-  currentWriteBufferSize -= amount;
-  KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    int64_t amount = highWaterMark - currentWriteBufferSize;
-    updateBackpressure(js, amount <= 0);
+    int64_t desiredSize = highWaterMark - currentWriteBufferSize;
+    updateBackpressure(js, desiredSize <= 0);
   }
 }
 
@@ -1600,7 +1591,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         if (queue.empty()) return js.resolvedPromise();
         auto& request = check.template operator()<Write>();
         maybeResolvePromise(js, request.promise);
-        decreaseCurrentWriteBufferSize(js, amountToWrite);
+        adjustWriteBufferSize(js, -amountToWrite);
         KJ_IF_SOME(o, observer) {
           o->onChunkDequeued(amountToWrite);
         }
@@ -1615,7 +1606,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         auto handle = reason.getHandle(js);
         auto& request = check.template operator()<Write>();
         auto& writable = state.get<IoOwn<Writable>>();
-        decreaseCurrentWriteBufferSize(js, amountToWrite);
+        adjustWriteBufferSize(js, -amountToWrite);
         KJ_IF_SOME(o, observer) {
           o->onChunkDequeued(amountToWrite);
         }
