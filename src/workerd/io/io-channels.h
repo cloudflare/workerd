@@ -37,7 +37,7 @@ class CacheClient {
 
     // Serialized JSON value to pass in ew_compat field of control header to FL. This has the same
     // semantics as the field in IoChannelFactory::SubrequestMetadata.
-    kj::Maybe<kj::StringPtr> featureFlagsForFl;
+    kj::Maybe<kj::String> featureFlagsForFl;
   };
 
   // Get the default namespace, i.e. the one that fetch() will use for caching.
@@ -108,11 +108,7 @@ class IoChannelFactory {
     // Serialized JSON value to pass in ew_compat field of control header to FL. If this subrequest
     // does not go directly to FL, this value is ignored. Flags marked with `$neededByFl` in
     // `compatibility-date.capnp` end up here.
-    //
-    // This string remains valid at least until either the request has returned response headers
-    // or has been canceled. (In practice, this string's lifetime is that of the Isolate making
-    // the request.)
-    kj::Maybe<kj::StringPtr> featureFlagsForFl;
+    kj::Maybe<kj::String> featureFlagsForFl;
 
     // Timestamp for when a subrequest is started. (ms since the Unix Epoch)
     double startTime = dateNow();
