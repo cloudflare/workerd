@@ -4,18 +4,15 @@
     // bazel_deps from deps.MODULE.bazel
     {
       "name": "ada-url",
-      "type": "bazel_dep",
-      "freeze_version": "3.3.0"
+      "type": "bazel_dep"
     },
     {
       "name": "brotli",
-      "type": "bazel_dep",
-      "freeze_version": "1.2.0"
+      "type": "bazel_dep"
     },
     {
       "name": "tcmalloc",
-      "type": "bazel_dep",
-      "freeze_version": "0.0.0-20250927-12f2552"
+      "type": "bazel_dep"
     },
     {
       "name": "capnp-cpp",
