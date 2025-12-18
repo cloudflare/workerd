@@ -52,6 +52,9 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
   // the start of the invocation to submit the onset event before any other tail events.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     KJ_IF_SOME(spanContext, topLevelInvocationSpanContext) {
+      if (markedUnused) {
+        LOG_WARNING_PERIODICALLY("WorkerTracer was marked unused but actually was used");
+      }
       if (isPredictableModeForTest()) {
         writer->report(spanContext,
             tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS),
@@ -60,7 +63,7 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
         writer->report(spanContext,
             tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime), completeTime);
       }
-    } else {
+    } else if (!markedUnused) {
       // If no span context is available, we have a streaming tail worker set up but shut down the
       // worker tracer without ever sending an Onset event. In that case we either failed to set up
       // the Onset properly (indicating a bug – all event types are required to report an Onset at
@@ -69,6 +72,8 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
       // (which is not incorrect behavior, but likely indicates inefficient code that sets up
       // WorkerInterfaces and then ends up not using it due to an error/incorrect parameters; such
       // error checking should be done beforehand to avoid unused allocations). Report such cases.
+      // Note: If markedUnused is true, this tracer was intentionally not used (e.g., duplicate
+      // alarm request deduplication) and the warning should be suppressed.
       LOG_ERROR_PERIODICALLY(
           "destructed WorkerTracer with STW without reporting Onset event", kj::getStackTrace());
     }
