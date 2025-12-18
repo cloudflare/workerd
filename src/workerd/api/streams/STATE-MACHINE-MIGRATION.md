@@ -20,13 +20,15 @@ These follow the exact pattern of the compression.c++ conversion (Active/Closed/
   - Pattern: Identical to writable-sink.c++
   - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, kj::Exception>, ErrorState<kj::Exception>, ActiveState<Open>>`
 
-- [ ] **writable-sink-adapter.h:251** - `WritableStreamSinkJsAdapter`
+- [x] **writable-sink-adapter.h:251** - `WritableStreamSinkJsAdapter`
   - `kj::OneOf<IoOwn<Active>, Closed, kj::Exception>`
   - Pattern: Same 3-state with IoOwn wrapper
+  - **DONE**: Converted to `ComposableStateMachine` with `Open` wrapper struct containing `IoOwn<Active>`
 
-- [ ] **writable-sink-adapter.h:442** - `WritableSinkKjAdapter`
+- [x] **writable-sink-adapter.h:442** - `WritableSinkKjAdapter`
   - `kj::OneOf<kj::Own<Active>, Closed, kj::Exception>`
   - Pattern: Same 3-state
+  - **DONE**: Converted to `ComposableStateMachine` with `KjOpen` wrapper struct containing `kj::Own<Active>`
 
 - [ ] **readable-source-adapter.h:236** - `ReadableStreamSourceJsAdapter`
   - `kj::OneOf<IoOwn<Active>, Closed, kj::Exception>`
