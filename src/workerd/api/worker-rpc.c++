@@ -1768,12 +1768,24 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Own<BaseTracer>> tracer)
       : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
+        ioCtx(ioCtx),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
         props(kj::mv(props)),
         wrapperModule(kj::mv(wrapperModule)),
         tracer(kj::mv(tracer)) {}
+
+  // Override call() to emit the Return event when the top-level RPC call completes.
+  // This marks when the handler returned a value, NOT when all data has been streamed or all
+  // capabilities released.
+  kj::Promise<void> call(CallContext callContext) override {
+    return JsRpcTargetBase::call(kj::mv(callContext)).then([this]() {
+      KJ_IF_SOME(t, ioCtx.getWorkerTracer()) {
+        t.setReturn(ioCtx.now());
+      }
+    });
+  }
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     jsg::Lock& js = lock;
@@ -1842,6 +1854,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   }
 
  private:
+  IoContext& ioCtx;
   kj::Maybe<kj::String> entrypointName;
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
@@ -1942,9 +1955,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // and server as part of this session.
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
 
-    KJ_IF_SOME(t, ioctx.getWorkerTracer()) {
-      t.setReturn(ioctx.now());
-    }
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   } catch (...) {
     // Make sure the top-level capability is revoked with the same exception that `run()` is
