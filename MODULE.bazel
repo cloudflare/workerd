@@ -32,36 +32,8 @@ git_override(
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
-# clang-tidy
-http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
-
-http_file(
-    name = "clang_tidy_macos_arm64",
-    executable = True,
-    integrity = "sha256-vzU7J99wf6a/DMsLJ7/q5f3JckU0i3kbNAtck3vO5oA=",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-darwin-arm64-clang-tidy",
-)
-
-http_file(
-    name = "clang_tidy_linux_amd64",
-    executable = True,
-    integrity = "sha256-6B+qIjJhCXJpRPp9nSQxnchEzuHH7UL5mWNrcGU/3z8=",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-linux-amd64-clang-tidy",
-)
-
-http_file(
-    name = "clang_tidy_linux_arm64",
-    executable = True,
-    integrity = "sha256-o4grMwBpnxMv+291b4ZbNHvmgtzUhjJL6KlGENuq/5E=",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-linux-arm64-clang-tidy",
-)
-
-http_file(
-    name = "clang_tidy_windows_amd64",
-    executable = True,
-    integrity = "sha256-9KJLz6bHbwpj5yAkjJzUQV0oL+ZrFsI2Wo5Rpjg69vc=",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-windows-amd64-clang-tidy.exe",
-)
+# Rust
+bazel_dep(name = "rules_rust", version = "0.68.1")
 
 # BoringSSL may subtly break backwards compatibility and behave differently than the latest FIPS
 # version, often by rejecting key values that it considers invalid/unsafe even though they are still
@@ -85,3 +57,8 @@ include("//build/deps:nodejs.MODULE.bazel")
 include("//build/deps:python.MODULE.bazel")
 include("//build/deps:v8.MODULE.bazel")
 include("//build/deps:oci.MODULE.bazel")
+
+# Automatically managed dependencies
+include("//build/deps:gen/deps/deps.MODULE.bazel")
+include("//build/deps:gen/build_deps/build_deps.MODULE.bazel")
+include("//build/deps:gen/shared_deps/shared_deps.MODULE.bazel")
