@@ -249,7 +249,7 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
             capTable.add(decodeSubrequestChannelToken(usage, cap.getSubrequestChannel()));
             continue;
           case ChannelToken::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
-            capTable.add(decodeSubrequestChannelToken(usage, cap.getActorClassChannel()));
+            capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
             continue;
         }
         KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
