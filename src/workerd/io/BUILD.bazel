@@ -74,6 +74,7 @@ wd_cc_library(
         "//src/workerd/util:completion-membrane",
         "//src/workerd/util:entropy",
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:state-machine",
         "//src/workerd/util:string-buffer",
         "//src/workerd/util:strings",
         "//src/workerd/util:uuid",
