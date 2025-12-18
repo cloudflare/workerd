@@ -57,6 +57,15 @@ REPO_RULE_DEP_TEMPLATE = (
 )
 
 
+BAZEL_DEP_TEMPLATE = (
+    TOP
+    + """
+bazel_dep({attrs}
+)
+"""
+)
+
+
 GITHUB_ACCESS_TOKEN = ""
 
 
@@ -381,6 +390,29 @@ def get_bcr_version(name: str) -> str:
         return new_version
 
 
+def gen_bazel_dep(repo):
+    name = repo["name"]
+
+    # Always fetch the latest version from BCR
+    latest_version = get_bcr_version(name)
+
+    if "freeze_version" in repo:
+        frozen_version = repo["freeze_version"]
+        if frozen_version != latest_version:
+            print(
+                f"frozen, update available: {frozen_version} -> {latest_version}",
+                end="",
+            )
+        version = frozen_version
+    else:
+        print(latest_version, end="")
+        version = latest_version
+
+    return BAZEL_DEP_TEMPLATE.format(
+        attrs=format_attr_list(dict(name=name, version=version))
+    )
+
+
 def gen_repo_str(repo):
     if repo["type"] == "github_tarball":
         return gen_github_tarball(repo)
@@ -388,6 +420,8 @@ def gen_repo_str(repo):
         return gen_github_release(repo)
     elif repo["type"] == "git_clone":
         return gen_git_clone(repo)
+    elif repo["type"] == "bazel_dep":
+        return gen_bazel_dep(repo)
     else:
         raise UnsupportedException(f"Unsupported repo type: {repo['type']}")
 

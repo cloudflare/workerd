@@ -194,6 +194,25 @@
               "build_file"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "bazel_dep"
+              },
+              "name": {
+                "type": "string"
+              },
+              "freeze_version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name"
+            ],
+            "additionalProperties": false
           }
         ]
       }
