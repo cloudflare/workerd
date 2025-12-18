@@ -1,6 +1,63 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
+    // bazel_deps from MODULE.bazel
+    {
+      "name": "aspect_bazel_lib",
+      "type": "bazel_dep",
+      "freeze_version": "2.21.2"
+    },
+    {
+      "name": "aspect_rules_lint",
+      "type": "bazel_dep",
+      "freeze_version": "1.10.2"
+    },
+    {
+      "name": "bazel_features",
+      "type": "bazel_dep",
+      "freeze_version": "1.38.0"
+    },
+    {
+      "name": "bazel_skylib",
+      "type": "bazel_dep",
+      "freeze_version": "1.9.0"
+    },
+    {
+      "name": "rules_shell",
+      "type": "bazel_dep",
+      "freeze_version": "0.6.1"
+    },
+    // abseil is used by protobuf and tcmalloc.
+    {
+      "name": "abseil-cpp",
+      "type": "bazel_dep",
+      "freeze_version": "20250814.0"
+    },
+    // Not pulling in platforms via bzlmod causes issues with the Windows clang-cl toolchain
+    {
+      "name": "platforms",
+      "type": "bazel_dep",
+      "freeze_version": "1.0.0"
+    },
+    // While the build should succeed with the default toolchain configuration from rules_cc,
+    // apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
+    // needs to be pulled in before rules_cc for this toolchain to actually be used.
+    {
+      "name": "apple_support",
+      "type": "bazel_dep",
+      "freeze_version": "2.0.0"
+    },
+    {
+      "name": "rules_cc",
+      "type": "bazel_dep",
+      "freeze_version": "0.2.15"
+    },
+    // Rust
+    {
+      "name": "rules_rust",
+      "type": "bazel_dep",
+      "freeze_version": "0.68.1"
+    },
     // rust
     {
       "name": "cargo_bazel_linux_x64",
