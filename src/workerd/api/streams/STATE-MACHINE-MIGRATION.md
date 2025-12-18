@@ -30,13 +30,15 @@ These follow the exact pattern of the compression.c++ conversion (Active/Closed/
   - Pattern: Same 3-state
   - **DONE**: Converted to `ComposableStateMachine` with `KjOpen` wrapper struct containing `kj::Own<Active>`
 
-- [ ] **readable-source-adapter.h:236** - `ReadableStreamSourceJsAdapter`
+- [x] **readable-source-adapter.h:236** - `ReadableStreamSourceJsAdapter`
   - `kj::OneOf<IoOwn<Active>, Closed, kj::Exception>`
   - Pattern: Same 3-state with IoOwn wrapper
+  - **DONE**: Converted to `ComposableStateMachine` with `Open` wrapper struct containing `IoOwn<Active>`
 
-- [ ] **readable-source-adapter.h:361** - `ReadableSourceKjAdapter`
+- [x] **readable-source-adapter.h:361** - `ReadableSourceKjAdapter`
   - `kj::OneOf<kj::Own<Active>, Closed, kj::Exception>`
   - Pattern: Same 3-state
+  - **DONE**: Converted to `ComposableStateMachine` with `KjOpen` wrapper struct containing `kj::Own<Active>`
 
 ---
 
@@ -113,9 +115,10 @@ These track lock states - different semantic pattern, may not benefit as much:
 - [ ] **standard.c++:2843** - PumpToReader state
   - `kj::OneOf<Pumping, StreamStates::Closed, kj::Exception, jsg::Ref<ReadableStream>>`
 
-- [ ] **readable-source-adapter.c++:519** - `Active` inner class
+- [x] **readable-source-adapter.c++:519** - `Active` inner class
   - `kj::OneOf<Idle, Readable, Reading, Done, Canceling, Canceled>`
   - Most complex: 6 states with multiple terminals
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Done, Canceling, Canceled>, ...>` (no ErrorState/ActiveState since transitions are more complex)
 
 ---
 
