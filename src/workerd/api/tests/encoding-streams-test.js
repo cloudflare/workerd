@@ -116,7 +116,7 @@ export const textDecoderStreamEncodings = {
 };
 
 // =============================================================================
-// Porting status from edgeworker/src/edgeworker/api-tests/streams/encoding.ew-test
+// Porting status from {internal repo}/api-tests/streams/encoding.ew-test
 //
 // PORTED (can be deleted from ew-test):
 // - textencoder-stream-roundtrip: Ported as textEncoderDecoderPipeline

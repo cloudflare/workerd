@@ -417,7 +417,7 @@ export default {
 };
 
 // =============================================================================
-// Porting status from edgeworker/src/edgeworker/api-tests/streams/compression.ew-test
+// Porting status from {internal repo}/api-tests/streams/compression.ew-test
 //
 // PORTED (can be deleted from ew-test):
 // - compression-gzip: Ported as compressionGzip

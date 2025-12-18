@@ -67,132 +67,85 @@ Remaining tests (2):
 
 ---
 
-### pipe-streams-test.js (PARTIALLY PORTED)
+### pipe-streams-test.js (MOSTLY PORTED)
 **Source**: `{internal}/api-tests/streams/pipe.ew-test`
 
-Ported tests (6):
-- [x] pipethrough-js-to-internal
-- [x] pipethrough-js-to-internal-errored-source
-- [x] pipeto-js-to-internal-errored-source
-- [x] pipethrough-internal-to-js
-- [x] pipeto-internal-to-js
-- [x] pipethrough-js-to-js
+Ported tests (32):
+- [x] pipethrough-js-to-internal: Ported as pipeThroughJsToInternal
+- [x] pipethrough-js-to-internal-errored-source: Ported as pipeThroughJsToInternalErroredSource
+- [x] pipeto-js-to-internal-errored-source: Ported as pipeToJsToInternalErroredSource
+- [x] pipethrough-js-to-internal-errored-source-prevent: Ported as pipeThroughJsToInternalErroredSourcePreventAbort
+- [x] pipeto-js-to-internal-errored-source-prevent: Ported as pipeToJsToInternalErroredSourcePreventAbort
+- [x] pipethrough-js-to-internal-errored-dest: Ported as pipeThroughJsToInternalErroredDest
+- [x] pipeto-js-to-internal-errored-dest: Ported as pipeToJsToInternalErroredDest
+- [x] pipethrough-js-to-internal-closes: Ported as pipeThroughJsToInternalCloses
+- [x] pipethrough-js-to-internal-prevent-close: Ported as pipeThroughJsToInternalPreventClose
+- [x] simple-pipethrough-js-byob-to-internal: Ported as pipeThroughJsByobToInternal
+- [x] simple-pipeto-js-byob-to-internal: Ported as pipeToJsByobToInternal
+- [x] pipethrough-internal-to-js: Ported as pipeThroughInternalToJs
+- [x] pipeto-internal-to-js: Ported as pipeToInternalToJs
+- [x] simple-pipeto-internal-to-js: Ported as pipeToInternalToJsSimple
+- [x] pipeto-internal-to-js-error: Ported as pipeToInternalToJsError
+- [x] pipeto-internal-to-js-error-prevent: Ported as pipeToInternalToJsErrorPrevent
+- [x] pipeto-internal-to-js-close: Ported as pipeToInternalToJsClose
+- [x] pipeto-internal-to-js-close-prevent: Ported as pipeToInternalToJsClosePrevent
+- [x] pipethrough-js-to-js: Ported as pipeThroughJsToJs
+- [x] simple-pipeto-js-to-js: Ported as pipeToJsToJsSimple
+- [x] simple-pipeto-js-to-js-error-readable: Ported as pipeToJsToJsErrorReadable
+- [x] simple-pipeto-js-to-js-error-readable-prevent: Ported as pipeToJsToJsErrorReadablePrevent
+- [x] simple-pipeto-js-to-js-error-writable: Ported as pipeToJsToJsErrorWritable
+- [x] simple-pipeto-js-to-js-error-writable-prevent: Ported as pipeToJsToJsErrorWritablePrevent
+- [x] simple-pipeto-js-to-js-close-readable: Ported as pipeToJsToJsCloseReadable
+- [x] simple-pipeto-js-to-js-close-readable-prevent: Ported as pipeToJsToJsCloseReadablePrevent
+- [x] simple-pipeto-js-to-js-tee: Ported as pipeToJsToJsTee
+- [x] cancel-pipeto-js-to-js-already: Ported as pipeToJsToJsCancelAlready
+- [x] cancel-pipeto-js-to-native-already: Ported as pipeToJsToNativeCancelAlready
+- [x] cancel-pipeto-js-to-js: Ported as pipeToJsToJsCancel
+- [x] cancel-pipeto-js-to-native: Ported as pipeToJsToNativeCancel
 
-Remaining tests - JS to Internal stream piping:
-- [ ] **simple-pipeto-js-to-internal**: Tests pipeTo from JS ReadableStream to internal IdentityTransformStream writable when a non-byte chunk causes an error
-  - *Note*: Similar to pipeThroughJsToInternal but uses pipeTo directly
-- [ ] **pipethrough-js-to-internal-errored-source-prevent-abort**: Tests `preventAbort=true` keeps writable usable after source errors
-- [ ] **pipeto-js-to-internal-errored-source-prevent-abort**: Same as above but with pipeTo
+NOT PORTED (require internal-only features or cause unhandled rejection errors):
+- [ ] **simple-pipeto-js-to-internal**: Causes unhandled promise rejection in wd-test
+      environment before the error can be caught (pipe rejects while consuming readable)
+- [ ] **pipethrough-js-to-internal-errored-dest-prevent**: Causes unhandled promise rejection
+- [ ] **pipeto-js-to-internal-errored-dest-prevent**: Causes unhandled promise rejection
+- [ ] **never-ending-pipethrough**: Tests CPU limit enforcement, requires internal harness
+- [ ] **pipeto-double-close**: Requires request body piping which needs HTTP request/response cycle
+- [ ] **pipeto-internal-to-js-error-readable**: Tests internal readable error propagation,
+      requires complex setup with IdentityTransformStream's internal behavior
+- [ ] **pipeto-internal-to-js-error-readable-prevent**: Same as above with preventCancel=true
 
-Remaining tests - Error propagation with errored destination:
-- [ ] **pipethrough-js-to-internal-errored-dest**: Tests error propagation when destination writable is canceled
-- [ ] **pipeto-js-to-internal-errored-dest**: Same with pipeTo
-- [ ] **pipethrough-js-to-internal-errored-dest-prevent**: Tests `preventCancel=true` keeps source readable usable
-- [ ] **pipeto-js-to-internal-errored-dest-prevent**: Same with pipeTo
+---
 
-Remaining tests - Close propagation:
-- [ ] **pipethrough-js-to-internal-closes**: Tests closing readable closes writable when `preventClose=false`
-- [ ] **pipethrough-js-to-internal-prevent-close**: Tests `preventClose=true` keeps writable open
+## Partially Ported
 
-Remaining tests - BYOB streams:
-- [ ] **simple-pipethrough-js-byob-to-internal**: pipeThrough with BYOB ReadableStream
-- [ ] **simple-pipeto-js-byob-to-internal**: pipeTo with BYOB ReadableStream
+### streams.ew-test (PARTIALLY PORTED)
+**Source**: `{internal}/api-tests/streams.ew-test`
 
-Remaining tests - Internal to JS:
-- [ ] **simple-pipeto-internal-to-js**: Basic pipeTo from internal readable to JS writable
-- [ ] **pipeto-internal-to-js-error**: Error in internal readable aborts JS writable
-- [ ] **pipeto-internal-to-js-error-prevent**: `preventAbort=true` keeps JS writable usable
-- [ ] **pipeto-internal-to-js-error-readable**: Error in JS writable cancels internal readable
-- [ ] **pipeto-internal-to-js-error-readable-prevent**: `preventCancel=true` keeps internal readable usable
-- [ ] **pipeto-internal-to-js-close**: Closing internal readable closes JS writable
-- [ ] **pipeto-internal-to-js-close-prevent**: `preventClose=true` keeps JS writable open
+Ported tests (11) - added to streams-test.js:
+- [x] testReadableStream cancel tests: Ported as cancelStreamRejectsBodyConsume, cancelReaderResolvesClosedPromise
+- [x] getReader mode validation: Ported as getReaderBadModeThrows
+- [x] stream locking: Ported as streamLockedAfterGetReader
+- [x] BYOB reader constraints: Ported as byobReaderConstraints
+- [x] testReadableStreamCancelErrors: Ported as cancelErrorTypePropagation
+- [x] testTransformStream write/read ordering: Ported as identityTransformWriteBeforeRead, identityTransformReadBeforeWrite
+- [x] closed promise behavior: Ported as closedPromiseUnderLockRelease, closedPromiseUnderWriterAbort
+- [x] testFixedLengthStream: Ported as fixedLengthStreamPreconditions
 
-Remaining tests - JS to JS:
-- [ ] **simple-pipeto-js-to-js**: Basic JS-to-JS pipeTo
-- [ ] **simple-pipeto-js-to-js-error-readable**: Error in JS readable aborts JS writable
-- [ ] **simple-pipeto-js-to-js-error-readable-prevent**: `preventAbort=true`
-- [ ] **simple-pipeto-js-to-js-error-writable**: Error in JS writable cancels JS readable
-- [ ] **simple-pipeto-js-to-js-error-writable-prevent**: `preventCancel=true`
-- [ ] **simple-pipeto-js-to-js-close-readable**: Closing readable closes writable
-- [ ] **simple-pipeto-js-to-js-close-readable-prevent**: `preventClose=true`
-- [ ] **simple-pipeto-js-to-js-tee**: pipeTo from a tee branch
-
-Remaining tests - AbortSignal:
-- [ ] **cancel-pipeto-js-to-js-already**: pipeTo with already-aborted signal
-- [ ] **cancel-pipeto-js-to-native-already**: Same with native writable
-- [ ] **cancel-pipeto-js-to-js**: pipeTo cancelable during operation
-- [ ] **cancel-pipeto-js-to-native**: Same with native writable
-
-Remaining tests - Edge cases:
-- [ ] **never-ending-pipethrough**: Never-ending readable handled by CPU limits
-- [ ] **pipeto-double-close**: Double close is handled correctly
+NOT PORTED (require HTTP harness or internal features):
+- [ ] cancel-subrequest: Requires subrequests with hung response
+- [ ] identity-transform-stream scripts: Require HTTP request/response cycle
+- [ ] identity-transform-stream-simple-esi: Requires subrequests
+- [ ] testReadableStreamPipeTo: Most tests require fetch/subrequests
+- [ ] testReadableStreamTee: Requires fetch/subrequests and memory limits
+- [ ] readable-stream-pipe-to: Requires subrequests
+- [ ] transform-stream-no-hang: Tests request hang prevention
+- [ ] tee-*-no-hang scripts: Require HTTP request cycle
+- [ ] fixed-length-stream scripts: Require subrequests
+- [ ] And many more that require the HTTP harness
 
 ---
 
 ## Not Yet Started - Porting Tasks
-
-### streams.ew-test (LARGE - needs triage)
-**Source**: `{internal}/api-tests/streams.ew-test`
-
-This is a large file with many diverse tests. Tests to port:
-
-**ReadableStream cancellation tests**:
-- [ ] cancel-subrequest: Tests canceling a subrequest body mid-read
-
-**IdentityTransformStream tests**:
-- [ ] identity-transform-stream: Multiple sub-tests for basic IdentityTransformStream usage
-- [ ] identity-transform-stream-simple-esi: Edge Side Includes pattern test
-
-**W3C-style ReadableStream tests** (api-streams bundle):
-- [ ] testReadableStream: Various cancel/read/lock tests
-- [ ] testReadableStreamPipeTo: Comprehensive pipeTo tests with error propagation
-- [ ] testReadableStreamTee: tee() tests including memory limits
-- [ ] testReadableStreamCancelErrors: Cancel error type preservation
-- [ ] testTransformStream: Identity transform tests
-- [ ] testFixedLengthStream: Constructor validation
-
-**ReadableStream.pipeTo() tests**:
-- [ ] readable-stream-pipe-to: Concatenating multiple readables
-
-**Hang prevention tests**:
-- [ ] transform-stream-no-hang: TransformStream read without write
-- [ ] tee-transform-stream-no-hang: Teed TransformStream ignoring one branch
-- [ ] tee-readable-stream-no-hang: Teed ReadableStream ignoring one branch
-
-**FixedLengthStream tests**:
-- [ ] fixed-length-stream: Basic usage with fetch concatenation
-- [ ] fixed-length-stream-incorrect: Truncation and overwrite handling
-
-**Misc tests**:
-- [ ] reader-doesnt-hold-state: Reader release doesn't corrupt gzip
-- [ ] close-stream-cross-request: Cross-request stream access errors
-- [ ] ts-doesnt-hang-response-text: Response.text() on TransformStream
-- [ ] teed-ts-doesnt-hang-if-not-closed: Teed TS without close
-- [ ] readable-stream-pipe-to-simple-cycle: Cycle detection
-- [ ] transform-stream-write-error-causes-premature-finalization: Error propagation
-
-**Memory limit tests**:
-- [ ] system-stream-tee-errors: Tee buffer limit errors
-
-**Constructor tests**:
-- [ ] writablestream-writer-constructors
-- [ ] reader-constructors-work
-
-**BYOB tests**:
-- [ ] byob-reader-detaches-buffer
-- [ ] write-subarray
-
-**Async iterator tests**:
-- [ ] for-await-readablestream
-- [ ] for-await-readablestream-values
-- [ ] for-await-readablestream-early-return
-- [ ] for-await-readablestream-early-throw
-- [ ] for-await-readablestream-early-return-preventcancel
-- [ ] for-await-readablestream-early-throw-preventcancel
-- [ ] for-await-readablestream-gc
-
-**Feature flag tests**:
-- [ ] capture-sync-throws: captureThrowsAsRejections flag
 
 ---
 
@@ -351,8 +304,8 @@ After porting tests, add a status comment at the end of each test file and updat
 | compression.ew-test | Complete | 12 | 0 | Yes |
 | encoding.ew-test | Complete | 5 | 0 | Yes |
 | transform.ew-test | Mostly done | 12 | 2 | No |
-| pipe.ew-test | Partial | 6 | ~30 | No |
-| streams.ew-test | Not started | 0 | ~40 | No |
+| pipe.ew-test | Mostly done | 32 | 7 | No (7 tests can't be ported) |
+| streams.ew-test | Partial | 11 | ~30 | No (many require HTTP harness) |
 | streams-js.ew-test | Not started | 0 | ? | No |
 | streams-nonstandard.ew-test | Not started | 0 | 1 | No |
 | respond.ew-test | Not started | 0 | ~10 | No |

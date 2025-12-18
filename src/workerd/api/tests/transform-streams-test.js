@@ -417,7 +417,7 @@ export const transformStreamCancel = {
 };
 
 // =============================================================================
-// Porting status from edgeworker/src/edgeworker/api-tests/streams/transform.ew-test
+// Porting status from {internal repo}/api-tests/streams/transform.ew-test
 //
 // PORTED (can be deleted from ew-test):
 // - default-identity-transform: Ported as defaultIdentityTransform
