@@ -2,7 +2,7 @@
 This file is included from the root MODULE.bazel"""
 
 bazel_dep(name = "ada-url", version = "3.3.0")
-bazel_dep(name = "brotli", version = "1.1.0")
+bazel_dep(name = "brotli", version = "1.2.0")
 
 ########################################################
 # Override BCR versions.
