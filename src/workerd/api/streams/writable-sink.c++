@@ -1,30 +1,51 @@
 #include "writable-sink.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/util/state-machine.h>
 #include <workerd/util/stream-utils.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-io.h>
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
-#include <kj/one-of.h>
 
 namespace workerd::api::streams {
 
 namespace {
-struct Closed {};
+struct Closed {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+};
+
+struct Open {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+  kj::Own<kj::AsyncOutputStream> stream;
+};
+
+// State machine for tracking writable sink lifecycle:
+//   Open -> Closed (normal close via end())
+//   Open -> kj::Exception (error via abort() or write failure)
+// Both Closed and kj::Exception are terminal states.
+using WritableSinkState = ComposableStateMachine<TerminalStates<Closed, kj::Exception>,
+    ErrorState<kj::Exception>,
+    ActiveState<Open>,
+    Open,
+    Closed,
+    kj::Exception>;
 
 // The base implementation of WritableSink. This is not exposed publicly.
 class WritableSinkImpl: public WritableSink {
  public:
   WritableSinkImpl(kj::Own<kj::AsyncOutputStream> inner,
       rpc::StreamEncoding encoding = rpc::StreamEncoding::IDENTITY)
-      : state(kj::mv(inner)),
-        encoding(encoding) {}
-  WritableSinkImpl(): state(Closed()), encoding(rpc::StreamEncoding::IDENTITY) {}
-  WritableSinkImpl(kj::Exception reason)
-      : state(kj::cp(reason)),
-        encoding(rpc::StreamEncoding::IDENTITY) {}
+      : encoding(encoding) {
+    state.transitionTo<Open>(kj::mv(inner));
+  }
+  WritableSinkImpl(): encoding(rpc::StreamEncoding::IDENTITY) {
+    state.transitionTo<Closed>();
+  }
+  WritableSinkImpl(kj::Exception reason): encoding(rpc::StreamEncoding::IDENTITY) {
+    state.transitionTo<kj::Exception>(kj::mv(reason));
+  }
 
   KJ_DISALLOW_COPY_AND_MOVE(WritableSinkImpl);
 
@@ -35,71 +56,49 @@ class WritableSinkImpl: public WritableSink {
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override final {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(inner, kj::Own<kj::AsyncOutputStream>) {
-        KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
-        try {
-          co_return co_await canceler.wrap(encodeAndWrite(prepareWrite(kj::mv(inner)), buffer));
-        } catch (...) {
-          auto exception = kj::getCaughtExceptionAsKj();
-          setErrored(kj::cp(exception));
-          kj::throwFatalException(kj::mv(exception));
-        }
-      }
-      KJ_CASE_ONEOF(closed, Closed) {
-        JSG_FAIL_REQUIRE(Error, "Cannot write to a closed stream.");
-      }
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        kj::throwFatalException(kj::cp(errored));
+    throwIfErrored();
+    KJ_IF_SOME(open, state.tryGetActive()) {
+      KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
+      try {
+        co_return co_await canceler.wrap(encodeAndWrite(prepareWrite(kj::mv(open.stream)), buffer));
+      } catch (...) {
+        handleOperationException();
       }
     }
-    KJ_UNREACHABLE;
+    // Must be closed
+    JSG_FAIL_REQUIRE(Error, "Cannot write to a closed stream.");
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override final {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(inner, kj::Own<kj::AsyncOutputStream>) {
-        KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
-        try {
-          co_return co_await canceler.wrap(encodeAndWrite(prepareWrite(kj::mv(inner)), pieces));
-        } catch (...) {
-          auto exception = kj::getCaughtExceptionAsKj();
-          setErrored(kj::cp(exception));
-          kj::throwFatalException(kj::mv(exception));
-        }
-      }
-      KJ_CASE_ONEOF(closed, Closed) {
-        JSG_FAIL_REQUIRE(Error, "Cannot write to a closed stream.");
-      }
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        kj::throwFatalException(kj::cp(errored));
+    throwIfErrored();
+    KJ_IF_SOME(open, state.tryGetActive()) {
+      KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
+      try {
+        co_return co_await canceler.wrap(encodeAndWrite(prepareWrite(kj::mv(open.stream)), pieces));
+      } catch (...) {
+        handleOperationException();
       }
     }
-    KJ_UNREACHABLE;
+    // Must be closed
+    JSG_FAIL_REQUIRE(Error, "Cannot write to a closed stream.");
   }
 
   kj::Promise<void> end() override final {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(open, kj::Own<kj::AsyncOutputStream>) {
-        KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
-        // The AsyncOutputStream interface does not yet have an end() method.
-        // Instead, we just drop it, signaling EOF. Eventually, it might get
-        // an end method, at which point we should use that instead.
-        try {
-          co_await canceler.wrap(endImpl(*open));
-          setClosed();
-          co_return;
-        } catch (...) {
-          auto exception = kj::getCaughtExceptionAsKj();
-          setErrored(kj::cp(exception));
-          kj::throwFatalException(kj::mv(exception));
-        }
-      }
-      KJ_CASE_ONEOF(closed, Closed) {
+    throwIfErrored();
+    if (state.is<Closed>()) {
+      co_return;
+    }
+    KJ_IF_SOME(open, state.tryGetActive()) {
+      KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
+      // The AsyncOutputStream interface does not yet have an end() method.
+      // Instead, we just drop it, signaling EOF. Eventually, it might get
+      // an end method, at which point we should use that instead.
+      try {
+        co_await canceler.wrap(endImpl(*open.stream));
+        setClosed();
         co_return;
-      }
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        kj::throwFatalException(kj::cp(errored));
+      } catch (...) {
+        handleOperationException();
       }
     }
     KJ_UNREACHABLE;
@@ -121,6 +120,20 @@ class WritableSinkImpl: public WritableSink {
   }
 
  protected:
+  // Throws the stored exception if in error state.
+  void throwIfErrored() {
+    KJ_IF_SOME(exception, state.tryGetError()) {
+      kj::throwFatalException(kj::cp(exception));
+    }
+  }
+
+  // Handles exceptions from write/end operations: stores the error and rethrows.
+  [[noreturn]] void handleOperationException() {
+    auto exception = kj::getCaughtExceptionAsKj();
+    setErrored(kj::cp(exception));
+    kj::throwFatalException(kj::mv(exception));
+  }
+
   virtual kj::AsyncOutputStream& prepareWrite(kj::Own<kj::AsyncOutputStream>&& inner) {
     return setStream(kj::mv(inner));
   };
@@ -148,25 +161,29 @@ class WritableSinkImpl: public WritableSink {
   }
 
   void setClosed() {
-    state.init<Closed>();
+    state.transitionTo<Closed>();
   }
 
   void setErrored(kj::Exception&& ex) {
-    state = kj::cp(ex);
+    // Use forceTransitionTo because setErrored may be called when already
+    // in an error state (e.g., from write error handling).
+    state.forceTransitionTo<kj::Exception>(kj::mv(ex));
   }
 
   kj::AsyncOutputStream& setStream(kj::Own<kj::AsyncOutputStream> inner) {
     auto& ret = *inner;
-    state = kj::mv(inner);
+    // Update the stream in place without a state transition.
+    // This is called from prepareWrite() which may wrap/transform the stream.
+    state.get<Open>().stream = kj::mv(inner);
     return ret;
   }
 
-  kj::OneOf<kj::Own<kj::AsyncOutputStream>, Closed, kj::Exception>& getState() {
+  WritableSinkState& getState() {
     return state;
   }
 
  private:
-  kj::OneOf<kj::Own<kj::AsyncOutputStream>, Closed, kj::Exception> state;
+  WritableSinkState state;
   rpc::StreamEncoding encoding;
   kj::Canceler canceler;
 };
