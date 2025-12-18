@@ -279,6 +279,32 @@ strictEqual(results[0].status, 'rejected');
 strictEqual(results[0].reason.message, 'expected');
 ```
 
+### Using Mocks for Callback Verification
+
+Use `mock.fn()` from `node:test` instead of boolean flags to verify callbacks:
+
+```javascript
+import { mock } from 'node:test';
+import { strictEqual } from 'node:assert';
+
+// Instead of:
+let abortCalled = false;
+const writable = new WritableStream({
+  abort() { abortCalled = true; },
+});
+// ... later
+ok(abortCalled);
+
+// Use mock.fn():
+const abortFn = mock.fn();
+const writable = new WritableStream({
+  abort: abortFn,
+});
+// ... later
+strictEqual(abortFn.mock.callCount(), 1);  // Was called once
+strictEqual(abortFn.mock.callCount(), 0);  // Was not called
+```
+
 ### Documenting Porting Status
 
 After porting tests, add a status comment at the end of each test file and update this document.

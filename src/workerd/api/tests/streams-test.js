@@ -1,4 +1,5 @@
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, rejects, throws } from 'node:assert';
+import { mock } from 'node:test';
 
 const enc = new TextEncoder();
 
@@ -261,13 +262,7 @@ export const readAllTextFailedPull = {
       },
     });
     const response = new Response(rs);
-    const promise = response.text();
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(response.text(), { message: 'boom' });
   },
 };
 
@@ -280,13 +275,7 @@ export const readAllTextFailedStart = {
       },
     });
     const response = new Response(rs);
-    const promise = response.text();
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(response.text(), { message: 'boom' });
   },
 };
 
@@ -302,12 +291,7 @@ export const readAllTextFailed = {
     ok(!rs.locked);
     const promise = response.text();
     ok(rs.locked);
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(promise, { message: 'boom' });
   },
 };
 
@@ -317,31 +301,25 @@ export const tsCancel = {
     // readable is canceled or the writable is aborted. Verify also that
     // errors thrown by the cancel function are propagated.
     {
-      let cancelCalled = false;
-      const { readable } = new TransformStream({
-        async cancel(reason) {
-          strictEqual(reason, 'boom');
-          await scheduler.wait(10);
-          cancelCalled = true;
-        },
+      const cancelFn = mock.fn(async (reason) => {
+        strictEqual(reason, 'boom');
+        await scheduler.wait(10);
       });
-      ok(!cancelCalled);
+      const { readable } = new TransformStream({ cancel: cancelFn });
+      strictEqual(cancelFn.mock.callCount(), 0);
       await readable.cancel('boom');
-      ok(cancelCalled);
+      strictEqual(cancelFn.mock.callCount(), 1);
     }
 
     {
-      let cancelCalled = false;
-      const { writable } = new TransformStream({
-        async cancel(reason) {
-          strictEqual(reason, 'boom');
-          await scheduler.wait(10);
-          cancelCalled = true;
-        },
+      const cancelFn = mock.fn(async (reason) => {
+        strictEqual(reason, 'boom');
+        await scheduler.wait(10);
       });
-      ok(!cancelCalled);
+      const { writable } = new TransformStream({ cancel: cancelFn });
+      strictEqual(cancelFn.mock.callCount(), 0);
       await writable.abort('boom');
-      ok(cancelCalled);
+      strictEqual(cancelFn.mock.callCount(), 1);
     }
 
     {
@@ -350,12 +328,7 @@ export const tsCancel = {
           throw new Error('boomy');
         },
       });
-      try {
-        await writable.abort('boom');
-        throw new Error('expected to throw');
-      } catch (err) {
-        strictEqual(err.message, 'boomy');
-      }
+      await rejects(writable.abort('boom'), { message: 'boomy' });
     }
   },
 };
@@ -442,14 +415,12 @@ export const readableStreamFromThrowingAsyncGen = {
     }
     const rs = ReadableStream.from(gen());
     const chunks = [];
-    try {
+    async function consumeStream() {
       for await (const chunk of rs) {
         chunks.push(chunk);
       }
-      throw new Error('should have failed');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
     }
+    await rejects(consumeStream, { message: 'boom' });
     deepStrictEqual(chunks, ['hello']);
   },
 };
@@ -510,12 +481,7 @@ export const cancelStreamRejectsBodyConsume = {
 
     stream.cancel(new Error('a good reason'));
 
-    try {
-      await response.text();
-      throw new Error('should have failed');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    await rejects(response.text(), TypeError);
   },
 };
 
@@ -531,12 +497,7 @@ export const cancelReaderResolvesClosedPromise = {
     strictEqual(typeof closed, 'undefined');
     reader.releaseLock();
 
-    try {
-      await response.text();
-      throw new Error('should have failed');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    await rejects(response.text(), TypeError);
   },
 };
 
@@ -546,12 +507,7 @@ export const getReaderBadModeThrows = {
     const response = new Response('foo bar');
     const stream = response.body;
 
-    try {
-      stream.getReader({ mode: 'nope' });
-      throw new Error('should have thrown');
-    } catch (err) {
-      ok(err instanceof RangeError);
-    }
+    throws(() => stream.getReader({ mode: 'nope' }), RangeError);
   },
 };
 
@@ -565,12 +521,7 @@ export const streamLockedAfterGetReader = {
 
     ok(stream.locked);
 
-    try {
-      stream.getReader();
-      throw new Error('should have thrown');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    throws(() => stream.getReader(), TypeError);
 
     reader.releaseLock();
     ok(!stream.locked);
@@ -588,28 +539,13 @@ export const byobReaderConstraints = {
     reader.read(new Uint8Array(32)).catch(() => {}); // Ignore the result
 
     // Cannot BYOB with a zero-length buffer
-    try {
-      await reader.read(new Uint8Array(0));
-      throw new Error('should have failed');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    await rejects(reader.read(new Uint8Array(0)), TypeError);
 
     // Cannot BYOB an ArrayBuffer, only an ArrayBufferView
-    try {
-      await reader.read(new ArrayBuffer(32));
-      throw new Error('should have failed');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    await rejects(reader.read(new ArrayBuffer(32)), TypeError);
 
     // Cannot use BYOB reader as a non-BYOB reader
-    try {
-      await reader.read();
-      throw new Error('should have failed');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    await rejects(reader.read(), TypeError);
   },
 };
 
@@ -657,18 +593,13 @@ export const cancelErrorTypePropagation = {
       await reader.cancel(testCase.cancelWith);
 
       for (const promise of [writePromise, writerActualClosed]) {
-        try {
-          await promise;
-          throw new Error(
-            'Cancelled stream should throw. Test case: ' +
-              JSON.stringify(testCase)
-          );
-        } catch (e) {
+        await rejects(promise, (e) => {
           strictEqual(String(e), testCase.expectError);
           if (testCase.errorType) {
             ok(e instanceof testCase.errorType);
           }
-        }
+          return true;
+        });
       }
     }
   },
@@ -762,21 +693,11 @@ export const closedPromiseUnderLockRelease = {
 
     writer.releaseLock();
 
-    try {
-      await writerClosed;
-      throw new Error('should have rejected');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    await rejects(writerClosed, TypeError);
 
     reader.releaseLock();
 
-    try {
-      await readerClosed;
-      throw new Error('should have rejected');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    await rejects(readerClosed, TypeError);
   },
 };
 
@@ -794,26 +715,9 @@ export const closedPromiseUnderWriterAbort = {
     const readPromise = reader.read();
     await writer.abort(new Error('Some arbitrary, capricious reason.'));
 
-    try {
-      await writerClosed;
-      throw new Error('should have rejected');
-    } catch (err) {
-      ok(err instanceof Error);
-    }
-
-    try {
-      await readPromise;
-      throw new Error('should have rejected');
-    } catch (err) {
-      ok(err instanceof Error);
-    }
-
-    try {
-      await readerClosed;
-      throw new Error('should have rejected');
-    } catch (err) {
-      ok(err instanceof Error);
-    }
+    await rejects(writerClosed, Error);
+    await rejects(readPromise, Error);
+    await rejects(readerClosed, Error);
   },
 };
 
@@ -832,20 +736,10 @@ export const fixedLengthStreamPreconditions = {
     new FixedLengthStream(Number.MAX_SAFE_INTEGER);
 
     // Cannot construct with unsafe integer
-    try {
-      new FixedLengthStream(Number.MAX_SAFE_INTEGER + 1);
-      throw new Error('should have thrown');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    throws(() => new FixedLengthStream(Number.MAX_SAFE_INTEGER + 1), TypeError);
 
     // Cannot construct with negative integer
-    try {
-      new FixedLengthStream(-1);
-      throw new Error('should have thrown');
-    } catch (err) {
-      ok(err instanceof TypeError);
-    }
+    throws(() => new FixedLengthStream(-1), TypeError);
   },
 };
 

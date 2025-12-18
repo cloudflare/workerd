@@ -2,7 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { strictEqual, ok, rejects } from 'node:assert';
+import { strictEqual, ok, rejects, deepStrictEqual, throws } from 'node:assert';
+import { mock } from 'node:test';
 
 // Test pipeThrough from JavaScript readable to internal writable
 export const pipeThroughJsToInternal = {
@@ -20,24 +21,17 @@ export const pipeThroughJsToInternal = {
     const readable = rs.pipeThrough(transform);
 
     const output = [];
-    let errored = false;
-    try {
+    async function consumeStream() {
       for await (const chunk of readable) {
         output.push(dec.decode(chunk));
       }
-    } catch (err) {
-      // The 'hello' string at the end of chunks will cause an error to be thrown.
-      strictEqual(
-        err.message,
-        'This WritableStream only supports writing byte types.'
-      );
-      errored = true;
     }
+    // The 'hello' string at the end of chunks will cause an error to be thrown.
+    await rejects(consumeStream, {
+      message: 'This WritableStream only supports writing byte types.',
+    });
 
-    strictEqual(output[0], 'hello');
-    strictEqual(output[1], 'there');
-    strictEqual(output.length, 2);
-    ok(errored);
+    deepStrictEqual(output, ['hello', 'there']);
   },
 };
 
@@ -197,8 +191,7 @@ export const pipeThroughJsToInternalErroredSourcePreventAbort = {
     ok(transform.writable.locked);
     ok(transform.readable.locked);
 
-    // Wait a tick to allow the event loop to advance so that the error
-    // in the ReadableStream pull is processed.
+    // Allow the piping algorithm to process the error from the pull.
     await scheduler.wait(1);
 
     reader.releaseLock();
@@ -272,7 +265,7 @@ export const pipeThroughJsToInternalErroredDest = {
     reader.cancel(new Error('boom'));
     reader.releaseLock();
 
-    // Wait a tick to allow the event loop to turn over to process the abort
+    // Allow the cancel to propagate back to the source.
     await scheduler.wait(1);
 
     ok(!rs.locked);
@@ -344,15 +337,9 @@ export const pipeThroughJsToInternalCloses = {
     }
 
     // The writable should be closed and locked by the pipe
-    try {
-      const writer = transform.writable.getWriter();
-      throw new Error('should not reach here');
-    } catch (err) {
-      strictEqual(
-        err.message,
-        'This WritableStream is currently locked to a writer.'
-      );
-    }
+    throws(() => transform.writable.getWriter(), {
+      message: 'This WritableStream is currently locked to a writer.',
+    });
   },
 };
 
@@ -531,6 +518,7 @@ export const pipeToInternalToJsClose = {
 
     writable.close();
 
+    // Allow the close to propagate through the pipe.
     await scheduler.wait(1);
 
     const writer = ws.getWriter();
@@ -551,6 +539,7 @@ export const pipeToInternalToJsClosePrevent = {
 
     writable.close();
 
+    // Allow the pipe to finish without closing the destination.
     await scheduler.wait(1);
 
     const writer = ws.getWriter();
@@ -577,68 +566,59 @@ export const pipeToJsToJsSimple = {
 
     await readable.pipeTo(writable);
 
-    strictEqual(output[0], 1);
-    strictEqual(output[1], 2);
-    strictEqual(output[2], 3);
+    deepStrictEqual(output, [1, 2, 3]);
   },
 };
 
 // Test pipeTo error in JS readable aborts JS writable when preventAbort = false
 export const pipeToJsToJsErrorReadable = {
   async test() {
-    let abortCalled = false;
+    const abortFn = mock.fn();
     const readable = new ReadableStream({
       async pull() {
         throw new Error('boom');
       },
     });
     const writable = new WritableStream({
-      abort(reason) {
-        abortCalled = true;
-      },
+      abort: abortFn,
     });
 
     await rejects(readable.pipeTo(writable), { message: 'boom' });
 
-    ok(abortCalled);
+    strictEqual(abortFn.mock.callCount(), 1);
   },
 };
 
 // Test pipeTo error in JS readable does not abort JS writable when preventAbort = true
 export const pipeToJsToJsErrorReadablePrevent = {
   async test() {
-    let abortCalled = false;
+    const abortFn = mock.fn();
     const readable = new ReadableStream({
       async pull() {
         throw new Error('boom');
       },
     });
     const writable = new WritableStream({
-      abort(reason) {
-        abortCalled = true;
-      },
+      abort: abortFn,
     });
 
     const pipe = readable.pipeTo(writable, { preventAbort: true });
 
     await rejects(pipe, { message: 'boom' });
 
-    ok(!abortCalled);
+    strictEqual(abortFn.mock.callCount(), 0);
   },
 };
 
 // Test pipeTo error in JS writable cancels JS readable when preventCancel = false
 export const pipeToJsToJsErrorWritable = {
   async test() {
-    let cancelCalled = false;
-
+    const cancelFn = mock.fn();
     const readable = new ReadableStream({
       start(c) {
         c.enqueue('hello');
       },
-      cancel() {
-        cancelCalled = true;
-      },
+      cancel: cancelFn,
     });
     const writable = new WritableStream({
       write() {
@@ -650,7 +630,7 @@ export const pipeToJsToJsErrorWritable = {
 
     await rejects(pipe, { message: 'boom' });
 
-    ok(cancelCalled);
+    strictEqual(cancelFn.mock.callCount(), 1);
   },
 };
 
@@ -658,15 +638,13 @@ export const pipeToJsToJsErrorWritable = {
 export const pipeToJsToJsErrorWritablePrevent = {
   async test() {
     const chunks = [1, 2];
-    let cancelCalled = false;
+    const cancelFn = mock.fn();
     const readable = new ReadableStream({
       pull(c) {
         c.enqueue(chunks.shift());
         if (chunks.length === 0) c.close();
       },
-      cancel() {
-        cancelCalled = true;
-      },
+      cancel: cancelFn,
     });
     const writable = new WritableStream({
       write() {
@@ -678,7 +656,7 @@ export const pipeToJsToJsErrorWritablePrevent = {
 
     await rejects(pipe, { message: 'boom' });
 
-    ok(!cancelCalled);
+    strictEqual(cancelFn.mock.callCount(), 0);
 
     const reader = readable.getReader();
     await reader.read();
@@ -688,42 +666,38 @@ export const pipeToJsToJsErrorWritablePrevent = {
 // Test closing JS readable closes JS writable when preventClose = false
 export const pipeToJsToJsCloseReadable = {
   async test() {
-    let closeCalled = false;
+    const closeFn = mock.fn();
     const readable = new ReadableStream({
       start(c) {
         c.close();
       },
     });
     const writable = new WritableStream({
-      close() {
-        closeCalled = true;
-      },
+      close: closeFn,
     });
 
     await readable.pipeTo(writable);
 
-    ok(closeCalled);
+    strictEqual(closeFn.mock.callCount(), 1);
   },
 };
 
 // Test closing JS readable does not close JS writable when preventClose = true
 export const pipeToJsToJsCloseReadablePrevent = {
   async test() {
-    let closeCalled = false;
+    const closeFn = mock.fn();
     const readable = new ReadableStream({
       start(c) {
         c.close();
       },
     });
     const writable = new WritableStream({
-      close() {
-        closeCalled = true;
-      },
+      close: closeFn,
     });
 
     await readable.pipeTo(writable, { preventClose: true });
 
-    ok(!closeCalled);
+    strictEqual(closeFn.mock.callCount(), 0);
   },
 };
 
@@ -756,7 +730,7 @@ export const pipeToJsToJsTee = {
 export const pipeToJsToJsCancelAlready = {
   async test() {
     const signal = AbortSignal.abort(new Error('boom'));
-    let writeCalled = false;
+    const writeFn = mock.fn();
     const readable = new ReadableStream({
       start(c) {
         c.enqueue('hello');
@@ -765,14 +739,12 @@ export const pipeToJsToJsCancelAlready = {
     });
 
     const writable = new WritableStream({
-      write(chunk) {
-        writeCalled = true;
-      },
+      write: writeFn,
     });
 
     await rejects(readable.pipeTo(writable, { signal }), { message: 'boom' });
 
-    ok(!writeCalled);
+    strictEqual(writeFn.mock.callCount(), 0);
   },
 };
 
