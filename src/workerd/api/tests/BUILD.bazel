@@ -225,6 +225,12 @@ wd_test(
 )
 
 wd_test(
+    src = "encoding-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["encoding-streams-test.js"],
+)
+
+wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
     data = ["events-test.js"],
@@ -334,6 +340,30 @@ wd_test(
     src = "stub-storage-test.wd-test",
     args = ["--experimental"],
     data = ["stub-storage-test.js"],
+)
+
+wd_test(
+    src = "compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["compression-streams-test.js"],
+)
+
+wd_test(
+    src = "strict-compression-test.wd-test",
+    args = ["--experimental"],
+    data = ["strict-compression-test.js"],
+)
+
+wd_test(
+    src = "transform-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["transform-streams-test.js"],
+)
+
+wd_test(
+    src = "pipe-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["pipe-streams-test.js"],
 )
 
 wd_test(

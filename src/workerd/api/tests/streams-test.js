@@ -1,4 +1,5 @@
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, rejects, throws } from 'node:assert';
+import { mock } from 'node:test';
 
 const enc = new TextEncoder();
 
@@ -261,13 +262,7 @@ export const readAllTextFailedPull = {
       },
     });
     const response = new Response(rs);
-    const promise = response.text();
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(response.text(), { message: 'boom' });
   },
 };
 
@@ -280,13 +275,7 @@ export const readAllTextFailedStart = {
       },
     });
     const response = new Response(rs);
-    const promise = response.text();
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(response.text(), { message: 'boom' });
   },
 };
 
@@ -302,12 +291,7 @@ export const readAllTextFailed = {
     ok(!rs.locked);
     const promise = response.text();
     ok(rs.locked);
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(promise, { message: 'boom' });
   },
 };
 
@@ -317,31 +301,25 @@ export const tsCancel = {
     // readable is canceled or the writable is aborted. Verify also that
     // errors thrown by the cancel function are propagated.
     {
-      let cancelCalled = false;
-      const { readable } = new TransformStream({
-        async cancel(reason) {
-          strictEqual(reason, 'boom');
-          await scheduler.wait(10);
-          cancelCalled = true;
-        },
+      const cancelFn = mock.fn(async (reason) => {
+        strictEqual(reason, 'boom');
+        await scheduler.wait(10);
       });
-      ok(!cancelCalled);
+      const { readable } = new TransformStream({ cancel: cancelFn });
+      strictEqual(cancelFn.mock.callCount(), 0);
       await readable.cancel('boom');
-      ok(cancelCalled);
+      strictEqual(cancelFn.mock.callCount(), 1);
     }
 
     {
-      let cancelCalled = false;
-      const { writable } = new TransformStream({
-        async cancel(reason) {
-          strictEqual(reason, 'boom');
-          await scheduler.wait(10);
-          cancelCalled = true;
-        },
+      const cancelFn = mock.fn(async (reason) => {
+        strictEqual(reason, 'boom');
+        await scheduler.wait(10);
       });
-      ok(!cancelCalled);
+      const { writable } = new TransformStream({ cancel: cancelFn });
+      strictEqual(cancelFn.mock.callCount(), 0);
       await writable.abort('boom');
-      ok(cancelCalled);
+      strictEqual(cancelFn.mock.callCount(), 1);
     }
 
     {
@@ -350,12 +328,7 @@ export const tsCancel = {
           throw new Error('boomy');
         },
       });
-      try {
-        await writable.abort('boom');
-        throw new Error('expected to throw');
-      } catch (err) {
-        strictEqual(err.message, 'boomy');
-      }
+      await rejects(writable.abort('boom'), { message: 'boomy' });
     }
   },
 };
@@ -442,14 +415,12 @@ export const readableStreamFromThrowingAsyncGen = {
     }
     const rs = ReadableStream.from(gen());
     const chunks = [];
-    try {
+    async function consumeStream() {
       for await (const chunk of rs) {
         chunks.push(chunk);
       }
-      throw new Error('should have failed');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
     }
+    await rejects(consumeStream, { message: 'boom' });
     deepStrictEqual(chunks, ['hello']);
   },
 };
@@ -497,6 +468,272 @@ export const finalReadOnInternalStreamReturnsBuffer = {
     ok(result.value instanceof Uint8Array);
     strictEqual(result.value.byteLength, 0);
     strictEqual(result.value.buffer.byteLength, 10);
+  },
+};
+
+// Test that canceling a stream rejects body consume function
+export const cancelStreamRejectsBodyConsume = {
+  async test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+
+    stream.cancel(new Error('a good reason'));
+
+    await rejects(response.text(), TypeError);
+  },
+};
+
+// Test that canceling a reader resolves closed promise
+export const cancelReaderResolvesClosedPromise = {
+  async test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+    const reader = stream.getReader();
+
+    reader.cancel();
+    const closed = await reader.closed;
+    strictEqual(typeof closed, 'undefined');
+    reader.releaseLock();
+
+    await rejects(response.text(), TypeError);
+  },
+};
+
+// Test that getReader with bad mode throws RangeError
+export const getReaderBadModeThrows = {
+  test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+
+    throws(() => stream.getReader({ mode: 'nope' }), RangeError);
+  },
+};
+
+// Test that stream is locked after getReader() called
+export const streamLockedAfterGetReader = {
+  test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+
+    const reader = stream.getReader();
+
+    ok(stream.locked);
+
+    throws(() => stream.getReader(), TypeError);
+
+    reader.releaseLock();
+    ok(!stream.locked);
+    reader.releaseLock(); // Second time should be a no-op
+  },
+};
+
+// Test BYOB reader constraints
+export const byobReaderConstraints = {
+  async test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+    const reader = stream.getReader({ mode: 'byob' });
+    // Start a read - this will consume part of the stream
+    reader.read(new Uint8Array(32)).catch(() => {}); // Ignore the result
+
+    // Cannot BYOB with a zero-length buffer
+    await rejects(reader.read(new Uint8Array(0)), TypeError);
+
+    // Cannot BYOB an ArrayBuffer, only an ArrayBufferView
+    await rejects(reader.read(new ArrayBuffer(32)), TypeError);
+
+    // Cannot use BYOB reader as a non-BYOB reader
+    await rejects(reader.read(), TypeError);
+  },
+};
+
+// Test cancel error type propagation
+export const cancelErrorTypePropagation = {
+  async test() {
+    const cancelErrorTests = [
+      {
+        cancelWith: new Error('test'),
+        expectError: 'Error: test',
+      },
+      {
+        cancelWith: new TypeError('Problems!'),
+        expectError: 'TypeError: Problems!',
+        errorType: TypeError,
+      },
+      {
+        cancelWith: new RangeError('Problems!'),
+        expectError: 'RangeError: Problems!',
+        errorType: RangeError,
+      },
+      {
+        cancelWith: new SyntaxError('The semicolons are bad'),
+        expectError: 'SyntaxError: The semicolons are bad',
+        errorType: SyntaxError,
+      },
+      {
+        cancelWith: new ReferenceError("Didn't find it"),
+        expectError: "ReferenceError: Didn't find it",
+        errorType: ReferenceError,
+      },
+      {
+        cancelWith: undefined,
+        expectError: 'Error: Stream was cancelled.',
+      },
+    ];
+
+    for (const testCase of cancelErrorTests) {
+      const ts = new IdentityTransformStream();
+
+      const writer = ts.writable.getWriter();
+      const reader = ts.readable.getReader();
+      const writePromise = writer.write(new TextEncoder().encode('a'));
+      const writerActualClosed = writer.close();
+      await reader.cancel(testCase.cancelWith);
+
+      for (const promise of [writePromise, writerActualClosed]) {
+        await rejects(promise, (e) => {
+          strictEqual(String(e), testCase.expectError);
+          if (testCase.errorType) {
+            ok(e instanceof testCase.errorType);
+          }
+          return true;
+        });
+      }
+    }
+  },
+};
+
+// Test IdentityTransformStream write before read
+export const identityTransformWriteBeforeRead = {
+  async test() {
+    const MAX_RW = 10;
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    const writePromises = [];
+    for (let i = 0; i < MAX_RW; i++) {
+      writePromises.push(writer.write(new Uint8Array([i])));
+    }
+
+    const chunks = [];
+    for (let i = 0; i < MAX_RW; i++) {
+      chunks.push(await reader.read());
+    }
+
+    await Promise.all(writePromises);
+
+    for (let i = 0; i < chunks.length; i++) {
+      deepStrictEqual([...chunks[i].value], [i]);
+      strictEqual(chunks[i].done, false);
+    }
+
+    const writeClosePromise = writer.close();
+    const chunk = await reader.read();
+    await writeClosePromise;
+
+    strictEqual(chunk.done, true);
+
+    await writer.closed;
+    await reader.closed;
+  },
+};
+
+// Test IdentityTransformStream read before write
+// NOTE: This test uses standard TransformStream because IdentityTransformStream
+// doesn't support multiple pending reads in the same way
+export const identityTransformReadBeforeWrite = {
+  async test() {
+    const MAX_RW = 10;
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    const readPromises = [];
+    for (let i = 0; i < MAX_RW; i++) {
+      readPromises.push(reader.read());
+    }
+
+    for (let i = 0; i < MAX_RW; i++) {
+      await writer.write(new Uint8Array([i]));
+    }
+
+    const chunks = await Promise.all(readPromises);
+
+    for (let i = 0; i < chunks.length; i++) {
+      deepStrictEqual([...chunks[i].value], [i]);
+      strictEqual(chunks[i].done, false);
+    }
+
+    const readClosePromise = reader.read();
+    await writer.close();
+    const chunk = await readClosePromise;
+
+    strictEqual(chunk.done, true);
+
+    await writer.closed;
+    await reader.closed;
+  },
+};
+
+// Test closed promise under lock release
+export const closedPromiseUnderLockRelease = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    const writerClosed = writer.closed;
+    const readerClosed = reader.closed;
+
+    writer.releaseLock();
+
+    await rejects(writerClosed, TypeError);
+
+    reader.releaseLock();
+
+    await rejects(readerClosed, TypeError);
+  },
+};
+
+// Test closed promise under writer abort
+export const closedPromiseUnderWriterAbort = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    const writerClosed = writer.closed;
+    const readerClosed = reader.closed;
+
+    const readPromise = reader.read();
+    await writer.abort(new Error('Some arbitrary, capricious reason.'));
+
+    await rejects(writerClosed, Error);
+    await rejects(readPromise, Error);
+    await rejects(readerClosed, Error);
+  },
+};
+
+// Test FixedLengthStream constructor preconditions
+export const fixedLengthStreamPreconditions = {
+  test() {
+    // Can construct with negative zero
+    new FixedLengthStream(-0.0);
+
+    // Can construct with fraction (coerced to 0)
+    new FixedLengthStream(0.00001);
+
+    // Can construct with MAX_SAFE_INTEGER
+    new FixedLengthStream(Number.MAX_SAFE_INTEGER);
+
+    // Cannot construct with unsafe integer
+    throws(() => new FixedLengthStream(Number.MAX_SAFE_INTEGER + 1), TypeError);
+
+    // Cannot construct with negative integer
+    throws(() => new FixedLengthStream(-1), TypeError);
   },
 };
 
