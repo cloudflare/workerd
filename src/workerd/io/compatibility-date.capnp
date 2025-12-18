@@ -1265,4 +1265,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # of a fetch Request or Response is sync iterable but has a custom toString or
   # toPrimitive method, we will skip treating it as a sync iterable and instead allow
   # it to fall through to being handled as a stringified object.
+
+  stripBomInReadAllText @150 :Bool
+    $compatEnableFlag("strip_bom_in_read_all_text")
+    $compatDisableFlag("do_not_strip_bom_in_read_all_text")
+    $compatEnableDate("2026-01-13")
+    $impliedByAfterDate(name = "pedanticWpt", date = "2026-01-13");
+  # Instructs the readAllText method in streams to strip the leading UTF8 BOM if present.
 }
