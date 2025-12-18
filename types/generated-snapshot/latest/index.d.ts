@@ -11489,7 +11489,7 @@ declare namespace CloudflareWorkersModule {
     constructor(ctx: ExecutionContext, env: Env);
     email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
-    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    queue?(batch: MessageBatch): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;
     tailStream?(
