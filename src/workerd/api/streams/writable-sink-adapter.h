@@ -1,6 +1,7 @@
 #include "common.h"
 #include "writable-sink.h"
 
+#include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api::streams {
@@ -247,8 +248,27 @@ class WritableStreamSinkJsAdapter final {
   // holds both the underlying WritableStreamSink and the write queue.
   // It must be held within an IoOwn.
   struct Active;
-  struct Closed final {};
-  kj::OneOf<IoOwn<Active>, Closed, kj::Exception> state;
+
+  struct Closed final {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+
+  struct Open {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+    IoOwn<Active> active;
+  };
+
+  // State machine for tracking writable sink adapter lifecycle:
+  //   Open -> Closed (normal close via end())
+  //   Open -> kj::Exception (error via abort() or write failure)
+  // Both Closed and kj::Exception are terminal states.
+  using State = ComposableStateMachine<TerminalStates<Closed, kj::Exception>,
+      ErrorState<kj::Exception>,
+      ActiveState<Open>,
+      Open,
+      Closed,
+      kj::Exception>;
+  State state;
 
   // Used for backpressure signaling. When backpressure is indicated, the
   // readyResolver, ready, and readyWatcher will be replaced with a new set.
@@ -438,8 +458,27 @@ class WritableStreamSinkKjAdapter final: public WritableSink {
  private:
   struct Active;
   KJ_DECLARE_NON_POLYMORPHIC(Active);
-  struct Closed {};
-  kj::OneOf<kj::Own<Active>, Closed, kj::Exception> state;
+
+  struct KjClosed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+
+  struct KjOpen {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+    kj::Own<Active> active;
+  };
+
+  // State machine for tracking writable sink adapter lifecycle:
+  //   KjOpen -> KjClosed (normal close via end())
+  //   KjOpen -> kj::Exception (error via abort() or write failure)
+  // Both KjClosed and kj::Exception are terminal states.
+  using KjState = ComposableStateMachine<TerminalStates<KjClosed, kj::Exception>,
+      ErrorState<kj::Exception>,
+      ActiveState<KjOpen>,
+      KjOpen,
+      KjClosed,
+      kj::Exception>;
+  KjState state;
   kj::Rc<WeakRef<WritableStreamSinkKjAdapter>> selfRef;
 };
 
