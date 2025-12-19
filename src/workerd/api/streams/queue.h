@@ -392,17 +392,19 @@ class ConsumerImpl final {
   }
 
   void push(jsg::Lock& js, kj::Rc<Entry> entry) {
-    auto& ready =
-        KJ_REQUIRE_NONNULL(state.tryGetActive(), "The consumer is either closed or errored.");
-    KJ_REQUIRE(!isClosing(), "The consumer is already closing.");
+    // If the consumer is already closed or errored, then we do nothing here.
+    // This can happen during iteration over consumers in QueueImpl::push() when
+    // resolving a read request on one consumer triggers JavaScript code that
+    // closes or errors another consumer in the same queue.
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      // If the consumer is already closing or the entry is empty, do nothing.
+      if (isClosing() || entry->getSize() == 0) {
+        return;
+      }
 
-    // If the size of the entry is zero, do nothing.
-    if (entry->getSize() == 0) {
-      return;
+      UpdateBackpressureScope scope(queue);
+      Self::handlePush(js, ready, queue, kj::mv(entry));
     }
-
-    UpdateBackpressureScope scope(queue);
-    Self::handlePush(js, ready, queue, kj::mv(entry));
   }
 
   void read(jsg::Lock& js, ReadRequest request) {

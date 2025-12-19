@@ -1199,5 +1199,95 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
 
 #pragma endregion ByteQueue Tests
 
+#pragma region Re-entrancy Safety Tests
+
+// Test that pushing to a closed consumer doesn't crash.
+// This can happen during QueueImpl::push() iteration when resolving a read
+// on one consumer triggers JavaScript that closes another consumer.
+KJ_TEST("ValueQueue push to closed consumer is safe") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(2);
+    ValueQueue::Consumer consumer1(queue);
+    ValueQueue::Consumer consumer2(queue);
+
+    // Close consumer2
+    consumer2.close(js);
+
+    // Now push to the queue - this pushes to all consumers
+    // Before the fix, this would crash when trying to push to closed consumer2
+    queue.push(js, getEntry(js, 4));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1.size() == 4);
+
+    js.runMicrotasks();
+  });
+}
+
+// Test that pushing to a cancelled consumer doesn't crash.
+KJ_TEST("ValueQueue push to cancelled consumer is safe") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(2);
+    ValueQueue::Consumer consumer1(queue);
+    ValueQueue::Consumer consumer2(queue);
+
+    // Cancel consumer2
+    consumer2.cancel(js, kj::none);
+
+    // Now push to the queue
+    queue.push(js, getEntry(js, 4));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1.size() == 4);
+
+    js.runMicrotasks();
+  });
+}
+
+// Test that pushing to an errored consumer doesn't crash.
+KJ_TEST("ValueQueue push to errored consumer is safe") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(2);
+    ValueQueue::Consumer consumer1(queue);
+    ValueQueue::Consumer consumer2(queue);
+
+    // Error consumer2
+    consumer2.error(js, js.v8Ref(js.v8Error("error reason"_kj)));
+
+    // Now push to the queue
+    queue.push(js, getEntry(js, 4));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1.size() == 4);
+
+    js.runMicrotasks();
+  });
+}
+
+// Test ByteQueue version of the safety checks
+KJ_TEST("ByteQueue push to closed consumer is safe") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer1(queue);
+    ByteQueue::Consumer consumer2(queue);
+
+    // Close consumer2
+    consumer2.close(js);
+
+    // Now push to the queue
+    auto store = jsg::BackingStore::alloc(js, 4);
+    memset(store.asArrayPtr().begin(), 'A', 4);
+    auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store)));
+    queue.push(js, kj::mv(entry));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1.size() == 4);
+
+    js.runMicrotasks();
+  });
+}
+
+#pragma endregion Re - entrancy Safety Tests
+
 }  // namespace
 }  // namespace workerd::api
