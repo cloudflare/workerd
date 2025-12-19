@@ -1701,6 +1701,12 @@ class StateMachine {
 
  private:
   StateUnion state;
+
+  // Counter for detecting illegal transitions from within withState()/whenActiveOr() callbacks.
+  // Marked mutable because const methods use it for internal bookkeeping while not changing
+  // the logical state (i.e., which state the machine is in). This class is NOT thread-safe;
+  // callers are responsible for synchronization if needed. The const qualifier on methods
+  // indicates "does not transition the state machine", not "thread-safe".
   mutable uint32_t transitionLockCount = 0;
 
   // Pending state support (only allocated when HAS_PENDING is true)
