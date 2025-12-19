@@ -17,6 +17,7 @@ pub use v8::ffi::ExceptionType;
 mod ffi {
     extern "Rust" {
         type Realm;
+
         #[expect(clippy::unnecessary_box_returns)]
         unsafe fn realm_create(isolate: *mut Isolate) -> Box<Realm>;
     }
@@ -77,7 +78,8 @@ pub fn create_resource_constructor<R: Resource>(
     lock: &mut Lock,
 ) -> v8::Global<v8::FunctionTemplate> {
     unsafe {
-        v8::ffi::create_resource_template(lock.isolate(), &get_resource_descriptor::<R>()).into()
+        v8::ffi::create_resource_template(lock.isolate().as_ffi(), &get_resource_descriptor::<R>())
+            .into()
     }
 }
 
@@ -110,7 +112,7 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, RT: ResourceTemplate>(
                 v8::Local::from_ffi(
                     lock.isolate(),
                     v8::ffi::wrap_resource(
-                        lock.isolate(),
+                        lock.isolate().as_ffi(),
                         resource.get_state().this as usize,
                         constructor.as_ffi_ref(),
                         drop_fn as usize,
@@ -120,7 +122,7 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, RT: ResourceTemplate>(
             unsafe {
                 resource
                     .get_state()
-                    .attach_wrapper(lock.get_realm(), instance.clone().into());
+                    .attach_wrapper(lock.realm(), instance.clone().into());
             }
             instance
         }
@@ -131,7 +133,8 @@ pub fn unwrap_resource<'a, R: Resource>(
     lock: &'a mut Lock,
     value: v8::Local<v8::Value>,
 ) -> &'a mut R {
-    let ptr = unsafe { v8::ffi::unwrap_resource(lock.isolate(), value.into_ffi()) as *mut R };
+    let ptr =
+        unsafe { v8::ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) as *mut R };
     unsafe { &mut *ptr }
 }
 
@@ -145,17 +148,12 @@ impl Error {
         Self { name, message }
     }
 
-    /// # Safety
-    /// The caller must ensure the isolate is valid and that the exception is thrown within the
-    /// correct isolate/context.
-    pub unsafe fn as_exception<'a>(
-        &self,
-        isolate: *mut v8::ffi::Isolate,
-    ) -> v8::Local<'a, v8::Value> {
+    /// Creates a V8 exception from this error.
+    pub fn as_exception<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
         unsafe {
             v8::Local::from_ffi(
                 isolate,
-                v8::ffi::exception_create(isolate, self.name, &self.message),
+                v8::ffi::exception_create(isolate.as_ffi(), self.name, &self.message),
             )
         }
     }
@@ -185,33 +183,38 @@ impl From<ParseIntError> for Error {
 /// perform V8 operations like creating objects, wrapping values, and accessing the Realm.
 /// This is analogous to `jsg::Lock` in C++ JSG.
 pub struct Lock {
-    isolate: *mut v8::ffi::Isolate,
+    isolate: v8::IsolatePtr,
 }
 
 impl Lock {
     /// # Safety
     /// The caller must ensure that `args` is a valid pointer to `FunctionCallbackInfo`.
     pub unsafe fn from_args(args: *mut v8::ffi::FunctionCallbackInfo) -> Self {
-        unsafe { Self::from_isolate(v8::ffi::fci_get_isolate(args)) }
+        unsafe { Self::from_isolate_ptr(v8::ffi::fci_get_isolate(args)) }
     }
 
-    /// # Safety
-    /// The caller must ensure that `isolate` is a valid pointer to an `Isolate`.
-    pub unsafe fn from_isolate(isolate: *mut v8::ffi::Isolate) -> Self {
-        Self { isolate }
-    }
-
-    /// Returns a raw pointer to the isolate.
+    /// Creates a Lock from a raw isolate pointer.
     ///
     /// # Safety
-    /// The caller must ensure the pointer is not used after the Lock is dropped and that all
-    /// V8 API calls using this pointer are made while holding the isolate lock.
-    pub unsafe fn isolate(&mut self) -> *mut v8::ffi::Isolate {
+    /// The caller must ensure that `isolate` is a valid pointer to an `Isolate`.
+    pub unsafe fn from_isolate_ptr(isolate: *mut v8::ffi::Isolate) -> Self {
+        Self {
+            isolate: unsafe { v8::IsolatePtr::from_ffi(isolate) },
+        }
+    }
+
+    /// Returns the isolate associated with this lock.
+    pub fn isolate(&self) -> v8::IsolatePtr {
         self.isolate
     }
 
     pub fn new_object<'a>(&mut self) -> v8::Local<'a, v8::Object> {
-        unsafe { v8::Local::from_ffi(self.isolate(), v8::ffi::local_new_object(self.isolate())) }
+        unsafe {
+            v8::Local::from_ffi(
+                self.isolate(),
+                v8::ffi::local_new_object(self.isolate().as_ffi()),
+            )
+        }
     }
 
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
@@ -222,8 +225,8 @@ impl Lock {
         todo!()
     }
 
-    fn get_realm(&mut self) -> &mut Realm {
-        unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate()) }
+    fn realm(&mut self) -> &mut Realm {
+        unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
     }
 }
 
@@ -338,7 +341,7 @@ pub struct ResourceState {
     pub this: *mut c_void,
     pub drop_fn: Option<unsafe extern "C" fn(*mut v8::ffi::Isolate, *mut c_void)>,
     pub strong_wrapper: Option<v8::Global<v8::Object>>,
-    pub isolate: *mut v8::ffi::Isolate,
+    pub isolate: Option<v8::IsolatePtr>,
 }
 
 impl Default for ResourceState {
@@ -347,7 +350,7 @@ impl Default for ResourceState {
             this: std::ptr::null_mut(),
             drop_fn: None,
             strong_wrapper: None,
-            isolate: std::ptr::null_mut(),
+            isolate: None,
         }
     }
 }
@@ -367,15 +370,16 @@ impl ResourceState {
         assert!(self.strong_wrapper.is_none());
 
         self.strong_wrapper = Some(object.into());
-        self.isolate = realm.get_isolate();
+        self.isolate = Some(realm.isolate());
 
         realm.add_resource(NonNull::from(&mut *self));
 
         let Some(wrapper) = self.strong_wrapper.as_mut() else {
             unreachable!("This should not happen")
         };
+        let isolate = self.isolate.expect("isolate should be set");
         unsafe {
-            wrapper.make_weak(self.isolate, self.this, Self::weak_callback);
+            wrapper.make_weak(isolate, self.this, Self::weak_callback);
         }
     }
 
@@ -449,12 +453,13 @@ pub unsafe fn drop_resource<R: Resource>(_isolate: *mut ffi::Isolate, this: *mut
 /// `Drop` iterates all tracked resources and calls their drop functions to reconstruct and
 /// free any leaked `Ref<R>` values for wrappers not yet collected by V8's GC.
 pub struct Realm {
-    isolate: *mut v8::ffi::Isolate,
+    isolate: v8::IsolatePtr,
     resources: Vec<*mut ResourceState>,
 }
 
 impl Realm {
-    pub fn new(isolate: *mut v8::ffi::Isolate) -> Self {
+    /// Creates a new Realm from a V8 isolate.
+    pub fn from_isolate(isolate: v8::IsolatePtr) -> Self {
         Self {
             isolate,
             resources: Vec::new(),
@@ -465,7 +470,7 @@ impl Realm {
         self.resources.push(resource.as_ptr());
     }
 
-    pub fn get_isolate(&self) -> *mut v8::ffi::Isolate {
+    pub fn isolate(&self) -> v8::IsolatePtr {
         self.isolate
     }
 }
@@ -473,7 +478,7 @@ impl Realm {
 impl Drop for Realm {
     fn drop(&mut self) {
         debug_assert!(
-            unsafe { v8::ffi::isolate_is_locked(self.isolate) },
+            unsafe { self.isolate.is_locked() },
             "Realm must be dropped while holding the isolate lock"
         );
 
@@ -492,7 +497,8 @@ impl Drop for Realm {
                 {
                     // Note: Do not access resource_state after drop_fn returns, as
                     // ResourceState is embedded inside the Resource which is now freed.
-                    drop_fn(resource_state.isolate, resource_state.this);
+                    let isolate = resource_state.isolate.expect("isolate should be set");
+                    drop_fn(isolate.as_ffi(), resource_state.this);
                 }
             }
         }
@@ -502,7 +508,7 @@ impl Drop for Realm {
 
 #[expect(clippy::unnecessary_box_returns)]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
-    Box::new(Realm::new(isolate))
+    unsafe { Box::new(Realm::from_isolate(v8::IsolatePtr::from_ffi(isolate))) }
 }
 
 /// Handles a result by setting the return value or throwing an error.
@@ -519,7 +525,7 @@ pub unsafe fn handle_result<T: Type, E: std::fmt::Display>(
         Err(err) => {
             // TODO(soon): Make sure to use jsg::Error trait here and dynamically call proper method to throw the error.
             let description = err.to_string();
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate(), &description) };
+            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &description) };
         }
     }
 }
