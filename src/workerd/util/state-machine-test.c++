@@ -16,12 +16,12 @@ namespace {
 // =============================================================================
 
 struct Idle {
-  static constexpr kj::StringPtr NAME = "idle"_kj;
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "idle"_kj;
   bool initialized = false;
 };
 
 struct Running {
-  static constexpr kj::StringPtr NAME = "running"_kj;
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "running"_kj;
   kj::String taskName;
   int progress = 0;
 
@@ -30,14 +30,14 @@ struct Running {
 };
 
 struct Completed {
-  static constexpr kj::StringPtr NAME = "completed"_kj;
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "completed"_kj;
   int result;
 
   explicit Completed(int r): result(r) {}
 };
 
 struct Failed {
-  static constexpr kj::StringPtr NAME = "failed"_kj;
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "failed"_kj;
   kj::String error;
 
   explicit Failed(kj::String err): error(kj::mv(err)) {}

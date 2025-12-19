@@ -10,6 +10,9 @@
 //
 // Entire implementation was Claude-generated initially.
 //
+// Most of the detailed doc comments here are largely intended to be used by agents
+// and tooling. Human readers may prefer to just skip to the actual code.
+//
 // This header provides utilities for building type-safe state machines using kj::OneOf.
 // It addresses common patterns found throughout the workerd codebase with improvements
 // that provide tangible benefits over raw kj::OneOf usage.
@@ -91,8 +94,8 @@
 //      state.init<Closed>();
 //      state.init<Readable>(...);  // Oops - zombie stream!
 //
-//    TerminalStateMachine/StateMachine with TerminalStates<> will
-//    throw if you attempt this, catching the bug immediately.
+//    StateMachine with TerminalStates<> will throw if you attempt this,
+//    catching the bug immediately.
 //
 // 4. SEMANTIC HELPERS:
 //
@@ -139,10 +142,10 @@
 //   - TerminalStates<Ts...>  - States that cannot be transitioned FROM
 //                              Enables: isTerminal()
 //   - ErrorState<T>          - Designates the error state type
-//                              Enables: isErrored(), tryGetError(), getError()
+//                              Enables: isErrored(), tryGetErrorUnsafe(), getErrorUnsafe()
 //   - ActiveState<T>         - Designates the active/working state type
 //                              Enables: isActive(), isInactive(), whenActive(), whenActiveOr(),
-//                                       tryGetActive(), requireActive()
+//                                       tryGetActiveUnsafe(), requireActiveUnsafe()
 //   - PendingStates<Ts...>   - States that can be deferred during operations
 //                              Enables: beginOperation(), endOperation(), deferTransitionTo(), etc.
 //
@@ -168,8 +171,8 @@
 //        a.resource->read();  // Safe - Active cannot be destroyed
 //      });
 //
-// 2. DEBUG ASSERTIONS: In debug builds, the machine tracks active references
-//    and asserts if a transition occurs while references exist.
+// 2. TRANSITION LOCK ENFORCEMENT: The machine tracks active transition locks
+//    and throws if a transition is attempted while locks are held.
 //
 // 3. SAFE ACCESS PATTERNS: Prefer whenState() and whenActive() over get()
 //    to ensure references don't outlive their validity.
@@ -246,7 +249,7 @@
 //
 //   // Error checking
 //   if (state.isErrored()) { ... }
-//   KJ_IF_SOME(err, state.tryGetError()) { ... }
+//   KJ_IF_SOME(err, state.tryGetErrorUnsafe()) { ... }
 //
 //   // Deferred transitions during operations
 //   state.beginOperation();
@@ -468,7 +471,7 @@ struct TerminalStates {
   }
 };
 
-// Marker type to specify the error state (enables isErrored(), tryGetError(), etc.)
+// Marker type to specify the error state (enables isErrored(), tryGetErrorUnsafe(), etc.)
 template <typename T>
 struct ErrorState {
   using Type = T;
@@ -857,8 +860,8 @@ class StateMachine;
 //
 // All features from separate classes are available when their spec is provided:
 //   - TerminalStates<...> -> isTerminal(), enforces no transitions from terminal
-//   - ErrorState<T> -> isErrored(), tryGetError(), getError()
-//   - ActiveState<T> -> isActive(), isInactive(), whenActive(), tryGetActive()
+//   - ErrorState<T> -> isErrored(), tryGetErrorUnsafe(), getErrorUnsafe()
+//   - ActiveState<T> -> isActive(), isInactive(), whenActive(), tryGetActiveUnsafe()
 //   - PendingStates<...> -> beginOperation(), endOperation(), deferTransitionTo(), etc.
 
 template <typename... Args>
@@ -1800,9 +1803,9 @@ class StateMachine {
     requires(HAS_PENDING)
   {
     // Applying a pending state is a transition, so we must not be locked.
-    // This prevents UAF when endOperation() is called inside a withState() callback:
+    // This prevents UAF when endOperation() is called inside a whenState() callback:
     //
-    //   machine.withState<Active>([&](Active& a) {
+    //   machine.whenState<Active>([&](Active& a) {
     //     {
     //       auto op = machine.scopedOperation();
     //       machine.deferTransitionTo<Closed>();
@@ -1918,86 +1921,83 @@ class StateMachine {
 // Example 1: Basic Resource State Machine (Streams Pattern)
 // ---------------------------------------------------------
 //
-//   struct Readable {
-//     static constexpr kj::StringPtr NAME = "readable"_kj;
-//     kj::Own<ReadableStreamSource> source;
+//   struct Open {
+//     static constexpr kj::StringPtr NAME = "open"_kj;
+//     kj::Own<kj::AsyncInputStream> stream;
 //   };
 //
 //   struct Closed {
 //     static constexpr kj::StringPtr NAME = "closed"_kj;
 //   };
 //
-//   struct Errored {
-//     static constexpr kj::StringPtr NAME = "errored"_kj;
-//     jsg::Value error;
-//     auto getHandle(jsg::Lock& js) { return error.getHandle(js); }
-//   };
+//   // Full-featured stream state machine (actual pattern used in streams code)
+//   using StreamState = StateMachine<
+//       TerminalStates<Closed, kj::Exception>,  // Cannot transition out of these
+//       ErrorState<kj::Exception>,              // Enables tryGetErrorUnsafe(), isErrored()
+//       ActiveState<Open>,                      // Enables tryGetActiveUnsafe(), isActive()
+//       Open, Closed, kj::Exception>;
 //
-//   // Use ResourceStateMachine for automatic active/closed/errored handling
-//   ResourceStateMachine<Readable, Closed, Errored> state;
-//
-//   // Initialize
-//   state.transitionTo<Readable>(kj::mv(source));
+//   StreamState state;
+//   state.transitionTo<Open>(kj::mv(stream));
 //
 //   // Check state
 //   if (state.isActive()) { ... }
-//   if (state.isClosedOrErrored()) { ... }
+//   if (state.isTerminal()) { ... }  // Closed or errored
 //
-//   // RECOMMENDED: Use whenActive() for safe access (transitions locked)
-//   state.whenActive([](Readable& r) {
-//     r.source->doSomething();  // Safe - transitions blocked during callback
-//   });
-//
-//   // whenActive() can return values
-//   auto result = state.whenActive([](Readable& r) {
-//     return r.source->read();  // Returns kj::Maybe of the result
-//   });
-//
-//   // CAUTION: tryGetActive() does NOT lock - use carefully
-//   KJ_IF_SOME(readable, state.tryGetActive()) {
-//     // Don't transition in this scope or readable becomes dangling!
-//     readable.source->read(...);
+//   // COMMON PATTERN: tryGetActiveUnsafe() with KJ_IF_SOME
+//   // This is the most frequently used pattern in actual streams code.
+//   // It works well with early returns and coroutines.
+//   KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
+//     // CAUTION: Don't transition state in this scope!
+//     co_return co_await open.stream->read(buffer);
 //   }
 //
-//   // Semantic transitions
-//   state.close();                      // -> Closed
-//   state.error(Errored{js.v8Ref(x)});  // -> Errored
+//   // ALTERNATIVE: whenActive() for safe access (transitions locked)
+//   // Use when the callback might indirectly trigger state transitions.
+//   state.whenActive([](Open& open) {
+//     open.stream->doSomething();  // Safe - transitions blocked
+//   });
+//
+//   // Error checking
+//   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
+//     kj::throwFatalException(kj::cp(exception));
+//   }
 //
 // Example 2: Terminal State Enforcement
 // -------------------------------------
 //
-//   TerminalStateMachine<
-//       TerminalStates<Closed, Errored>,  // Mark terminal states
-//       Readable, Closed, Errored         // All states
+//   StateMachine<
+//       TerminalStates<Closed, kj::Exception>,
+//       Open, Closed, kj::Exception
 //   > state;
 //
-//   state.transitionTo<Readable>(...);
+//   state.transitionTo<Open>(...);
 //
 //   // This works
 //   state.transitionTo<Closed>();
 //
 //   // This throws! Cannot leave terminal state
-//   state.transitionTo<Readable>(...);  // KJ_REQUIRE fails
+//   state.transitionTo<Open>(...);  // KJ_REQUIRE fails
 //
-//   // For cleanup, use forceTransitionTo
-//   state.forceTransitionTo<Readable>(...);  // Allowed
+//   // For cleanup/reset, use forceTransitionTo
+//   state.forceTransitionTo<Open>(...);  // Bypasses terminal check
 //
-// Example 3: Error Extraction
-// ---------------------------
+// Example 3: Error State Helpers
+// ------------------------------
 //
-//   ErrorableStateMachine<Readable, Closed, Errored> state;
+//   StateMachine<ErrorState<kj::Exception>, Open, Closed, kj::Exception> state;
 //
 //   // Old pattern (verbose):
-//   KJ_IF_SOME(errored, state.tryGetUnsafe<Errored>()) {
-//     return errored.getHandle(js);
+//   KJ_IF_SOME(err, state.tryGetUnsafe<kj::Exception>()) {
+//     kj::throwFatalException(kj::cp(err));
 //   }
 //
 //   // New pattern (cleaner):
-//   KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
-//     return errored.getHandle(js);
+//   KJ_IF_SOME(err, state.tryGetErrorUnsafe()) {
+//     kj::throwFatalException(kj::cp(err));
 //   }
 //
-//   // Or simply:
+//   // Or check first:
 //   if (state.isErrored()) {
 //     auto& err = state.getErrorUnsafe();
 //   }
@@ -2020,50 +2020,41 @@ class StateMachine {
 //     return js.strIntern(state.currentStateName());
 //   }
 //
-// Example 5: Observable State Machine for Debugging
-// -------------------------------------------------
-//
-//   ObservableStateMachine<Idle, Running, Done> state;
-//
-//   state.onTransition([](kj::StringPtr from, kj::StringPtr to) {
-//     KJ_LOG(INFO, "State transition", from, "->", to);
-//   });
-//
-//   state.transitionTo<Idle>();    // Logs: (uninitialized) -> idle
-//   state.transitionTo<Running>(); // Logs: idle -> running
-//   state.transitionTo<Done>();    // Logs: running -> done
-//
-// Example 6: Lock State Machine
-// -----------------------------
+// Example 5: Lock State Machine (no terminal states)
+// --------------------------------------------------
 //
 //   struct ReaderLocked {
 //     static constexpr kj::StringPtr NAME = "reader_locked"_kj;
-//     jsg::PromiseResolverPair<void> closedPromise;
+//   };
+//   struct Unlocked {
+//     static constexpr kj::StringPtr NAME = "unlocked"_kj;
+//   };
+//   struct Locked {
+//     static constexpr kj::StringPtr NAME = "locked"_kj;
 //   };
 //
-//   using LockState = TerminalStateMachine<
-//       states::Unlocked, states::Locked, ReaderLocked>
-//       ::WithTerminal<>;  // No terminal states - locks can always be released
+//   // No TerminalStates - locks can always be released
+//   using LockState = StateMachine<Unlocked, Locked, ReaderLocked>;
 //
 //   LockState lockState;
-//   lockState.transitionTo<states::Unlocked>();
+//   lockState.transitionTo<Unlocked>();
 //
 //   // Acquire lock
-//   if (lockState.is<states::Unlocked>()) {
-//     lockState.transitionTo<ReaderLocked>(kj::mv(promise));
+//   if (lockState.is<Unlocked>()) {
+//     lockState.transitionTo<ReaderLocked>();
 //   }
 //
-//   // Release lock
-//   lockState.transitionTo<states::Unlocked>();
+//   // Release lock - always allowed
+//   lockState.transitionTo<Unlocked>();
 //
-// Example 7: Safe State Access with withState()
-// ----------------------------------------------
+// Example 6: Safe State Access with whenState()
+// ---------------------------------------------
 //
 //   StateMachine<Active, Paused, Done> state;
 //   state.transitionTo<Active>();
 //
-//   // SAFE: withState() locks transitions during callback
-//   auto result = state.withState<Active>([](Active& a) {
+//   // SAFE: whenState() locks transitions during callback
+//   auto result = state.whenState<Active>([](Active& a) {
 //     return a.computeResult();  // a is guaranteed valid
 //   });  // Returns kj::Maybe<ResultType>
 //
@@ -2072,56 +2063,13 @@ class StateMachine {
 //     state.transitionTo<Done>(kj::mv(r));
 //   }
 //
-//   // UNSAFE patterns to avoid:
-//   //
-//   //   Active& a = state.getUnsafe<Active>();  // Reference not locked!
-//   //   state.transitionTo<Done>();             // a is now dangling!
-//   //   a.doSomething();                        // USE-AFTER-FREE!
-//   //
-//   //   state.withState<Active>([&](Active& a) {
-//   //     state.transitionTo<Done>();     // FAILS - transitions locked!
-//   //   });
+//   // whenActiveOr() provides a default for non-active states
+//   size_t count = state.whenActiveOr(
+//       [](Active& a) { return a.itemCount; },
+//       size_t{0});  // Default if not active
 //
-// Example 9: Using with KJ_SWITCH_ONEOF
-// -------------------------------------
-//
-//   // StateMachine works directly with KJ_SWITCH_ONEOF
-//   ResourceStateMachine<Readable, Closed, Errored> state;
-//
-//   // NOTE: KJ_SWITCH_ONEOF does NOT lock transitions.
-//   // Only use for read-only operations or when you control all code paths.
-//   KJ_SWITCH_ONEOF(state) {
-//     KJ_CASE_ONEOF(readable, Readable) {
-//       // Don't call code that might transition the state!
-//       readable.source->read(...);
-//     }
-//     KJ_CASE_ONEOF(closed, Closed) {
-//       // Handle closed
-//     }
-//     KJ_CASE_ONEOF(errored, Errored) {
-//       // Handle error
-//     }
-//   }
-//
-// Example 10: Visitor Pattern
-// ---------------------------
-//
-//   StateMachine<Active, Paused, Done> state;
-//
-//   // Generic visitor (does NOT lock transitions)
-//   state.visit([](auto& s) {
-//     using S = kj::Decay<decltype(s)>;
-//     if constexpr (kj::isSameType<S, Active>()) {
-//       // Handle active
-//     } else if constexpr (kj::isSameType<S, Paused>()) {
-//       // Handle paused
-//     } else {
-//       // Handle done
-//     }
-//   });
-//
-// Example 11: Manual Transition Locking
-// -------------------------------------
+// Example 7: Manual Transition Locking
+// ------------------------------------
 //
 //   StateMachine<Active, Paused, Done> state;
 //   state.transitionTo<Active>();
@@ -2140,18 +2088,19 @@ class StateMachine {
 //
 //   state.transitionTo<Done>();
 //
-// Example 12: Deferred State Transitions
-// --------------------------------------
+// Example 8: Deferred State Transitions
+// -------------------------------------
 //
 //   // For deferring close/error until pending operations complete
-//   DeferrableStateMachine<
+//   StateMachine<
+//       TerminalStates<Closed, Errored>,
 //       PendingStates<Closed, Errored>,  // States that can be deferred
-//       Active, Closed, Errored          // All states
+//       Active, Closed, Errored
 //   > state;
 //
 //   state.transitionTo<Active>();
 //
-//   // Start a read operation
+//   // Start an operation
 //   state.beginOperation();  // Or: auto scope = state.scopedOperation();
 //
 //   // Close is requested, but we're mid-operation - defer it
@@ -2159,7 +2108,6 @@ class StateMachine {
 //
 //   KJ_EXPECT(state.is<Active>());         // Still active!
 //   KJ_EXPECT(state.hasPendingState());    // Close is pending
-//   KJ_EXPECT(state.isOrPending<Closed>()); // "Is closed or closing"
 //
 //   // Complete the operation - pending state is auto-applied
 //   state.endOperation();
@@ -2177,89 +2125,62 @@ class StateMachine {
 //     // ... do the read ...
 //   }  // Operation ends, pending state applied if any
 //
-// =============================================================================
-// STREAMS INTEGRATION GUIDE
-// =============================================================================
+// Example 9: Visitor Pattern
+// --------------------------
 //
-// The following shows how existing streams code could use these utilities:
+//   StateMachine<Active, Paused, Done> state;
 //
-// ReadableStreamInternalController:
-// ---------------------------------
-//   // Current:
-//   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
-//
-//   // With utility:
-//   ResourceStateMachine<Readable, StreamStates::Closed, StreamStates::Errored> state;
-//
-//   // Benefits:
-//   // - isClosedOrErrored() built-in
-//   // - whenActive() for safe resource access with transition locking
-//   // - close()/error() with terminal enforcement
-//
-//   // Safe read pattern:
-//   state.whenActive([&](Readable& r) {
-//     return r.source->read(js, ...);  // Transitions blocked
+//   // Generic visitor (does NOT lock transitions)
+//   state.visit([](auto& s) {
+//     using S = kj::Decay<decltype(s)>;
+//     if constexpr (kj::isSameType<S, Active>()) {
+//       // Handle active
+//     } else if constexpr (kj::isSameType<S, Paused>()) {
+//       // Handle paused
+//     } else {
+//       // Handle done
+//     }
 //   });
 //
-// ReaderImpl:
-// -----------
-//   // Current:
-//   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state;
+// =============================================================================
+// ACTUAL USAGE PATTERNS FROM STREAMS CODE
+// =============================================================================
 //
-//   // With utility:
-//   TerminalStateMachine<
-//       TerminalStates<StreamStates::Closed, Released>,
-//       Initial, Attached, StreamStates::Closed, Released> state;
+// The streams code uses StateMachine extensively. Here are the actual patterns:
 //
-//   // Benefits:
-//   // - Cannot accidentally transition out of Closed/Released
-//   // - currentStateName() for debugging
-//   // - withState() for safe access to Attached state
-//
-// ReadableSourceKjAdapter::Active:
+// Common state machine declaration:
 // ---------------------------------
-//   // Current (complex 6-state machine):
-//   kj::OneOf<Idle, Readable, Reading, Done, Canceling, Canceled> state;
+//   using StreamState = StateMachine<
+//       TerminalStates<Closed, kj::Exception>,
+//       ErrorState<kj::Exception>,
+//       ActiveState<Open>,
+//       Open, Closed, kj::Exception>;
 //
-//   // With utility:
-//   TerminalStateMachine<
-//       TerminalStates<Canceled>,
-//       Idle, Readable, Reading, Done, Canceling, Canceled> state;
+// Most common access pattern (tryGetActiveUnsafe + KJ_IF_SOME):
+// -------------------------------------------------------------
+//   // This pattern is used 100+ times in streams code because it works
+//   // well with coroutines and early returns.
+//   KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
+//     co_return co_await open.stream->read(buffer);
+//   }
+//   // Falls through if not in active state
 //
-//   // Benefits:
-//   // - Cannot transition out of Canceled state
-//   // - Clear documentation of terminal vs non-terminal states
-//   // - Transition locking prevents use-after-free in callbacks
-//
-// ReadableStreamJsController (deferred close pattern):
-// ----------------------------------------------------
-//   // Current:
-//   kj::Maybe<kj::OneOf<Closed, Errored>> maybePendingState;
-//   size_t pendingReadCount = 0;
-//
-//   void doClose(jsg::Lock& js) {
-//     if (isReadPending()) {
-//       setPendingState(Closed{});
-//     } else {
-//       state.init<Closed>();
-//     }
+// Error checking pattern:
+// -----------------------
+//   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
+//     output.abort(kj::cp(exception));
+//     kj::throwFatalException(kj::cp(exception));
 //   }
 //
-//   // With utility:
-//   DeferrableStateMachine<
-//       PendingStates<Closed, Errored>,
-//       Active, Closed, Errored> state;
+// Simple state checks:
+// --------------------
+//   if (state.is<Closed>()) { co_return 0; }
+//   if (state.isActive()) { ... }
+//   if (state.isTerminal()) { ... }
 //
-//   void doClose(jsg::Lock& js) {
-//     state.deferTransitionTo<Closed>();  // Handles pending automatically
-//   }
-//
-//   jsg::Promise<ReadResult> read(jsg::Lock& js) {
-//     auto scope = state.scopedOperation();  // Track pending read
-//     // ... do read ...
-//   }  // Pending close applied when scope ends
-//
-//   bool isClosedOrErrored() const {
-//     return state.isTerminal() || state.hasPendingState();
-//   }
+// whenActiveOr for default values:
+// --------------------------------
+//   return state.whenActiveOr(
+//       [](Queue& q) { return q.getConsumerCount(); },
+//       size_t{0});
 //
