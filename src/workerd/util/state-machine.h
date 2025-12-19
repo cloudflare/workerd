@@ -407,10 +407,8 @@
 
 #include <kj/common.h>
 #include <kj/debug.h>
-#include <kj/function.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
-#include <kj/tuple.h>
 
 #include <concepts>
 #include <tuple>
@@ -448,10 +446,6 @@ constexpr kj::StringPtr getStateName() {
     return "(unnamed)"_kj;
   }
 }
-
-// Check if type is empty (no non-static data members)
-template <typename T>
-inline constexpr bool isEmptyState = std::is_empty_v<T>;
 
 }  // namespace _
 
@@ -553,81 +547,45 @@ struct TupleToOneOf<std::tuple<Ts...>> {
 template <typename Tuple>
 using TupleToOneOfT = typename TupleToOneOf<Tuple>::Type;
 
-// Find a specific spec in a list
-template <template <typename...> class SpecTemplate, typename... Ts>
-struct FindSpec {
+// Generic spec finder - finds the first type matching a predicate
+template <template <typename> class Pred, typename... Ts>
+struct FindSpecWhere {
   using Type = void;  // Not found
 };
 
-template <template <typename...> class SpecTemplate, typename First, typename... Rest>
-struct FindSpec<SpecTemplate, First, Rest...> {
-  using Type = std::conditional_t<isTerminalStatesSpec<First> &&
-          kj::isSameType<SpecTemplate<>, TerminalStates<>>(),
-      First,
-      std::conditional_t<isPendingStatesSpec<First> &&
-              kj::isSameType<SpecTemplate<>, PendingStates<>>(),
-          First,
-          typename FindSpec<SpecTemplate, Rest...>::Type>>;
+template <template <typename> class Pred, typename First, typename... Rest>
+struct FindSpecWhere<Pred, First, Rest...> {
+  using Type =
+      std::conditional_t<Pred<First>::value, First, typename FindSpecWhere<Pred, Rest...>::Type>;
 };
 
-// Find ErrorState spec
+// Predicate wrappers for each spec type
+template <typename T>
+struct IsErrorStateSpec {
+  static constexpr bool value = isErrorStateSpec<T>;
+};
+template <typename T>
+struct IsActiveStateSpec {
+  static constexpr bool value = isActiveStateSpec<T>;
+};
+template <typename T>
+struct IsTerminalStatesSpec {
+  static constexpr bool value = isTerminalStatesSpec<T>;
+};
+template <typename T>
+struct IsPendingStatesSpec {
+  static constexpr bool value = isPendingStatesSpec<T>;
+};
+
+// Convenient aliases for finding each spec type
 template <typename... Ts>
-struct FindErrorStateSpec {
-  using Type = void;
-};
-
-template <typename First, typename... Rest>
-struct FindErrorStateSpec<First, Rest...> {
-  using Type = std::
-      conditional_t<isErrorStateSpec<First>, First, typename FindErrorStateSpec<Rest...>::Type>;
-};
-
-// Find ActiveState spec
+using FindErrorStateSpec = FindSpecWhere<IsErrorStateSpec, Ts...>;
 template <typename... Ts>
-struct FindActiveStateSpec {
-  using Type = void;
-};
-
-template <typename First, typename... Rest>
-struct FindActiveStateSpec<First, Rest...> {
-  using Type = std::
-      conditional_t<isActiveStateSpec<First>, First, typename FindActiveStateSpec<Rest...>::Type>;
-};
-
-// Find TerminalStates spec
+using FindActiveStateSpec = FindSpecWhere<IsActiveStateSpec, Ts...>;
 template <typename... Ts>
-struct FindTerminalStatesSpec {
-  using Type = void;
-};
-
-template <typename First, typename... Rest>
-struct FindTerminalStatesSpec<First, Rest...> {
-  using Type = std::conditional_t<isTerminalStatesSpec<First>,
-      First,
-      typename FindTerminalStatesSpec<Rest...>::Type>;
-};
-
-// Find PendingStates spec
+using FindTerminalStatesSpec = FindSpecWhere<IsTerminalStatesSpec, Ts...>;
 template <typename... Ts>
-struct FindPendingStatesSpec {
-  using Type = void;
-};
-
-template <typename First, typename... Rest>
-struct FindPendingStatesSpec<First, Rest...> {
-  using Type = std::conditional_t<isPendingStatesSpec<First>,
-      First,
-      typename FindPendingStatesSpec<Rest...>::Type>;
-};
-
-// Helper to get state tuple size
-template <typename Tuple>
-struct TupleSize;
-
-template <typename... Ts>
-struct TupleSize<std::tuple<Ts...>> {
-  static constexpr size_t value = sizeof...(Ts);
-};
+using FindPendingStatesSpec = FindSpecWhere<IsPendingStatesSpec, Ts...>;
 
 // Check if a type is in a tuple (type list)
 template <typename T, typename Tuple>
@@ -658,81 +616,19 @@ struct ExtractSpecType<void> {
 template <typename Spec>
 using ExtractSpecTypeT = typename ExtractSpecType<Spec>::Type;
 
-// Helper to validate that a type is in a tuple (for spec validation)
-template <typename T, typename Tuple>
-struct ValidateTypeInTuple {
-  static_assert(isInTuple<T, Tuple>,
-      "Spec type parameter must be one of the state types in the state machine");
-  static constexpr bool valid = true;
-};
+// Generic spec counter using fold expression
+template <template <typename> class Pred, typename... Ts>
+inline constexpr size_t countSpecsWhere = ((Pred<Ts>::value ? 1 : 0) + ... + 0);
 
-// Count how many times a spec type appears in a list
-template <template <typename...> class SpecTemplate, typename... Ts>
-struct CountSpec {
-  static constexpr size_t value = 0;
-};
-
-template <template <typename...> class SpecTemplate, typename First, typename... Rest>
-struct CountSpec<SpecTemplate, First, Rest...> {
-  static constexpr bool isMatch = []() {
-    if constexpr (isTerminalStatesSpec<First>) {
-      return kj::isSameType<SpecTemplate<>, TerminalStates<>>();
-    } else if constexpr (isPendingStatesSpec<First>) {
-      return kj::isSameType<SpecTemplate<>, PendingStates<>>();
-    } else {
-      return false;
-    }
-  }();
-  static constexpr size_t value = (isMatch ? 1 : 0) + CountSpec<SpecTemplate, Rest...>::value;
-};
-
-// Count ErrorState specs
+// Convenient aliases for counting each spec type
 template <typename... Ts>
-struct CountErrorStateSpec {
-  static constexpr size_t value = 0;
-};
-
-template <typename First, typename... Rest>
-struct CountErrorStateSpec<First, Rest...> {
-  static constexpr size_t value =
-      (isErrorStateSpec<First> ? 1 : 0) + CountErrorStateSpec<Rest...>::value;
-};
-
-// Count ActiveState specs
+inline constexpr size_t countErrorStateSpecs = countSpecsWhere<IsErrorStateSpec, Ts...>;
 template <typename... Ts>
-struct CountActiveStateSpec {
-  static constexpr size_t value = 0;
-};
-
-template <typename First, typename... Rest>
-struct CountActiveStateSpec<First, Rest...> {
-  static constexpr size_t value =
-      (isActiveStateSpec<First> ? 1 : 0) + CountActiveStateSpec<Rest...>::value;
-};
-
-// Count TerminalStates specs
+inline constexpr size_t countActiveStateSpecs = countSpecsWhere<IsActiveStateSpec, Ts...>;
 template <typename... Ts>
-struct CountTerminalStatesSpec {
-  static constexpr size_t value = 0;
-};
-
-template <typename First, typename... Rest>
-struct CountTerminalStatesSpec<First, Rest...> {
-  static constexpr size_t value =
-      (isTerminalStatesSpec<First> ? 1 : 0) + CountTerminalStatesSpec<Rest...>::value;
-};
-
-// Count PendingStates specs
+inline constexpr size_t countTerminalStatesSpecs = countSpecsWhere<IsTerminalStatesSpec, Ts...>;
 template <typename... Ts>
-struct CountPendingStatesSpec {
-  static constexpr size_t value = 0;
-};
-
-template <typename First, typename... Rest>
-struct CountPendingStatesSpec<First, Rest...> {
-  static constexpr size_t value =
-      (isPendingStatesSpec<First> ? 1 : 0) + CountPendingStatesSpec<Rest...>::value;
-};
+inline constexpr size_t countPendingStatesSpecs = countSpecsWhere<IsPendingStatesSpec, Ts...>;
 
 // Validate that all types in a TerminalStates spec are actual state types
 template <typename StatesTuple, typename... TerminalTs>
@@ -876,7 +772,7 @@ class StateMachine {
   // Filter out specs to get actual states
   using StatesTuple = _::FilterStatesT<Args...>;
   using StateUnion = _::TupleToOneOfT<StatesTuple>;
-  static constexpr size_t STATE_COUNT = _::TupleSize<StatesTuple>::value;
+  static constexpr size_t STATE_COUNT = std::tuple_size_v<StatesTuple>;
 
   // Feature detection
   static constexpr bool HAS_TERMINAL = !std::is_void_v<TerminalSpec>;
@@ -895,17 +791,17 @@ class StateMachine {
   // ==========================================================================
 
   // Detect duplicate specs
-  static_assert(_::CountTerminalStatesSpec<Args...>::value <= 1,
+  static_assert(_::countTerminalStatesSpecs<Args...> <= 1,
       "Multiple TerminalStates<...> specs provided. Only one is allowed.");
-  static_assert(_::CountErrorStateSpec<Args...>::value <= 1,
+  static_assert(_::countErrorStateSpecs<Args...> <= 1,
       "Multiple ErrorState<...> specs provided. Only one is allowed.");
-  static_assert(_::CountActiveStateSpec<Args...>::value <= 1,
+  static_assert(_::countActiveStateSpecs<Args...> <= 1,
       "Multiple ActiveState<...> specs provided. Only one is allowed.");
-  static_assert(_::CountPendingStatesSpec<Args...>::value <= 1,
+  static_assert(_::countPendingStatesSpecs<Args...> <= 1,
       "Multiple PendingStates<...> specs provided. Only one is allowed.");
 
   // Validate that spec types reference actual states
-  static constexpr bool validateErrorSpec() {
+  static consteval bool validateErrorSpec() {
     if constexpr (HAS_ERROR) {
       static_assert(_::isInTuple<ErrorStateType, StatesTuple>,
           "ErrorState<T> must reference a type that is one of the state machine's states");
@@ -913,7 +809,7 @@ class StateMachine {
     return true;
   }
 
-  static constexpr bool validateActiveSpec() {
+  static consteval bool validateActiveSpec() {
     if constexpr (HAS_ACTIVE) {
       static_assert(_::isInTuple<ActiveStateType, StatesTuple>,
           "ActiveState<T> must reference a type that is one of the state machine's states");
@@ -921,7 +817,7 @@ class StateMachine {
     return true;
   }
 
-  static constexpr bool validateTerminalSpec() {
+  static consteval bool validateTerminalSpec() {
     if constexpr (HAS_TERMINAL) {
       static_assert(_::ValidateTerminalSpec<StatesTuple, TerminalSpec>::valid,
           "All types in TerminalStates<...> must be actual state types");
@@ -929,7 +825,7 @@ class StateMachine {
     return true;
   }
 
-  static constexpr bool validatePendingSpec() {
+  static consteval bool validatePendingSpec() {
     if constexpr (HAS_PENDING) {
       static_assert(_::ValidatePendingSpec<StatesTuple, PendingSpec>::valid,
           "All types in PendingStates<...> must be actual state types");
