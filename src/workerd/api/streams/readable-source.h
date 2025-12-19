@@ -15,6 +15,7 @@ class IoContext;
 namespace api {
 template <typename T>
 struct DeferredProxy;
+class ReadableStreamSource;
 }  // namespace api
 
 namespace jsg {
@@ -218,6 +219,27 @@ kj::Own<ReadableSource> newEncodedReadableSource(
 // errors into equivalent JS exceptions. Typically this is used when customizing tee() on
 // a ReadableSource implementation.
 kj::Own<kj::AsyncInputStream> wrapTeeBranch(kj::Own<kj::AsyncInputStream> branch);
+
+// A ReadableStreamSource backed by in-memory data. Unlike newSystemStream() wrapping a
+// newMemoryInputStream(), this implementation does NOT support deferred proxying. This is
+// important when the backing memory has V8 heap provenance (e.g., jsg::BackingStore, Blob data,
+// kj::Array<kj::byte> with a v8::BackingStore attached, etc)
+// since the memory could be freed by GC after the IoContext completes.
+//
+// The `backing` parameter keeps the underlying memory alive for the lifetime of the stream.
+// If not provided, the bytes are copied.
+//
+// TODO(soon): Update to implement ReadableSource instead of ReadableStreamSource.
+// For now this is a ReadableStreamSource for compat with existing code. Once internal.h/c++
+// is updated to use ReadableSource, we will change this also.
+//
+// TODO(cleanup): It would be nice to eventually have some sort of stronger guarantee when
+// deferred proxying can or cannot be used with a stream. Right now it's a bit ad hoc and
+// error-prone. It requires the stream impl to keep track of whether it can be deferred-proxied
+// or not, but in this case, that may be entirely opaque behind the details of the backing memory
+// as is the case with kj::Array<kj::byte> instances that come from the type wrapper system.
+kj::Own<ReadableStreamSource> newMemorySource(
+    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none);
 
 }  // namespace api::streams
 }  // namespace workerd
