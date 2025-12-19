@@ -40,7 +40,7 @@ struct Closed {
 //   Closed -> kj::Exception (abort can force-transition a closed stream to error)
 // Both Closed and kj::Exception are terminal states. abort() uses forceTransitionTo
 // to allow the exceptional Closed -> Exception transition.
-using IdentityTransformState = ComposableStateMachine<TerminalStates<Closed, kj::Exception>,
+using IdentityTransformState = StateMachine<TerminalStates<Closed, kj::Exception>,
     ErrorState<kj::Exception>,
     Idle,
     ReadRequest,

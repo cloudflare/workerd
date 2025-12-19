@@ -286,7 +286,7 @@ class QueueImpl final {
   //   Ready -> Closed (close() called)
   //   Ready -> Errored (error() called)
   // Both Closed and Errored are terminal states.
-  using QueueState = ComposableStateMachine<TerminalStates<Closed, Errored>,
+  using QueueState = StateMachine<TerminalStates<Closed, Errored>,
       ErrorState<Errored>,
       ActiveState<Ready>,
       Ready,
@@ -544,7 +544,7 @@ class ConsumerImpl final {
   //   Ready -> Closed (close() called and drained)
   //   Ready -> Errored (error() called)
   // Both Closed and Errored are terminal states.
-  using ConsumerState = ComposableStateMachine<TerminalStates<Closed, Errored>,
+  using ConsumerState = StateMachine<TerminalStates<Closed, Errored>,
       ErrorState<Errored>,
       ActiveState<Ready>,
       Ready,

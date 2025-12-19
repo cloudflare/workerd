@@ -224,7 +224,7 @@ class ReadableImpl {
   // Closed and Errored are terminal states (cannot transition back to Queue)
   //   Queue -> Closed (close() or doCancel() called)
   //   Queue -> Errored (doError() called)
-  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
       ActiveState<Queue>,
       StreamStates::Closed,
       StreamStates::Errored,
@@ -380,7 +380,7 @@ class WritableImpl {
   //   Writable -> Closed (finishInFlightClose() succeeds)
   //   Erroring -> Errored (finishErroring() called)
   //   Erroring -> Closed (finishInFlightClose() succeeds - close wins)
-  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
       ActiveState<Writable>,
       StreamStates::Closed,
       StreamStates::Errored,

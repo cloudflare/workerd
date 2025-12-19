@@ -73,7 +73,7 @@ private:
   //   Attached -> Released (releaseLock() called)
   // Closed and Released are terminal states.
   // Initial is not terminal but most methods assert if called in this state.
-  using ReaderState = ComposableStateMachine<TerminalStates<Closed, Released>,
+  using ReaderState = StateMachine<TerminalStates<Closed, Released>,
       ActiveState<Attached>,
       Initial,
       Attached,

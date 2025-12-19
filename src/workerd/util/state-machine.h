@@ -1442,7 +1442,6 @@ class StateMachine {
     return pendingState.template is<S>();
   }
 
-<<<<<<< HEAD
   // Get the pending state if it matches the specified type.
   //
   // WARNING: Returns an UNLOCKED reference - can dangle if the pending state is applied.
@@ -1460,24 +1459,6 @@ class StateMachine {
     return pendingState.template tryGet<S>();
   }
 
-||||||| parent of 6ce665b76 (Improve pending state handling in standard.c++)
-=======
-  // Get the pending state if it matches the specified type.
-  template <typename S>
-  kj::Maybe<S&> tryGetPendingState() KJ_LIFETIMEBOUND
-    requires(HAS_PENDING) && (PendingSpec::template contains<S>)
-  {
-    return pendingState.template tryGet<S>();
-  }
-
-  template <typename S>
-  kj::Maybe<const S&> tryGetPendingState() const KJ_LIFETIMEBOUND
-    requires(HAS_PENDING) && (PendingSpec::template contains<S>)
-  {
-    return pendingState.template tryGet<S>();
-  }
-
->>>>>>> 6ce665b76 (Improve pending state handling in standard.c++)
   // Clear any pending state without applying it.
   void clearPendingState()
     requires(HAS_PENDING)
