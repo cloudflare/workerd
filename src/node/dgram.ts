@@ -27,7 +27,12 @@ import { validateObject, validateFunction } from 'node-internal:validators';
 import { Buffer } from 'node-internal:internal_buffer';
 import { EventEmitter } from 'node-internal:events';
 
-import type { SocketOptions, SocketType, RemoteInfo, Socket as DgramSocket } from 'node:dgram';
+import type {
+  SocketOptions,
+  SocketType,
+  RemoteInfo,
+  Socket as DgramSocket,
+} from 'node:dgram';
 
 type SocketClassType = typeof DgramSocket;
 
@@ -45,7 +50,7 @@ export function Socket(
     validateFunction(callback, 'callback');
   }
   return this;
-};
+}
 Object.setPrototypeOf(Socket.prototype, EventEmitter.prototype);
 Object.setPrototypeOf(Socket, EventEmitter);
 
