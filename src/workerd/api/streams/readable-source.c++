@@ -1,5 +1,6 @@
 #include "readable-source.h"
 
+#include "common.h"
 #include "writable-sink.h"
 
 #include <workerd/api/util.h>
@@ -887,6 +888,78 @@ kj::Own<ReadableSource> newEncodedReadableSource(
 
 kj::Own<kj::AsyncInputStream> wrapTeeBranch(kj::Own<kj::AsyncInputStream> branch) {
   return TeeErrorAdapter::wrap(kj::mv(branch));
+}
+
+// =======================================================================================
+// MemoryInputStream
+
+namespace {
+
+// A ReadableStreamSource backed by in-memory data that does NOT support deferred proxying.
+// This is critical when the backing memory may have V8 heap provenance - if we allowed
+// deferred proxying, the IoContext could complete and V8 GC could free the memory while
+// the deferred pump is still running, causing a use-after-free.
+//
+// TODO(soon): The expectation is that this will be update to implement ReadableSource instead
+// of ReadableStreamSource as we continue the transition.
+class MemoryInputStream final: public ReadableStreamSource {
+ public:
+  MemoryInputStream(kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing)
+      : unread(bytes),
+        backing(kj::mv(backing)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    size_t amount = kj::min(maxBytes, unread.size());
+    if (amount > 0) {
+      memcpy(buffer, unread.begin(), amount);
+      unread = unread.slice(amount, unread.size());
+    }
+    return amount;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) {
+      return unread.size();
+    }
+    return kj::none;
+  }
+
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+    // Explicitly NOT using KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING here!
+    // The backing memory may be tied to V8 heap (e.g., jsg::BackingStore, Blob data),
+    // so we must complete all I/O before the IoContext can be released.
+    if (unread.size() > 0) {
+      auto data = unread;
+      unread = nullptr;
+      co_await output.write(data);
+    }
+    if (end) {
+      co_await output.end();
+    }
+    co_return;
+  }
+
+  void cancel(kj::Exception reason) override {
+    // Nothing to do - we're just reading from memory.
+    unread = nullptr;
+  }
+
+ private:
+  kj::ArrayPtr<const kj::byte> unread;
+  kj::Maybe<kj::Own<void>> backing;
+};
+
+}  // namespace
+
+kj::Own<ReadableStreamSource> newMemorySource(
+    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> maybeBacking) {
+  KJ_IF_SOME(backing, maybeBacking) {
+    return kj::heap<MemoryInputStream>(bytes, kj::mv(backing));
+  }
+  // No backing provided - make a copy of the bytes.
+  auto copy = kj::heapArray<kj::byte>(bytes);
+  auto ptr = copy.asPtr();
+  return kj::heap<MemoryInputStream>(ptr, kj::heap(kj::mv(copy)));
 }
 
 }  // namespace workerd::api::streams
