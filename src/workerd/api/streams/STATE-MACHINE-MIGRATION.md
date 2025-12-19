@@ -44,9 +44,10 @@ These follow the exact pattern of the compression.c++ conversion (Active/Closed/
 
 ## Tier 2: Easy (Similar Pattern, Minor Variations)
 
-- [ ] **identity-transform-stream.c++:305** - `IdentityTransformStreamImpl`
+- [x] **identity-transform-stream.c++:305** - `IdentityTransformStreamImpl`
   - `kj::OneOf<Idle, ReadRequest, WriteRequest, kj::Exception, StreamStates::Closed>`
   - 5 states with clear lifecycle
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, kj::Exception>, ErrorState<kj::Exception>, ...>` (both Closed and Exception are terminal; abort() uses forceTransitionTo for Closed→Exception)
 
 - [ ] **queue.h:296** - `QueueImpl`
   - `kj::OneOf<Ready, Closed, Errored>` (Errored = jsg::Value)
