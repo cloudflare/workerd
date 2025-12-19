@@ -39,9 +39,9 @@ include("//build/deps:v8.MODULE.bazel")
 include("//build/deps:oci.MODULE.bazel")
 
 # Automatically managed dependencies
-include("//build/deps:gen/deps/deps.MODULE.bazel")
-include("//build/deps:gen/build_deps/build_deps.MODULE.bazel")
-include("//build/deps:gen/shared_deps/shared_deps.MODULE.bazel")
+include("//build/deps:gen/deps.MODULE.bazel")
+include("//build/deps:gen/build_deps.MODULE.bazel")
+include("//build/deps:gen/shared_deps.MODULE.bazel")
 
 # Must be loaded after automated dependencies, which provide rules_rust
 include("//build/deps:rust.MODULE.bazel")
