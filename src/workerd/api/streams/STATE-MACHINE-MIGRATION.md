@@ -79,13 +79,17 @@ These track lock states - different semantic pattern, may not benefit as much:
   - Released = user explicitly released the lock (releaseLock() called)
   - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Released>, ActiveState<Attached>>` with `Attached` struct wrapping `jsg::Ref<WritableStream>`
 
-- [ ] **standard.c++:133** - `ReadableLockImpl`
+- [x] **standard.c++:143** - `ReadableLockImpl`
   - `kj::OneOf<Locked, PipeLocked, ReaderLocked, Unlocked>`
-  - Lock state (no terminal states)
+  - Lock state (no terminal states - cyclic transitions allowed)
+  - **DONE**: Converted to `ComposableStateMachine<Locked, PipeLocked, ReaderLocked, Unlocked>` (no TerminalStates since all states can transition to other states)
+  - Note: Also added NAME constants to `Unlocked`, `Locked`, `ReaderLocked`, `WriterLocked` in common.h
 
-- [ ] **standard.c++:192** - `WritableLockImpl`
+- [x] **standard.c++:212** - `WritableLockImpl`
   - `kj::OneOf<Unlocked, Locked, WriterLocked, PipeLocked>`
-  - Lock state (no terminal states)
+  - Lock state (no terminal states - cyclic transitions allowed)
+  - **DONE**: Converted to `ComposableStateMachine<Unlocked, Locked, WriterLocked, PipeLocked>`
+  - Bug fix: Changed `releaseWriter()` to use `tryGet<>()` instead of `get<>()` (matching `releaseReader()` pattern)
 
 - [ ] **internal.h:149** - `ReadableStreamInternalController::readState`
   - `kj::OneOf<Unlocked, Locked, PipeLocked, ReaderLocked>`

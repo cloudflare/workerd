@@ -758,13 +758,18 @@ kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext&
     kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
-struct Unlocked {};
-struct Locked {};
+struct Unlocked {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "unlocked"_kj;
+};
+struct Locked {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "locked"_kj;
+};
 
 // When a reader is locked to a ReadableStream, a ReaderLock instance
 // is used internally to represent the locked state in the ReadableStreamController.
 class ReaderLocked {
  public:
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "reader-locked"_kj;
   ReaderLocked(ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
@@ -817,6 +822,7 @@ class ReaderLocked {
 // is used internally to represent the locked state in the WritableStreamController.
 class WriterLocked {
  public:
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "writer-locked"_kj;
   WriterLocked(WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
