@@ -2,9 +2,51 @@
 
 #include "common.h"
 
+#include <workerd/util/state-machine.h>
+
 namespace workerd::api {
 
 namespace {
+struct Idle {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "idle"_kj;
+};
+
+struct ReadRequest {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "read-request"_kj;
+  kj::ArrayPtr<kj::byte> bytes;
+  // WARNING: `bytes` may be invalid if fulfiller->isWaiting() returns false! (This indicates the
+  //   read was canceled.)
+  kj::Own<kj::PromiseFulfiller<size_t>> fulfiller;
+};
+
+struct WriteRequest {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "write-request"_kj;
+  kj::ArrayPtr<const kj::byte> bytes;
+  kj::Own<kj::PromiseFulfiller<void>> fulfiller;
+};
+
+struct Closed {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+};
+
+// State machine for IdentityTransformStream:
+//   Idle -> ReadRequest (read arrives when no write pending)
+//   Idle -> WriteRequest (write arrives when no read pending)
+//   Idle -> Closed (empty write = close)
+//   ReadRequest -> Idle (write fulfills read completely)
+//   WriteRequest -> Idle (read fulfills write completely)
+//   ReadRequest -> Closed (empty write closes while read pending)
+//   Any -> kj::Exception (cancel/abort)
+//   Closed -> kj::Exception (abort can force-transition a closed stream to error)
+// Both Closed and kj::Exception are terminal states. abort() uses forceTransitionTo
+// to allow the exceptional Closed -> Exception transition.
+using IdentityTransformState = ComposableStateMachine<TerminalStates<Closed, kj::Exception>,
+    ErrorState<kj::Exception>,
+    Idle,
+    ReadRequest,
+    WriteRequest,
+    Closed,
+    kj::Exception>;
 // An implementation of ReadableStreamSource and WritableStreamSink which communicates read and
 // write requests via a OneOf.
 //
@@ -16,7 +58,9 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
  public:
   // The limit is the maximum number of bytes that can be fed through the stream.
   // If kj::none, there is no limit.
-  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none): limit(limit) {}
+  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none): limit(limit) {
+    state.transitionTo<Idle>();
+  }
 
   ~IdentityTransformStreamImpl() noexcept(false) {
     // Due to the different natures of JS and C++ disposal, there is no point in enforcing the limit
@@ -99,27 +143,20 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
   }
 
   void cancel(kj::Exception reason) override {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(idle, Idle) {
-        // This is fine.
-      }
-      KJ_CASE_ONEOF(request, ReadRequest) {
-        request.fulfiller->fulfill(static_cast<size_t>(0));
-      }
-      KJ_CASE_ONEOF(request, WriteRequest) {
-        request.fulfiller->reject(kj::cp(reason));
-      }
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        // Already errored.
-        return;
-      }
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        // Already closed by writable side.
-        return;
-      }
-    }
+    // Already errored - nothing to do.
+    if (state.isErrored()) return;
 
-    state = kj::mv(reason);
+    // Already closed by writable side - nothing to do.
+    if (state.is<Closed>()) return;
+
+    KJ_IF_SOME(request, state.tryGet<ReadRequest>()) {
+      request.fulfiller->fulfill(static_cast<size_t>(0));
+    } else KJ_IF_SOME(request, state.tryGet<WriteRequest>()) {
+      request.fulfiller->reject(kj::cp(reason));
+    }
+    // Idle state is fine, just transition to error.
+
+    state.forceTransitionTo<kj::Exception>(kj::mv(reason));
 
     // TODO(conform): Proactively put WritableStream into Errored state.
   }
@@ -141,168 +178,149 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
 
   kj::Promise<void> end() override {
     // If we're already closed, there's nothing else we need to do here.
-    if (state.is<StreamStates::Closed>()) return kj::READY_NOW;
+    if (state.is<Closed>()) return kj::READY_NOW;
 
     return writeHelper(kj::ArrayPtr<const kj::byte>());
   }
 
   void abort(kj::Exception reason) override {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(idle, Idle) {
-        // This is fine.
-      }
-      KJ_CASE_ONEOF(request, ReadRequest) {
-        request.fulfiller->reject(kj::cp(reason));
-      }
-      KJ_CASE_ONEOF(request, WriteRequest) {
-        // IF the fulfiller is not waiting, the write promise was already
-        // canceled and no one is waiting on it.
-        KJ_ASSERT(!request.fulfiller->isWaiting(),
-            "abort() is supposed to wait for any pending write() to finish");
-      }
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        // Already errored.
-        return;
-      }
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        // If we're in the pending close state... it should be OK to just switch
-        // the state to errored below.
-      }
-    }
+    // Already errored - nothing to do.
+    if (state.isErrored()) return;
 
-    state = kj::mv(reason);
+    KJ_IF_SOME(request, state.tryGet<ReadRequest>()) {
+      request.fulfiller->reject(kj::cp(reason));
+    } else KJ_IF_SOME(request, state.tryGet<WriteRequest>()) {
+      // If the fulfiller is not waiting, the write promise was already
+      // canceled and no one is waiting on it.
+      KJ_ASSERT(!request.fulfiller->isWaiting(),
+          "abort() is supposed to wait for any pending write() to finish");
+    }
+    // Idle and Closed states are fine, just transition to error.
+    // (Closed can transition to error via abort)
+
+    state.forceTransitionTo<kj::Exception>(kj::mv(reason));
 
     // TODO(conform): Proactively put ReadableStream into Errored state.
   }
 
  private:
   kj::Promise<size_t> readHelper(kj::ArrayPtr<kj::byte> bytes) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(idle, Idle) {
-        // No outstanding write request, switch to ReadRequest state.
-
-        auto paf = kj::newPromiseAndFulfiller<size_t>();
-        state = ReadRequest{bytes, kj::mv(paf.fulfiller)};
-        return kj::mv(paf.promise);
-      }
-      KJ_CASE_ONEOF(request, ReadRequest) {
-        KJ_FAIL_ASSERT("read operation already in flight");
-      }
-      KJ_CASE_ONEOF(request, WriteRequest) {
-        if (bytes.size() >= request.bytes.size()) {
-          // The write buffer will entirely fit into our read buffer; fulfill both requests.
-          memcpy(bytes.begin(), request.bytes.begin(), request.bytes.size());
-          auto result = request.bytes.size();
-          request.fulfiller->fulfill();
-
-          // Switch to idle state.
-          state = Idle();
-
-          return result;
-        }
-
-        // The write buffer won't quite fit into our read buffer; fulfill only the read request.
-        memcpy(bytes.begin(), request.bytes.begin(), bytes.size());
-        request.bytes = request.bytes.slice(bytes.size(), request.bytes.size());
-        return bytes.size();
-      }
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        return kj::cp(exception);
-      }
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return static_cast<size_t>(0);
-      }
+    // Handle error state first.
+    KJ_IF_SOME(exception, state.tryGetError()) {
+      return kj::cp(exception);
     }
 
-    KJ_UNREACHABLE;
+    // Handle closed state.
+    if (state.is<Closed>()) {
+      return static_cast<size_t>(0);
+    }
+
+    // Check for already in-flight read.
+    if (state.is<ReadRequest>()) {
+      KJ_FAIL_ASSERT("read operation already in flight");
+    }
+
+    // Check for pending write request.
+    KJ_IF_SOME(request, state.tryGet<WriteRequest>()) {
+      if (bytes.size() >= request.bytes.size()) {
+        // The write buffer will entirely fit into our read buffer; fulfill both requests.
+        memcpy(bytes.begin(), request.bytes.begin(), request.bytes.size());
+        auto result = request.bytes.size();
+        request.fulfiller->fulfill();
+
+        // Switch to idle state.
+        state.transitionTo<Idle>();
+
+        return result;
+      }
+
+      // The write buffer won't quite fit into our read buffer; fulfill only the read request.
+      memcpy(bytes.begin(), request.bytes.begin(), bytes.size());
+      request.bytes = request.bytes.slice(bytes.size(), request.bytes.size());
+      return bytes.size();
+    }
+
+    // Must be idle - no outstanding write request, switch to ReadRequest state.
+    KJ_ASSERT(state.is<Idle>());
+    auto paf = kj::newPromiseAndFulfiller<size_t>();
+    state.transitionTo<ReadRequest>(bytes, kj::mv(paf.fulfiller));
+    return kj::mv(paf.promise);
   }
 
   kj::Promise<void> writeHelper(kj::ArrayPtr<const kj::byte> bytes) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(idle, Idle) {
-        if (bytes.size() == 0) {
-          // This is a close operation.
-          state = StreamStates::Closed();
-          return kj::READY_NOW;
-        }
-
-        auto paf = kj::newPromiseAndFulfiller<void>();
-        state = WriteRequest{bytes, kj::mv(paf.fulfiller)};
-        return kj::mv(paf.promise);
-      }
-      KJ_CASE_ONEOF(request, ReadRequest) {
-        if (!request.fulfiller->isWaiting()) {
-          // Oops, the request was canceled. Currently, this happen in particular when pumping a
-          // response body to the client, and the client disconnects, cancelling the pump. In this
-          // specific case, we want to propagate the error back to the write end of the transform
-          // stream. In theory, though, there could be other cases where propagation is incorrect.
-          //
-          // TODO(cleanup): This cancellation should probably be handled at a higher level, e.g.
-          //   in pumpTo(), but I need a quick fix.
-          state = KJ_EXCEPTION(DISCONNECTED, "reader canceled");
-
-          // I was going to use a `goto` but Harris choked on his bagel. Recursion it is.
-          return writeHelper(bytes);
-        }
-
-        if (bytes.size() == 0) {
-          // This is a close operation.
-          request.fulfiller->fulfill(static_cast<size_t>(0));
-          state = StreamStates::Closed();
-          return kj::READY_NOW;
-        }
-
-        KJ_ASSERT(request.bytes.size() > 0);
-
-        if (request.bytes.size() >= bytes.size()) {
-          // Our write buffer will entirely fit into the read buffer; fulfill both requests.
-          memcpy(request.bytes.begin(), bytes.begin(), bytes.size());
-          request.fulfiller->fulfill(bytes.size());
-          state = Idle();
-          return kj::READY_NOW;
-        }
-
-        // Our write buffer won't quite fit into the read buffer; fulfill only the read request.
-        memcpy(request.bytes.begin(), bytes.begin(), request.bytes.size());
-        bytes = bytes.slice(request.bytes.size(), bytes.size());
-        request.fulfiller->fulfill(request.bytes.size());
-
-        auto paf = kj::newPromiseAndFulfiller<void>();
-        state = WriteRequest{bytes, kj::mv(paf.fulfiller)};
-        return kj::mv(paf.promise);
-      }
-      KJ_CASE_ONEOF(request, WriteRequest) {
-        KJ_FAIL_ASSERT("write operation already in flight");
-      }
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        return kj::cp(exception);
-      }
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        KJ_FAIL_ASSERT("close operation already in flight");
-      }
+    // Handle error state first.
+    KJ_IF_SOME(exception, state.tryGetError()) {
+      return kj::cp(exception);
     }
 
-    KJ_UNREACHABLE;
+    // Handle closed state.
+    if (state.is<Closed>()) {
+      KJ_FAIL_ASSERT("close operation already in flight");
+    }
+
+    // Check for already in-flight write.
+    if (state.is<WriteRequest>()) {
+      KJ_FAIL_ASSERT("write operation already in flight");
+    }
+
+    // Check for pending read request.
+    KJ_IF_SOME(request, state.tryGet<ReadRequest>()) {
+      if (!request.fulfiller->isWaiting()) {
+        // Oops, the request was canceled. Currently, this happen in particular when pumping a
+        // response body to the client, and the client disconnects, cancelling the pump. In this
+        // specific case, we want to propagate the error back to the write end of the transform
+        // stream. In theory, though, there could be other cases where propagation is incorrect.
+        //
+        // TODO(cleanup): This cancellation should probably be handled at a higher level, e.g.
+        //   in pumpTo(), but I need a quick fix.
+        state.forceTransitionTo<kj::Exception>(KJ_EXCEPTION(DISCONNECTED, "reader canceled"));
+
+        // I was going to use a `goto` but Harris choked on his bagel. Recursion it is.
+        return writeHelper(bytes);
+      }
+
+      if (bytes.size() == 0) {
+        // This is a close operation.
+        request.fulfiller->fulfill(static_cast<size_t>(0));
+        state.transitionTo<Closed>();
+        return kj::READY_NOW;
+      }
+
+      KJ_ASSERT(request.bytes.size() > 0);
+
+      if (request.bytes.size() >= bytes.size()) {
+        // Our write buffer will entirely fit into the read buffer; fulfill both requests.
+        memcpy(request.bytes.begin(), bytes.begin(), bytes.size());
+        request.fulfiller->fulfill(bytes.size());
+        state.transitionTo<Idle>();
+        return kj::READY_NOW;
+      }
+
+      // Our write buffer won't quite fit into the read buffer; fulfill only the read request.
+      memcpy(request.bytes.begin(), bytes.begin(), request.bytes.size());
+      bytes = bytes.slice(request.bytes.size(), bytes.size());
+      request.fulfiller->fulfill(request.bytes.size());
+
+      auto paf = kj::newPromiseAndFulfiller<void>();
+      state.transitionTo<WriteRequest>(bytes, kj::mv(paf.fulfiller));
+      return kj::mv(paf.promise);
+    }
+
+    // Must be idle.
+    KJ_ASSERT(state.is<Idle>());
+    if (bytes.size() == 0) {
+      // This is a close operation.
+      state.transitionTo<Closed>();
+      return kj::READY_NOW;
+    }
+
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    state.transitionTo<WriteRequest>(bytes, kj::mv(paf.fulfiller));
+    return kj::mv(paf.promise);
   }
 
   kj::Maybe<uint64_t> limit;
-
-  struct ReadRequest {
-    kj::ArrayPtr<kj::byte> bytes;
-    // WARNING: `bytes` may be invalid if fulfiller->isWaiting() returns false! (This indicates the
-    //   read was canceled.)
-
-    kj::Own<kj::PromiseFulfiller<size_t>> fulfiller;
-  };
-
-  struct WriteRequest {
-    kj::ArrayPtr<const kj::byte> bytes;
-    kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-  };
-
-  struct Idle {};
-
-  kj::OneOf<Idle, ReadRequest, WriteRequest, kj::Exception, StreamStates::Closed> state = Idle();
+  IdentityTransformState state;
 };
 }  // namespace
 
