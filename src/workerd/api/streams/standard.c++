@@ -9,6 +9,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/debug.h>
@@ -86,6 +87,7 @@ class ReadableLockImpl {
  private:
   class PipeLocked final: public PipeController {
    public:
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
     explicit PipeLocked(Controller& inner): inner(inner) {}
 
     bool isClosed() override {
@@ -117,7 +119,7 @@ class ReadableLockImpl {
       KJ_IF_SOME(error, maybeError) {
         cancel(js, error);
       }
-      inner.lock.state.template init<Unlocked>();
+      inner.lock.state.template transitionTo<Unlocked>();
     }
 
     kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
@@ -130,7 +132,16 @@ class ReadableLockImpl {
     friend Controller;
   };
 
-  kj::OneOf<Locked, PipeLocked, ReaderLocked, Unlocked> state = Unlocked();
+  // State machine for ReadableLockImpl:
+  // All states can transition to any other state (no terminal states).
+  //   Unlocked -> Locked (lock() called for tee)
+  //   Unlocked -> ReaderLocked (lockReader() called)
+  //   Unlocked -> PipeLocked (tryPipeLock() called)
+  //   ReaderLocked -> Unlocked (releaseReader() called)
+  //   PipeLocked -> Unlocked (release() or onClose/onError called)
+  //   Locked -> (remains until stream is done)
+  using LockState = ComposableStateMachine<Locked, PipeLocked, ReaderLocked, Unlocked>;
+  LockState state = LockState::template create<Unlocked>();
   friend Controller;
 };
 
@@ -169,6 +180,7 @@ class WritableLockImpl {
 
  private:
   struct PipeLocked {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
     ReadableStreamController::PipeController& source;
     jsg::Ref<ReadableStream> readableStreamRef;
 
@@ -189,7 +201,16 @@ class WritableLockImpl {
       tracker.trackField("signal", maybeSignal);
     }
   };
-  kj::OneOf<Unlocked, Locked, WriterLocked, PipeLocked> state = Unlocked();
+
+  // State machine for WritableLockImpl:
+  // All states can transition to any other state (no terminal states).
+  //   Unlocked -> Locked (not currently used)
+  //   Unlocked -> WriterLocked (lockWriter() called)
+  //   Unlocked -> PipeLocked (pipeLock() called)
+  //   WriterLocked -> Unlocked (releaseWriter() called)
+  //   PipeLocked -> Unlocked (releasePipeLock() called)
+  using LockState = ComposableStateMachine<Unlocked, Locked, WriterLocked, PipeLocked>;
+  LockState state = LockState::template create<Unlocked>();
 
   inline kj::Maybe<PipeLocked&> tryGetPipe() {
     KJ_IF_SOME(locked, state.template tryGet<PipeLocked>()) {
@@ -209,7 +230,7 @@ bool ReadableLockImpl<Controller>::lock() {
     return false;
   }
 
-  state.template init<Locked>();
+  state.template transitionTo<Locked>();
   return true;
 }
 
@@ -230,7 +251,7 @@ bool ReadableLockImpl<Controller>::lockReader(jsg::Lock& js, Controller& self, R
     maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored.getHandle(js));
   }
 
-  state = kj::mv(lock);
+  state.template transitionTo<ReaderLocked>(kj::mv(lock));
   reader.attach(self, kj::mv(prp.promise));
   return true;
 }
@@ -267,7 +288,7 @@ void ReadableLockImpl<Controller>::releaseReader(
     // state itself. Moving the lock above will free the lock state while keeping the
     // ReadableStream marked as locked.
     if (maybeJs != kj::none) {
-      state.template init<Unlocked>();
+      state.template transitionTo<Unlocked>();
     }
   }
 }
@@ -278,8 +299,7 @@ kj::Maybe<ReadableStreamController::PipeController&> ReadableLockImpl<Controller
   if (isLockedToReader()) {
     return kj::none;
   }
-  state.template init<PipeLocked>(self);
-  return state.template get<PipeLocked>();
+  return state.template transitionTo<PipeLocked>(self);
 }
 
 template <typename Controller>
@@ -308,8 +328,8 @@ void ReadableLockImpl<Controller>::onClose(jsg::Lock& js) {
         LOG_NOSENTRY(ERROR, "Error resolving ReadableStream reader closed promise");
       };
     }
-    KJ_CASE_ONEOF(locked, ReadableLockImpl::PipeLocked) {
-      state.template init<Unlocked>();
+    KJ_CASE_ONEOF(locked, ReadableLockImpl<Controller>::PipeLocked) {
+      state.template transitionTo<Unlocked>();
     }
     KJ_CASE_ONEOF(locked, Locked) {}
     KJ_CASE_ONEOF(locked, Unlocked) {}
@@ -330,8 +350,8 @@ void ReadableLockImpl<Controller>::onError(jsg::Lock& js, v8::Local<v8::Value> r
         LOG_NOSENTRY(ERROR, "Error rejecting ReadableStream reader closed promise");
       }
     }
-    KJ_CASE_ONEOF(locked, ReadableLockImpl::PipeLocked) {
-      state.template init<Unlocked>();
+    KJ_CASE_ONEOF(locked, ReadableLockImpl<Controller>::PipeLocked) {
+      state.template transitionTo<Unlocked>();
     }
     KJ_CASE_ONEOF(locked, Locked) {}
     KJ_CASE_ONEOF(locked, Unlocked) {}
@@ -382,7 +402,7 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
     }
   }
 
-  state = kj::mv(lock);
+  state.template transitionTo<WriterLocked>(kj::mv(lock));
   writer.attach(js, self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
@@ -390,30 +410,31 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
 template <typename Controller>
 void WritableLockImpl<Controller>::releaseWriter(
     Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) {
-  auto& locked = state.template get<WriterLocked>();
-  KJ_ASSERT(&locked.getWriter() == &writer);
-  KJ_IF_SOME(js, maybeJs) {
-    KJ_SWITCH_ONEOF(self.state) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
-      KJ_CASE_ONEOF(errored, StreamStates::Errored) {}
-      KJ_CASE_ONEOF(controller, jsg::Ref<WritableStreamDefaultController>) {
-        controller->cancelPendingWrites(
-            js, js.typeError("This WritableStream writer has been released."_kjc));
+  KJ_IF_SOME(locked, state.template tryGet<WriterLocked>()) {
+    KJ_ASSERT(&locked.getWriter() == &writer);
+    KJ_IF_SOME(js, maybeJs) {
+      KJ_SWITCH_ONEOF(self.state) {
+        KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+        KJ_CASE_ONEOF(errored, StreamStates::Errored) {}
+        KJ_CASE_ONEOF(controller, jsg::Ref<WritableStreamDefaultController>) {
+          controller->cancelPendingWrites(
+              js, js.typeError("This WritableStream writer has been released."_kjc));
+        }
       }
+
+      maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
+          js.v8TypeError("This WritableStream writer has been released."_kjc));
     }
+    locked.clear();
 
-    maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
-        js.v8TypeError("This WritableStream writer has been released."_kjc));
-  }
-  locked.clear();
-
-  // When maybeJs is nullptr, that means releaseWriter was called when the writer is
-  // being deconstructed and not as the result of explicitly calling releaseLock and
-  // we do not have an isolate lock. In that case, we don't want to change the lock
-  // state itself. Moving the lock above will free the lock state while keeping the
-  // WritableStream marked as locked.
-  if (maybeJs != kj::none) {
-    state.template init<Unlocked>();
+    // When maybeJs is nullptr, that means releaseWriter was called when the writer is
+    // being deconstructed and not as the result of explicitly calling releaseLock and
+    // we do not have an isolate lock. In that case, we don't want to change the lock
+    // state itself. Moving the lock above will free the lock state while keeping the
+    // WritableStream marked as locked.
+    if (maybeJs != kj::none) {
+      state.template transitionTo<Unlocked>();
+    }
   }
 }
 
@@ -426,7 +447,7 @@ bool WritableLockImpl<Controller>::pipeLock(
 
   auto& sourceLock = KJ_ASSERT_NONNULL(source->getController().tryPipeLock());
 
-  state.template init<PipeLocked>(PipeLocked{
+  state.template transitionTo<PipeLocked>(PipeLocked{
     .source = sourceLock,
     .readableStreamRef = kj::mv(source),
     .maybeSignal = kj::mv(options.signal),
@@ -444,7 +465,7 @@ bool WritableLockImpl<Controller>::pipeLock(
 template <typename Controller>
 void WritableLockImpl<Controller>::releasePipeLock() {
   if (state.template is<PipeLocked>()) {
-    state.template init<Unlocked>();
+    state.template transitionTo<Unlocked>();
   }
 }
 
@@ -2437,7 +2458,7 @@ void ReadableStreamJsController::releaseReader(Reader& reader, kj::Maybe<jsg::Lo
 
 ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
   JSG_REQUIRE(!isLockedToReader(), TypeError, "This ReadableStream is locked to a reader.");
-  lock.state.init<Locked>();
+  lock.state.transitionTo<Locked>();
   disturbed = true;
 
   // This will leave this stream locked, disturbed, and closed.
@@ -3361,7 +3382,7 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
     maybeResolvePromise(js, locked.getReadyFulfiller());
   } else if (lock.state.tryGet<WritableLockImpl::PipeLocked>() != kj::none) {
-    lock.state.init<Unlocked>();
+    lock.state.transitionTo<Unlocked>();
   }
 }
 
@@ -3376,7 +3397,7 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
   } else if (lock.state.tryGet<WritableLockImpl::PipeLocked>() != kj::none) {
-    lock.state.init<Unlocked>();
+    lock.state.transitionTo<Unlocked>();
   }
 }
 
