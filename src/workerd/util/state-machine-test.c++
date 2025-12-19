@@ -207,51 +207,6 @@ KJ_TEST("StateMachine: currentStateName introspection") {
 }
 
 // =============================================================================
-// Utility Function Tests
-// =============================================================================
-
-KJ_TEST("requireState: returns state when correct") {
-  StateMachine<Idle, Running, Completed, Failed> machine;
-  machine.transitionTo<Running>(kj::str("task"));
-
-  auto& running = requireState<Running>(machine);
-  KJ_EXPECT(running.taskName == "task");
-}
-
-KJ_TEST("ifInState: executes function when in state") {
-  StateMachine<Idle, Running, Completed, Failed> machine;
-  machine.transitionTo<Running>(kj::str("task"));
-
-  auto result = ifInState<Running>(machine, [](Running& r) { return r.taskName.size(); }, 0ul);
-  KJ_EXPECT(result == 4);  // "task" has 4 characters
-}
-
-KJ_TEST("ifInState: returns default when not in state") {
-  StateMachine<Idle, Running, Completed, Failed> machine;
-  machine.transitionTo<Idle>();
-
-  auto result = ifInState<Running>(machine, [](Running& r) { return r.taskName.size(); }, 999ul);
-  KJ_EXPECT(result == 999);
-}
-
-// =============================================================================
-// Common States Tests
-// =============================================================================
-
-KJ_TEST("states::Errored holds error") {
-  states::Errored<kj::String> errored(kj::str("something went wrong"));
-  KJ_EXPECT(errored.error == "something went wrong");
-}
-
-KJ_TEST("states have correct names") {
-  KJ_EXPECT(states::Closed::NAME == "closed"_kj);
-  KJ_EXPECT(states::Unlocked::NAME == "unlocked"_kj);
-  KJ_EXPECT(states::Locked::NAME == "locked"_kj);
-  KJ_EXPECT(states::Initial::NAME == "initial"_kj);
-  KJ_EXPECT(states::Released::NAME == "released"_kj);
-}
-
-// =============================================================================
 // Memory Safety Tests
 // =============================================================================
 
@@ -284,20 +239,6 @@ KJ_TEST("StateMachine: withState blocks transitions during callback") {
 
   // State should still be Running (transition was blocked)
   KJ_EXPECT(machine.is<Running>());
-}
-
-KJ_TEST("StateMachine: withStateOr with default value") {
-  StateMachine<Idle, Running, Completed, Failed> machine;
-  machine.transitionTo<Idle>();
-
-  // Returns default when not in state
-  auto result = machine.withStateOr<Running>([](Running& r) { return r.taskName.size(); }, 999ul);
-  KJ_EXPECT(result == 999);
-
-  // Returns computed value when in state
-  machine.transitionTo<Running>(kj::str("hello"));
-  auto result2 = machine.withStateOr<Running>([](Running& r) { return r.taskName.size(); }, 999ul);
-  KJ_EXPECT(result2 == 5);
 }
 
 KJ_TEST("StateMachine: transition lock count is tracked") {
@@ -339,103 +280,6 @@ KJ_TEST("StateMachine: void withState returns bool") {
   bool result2 = machine.withState<Idle>([&](Idle&) { executed = true; });
   KJ_EXPECT(result2 == false);
   KJ_EXPECT(!executed);
-}
-
-// =============================================================================
-// Conditional Transition Tests
-// =============================================================================
-
-struct Reading {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "reading"_kj;
-  size_t bytesRemaining;
-  size_t totalBytes;
-
-  explicit Reading(size_t total): bytesRemaining(total), totalBytes(total) {}
-};
-
-struct Done {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "done"_kj;
-  size_t totalBytesRead;
-
-  explicit Done(size_t total): totalBytesRead(total) {}
-};
-
-KJ_TEST("StateMachine: transitionFromToIf with true predicate") {
-  StateMachine<Idle, Reading, Done> machine;
-  machine.transitionTo<Reading>(100);
-
-  // Consume all bytes
-  machine.get<Reading>().bytesRemaining = 0;
-
-  // Transition when bytes remaining is 0
-  // Note: We need to get totalBytes before the transition since the predicate
-  // runs while locked, but args are used after
-  size_t totalBytes = machine.get<Reading>().totalBytes;
-  auto result = machine.transitionFromToIf<Reading, Done>(
-      [](Reading& r) { return r.bytesRemaining == 0; }, totalBytes);
-
-  KJ_EXPECT(result != kj::none);
-  KJ_EXPECT(machine.is<Done>());
-  KJ_EXPECT(machine.get<Done>().totalBytesRead == 100);
-}
-
-KJ_TEST("StateMachine: transitionFromToIf with false predicate") {
-  StateMachine<Idle, Reading, Done> machine;
-  machine.transitionTo<Reading>(100);
-
-  // Still have bytes remaining
-  machine.get<Reading>().bytesRemaining = 50;
-
-  // Won't transition because predicate is false
-  auto result = machine.transitionFromToIf<Reading, Done>(
-      [](Reading& r) { return r.bytesRemaining == 0; }, 0);
-
-  KJ_EXPECT(result == kj::none);
-  KJ_EXPECT(machine.is<Reading>());
-}
-
-KJ_TEST("StateMachine: transitionFromToIf wrong source state") {
-  StateMachine<Idle, Reading, Done> machine;
-  machine.transitionTo<Idle>();
-
-  // Won't transition because not in Reading state
-  auto result = machine.transitionFromToIf<Reading, Done>([](Reading&) { return true; }, 0);
-
-  KJ_EXPECT(result == kj::none);
-  KJ_EXPECT(machine.is<Idle>());
-}
-
-KJ_TEST("StateMachine: transitionFromToWith produces new state") {
-  StateMachine<Idle, Reading, Done> machine;
-  machine.transitionTo<Reading>(100);
-  machine.get<Reading>().bytesRemaining = 0;
-
-  auto result = machine.transitionFromToWith<Reading, Done>([](Reading& r) -> kj::Maybe<Done> {
-    if (r.bytesRemaining == 0) {
-      return Done{r.totalBytes};
-    }
-    return kj::none;
-  });
-
-  KJ_EXPECT(result != kj::none);
-  KJ_EXPECT(machine.is<Done>());
-  KJ_EXPECT(machine.get<Done>().totalBytesRead == 100);
-}
-
-KJ_TEST("StateMachine: transitionFromToWith returns none") {
-  StateMachine<Idle, Reading, Done> machine;
-  machine.transitionTo<Reading>(100);
-  machine.get<Reading>().bytesRemaining = 50;
-
-  auto result = machine.transitionFromToWith<Reading, Done>([](Reading& r) -> kj::Maybe<Done> {
-    if (r.bytesRemaining == 0) {
-      return Done{r.totalBytes};
-    }
-    return kj::none;
-  });
-
-  KJ_EXPECT(result == kj::none);
-  KJ_EXPECT(machine.is<Reading>());
 }
 
 // =============================================================================
@@ -587,6 +431,29 @@ KJ_TEST("StateMachine: whenActiveOr") {
   KJ_EXPECT(result2 == 999);
 }
 
+KJ_TEST("StateMachine: requireActive") {
+  StateMachine<ActiveState<CActive>, CActive, CClosed, CErrored> machine;
+
+  machine.transitionTo<CActive>(kj::str("resource"));
+
+  // requireActive returns reference when active
+  auto& active = machine.requireActive();
+  KJ_EXPECT(active.resourceName == "resource");
+
+  // requireActive with custom message works when active
+  auto& active2 = machine.requireActive("Custom message");
+  KJ_EXPECT(active2.resourceName == "resource");
+
+  machine.transitionTo<CClosed>();
+
+  // requireActive throws when not active
+  KJ_EXPECT_THROW_MESSAGE(
+      "State machine is not in the active state", (void)machine.requireActive());
+
+  // requireActive throws custom message when not active
+  KJ_EXPECT_THROW_MESSAGE("Stream is closed", (void)machine.requireActive("Stream is closed"));
+}
+
 KJ_TEST("StateMachine: with PendingStates spec") {
   StateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
@@ -595,7 +462,6 @@ KJ_TEST("StateMachine: with PendingStates spec") {
   // Start an operation
   machine.beginOperation();
   KJ_EXPECT(machine.hasOperationInProgress());
-  KJ_EXPECT(machine.operationCountValue() == 1);
 
   // Defer a close
   bool immediate = machine.deferTransitionTo<CClosed>();
@@ -1010,67 +876,6 @@ KJ_TEST("StateMachine: visit const method") {
     }
   });
   KJ_EXPECT(result == 1);
-}
-
-KJ_TEST("StateMachine: withStateOr") {
-  StateMachine<CActive, CClosed, CErrored> machine;
-  machine.transitionTo<CActive>(kj::str("resource"));
-
-  // Execute when in state
-  size_t result = machine.withStateOr<CActive>([](CActive& a) { return a.resourceName.size(); }, 0);
-  KJ_EXPECT(result == 8);  // "resource"
-
-  // Return default when not in state
-  size_t result2 = machine.withStateOr<CClosed>([](CClosed&) { return 42; }, 99);
-  KJ_EXPECT(result2 == 99);
-}
-
-KJ_TEST("StateMachine: transitionFromToIf") {
-  StateMachine<CActive, CClosed, CErrored> machine;
-  machine.transitionTo<CActive>(kj::str("resource"));
-
-  // Transition with false predicate - should not transition
-  auto result = machine.transitionFromToIf<CActive, CClosed>(
-      [](CActive& a) { return a.resourceName == "foo"; });
-  KJ_EXPECT(result == kj::none);
-  KJ_EXPECT(machine.is<CActive>());
-
-  // Transition with true predicate - should transition
-  auto result2 = machine.transitionFromToIf<CActive, CClosed>(
-      [](CActive& a) { return a.resourceName == "resource"; });
-  KJ_EXPECT(result2 != kj::none);
-  KJ_EXPECT(machine.is<CClosed>());
-}
-
-KJ_TEST("StateMachine: transitionFromToIf wrong source") {
-  StateMachine<CActive, CClosed, CErrored> machine;
-  machine.transitionTo<CClosed>();
-
-  // Try to transition from wrong state
-  auto result = machine.transitionFromToIf<CActive, CErrored>(
-      [](CActive&) { return true; }, kj::str("error"));
-  KJ_EXPECT(result == kj::none);
-  KJ_EXPECT(machine.is<CClosed>());
-}
-
-KJ_TEST("StateMachine: transitionFromToWith") {
-  StateMachine<CActive, CClosed, CErrored> machine;
-  machine.transitionTo<CActive>(kj::str("resource"));
-
-  // Producer that returns none - should not transition
-  auto result = machine.transitionFromToWith<CActive, CErrored>(
-      [](CActive&) -> kj::Maybe<CErrored> { return kj::none; });
-  KJ_EXPECT(result == kj::none);
-  KJ_EXPECT(machine.is<CActive>());
-
-  // Producer that returns value - should transition
-  auto result2 =
-      machine.transitionFromToWith<CActive, CErrored>([](CActive& a) -> kj::Maybe<CErrored> {
-    return CErrored(kj::str("derived from ", a.resourceName));
-  });
-  KJ_EXPECT(result2 != kj::none);
-  KJ_EXPECT(machine.is<CErrored>());
-  KJ_EXPECT(machine.get<CErrored>().reason == "derived from resource"_kj);
 }
 
 KJ_TEST("StateMachine: underlying accessor") {

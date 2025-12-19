@@ -216,7 +216,7 @@ class QueueImpl final {
   // operations, then any left over data will be pushed into the consumer's buffer.
   // Asserts if the queue is closed or errored.
   void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
-    auto& ready = KJ_REQUIRE_NONNULL(state.tryGetActive(), "The queue is closed or errored.");
+    auto& ready = state.requireActive("The queue is closed or errored.");
 
     auto consumers = ready.consumers.snapshot();
     for (auto consumer: consumers) {
@@ -236,10 +236,7 @@ class QueueImpl final {
   }
 
   size_t getConsumerCount() const {
-    KJ_IF_SOME(ready, state.tryGetActive()) {
-      return ready.consumers.size();
-    }
-    return 0;
+    return state.whenActiveOr([](const Ready& ready) { return ready.consumers.size(); }, 0ul);
   }
 
   bool wantsRead() const {
@@ -431,14 +428,11 @@ class ConsumerImpl final {
 
   // The current total calculated size of the consumer's internal buffer.
   size_t size() const {
-    KJ_IF_SOME(ready, state.tryGetActive()) {
-      return ready.queueTotalSize;
-    }
-    return 0;
+    return state.whenActiveOr([](const Ready& ready) { return ready.queueTotalSize; }, 0ul);
   }
 
   void resolveRead(jsg::Lock& js, ReadRequest& req) {
-    auto& ready = KJ_REQUIRE_NONNULL(state.tryGetActive());
+    auto& ready = state.requireActive();
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
     req.resolve(js);
@@ -446,7 +440,7 @@ class ConsumerImpl final {
   }
 
   void resolveReadAsDone(jsg::Lock& js, ReadRequest& req) {
-    auto& ready = KJ_REQUIRE_NONNULL(state.tryGetActive());
+    auto& ready = state.requireActive();
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
     req.resolveAsDone(js);
@@ -481,10 +475,8 @@ class ConsumerImpl final {
   }
 
   bool hasReadRequests() const {
-    KJ_IF_SOME(ready, state.tryGetActive()) {
-      return !ready.readRequests.empty();
-    }
-    return false;
+    return state.whenActiveOr(
+        [](const Ready& ready) { return !ready.readRequests.empty(); }, false);
   }
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
