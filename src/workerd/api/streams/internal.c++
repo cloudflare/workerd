@@ -729,8 +729,8 @@ void ReadableStreamInternalController::doClose(jsg::Lock& js) {
   state.init<StreamStates::Closed>();
   KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
-  } else if (readState.tryGet<PipeLocked>() != kj::none) {
-    readState.transitionTo<Unlocked>();
+  } else {
+    (void)readState.transitionFromTo<PipeLocked, Unlocked>();
   }
 }
 
@@ -738,8 +738,8 @@ void ReadableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
   state.init<StreamStates::Errored>(js.v8Ref(reason));
   KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
-  } else if (readState.tryGet<PipeLocked>() != kj::none) {
-    readState.transitionTo<Unlocked>();
+  } else {
+    (void)readState.transitionFromTo<PipeLocked, Unlocked>();
   }
 }
 
@@ -1436,8 +1436,8 @@ void WritableStreamInternalController::doClose(jsg::Lock& js) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
     maybeResolvePromise(js, locked.getReadyFulfiller());
     writeState.transitionTo<Locked>();
-  } else if (writeState.tryGet<PipeLocked>() != kj::none) {
-    writeState.transitionTo<Unlocked>();
+  } else {
+    (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
   }
   PendingAbort::dequeue(maybePendingAbort);
 }
@@ -1448,8 +1448,8 @@ void WritableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
     writeState.transitionTo<Locked>();
-  } else if (writeState.tryGet<PipeLocked>() != kj::none) {
-    writeState.transitionTo<Unlocked>();
+  } else {
+    (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
   }
   PendingAbort::dequeue(maybePendingAbort);
 }
