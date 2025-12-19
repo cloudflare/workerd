@@ -25,7 +25,7 @@ struct Open {
 //   Open -> Closed (normal close via end())
 //   Open -> kj::Exception (error via abort() or write failure)
 // Both Closed and kj::Exception are terminal states.
-using WritableSinkState = ComposableStateMachine<TerminalStates<Closed, kj::Exception>,
+using WritableSinkState = StateMachine<TerminalStates<Closed, kj::Exception>,
     ErrorState<kj::Exception>,
     ActiveState<Open>,
     Open,

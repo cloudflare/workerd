@@ -262,7 +262,7 @@ class WritableStreamSinkJsAdapter final {
   //   Open -> Closed (normal close via end())
   //   Open -> kj::Exception (error via abort() or write failure)
   // Both Closed and kj::Exception are terminal states.
-  using State = ComposableStateMachine<TerminalStates<Closed, kj::Exception>,
+  using State = StateMachine<TerminalStates<Closed, kj::Exception>,
       ErrorState<kj::Exception>,
       ActiveState<Open>,
       Open,
@@ -472,7 +472,7 @@ class WritableStreamSinkKjAdapter final: public WritableSink {
   //   KjOpen -> KjClosed (normal close via end())
   //   KjOpen -> kj::Exception (error via abort() or write failure)
   // Both KjClosed and kj::Exception are terminal states.
-  using KjState = ComposableStateMachine<TerminalStates<KjClosed, kj::Exception>,
+  using KjState = StateMachine<TerminalStates<KjClosed, kj::Exception>,
       ErrorState<kj::Exception>,
       ActiveState<KjOpen>,
       KjOpen,

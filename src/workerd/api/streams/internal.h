@@ -153,7 +153,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
   // State machine for ReadableStreamInternalController:
   // Closed and Errored are terminal states (stream is done).
   // Readable is the active state (stream has data).
-  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
       ErrorState<StreamStates::Errored>,
       ActiveState<Readable>,
       StreamStates::Closed,
@@ -169,7 +169,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
   //   ReaderLocked -> Unlocked (releaseReader() called)
   //   PipeLocked -> Unlocked (release() or doClose/doError called)
   //   Locked -> (remains until stream is done)
-  using ReadLockState = ComposableStateMachine<Unlocked, Locked, PipeLocked, ReaderLocked>;
+  using ReadLockState = StateMachine<Unlocked, Locked, PipeLocked, ReaderLocked>;
   ReadLockState readState = ReadLockState::create<Unlocked>();
   bool disturbed = false;
   bool readPending = false;
@@ -298,7 +298,7 @@ class WritableStreamInternalController: public WritableStreamController {
   // State machine for WritableStreamInternalController:
   // Closed and Errored are terminal states (stream is done).
   // IoOwn<Writable> is the active state (stream is writable).
-  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
       ErrorState<StreamStates::Errored>,
       ActiveState<IoOwn<Writable>>,
       StreamStates::Closed,
@@ -314,7 +314,7 @@ class WritableStreamInternalController: public WritableStreamController {
   //   WriterLocked -> Unlocked (releaseWriter() called)
   //   WriterLocked -> Locked (doClose/doError called - stream closed but writer still attached)
   //   PipeLocked -> Unlocked (pipe completes)
-  using WriteLockState = ComposableStateMachine<Unlocked, Locked, PipeLocked, WriterLocked>;
+  using WriteLockState = StateMachine<Unlocked, Locked, PipeLocked, WriterLocked>;
   WriteLockState writeState = WriteLockState::create<Unlocked>();
 
   kj::Maybe<kj::Own<ByteStreamObserver>> observer;

@@ -207,326 +207,6 @@ KJ_TEST("StateMachine: currentStateName introspection") {
 }
 
 // =============================================================================
-// TerminalStateMachine Tests
-// =============================================================================
-
-KJ_TEST("TerminalStateMachine: prevents transition from terminal state") {
-  TerminalStateMachine<TerminalStates<Completed, Failed>, Idle, Running, Completed, Failed> machine;
-
-  machine.transitionTo<Idle>();
-  KJ_EXPECT(!machine.isTerminal());
-
-  machine.transitionTo<Running>(kj::str("task"));
-  KJ_EXPECT(!machine.isTerminal());
-
-  // Transition to terminal state
-  machine.transitionTo<Completed>(42);
-  KJ_EXPECT(machine.isTerminal());
-
-  // Cannot transition from terminal state
-  auto tryTransition = [&]() { machine.transitionTo<Running>(kj::str("another")); };
-  KJ_EXPECT_THROW_MESSAGE("Cannot transition from terminal state", tryTransition());
-
-  // Still in Completed
-  KJ_EXPECT(machine.is<Completed>());
-}
-
-KJ_TEST("TerminalStateMachine: forceTransitionTo bypasses terminal check") {
-  TerminalStateMachine<TerminalStates<Completed, Failed>, Idle, Running, Completed, Failed> machine;
-
-  machine.transitionTo<Completed>(42);
-  KJ_EXPECT(machine.isTerminal());
-
-  // Force transition works even from terminal state
-  machine.forceTransitionTo<Idle>();
-  KJ_EXPECT(machine.is<Idle>());
-  KJ_EXPECT(!machine.isTerminal());
-}
-
-KJ_TEST("TerminalStateMachine: transitionFromTo also enforces terminal") {
-  TerminalStateMachine<TerminalStates<Completed, Failed>, Idle, Running, Completed, Failed> machine;
-
-  machine.transitionTo<Completed>(42);
-
-  // transitionFromTo also respects terminal state
-  auto tryTransition = [&]() { auto _ KJ_UNUSED = machine.transitionFromTo<Completed, Idle>(); };
-  KJ_EXPECT_THROW_MESSAGE("Cannot transition from terminal state", tryTransition());
-}
-
-// =============================================================================
-// ErrorableStateMachine Tests
-// =============================================================================
-
-KJ_TEST("ErrorableStateMachine: error extraction") {
-  ErrorableStateMachine<Failed, Idle, Running, Completed, Failed> machine;
-
-  machine.transitionTo<Idle>();
-  KJ_EXPECT(!machine.isErrored());
-  KJ_EXPECT(machine.tryGetError() == kj::none);
-
-  machine.transitionTo<Failed>(kj::str("something went wrong"));
-  KJ_EXPECT(machine.isErrored());
-
-  KJ_IF_SOME(error, machine.tryGetError()) {
-    KJ_EXPECT(error.error == "something went wrong");
-  } else {
-    KJ_FAIL_EXPECT("Should have gotten error");
-  }
-
-  // getError() also works
-  KJ_EXPECT(machine.getError().error == "something went wrong");
-}
-
-// =============================================================================
-// ResourceStateMachine Tests
-// =============================================================================
-
-struct Active {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "active"_kj;
-  kj::String resourceName;
-
-  explicit Active(kj::String name): resourceName(kj::mv(name)) {}
-};
-
-struct Closed {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "closed"_kj;
-};
-
-struct Errored {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "errored"_kj;
-  kj::String reason;
-
-  explicit Errored(kj::String r): reason(kj::mv(r)) {}
-};
-
-KJ_TEST("ResourceStateMachine: basic lifecycle") {
-  ResourceStateMachine<Active, Closed, Errored> machine;
-
-  // Initialize to active
-  machine.transitionTo<Active>(kj::str("my-resource"));
-  KJ_EXPECT(machine.isActive());
-  KJ_EXPECT(!machine.isClosed());
-  KJ_EXPECT(!machine.isErrored());
-  KJ_EXPECT(!machine.isTerminated());
-  KJ_EXPECT(!machine.isClosedOrErrored());
-
-  // Access active resource
-  KJ_IF_SOME(active, machine.tryGetActive()) {
-    KJ_EXPECT(active.resourceName == "my-resource");
-  } else {
-    KJ_FAIL_EXPECT("Should be active");
-  }
-}
-
-KJ_TEST("ResourceStateMachine: close and error") {
-  ResourceStateMachine<Active, Closed, Errored> machine;
-
-  machine.transitionTo<Active>(kj::str("resource"));
-
-  // Close the resource
-  machine.close();
-  KJ_EXPECT(machine.isClosed());
-  KJ_EXPECT(machine.isTerminated());
-  KJ_EXPECT(machine.tryGetActive() == kj::none);
-
-  // Cannot close again (already terminated)
-  auto tryClose = [&]() { machine.close(); };
-  KJ_EXPECT_THROW_MESSAGE("Resource is already terminated", tryClose());
-
-  // But forceClose works
-  machine.forceClose();
-  KJ_EXPECT(machine.isClosed());
-}
-
-KJ_TEST("ResourceStateMachine: error terminates") {
-  ResourceStateMachine<Active, Closed, Errored> machine;
-
-  machine.transitionTo<Active>(kj::str("resource"));
-
-  // Error the resource
-  machine.error(kj::str("something broke"));
-  KJ_EXPECT(machine.isErrored());
-  KJ_EXPECT(machine.isTerminated());
-
-  KJ_IF_SOME(err, machine.tryGetError()) {
-    KJ_EXPECT(err.reason == "something broke");
-  } else {
-    KJ_FAIL_EXPECT("Should be errored");
-  }
-}
-
-KJ_TEST("ResourceStateMachine: whenActive") {
-  ResourceStateMachine<Active, Closed, Errored> machine;
-
-  machine.transitionTo<Active>(kj::str("resource"));
-
-  // whenActive executes when active
-  auto result = machine.whenActive([](Active& a) { return a.resourceName.size(); });
-  KJ_EXPECT(result != kj::none);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(result) == 8);  // "resource" has 8 chars
-
-  // After close, whenActive returns none
-  machine.close();
-  auto result2 = machine.whenActive([](Active& a) { return a.resourceName.size(); });
-  KJ_EXPECT(result2 == kj::none);
-}
-
-KJ_TEST("ResourceStateMachine: whenActiveOr") {
-  ResourceStateMachine<Active, Closed, Errored> machine;
-
-  machine.transitionTo<Active>(kj::str("resource"));
-
-  // whenActiveOr executes when active
-  auto result = machine.whenActiveOr([](Active& a) { return a.resourceName.size(); }, 0ul);
-  KJ_EXPECT(result == 8);
-
-  // After close, returns default
-  machine.close();
-  auto result2 = machine.whenActiveOr([](Active& a) { return a.resourceName.size(); }, 999ul);
-  KJ_EXPECT(result2 == 999);
-}
-
-// =============================================================================
-// ValidatedStateMachine Tests
-// =============================================================================
-
-using TaskTransitions = transitions::TransitionList<transitions::Transition<Idle, Running>,
-    transitions::Transition<Running, Completed>,
-    transitions::Transition<Running, Failed>,
-    transitions::Transition<Completed, Idle>,
-    transitions::Transition<Failed, Idle>>;
-
-KJ_TEST("ValidatedStateMachine: allowed transitions work") {
-  ValidatedStateMachine<TaskTransitions, Idle, Running, Completed, Failed> machine;
-
-  // Initialize to Idle
-  machine.transitionTo<Idle>();
-  KJ_EXPECT(machine.is<Idle>());
-
-  // Idle -> Running (allowed)
-  machine.checkedTransitionFromTo<Idle, Running>(kj::str("task"));
-  KJ_EXPECT(machine.is<Running>());
-
-  // Running -> Completed (allowed)
-  machine.checkedTransitionFromTo<Running, Completed>(42);
-  KJ_EXPECT(machine.is<Completed>());
-  KJ_EXPECT(machine.get<Completed>().result == 42);
-
-  // Completed -> Idle (allowed - reset)
-  machine.checkedTransitionFromTo<Completed, Idle>();
-  KJ_EXPECT(machine.is<Idle>());
-}
-
-KJ_TEST("ValidatedStateMachine: tryCheckedTransitionFromTo") {
-  ValidatedStateMachine<TaskTransitions, Idle, Running, Completed, Failed> machine;
-  machine.transitionTo<Idle>();
-
-  // Wrong current state - returns none
-  auto result1 = machine.tryCheckedTransitionFromTo<Running, Completed>(42);
-  KJ_EXPECT(result1 == kj::none);
-  KJ_EXPECT(machine.is<Idle>());  // Still Idle
-
-  // Correct current state - succeeds
-  machine.transitionTo<Running>(kj::str("task"));
-  auto result2 = machine.tryCheckedTransitionFromTo<Running, Failed>(kj::str("error"));
-  KJ_EXPECT(result2 != kj::none);
-  KJ_EXPECT(machine.is<Failed>());
-}
-
-// The following would not compile due to policy violation:
-// KJ_TEST("ValidatedStateMachine: disallowed transition fails to compile") {
-//   ValidatedStateMachine<TaskTransitions, Idle, Running, Completed, Failed> machine;
-//   machine.transitionTo<Running>(kj::str("task"));
-//   // This would fail at compile time:
-//   // machine.checkedTransitionFromTo<Completed, Running>(kj::str("task"));
-// }
-
-// =============================================================================
-// TransitionList Policy Tests
-// =============================================================================
-
-KJ_TEST("TransitionList: allows defined transitions") {
-  static_assert(TaskTransitions::isAllowed<Idle, Running>());
-  static_assert(TaskTransitions::isAllowed<Running, Completed>());
-  static_assert(TaskTransitions::isAllowed<Running, Failed>());
-  static_assert(TaskTransitions::isAllowed<Completed, Idle>());
-  static_assert(TaskTransitions::isAllowed<Failed, Idle>());
-}
-
-KJ_TEST("TransitionList: disallows undefined transitions") {
-  static_assert(!TaskTransitions::isAllowed<Idle, Completed>());
-  static_assert(!TaskTransitions::isAllowed<Idle, Failed>());
-  static_assert(!TaskTransitions::isAllowed<Completed, Running>());
-  static_assert(!TaskTransitions::isAllowed<Failed, Running>());
-  static_assert(!TaskTransitions::isAllowed<Running, Idle>());
-}
-
-// =============================================================================
-// LinearPolicy Tests
-// =============================================================================
-
-struct Step1 {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "step1"_kj;
-};
-struct Step2 {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "step2"_kj;
-};
-struct Step3 {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "step3"_kj;
-};
-struct Step4 {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "step4"_kj;
-};
-
-using LinearSteps = transitions::LinearPolicy<Step1, Step2, Step3, Step4>;
-
-KJ_TEST("LinearPolicy: allows sequential transitions") {
-  static_assert(LinearSteps::isAllowed<Step1, Step2>());
-  static_assert(LinearSteps::isAllowed<Step2, Step3>());
-  static_assert(LinearSteps::isAllowed<Step3, Step4>());
-}
-
-KJ_TEST("LinearPolicy: disallows non-sequential transitions") {
-  static_assert(!LinearSteps::isAllowed<Step1, Step3>());  // Skip
-  static_assert(!LinearSteps::isAllowed<Step2, Step1>());  // Backward
-  static_assert(!LinearSteps::isAllowed<Step4, Step1>());  // Wrap
-  static_assert(!LinearSteps::isAllowed<Step1, Step1>());  // Same
-}
-
-// =============================================================================
-// ObservableStateMachine Tests
-// =============================================================================
-
-KJ_TEST("ObservableStateMachine: callback on transition") {
-  ObservableStateMachine<Idle, Running, Completed, Failed> machine;
-
-  int callCount = 0;
-  kj::String lastFrom;
-  kj::String lastTo;
-
-  machine.onTransition([&](kj::StringPtr from, kj::StringPtr to) {
-    callCount++;
-    lastFrom = kj::str(from);
-    lastTo = kj::str(to);
-  });
-
-  machine.transitionTo<Idle>();
-  KJ_EXPECT(callCount == 1);
-  KJ_EXPECT(lastFrom == "(uninitialized)");
-  KJ_EXPECT(lastTo == "idle");
-
-  machine.transitionTo<Running>(kj::str("task"));
-  KJ_EXPECT(callCount == 2);
-  KJ_EXPECT(lastFrom == "idle");
-  KJ_EXPECT(lastTo == "running");
-
-  machine.transitionTo<Completed>(42);
-  KJ_EXPECT(callCount == 3);
-  KJ_EXPECT(lastFrom == "running");
-  KJ_EXPECT(lastTo == "completed");
-}
-
-// =============================================================================
 // Utility Function Tests
 // =============================================================================
 
@@ -569,92 +249,6 @@ KJ_TEST("states have correct names") {
   KJ_EXPECT(states::Locked::NAME == "locked"_kj);
   KJ_EXPECT(states::Initial::NAME == "initial"_kj);
   KJ_EXPECT(states::Released::NAME == "released"_kj);
-}
-
-// =============================================================================
-// Real-world Example: Stream-like State Machine
-// =============================================================================
-
-namespace stream_example {
-
-struct Readable {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "readable"_kj;
-  kj::String sourceName;
-  size_t bytesAvailable = 0;
-
-  explicit Readable(kj::String name): sourceName(kj::mv(name)) {}
-};
-
-struct StreamClosed {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "closed"_kj;
-};
-
-struct StreamErrored {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "errored"_kj;
-  kj::String reason;
-
-  explicit StreamErrored(kj::String r): reason(kj::mv(r)) {}
-};
-
-}  // namespace stream_example
-
-KJ_TEST("Stream-like example: ResourceStateMachine") {
-  using namespace stream_example;
-
-  ResourceStateMachine<Readable, StreamClosed, StreamErrored> state;
-
-  // Initialize
-  state.transitionTo<Readable>(kj::str("http-body"));
-
-  KJ_EXPECT(state.isActive());
-  KJ_EXPECT(!state.isClosedOrErrored());
-
-  // Simulate reading data
-  state.whenActive([](Readable& r) { r.bytesAvailable = 1024; });
-  KJ_EXPECT(KJ_ASSERT_NONNULL(state.tryGetActive()).bytesAvailable == 1024);
-
-  // Close the stream
-  state.close();
-  KJ_EXPECT(state.isClosed());
-  KJ_EXPECT(state.isClosedOrErrored());
-}
-
-KJ_TEST("Stream-like example: error handling") {
-  using namespace stream_example;
-
-  ResourceStateMachine<Readable, StreamClosed, StreamErrored> state;
-  state.transitionTo<Readable>(kj::str("network-socket"));
-
-  // Simulate an error
-  state.error(kj::str("Connection reset"));
-  KJ_EXPECT(state.isErrored());
-
-  KJ_IF_SOME(err, state.tryGetError()) {
-    KJ_EXPECT(err.reason == "Connection reset");
-  } else {
-    KJ_FAIL_EXPECT("Should be errored");
-  }
-
-  // Check terminal states
-  KJ_EXPECT(state.isClosedOrErrored());
-}
-
-KJ_TEST("Stream-like example: terminal state enforcement") {
-  using namespace stream_example;
-
-  TerminalStateMachine<TerminalStates<StreamClosed, StreamErrored>, Readable, StreamClosed,
-      StreamErrored>
-      state;
-
-  state.transitionTo<Readable>(kj::str("source"));
-  KJ_EXPECT(!state.isTerminal());
-
-  state.transitionTo<StreamClosed>();
-  KJ_EXPECT(state.isTerminal());
-
-  // Cannot go back to Readable
-  auto tryTransition = [&]() { state.transitionTo<Readable>(kj::str("another")); };
-  KJ_EXPECT_THROW_MESSAGE("Cannot transition from terminal state", tryTransition());
 }
 
 // =============================================================================
@@ -745,18 +339,6 @@ KJ_TEST("StateMachine: void withState returns bool") {
   bool result2 = machine.withState<Idle>([&](Idle&) { executed = true; });
   KJ_EXPECT(result2 == false);
   KJ_EXPECT(!executed);
-}
-
-KJ_TEST("ResourceStateMachine: whenActive is locked") {
-  ResourceStateMachine<Active, Closed, Errored> machine;
-  machine.transitionTo<Active>(kj::str("resource"));
-
-  // Cannot close while in whenActive callback
-  auto tryCloseInCallback = [&]() { machine.whenActive([&](Active&) { machine.close(); }); };
-  KJ_EXPECT_THROW_MESSAGE("transitions are locked", tryCloseInCallback());
-
-  // Still active
-  KJ_EXPECT(machine.isActive());
 }
 
 // =============================================================================
@@ -857,201 +439,10 @@ KJ_TEST("StateMachine: transitionFromToWith returns none") {
 }
 
 // =============================================================================
-// Deferrable State Machine Tests
+// StateMachine Tests
 // =============================================================================
 
-struct StreamActive {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "active"_kj;
-  kj::String sourceName;
-
-  explicit StreamActive(kj::String name): sourceName(kj::mv(name)) {}
-};
-
-struct StreamClosed2 {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "closed"_kj;
-};
-
-struct StreamErrored2 {
-  static constexpr kj::StringPtr NAME [[maybe_unused]] = "errored"_kj;
-  kj::String reason;
-
-  explicit StreamErrored2(kj::String r): reason(kj::mv(r)) {}
-};
-
-KJ_TEST("DeferrableStateMachine: immediate transition when no operations") {
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-  KJ_EXPECT(machine.is<StreamActive>());
-
-  // No operations in progress, should transition immediately
-  bool immediate = machine.deferTransitionTo<StreamClosed2>();
-  KJ_EXPECT(immediate);
-  KJ_EXPECT(machine.is<StreamClosed2>());
-  KJ_EXPECT(!machine.hasPendingState());
-}
-
-KJ_TEST("DeferrableStateMachine: deferred transition during operation") {
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-
-  // Start an operation
-  machine.beginOperation();
-  KJ_EXPECT(machine.hasOperationInProgress());
-
-  // Request close - should be deferred
-  bool immediate = machine.deferTransitionTo<StreamClosed2>();
-  KJ_EXPECT(!immediate);
-  KJ_EXPECT(machine.is<StreamActive>());  // Still active!
-  KJ_EXPECT(machine.hasPendingState());
-  KJ_EXPECT(machine.pendingStateIs<StreamClosed2>());
-
-  // End operation - pending state should be applied
-  bool applied = machine.endOperation();
-  KJ_EXPECT(applied);
-  KJ_EXPECT(machine.is<StreamClosed2>());
-  KJ_EXPECT(!machine.hasPendingState());
-}
-
-KJ_TEST("DeferrableStateMachine: multiple operations") {
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-
-  // Start two operations
-  machine.beginOperation();
-  machine.beginOperation();
-  KJ_EXPECT(machine.operationCountValue() == 2);
-
-  // Request close
-  auto _ KJ_UNUSED = machine.deferTransitionTo<StreamClosed2>();
-  KJ_EXPECT(machine.hasPendingState());
-
-  // End first operation - should NOT apply pending state yet
-  bool applied1 = machine.endOperation();
-  KJ_EXPECT(!applied1);
-  KJ_EXPECT(machine.is<StreamActive>());
-  KJ_EXPECT(machine.hasPendingState());
-
-  // End second operation - NOW apply pending state
-  bool applied2 = machine.endOperation();
-  KJ_EXPECT(applied2);
-  KJ_EXPECT(machine.is<StreamClosed2>());
-}
-
-KJ_TEST("DeferrableStateMachine: scoped operation RAII") {
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-
-  {
-    auto scope = machine.scopedOperation();
-    KJ_EXPECT(machine.hasOperationInProgress());
-
-    // Intentionally ignoring return value - we know it will be deferred
-    auto _ KJ_UNUSED = machine.deferTransitionTo<StreamClosed2>();
-    KJ_EXPECT(machine.is<StreamActive>());  // Still active in scope
-  }
-
-  // Scope ended, pending state applied
-  KJ_EXPECT(machine.is<StreamClosed2>());
-}
-
-KJ_TEST("DeferrableStateMachine: isOrPending") {
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-  machine.beginOperation();
-  auto _ KJ_UNUSED = machine.deferTransitionTo<StreamClosed2>();
-
-  // Current state is Active
-  KJ_EXPECT(machine.is<StreamActive>());
-  KJ_EXPECT(!machine.is<StreamClosed2>());
-
-  // But isOrPending sees the pending close
-  KJ_EXPECT(machine.isOrPending<StreamActive>());
-  KJ_EXPECT(machine.isOrPending<StreamClosed2>());
-  KJ_EXPECT(!machine.isOrPending<StreamErrored2>());
-
-  // isAnyOfOrPending
-  bool closedOrErrored = machine.isAnyOfOrPending<StreamClosed2, StreamErrored2>();
-  KJ_EXPECT(closedOrErrored);
-
-  auto applied KJ_UNUSED = machine.endOperation();
-}
-
-KJ_TEST("DeferrableStateMachine: first pending state wins") {
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-  machine.beginOperation();
-
-  // First: request close
-  auto deferred1 KJ_UNUSED = machine.deferTransitionTo<StreamClosed2>();
-  KJ_EXPECT(machine.pendingStateIs<StreamClosed2>());
-
-  // Second: request error - should be ignored (first wins)
-  auto deferred2 KJ_UNUSED = machine.deferTransitionTo<StreamErrored2>(kj::str("error"));
-  KJ_EXPECT(machine.pendingStateIs<StreamClosed2>());  // Still closed
-
-  auto applied KJ_UNUSED = machine.endOperation();
-  KJ_EXPECT(machine.is<StreamClosed2>());  // Closed, not errored
-}
-
-KJ_TEST("DeferrableStateMachine: clearPendingState") {
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-  machine.beginOperation();
-  auto _ KJ_UNUSED = machine.deferTransitionTo<StreamClosed2>();
-  KJ_EXPECT(machine.hasPendingState());
-
-  // Clear the pending state
-  machine.clearPendingState();
-  KJ_EXPECT(!machine.hasPendingState());
-
-  // End operation - no pending state to apply
-  bool applied = machine.endOperation();
-  KJ_EXPECT(!applied);
-  KJ_EXPECT(machine.is<StreamActive>());
-}
-
-KJ_TEST("DeferrableStateMachine: pendingStateName") {
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-
-  KJ_EXPECT(machine.pendingStateName() == "(none)"_kj);
-
-  machine.beginOperation();
-  auto deferred KJ_UNUSED = machine.deferTransitionTo<StreamClosed2>();
-  KJ_EXPECT(machine.pendingStateName() == "closed"_kj);
-
-  auto applied KJ_UNUSED = machine.endOperation();
-}
-
-// =============================================================================
-// ComposableStateMachine Tests
-// =============================================================================
-
-// Test state types for ComposableStateMachine
+// Test state types for StateMachine
 struct CActive {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "active"_kj;
   kj::String resourceName;
@@ -1068,8 +459,8 @@ struct CErrored {
   explicit CErrored(kj::String r): reason(kj::mv(r)) {}
 };
 
-KJ_TEST("ComposableStateMachine: basic usage without specs") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: basic usage without specs") {
+  StateMachine<CActive, CClosed, CErrored> machine;
 
   // Basic state operations work
   KJ_EXPECT(!machine.isInitialized());
@@ -1087,16 +478,16 @@ KJ_TEST("ComposableStateMachine: basic usage without specs") {
   KJ_EXPECT(machine.is<CActive>());
 }
 
-KJ_TEST("ComposableStateMachine: uninitialized state throws on get") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: uninitialized state throws on get") {
+  StateMachine<CActive, CClosed, CErrored> machine;
 
   // get() on uninitialized machine should throw with clear message
   auto tryGet = [&]() { machine.get<CActive>(); };
   KJ_EXPECT_THROW_MESSAGE("used before initialization", tryGet());
 }
 
-KJ_TEST("ComposableStateMachine: uninitialized state throws on KJ_SWITCH_ONEOF") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: uninitialized state throws on KJ_SWITCH_ONEOF") {
+  StateMachine<CActive, CClosed, CErrored> machine;
 
   // KJ_SWITCH_ONEOF on uninitialized machine should throw with clear message
   auto trySwitch = [&]() {
@@ -1109,16 +500,16 @@ KJ_TEST("ComposableStateMachine: uninitialized state throws on KJ_SWITCH_ONEOF")
   KJ_EXPECT_THROW_MESSAGE("used before initialization", trySwitch());
 }
 
-KJ_TEST("ComposableStateMachine: uninitialized state throws on visit") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: uninitialized state throws on visit") {
+  StateMachine<CActive, CClosed, CErrored> machine;
 
   // visit() on uninitialized machine should throw
   auto tryVisit = [&]() { machine.visit([](auto&) {}); };
   KJ_EXPECT_THROW_MESSAGE("uninitialized", tryVisit());
 }
 
-KJ_TEST("ComposableStateMachine: with TerminalStates spec") {
-  ComposableStateMachine<TerminalStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: with TerminalStates spec") {
+  StateMachine<TerminalStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
   KJ_EXPECT(!machine.isTerminal());
@@ -1135,8 +526,8 @@ KJ_TEST("ComposableStateMachine: with TerminalStates spec") {
   KJ_EXPECT(machine.is<CActive>());
 }
 
-KJ_TEST("ComposableStateMachine: with ErrorState spec") {
-  ComposableStateMachine<ErrorState<CErrored>, CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: with ErrorState spec") {
+  StateMachine<ErrorState<CErrored>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
   KJ_EXPECT(!machine.isErrored());
@@ -1154,8 +545,8 @@ KJ_TEST("ComposableStateMachine: with ErrorState spec") {
   KJ_EXPECT(machine.getError().reason == "something went wrong");
 }
 
-KJ_TEST("ComposableStateMachine: with ActiveState spec") {
-  ComposableStateMachine<ActiveState<CActive>, CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: with ActiveState spec") {
+  StateMachine<ActiveState<CActive>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
   KJ_EXPECT(machine.isActive());
@@ -1181,8 +572,8 @@ KJ_TEST("ComposableStateMachine: with ActiveState spec") {
   KJ_EXPECT(result2 == kj::none);
 }
 
-KJ_TEST("ComposableStateMachine: whenActiveOr") {
-  ComposableStateMachine<ActiveState<CActive>, CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: whenActiveOr") {
+  StateMachine<ActiveState<CActive>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
 
@@ -1196,8 +587,8 @@ KJ_TEST("ComposableStateMachine: whenActiveOr") {
   KJ_EXPECT(result2 == 999);
 }
 
-KJ_TEST("ComposableStateMachine: with PendingStates spec") {
-  ComposableStateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: with PendingStates spec") {
+  StateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
 
@@ -1221,8 +612,8 @@ KJ_TEST("ComposableStateMachine: with PendingStates spec") {
   KJ_EXPECT(!machine.hasPendingState());
 }
 
-KJ_TEST("ComposableStateMachine: with PendingStates scoped operation") {
-  ComposableStateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: with PendingStates scoped operation") {
+  StateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
 
@@ -1238,10 +629,10 @@ KJ_TEST("ComposableStateMachine: with PendingStates scoped operation") {
   KJ_EXPECT(machine.is<CClosed>());
 }
 
-KJ_TEST("ComposableStateMachine: full-featured stream-like usage") {
+KJ_TEST("StateMachine: full-featured stream-like usage") {
   // This demonstrates the common stream pattern with all features
-  ComposableStateMachine<TerminalStates<CClosed, CErrored>, ErrorState<CErrored>,
-      ActiveState<CActive>, PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored>
+  StateMachine<TerminalStates<CClosed, CErrored>, ErrorState<CErrored>, ActiveState<CActive>,
+      PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored>
       machine;
 
   // Initialize
@@ -1275,8 +666,8 @@ KJ_TEST("ComposableStateMachine: full-featured stream-like usage") {
   KJ_EXPECT_THROW_MESSAGE("Cannot transition from terminal state", tryTransition());
 }
 
-KJ_TEST("ComposableStateMachine: KJ_SWITCH_ONEOF works") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: KJ_SWITCH_ONEOF works") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("test"));
 
   kj::String result;
@@ -1295,8 +686,8 @@ KJ_TEST("ComposableStateMachine: KJ_SWITCH_ONEOF works") {
   KJ_EXPECT(result == "active: test");
 }
 
-KJ_TEST("ComposableStateMachine: withState locks transitions") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: withState locks transitions") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   // Cannot transition while locked
@@ -1309,8 +700,8 @@ KJ_TEST("ComposableStateMachine: withState locks transitions") {
   KJ_EXPECT(machine.is<CActive>());
 }
 
-KJ_TEST("ComposableStateMachine: currentStateName") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: currentStateName") {
+  StateMachine<CActive, CClosed, CErrored> machine;
 
   KJ_EXPECT(machine.currentStateName() == "(uninitialized)"_kj);
 
@@ -1324,8 +715,8 @@ KJ_TEST("ComposableStateMachine: currentStateName") {
   KJ_EXPECT(machine.currentStateName() == "errored"_kj);
 }
 
-KJ_TEST("ComposableStateMachine: const withState works") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: const withState works") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   const auto& constMachine = machine;
@@ -1341,9 +732,9 @@ KJ_TEST("ComposableStateMachine: const withState works") {
   KJ_EXPECT(result2 == kj::none);
 }
 
-KJ_TEST("ComposableStateMachine: deferTransitionTo respects terminal states") {
-  ComposableStateMachine<TerminalStates<CClosed, CErrored>, PendingStates<CClosed, CErrored>,
-      CActive, CClosed, CErrored>
+KJ_TEST("StateMachine: deferTransitionTo respects terminal states") {
+  StateMachine<TerminalStates<CClosed, CErrored>, PendingStates<CClosed, CErrored>, CActive,
+      CClosed, CErrored>
       machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
@@ -1362,7 +753,7 @@ KJ_TEST("ComposableStateMachine: deferTransitionTo respects terminal states") {
 // =============================================================================
 // Streams Integration Example
 // =============================================================================
-// This demonstrates how ComposableStateMachine could replace the separate
+// This demonstrates how StateMachine could replace the separate
 // state + readState pattern found in ReadableStreamInternalController.
 
 namespace stream_integration_example {
@@ -1415,7 +806,7 @@ struct ReaderLocked {
 };
 
 // The full-featured state machine type for stream data state
-using StreamDataState = ComposableStateMachine<TerminalStates<StreamClosed, StreamErrored>,
+using StreamDataState = StateMachine<TerminalStates<StreamClosed, StreamErrored>,
     ErrorState<StreamErrored>,
     ActiveState<Readable>,
     PendingStates<StreamClosed, StreamErrored>,
@@ -1424,7 +815,7 @@ using StreamDataState = ComposableStateMachine<TerminalStates<StreamClosed, Stre
     StreamErrored>;
 
 // Lock state machine (simpler)
-using StreamLockState = ComposableStateMachine<Unlocked, Locked, ReaderLocked>;
+using StreamLockState = StateMachine<Unlocked, Locked, ReaderLocked>;
 
 // Simulated controller showing combined usage
 class MockReadableStreamController {
@@ -1499,7 +890,7 @@ class MockReadableStreamController {
 
 }  // namespace stream_integration_example
 
-KJ_TEST("ComposableStateMachine: stream integration example - basic flow") {
+KJ_TEST("StateMachine: stream integration example - basic flow") {
   using namespace stream_integration_example;
 
   MockReadableStreamController controller;
@@ -1533,7 +924,7 @@ KJ_TEST("ComposableStateMachine: stream integration example - basic flow") {
   KJ_EXPECT(!controller.isLocked());
 }
 
-KJ_TEST("ComposableStateMachine: stream integration example - close during read") {
+KJ_TEST("StateMachine: stream integration example - close during read") {
   using namespace stream_integration_example;
 
   MockReadableStreamController controller;
@@ -1550,7 +941,7 @@ KJ_TEST("ComposableStateMachine: stream integration example - close during read"
   KJ_EXPECT(controller.isClosedOrErrored());
 }
 
-KJ_TEST("ComposableStateMachine: stream integration example - error handling") {
+KJ_TEST("StateMachine: stream integration example - error handling") {
   using namespace stream_integration_example;
 
   MockReadableStreamController controller;
@@ -1569,11 +960,11 @@ KJ_TEST("ComposableStateMachine: stream integration example - error handling") {
 }
 
 // =============================================================================
-// ComposableStateMachine Additional API Tests
+// StateMachine Additional API Tests
 // =============================================================================
 
-KJ_TEST("ComposableStateMachine: visit method") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: visit method") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   // Visit with return value - note: visitor must return the same type for all states
@@ -1603,8 +994,8 @@ KJ_TEST("ComposableStateMachine: visit method") {
   KJ_EXPECT(result == 0);
 }
 
-KJ_TEST("ComposableStateMachine: visit const method") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: visit const method") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("test"));
 
   const auto& constMachine = machine;
@@ -1621,8 +1012,8 @@ KJ_TEST("ComposableStateMachine: visit const method") {
   KJ_EXPECT(result == 1);
 }
 
-KJ_TEST("ComposableStateMachine: withStateOr") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: withStateOr") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   // Execute when in state
@@ -1634,8 +1025,8 @@ KJ_TEST("ComposableStateMachine: withStateOr") {
   KJ_EXPECT(result2 == 99);
 }
 
-KJ_TEST("ComposableStateMachine: transitionFromToIf") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: transitionFromToIf") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   // Transition with false predicate - should not transition
@@ -1651,8 +1042,8 @@ KJ_TEST("ComposableStateMachine: transitionFromToIf") {
   KJ_EXPECT(machine.is<CClosed>());
 }
 
-KJ_TEST("ComposableStateMachine: transitionFromToIf wrong source") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: transitionFromToIf wrong source") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CClosed>();
 
   // Try to transition from wrong state
@@ -1662,8 +1053,8 @@ KJ_TEST("ComposableStateMachine: transitionFromToIf wrong source") {
   KJ_EXPECT(machine.is<CClosed>());
 }
 
-KJ_TEST("ComposableStateMachine: transitionFromToWith") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: transitionFromToWith") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   // Producer that returns none - should not transition
@@ -1682,8 +1073,8 @@ KJ_TEST("ComposableStateMachine: transitionFromToWith") {
   KJ_EXPECT(machine.get<CErrored>().reason == "derived from resource"_kj);
 }
 
-KJ_TEST("ComposableStateMachine: underlying accessor") {
-  ComposableStateMachine<CActive, CClosed, CErrored> machine;
+KJ_TEST("StateMachine: underlying accessor") {
+  StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   // Access underlying kj::OneOf
@@ -1697,11 +1088,11 @@ KJ_TEST("ComposableStateMachine: underlying accessor") {
   KJ_EXPECT(constUnderlying.is<CActive>());
 }
 
-KJ_TEST("ComposableStateMachine: applyPendingStateImpl respects terminal") {
+KJ_TEST("StateMachine: applyPendingStateImpl respects terminal") {
   // When we force-transition to a terminal state during an operation,
   // the pending state should be discarded on endOperation.
-  ComposableStateMachine<TerminalStates<CClosed, CErrored>, PendingStates<CClosed, CErrored>,
-      CActive, CClosed, CErrored>
+  StateMachine<TerminalStates<CClosed, CErrored>, PendingStates<CClosed, CErrored>, CActive,
+      CClosed, CErrored>
       machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
@@ -1725,11 +1116,11 @@ KJ_TEST("ComposableStateMachine: applyPendingStateImpl respects terminal") {
   KJ_EXPECT(!machine.hasPendingState());  // Pending was cleared
 }
 
-KJ_TEST("ComposableStateMachine: endOperation inside withState throws") {
+KJ_TEST("StateMachine: endOperation inside withState throws") {
   // This test verifies that ending an operation (which could apply a pending state)
   // inside a withState() callback throws an error. This prevents UAF where a
   // transition invalidates the reference being used in the callback.
-  ComposableStateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
+  StateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
 
@@ -1752,30 +1143,9 @@ KJ_TEST("ComposableStateMachine: endOperation inside withState throws") {
   KJ_EXPECT(machine.is<CActive>());
 }
 
-KJ_TEST("DeferrableStateMachine: endOperation inside withState throws") {
-  // Same test for DeferrableStateMachine
-  DeferrableStateMachine<PendingStates<StreamClosed2, StreamErrored2>, StreamActive, StreamClosed2,
-      StreamErrored2>
-      machine;
-
-  machine.transitionTo<StreamActive>(kj::str("source"));
-
-  auto tryUnsafePattern = [&]() {
-    machine.withState<StreamActive>([&](StreamActive&) {
-      {
-        auto op = machine.scopedOperation();
-        auto _ KJ_UNUSED = machine.deferTransitionTo<StreamClosed2>();
-      }
-    });
-  };
-
-  KJ_EXPECT_THROW_MESSAGE("transitions are locked", tryUnsafePattern());
-  KJ_EXPECT(machine.is<StreamActive>());
-}
-
-KJ_TEST("ComposableStateMachine: endOperation outside withState works") {
+KJ_TEST("StateMachine: endOperation outside withState works") {
   // Verify the correct pattern still works: end operations outside withState
-  ComposableStateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
+  StateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
 

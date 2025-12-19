@@ -246,7 +246,7 @@ class ReadableStreamSourceJsAdapter final {
   //   Open -> Closed (normal close)
   //   Open -> kj::Exception (error via cancel or read failure)
   // Both Closed and kj::Exception are terminal states.
-  using State = ComposableStateMachine<TerminalStates<Closed, kj::Exception>,
+  using State = StateMachine<TerminalStates<Closed, kj::Exception>,
       ErrorState<kj::Exception>,
       ActiveState<Open>,
       Open,
@@ -388,7 +388,7 @@ class ReadableSourceKjAdapter final: public ReadableSource {
   //   KjOpen -> KjClosed (normal close)
   //   KjOpen -> kj::Exception (error via cancel or read failure)
   // Both KjClosed and kj::Exception are terminal states.
-  using KjState = ComposableStateMachine<TerminalStates<KjClosed, kj::Exception>,
+  using KjState = StateMachine<TerminalStates<KjClosed, kj::Exception>,
       ErrorState<kj::Exception>,
       ActiveState<KjOpen>,
       KjOpen,

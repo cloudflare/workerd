@@ -140,7 +140,7 @@ class ReadableLockImpl {
   //   ReaderLocked -> Unlocked (releaseReader() called)
   //   PipeLocked -> Unlocked (release() or onClose/onError called)
   //   Locked -> (remains until stream is done)
-  using LockState = ComposableStateMachine<Locked, PipeLocked, ReaderLocked, Unlocked>;
+  using LockState = StateMachine<Locked, PipeLocked, ReaderLocked, Unlocked>;
   LockState state = LockState::template create<Unlocked>();
   friend Controller;
 };
@@ -209,7 +209,7 @@ class WritableLockImpl {
   //   Unlocked -> PipeLocked (pipeLock() called)
   //   WriterLocked -> Unlocked (releaseWriter() called)
   //   PipeLocked -> Unlocked (releasePipeLock() called)
-  using LockState = ComposableStateMachine<Unlocked, Locked, WriterLocked, PipeLocked>;
+  using LockState = StateMachine<Unlocked, Locked, WriterLocked, PipeLocked>;
   LockState state = LockState::template create<Unlocked>();
 
   inline kj::Maybe<PipeLocked&> tryGetPipe() {
@@ -745,7 +745,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   //   ByteReadable -> Errored (doError() called)
   // Note: No single ActiveState since there are two active variants.
   // PendingStates allows Closed/Errored transitions to be deferred during reads.
-  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
       PendingStates<StreamStates::Closed, StreamStates::Errored>,
       Initial,
       StreamStates::Closed,
@@ -879,7 +879,7 @@ class WritableStreamJsController final: public WritableStreamController {
   // Initial is the default state before setup() is called
   // Controller is the active state (stream is writable)
   // Closed and Errored are terminal states (stream is done)
-  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
       ErrorState<StreamStates::Errored>,
       ActiveState<Controller>,
       Initial,
@@ -2737,7 +2737,7 @@ class AllReader {
   // State machine for AllReader:
   // Closed and Errored are terminal states (reading is done).
   // jsg::Ref<ReadableStream> is the active state (still reading).
-  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
       ErrorState<StreamStates::Errored>,
       ActiveState<jsg::Ref<ReadableStream>>,
       StreamStates::Closed,
@@ -2880,7 +2880,7 @@ class PumpToReader {
   // Closed and kj::Exception are terminal states (pump is done).
   // jsg::Ref<ReadableStream> is the initial state (has stream to pump).
   // Pumping is the active state (pump is in progress).
-  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, kj::Exception>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed, kj::Exception>,
       Pumping,
       StreamStates::Closed,
       kj::Exception,

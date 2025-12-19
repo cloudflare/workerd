@@ -539,7 +539,7 @@ struct ReadableSourceKjAdapter::Active {
   //   Any -> Canceling (error during read)
   //   Any -> Canceled (explicit cancel)
   // Done, Canceling, and Canceled are terminal states.
-  using InnerState = ComposableStateMachine<TerminalStates<Done, Canceling, Canceled>,
+  using InnerState = StateMachine<TerminalStates<Done, Canceling, Canceled>,
       Idle,
       Readable,
       Reading,

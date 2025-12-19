@@ -91,7 +91,7 @@
 //      state.init<Closed>();
 //      state.init<Readable>(...);  // Oops - zombie stream!
 //
-//    TerminalStateMachine/ComposableStateMachine with TerminalStates<> will
+//    TerminalStateMachine/StateMachine with TerminalStates<> will
 //    throw if you attempt this, catching the bug immediately.
 //
 // 4. SEMANTIC HELPERS:
@@ -102,58 +102,32 @@
 //    Instead of: KJ_IF_SOME(e, state.tryGet<kj::Exception>()) { ... }
 //    Write:      KJ_IF_SOME(e, state.tryGetError()) { ... }
 //
-// WHEN TO USE WHICH:
+// WHEN TO USE:
 //
-//   - New code: Use ComposableStateMachine with appropriate specs
 //   - Simple state tracking: StateMachine<States...> is fine
 //   - Resource lifecycle (streams, handles): Use TerminalStates + PendingStates
 //   - Migrating existing code: See MIGRATION GUIDE section below
 //
 // =============================================================================
-// AVAILABLE CLASSES
+// STATE MACHINE
 // =============================================================================
 //
-// This header provides several state machine classes:
-//
-// 1. StateMachine<States...>
-//    - Basic state machine, thin wrapper over kj::OneOf
-//    - Provides transition locking, safe access patterns, visitor support
-//    - Movable but NOT copyable (for consistency with other state machine types)
-//
-// 2. TerminalStateMachine<TerminalStates<...>, States...>
-//    - Enforces that terminal states cannot be transitioned FROM
-//
-// 3. ErrorableStateMachine<ErrorState, States...>
-//    - Adds isErrored(), tryGetError(), getError() helpers
-//
-// 4. ResourceStateMachine<Active, Closed, Errored>
-//    - Specialized for the common Active/Closed/Errored pattern
-//
-// 5. ComposableStateMachine<Specs..., States...>
-//    - RECOMMENDED for new code
-//    - Combines any subset of features via spec types
-//    - Not copyable (to support pending state semantics)
-//
-// =============================================================================
-// COMPOSABLE STATE MACHINE
-// =============================================================================
-//
-// ComposableStateMachine supports composable features via spec types:
+// StateMachine supports composable features via spec types:
 //
 //   // Simple (no specs)
-//   ComposableStateMachine<Idle, Running, Done> basic;
+//   StateMachine<Idle, Running, Done> basic;
 //
 //   // With terminal state enforcement
-//   ComposableStateMachine<TerminalStates<Done>, Idle, Running, Done> withTerminal;
+//   StateMachine<TerminalStates<Done>, Idle, Running, Done> withTerminal;
 //
 //   // With error extraction helpers
-//   ComposableStateMachine<ErrorState<Errored>, Active, Closed, Errored> withError;
+//   StateMachine<ErrorState<Errored>, Active, Closed, Errored> withError;
 //
 //   // With deferred transitions
-//   ComposableStateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored> withDefer;
+//   StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored> withDefer;
 //
 //   // Full-featured (combine any specs)
-//   ComposableStateMachine<
+//   StateMachine<
 //       TerminalStates<Closed, Errored>,
 //       ErrorState<Errored>,
 //       ActiveState<Active>,
@@ -254,7 +228,7 @@
 //
 // Stream-like state machine (common pattern in workerd):
 //
-//   ComposableStateMachine<
+//   StateMachine<
 //       TerminalStates<Closed, Errored>,
 //       ErrorState<Errored>,
 //       ActiveState<Readable>,
@@ -322,7 +296,7 @@
 //   StateMachine<Closed, Errored, Readable> state;
 //
 //   // After (with features):
-//   ComposableStateMachine<
+//   StateMachine<
 //       TerminalStates<Closed, Errored>,
 //       ErrorState<Errored>,
 //       ActiveState<Readable>,
@@ -880,1336 +854,9 @@ class TransitionLock {
 //     static constexpr kj::StringPtr NAME = "errored"_kj;
 //   };
 
-// =============================================================================
-// Base State Machine
-// =============================================================================
-
-// Base state machine without transition validation.
-// This is a thin wrapper around kj::OneOf that provides a more intention-revealing API.
-//
-// MEMORY SAFETY:
-// - Use withState() for safe scoped access to state data
-// - Avoid storing references from get() across potential transitions
-// - In debug builds, transitions while references are held will assert
-template <typename... States>
-class StateMachine {
- public:
-  using StateUnion = kj::OneOf<States...>;
-  static constexpr size_t STATE_COUNT = sizeof...(States);
-
-  // Default constructor: state is uninitialized (tag == 0)
-  StateMachine() = default;
-
-  // Destructor checks for outstanding locks in debug builds
-  ~StateMachine() {
-    KJ_DASSERT(transitionLockCount == 0, "StateMachine destroyed while transition locks are held");
-  }
-
-  // Move operations - both source and destination must not have locks held
-  StateMachine(StateMachine&& other) noexcept: state(kj::mv(other.state)), transitionLockCount(0) {
-    KJ_DASSERT(other.transitionLockCount == 0,
-        "Cannot move from StateMachine while transition locks are held");
-  }
-
-  StateMachine& operator=(StateMachine&& other) noexcept {
-    KJ_DASSERT(transitionLockCount == 0,
-        "Cannot move-assign to StateMachine while transition locks are held");
-    KJ_DASSERT(other.transitionLockCount == 0,
-        "Cannot move from StateMachine while transition locks are held");
-    state = kj::mv(other.state);
-    return *this;
-  }
-
-  // Copying is disabled for consistency with other state machine types
-  // and to avoid confusion about transitionLockCount semantics.
-  StateMachine(const StateMachine&) = delete;
-  StateMachine& operator=(const StateMachine&) = delete;
-
-  // Initialize with a specific state
-  template <typename S, typename... Args>
-  explicit StateMachine(kj::Badge<S>, Args&&... args)
-    requires(_::isOneOf<S, States...>)
-  {
-    state.template init<S>(kj::fwd<Args>(args)...);
-  }
-
-  // Factory function for clearer initialization
-  template <typename S, typename... Args>
-  static StateMachine create(Args&&... args)
-    requires(_::isOneOf<S, States...>)
-  {
-    StateMachine m;
-    m.state.template init<S>(kj::fwd<Args>(args)...);
-    return m;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Transition Locking
-  // ---------------------------------------------------------------------------
-
-  // Check if transitions are currently locked
-  bool isTransitionLocked() const {
-    return transitionLockCount > 0;
-  }
-
-  // Lock transitions (called by TransitionLock RAII guard)
-  void lockTransitions() {
-    ++transitionLockCount;
-  }
-
-  // Unlock transitions (called by TransitionLock RAII guard)
-  void unlockTransitions() {
-    KJ_DASSERT(transitionLockCount > 0, "Transition lock underflow");
-    --transitionLockCount;
-  }
-
-  // Get a RAII lock that prevents transitions while in scope
-  TransitionLock<StateMachine> acquireTransitionLock() {
-    return TransitionLock<StateMachine>(*this);
-  }
-
-  // ---------------------------------------------------------------------------
-  // State Queries
-  // ---------------------------------------------------------------------------
-
-  // Check if the machine is in a specific state.
-  // Returns false if uninitialized.
-  template <typename S>
-  bool is() const
-    requires(_::isOneOf<S, States...>)
-  {
-    return state.template is<S>();
-  }
-
-  // Check if the machine is in any of the specified states.
-  // Returns false if uninitialized.
-  template <typename... Ss>
-  bool isAnyOf() const
-    requires((_::isOneOf<Ss, States...>) && ...)
-  {
-    return (is<Ss>() || ...);
-  }
-
-  // Check if the machine is initialized (not in the null state).
-  // Call transitionTo<>() to initialize the state machine.
-  bool isInitialized() const {
-    return !(state == nullptr);
-  }
-
-  // Assert that the machine is initialized, with a clear error message.
-  void requireInitialized() const {
-    KJ_REQUIRE(isInitialized(),
-        "State machine used before initialization. Call transitionTo<InitialState>() first.");
-  }
-
-  // ---------------------------------------------------------------------------
-  // State Access
-  // ---------------------------------------------------------------------------
-  //
-  // WARNING: get() and tryGet() return UNLOCKED references. The returned
-  // reference becomes invalid if the state machine transitions. Prefer
-  // withState() for safe access that locks transitions during the callback.
-  //
-  // UNSAFE PATTERN:
-  //   Active& a = machine.get<Active>();
-  //   someFunction();  // If this transitions the machine...
-  //   a.doSomething(); // ...this is use-after-free!
-  //
-  // SAFE PATTERN:
-  //   machine.withState<Active>([](Active& a) {
-  //     a.doSomething();  // Transitions blocked during callback
-  //   });
-
-  // Get reference to current state data.
-  // Throws if not in the specified state or if uninitialized.
-  //
-  // WARNING: The returned reference is NOT protected by a transition lock.
-  // It becomes dangling if the machine transitions before you're done using it.
-  // Prefer withState() for safe access.
-  template <typename S>
-  S& get() KJ_LIFETIMEBOUND
-    requires(_::isOneOf<S, States...>)
-  {
-    requireInitialized();
-    KJ_REQUIRE(is<S>(), "State machine is not in the expected state");
-    return state.template get<S>();
-  }
-
-  template <typename S>
-  const S& get() const KJ_LIFETIMEBOUND
-    requires(_::isOneOf<S, States...>)
-  {
-    requireInitialized();
-    KJ_REQUIRE(is<S>(), "State machine is not in the expected state");
-    return state.template get<S>();
-  }
-
-  // Try to get reference to current state data.
-  // Returns kj::none if not in the specified state.
-  //
-  // WARNING: The returned reference is NOT protected by a transition lock.
-  // It becomes dangling if the machine transitions before you're done using it.
-  // Prefer withState() for safe access.
-  template <typename S>
-  kj::Maybe<S&> tryGet() KJ_LIFETIMEBOUND
-    requires(_::isOneOf<S, States...>)
-  {
-    return state.template tryGet<S>();
-  }
-
-  template <typename S>
-  kj::Maybe<const S&> tryGet() const KJ_LIFETIMEBOUND
-    requires(_::isOneOf<S, States...>)
-  {
-    return state.template tryGet<S>();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Safe State Access (RECOMMENDED)
-  // ---------------------------------------------------------------------------
-
-  // Execute a function with the current state, locking transitions.
-  // This is the SAFEST way to access state data as it prevents
-  // use-after-free by blocking transitions during the callback.
-  //
-  // Usage:
-  //   machine.withState<Active>([](Active& a) {
-  //     a.resource->doSomething();  // Safe!
-  //   });
-  //
-  // Returns the function's result wrapped in Maybe (none if not in state).
-  // For void functions, returns true if executed, false if not in state.
-  //
-  // WARNING: Do NOT store or escape the reference passed to the callback!
-  // The reference is only valid during the callback. Storing it for later
-  // use defeats the purpose of the transition lock:
-  //
-  //   Active* escaped;
-  //   machine.withState<Active>([&](Active& a) {
-  //     escaped = &a;  // BAD: escaping the reference!
-  //   });
-  //   escaped->foo();  // UAF if machine has transitioned!
-  template <typename S, typename Func>
-  auto withState(
-      Func&& func) -> std::conditional_t<std::is_void_v<decltype(func(kj::instance<S&>()))>,
-                       bool,
-                       kj::Maybe<decltype(func(kj::instance<S&>()))>>
-    requires(_::isOneOf<S, States...>)
-  {
-    if (!is<S>()) {
-      if constexpr (std::is_void_v<decltype(func(kj::instance<S&>()))>) {
-        return false;
-      } else {
-        return kj::none;
-      }
-    }
-
-    auto lock = acquireTransitionLock();
-    if constexpr (std::is_void_v<decltype(func(kj::instance<S&>()))>) {
-      func(state.template get<S>());
-      return true;
-    } else {
-      return func(state.template get<S>());
-    }
-  }
-
-  template <typename S, typename Func>
-  auto withState(Func&& func) const
-      -> std::conditional_t<std::is_void_v<decltype(func(kj::instance<const S&>()))>,
-          bool,
-          kj::Maybe<decltype(func(kj::instance<const S&>()))>>
-    requires(_::isOneOf<S, States...>)
-  {
-    if (!is<S>()) {
-      if constexpr (std::is_void_v<decltype(func(kj::instance<const S&>()))>) {
-        return false;
-      } else {
-        return kj::none;
-      }
-    }
-
-    // Note: Lock count is mutable, so we can lock even on const
-    ++transitionLockCount;
-    KJ_DEFER(--transitionLockCount);
-    if constexpr (std::is_void_v<decltype(func(kj::instance<const S&>()))>) {
-      func(state.template get<S>());
-      return true;
-    } else {
-      return func(state.template get<S>());
-    }
-  }
-
-  // Execute with state, providing a default value if not in that state.
-  template <typename S, typename Func, typename Default>
-  auto withStateOr(Func&& func, Default&& defaultValue) -> decltype(func(kj::instance<S&>()))
-    requires(_::isOneOf<S, States...>)
-  {
-    if (!is<S>()) {
-      return kj::fwd<Default>(defaultValue);
-    }
-
-    auto lock = acquireTransitionLock();
-    return func(state.template get<S>());
-  }
-
-  // ---------------------------------------------------------------------------
-  // State Transitions
-  // ---------------------------------------------------------------------------
-
-  // Transition to a new state, constructing it in-place.
-  // Returns a reference to the new state.
-  //
-  // WARNING: The returned reference becomes invalid on the next transition!
-  // Do NOT store this reference. If you need to work with the new state,
-  // either use the reference immediately inline, or use withState() after:
-  //
-  //   // OK: Use immediately inline
-  //   machine.transitionTo<Active>(...).startOperation();
-  //
-  //   // OK: Use withState() for extended access
-  //   machine.transitionTo<Active>(...);
-  //   machine.withState<Active>([](Active& a) { ... });
-  //
-  //   // BAD: Storing the reference
-  //   Active& a = machine.transitionTo<Active>(...);
-  //   someFunction();  // If this transitions machine...
-  //   a.foo();         // ...this is UAF!
-  template <typename S, typename... Args>
-  S& transitionTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<S, States...>)
-  {
-    requireUnlocked();
-    return state.template init<S>(kj::fwd<Args>(args)...);
-  }
-
-  // Transition to a new state only if currently in a specific state.
-  // Returns kj::Maybe<To&> - none if the precondition state wasn't met.
-  //
-  // WARNING: The returned reference becomes invalid on the next transition!
-  template <typename From, typename To, typename... Args>
-  KJ_WARN_UNUSED_RESULT kj::Maybe<To&> transitionFromTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<From, States...>) && (_::isOneOf<To, States...>)
-  {
-    requireUnlocked();
-    if (is<From>()) {
-      return state.template init<To>(kj::fwd<Args>(args)...);
-    }
-    return kj::none;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Conditional State Transitions
-  // ---------------------------------------------------------------------------
-
-  // Transition from one state to another only if a predicate is satisfied.
-  // The predicate receives a reference to the current From state and should return bool.
-  //
-  // Returns kj::Maybe<To&>:
-  //   - none if not in From state OR predicate returned false
-  //   - reference to new To state if transition occurred
-  //
-  // THREAD SAFETY NOTE: This method is designed for single-threaded use only.
-  // The predicate is evaluated while transitions are locked, ensuring the state
-  // doesn't change during predicate evaluation. However, there is a brief window
-  // between predicate evaluation and transition where the lock is released
-  // (necessary because transitions require unlocked state). In single-threaded
-  // code this is safe since no other code runs in that window.
-  //
-  // Usage:
-  //   state.transitionFromToIf<Reading, Done>(
-  //       [](Reading& r) { return r.bytesRemaining == 0; },
-  //       doneArgs...);
-  template <typename From, typename To, typename Predicate, typename... Args>
-  KJ_WARN_UNUSED_RESULT kj::Maybe<To&> transitionFromToIf(
-      Predicate&& predicate, Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<From, States...>) && (_::isOneOf<To, States...>)
-  {
-    requireUnlocked();
-
-    if (!is<From>()) {
-      return kj::none;
-    }
-
-    // Lock while evaluating predicate to ensure atomicity
-    bool shouldTransition;
-    {
-      auto lock = acquireTransitionLock();
-      shouldTransition = predicate(state.template get<From>());
-    }
-
-    if (shouldTransition) {
-      return state.template init<To>(kj::fwd<Args>(args)...);
-    }
-    return kj::none;
-  }
-
-  // Transition with predicate that also produces the arguments for the new state.
-  // The predicate returns kj::Maybe<To> - none means don't transition.
-  //
-  // Usage:
-  //   state.transitionFromToWith<Reading, Done>(
-  //       [](Reading& r) -> kj::Maybe<Done> {
-  //         if (r.bytesRemaining == 0) {
-  //           return Done { r.totalBytes };
-  //         }
-  //         return kj::none;
-  //       });
-  template <typename From, typename To, typename Producer>
-  KJ_WARN_UNUSED_RESULT kj::Maybe<To&> transitionFromToWith(Producer&& producer) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<From, States...>) && (_::isOneOf<To, States...>)
-  {
-    requireUnlocked();
-
-    if (!is<From>()) {
-      return kj::none;
-    }
-
-    // Lock while evaluating producer to ensure atomicity
-    kj::Maybe<To> maybeNewState;
-    {
-      auto lock = acquireTransitionLock();
-      maybeNewState = producer(state.template get<From>());
-    }
-
-    KJ_IF_SOME(newState, maybeNewState) {
-      return state.template init<To>(kj::mv(newState));
-    }
-    return kj::none;
-  }
-
-  // ---------------------------------------------------------------------------
-  // State Introspection
-  // ---------------------------------------------------------------------------
-
-  // Get the name of the current state (requires states to have NAME member)
-  kj::StringPtr currentStateName() const {
-    if (!isInitialized()) {
-      return "(uninitialized)"_kj;
-    }
-    kj::StringPtr result = "(unknown)"_kj;
-    visit([&result](const auto& s) {
-      using S = kj::Decay<decltype(s)>;
-      result = _::getStateName<S>();
-    });
-    return result;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Visitor Pattern
-  // ---------------------------------------------------------------------------
-
-  // Visit the current state with a generic lambda.
-  // The lambda must be able to accept any state type.
-  //
-  // Usage:
-  //   state.visit([](auto& s) {
-  //     // s is a reference to the current state
-  //   });
-  //
-  // Or with explicit type handling:
-  //   state.visit([](auto& s) {
-  //     using S = kj::Decay<decltype(s)>;
-  //     if constexpr (kj::isSameType<S, Readable>()) { ... }
-  //   });
-  template <typename Visitor>
-  decltype(auto) visit(Visitor&& visitor) {
-    return visitImpl(kj::fwd<Visitor>(visitor), std::index_sequence_for<States...>{});
-  }
-
-  template <typename Visitor>
-  decltype(auto) visit(Visitor&& visitor) const {
-    return visitConstImpl(kj::fwd<Visitor>(visitor), std::index_sequence_for<States...>{});
-  }
-
-  // ---------------------------------------------------------------------------
-  // Interop
-  // ---------------------------------------------------------------------------
-
-  // Access the underlying kj::OneOf for interop with existing code
-  StateUnion& underlying() KJ_LIFETIMEBOUND {
-    return state;
-  }
-  const StateUnion& underlying() const KJ_LIFETIMEBOUND {
-    return state;
-  }
-
-  // For use with KJ_SWITCH_ONEOF
-  auto _switchSubject() & {
-    requireInitialized();
-    return state._switchSubject();
-  }
-  auto _switchSubject() const& {
-    requireInitialized();
-    return state._switchSubject();
-  }
-  auto _switchSubject() && {
-    requireInitialized();
-    return kj::mv(state)._switchSubject();
-  }
-
- protected:
-  StateUnion state;
-  mutable uint32_t transitionLockCount = 0;
-
-  // Check that transitions are allowed (not locked)
-  void requireUnlocked() const {
-    KJ_REQUIRE(transitionLockCount == 0,
-        "Cannot transition state machine while transitions are locked. "
-        "This usually means you're trying to transition inside a withState() callback.");
-  }
-
-  // Visitor implementation using index sequence
-  template <typename Visitor, size_t... Is>
-  decltype(auto) visitImpl(Visitor&& visitor, std::index_sequence<Is...>) {
-    KJ_REQUIRE(isInitialized(), "Cannot visit uninitialized state machine");
-
-    using ReturnType = std::common_type_t<decltype(visitor(kj::instance<States&>()))...>;
-
-    if constexpr (std::is_void_v<ReturnType>) {
-      auto tryVisit = [&]<size_t I>() {
-        using S = std::tuple_element_t<I, std::tuple<States...>>;
-        if (state.template is<S>()) {
-          visitor(state.template get<S>());
-          return true;
-        }
-        return false;
-      };
-      (tryVisit.template operator()<Is>() || ...);
-    } else {
-      ReturnType result{};
-      auto tryVisit = [&]<size_t I>() {
-        using S = std::tuple_element_t<I, std::tuple<States...>>;
-        if (state.template is<S>()) {
-          result = visitor(state.template get<S>());
-          return true;
-        }
-        return false;
-      };
-      (tryVisit.template operator()<Is>() || ...);
-      return result;
-    }
-  }
-
-  // Helper for visit() - const version
-  template <typename Visitor, size_t... Is>
-  decltype(auto) visitConstImpl(Visitor&& visitor, std::index_sequence<Is...>) const {
-    KJ_REQUIRE(isInitialized(), "Cannot visit uninitialized state machine");
-
-    using ReturnType = std::common_type_t<decltype(visitor(kj::instance<const States&>()))...>;
-
-    if constexpr (std::is_void_v<ReturnType>) {
-      auto tryVisit = [&]<size_t I>() {
-        using S = std::tuple_element_t<I, std::tuple<States...>>;
-        if (state.template is<S>()) {
-          visitor(state.template get<S>());
-          return true;
-        }
-        return false;
-      };
-      (tryVisit.template operator()<Is>() || ...);
-    } else {
-      ReturnType result{};
-      auto tryVisit = [&]<size_t I>() {
-        using S = std::tuple_element_t<I, std::tuple<States...>>;
-        if (state.template is<S>()) {
-          result = visitor(state.template get<S>());
-          return true;
-        }
-        return false;
-      };
-      (tryVisit.template operator()<Is>() || ...);
-      return result;
-    }
-  }
-};
-
-// =============================================================================
-// Terminal State Machine
-// =============================================================================
-
-// A state machine that enforces terminal states - once in a terminal state,
-// no further transitions are allowed.
-//
-// Usage:
-//   // Specify terminal states as first template arguments, then all states
-//   TerminalStateMachine<
-//       TerminalStates<Closed, Errored>,  // Terminal states
-//       Active, Closed, Errored           // All states
-//   > state;
-//
-//   state.transitionTo<Active>(...);
-//   state.transitionTo<Closed>();
-//   state.transitionTo<Active>(...);  // KJ_REQUIRE fails!
-//
-// This catches bugs where code accidentally transitions out of terminal states.
-
-template <typename TerminalSpec, typename... States>
-class TerminalStateMachine: public StateMachine<States...> {
-  using Base = StateMachine<States...>;
-
- public:
-  using Base::Base;
-  using Base::currentStateName;
-  using Base::get;
-  using Base::is;
-  using Base::isAnyOf;
-  using Base::tryGet;
-
-  // Check if currently in a terminal state
-  bool isTerminal() const {
-    return TerminalSpec::isTerminal(*this);
-  }
-
-  // Transition that enforces terminal state rules
-  template <typename S, typename... Args>
-  S& transitionTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<S, States...>)
-  {
-    this->requireUnlocked();
-    KJ_REQUIRE(!isTerminal(), "Cannot transition from terminal state. Current state is terminal.");
-    return this->state.template init<S>(kj::fwd<Args>(args)...);
-  }
-
-  // Force transition even from terminal state.
-  //
-  // WARNING: This bypasses terminal state protection! Use sparingly and only
-  // for legitimate cleanup/reset scenarios. If you find yourself using this
-  // frequently, reconsider whether your state should actually be terminal.
-  //
-  // Legitimate uses:
-  //   - Resetting a state machine for reuse
-  //   - Cleanup during destruction
-  //   - Test fixtures
-  //
-  // Suspicious uses (reconsider your design):
-  //   - Regular business logic transitions
-  //   - "Retry" or "restart" operations
-  template <typename S, typename... Args>
-  S& forceTransitionTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<S, States...>)
-  {
-    this->requireUnlocked();
-    return this->state.template init<S>(kj::fwd<Args>(args)...);
-  }
-
-  // Transition from a specific state (also enforces terminal)
-  template <typename From, typename To, typename... Args>
-  KJ_WARN_UNUSED_RESULT kj::Maybe<To&> transitionFromTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<From, States...>) && (_::isOneOf<To, States...>)
-  {
-    this->requireUnlocked();
-    if (this->template is<From>()) {
-      KJ_REQUIRE(!isTerminal(), "Cannot transition from terminal state");
-      return this->state.template init<To>(kj::fwd<Args>(args)...);
-    }
-    return kj::none;
-  }
-};
-
-// =============================================================================
-// Errorable State Machine
-// =============================================================================
-
-// A state machine with built-in support for error states.
-// Reduces boilerplate for the common pattern of extracting errors.
-//
-// Usage:
-//   ErrorableStateMachine<Readable, Closed, Errored> state;
-//
-//   // Instead of:
-//   //   KJ_IF_SOME(errored, state.tryGet<Errored>()) { ... }
-//   // You can write:
-//   KJ_IF_SOME(errored, state.tryGetError()) { ... }
-//
-//   if (state.isErrored()) { ... }
-
-template <typename ErrorState, typename... AllStates>
-class ErrorableStateMachine: public StateMachine<AllStates...> {
-  using Base = StateMachine<AllStates...>;
-  static_assert(_::isOneOf<ErrorState, AllStates...>, "ErrorState must be one of the state types");
-
- public:
-  using Base::Base;
-  using Base::get;
-  using Base::is;
-  using Base::transitionTo;
-  using Base::tryGet;
-
-  // Check if in errored state
-  bool isErrored() const {
-    return this->template is<ErrorState>();
-  }
-
-  // Get the error state if currently errored
-  kj::Maybe<ErrorState&> tryGetError() KJ_LIFETIMEBOUND {
-    return this->template tryGet<ErrorState>();
-  }
-
-  kj::Maybe<const ErrorState&> tryGetError() const KJ_LIFETIMEBOUND {
-    return this->template tryGet<ErrorState>();
-  }
-
-  // Get the error state, asserting we are errored
-  ErrorState& getError() KJ_LIFETIMEBOUND {
-    return this->template get<ErrorState>();
-  }
-
-  const ErrorState& getError() const KJ_LIFETIMEBOUND {
-    return this->template get<ErrorState>();
-  }
-};
-
-// =============================================================================
-// Resource State Machine
-// =============================================================================
-
-// A state machine for managing resources with active/closed/errored lifecycle.
-// This is the most common pattern in streams: one "active" state holds a resource,
-// and terminal states indicate the resource is no longer available.
-//
-// Usage:
-//   struct Active { kj::Own<Source> source; };
-//   struct Closed { static constexpr kj::StringPtr NAME = "closed"_kj; };
-//   struct Errored { jsg::Value error; static constexpr kj::StringPtr NAME = "errored"_kj; };
-//
-//   ResourceStateMachine<Active, Closed, Errored> state;
-//
-//   // Check resource availability
-//   if (state.isActive()) { ... }
-//   if (state.isTerminated()) { ... }  // closed OR errored
-//
-//   // Get the active resource
-//   KJ_IF_SOME(active, state.tryGetActive()) {
-//     active.source->read(...);
-//   }
-//
-//   // Execute only if active
-//   state.whenActive([](Active& a) {
-//     a.source->doSomething();
-//   });
-
-template <typename ActiveState, typename ClosedState, typename ErrorState>
-class ResourceStateMachine: public StateMachine<ActiveState, ClosedState, ErrorState> {
-  using Base = StateMachine<ActiveState, ClosedState, ErrorState>;
-
- public:
-  using Base::Base;
-  using Base::get;
-  using Base::is;
-  using Base::tryGet;
-
-  // ---------------------------------------------------------------------------
-  // Resource State Queries
-  // ---------------------------------------------------------------------------
-
-  // Is the resource still active/usable?
-  bool isActive() const {
-    return this->template is<ActiveState>();
-  }
-
-  // Is the resource closed normally?
-  bool isClosed() const {
-    return this->template is<ClosedState>();
-  }
-
-  // Is the resource in an error state?
-  bool isErrored() const {
-    return this->template is<ErrorState>();
-  }
-
-  // Is the resource terminated (closed or errored)?
-  bool isTerminated() const {
-    return isClosed() || isErrored();
-  }
-
-  // Alias for isTerminated (matches streams API naming)
-  bool isClosedOrErrored() const {
-    return isTerminated();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Resource Access
-  // ---------------------------------------------------------------------------
-
-  // Get the active state if available
-  kj::Maybe<ActiveState&> tryGetActive() KJ_LIFETIMEBOUND {
-    return this->template tryGet<ActiveState>();
-  }
-
-  kj::Maybe<const ActiveState&> tryGetActive() const KJ_LIFETIMEBOUND {
-    return this->template tryGet<ActiveState>();
-  }
-
-  // Get the error state if errored
-  kj::Maybe<ErrorState&> tryGetError() KJ_LIFETIMEBOUND {
-    return this->template tryGet<ErrorState>();
-  }
-
-  kj::Maybe<const ErrorState&> tryGetError() const KJ_LIFETIMEBOUND {
-    return this->template tryGet<ErrorState>();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Resource Operations (with transition locking for safety)
-  // ---------------------------------------------------------------------------
-
-  // Execute a function only if in active state.
-  // LOCKS TRANSITIONS during callback execution to prevent use-after-free.
-  // Returns the function's result, or kj::none if not active.
-  // For void functions, returns true if executed, false if not active.
-  template <typename Func>
-  auto whenActive(Func&& func)
-      -> std::conditional_t<std::is_void_v<decltype(func(kj::instance<ActiveState&>()))>,
-          bool,
-          kj::Maybe<decltype(func(kj::instance<ActiveState&>()))>> {
-    if (!isActive()) {
-      if constexpr (std::is_void_v<decltype(func(kj::instance<ActiveState&>()))>) {
-        return false;
-      } else {
-        return kj::none;
-      }
-    }
-
-    auto lock = this->acquireTransitionLock();
-    auto& active = this->state.template get<ActiveState>();
-    if constexpr (std::is_void_v<decltype(func(kj::instance<ActiveState&>()))>) {
-      func(active);
-      return true;
-    } else {
-      return func(active);
-    }
-  }
-
-  template <typename Func>
-  auto whenActive(Func&& func) const
-      -> std::conditional_t<std::is_void_v<decltype(func(kj::instance<const ActiveState&>()))>,
-          bool,
-          kj::Maybe<decltype(func(kj::instance<const ActiveState&>()))>> {
-    if (!isActive()) {
-      if constexpr (std::is_void_v<decltype(func(kj::instance<const ActiveState&>()))>) {
-        return false;
-      } else {
-        return kj::none;
-      }
-    }
-
-    ++this->transitionLockCount;
-    KJ_DEFER(--this->transitionLockCount);
-    const auto& active = this->state.template get<ActiveState>();
-    if constexpr (std::is_void_v<decltype(func(kj::instance<const ActiveState&>()))>) {
-      func(active);
-      return true;
-    } else {
-      return func(active);
-    }
-  }
-
-  // Execute a function if active, or return a default value.
-  // LOCKS TRANSITIONS during callback execution.
-  template <typename Func, typename Default>
-  auto whenActiveOr(
-      Func&& func, Default&& defaultValue) -> decltype(func(kj::instance<ActiveState&>())) {
-    if (!isActive()) {
-      return kj::fwd<Default>(defaultValue);
-    }
-
-    auto lock = this->acquireTransitionLock();
-    auto& active = this->state.template get<ActiveState>();
-    return func(active);
-  }
-
-  // ---------------------------------------------------------------------------
-  // State Transitions with Semantics
-  // ---------------------------------------------------------------------------
-
-  // Close the resource (transition to closed state)
-  template <typename... Args>
-  ClosedState& close(Args&&... args) KJ_LIFETIMEBOUND {
-    this->requireUnlocked();
-    KJ_REQUIRE(!isTerminated(), "Resource is already terminated");
-    return this->state.template init<ClosedState>(kj::fwd<Args>(args)...);
-  }
-
-  // Error the resource (transition to error state)
-  template <typename... Args>
-  ErrorState& error(Args&&... args) KJ_LIFETIMEBOUND {
-    this->requireUnlocked();
-    KJ_REQUIRE(!isTerminated(), "Resource is already terminated");
-    return this->state.template init<ErrorState>(kj::fwd<Args>(args)...);
-  }
-
-  // Close even if already terminated (for cleanup scenarios).
-  //
-  // WARNING: Bypasses terminal state protection. See forceTransitionTo() docs
-  // for when this is appropriate vs. suspicious.
-  template <typename... Args>
-  ClosedState& forceClose(Args&&... args) KJ_LIFETIMEBOUND {
-    this->requireUnlocked();
-    return this->state.template init<ClosedState>(kj::fwd<Args>(args)...);
-  }
-
-  // Error even if already terminated (for cleanup scenarios).
-  //
-  // WARNING: Bypasses terminal state protection. See forceTransitionTo() docs
-  // for when this is appropriate vs. suspicious.
-  template <typename... Args>
-  ErrorState& forceError(Args&&... args) KJ_LIFETIMEBOUND {
-    this->requireUnlocked();
-    return this->state.template init<ErrorState>(kj::fwd<Args>(args)...);
-  }
-
-  // Generic transition (for backward compatibility)
-  template <typename S, typename... Args>
-  S& transitionTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<S, ActiveState, ClosedState, ErrorState>)
-  {
-    this->requireUnlocked();
-    return this->state.template init<S>(kj::fwd<Args>(args)...);
-  }
-};
-
-// =============================================================================
-// Validated State Machine
-// =============================================================================
-
-// A state machine with compile-time transition validation.
-// The TransitionPolicy must have a static method:
-//   template <typename From, typename To>
-//   static constexpr bool isAllowed();
-//
-// Invalid transitions will cause a compile-time error.
-
-template <typename TransitionPolicy, typename... States>
-class ValidatedStateMachine: public StateMachine<States...> {
-  using Base = StateMachine<States...>;
-
- public:
-  using Base::Base;
-  using Base::get;
-  using Base::is;
-  using Base::tryGet;
-
-  // Unvalidated transition (same as base)
-  template <typename To, typename... Args>
-  To& transitionTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<To, States...>)
-  {
-    this->requireUnlocked();
-    return this->state.template init<To>(kj::fwd<Args>(args)...);
-  }
-
-  // Validated transition from a specific state.
-  // Compile-time error if From -> To is not allowed by the policy.
-  template <typename From, typename To, typename... Args>
-  To& checkedTransitionFromTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<From, States...>) && (_::isOneOf<To, States...>) &&
-      (TransitionPolicy::template isAllowed<From, To>())
-  {
-    this->requireUnlocked();
-    KJ_REQUIRE(this->template is<From>(),
-        "State machine transition precondition failed: not in expected state");
-    return this->state.template init<To>(kj::fwd<Args>(args)...);
-  }
-
-  // Try validated transition - returns none if not in From state.
-  template <typename From, typename To, typename... Args>
-  KJ_WARN_UNUSED_RESULT kj::Maybe<To&> tryCheckedTransitionFromTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<From, States...>) && (_::isOneOf<To, States...>) &&
-      (TransitionPolicy::template isAllowed<From, To>())
-  {
-    this->requireUnlocked();
-    if (this->template is<From>()) {
-      return this->state.template init<To>(kj::fwd<Args>(args)...);
-    }
-    return kj::none;
-  }
-};
-
-// =============================================================================
-// Observable State Machine
-// =============================================================================
-
-// A state machine that can notify observers of state changes.
-// Useful for debugging, logging, or triggering side effects.
-
-template <typename... States>
-class ObservableStateMachine: public StateMachine<States...> {
-  using Base = StateMachine<States...>;
-
- public:
-  using TransitionCallback = kj::Function<void(kj::StringPtr fromState, kj::StringPtr toState)>;
-
-  ObservableStateMachine() = default;
-
-  // Set a callback to be invoked on any state transition
-  void onTransition(TransitionCallback callback) {
-    transitionCallback = kj::mv(callback);
-  }
-
-  template <typename To, typename... Args>
-  To& transitionTo(Args&&... args) KJ_LIFETIMEBOUND
-    requires(_::isOneOf<To, States...>)
-  {
-    this->requireUnlocked();
-    kj::StringPtr fromName = this->currentStateName();
-    auto& result = this->state.template init<To>(kj::fwd<Args>(args)...);
-    KJ_IF_SOME(cb, transitionCallback) {
-      cb(fromName, _::getStateName<To>());
-    }
-    return result;
-  }
-
- private:
-  kj::Maybe<TransitionCallback> transitionCallback;
-};
-
-// =============================================================================
-// Deferrable State Machine
-// =============================================================================
-
-// A state machine that supports pending/deferred state transitions.
-//
-// This is useful when:
-// - An operation is in progress (e.g., a read)
-// - A terminal state change is requested (e.g., close/error)
-// - The actual transition should be deferred until the operation completes
-//
-// The machine tracks a "pending state" separately from the current state.
-// When the blocking condition clears, call applyPendingState() to complete
-// the deferred transition.
-//
-// Usage:
-//   DeferrableStateMachine<
-//       PendingStates<Closed, Errored>,  // States that can be pending
-//       Active, Closed, Errored          // All states
-//   > state;
-//
-//   state.transitionTo<Active>();
-//   state.beginOperation();  // Mark that an operation is in progress
-//
-//   // This will defer the transition since an operation is in progress
-//   state.deferTransitionTo<Closed>();
-//
-//   KJ_EXPECT(state.is<Active>());           // Still Active!
-//   KJ_EXPECT(state.hasPendingState());      // But Close is pending
-//   KJ_EXPECT(state.pendingStateIs<Closed>()); // Specifically, Closed
-//
-//   state.endOperation();  // Mark operation complete
-//   // If no more operations, pending state is automatically applied
-//   KJ_EXPECT(state.is<Closed>());           // Now Closed!
-//
-// The pending state can also be checked to modify behavior:
-//   if (state.hasPendingState()) {
-//     // Don't start new operations, we're shutting down
-//   }
-
-template <typename PendingSpec, typename... States>
-class DeferrableStateMachine: public StateMachine<States...> {
-  using Base = StateMachine<States...>;
-  using PendingUnion = kj::OneOf<States...>;
-
- public:
-  using Base::Base;
-  using Base::currentStateName;
-  using Base::get;
-  using Base::is;
-  using Base::isAnyOf;
-  using Base::tryGet;
-
-  // ---------------------------------------------------------------------------
-  // Operation Tracking
-  // ---------------------------------------------------------------------------
-  //
-  // RECOMMENDATION: Prefer scopedOperation() RAII guard over manual
-  // beginOperation()/endOperation() calls. Manual calls are error-prone:
-  //
-  //   void badExample() {
-  //     machine.beginOperation();
-  //     if (condition) return;  // BUG: leaks operation count!
-  //     machine.endOperation();
-  //   }
-  //
-  //   void goodExample() {
-  //     auto op = machine.scopedOperation();
-  //     if (condition) return;  // OK: destructor calls endOperation()
-  //   }
-
-  // Mark that an operation is beginning. While operations are in progress,
-  // certain transitions will be deferred rather than applied immediately.
-  // Prefer scopedOperation() for automatic cleanup.
-  void beginOperation() {
-    ++operationCount;
-  }
-
-  // Mark that an operation has completed. If no more operations are pending
-  // and there's a deferred state transition, it will be applied.
-  // Returns true if a pending state was applied.
-  // Prefer scopedOperation() for automatic cleanup.
-  KJ_WARN_UNUSED_RESULT bool endOperation() {
-    KJ_REQUIRE(operationCount > 0, "endOperation() called without matching beginOperation()");
-    --operationCount;
-
-    if (operationCount == 0 && pendingState != nullptr) {
-      applyPendingStateImpl();
-      return true;
-    }
-    return false;
-  }
-
-  // Check if any operations are in progress
-  bool hasOperationInProgress() const {
-    return operationCount > 0;
-  }
-
-  // Get the count of in-progress operations
-  uint32_t operationCountValue() const {
-    return operationCount;
-  }
-
-  // RAII guard for operation tracking.
-  //
-  // EXCEPTION SAFETY: If endOperation() triggers a pending state transition
-  // and the state constructor throws, the exception will propagate from the
-  // destructor. This is generally acceptable since state machine corruption
-  // is unrecoverable, but be aware when using this in exception-sensitive code.
-  class OperationScope {
-   public:
-    explicit OperationScope(DeferrableStateMachine& m): machine(m) {
-      machine.beginOperation();
-    }
-    ~OperationScope() noexcept(false) {
-      // Note: endOperation() may throw if pending state constructor throws.
-      // We mark this noexcept(false) to be explicit about this.
-      // In destructor we don't need to check whether a pending state was applied.
-      auto applied KJ_UNUSED = machine.endOperation();
-    }
-
-    OperationScope(const OperationScope&) = delete;
-    OperationScope& operator=(const OperationScope&) = delete;
-    OperationScope(OperationScope&&) = delete;
-    OperationScope& operator=(OperationScope&&) = delete;
-
-   private:
-    DeferrableStateMachine& machine;
-  };
-
-  // Get an RAII scope for an operation
-  OperationScope scopedOperation() {
-    return OperationScope(*this);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Pending State Management
-  // ---------------------------------------------------------------------------
-
-  // Check if there's a pending state transition
-  bool hasPendingState() const {
-    return !(pendingState == nullptr);
-  }
-
-  // Check if a specific state is pending
-  template <typename S>
-  bool pendingStateIs() const
-    requires(PendingSpec::template contains<S>)
-  {
-    return pendingState.template is<S>();
-  }
-
-  // Check if the pending state is any of the specified states
-  template <typename... Ss>
-  bool pendingStateIsAnyOf() const
-    requires((PendingSpec::template contains<Ss>) && ...)
-  {
-    return (pendingState.template is<Ss>() || ...);
-  }
-
-  // Get the pending state if it matches the specified type
-  template <typename S>
-  kj::Maybe<S&> tryGetPendingState() KJ_LIFETIMEBOUND
-    requires(PendingSpec::template contains<S>)
-  {
-    return pendingState.template tryGet<S>();
-  }
-
-  template <typename S>
-  kj::Maybe<const S&> tryGetPendingState() const KJ_LIFETIMEBOUND
-    requires(PendingSpec::template contains<S>)
-  {
-    return pendingState.template tryGet<S>();
-  }
-
-  // Get the name of the pending state (or "(none)" if no pending state)
-  kj::StringPtr pendingStateName() const {
-    if (pendingState == nullptr) {
-      return "(none)"_kj;
-    }
-    kj::StringPtr result = "(unknown)"_kj;
-    // Visit the pending state to get its name
-    visitPendingState([&result]<typename S>(const S&) { result = _::getStateName<S>(); });
-    return result;
-  }
-
-  // Clear any pending state without applying it
-  void clearPendingState() {
-    pendingState = PendingUnion();
-  }
-
-  // Manually apply the pending state (if any).
-  // Usually called when all blocking operations complete.
-  // Returns true if a pending state was applied.
-  KJ_WARN_UNUSED_RESULT bool applyPendingState() {
-    if (pendingState == nullptr) {
-      return false;
-    }
-    applyPendingStateImpl();
-    return true;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Deferred Transitions
-  // ---------------------------------------------------------------------------
-
-  // Request a transition that will be deferred if operations are in progress.
-  // - If no operations in progress: transition happens immediately
-  // - If operations in progress: state is stored as pending
-  //
-  // Only states marked in PendingStates<> can be deferred.
-  // Returns true if transition happened immediately, false if deferred.
-  //
-  // IMPORTANT: First-wins semantics! If a pending state is already set, this
-  // call is SILENTLY IGNORED. The first deferred transition wins:
-  //
-  //   machine.beginOperation();
-  //   machine.deferTransitionTo<Closed>();   // This one wins
-  //   machine.deferTransitionTo<Errored>(e); // IGNORED - Closed already pending!
-  //   machine.endOperation();                // Transitions to Closed, not Errored
-  //
-  // If you need error to take precedence over close, you must either:
-  //   1. Use forceTransitionTo<Errored>() which bypasses deferral, or
-  //   2. Check hasPendingState() before deferring, or
-  //   3. Use clearPendingState() first to override
-  template <typename S, typename... Args>
-  KJ_WARN_UNUSED_RESULT bool deferTransitionTo(Args&&... args)
-    requires(PendingSpec::template contains<S>)
-  {
-    this->requireUnlocked();
-
-    if (operationCount == 0) {
-      // No operations in progress, transition immediately
-      this->state.template init<S>(kj::fwd<Args>(args)...);
-      return true;
-    } else {
-      // Defer the transition - only store if not already pending (first wins)
-      if (pendingState == nullptr) {
-        pendingState.template init<S>(kj::fwd<Args>(args)...);
-      }
-      return false;
-    }
-  }
-
-  // Request a deferred transition only if currently in a specific state.
-  // Returns:
-  //   - kj::none if not in From state
-  //   - true if transition happened immediately
-  //   - false if transition was deferred
-  template <typename From, typename To, typename... Args>
-  KJ_WARN_UNUSED_RESULT kj::Maybe<bool> deferTransitionFromTo(Args&&... args)
-    requires(_::isOneOf<From, States...>) && (PendingSpec::template contains<To>)
-  {
-    this->requireUnlocked();
-
-    if (!this->template is<From>()) {
-      return kj::none;
-    }
-
-    return deferTransitionTo<To>(kj::fwd<Args>(args)...);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Combined State Queries
-  // ---------------------------------------------------------------------------
-
-  // Check if the machine is in state S OR has S pending.
-  // Useful for "is closed or closing" type checks.
-  template <typename S>
-  bool isOrPending() const
-    requires(_::isOneOf<S, States...>)
-  {
-    if (this->template is<S>()) {
-      return true;
-    }
-    if constexpr (PendingSpec::template contains<S>) {
-      return pendingState.template is<S>();
-    }
-    return false;
-  }
-
-  // Check if any of the specified states are current OR pending
-  template <typename... Ss>
-  bool isAnyOfOrPending() const {
-    return (isOrPending<Ss>() || ...);
-  }
-
-  // Get the "effective" state name - pending state if any, otherwise current
-  kj::StringPtr effectiveStateName() const {
-    if (hasPendingState()) {
-      return pendingStateName();
-    }
-    return this->currentStateName();
-  }
-
- private:
-  PendingUnion pendingState;
-  uint32_t operationCount = 0;
-
-  void applyPendingStateImpl() {
-    // Applying a pending state is a transition, so we must not be locked.
-    // This prevents UAF when endOperation() is called inside a withState() callback.
-    this->requireUnlocked();
-
-    // Move pending state to current state
-    visitPendingState([this]<typename S>(S& s) { this->state.template init<S>(kj::mv(s)); });
-    pendingState = PendingUnion();
-  }
-
-  template <typename Visitor>
-  void visitPendingState(Visitor&& visitor) const {
-    visitPendingStateImpl(kj::fwd<Visitor>(visitor), std::index_sequence_for<States...>{});
-  }
-
-  template <typename Visitor>
-  void visitPendingState(Visitor&& visitor) {
-    visitPendingStateImpl(kj::fwd<Visitor>(visitor), std::index_sequence_for<States...>{});
-  }
-
-  template <typename Visitor, size_t... Is>
-  void visitPendingStateImpl(Visitor&& visitor, std::index_sequence<Is...>) const {
-    auto tryVisit = [&]<size_t I>() {
-      using S = std::tuple_element_t<I, std::tuple<States...>>;
-      if (pendingState.template is<S>()) {
-        visitor.template operator()<S>(pendingState.template get<S>());
-        return true;
-      }
-      return false;
-    };
-
-    (tryVisit.template operator()<Is>() || ...);
-  }
-
-  template <typename Visitor, size_t... Is>
-  void visitPendingStateImpl(Visitor&& visitor, std::index_sequence<Is...>) {
-    auto tryVisit = [&]<size_t I>() {
-      using S = std::tuple_element_t<I, std::tuple<States...>>;
-      if (pendingState.template is<S>()) {
-        visitor.template operator()<S>(pendingState.template get<S>());
-        return true;
-      }
-      return false;
-    };
-
-    (tryVisit.template operator()<Is>() || ...);
-  }
-};
+// Forward declaration
+template <typename... Args>
+class StateMachine;
 
 // =============================================================================
 // Common State Types
@@ -2379,7 +1026,7 @@ auto ifInState(Machine& machine,
 }
 
 // =============================================================================
-// Composable State Machine
+// State Machine
 // =============================================================================
 
 // A unified state machine that supports all features via spec types.
@@ -2387,13 +1034,13 @@ auto ifInState(Machine& machine,
 //
 // Usage:
 //   // Simple (no specs)
-//   ComposableStateMachine<Idle, Running, Done> simple;
+//   StateMachine<Idle, Running, Done> simple;
 //
 //   // With terminal states
-//   ComposableStateMachine<TerminalStates<Done>, Idle, Running, Done> withTerminal;
+//   StateMachine<TerminalStates<Done>, Idle, Running, Done> withTerminal;
 //
 //   // Full-featured (stream pattern)
-//   ComposableStateMachine<
+//   StateMachine<
 //       TerminalStates<Closed, Errored>,
 //       ErrorState<Errored>,
 //       ActiveState<Readable>,
@@ -2408,7 +1055,7 @@ auto ifInState(Machine& machine,
 //   - PendingStates<...> -> beginOperation(), endOperation(), deferTransitionTo(), etc.
 
 template <typename... Args>
-class ComposableStateMachine {
+class StateMachine {
  public:
   // Extract specs from Args
   using TerminalSpec = typename _::FindTerminalStatesSpec<Args...>::Type;
@@ -2492,20 +1139,17 @@ class ComposableStateMachine {
   // ==========================================================================
 
   // Default constructor: state is uninitialized
-  ComposableStateMachine() = default;
+  StateMachine() = default;
 
   // Destructor checks for outstanding locks
-  ~ComposableStateMachine() {
-    KJ_DASSERT(transitionLockCount == 0,
-        "ComposableStateMachine destroyed while transition locks are held");
+  ~StateMachine() {
+    KJ_DASSERT(transitionLockCount == 0, "StateMachine destroyed while transition locks are held");
   }
 
   // Move operations - both source and destination must not have locks held
-  ComposableStateMachine(ComposableStateMachine&& other) noexcept
-      : state(kj::mv(other.state)),
-        transitionLockCount(0) {
+  StateMachine(StateMachine&& other) noexcept: state(kj::mv(other.state)), transitionLockCount(0) {
     KJ_DASSERT(other.transitionLockCount == 0,
-        "Cannot move from ComposableStateMachine while transition locks are held");
+        "Cannot move from StateMachine while transition locks are held");
     if constexpr (HAS_PENDING) {
       operationCount = other.operationCount;
       pendingState = kj::mv(other.pendingState);
@@ -2513,11 +1157,11 @@ class ComposableStateMachine {
     }
   }
 
-  ComposableStateMachine& operator=(ComposableStateMachine&& other) noexcept {
+  StateMachine& operator=(StateMachine&& other) noexcept {
     KJ_DASSERT(transitionLockCount == 0,
-        "Cannot move-assign to ComposableStateMachine while transition locks are held");
+        "Cannot move-assign to StateMachine while transition locks are held");
     KJ_DASSERT(other.transitionLockCount == 0,
-        "Cannot move from ComposableStateMachine while transition locks are held");
+        "Cannot move from StateMachine while transition locks are held");
     state = kj::mv(other.state);
     if constexpr (HAS_PENDING) {
       operationCount = other.operationCount;
@@ -2529,15 +1173,15 @@ class ComposableStateMachine {
 
   // State machines are generally not copyable - they're owned by classes
   // that typically aren't copyable either (e.g., stream controllers).
-  ComposableStateMachine(const ComposableStateMachine&) = delete;
-  ComposableStateMachine& operator=(const ComposableStateMachine&) = delete;
+  StateMachine(const StateMachine&) = delete;
+  StateMachine& operator=(const StateMachine&) = delete;
 
   // Factory function for clearer initialization
   template <typename S, typename... TArgs>
-  static ComposableStateMachine create(TArgs&&... args)
+  static StateMachine create(TArgs&&... args)
     requires(_::isInTuple<S, StatesTuple>)
   {
-    ComposableStateMachine m;
+    StateMachine m;
     m.state.template init<S>(kj::fwd<TArgs>(args)...);
     return m;
   }
@@ -2625,8 +1269,8 @@ class ComposableStateMachine {
     --transitionLockCount;
   }
 
-  TransitionLock<ComposableStateMachine> acquireTransitionLock() {
-    return TransitionLock<ComposableStateMachine>(*this);
+  TransitionLock<StateMachine> acquireTransitionLock() {
+    return TransitionLock<StateMachine>(*this);
   }
 
   // ---------------------------------------------------------------------------
@@ -3210,7 +1854,7 @@ class ComposableStateMachine {
   // is unrecoverable, but be aware when using this in exception-sensitive code.
   class OperationScope {
    public:
-    explicit OperationScope(ComposableStateMachine& m): machine(m) {
+    explicit OperationScope(StateMachine& m): machine(m) {
       machine.beginOperation();
     }
 
@@ -3227,7 +1871,7 @@ class ComposableStateMachine {
     OperationScope& operator=(OperationScope&&) = delete;
 
    private:
-    ComposableStateMachine& machine;
+    StateMachine& machine;
   };
 
   OperationScope scopedOperation()
@@ -3276,7 +1920,7 @@ class ComposableStateMachine {
   //   - Modifications won't trigger pending state application
   //
   // This is primarily useful for:
-  // - Migrating existing code to use ComposableStateMachine
+  // - Migrating existing code to use StateMachine
   // - Implementing new patterns that the state machine doesn't support yet
   // - Interfacing with APIs that expect kj::OneOf directly
   //

@@ -479,7 +479,7 @@ class CompressionStreamImpl: public kj::Refcounted,
   //   Open -> Ended (normal close via end())
   //   Open -> kj::Exception (error via abortWrite())
   // Both Ended and kj::Exception are terminal states.
-  ComposableStateMachine<TerminalStates<Ended, kj::Exception>,
+  StateMachine<TerminalStates<Ended, kj::Exception>,
       ErrorState<kj::Exception>,
       ActiveState<Open>,
       Open,

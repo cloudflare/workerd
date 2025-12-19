@@ -245,7 +245,7 @@ struct Open {
 //   Open -> Closed (normal close after EOF or pumpTo)
 //   Open -> kj::Exception (error via cancel() or read failure)
 // Both Closed and kj::Exception are terminal states.
-using ReadableSourceState = ComposableStateMachine<TerminalStates<Closed, kj::Exception>,
+using ReadableSourceState = StateMachine<TerminalStates<Closed, kj::Exception>,
     ErrorState<kj::Exception>,
     ActiveState<Open>,
     Open,
