@@ -577,17 +577,19 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     auto result = readCallback();
     endOperation = false;
 
-    KJ_ASSERT(!js.v8Isolate->IsExecutionTerminating());
-
     // endOperation() will automatically apply any pending state if this was the last operation.
     // Returns true if a pending state was applied.
     if (controller.state.endOperation()) {
       // A pending state was applied. Call the appropriate callback.
-      if (controller.state.template is<StreamStates::Closed>()) {
-        controller.lock.onClose(js);
-      } else if (controller.state.template is<StreamStates::Errored>()) {
-        KJ_IF_SOME(err, controller.state.template tryGet<StreamStates::Errored>()) {
-          controller.lock.onError(js, err.getHandle(js));
+      // Skip callbacks if execution is being terminated (e.g., CPU time limit) since we can't
+      // safely execute JavaScript in that state.
+      if (!js.v8Isolate->IsExecutionTerminating()) {
+        if (controller.state.template is<StreamStates::Closed>()) {
+          controller.lock.onClose(js);
+        } else if (controller.state.template is<StreamStates::Errored>()) {
+          KJ_IF_SOME(err, controller.state.template tryGet<StreamStates::Errored>()) {
+            controller.lock.onError(js, err.getHandle(js));
+          }
         }
       }
     }
