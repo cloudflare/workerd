@@ -303,9 +303,12 @@ struct PipeToOptions {
 };
 
 namespace StreamStates {
-struct Closed {};
+struct Closed {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+};
 using Errored = jsg::Value;
 struct Erroring {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "erroring"_kj;
   jsg::Value reason;
 
   Erroring(jsg::Value reason): reason(kj::mv(reason)) {}

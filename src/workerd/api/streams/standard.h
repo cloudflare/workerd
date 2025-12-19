@@ -9,6 +9,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/ring-buffer.h>
+#include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
@@ -218,7 +219,17 @@ class ReadableImpl {
 
   using Queue = typename Self::QueueType;
 
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue> state;
+  // State machine for ReadableImpl:
+  // Queue is the active state where the stream can accept data
+  // Closed and Errored are terminal states (cannot transition back to Queue)
+  //   Queue -> Closed (close() or doCancel() called)
+  //   Queue -> Errored (doError() called)
+  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+      ActiveState<Queue>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      Queue>;
+  State state;
   Algorithms algorithms;
 
   size_t highWaterMark = 1;

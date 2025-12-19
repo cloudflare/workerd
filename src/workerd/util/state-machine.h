@@ -1337,6 +1337,33 @@ class StateMachine {
     return func(state.template get<ActiveStateType>());
   }
 
+  // Execute a function if active, or return a default value.
+  // LOCKS TRANSITIONS during callback execution.
+  template <typename Func, typename Default>
+  auto whenActiveOr(
+      Func&& func, Default&& defaultValue) -> decltype(func(kj::instance<ActiveStateType&>()))
+    requires(HAS_ACTIVE)
+  {
+    if (!isActive()) {
+      return kj::fwd<Default>(defaultValue);
+    }
+    auto lock = acquireTransitionLock();
+    return func(state.template get<ActiveStateType>());
+  }
+
+  template <typename Func, typename Default>
+  auto whenActiveOr(Func&& func,
+      Default&& defaultValue) const -> decltype(func(kj::instance<const ActiveStateType&>()))
+    requires(HAS_ACTIVE)
+  {
+    if (!isActive()) {
+      return kj::fwd<Default>(defaultValue);
+    }
+    ++transitionLockCount;
+    KJ_DEFER(--transitionLockCount);
+    return func(state.template get<ActiveStateType>());
+  }
+
   // ---------------------------------------------------------------------------
   // Pending State Features (enabled when PendingStates<...> is provided)
   // ---------------------------------------------------------------------------

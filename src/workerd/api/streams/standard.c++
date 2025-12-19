@@ -874,7 +874,7 @@ kj::Own<WritableStreamController> newWritableStreamJsController() {
 template <typename Self>
 ReadableImpl<Self>::ReadableImpl(
     UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
-    : state(Queue(getHighWaterMark(underlyingSource, queuingStrategy))),
+    : state(State::template create<Queue>(getHighWaterMark(underlyingSource, queuingStrategy))),
       algorithms(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
 template <typename Self>
@@ -901,70 +901,56 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
 
 template <typename Self>
 size_t ReadableImpl<Self>::consumerCount() {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return 0;
-    }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return 0;
-    }
-    KJ_CASE_ONEOF(queue, Queue) {
-      return queue.getConsumerCount();
-    }
-  }
-  KJ_UNREACHABLE;
+  return state.whenActiveOr([](Queue& q) { return q.getConsumerCount(); }, size_t{0});
 }
 
 template <typename Self>
 jsg::Promise<void> ReadableImpl<Self>::cancel(
     jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      // We are already closed. There's nothing to cancel.
-      // This shouldn't happen but we handle the case anyway, just to be safe.
-      return js.resolvedPromise();
-    }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      // We are already errored. There's nothing to cancel.
-      // This shouldn't happen but we handle the case anyway, just to be safe.
-      return js.rejectedPromise<void>(errored.getHandle(js));
-    }
-    KJ_CASE_ONEOF(queue, Queue) {
-      size_t consumerCount = queue.getConsumerCount();
-      if (consumerCount > 1) {
-        // If there is more than 1 consumer, then we just return here with an
-        // immediately resolved promise. The consumer will remove itself,
-        // canceling its interest in the underlying source but we do not yet
-        // want to cancel the underlying source since there are still other
-        // consumers that want data.
-        return js.resolvedPromise();
-      }
-
-      // Otherwise, there should be exactly one consumer at this point.
-      KJ_ASSERT(consumerCount == 1);
-      KJ_IF_SOME(pendingCancel, maybePendingCancel) {
-        // If we're already waiting for cancel to complete, just return the
-        // already existing pending promise.
-        // This shouldn't happen but we handle the case anyway, just to be safe.
-        return pendingCancel.promise.whenResolved(js);
-      }
-
-      auto prp = js.newPromiseAndResolver<void>();
-      maybePendingCancel = PendingCancel{
-        .fulfiller = kj::mv(prp.resolver),
-        .promise = kj::mv(prp.promise),
-      };
-      auto promise = KJ_ASSERT_NONNULL(maybePendingCancel).promise.whenResolved(js);
-      doCancel(js, kj::mv(self), reason);
-      return kj::mv(promise);
-    }
+  if (state.template is<StreamStates::Closed>()) {
+    // We are already closed. There's nothing to cancel.
+    // This shouldn't happen but we handle the case anyway, just to be safe.
+    return js.resolvedPromise();
   }
-  KJ_UNREACHABLE;
+  KJ_IF_SOME(errored, state.template tryGet<StreamStates::Errored>()) {
+    // We are already errored. There's nothing to cancel.
+    // This shouldn't happen but we handle the case anyway, just to be safe.
+    return js.rejectedPromise<void>(errored.getHandle(js));
+  }
+
+  auto& queue = state.template get<Queue>();
+  size_t consumerCount = queue.getConsumerCount();
+  if (consumerCount > 1) {
+    // If there is more than 1 consumer, then we just return here with an
+    // immediately resolved promise. The consumer will remove itself,
+    // canceling its interest in the underlying source but we do not yet
+    // want to cancel the underlying source since there are still other
+    // consumers that want data.
+    return js.resolvedPromise();
+  }
+
+  // Otherwise, there should be exactly one consumer at this point.
+  KJ_ASSERT(consumerCount == 1);
+  KJ_IF_SOME(pendingCancel, maybePendingCancel) {
+    // If we're already waiting for cancel to complete, just return the
+    // already existing pending promise.
+    // This shouldn't happen but we handle the case anyway, just to be safe.
+    return pendingCancel.promise.whenResolved(js);
+  }
+
+  auto prp = js.newPromiseAndResolver<void>();
+  maybePendingCancel = PendingCancel{
+    .fulfiller = kj::mv(prp.resolver),
+    .promise = kj::mv(prp.promise),
+  };
+  auto promise = KJ_ASSERT_NONNULL(maybePendingCancel).promise.whenResolved(js);
+  doCancel(js, kj::mv(self), reason);
+  return kj::mv(promise);
 }
 
 template <typename Self>
 bool ReadableImpl<Self>::canCloseOrEnqueue() {
-  return state.template is<Queue>();
+  return state.isActive();
 }
 
 // doCancel() is triggered by cancel() being called, which is an explicit signal from
@@ -974,7 +960,7 @@ bool ReadableImpl<Self>::canCloseOrEnqueue() {
 // and trigger the cancel algorithm.
 template <typename Self>
 void ReadableImpl<Self>::doCancel(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason) {
-  state.template init<StreamStates::Closed>();
+  state.template transitionTo<StreamStates::Closed>();
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     doClose(js);
@@ -1023,7 +1009,7 @@ void ReadableImpl<Self>::close(jsg::Lock& js) {
 
   queue.close(js);
 
-  state.template init<StreamStates::Closed>();
+  state.template transitionTo<StreamStates::Closed>();
   doClose(js);
 }
 
@@ -1036,47 +1022,34 @@ void ReadableImpl<Self>::doClose(jsg::Lock& js) {
 
 template <typename Self>
 void ReadableImpl<Self>::doError(jsg::Lock& js, jsg::Value reason) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      // We're already closed, so we really don't care if there was an error. Do nothing.
-      return;
-    }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      // We're already errored, so we really don't care if there was an error. Do nothing.
-      return;
-    }
-    KJ_CASE_ONEOF(queue, Queue) {
-      queue.error(js, reason.addRef(js));
-      state = kj::mv(reason);
-      algorithms.clear();
-      return;
-    }
+  // If already closed or errored, do nothing
+  if (state.isInactive()) {
+    return;
   }
-  KJ_UNREACHABLE;
+
+  auto& queue = state.template get<Queue>();
+  queue.error(js, reason.addRef(js));
+  state.template transitionTo<StreamStates::Errored>(kj::mv(reason));
+  algorithms.clear();
 }
 
 template <typename Self>
 kj::Maybe<int> ReadableImpl<Self>::getDesiredSize() {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return 0;
-    }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return kj::none;
-    }
-    KJ_CASE_ONEOF(queue, Queue) {
-      return queue.desiredSize();
-    }
+  if (state.template is<StreamStates::Closed>()) {
+    return 0;
   }
-  KJ_UNREACHABLE;
+  if (state.template is<StreamStates::Errored>()) {
+    return kj::none;
+  }
+  return state.template get<Queue>().desiredSize();
 }
 
 // We should call pull if any of the consumers known to the queue have read requests or
 // we haven't yet signalled backpressure.
 template <typename Self>
 bool ReadableImpl<Self>::shouldCallPull() {
-  return canCloseOrEnqueue() &&
-      (state.template get<Queue>().wantsRead() || getDesiredSize().orDefault(0) > 0);
+  return state.whenActiveOr(
+      [this](Queue& q) { return q.wantsRead() || getDesiredSize().orDefault(0) > 0; }, false);
 }
 
 template <typename Self>
@@ -1113,14 +1086,10 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
 
 template <typename Self>
 void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      visitor.visit(errored);
-    }
-    KJ_CASE_ONEOF(queue, Queue) {
-      visitor.visit(queue);
-    }
+  KJ_IF_SOME(errored, state.template tryGet<StreamStates::Errored>()) {
+    visitor.visit(errored);
+  } else KJ_IF_SOME(queue, state.template tryGet<Queue>()) {
+    visitor.visit(queue);
   }
   KJ_IF_SOME(pendingCancel, maybePendingCancel) {
     visitor.visit(pendingCancel.fulfiller, pendingCancel.promise);
