@@ -162,11 +162,7 @@ bool WritableStreamSinkJsAdapter::isClosed() {
 }
 
 bool WritableStreamSinkJsAdapter::isClosing() {
-  KJ_IF_SOME(open, state.tryGetActive()) {
-    return open.active->closePending;
-  } else {
-    return false;
-  }
+  return state.whenActiveOr([](Open& open) { return open.active->closePending; }, false);
 }
 
 kj::Maybe<ssize_t> WritableStreamSinkJsAdapter::getDesiredSize() {
