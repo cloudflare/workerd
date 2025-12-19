@@ -9,6 +9,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/small-set.h>
+#include <workerd/util/state-machine.h>
 
 namespace workerd::api {
 
@@ -151,7 +152,9 @@ class QueueImpl final {
   using Entry = typename Self::Entry;
   using State = typename Self::State;
 
-  explicit QueueImpl(size_t highWaterMark): highWaterMark(highWaterMark) {}
+  explicit QueueImpl(size_t highWaterMark): highWaterMark(highWaterMark) {
+    state.template transitionTo<Ready>();
+  }
 
   QueueImpl(QueueImpl&&) = default;
   QueueImpl& operator=(QueueImpl&&) = default;
@@ -159,14 +162,14 @@ class QueueImpl final {
   // Closes the queue. The close is forwarded on to all consumers.
   // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.tryGetActive()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the close callback, invalidating the iterator.
       auto consumers = ready.consumers.snapshot();
       for (auto consumer: consumers) {
         consumer->close(js);
       }
-      state.template init<Closed>();
+      state.template transitionTo<Closed>();
     }
   }
 
@@ -175,7 +178,7 @@ class QueueImpl final {
   // signaled on the queue.
   // If the queue is already closed or errored, return 0.
   inline ssize_t desiredSize() const {
-    return state.template is<Ready>() ? highWaterMark - size() : 0;
+    return state.isActive() ? highWaterMark - size() : 0;
   }
 
   // Errors the queue. The error is forwarded on to all consumers,
@@ -183,14 +186,14 @@ class QueueImpl final {
   // all pending consume promises.
   // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::Value reason) {
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.tryGetActive()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the error callback, invalidating the iterator.
       auto consumers = ready.consumers.snapshot();
       for (auto consumer: consumers) {
         consumer->error(js, reason.addRef(js));
       }
-      state = kj::mv(reason);
+      state.template transitionTo<Errored>(kj::mv(reason));
     }
   }
 
@@ -199,7 +202,7 @@ class QueueImpl final {
   // If we are already closed or errored, set totalQueueSize to zero.
   void maybeUpdateBackpressure() {
     totalQueueSize = 0;
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.tryGetActive()) {
       auto consumers = ready.consumers.snapshot();
       for (auto consumer: consumers) {
         totalQueueSize = kj::max(totalQueueSize, consumer->size());
@@ -213,8 +216,7 @@ class QueueImpl final {
   // operations, then any left over data will be pushed into the consumer's buffer.
   // Asserts if the queue is closed or errored.
   void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
-    auto& ready =
-        KJ_REQUIRE_NONNULL(state.template tryGet<Ready>(), "The queue is closed or errored.");
+    auto& ready = KJ_REQUIRE_NONNULL(state.tryGetActive(), "The queue is closed or errored.");
 
     auto consumers = ready.consumers.snapshot();
     for (auto consumer: consumers) {
@@ -234,43 +236,26 @@ class QueueImpl final {
   }
 
   size_t getConsumerCount() const {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {
-        return 0;
-      }
-      KJ_CASE_ONEOF(errored, Errored) {
-        return 0;
-      }
-      KJ_CASE_ONEOF(ready, Ready) {
-        return ready.consumers.size();
-      }
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      return ready.consumers.size();
     }
-    KJ_UNREACHABLE;
+    return 0;
   }
 
   bool wantsRead() const {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {
-        return false;
-      }
-      KJ_CASE_ONEOF(errored, Errored) {
-        return false;
-      }
-      KJ_CASE_ONEOF(ready, Ready) {
-        auto consumers = ready.consumers.snapshot();
-        for (auto consumer: consumers) {
-          if (consumer->hasReadRequests()) return true;
-        }
-        return false;
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      auto consumers = ready.consumers.snapshot();
+      for (auto consumer: consumers) {
+        if (consumer->hasReadRequests()) return true;
       }
     }
-    KJ_UNREACHABLE;
+    return false;
   }
 
   // Specific queue implementations may provide additional state that is attached
   // to the Ready struct.
   kj::Maybe<State&> getState() KJ_LIFETIMEBOUND {
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.tryGetActive()) {
       return ready;
     }
     return kj::none;
@@ -281,19 +266,36 @@ class QueueImpl final {
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  struct Closed {};
-  using Errored = jsg::Value;
+  struct Closed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+  struct Errored {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
+    jsg::Value reason;
+  };
 
   struct Ready final: public State {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
     // The set of consumers attached to this queue. In the typical case this
     // will be a very small number (often just one or two), so we use SmallSet to
     // optimize for that.
     SmallSet<ConsumerImpl*> consumers;
   };
 
+  // State machine for QueueImpl:
+  //   Ready -> Closed (close() called)
+  //   Ready -> Errored (error() called)
+  // Both Closed and Errored are terminal states.
+  using QueueState = ComposableStateMachine<TerminalStates<Closed, Errored>,
+      ErrorState<Errored>,
+      ActiveState<Ready>,
+      Ready,
+      Closed,
+      Errored>;
+
   size_t highWaterMark;
   size_t totalQueueSize = 0;
-  kj::OneOf<Ready, Closed, Errored> state = Ready();
+  QueueState state;
 
   void addConsumer(ConsumerImpl* consumer) {
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
@@ -343,6 +345,7 @@ class ConsumerImpl final {
   ConsumerImpl(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none)
       : queue(queue),
         stateListener(stateListener) {
+    state.template transitionTo<Ready>();
     queue.addConsumer(this);
   }
 
@@ -353,21 +356,18 @@ class ConsumerImpl final {
   }
 
   void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {}
-      KJ_CASE_ONEOF(errored, Errored) {}
-      KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& request: ready.readRequests) {
-          request->resolveAsDone(js);
-        }
-        state.template init<Closed>();
+    // Already closed or errored - nothing to do.
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      for (auto& request: ready.readRequests) {
+        request->resolveAsDone(js);
       }
+      state.template transitionTo<Closed>();
     }
   }
 
   void close(jsg::Lock& js) {
     // If we are already closed or errored, then we do nothing here.
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.tryGetActive()) {
       // If we are not already closing, enqueue a Close sentinel.
       if (!isClosing()) {
         ready.buffer.push_back(Close{});
@@ -386,14 +386,14 @@ class ConsumerImpl final {
   void error(jsg::Lock& js, jsg::Value reason) {
     // If we are already closed or errored, then we do nothing here.
     // The new error doesn't matter.
-    if (state.template tryGet<Ready>() != kj::none) {
+    if (state.isActive()) {
       maybeDrainAndSetState(js, kj::mv(reason));
     }
   }
 
   void push(jsg::Lock& js, kj::Rc<Entry> entry) {
-    auto& ready = KJ_REQUIRE_NONNULL(
-        state.template tryGet<Ready>(), "The consumer is either closed or errored.");
+    auto& ready =
+        KJ_REQUIRE_NONNULL(state.tryGetActive(), "The consumer is either closed or errored.");
     KJ_REQUIRE(!isClosing(), "The consumer is already closing.");
 
     // If the size of the entry is zero, do nothing.
@@ -406,23 +406,21 @@ class ConsumerImpl final {
   }
 
   void read(jsg::Lock& js, ReadRequest request) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(c, Closed) {
-        return request.resolveAsDone(js);
-      }
-      KJ_CASE_ONEOF(e, Errored) {
-        return request.reject(js, e);
-      }
-      KJ_CASE_ONEOF(ready, Ready) {
-        Self::handleRead(js, ready, *this, queue, kj::mv(request));
-        return maybeDrainAndSetState(js);
-      }
+    if (state.template is<Closed>()) {
+      return request.resolveAsDone(js);
+    }
+    KJ_IF_SOME(errored, state.tryGetError()) {
+      return request.reject(js, errored.reason);
+    }
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      Self::handleRead(js, ready, *this, queue, kj::mv(request));
+      return maybeDrainAndSetState(js);
     }
     KJ_UNREACHABLE;
   }
 
   void reset() {
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.tryGetActive()) {
       UpdateBackpressureScope scope(queue);
       ready.buffer.clear();
       ready.queueTotalSize = 0;
@@ -431,22 +429,14 @@ class ConsumerImpl final {
 
   // The current total calculated size of the consumer's internal buffer.
   size_t size() const {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(e, Errored) {
-        return 0;
-      }
-      KJ_CASE_ONEOF(c, Closed) {
-        return 0;
-      }
-      KJ_CASE_ONEOF(r, Ready) {
-        return r.queueTotalSize;
-      }
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      return ready.queueTotalSize;
     }
-    KJ_UNREACHABLE;
+    return 0;
   }
 
   void resolveRead(jsg::Lock& js, ReadRequest& req) {
-    auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>());
+    auto& ready = KJ_REQUIRE_NONNULL(state.tryGetActive());
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
     req.resolve(js);
@@ -454,7 +444,7 @@ class ConsumerImpl final {
   }
 
   void resolveReadAsDone(jsg::Lock& js, ReadRequest& req) {
-    auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>());
+    auto& ready = KJ_REQUIRE_NONNULL(state.tryGetActive());
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
     req.resolveAsDone(js);
@@ -462,26 +452,26 @@ class ConsumerImpl final {
   }
 
   void cloneTo(jsg::Lock& js, ConsumerImpl& other) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(c, Closed) {
-        other.state.template init<Closed>();
-      }
-      KJ_CASE_ONEOF(e, Errored) {
-        other.state = e.addRef(js);
-      }
-      KJ_CASE_ONEOF(ready, Ready) {
-        // We copy the buffered state but not the readRequests.
-        auto& otherReady = KJ_REQUIRE_NONNULL(other.state.template tryGet<Ready>(),
-            "The new consumer should not be closed or errored.");
-        otherReady.queueTotalSize = ready.queueTotalSize;
-        for (auto& item: ready.buffer) {
-          KJ_SWITCH_ONEOF(item) {
-            KJ_CASE_ONEOF(c, Close) {
-              otherReady.buffer.push_back(Close{});
-            }
-            KJ_CASE_ONEOF(entry, QueueEntry) {
-              otherReady.buffer.push_back(entry.clone(js));
-            }
+    if (state.template is<Closed>()) {
+      other.state.template transitionTo<Closed>();
+      return;
+    }
+    KJ_IF_SOME(errored, state.tryGetError()) {
+      other.state.template transitionTo<Errored>(errored.reason.addRef(js));
+      return;
+    }
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      // We copy the buffered state but not the readRequests.
+      auto& otherReady = KJ_REQUIRE_NONNULL(
+          other.state.tryGetActive(), "The new consumer should not be closed or errored.");
+      otherReady.queueTotalSize = ready.queueTotalSize;
+      for (auto& item: ready.buffer) {
+        KJ_SWITCH_ONEOF(item) {
+          KJ_CASE_ONEOF(c, Close) {
+            otherReady.buffer.push_back(Close{});
+          }
+          KJ_CASE_ONEOF(entry, QueueEntry) {
+            otherReady.buffer.push_back(entry.clone(js));
           }
         }
       }
@@ -489,50 +479,34 @@ class ConsumerImpl final {
   }
 
   bool hasReadRequests() const {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {
-        return false;
-      }
-      KJ_CASE_ONEOF(errored, Errored) {
-        return false;
-      }
-      KJ_CASE_ONEOF(ready, Ready) {
-        return !ready.readRequests.empty();
-      }
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      return !ready.readRequests.empty();
     }
-    KJ_UNREACHABLE;
+    return false;
   }
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {}
-      KJ_CASE_ONEOF(errored, Errored) {}
-      KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& request: ready.readRequests) {
-          request->resolver.reject(js, reason);
-        }
-        ready.readRequests.clear();
+    // Already closed or errored - nothing to do.
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      for (auto& request: ready.readRequests) {
+        request->resolver.reject(js, reason);
       }
+      ready.readRequests.clear();
     }
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {}
-      KJ_CASE_ONEOF(errored, Errored) {
-        // Technically we shouldn't really have to GC visit the stored error here but there
-        // should not be any harm in doing so.
-        visitor.visit(errored);
-      }
-      KJ_CASE_ONEOF(ready, Ready) {
-        // There's no reason to GC visit the promise resolver or buffer here and it is
-        // potentially problematic if we do. Since the read requests are queued, if we
-        // GC visit it once, remove it from the queue, and GC happens to kick in before
-        // we access the resolver, then v8 could determine that the resolver or buffered
-        // entries are no longer reachable via tracing and free them before we can
-        // actually try to access the held resolver.
-      }
+    // Technically we shouldn't really have to GC visit the stored error here but there
+    // should not be any harm in doing so.
+    KJ_IF_SOME(errored, state.tryGetError()) {
+      visitor.visit(errored.reason);
     }
+    // There's no reason to GC visit the promise resolver or buffer in Ready state and it is
+    // potentially problematic if we do. Since the read requests are queued, if we
+    // GC visit it once, remove it from the queue, and GC happens to kick in before
+    // we access the resolver, then v8 could determine that the resolver or buffered
+    // entries are no longer reachable via tracing and free them before we can
+    // actually try to access the held resolver.
   }
 
   inline kj::StringPtr jsgGetMemoryName() const;
@@ -543,9 +517,15 @@ class ConsumerImpl final {
   // A sentinel used in the buffer to signal that close() has been called.
   struct Close {};
 
-  struct Closed {};
-  using Errored = jsg::Value;
+  struct Closed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+  struct Errored {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
+    jsg::Value reason;
+  };
   struct Ready {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
     workerd::RingBuffer<kj::OneOf<QueueEntry, Close>, 16> buffer;
     // We use kj::Own<ReadRequest> because ByobRequest holds a reference to its associated
     // ReadRequest. Using RingBuffer directly would invalidate those references when the buffer
@@ -558,33 +538,36 @@ class ConsumerImpl final {
     inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
 
+  // State machine for ConsumerImpl:
+  //   Ready -> Closed (close() called and drained)
+  //   Ready -> Errored (error() called)
+  // Both Closed and Errored are terminal states.
+  using ConsumerState = ComposableStateMachine<TerminalStates<Closed, Errored>,
+      ErrorState<Errored>,
+      ActiveState<Ready>,
+      Ready,
+      Closed,
+      Errored>;
+
   QueueImpl& queue;
-  kj::OneOf<Ready, Closed, Errored> state = Ready();
+  ConsumerState state;
   kj::Maybe<ConsumerImpl::StateListener&> stateListener;
 
   bool isClosing() {
     // Closing state is determined by whether there is a Close sentinel that has been
     // pushed into the end of Ready state buffer.
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(c, Closed) {
+    KJ_IF_SOME(ready, state.tryGetActive()) {
+      if (ready.buffer.empty()) {
         return false;
       }
-      KJ_CASE_ONEOF(e, Errored) {
-        return false;
-      }
-      KJ_CASE_ONEOF(r, Ready) {
-        if (r.buffer.empty()) {
-          return false;
-        }
-        return r.buffer.back().template is<Close>();
-      }
+      return ready.buffer.back().template is<Close>();
     }
-    KJ_UNREACHABLE;
+    return false;
   }
 
   void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.tryGetActive()) {
       UpdateBackpressureScope scope(queue);
       KJ_IF_SOME(reason, maybeReason) {
         // If maybeReason != nullptr, then we are draining because of an error.
@@ -593,7 +576,7 @@ class ConsumerImpl final {
         for (auto& request: ready.readRequests) {
           request->reject(js, reason);
         }
-        state = reason.addRef(js);
+        state.template transitionTo<Errored>(reason.addRef(js));
         KJ_IF_SOME(listener, stateListener) {
           listener.onConsumerError(js, kj::mv(reason));
           // After this point, we should not assume that this consumer can
@@ -617,7 +600,7 @@ class ConsumerImpl final {
           for (auto& request: ready.readRequests) {
             request->resolveAsDone(js);
           }
-          state.template init<Closed>();
+          state.template transitionTo<Closed>();
           KJ_IF_SOME(listener, stateListener) {
             listener.onConsumerClose(js);
             // After this point, we should not assume that this consumer can
@@ -1017,12 +1000,8 @@ size_t QueueImpl<Self>::jsgGetMemorySelfSize() const {
 
 template <typename Self>
 void QueueImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(ready, Ready) {}
-    KJ_CASE_ONEOF(closed, Closed) {}
-    KJ_CASE_ONEOF(errored, Errored) {
-      tracker.trackField("error", errored);
-    }
+  KJ_IF_SOME(errored, state.tryGetError()) {
+    tracker.trackField("error", errored.reason);
   }
 }
 
@@ -1038,14 +1017,10 @@ size_t ConsumerImpl<Self>::jsgGetMemorySelfSize() const {
 
 template <typename Self>
 void ConsumerImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(close, Closed) {}
-    KJ_CASE_ONEOF(error, Errored) {
-      tracker.trackField("error", error);
-    }
-    KJ_CASE_ONEOF(ready, Ready) {
-      tracker.trackField("inner", ready);
-    }
+  KJ_IF_SOME(errored, state.tryGetError()) {
+    tracker.trackField("error", errored.reason);
+  } else KJ_IF_SOME(ready, state.tryGetActive()) {
+    tracker.trackField("inner", ready);
   }
 }
 
