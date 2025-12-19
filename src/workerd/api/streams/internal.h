@@ -10,6 +10,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/observer.h>
 #include <workerd/util/ring-buffer.h>
+#include <workerd/util/state-machine.h>
 
 namespace workerd::api {
 
@@ -122,6 +123,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   class PipeLocked: public PipeController {
    public:
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
     PipeLocked(ReadableStreamInternalController& inner): inner(inner) {}
 
     bool isClosed() override;
@@ -146,7 +148,17 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   kj::Maybe<ReadableStream&> owner;
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
-  kj::OneOf<Unlocked, Locked, PipeLocked, ReaderLocked> readState = Unlocked();
+
+  // Lock state machine for ReadableStreamInternalController:
+  // All states can transition to any other state (no terminal states).
+  //   Unlocked -> Locked (removeSink() or pumpTo() called)
+  //   Unlocked -> ReaderLocked (lockReader() called)
+  //   Unlocked -> PipeLocked (tryPipeLock() called)
+  //   ReaderLocked -> Unlocked (releaseReader() called)
+  //   PipeLocked -> Unlocked (release() or doClose/doError called)
+  //   Locked -> (remains until stream is done)
+  using ReadLockState = ComposableStateMachine<Unlocked, Locked, PipeLocked, ReaderLocked>;
+  ReadLockState readState = ReadLockState::create<Unlocked>();
   bool disturbed = false;
   bool readPending = false;
 
@@ -263,12 +275,23 @@ class WritableStreamInternalController: public WritableStreamController {
   jsg::Promise<void> closeImpl(jsg::Lock& js, bool markAsHandled);
 
   struct PipeLocked {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
     ReadableStream& ref;
   };
 
   kj::Maybe<WritableStream&> owner;
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, IoOwn<Writable>> state;
-  kj::OneOf<Unlocked, Locked, PipeLocked, WriterLocked> writeState = Unlocked();
+
+  // Lock state machine for WritableStreamInternalController:
+  // All states can transition to any other state (no terminal states).
+  //   Unlocked -> Locked (removeSink() or detach() called)
+  //   Unlocked -> WriterLocked (lockWriter() called)
+  //   Unlocked -> PipeLocked (tryPipeFrom() called)
+  //   WriterLocked -> Unlocked (releaseWriter() called)
+  //   WriterLocked -> Locked (doClose/doError called - stream closed but writer still attached)
+  //   PipeLocked -> Unlocked (pipe completes)
+  using WriteLockState = ComposableStateMachine<Unlocked, Locked, PipeLocked, WriterLocked>;
+  WriteLockState writeState = WriteLockState::create<Unlocked>();
 
   kj::Maybe<kj::Own<ByteStreamObserver>> observer;
 
