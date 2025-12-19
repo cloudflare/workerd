@@ -38,6 +38,36 @@ impl DnsUtil {
 }
 ```
 
+### Supported Parameter Types
+
+| Type     | `T`         | `Option<T>` | `NonCoercible<T>` |
+|----------|-------------|-------------|-------------------|
+| `&str`   | ✅ Supported | ❌           | ❌                 |
+| `T: Type`| ❌           | ❌           | ✅ Supported       |
+
+Any type implementing `jsg::Type` can be used with `NonCoercible<T>`. Built-in types include `String`, `bool`, and `f64`.
+
+### `NonCoercible<T>` Parameters
+
+Use `NonCoercible<T>` when you want to accept a value only if it's already the expected type, without JavaScript's automatic type coercion:
+
+```rust
+impl MyResource {
+    #[jsg_method]
+    pub fn strict_string(&self, param: NonCoercible<String>) -> Result<String, Error> {
+        // Only accepts actual strings - passing null/undefined/numbers will throw
+        // Access via Deref: *param, or via value(): param.value(), or via AsRef: param.as_ref()
+        Ok(param.value().clone())
+    }
+
+    #[jsg_method]
+    pub fn strict_bool(&self, param: NonCoercible<bool>) -> Result<bool, Error> {
+        // Only accepts actual booleans
+        Ok(*param)
+    }
+}
+```
+
 ## `#[jsg_resource]`
 
 Generates boilerplate for JSG resources. Applied to both struct definitions and impl blocks. Automatically implements `jsg::Type::class_name()` using the struct name, or a custom name if provided via the `name` parameter.

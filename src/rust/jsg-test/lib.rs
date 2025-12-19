@@ -1,5 +1,19 @@
+use std::pin::Pin;
+
 use jsg::v8;
 use kj_rs::KjOwn;
+
+#[cfg(test)]
+#[path = "tests/eval.rs"]
+mod eval_tests;
+
+#[cfg(test)]
+#[path = "tests/non_coercible.rs"]
+mod non_coercible_tests;
+
+#[cfg(test)]
+#[path = "tests/unwrap.rs"]
+mod unwrap_tests;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg_test")]
 mod ffi {
@@ -8,26 +22,47 @@ mod ffi {
         include!("workerd/rust/jsg/ffi.h");
 
         type Isolate = jsg::v8::ffi::Isolate;
+        type Local = jsg::v8::ffi::Local;
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct EvalResult {
+        success: bool,
+        result_type: String,
+        result_value: String,
     }
 
     unsafe extern "C++" {
         include!("workerd/rust/jsg-test/ffi.h");
 
         type TestHarness;
+        type EvalContext;
 
         pub unsafe fn create_test_harness() -> KjOwn<TestHarness>;
-        pub unsafe fn run_in_context(self: &TestHarness, callback: unsafe fn(*mut Isolate));
+        pub unsafe fn run_in_context(
+            self: &TestHarness,
+            callback: unsafe fn(*mut Isolate, Pin<&mut EvalContext>),
+        );
+
+        #[cxx_name = "eval"]
+        pub fn eval_safe(self: &EvalContext, code: &str) -> EvalResult;
+
+        #[cxx_name = "set_global"]
+        pub fn set_global_safe(self: &EvalContext, name: &str, value: Local);
     }
 }
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
+
+pub use ffi::EvalContext;
+pub use ffi::EvalResult;
 
 impl Harness {
     pub fn new() -> Self {
         Self(unsafe { ffi::create_test_harness() })
     }
 
-    pub fn run_in_context(&self, callback: fn(*mut v8::ffi::Isolate)) {
+    pub fn run_in_context(&self, callback: fn(*mut v8::ffi::Isolate, Pin<&mut EvalContext>)) {
         unsafe { self.0.run_in_context(callback) }
     }
 }
@@ -68,12 +103,12 @@ mod tests {
     #[test]
     fn objects_can_be_wrapped_and_unwrapped() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
+        harness.run_in_context(|isolate, _ctx| unsafe {
             let mut lock = Lock::from_isolate_ptr(isolate);
             let instance = TestStruct {
                 str: "test".to_owned(),
             };
-            let wrapped = instance.wrap(&mut lock);
+            let wrapped = TestStruct::wrap(instance, &mut lock);
             let mut obj: v8::Local<'_, v8::Object> = wrapped.into();
             assert!(obj.has(&mut lock, "str"));
             let str_value = obj.get(&mut lock, "str");
@@ -89,14 +124,14 @@ mod tests {
     #[test]
     fn struct_with_multiple_properties() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
+        harness.run_in_context(|isolate, _ctx| unsafe {
             let mut lock = Lock::from_isolate_ptr(isolate);
             let instance = MultiPropertyStruct {
                 name: "Alice".to_owned(),
                 age: 30,
                 active: "true".to_owned(),
             };
-            let wrapped = instance.wrap(&mut lock);
+            let wrapped = MultiPropertyStruct::wrap(instance, &mut lock);
             let obj: v8::Local<'_, v8::Object> = wrapped.into();
 
             assert!(obj.has(&mut lock, "name"));
@@ -119,7 +154,7 @@ mod tests {
     #[test]
     fn number_type_conversions() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
+        harness.run_in_context(|isolate, _ctx| unsafe {
             let mut lock = Lock::from_isolate_ptr(isolate);
 
             let byte_val: u8 = 42;
@@ -135,7 +170,7 @@ mod tests {
     #[test]
     fn empty_object_and_property_setting() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
+        harness.run_in_context(|isolate, _ctx| unsafe {
             let mut lock = Lock::from_isolate_ptr(isolate);
             let mut obj = lock.new_object();
 
@@ -162,7 +197,7 @@ mod tests {
     #[test]
     fn global_handle_conversion() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
+        harness.run_in_context(|isolate, _ctx| unsafe {
             let mut lock = Lock::from_isolate_ptr(isolate);
 
             let local_str = "global test".to_local(&mut lock);
@@ -177,14 +212,14 @@ mod tests {
     #[test]
     fn nested_object_properties() {
         let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
+        harness.run_in_context(|isolate, _ctx| unsafe {
             let mut lock = Lock::from_isolate_ptr(isolate);
             let mut outer = lock.new_object();
 
             let inner_instance = NestedStruct {
                 inner: "nested value".to_owned(),
             };
-            let inner_wrapped = inner_instance.wrap(&mut lock);
+            let inner_wrapped = NestedStruct::wrap(inner_instance, &mut lock);
             outer.set(&mut lock, "nested", inner_wrapped);
 
             assert!(outer.has(&mut lock, "nested"));

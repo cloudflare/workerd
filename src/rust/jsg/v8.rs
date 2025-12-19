@@ -50,10 +50,13 @@ pub mod ffi {
         pub unsafe fn local_to_global(isolate: *mut Isolate, value: Local) -> Global;
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
         pub unsafe fn local_new_string(isolate: *mut Isolate, value: &str) -> Local;
+        pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
         pub unsafe fn local_has_value(value: &Local) -> bool;
         pub unsafe fn local_is_string(value: &Local) -> bool;
+        pub unsafe fn local_is_boolean(value: &Local) -> bool;
+        pub unsafe fn local_is_number(value: &Local) -> bool;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -86,6 +89,8 @@ pub mod ffi {
 
         // Unwrappers
         pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> String;
+        pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
+        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> f64;
 
         // FunctionCallbackInfo
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
@@ -241,6 +246,14 @@ impl<'a, T> Local<'a, T> {
 
     pub fn is_string(&self) -> bool {
         unsafe { ffi::local_is_string(&self.handle) }
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        unsafe { ffi::local_is_boolean(&self.handle) }
+    }
+
+    pub fn is_number(&self) -> bool {
+        unsafe { ffi::local_is_number(&self.handle) }
     }
 
     /// Returns the isolate associated with this local handle.
@@ -453,6 +466,28 @@ impl ToLocalValue for &str {
             Local::from_ffi(
                 lock.isolate(),
                 ffi::local_new_string(lock.isolate().as_ffi(), self),
+            )
+        }
+    }
+}
+
+impl ToLocalValue for bool {
+    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::local_new_boolean(lock.isolate().as_ffi(), *self),
+            )
+        }
+    }
+}
+
+impl ToLocalValue for f64 {
+    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::local_new_number(lock.isolate().as_ffi(), *self),
             )
         }
     }

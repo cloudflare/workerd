@@ -13,6 +13,8 @@ pub mod modules;
 pub mod v8;
 pub use v8::ffi::ExceptionType;
 
+use crate::v8::ToLocalValue;
+
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 mod ffi {
     extern "Rust" {
@@ -177,6 +179,79 @@ impl From<ParseIntError> for Error {
     }
 }
 
+// =============================================================================
+// NonCoercible<T>
+//
+// JavaScript automatically coerces types in certain contexts. For instance, when a JavaScript
+// API expects a string, calling it with the value `null` will result in the null being coerced
+// into the string value "null". The NonCoercible type can be used to disable automatic type
+// coercion in APIs. For instance, NonCoercible<String> can be used to accept a value only if
+// the input is already a string. If the input is the value null, then an error is thrown rather
+// than silently coercing to "null".
+//
+// It should be pointed out that using NonCoercible<T> runs counter to Web IDL and general
+// JavaScript API conventions. In nearly all cases, APIs should allow the coercion to occur and
+// should deal with the coerced input accordingly to avoid being a source of user confusion and
+// issues. Only use NonCoercible if you have a good reason to disable coercion.
+
+/// A wrapper type that prevents automatic type coercion when unwrapping from JavaScript.
+///
+/// JavaScript automatically coerces types in certain contexts. For instance, when a JavaScript
+/// API expects a string, calling it with the value `null` will result in the null being coerced
+/// into the string value "null".
+///
+/// `NonCoercible<T>` can be used to accept a value only if the input is already exactly the
+/// expected type. If the input is a different type that would normally be coerced, an error
+/// is thrown instead.
+///
+/// Any type implementing the `Type` trait can be used with `NonCoercible<T>`.
+///
+/// # Example
+///
+/// ```ignore
+/// // This function will only accept actual strings, not values that can be coerced to strings
+/// fn process_string(value: NonCoercible<String>) -> Result<()> {
+///     let s: String = value.into();
+///     // ...
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonCoercible<T: Type> {
+    value: T,
+}
+
+impl<T: Type> NonCoercible<T> {
+    /// Creates a new `NonCoercible` wrapper around the given value.
+    pub fn new(value: T) -> Self {
+        Self { value }
+    }
+
+    /// Returns a reference to the inner value.
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T: Type> From<T> for NonCoercible<T> {
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
+impl<T: Type> AsRef<T> for NonCoercible<T> {
+    fn as_ref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T: Type> Deref for NonCoercible<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
 /// Provides access to V8 operations within an isolate lock.
 ///
 /// A Lock wraps a V8 isolate pointer and is passed to resource methods and callbacks to
@@ -292,23 +367,34 @@ impl<T: Resource> Clone for Ref<T> {
 }
 
 /// TODO: Implement `memory_info(jsg::MemoryTracker)`
-pub trait Type {
+pub trait Type: Sized {
+    type This;
+
     fn class_name() -> &'static str;
     /// Same as jsgGetMemoryName
     fn memory_name() -> &'static str {
         std::any::type_name::<Self>()
     }
     /// Same as jsgGetMemorySelfSize
-    fn memory_self_size() -> usize
-    where
-        Self: Sized,
-    {
+    fn memory_self_size() -> usize {
         std::mem::size_of::<Self>()
     }
     /// Wraps this struct as a JavaScript value by deep-copying its fields.
-    fn wrap<'a, 'b>(&self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
         'b: 'a;
+
+    /// Returns true if the V8 value is exactly this type (no coercion).
+    /// Used by `NonCoercible<T>` to reject values that would require coercion.
+    fn is_exact_v8_type(value: &v8::Local<v8::Value>) -> bool;
+
+    /// Unwraps a V8 value into this type without coercion.
+    ///
+    /// # Safety
+    /// The caller must ensure:
+    /// - `isolate` is a valid pointer to a locked V8 isolate
+    /// - `value` is a V8 value of the correct type (validated via `is_exact_v8_type`)
+    unsafe fn unwrap(isolate: *mut v8::ffi::Isolate, value: v8::ffi::Local) -> Self;
 }
 
 pub enum Member {
@@ -515,17 +601,86 @@ unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
 ///
 /// # Safety
 /// The caller must ensure V8 operations are performed within the correct isolate/context.
-pub unsafe fn handle_result<T: Type, E: std::fmt::Display>(
+pub unsafe fn handle_result<T: Type<This = T>, E: std::fmt::Display>(
     lock: &mut Lock,
     args: &mut v8::FunctionCallbackInfo,
     result: Result<T, E>,
 ) {
     match result {
-        Ok(result) => args.set_return_value(result.wrap(lock)),
+        Ok(result) => args.set_return_value(T::wrap(result, lock)),
         Err(err) => {
             // TODO(soon): Make sure to use jsg::Error trait here and dynamically call proper method to throw the error.
             let description = err.to_string();
             unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &description) };
         }
+    }
+}
+
+impl Type for String {
+    type This = Self;
+
+    fn class_name() -> &'static str {
+        "string"
+    }
+
+    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        this.to_local(lock)
+    }
+
+    fn is_exact_v8_type(value: &v8::Local<v8::Value>) -> bool {
+        value.is_string()
+    }
+
+    unsafe fn unwrap(isolate: *mut v8::ffi::Isolate, value: v8::ffi::Local) -> Self {
+        unsafe { v8::ffi::unwrap_string(isolate, value) }
+    }
+}
+
+impl Type for bool {
+    type This = Self;
+
+    fn class_name() -> &'static str {
+        "boolean"
+    }
+
+    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        this.to_local(lock)
+    }
+
+    fn is_exact_v8_type(value: &v8::Local<v8::Value>) -> bool {
+        value.is_boolean()
+    }
+
+    unsafe fn unwrap(isolate: *mut v8::ffi::Isolate, value: v8::ffi::Local) -> Self {
+        unsafe { v8::ffi::unwrap_boolean(isolate, value) }
+    }
+}
+
+impl Type for f64 {
+    type This = Self;
+
+    fn class_name() -> &'static str {
+        "number"
+    }
+
+    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        this.to_local(lock)
+    }
+
+    fn is_exact_v8_type(value: &v8::Local<v8::Value>) -> bool {
+        value.is_number()
+    }
+
+    unsafe fn unwrap(isolate: *mut v8::ffi::Isolate, value: v8::ffi::Local) -> Self {
+        unsafe { v8::ffi::unwrap_number(isolate, value) }
     }
 }

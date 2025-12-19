@@ -32,10 +32,13 @@ Local local_clone(const Local& value);
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
 Local local_new_string(Isolate* isolate, ::rust::Str value);
+Local local_new_boolean(Isolate* isolate, bool value);
 Local local_new_object(Isolate* isolate);
 bool local_eq(const Local& lhs, const Local& rhs);
 bool local_has_value(const Local& val);
 bool local_is_string(const Local& val);
+bool local_is_boolean(const Local& val);
+bool local_is_number(const Local& val);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
@@ -54,6 +57,8 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
 
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value);
+bool unwrap_boolean(Isolate* isolate, Local value);
+double unwrap_number(Isolate* isolate, Local value);
 size_t unwrap_resource(Isolate* isolate, Local value);
 
 // FunctionCallbackInfo

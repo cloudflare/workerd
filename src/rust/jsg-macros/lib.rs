@@ -75,7 +75,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .expect("Named fields must have identifiers")
                 .to_string();
             Some(quote! {
-                let #field_name = jsg::v8::ToLocalValue::to_local(&self.#field_name, lock);
+                let #field_name = jsg::v8::ToLocalValue::to_local(&this.#field_name, lock);
                 obj.set(lock, #field_name_str, #field_name);
             })
         } else {
@@ -87,11 +87,13 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         #input
 
         impl jsg::Type for #name {
+            type This = Self;
+
             fn class_name() -> &'static str {
                 #class_name
             }
 
-            fn wrap<'a, 'b>(&self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            fn wrap<'a, 'b>(this: Self::This, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
@@ -103,6 +105,16 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                     #(#field_assignments)*
                     obj.into()
                 }
+            }
+
+            fn is_exact_v8_type(_value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                // TODO(soon): Implement proper type checking for struct types
+                unimplemented!("NonCoercible<Struct> is not yet supported")
+            }
+
+            unsafe fn unwrap(_isolate: *mut jsg::v8::ffi::Isolate, _value: jsg::v8::ffi::Local) -> Self {
+                // TODO(soon): Implement proper unwrapping for struct types
+                unimplemented!("NonCoercible<Struct> is not yet supported")
             }
         }
 
@@ -210,11 +222,54 @@ fn is_str_reference(ty: &Type) -> bool {
     }
 }
 
+/// Extracts the inner type from `NonCoercible<T>`, returning the type tokens.
+fn get_non_coercible_inner_type(ty: &Type) -> Option<&Type> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let seg = type_path.path.segments.last()?;
+    if seg.ident != "NonCoercible" {
+        return None;
+    }
+
+    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
+        return None;
+    };
+
+    let syn::GenericArgument::Type(inner_type) = args.args.first()? else {
+        return None;
+    };
+
+    Some(inner_type)
+}
+
 fn generate_unwrap_code(
     arg_name: &syn::Ident,
     ty: &Type,
     index: usize,
 ) -> quote::__private::TokenStream {
+    // Check for NonCoercible<T> types - uses Type trait methods
+    if let Some(inner_type) = get_non_coercible_inner_type(ty) {
+        return quote! {
+            let #arg_name = {
+                let arg_value = args.get(#index);
+                if !<#inner_type as jsg::Type>::is_exact_v8_type(&arg_value) {
+                    let type_name = <#inner_type as jsg::Type>::class_name();
+                    let error_msg = format!("Expected a {} value (type coercion is disabled)", type_name);
+                    unsafe {
+                        jsg::v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &error_msg);
+                    }
+                    return;
+                }
+                let value = unsafe {
+                    <#inner_type as jsg::Type>::unwrap(lock.isolate().as_ffi(), arg_value.into_ffi())
+                };
+                jsg::NonCoercible::new(value)
+            };
+        };
+    }
+
     if is_str_reference(ty) {
         quote! {
             let #arg_name = unsafe {
@@ -223,7 +278,7 @@ fn generate_unwrap_code(
         }
     } else {
         quote! {
-            compile_error!("Unsupported parameter type for jsg::method. Currently only &str is supported.");
+            compile_error!("Unsupported parameter type for jsg::method. Currently only &str and NonCoercible<T> are supported.");
         }
     }
 }
@@ -294,15 +349,27 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[automatically_derived]
         impl jsg::Type for #name {
+            type This = jsg::Ref<Self>;
+
             fn class_name() -> &'static str {
                 #class_name
             }
 
-            fn wrap<'a, 'b>(&self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            fn wrap<'a, 'b>(_this: Self::This, _lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
                 todo!("Implement wrap for jsg::Resource")
+            }
+
+            fn is_exact_v8_type(_value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                // TODO(soon): Implement proper type checking for resource types
+                unimplemented!("NonCoercible<Resource> is not yet supported")
+            }
+
+            unsafe fn unwrap(_isolate: *mut jsg::v8::ffi::Isolate, _value: jsg::v8::ffi::Local) -> Self {
+                // TODO(soon): Implement proper unwrapping for resource types
+                unimplemented!("NonCoercible<Resource> is not yet supported")
             }
         }
 

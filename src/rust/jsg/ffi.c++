@@ -38,6 +38,11 @@ Local local_new_string(Isolate* isolate, ::rust::Str value) {
   return to_ffi(kj::mv(val));
 }
 
+Local local_new_boolean(Isolate* isolate, bool value) {
+  v8::Local<v8::Boolean> val = v8::Boolean::New(isolate, value);
+  return to_ffi(kj::mv(val));
+}
+
 Local local_new_object(Isolate* isolate) {
   v8::Local<v8::Object> object = v8::Object::New(isolate);
   return to_ffi(kj::mv(object));
@@ -53,6 +58,14 @@ bool local_has_value(const Local& val) {
 
 bool local_is_string(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsString();
+}
+
+bool local_is_boolean(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBoolean();
+}
+
+bool local_is_number(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNumber();
 }
 
 // Local<Object>
@@ -110,6 +123,16 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
     return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
   }
   return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+}
+
+bool unwrap_boolean(Isolate* isolate, Local value) {
+  return local_from_ffi<v8::Value>(kj::mv(value))->ToBoolean(isolate)->Value();
+}
+
+double unwrap_number(Isolate* isolate, Local value) {
+  return ::workerd::jsg::check(
+      local_from_ffi<v8::Value>(kj::mv(value))->ToNumber(isolate->GetCurrentContext()))
+      ->Value();
 }
 
 size_t unwrap_resource(Isolate* isolate, Local value) {
