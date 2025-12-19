@@ -316,45 +316,35 @@ void ReadableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
 
 template <typename Controller>
 void ReadableLockImpl<Controller>::onClose(jsg::Lock& js) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(locked, ReaderLocked) {
-      try {
-        maybeResolvePromise(js, locked.getClosedFulfiller());
-      } catch (jsg::JsExceptionThrown&) {
-        // Resolving the promise could end up throwing an exception in some cases,
-        // causing a jsg::JsExceptionThrown to be thrown. At this point, however,
-        // we are already in the process of closing the stream and an error at this
-        // point is not recoverable. Log and move on.
-        LOG_NOSENTRY(ERROR, "Error resolving ReadableStream reader closed promise");
-      };
-    }
-    KJ_CASE_ONEOF(locked, ReadableLockImpl<Controller>::PipeLocked) {
-      state.template transitionTo<Unlocked>();
-    }
-    KJ_CASE_ONEOF(locked, Locked) {}
-    KJ_CASE_ONEOF(locked, Unlocked) {}
+  KJ_IF_SOME(locked, state.template tryGet<ReaderLocked>()) {
+    try {
+      maybeResolvePromise(js, locked.getClosedFulfiller());
+    } catch (jsg::JsExceptionThrown&) {
+      // Resolving the promise could end up throwing an exception in some cases,
+      // causing a jsg::JsExceptionThrown to be thrown. At this point, however,
+      // we are already in the process of closing the stream and an error at this
+      // point is not recoverable. Log and move on.
+      LOG_NOSENTRY(ERROR, "Error resolving ReadableStream reader closed promise");
+    };
+  } else {
+    (void)state.template transitionFromTo<PipeLocked, Unlocked>();
   }
 }
 
 template <typename Controller>
 void ReadableLockImpl<Controller>::onError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(locked, ReaderLocked) {
-      try {
-        maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
-      } catch (jsg::JsExceptionThrown&) {
-        // Rejecting the promise could end up throwing an exception in some cases,
-        // causing a jsg::JsExceptionThrown to be thrown. At this point, however,
-        // we are already in the process of closing the stream and an error at this
-        // point is not recoverable. Log and move on.
-        LOG_NOSENTRY(ERROR, "Error rejecting ReadableStream reader closed promise");
-      }
+  KJ_IF_SOME(locked, state.template tryGet<ReaderLocked>()) {
+    try {
+      maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
+    } catch (jsg::JsExceptionThrown&) {
+      // Rejecting the promise could end up throwing an exception in some cases,
+      // causing a jsg::JsExceptionThrown to be thrown. At this point, however,
+      // we are already in the process of closing the stream and an error at this
+      // point is not recoverable. Log and move on.
+      LOG_NOSENTRY(ERROR, "Error rejecting ReadableStream reader closed promise");
     }
-    KJ_CASE_ONEOF(locked, ReadableLockImpl<Controller>::PipeLocked) {
-      state.template transitionTo<Unlocked>();
-    }
-    KJ_CASE_ONEOF(locked, Locked) {}
-    KJ_CASE_ONEOF(locked, Unlocked) {}
+  } else {
+    (void)state.template transitionFromTo<PipeLocked, Unlocked>();
   }
 }
 
@@ -3381,8 +3371,8 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
   KJ_IF_SOME(locked, lock.state.tryGet<WriterLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
     maybeResolvePromise(js, locked.getReadyFulfiller());
-  } else if (lock.state.tryGet<WritableLockImpl::PipeLocked>() != kj::none) {
-    lock.state.transitionTo<Unlocked>();
+  } else {
+    (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
   }
 }
 
@@ -3396,8 +3386,8 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   KJ_IF_SOME(locked, lock.state.tryGet<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
-  } else if (lock.state.tryGet<WritableLockImpl::PipeLocked>() != kj::none) {
-    lock.state.transitionTo<Unlocked>();
+  } else {
+    (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
   }
 }
 
