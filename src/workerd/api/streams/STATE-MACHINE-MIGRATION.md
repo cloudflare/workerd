@@ -113,9 +113,12 @@ These track lock states - different semantic pattern, may not benefit as much:
   - Uses `isInactive()` for checking terminal states, `transitionTo<>()` for transitions
   - Note: Added NAME constant to `StreamStates::Closed` and `StreamStates::Erroring`
 
-- [ ] **standard.h:370** - `WritableImpl` (template)
+- [x] **standard.h:370** - `WritableImpl` (template)
   - `kj::OneOf<StreamStates::Closed, StreamStates::Errored, StreamStates::Erroring, Writable>`
   - 4 states including Erroring transition state
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, ActiveState<Writable>, ...>`
+  - Uses `isActive()` for writable check, `isTerminal()` for abort checks
+  - Note: `doClose()`/`doError()` now assert state already transitioned instead of transitioning
 
 - [ ] **standard.c++:715-728** - `ReadableStreamJsController`
   - Main + pending state machines

@@ -368,7 +368,24 @@ class WritableImpl {
     }
   };
 
-  struct Writable {};
+  struct Writable {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "writable"_kj;
+  };
+
+  // State machine for WritableImpl:
+  // Writable is the active state where the stream can accept writes
+  // Erroring is a transitional state - waiting for in-flight ops before erroring
+  // Closed and Errored are terminal states
+  //   Writable -> Erroring (startErroring() called)
+  //   Writable -> Closed (finishInFlightClose() succeeds)
+  //   Erroring -> Errored (finishErroring() called)
+  //   Erroring -> Closed (finishInFlightClose() succeeds - close wins)
+  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+      ActiveState<Writable>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      StreamStates::Erroring,
+      Writable>;
 
   // Sadly, we have to use a weak ref here rather than jsg::Ref. This is because
   // the jsg::Ref<WritableStream> (via its internal WritableStreamJsController)
@@ -378,8 +395,7 @@ class WritableImpl {
   // try tracing each other.
   kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
   jsg::Ref<AbortSignal> signal;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, StreamStates::Erroring, Writable> state =
-      Writable();
+  State state = State::template create<Writable>();
   Algorithms algorithms;
 
   size_t highWaterMark = 1;
