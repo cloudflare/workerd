@@ -489,6 +489,10 @@ struct JsValue {
       # the one that will later on send the abort signal. This external will have an associated
       # stream in the corresponding `StreamSink` with type `AbortTrigger`.
 
+      subrequestChannelToken @8 :Data;
+      actorClassChannelToken @9 :Data;
+      # Encoded ChannelTokens. See channel-token.capnp.
+
       # TODO(soon): WebSocket, Request, Response
     }
   }

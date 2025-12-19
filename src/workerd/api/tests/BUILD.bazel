@@ -324,6 +324,12 @@ wd_test(
 )
 
 wd_test(
+    src = "stub-storage-test.wd-test",
+    args = ["--experimental"],
+    data = ["stub-storage-test.js"],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],

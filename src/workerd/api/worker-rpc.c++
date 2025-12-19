@@ -1289,9 +1289,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
             } else if (isProxyOfRpcTarget || object.isInstanceOf<JsRpcTarget>(js)) {
               // Yes. It's a JsRpcTarget.
               allowInstanceProperties = false;
-            } else if (object.isInstanceOf<JsRpcStub>(js) ||
+            } else if (object.isInstanceOf<JsRpcStub>(js) || object.isInstanceOf<Fetcher>(js) ||
                 (inStub && object.isInstanceOf<JsRpcProperty>(js))) {
-              // Yes. It's a JsRpcStub. We should allow descending into the stub.
+              // Yes. It's a JsRpcStub or Fetcher. We should allow descending into the stub.
               // Note that the wildcard property of a stub is a prototype property, not an instance
               // property, so setting allowInstanceProperties = false here gets the behavior we
               // want.
@@ -1623,6 +1623,16 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     } else if (isFunctionForRpc(js, obj)) {
       // It's a plain function. It will be serialized as a single stub.
       return MakeCallPipeline::SingleStub();
+    } else if (obj.isInstanceOf<Fetcher>(js)) {
+      // It's a plain fetcher. We want to allow pipelining on it, but we also actually need to
+      // serialize it, so we can't use `SingleStub()`. Note we set `allowInstanceProperties` to
+      // `false` here because the wildcard property of a `Fetcher` is a prototype property, and
+      // that's what we want to expose for pipelining.
+      auto pipeline = kj::heap<TransientJsRpcTarget>(
+          js, IoContext::current(), obj, kj::mv(maybeDispose), kj::mv(stubDisposers), false);
+
+      return MakeCallPipeline::Object{
+        .cap = rpc::JsRpcTarget::Client(kj::mv(pipeline)), .hasDispose = hasDispose};
     } else {
       // Not an RPC object. Could be a String or other serializable types that derive from Object.
       // Similar to primitive types, we return a fake pipeline for error-handling reasons.
