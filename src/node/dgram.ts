@@ -23,14 +23,13 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import { validateObject, validateFunction } from 'node-internal:validators';
 import { Buffer } from 'node-internal:internal_buffer';
 import { EventEmitter } from 'node-internal:events';
 
-import type { SocketOptions, SocketType, RemoteInfo } from 'node:dgram';
+import type { SocketOptions, SocketType, RemoteInfo, Socket as DgramSocket } from 'node:dgram';
 
-type SocketClassType = typeof Socket;
+type SocketClassType = typeof DgramSocket;
 
 export function Socket(
   this: SocketClassType,
@@ -45,8 +44,8 @@ export function Socket(
   if (callback !== undefined) {
     validateFunction(callback, 'callback');
   }
-  throw new ERR_METHOD_NOT_IMPLEMENTED('dgram.Socket');
-}
+  return this;
+};
 Object.setPrototypeOf(Socket.prototype, EventEmitter.prototype);
 Object.setPrototypeOf(Socket, EventEmitter);
 
@@ -54,23 +53,18 @@ export function createSocket(
   type?: SocketType | SocketOptions,
   callback?: (msg: Buffer, rinfo: RemoteInfo) => void
 ): SocketClassType {
-  if (typeof type === 'string') {
-    type = { type };
-  }
-  validateObject(type, 'type');
-  if (callback !== undefined) {
-    validateFunction(callback, 'callback');
-  }
-  throw new ERR_METHOD_NOT_IMPLEMENTED('dgram.createSocket()');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call
+  return new (Socket as any)(type, callback) as SocketClassType;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 Socket.prototype.bind = function (
+  this: SocketClassType,
   _1: unknown,
   _2: unknown,
   _3: unknown
 ): SocketClassType {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('dgram.Socket.prototype.bind');
+  return this;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -79,12 +73,12 @@ Socket.prototype.connect = function (
   _2: unknown,
   _3: unknown
 ): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('dgram.Socket.prototype.connect');
+  // no-op
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 Socket.prototype.disconnect = function (): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('dgram.Socket.prototype.disconnect');
+  // no-op
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -96,7 +90,7 @@ Socket.prototype.sendto = function (
   _5: unknown,
   _6: unknown
 ): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('dgram.Socket.prototype.sendto');
+  // no-op
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -108,12 +102,15 @@ Socket.prototype.send = function (
   _5: unknown,
   _6: unknown
 ): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('dgram.Socket.prototype.send');
+  // no-op
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.close = function (_1: unknown): SocketClassType {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('dgram.Socket.prototype.close');
+Socket.prototype.close = function (
+  this: SocketClassType,
+  _1: unknown
+): SocketClassType {
+  return this;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
