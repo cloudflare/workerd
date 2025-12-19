@@ -126,6 +126,11 @@ jobs:
       - name: Build and load container images
         if: inputs.build_container_images
         run: |
+          docker context use default
+          echo "Docker info:"
+          docker info
+          echo "Docker version:"
+          docker version
           bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
       - name: Bazel test
         if: inputs.run_tests

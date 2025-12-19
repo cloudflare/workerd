@@ -1255,4 +1255,31 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
   # measurements and time-sensitive operations.
+
+  fetchIterableTypeSupportOverrideAdjustment @149 :Bool
+    $compatEnableFlag("fetch_iterable_type_support_override_adjustment")
+    $compatDisableFlag("no_fetch_iterable_type_support_override_adjustment")
+    $impliedByAfterDate(name = "fetchIterableTypeSupport", date = "2026-01-15");
+  # Further adapts the fetch iterable type support to adjust for toString/toPrimitive
+  # overrides on sync iterable objects. Specifically, if an object passed as the body
+  # of a fetch Request or Response is sync iterable but has a custom toString or
+  # toPrimitive method, we will skip treating it as a sync iterable and instead allow
+  # it to fall through to being handled as a stringified object.
+
+  stripBomInReadAllText @150 :Bool
+    $compatEnableFlag("strip_bom_in_read_all_text")
+    $compatDisableFlag("do_not_strip_bom_in_read_all_text")
+    $compatEnableDate("2026-01-13")
+    $impliedByAfterDate(name = "pedanticWpt", date = "2026-01-13");
+  # Instructs the readAllText method in streams to strip the leading UTF8 BOM if present.
+
+  allowIrrevocableStubStorage @151 :Bool
+    $compatEnableFlag("allow_irrevocable_stub_storage")
+    $experimental;
+  # Permits various stub types (e.g. ServiceStub aka Fetcher, DurableObjectClass) to be stored in
+  # long-term Durable Object storage without any mechanism for the stub target to audit or revoke
+  # incoming connections.
+  #
+  # This feature exists for experimental use only, and will be removed once we have a properly
+  # auditable and revocable storage mechanism.
 }

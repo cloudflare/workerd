@@ -33,6 +33,18 @@ wd_test(
     ],
 )
 
+# Test to validate timing semantics for JSRPC streaming responses.
+# This test verifies that Return events occur when the handler returns,
+# NOT when the stream is fully consumed.
+wd_test(
+    src = "jsrpc-timing-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-timing-test.js",
+        "jsrpc-timing-test-tail.js",
+    ],
+)
+
 # Test for a worker that can log to itself using the isTracer parameter
 wd_test(
     src = "self-logger-test.wd-test",
@@ -309,6 +321,12 @@ wd_test(
     src = "streams-test.wd-test",
     args = ["--experimental"],
     data = ["streams-test.js"],
+)
+
+wd_test(
+    src = "stub-storage-test.wd-test",
+    args = ["--experimental"],
+    data = ["stub-storage-test.js"],
 )
 
 wd_test(

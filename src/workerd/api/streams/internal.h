@@ -291,8 +291,7 @@ class WritableStreamInternalController: public WritableStreamController {
   // because the socket is currently being closed.
   bool isPendingClosure = false;
 
-  void increaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
-  void decreaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
+  void adjustWriteBufferSize(jsg::Lock& js, int64_t amount);
   void updateBackpressure(jsg::Lock& js, bool backpressure);
 
   struct Write {

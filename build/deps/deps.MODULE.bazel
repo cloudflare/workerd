@@ -2,7 +2,7 @@
 This file is included from the root MODULE.bazel"""
 
 bazel_dep(name = "ada-url", version = "3.3.0")
-bazel_dep(name = "brotli", version = "1.1.0")
+bazel_dep(name = "brotli", version = "1.2.0")
 
 ########################################################
 # Override BCR versions.
@@ -83,43 +83,3 @@ archive_override(
 )
 
 bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
-
-########################################################
-# Libraries which are not on the BCR
-http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
-http_archive(
-    name = "nbytes",
-    build_file = "//:build/BUILD.nbytes",
-    sha256 = "34be48071c86add2f8d14fd4a238c47230965fd743a51b8a1dd0b2f0210f0171",
-    strip_prefix = "nbytes-0.1.1",
-    url = "https://github.com/nodejs/nbytes/archive/refs/tags/v0.1.1.tar.gz",
-)
-
-http_archive(
-    name = "ncrypto",
-    sha256 = "02a6da93113c93402bb9ec025e1a51881ca3c78e02ea57f043444bda98a87868",
-    strip_prefix = "ncrypto-50b68a6170c85ab5208e2a2eda0b291c47ff74c7",
-    type = "tgz",
-    url = "https://github.com/nodejs/ncrypto/archive/50b68a6170c85ab5208e2a2eda0b291c47ff74c7.tar.gz",
-)
-
-http_archive(
-    name = "dragonbox",
-    build_file_content = """cc_library(
-            name = "dragonbox",
-            hdrs = glob(["include/dragonbox/*.h"]),
-            visibility = ["//visibility:public"],
-            include_prefix = "third_party/dragonbox/src",
-        )""",
-    integrity = "sha256-cfLtl8+JzGsFwK77NJvRN/Uh7KTifw/phbGoFad4iaY=",
-    strip_prefix = "dragonbox-6c7c925b571d54486b9ffae8d9d18a822801cbda",
-    url = "https://github.com/jk-jeon/dragonbox/archive/6c7c925b571d54486b9ffae8d9d18a822801cbda.tar.gz",
-)
-
-http_archive(
-    name = "simdutf",
-    build_file = "//:build/BUILD.simdutf",
-    sha256 = "6c80c566f9158b07330f96fa5e522756bdb229013b8b6e41d787d37a3147aec3",
-    url = "https://github.com/simdutf/simdutf/releases/download/v7.7.0/singleheader.zip",
-)

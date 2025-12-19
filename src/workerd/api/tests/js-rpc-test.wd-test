@@ -13,6 +13,7 @@ const unitTests :Workerd.Config = (
           "fetcher_no_get_put_delete",
           "enable_abortsignal_rpc",
           "enhanced_error_serialization",
+          "enable_ctx_exports",
           "experimental"
         ],
         bindings = [
@@ -23,6 +24,7 @@ const unitTests :Workerd.Config = (
           (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
           (name = "defaultExport", service = "js-rpc-test"),
           (name = "twelve", json = "12"),
+          (name = "GreeterFactory", service = (name = "js-rpc-test", entrypoint = "GreeterFactory")),
         ],
 
         durableObjectNamespaces = [

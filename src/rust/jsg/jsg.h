@@ -18,8 +18,8 @@ struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
   virtual ~RustModuleRegistry() = default;
   RustModuleRegistry(Registry& registry): registry(registry) {}
 
-  // todo; add a parameter for jsg::moduletype
-  void addBuiltinModule(::rust::Str specifier, ModuleCallback moduleCallback) override {
+  void addBuiltinModule(
+      ::rust::Str specifier, ModuleCallback moduleCallback, ModuleType moduleType) override {
     registry.addBuiltinModule(kj::str(specifier),
         [kj_specifier = kj::str(specifier), callback = kj::mv(moduleCallback)](
             ::workerd::jsg::Lock& js, ::workerd::jsg::ModuleRegistry::ResolveMethod,
@@ -34,7 +34,7 @@ struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
       return kj::Maybe(
           ModuleInfo(js, kj_specifier, kj::none, ObjectModuleInfo(js, value.As<v8::Object>())));
     },
-        ::workerd::jsg::ModuleType::INTERNAL);
+        moduleType);
   }
 
   Registry& registry;

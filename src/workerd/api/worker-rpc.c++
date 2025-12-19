@@ -1289,9 +1289,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
             } else if (isProxyOfRpcTarget || object.isInstanceOf<JsRpcTarget>(js)) {
               // Yes. It's a JsRpcTarget.
               allowInstanceProperties = false;
-            } else if (object.isInstanceOf<JsRpcStub>(js) ||
+            } else if (object.isInstanceOf<JsRpcStub>(js) || object.isInstanceOf<Fetcher>(js) ||
                 (inStub && object.isInstanceOf<JsRpcProperty>(js))) {
-              // Yes. It's a JsRpcStub. We should allow descending into the stub.
+              // Yes. It's a JsRpcStub or Fetcher. We should allow descending into the stub.
               // Note that the wildcard property of a stub is a prototype property, not an instance
               // property, so setting allowInstanceProperties = false here gets the behavior we
               // want.
@@ -1623,6 +1623,16 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     } else if (isFunctionForRpc(js, obj)) {
       // It's a plain function. It will be serialized as a single stub.
       return MakeCallPipeline::SingleStub();
+    } else if (obj.isInstanceOf<Fetcher>(js)) {
+      // It's a plain fetcher. We want to allow pipelining on it, but we also actually need to
+      // serialize it, so we can't use `SingleStub()`. Note we set `allowInstanceProperties` to
+      // `false` here because the wildcard property of a `Fetcher` is a prototype property, and
+      // that's what we want to expose for pipelining.
+      auto pipeline = kj::heap<TransientJsRpcTarget>(
+          js, IoContext::current(), obj, kj::mv(maybeDispose), kj::mv(stubDisposers), false);
+
+      return MakeCallPipeline::Object{
+        .cap = rpc::JsRpcTarget::Client(kj::mv(pipeline)), .hasDispose = hasDispose};
     } else {
       // Not an RPC object. Could be a String or other serializable types that derive from Object.
       // Similar to primitive types, we return a fake pipeline for error-handling reasons.
@@ -1768,12 +1778,24 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Own<BaseTracer>> tracer)
       : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
+        ioCtx(ioCtx),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
         props(kj::mv(props)),
         wrapperModule(kj::mv(wrapperModule)),
         tracer(kj::mv(tracer)) {}
+
+  // Override call() to emit the Return event when the top-level RPC call completes.
+  // This marks when the handler returned a value, NOT when all data has been streamed or all
+  // capabilities released.
+  kj::Promise<void> call(CallContext callContext) override {
+    return JsRpcTargetBase::call(kj::mv(callContext)).then([this]() {
+      KJ_IF_SOME(t, ioCtx.getWorkerTracer()) {
+        t.setReturn(ioCtx.now());
+      }
+    });
+  }
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     jsg::Lock& js = lock;
@@ -1842,6 +1864,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   }
 
  private:
+  IoContext& ioCtx;
   kj::Maybe<kj::String> entrypointName;
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
@@ -1942,9 +1965,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // and server as part of this session.
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
 
-    KJ_IF_SOME(t, ioctx.getWorkerTracer()) {
-      t.setReturn(ioctx.now());
-    }
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   } catch (...) {
     // Make sure the top-level capability is revoked with the same exception that `run()` is

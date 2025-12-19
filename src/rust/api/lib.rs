@@ -22,15 +22,20 @@ mod ffi {
 }
 
 pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
-    jsg::modules::add_builtin(registry, "node-internal:dns", |isolate| unsafe {
-        let mut lock = jsg::Lock::from_isolate(isolate);
-        let dns_util = jsg::Ref::new(DnsUtil {
-            _state: ResourceState::default(),
-        });
-        let mut dns_util_template = DnsUtilTemplate::new(&mut lock);
+    jsg::modules::add_builtin(
+        registry,
+        "node-internal:dns",
+        |isolate| unsafe {
+            let mut lock = jsg::Lock::from_isolate(isolate);
+            let dns_util = jsg::Ref::new(DnsUtil {
+                _state: ResourceState::default(),
+            });
+            let mut dns_util_template = DnsUtilTemplate::new(&mut lock);
 
-        jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template).into_ffi()
-    });
+            jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template).into_ffi()
+        },
+        jsg::modules::ModuleType::INTERNAL,
+    );
 }
 
 #[cfg(test)]

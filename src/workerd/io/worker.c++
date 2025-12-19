@@ -503,6 +503,13 @@ const Worker::Api& Worker::Api::current() {
   return *currentApi;
 }
 
+kj::Maybe<const Worker::Api&> Worker::Api::tryCurrent() {
+  if (currentApi != nullptr) {
+    return *currentApi;
+  }
+  return kj::none;
+}
+
 struct Worker::Impl {
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> context;
 

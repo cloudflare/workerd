@@ -21,56 +21,7 @@ This document analyzes coding patterns, inefficiencies, and duplicated logic in 
 
 ## 1. Duplicated Logic
 
-### 1.1 Backpressure Update Duplication
-
-**Location:** `internal.c++:977-993`
-
-```cpp
-void WritableStreamInternalController::increaseCurrentWriteBufferSize(
-    jsg::Lock& js, uint64_t amount) {
-  currentWriteBufferSize += amount;
-  KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    int64_t amount = highWaterMark - currentWriteBufferSize;  // shadows parameter!
-    updateBackpressure(js, amount <= 0);
-  }
-}
-
-void WritableStreamInternalController::decreaseCurrentWriteBufferSize(
-    jsg::Lock& js, uint64_t amount) {
-  currentWriteBufferSize -= amount;
-  KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    int64_t amount = highWaterMark - currentWriteBufferSize;  // shadows parameter!
-    updateBackpressure(js, amount <= 0);
-  }
-}
-```
-
-**Issues:**
-1. Both functions duplicate the backpressure update logic
-2. Variable `amount` shadows the parameter (potential bug)
-3. The backpressure check could be extracted
-
-**Suggested Fix:**
-```cpp
-void WritableStreamInternalController::adjustWriteBufferSize(
-    jsg::Lock& js, int64_t delta) {
-  currentWriteBufferSize += delta;
-  KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    int64_t desiredSize = highWaterMark - currentWriteBufferSize;
-    updateBackpressure(js, desiredSize <= 0);
-  }
-}
-
-// Usage:
-adjustWriteBufferSize(js, byteLength);   // increase
-adjustWriteBufferSize(js, -byteLength);  // decrease
-```
-
-**Impact:** Eliminates 10 lines of duplicated code, fixes variable shadowing.
-
----
-
-### 1.2 Reader/Writer Release Logic Duplication
+### 1.1 Reader/Writer Release Logic Duplication
 
 **Location:** `internal.c++:854-877` and `standard.c++:238-273`
 
@@ -102,7 +53,7 @@ void ReadableStreamInternalController::releaseReader(
 
 ---
 
-### 1.3 State Switch Pattern Duplication
+### 1.2 State Switch Pattern Duplication
 
 **Location:** Multiple files
 
@@ -136,30 +87,6 @@ auto visitStreamState(auto& state, Closed&& onClosed, Errored&& onErrored, Activ
 ```
 
 ---
-
-### 1.4 IoContext Access Pattern Duplication
-
-**Location:** Throughout the codebase
-
-```cpp
-// Pattern appears 30+ times:
-if (IoContext::hasCurrent()) {
-  auto& ioContext = IoContext::current();
-  // use ioContext
-}
-```
-
-**Suggested Fix:** Create a helper:
-
-```cpp
-template<typename Func>
-auto withIoContextIfAvailable(Func&& func) {
-  if (IoContext::hasCurrent()) {
-    return func(IoContext::current());
-  }
-  return decltype(func(std::declval<IoContext&>()))();
-}
-```
 
 ---
 

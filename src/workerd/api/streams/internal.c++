@@ -65,8 +65,9 @@ class AllReader final {
     return read<kj::byte>();
   }
 
-  kj::Promise<kj::String> readAllText() {
-    auto data = co_await read<char>(ReadOption::NULL_TERMINATE);
+  kj::Promise<kj::String> readAllText(
+      ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
+    auto data = co_await read<char>(option);
     co_return kj::String(kj::mv(data));
   }
 
@@ -74,13 +75,8 @@ class AllReader final {
   ReadableStreamSource& input;
   uint64_t limit;
 
-  enum class ReadOption {
-    NONE,
-    NULL_TERMINATE,
-  };
-
   template <typename T>
-  kj::Promise<kj::Array<T>> read(ReadOption option = ReadOption::NONE) {
+  kj::Promise<kj::Array<T>> read(ReadAllTextOption option = ReadAllTextOption::NONE) {
     // There are a few complexities in this operation that make it difficult to completely
     // optimize. The most important is that even if a stream reports an expected length
     // using tryGetLength, we really don't know how much data the stream will produce until
@@ -201,10 +197,18 @@ class AllReader final {
       }
     }
 
-    if (option == ReadOption::NULL_TERMINATE) {
+    // Strip UTF-8 BOM if requested
+    size_t skipBytes = 0;
+    if ((option & ReadAllTextOption::STRIP_BOM) && parts.size() > 0 &&
+        hasUtf8Bom(parts[0].asBytes())) {
+      skipBytes = UTF8_BOM_SIZE;
+      runningTotal -= UTF8_BOM_SIZE;
+    }
+
+    if (option & ReadAllTextOption::NULL_TERMINATE) {
       auto out = kj::heapArray<T>(runningTotal + 1);
       out[runningTotal] = '\0';
-      copyInto<T>(out, parts.asPtr());
+      copyInto<T>(out, parts.asPtr(), skipBytes);
       co_return kj::mv(out);
     }
 
@@ -220,12 +224,21 @@ class AllReader final {
   }
 
   template <typename T>
-  void copyInto(kj::ArrayPtr<T> out, kj::ArrayPtr<kj::Array<T>> in) {
-    size_t pos = 0;
+  void copyInto(kj::ArrayPtr<T> out, kj::ArrayPtr<kj::Array<T>> in, size_t skipBytes = 0) {
     for (auto& part: in) {
-      KJ_DASSERT(part.size() <= out.size() - pos);
-      memcpy(out.begin() + pos, part.begin(), part.size());
-      pos += part.size();
+      if (out.size() == 0) {
+        break;
+      }
+      // The skipBytes are used to skip the BOM on the first part only.
+      KJ_DASSERT(skipBytes <= part.size());
+      auto slicedPart = skipBytes ? part.slice(skipBytes) : part;
+      skipBytes = 0;
+      if (slicedPart.size() == 0) {
+        continue;
+      }
+      KJ_DASSERT(slicedPart.size() <= out.size());
+      out.first(slicedPart.size()).copyFrom(slicedPart);
+      out = out.slice(slicedPart.size());
     }
   }
 };
@@ -482,10 +495,11 @@ kj::Promise<kj::Array<byte>> ReadableStreamSource::readAllBytes(uint64_t limit) 
   }
 }
 
-kj::Promise<kj::String> ReadableStreamSource::readAllText(uint64_t limit) {
+kj::Promise<kj::String> ReadableStreamSource::readAllText(
+    uint64_t limit, ReadAllTextOption option) {
   try {
     AllReader allReader(*this, limit);
-    co_return co_await allReader.readAllText();
+    co_return co_await allReader.readAllText(option);
   } catch (...) {
     // TODO(soon): Temporary logging.
     auto ex = kj::getCaughtExceptionAsKj();
@@ -950,7 +964,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
       }
 
       auto prp = js.newPromiseAndResolver<void>();
-      increaseCurrentWriteBufferSize(js, byteLength);
+      adjustWriteBufferSize(js, byteLength);
       KJ_IF_SOME(o, observer) {
         o->onChunkEnqueued(byteLength);
       }
@@ -977,21 +991,12 @@ jsg::Promise<void> WritableStreamInternalController::write(
   KJ_UNREACHABLE;
 }
 
-void WritableStreamInternalController::increaseCurrentWriteBufferSize(
-    jsg::Lock& js, uint64_t amount) {
+void WritableStreamInternalController::adjustWriteBufferSize(jsg::Lock& js, int64_t amount) {
+  KJ_DASSERT(amount >= 0 || std::abs(amount) <= currentWriteBufferSize);
   currentWriteBufferSize += amount;
   KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    int64_t amount = highWaterMark - currentWriteBufferSize;
-    updateBackpressure(js, amount <= 0);
-  }
-}
-
-void WritableStreamInternalController::decreaseCurrentWriteBufferSize(
-    jsg::Lock& js, uint64_t amount) {
-  currentWriteBufferSize -= amount;
-  KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    int64_t amount = highWaterMark - currentWriteBufferSize;
-    updateBackpressure(js, amount <= 0);
+    int64_t desiredSize = highWaterMark - currentWriteBufferSize;
+    updateBackpressure(js, desiredSize <= 0);
   }
 }
 
@@ -1600,7 +1605,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         if (queue.empty()) return js.resolvedPromise();
         auto& request = check.template operator()<Write>();
         maybeResolvePromise(js, request.promise);
-        decreaseCurrentWriteBufferSize(js, amountToWrite);
+        adjustWriteBufferSize(js, -amountToWrite);
         KJ_IF_SOME(o, observer) {
           o->onChunkDequeued(amountToWrite);
         }
@@ -1615,7 +1620,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         auto handle = reason.getHandle(js);
         auto& request = check.template operator()<Write>();
         auto& writable = state.get<IoOwn<Writable>>();
-        decreaseCurrentWriteBufferSize(js, amountToWrite);
+        adjustWriteBufferSize(js, -amountToWrite);
         KJ_IF_SOME(o, observer) {
           o->onChunkDequeued(amountToWrite);
         }
@@ -2139,7 +2144,13 @@ jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
     KJ_CASE_ONEOF(readable, Readable) {
       auto source = KJ_ASSERT_NONNULL(removeSource(js));
       auto& context = IoContext::current();
-      return context.awaitIoLegacy(js, source->readAllText(limit).attach(kj::mv(source)));
+      auto option = ReadAllTextOption::NULL_TERMINATE;
+      KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+        if (flags.getStripBomInReadAllText()) {
+          option |= ReadAllTextOption::STRIP_BOM;
+        }
+      }
+      return context.awaitIoLegacy(js, source->readAllText(limit, option).attach(kj::mv(source)));
     }
   }
   KJ_UNREACHABLE;

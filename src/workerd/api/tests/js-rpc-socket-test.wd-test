@@ -18,6 +18,7 @@ const unitTests :Workerd.Config = (
           "fetcher_no_get_put_delete",
           "enable_abortsignal_rpc",
           "enhanced_error_serialization",
+          "enable_ctx_exports",
           "experimental"],
         bindings = [
           (name = "self", service = "nonClass-loop"),
@@ -27,6 +28,7 @@ const unitTests :Workerd.Config = (
           (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
           (name = "defaultExport", service = "default-loop"),
           (name = "twelve", json = "12"),
+          (name = "GreeterFactory", service = "GreeterFactory-loop"),
         ],
 
         durableObjectNamespaces = [
@@ -61,6 +63,12 @@ const unitTests :Workerd.Config = (
         http = (capnpConnectHost = "cappy")
       )
     ),
+    ( name = "GreeterFactory-loop",
+      external = (
+        address = "loopback:GreeterFactory-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
   ],
   sockets = [
     ( name = "MyService-loop",
@@ -81,6 +89,11 @@ const unitTests :Workerd.Config = (
     ( name = "default-loop",
       address = "loopback:default-loop",
       service = (name = "js-rpc-test"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    ( name = "GreeterFactory-loop",
+      address = "loopback:GreeterFactory-loop",
+      service = (name = "js-rpc-test", entrypoint = "GreeterFactory"),
       http = (capnpConnectHost = "cappy")
     ),
   ],

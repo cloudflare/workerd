@@ -272,6 +272,8 @@ struct WorkerdApi::Impl final {
             .noSubstituteNull = features.getNoSubstituteNull(),
             .unwrapCustomThenables = features.getUnwrapCustomThenables(),
             .fetchIterableTypeSupport = features.getFetchIterableTypeSupport(),
+            .fetchIterableTypeSupportOverrideAdjustment =
+                features.getFetchIterableTypeSupportOverrideAdjustment(),
             .fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API),
           }) {}
     operator const CompatibilityFlags::Reader() const {

@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Test to validate timing semantics for JSRPC invocations with streaming responses.
+# This test verifies that the Return event is emitted when the handler returns,
+# NOT when the stream is fully consumed.
+#
+# Expected timeline:
+#   T=0:      Onset event (invocation starts)
+#   T=~500ms: Return event (handler returns ReadableStream after 500ms sleep)
+#   T=~950ms: Outcome event (stream fully consumed after ~450ms more)
+#
+# If Return event occurs at T=~950ms instead of T=~500ms, this indicates a bug
+# where setReturn() is called when capabilities are released rather than
+# when the handler actually returns.
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "jsrpc-timing-test", worker = .mainWorker),
+    (name = "tail", worker = .tailWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "jsrpc-timing-test.js")
+  ],
+  compatibilityDate = "2024-01-01",
+  compatibilityFlags = ["nodejs_compat", "experimental", "precise_timers"],
+  bindings = [
+    (name = "StreamingService", service = (name = "jsrpc-timing-test", entrypoint = "StreamingService")),
+  ],
+  streamingTails = ["tail"],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "jsrpc-timing-test-tail.js")
+  ],
+  compatibilityDate = "2024-01-01",
+  compatibilityFlags = ["experimental", "nodejs_compat", "precise_timers"],
+);
