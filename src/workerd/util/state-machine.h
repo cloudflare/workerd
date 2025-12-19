@@ -3111,6 +3111,21 @@ class ComposableStateMachine {
     return pendingState.template is<S>();
   }
 
+  // Get the pending state if it matches the specified type.
+  template <typename S>
+  kj::Maybe<S&> tryGetPendingState() KJ_LIFETIMEBOUND
+    requires(HAS_PENDING) && (PendingSpec::template contains<S>)
+  {
+    return pendingState.template tryGet<S>();
+  }
+
+  template <typename S>
+  kj::Maybe<const S&> tryGetPendingState() const KJ_LIFETIMEBOUND
+    requires(HAS_PENDING) && (PendingSpec::template contains<S>)
+  {
+    return pendingState.template tryGet<S>();
+  }
+
   // Clear any pending state without applying it.
   void clearPendingState()
     requires(HAS_PENDING)

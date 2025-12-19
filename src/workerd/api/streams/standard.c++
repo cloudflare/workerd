@@ -561,45 +561,45 @@ int getHighWaterMark(
 // It is possible for the controller state to be released synchronously while
 // we are in the middle of a read. When that happens we need to defer the actual
 // close/error state change until the read call is complete. deferControllerStateChange
-// handles this for us by making sure that pendingReadCount is
-// incremented until the read operation completes and deferring
-// a state change until it is 0
+// handles this for us by using the state machine's operation tracking to defer
+// pending close/error transitions until the read is complete.
 template <typename Controller>
 jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     Controller& controller,
     kj::FunctionParam<jsg::Promise<ReadResult>()> readCallback) {
-  bool decrementCount = true;
+  bool endOperation = true;
   // The readCallback and the controller.doClose(..) and controller.doError(...)
   // methods, as well as the methods can trigger JavaScript errors to be thrown
   // synchronously in some cases. We want to make sure non-fatal errors cause the
   // stream to error and only fatal cases bubble up.
   return js.tryCatch([&] {
-    controller.pendingReadCount++;
+    controller.state.beginOperation();
     auto result = readCallback();
-    decrementCount = false;
-    --controller.pendingReadCount;
+    endOperation = false;
 
     KJ_ASSERT(!js.v8Isolate->IsExecutionTerminating());
 
-    if (!controller.isReadPending()) {
-      KJ_IF_SOME(state, controller.maybePendingState) {
-        KJ_SWITCH_ONEOF(state) {
-          KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-            controller.doClose(js);
-          }
-          KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-            controller.doError(js, errored.getHandle(js));
-          }
+    // endOperation() will automatically apply any pending state if this was the last operation.
+    // Returns true if a pending state was applied.
+    if (controller.state.endOperation()) {
+      // A pending state was applied. Call the appropriate callback.
+      if (controller.state.template is<StreamStates::Closed>()) {
+        controller.lock.onClose(js);
+      } else if (controller.state.template is<StreamStates::Errored>()) {
+        KJ_IF_SOME(err, controller.state.template tryGet<StreamStates::Errored>()) {
+          controller.lock.onError(js, err.getHandle(js));
         }
-        controller.maybePendingState = kj::none;
       }
     }
 
     return kj::mv(result);
   }, [&](jsg::Value exception) -> jsg::Promise<ReadResult> {
-    if (decrementCount) --controller.pendingReadCount;
+    if (endOperation) {
+      // Clear any pending state since we're erroring
+      controller.state.clearPendingState();
+      (void)controller.state.endOperation();
+    }
     controller.doError(js, exception.getHandle(js));
-    controller.maybePendingState = kj::none;
     return js.rejectedPromise<ReadResult>(kj::mv(exception));
   });
 }
@@ -742,7 +742,9 @@ class ReadableStreamJsController final: public ReadableStreamController {
   //   ByteReadable -> Closed (doClose() or cancel() called)
   //   ByteReadable -> Errored (doError() called)
   // Note: No single ActiveState since there are two active variants.
+  // PendingStates allows Closed/Errored transitions to be deferred during reads.
   using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+      PendingStates<StreamStates::Closed, StreamStates::Errored>,
       Initial,
       StreamStates::Closed,
       StreamStates::Errored,
@@ -756,22 +758,10 @@ class ReadableStreamJsController final: public ReadableStreamController {
   // The lock state is separate because a closed or errored stream can still be locked.
   ReadableLockImpl lock;
 
-  size_t pendingReadCount = 0;
-  kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = kj::none;
   bool disturbed = false;
 
   template <typename T>
   jsg::Promise<T> readAll(jsg::Lock& js, uint64_t limit);
-
-  void setPendingState(kj::OneOf<StreamStates::Closed, StreamStates::Errored> pending) {
-    if (maybePendingState == kj::none) {
-      maybePendingState = kj::mv(pending);
-    }
-  }
-
-  bool isReadPending() const {
-    return pendingReadCount > 0;
-  }
 
   friend ReadableLockImpl;
   friend ReadableLockImpl::PipeLocked;
@@ -2267,15 +2257,12 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
     return consumer->cancel(js, reason.getHandle(js));
   };
 
-  KJ_IF_SOME(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(pendingState) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return js.resolvedPromise();
-      }
-      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-        return js.rejectedPromise<void>(errored.addRef(js));
-      }
-    }
+  // Check for pending state first (deferred close/error during a read operation)
+  if (state.pendingStateIs<StreamStates::Closed>()) {
+    return js.resolvedPromise();
+  }
+  KJ_IF_SOME(pendingError, state.tryGetPendingState<StreamStates::Errored>()) {
+    return js.rejectedPromise<void>(pendingError.addRef(js));
   }
 
   KJ_SWITCH_ONEOF(state) {
@@ -2314,12 +2301,13 @@ void ReadableStreamJsController::doClose(jsg::Lock& js) {
   // If already in a terminal state, nothing to do.
   if (state.isTerminal()) return;
 
-  if (isReadPending()) {
-    setPendingState(StreamStates::Closed());
-  } else {
-    state.transitionTo<StreamStates::Closed>();
+  // deferTransitionTo will defer if an operation is in progress, otherwise transition immediately.
+  // Returns true if transition happened immediately.
+  if (state.deferTransitionTo<StreamStates::Closed>()) {
     lock.onClose(js);
   }
+  // If deferred, lock.onClose will be called when the pending state is applied
+  // via applyPendingState in deferControllerStateChange.
 }
 
 // As with doClose(), doError() finalizes the error state of this ReadableStream.
@@ -2332,12 +2320,13 @@ void ReadableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   // If already in a terminal state, nothing to do.
   if (state.isTerminal()) return;
 
-  if (isReadPending()) {
-    setPendingState(js.v8Ref(reason));
-  } else {
-    state.transitionTo<StreamStates::Errored>(js.v8Ref(reason));
+  // deferTransitionTo will defer if an operation is in progress, otherwise transition immediately.
+  // Returns true if transition happened immediately.
+  if (state.deferTransitionTo<StreamStates::Errored>(js.v8Ref(reason))) {
     lock.onError(js, reason);
   }
+  // If deferred, lock.onError will be called when the pending state is applied
+  // via applyPendingState in deferControllerStateChange.
 }
 
 bool ReadableStreamJsController::isByteOriented() const {
@@ -2345,17 +2334,14 @@ bool ReadableStreamJsController::isByteOriented() const {
 }
 
 bool ReadableStreamJsController::isClosedOrErrored() const {
-  if (maybePendingState != kj::none) {
-    return true;
-  }
-  return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();
+  // Check if we're in a terminal state or have one pending
+  return state.isTerminal() || state.hasPendingState();
 }
 
 bool ReadableStreamJsController::isClosed() const {
-  KJ_IF_SOME(s, maybePendingState) {
-    return s.is<StreamStates::Closed>();
-  }
-  return state.is<StreamStates::Closed>();
+  // Check current state first, then pending state
+  if (state.is<StreamStates::Closed>()) return true;
+  return state.pendingStateIs<StreamStates::Closed>();
 }
 
 bool ReadableStreamJsController::isDisturbed() {
@@ -2401,17 +2387,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
           js.v8TypeError("Unable to use a zero-length ArrayBuffer."_kj));
     }
 
-    if (state.is<StreamStates::Closed>() || maybePendingState != kj::none) {
-      KJ_IF_SOME(pendingState, maybePendingState) {
-        KJ_SWITCH_ONEOF(pendingState) {
-          KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-            // Fall through to the BYOB read case below.
-          }
-          KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-            return js.rejectedPromise<ReadResult>(errored.addRef(js));
-          }
-        }
-      }
+    // Check for pending error first (deferred error during a prior read operation)
+    KJ_IF_SOME(pendingError, state.tryGetPendingState<StreamStates::Errored>()) {
+      return js.rejectedPromise<ReadResult>(pendingError.addRef(js));
+    }
+
+    if (state.is<StreamStates::Closed>() || state.pendingStateIs<StreamStates::Closed>()) {
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
@@ -2425,17 +2406,14 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     }
   }
 
-  KJ_IF_SOME(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(pendingState) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        // The closed state for BYOB reads is handled in the maybeByobOptions check above.
-        KJ_ASSERT(maybeByobOptions == kj::none);
-        return js.resolvedPromise(ReadResult{.done = true});
-      }
-      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-        return js.rejectedPromise<ReadResult>(errored.addRef(js));
-      }
-    }
+  // Check for pending state (deferred close/error during a prior read operation)
+  if (state.pendingStateIs<StreamStates::Closed>()) {
+    // The closed state for BYOB reads is handled in the maybeByobOptions check above.
+    KJ_ASSERT(maybeByobOptions == kj::none);
+    return js.resolvedPromise(ReadResult{.done = true});
+  }
+  KJ_IF_SOME(pendingError, state.tryGetPendingState<StreamStates::Errored>()) {
+    return js.rejectedPromise<ReadResult>(pendingError.addRef(js));
   }
 
   KJ_SWITCH_ONEOF(state) {
@@ -2477,25 +2455,22 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
 
   // This will leave this stream locked, disturbed, and closed.
 
-  KJ_IF_SOME(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(pendingState) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return Tee{
-          .branch1 = js.alloc<ReadableStream>(
-              kj::heap<ReadableStreamJsController>(StreamStates::Closed())),
-          .branch2 = js.alloc<ReadableStream>(
-              kj::heap<ReadableStreamJsController>(StreamStates::Closed())),
-        };
-      }
-      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-        return Tee{
-          .branch1 =
-              js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(errored.addRef(js))),
-          .branch2 =
-              js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(errored.addRef(js))),
-        };
-      }
-    }
+  // Check for pending state first (deferred close/error during a prior read operation)
+  if (state.pendingStateIs<StreamStates::Closed>()) {
+    return Tee{
+      .branch1 =
+          js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(StreamStates::Closed())),
+      .branch2 =
+          js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(StreamStates::Closed())),
+    };
+  }
+  KJ_IF_SOME(pendingError, state.tryGetPendingState<StreamStates::Errored>()) {
+    return Tee{
+      .branch1 =
+          js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(pendingError.addRef(js))),
+      .branch2 =
+          js.alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(pendingError.addRef(js))),
+    };
   }
 
   KJ_SWITCH_ONEOF(state) {
@@ -2596,13 +2571,9 @@ kj::Maybe<ReadableStreamController::PipeController&> ReadableStreamJsController:
 }
 
 void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_SOME(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(pendingState) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
-      KJ_CASE_ONEOF(error, StreamStates::Errored) {
-        visitor.visit(error);
-      }
-    }
+  // Visit pending state if it's an error (Closed has no GC-traceable content)
+  KJ_IF_SOME(pendingError, state.tryGetPendingState<StreamStates::Errored>()) {
+    visitor.visit(pendingError);
   }
 
   // Note: We cannot use state.visitForGc(visitor) here because the state machine's
@@ -2625,7 +2596,8 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
-  if (maybePendingState != kj::none) {
+  // If there's a pending state transition, return none
+  if (state.hasPendingState()) {
     return kj::none;
   }
 
@@ -2650,22 +2622,18 @@ kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
 }
 
 kj::Maybe<v8::Local<v8::Value>> ReadableStreamJsController::isErrored(jsg::Lock& js) {
-  KJ_IF_SOME(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(pendingState) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return kj::none;
-      }
-      KJ_CASE_ONEOF(error, StreamStates::Errored) {
-        return error.getHandle(js);
-      }
-    }
+  // Check for pending error first
+  KJ_IF_SOME(pendingError, state.tryGetPendingState<StreamStates::Errored>()) {
+    return pendingError.getHandle(js);
   }
+  // Pending Closed means not errored, so we can just check current state
   return state.tryGet<StreamStates::Errored>().map(
       [&](jsg::Value& reason) { return reason.getHandle(js); });
 }
 
 bool ReadableStreamJsController::canCloseOrEnqueue() {
-  if (maybePendingState != kj::none) {
+  // If there's a pending state transition, can't close or enqueue
+  if (state.hasPendingState()) {
     return false;
   }
 
@@ -2698,7 +2666,8 @@ bool ReadableStreamJsController::hasBackpressure() {
 
 kj::Maybe<kj::OneOf<DefaultController, ByobController>> ReadableStreamJsController::
     getController() {
-  if (maybePendingState != kj::none) {
+  // If there's a pending state transition, return none
+  if (state.hasPendingState()) {
     return kj::none;
   }
   KJ_SWITCH_ONEOF(state) {
@@ -3221,7 +3190,7 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
     jsg::Lock& js, bool ignored /* unused */) {
   KJ_ASSERT(!isLockedToReader());
   KJ_ASSERT(!isDisturbed());
-  KJ_ASSERT(!isReadPending(), "Unable to detach with read pending");
+  KJ_ASSERT(!state.hasOperationInProgress(), "Unable to detach with read pending");
   auto controller = kj::heap<ReadableStreamJsController>();
   controller->expectedLength = expectedLength;
   disturbed = true;
@@ -4183,13 +4152,9 @@ void ReadableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) c
 
   tracker.trackField("lock", lock);
 
-  KJ_IF_SOME(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(pendingState) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
-      KJ_CASE_ONEOF(error, StreamStates::Errored) {
-        tracker.trackField("pendingError", error);
-      }
-    }
+  // Track pending error state if present (Closed has no trackable content)
+  KJ_IF_SOME(pendingError, state.tryGetPendingState<StreamStates::Errored>()) {
+    tracker.trackField("pendingError", pendingError);
   }
 }
 
