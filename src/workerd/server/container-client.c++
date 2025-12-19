@@ -107,16 +107,22 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String dockerPath,
     kj::String containerName,
     kj::String imageName,
-    kj::TaskSet& waitUntilTasks)
+    kj::TaskSet& waitUntilTasks,
+    kj::Function<void()> cleanupCallback)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
       dockerPath(kj::mv(dockerPath)),
       containerName(kj::encodeUriComponent(kj::mv(containerName))),
       imageName(kj::mv(imageName)),
-      waitUntilTasks(waitUntilTasks) {}
+      waitUntilTasks(waitUntilTasks),
+      cleanupCallback(kj::mv(cleanupCallback)) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
+  // Call the cleanup callback to remove this client from the ActorNamespace map
+  cleanupCallback();
+
+  // Destroy the Docker container
   waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", containerName, "?force=true"))
                          .ignoreResult());
@@ -427,7 +433,19 @@ kj::Promise<void> ContainerClient::signal(SignalContext context) {
 }
 
 kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutContext context) {
-  // empty implementation on purpose
+  auto params = context.getParams();
+  auto durationMs = params.getDurationMs();
+
+  JSG_REQUIRE(
+      durationMs > 0, Error, "setInactivityTimeout() requires durationMs > 0, got ", durationMs);
+
+  auto timeout = durationMs * kj::MILLISECONDS;
+
+  // Add a timer task that holds a reference to this ContainerClient.
+  waitUntilTasks.add(timer.afterDelay(timeout).then([self = kj::addRef(*this)]() {
+    // This callback does nothing but drop the reference
+  }));
+
   co_return;
 }
 
@@ -442,6 +460,10 @@ kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
 
 kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
   KJ_UNIMPLEMENTED("listenTcp not implemented for Docker containers - use port mapping instead");
+}
+
+kj::Own<ContainerClient> ContainerClient::addRef() {
+  return kj::addRef(*this);
 }
 
 }  // namespace workerd::server
