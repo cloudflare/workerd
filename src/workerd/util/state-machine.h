@@ -1288,9 +1288,8 @@ class StateMachine {
 
   // Get the active state, throwing KJ_REQUIRE if not active.
   //
-  // WARNING: This returns an UNLOCKED reference - same risks as get()/tryGet().
-  // The reference can dangle if the machine transitions.
-  ActiveStateType& requireActive(kj::StringPtr message = nullptr) KJ_LIFETIMEBOUND
+  // WARNING: Returns an UNLOCKED reference - can dangle if the machine transitions.
+  ActiveStateType& requireActiveUnsafe(kj::StringPtr message = nullptr) KJ_LIFETIMEBOUND
     requires(HAS_ACTIVE)
   {
     if (message == nullptr) {
@@ -1300,7 +1299,7 @@ class StateMachine {
     return state.template get<ActiveStateType>();
   }
 
-  const ActiveStateType& requireActive(kj::StringPtr message = nullptr) const KJ_LIFETIMEBOUND
+  const ActiveStateType& requireActiveUnsafe(kj::StringPtr message = nullptr) const KJ_LIFETIMEBOUND
     requires(HAS_ACTIVE)
   {
     if (message == nullptr) {

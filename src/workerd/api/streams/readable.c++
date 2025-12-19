@@ -21,7 +21,7 @@ ReaderImpl::ReaderImpl(ReadableStreamController::Reader& reader)
 }
 
 ReaderImpl::~ReaderImpl() noexcept(false) {
-  KJ_IF_SOME(attached, state.tryGetActive()) {
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
     attached.stream->getController().releaseReader(reader, kj::none);
   }
 }
@@ -50,7 +50,7 @@ jsg::Promise<void> ReaderImpl::cancel(
   if (state.is<Closed>()) {
     return js.resolvedPromise();
   }
-  KJ_IF_SOME(attached, state.tryGetActive()) {
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
     // In some edge cases, this reader is the last thing holding a strong
     // reference to the stream. Calling cancel might cause the readers strong
     // reference to be cleared, so let's make sure we keep a reference to
@@ -83,7 +83,7 @@ jsg::Promise<ReadResult> ReaderImpl::read(
     return js.rejectedPromise<ReadResult>(
         js.v8TypeError("This ReadableStream has been closed."_kj));
   }
-  KJ_IF_SOME(attached, state.tryGetActive()) {
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
     KJ_IF_SOME(options, byobOptions) {
       // Per the spec, we must perform these checks before disturbing the stream.
       size_t atLeast = options.atLeast.orDefault(1);
@@ -116,7 +116,7 @@ void ReaderImpl::releaseLock(jsg::Lock& js) {
   // modification to the spec that we have not yet implemented.
   assertAttachedOrTerminal();
   // Closed and Released states are no-ops.
-  KJ_IF_SOME(attached, state.tryGetActive()) {
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
     // In some edge cases, this reader is the last thing holding a strong
     // reference to the stream. Calling releaseLock might cause the readers strong
     // reference to be cleared, so let's make sure we keep a reference to
@@ -128,7 +128,7 @@ void ReaderImpl::releaseLock(jsg::Lock& js) {
 }
 
 void ReaderImpl::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_SOME(attached, state.tryGetActive()) {
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
     visitor.visit(attached.stream);
   }
   visitor.visit(closedPromise);
@@ -714,7 +714,7 @@ size_t ReaderImpl::jsgGetMemorySelfSize() const {
 }
 
 void ReaderImpl::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  KJ_IF_SOME(attached, state.tryGetActive()) {
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
     tracker.trackField("stream", attached.stream);
   }
   tracker.trackField("closedPromise", closedPromise);

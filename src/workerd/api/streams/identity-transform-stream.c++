@@ -149,9 +149,9 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     // Already closed by writable side - nothing to do.
     if (state.is<Closed>()) return;
 
-    KJ_IF_SOME(request, state.tryGet<ReadRequest>()) {
+    KJ_IF_SOME(request, state.tryGetUnsafe<ReadRequest>()) {
       request.fulfiller->fulfill(static_cast<size_t>(0));
-    } else KJ_IF_SOME(request, state.tryGet<WriteRequest>()) {
+    } else KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
       request.fulfiller->reject(kj::cp(reason));
     }
     // Idle state is fine, just transition to error.
@@ -187,9 +187,9 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     // Already errored - nothing to do.
     if (state.isErrored()) return;
 
-    KJ_IF_SOME(request, state.tryGet<ReadRequest>()) {
+    KJ_IF_SOME(request, state.tryGetUnsafe<ReadRequest>()) {
       request.fulfiller->reject(kj::cp(reason));
-    } else KJ_IF_SOME(request, state.tryGet<WriteRequest>()) {
+    } else KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
       // If the fulfiller is not waiting, the write promise was already
       // canceled and no one is waiting on it.
       KJ_ASSERT(!request.fulfiller->isWaiting(),
@@ -206,7 +206,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
  private:
   kj::Promise<size_t> readHelper(kj::ArrayPtr<kj::byte> bytes) {
     // Handle error state first.
-    KJ_IF_SOME(exception, state.tryGetError()) {
+    KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
       return kj::cp(exception);
     }
 
@@ -221,7 +221,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     }
 
     // Check for pending write request.
-    KJ_IF_SOME(request, state.tryGet<WriteRequest>()) {
+    KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
       if (bytes.size() >= request.bytes.size()) {
         // The write buffer will entirely fit into our read buffer; fulfill both requests.
         memcpy(bytes.begin(), request.bytes.begin(), request.bytes.size());
@@ -249,7 +249,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
 
   kj::Promise<void> writeHelper(kj::ArrayPtr<const kj::byte> bytes) {
     // Handle error state first.
-    KJ_IF_SOME(exception, state.tryGetError()) {
+    KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
       return kj::cp(exception);
     }
 
@@ -264,7 +264,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     }
 
     // Check for pending read request.
-    KJ_IF_SOME(request, state.tryGet<ReadRequest>()) {
+    KJ_IF_SOME(request, state.tryGetUnsafe<ReadRequest>()) {
       if (!request.fulfiller->isWaiting()) {
         // Oops, the request was canceled. Currently, this happen in particular when pumping a
         // response body to the client, and the client disconnects, cancelling the pump. In this

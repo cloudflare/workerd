@@ -620,7 +620,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
 
       auto promise =
           kj::evalNow([&] { return readable->tryRead(bytes.begin(), atLeast, bytes.size()); });
-      KJ_IF_SOME(readerLock, readState.tryGet<ReaderLocked>()) {
+      KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
         promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
       }
 
@@ -702,7 +702,7 @@ jsg::Promise<void> ReadableStreamInternalController::cancel(
     jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
   disturbed = true;
 
-  KJ_IF_SOME(errored, state.tryGet<StreamStates::Errored>()) {
+  KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
     return js.rejectedPromise<void>(errored.getHandle(js));
   }
 
@@ -714,12 +714,12 @@ jsg::Promise<void> ReadableStreamInternalController::cancel(
 void ReadableStreamInternalController::doCancel(
     jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
   auto exception = reasonToException(js, maybeReason);
-  KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
+  KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     KJ_IF_SOME(canceler, locked.getCanceler()) {
       canceler->cancel(kj::cp(exception));
     }
   }
-  KJ_IF_SOME(readable, state.tryGet<Readable>()) {
+  KJ_IF_SOME(readable, state.tryGetUnsafe<Readable>()) {
     readable->cancel(kj::mv(exception));
     doClose(js);
   }
@@ -730,7 +730,7 @@ void ReadableStreamInternalController::doClose(jsg::Lock& js) {
   if (state.isTerminal()) return;
 
   state.transitionTo<StreamStates::Closed>();
-  KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
+  KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
   } else {
     (void)readState.transitionFromTo<PipeLocked, Unlocked>();
@@ -742,7 +742,7 @@ void ReadableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
   if (state.isTerminal()) return;
 
   state.transitionTo<StreamStates::Errored>(js.v8Ref(reason));
-  KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
+  KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
   } else {
     (void)readState.transitionFromTo<PipeLocked, Unlocked>();
@@ -872,7 +872,7 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader)
 
 void ReadableStreamInternalController::releaseReader(
     Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) {
-  KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
+  KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     KJ_ASSERT(&locked.getReader() == &reader);
     KJ_IF_SOME(js, maybeJs) {
       KJ_IF_SOME(canceler, locked.getCanceler()) {
@@ -1007,7 +1007,7 @@ void WritableStreamInternalController::adjustWriteBufferSize(jsg::Lock& js, int6
 }
 
 void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool backpressure) {
-  KJ_IF_SOME(writerLock, writeState.tryGet<WriterLocked>()) {
+  KJ_IF_SOME(writerLock, writeState.tryGetUnsafe<WriterLocked>()) {
     if (backpressure) {
       // Per the spec, when backpressure is updated and is true, we replace the existing
       // ready promise on the writer with a new pending promise, regardless of whether
@@ -1143,7 +1143,7 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
     return kj::mv(promise);
   }
 
-  KJ_IF_SOME(writable, state.tryGet<IoOwn<Writable>>()) {
+  KJ_IF_SOME(writable, state.tryGetUnsafe<IoOwn<Writable>>()) {
     auto exception = js.exceptionToKj(js.v8Ref(reason));
 
     if (FeatureFlags::get(js).getInternalWritableStreamAbortClearsQueue()) {
@@ -1218,7 +1218,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   KJ_IF_SOME(errored, sourceLock.tryGetErrored(js)) {
     sourceLock.release(js);
     if (!preventAbort) {
-      if (state.tryGet<IoOwn<Writable>>() != kj::none) {
+      if (state.tryGetUnsafe<IoOwn<Writable>>() != kj::none) {
         return doAbort(js, errored, {.reject = true, .handled = pipeThrough});
       }
     }
@@ -1231,7 +1231,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   // If the destination has errored, the spec requires us to reject the pipe promise and, if
   // preventCancel is false, error the source (Propagate error backward). The errored destination
   // will be unlocked immediately.
-  KJ_IF_SOME(errored, state.tryGet<StreamStates::Errored>()) {
+  KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
     writeState.transitionTo<Unlocked>();
     if (!preventCancel) {
       sourceLock.release(js, errored.getHandle(js));
@@ -1402,7 +1402,7 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
 
 void WritableStreamInternalController::releaseWriter(
     Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) {
-  KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
+  KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
     KJ_ASSERT(&locked.getWriter() == &writer);
     KJ_IF_SOME(js, maybeJs) {
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
@@ -1441,7 +1441,7 @@ void WritableStreamInternalController::doClose(jsg::Lock& js) {
   if (state.isTerminal()) return;
 
   state.transitionTo<StreamStates::Closed>();
-  KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
+  KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
     maybeResolvePromise(js, locked.getReadyFulfiller());
     writeState.transitionTo<Locked>();
@@ -1456,7 +1456,7 @@ void WritableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
   if (state.isTerminal()) return;
 
   state.transitionTo<StreamStates::Errored>(js.v8Ref(reason));
-  KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
+  KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
     writeState.transitionTo<Locked>();
@@ -1564,7 +1564,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
   };
 
   const auto maybeAbort = [this](jsg::Lock& js, auto& request) -> bool {
-    auto& writable = KJ_ASSERT_NONNULL(state.tryGet<IoOwn<Writable>>());
+    auto& writable = KJ_ASSERT_NONNULL(state.tryGetUnsafe<IoOwn<Writable>>());
     KJ_IF_SOME(pendingAbort, WritableStreamController::PendingAbort::dequeue(maybePendingAbort)) {
       auto ex = js.exceptionToKj(pendingAbort->reason.addRef(js));
       writable->abort(kj::mv(ex));
@@ -1594,7 +1594,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       }
 
       // writeLoop() is only called with the sink in the Writable state.
-      auto& writable = state.get<IoOwn<Writable>>();
+      auto& writable = state.getUnsafe<IoOwn<Writable>>();
       auto check = makeChecker();
 
       auto amountToWrite = request->bytes.size();
@@ -1631,7 +1631,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         if (queue.empty()) return js.resolvedPromise();
         auto handle = reason.getHandle(js);
         auto& request = check.template operator()<Write>();
-        auto& writable = state.get<IoOwn<Writable>>();
+        auto& writable = state.getUnsafe<IoOwn<Writable>>();
         adjustWriteBufferSize(js, -amountToWrite);
         KJ_IF_SOME(o, observer) {
           o->onChunkDequeued(amountToWrite);
@@ -1650,7 +1650,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // The destination should still be Writable, because the only way to transition to an
       // errored state would have been if a write request in the queue ahead of us encountered an
       // error. But in that case, the queue would already have been drained and we wouldn't be here.
-      auto& writable = state.get<IoOwn<Writable>>();
+      auto& writable = state.getUnsafe<IoOwn<Writable>>();
 
       if (request->checkSignal(js)) {
         // If the signal is triggered, checkSignal will handle erroring the source and destination.
@@ -1711,7 +1711,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
             // Even through we're not going to close the destination, we still want the
             // pipe promise itself to be rejected in this case.
             maybeRejectPromise<void>(js, request.promise, errored);
-          } else KJ_IF_SOME(errored, state.tryGet<StreamStates::Errored>()) {
+          } else KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
             maybeRejectPromise<void>(js, request.promise, errored.getHandle(js));
           } else {
             maybeResolvePromise(js, request.promise);
@@ -1770,7 +1770,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
     }
     KJ_CASE_ONEOF(request, kj::Own<Close>) {
       // writeLoop() is only called with the sink in the Writable state.
-      auto& writable = state.get<IoOwn<Writable>>();
+      auto& writable = state.getUnsafe<IoOwn<Writable>>();
       auto check = makeChecker();
 
       return ioContext.awaitIo(js, writable->canceler.wrap(writable->sink->end()))
@@ -1822,7 +1822,7 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
       auto promise = kj::mv(this->promise);
 
       if (!preventAbort) {
-        KJ_IF_SOME(writable, parent.state.tryGet<IoOwn<Writable>>()) {
+        KJ_IF_SOME(writable, parent.state.tryGetUnsafe<IoOwn<Writable>>()) {
           auto ex = js.exceptionToKj(reason);
           writable->abort(kj::mv(ex));
           parent.drain(js, reason);
@@ -1845,7 +1845,7 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
 }
 
 jsg::Promise<void> WritableStreamInternalController::Pipe::write(v8::Local<v8::Value> handle) {
-  auto& writable = parent.state.get<IoOwn<Writable>>();
+  auto& writable = parent.state.getUnsafe<IoOwn<Writable>>();
   // TODO(soon): Once jsg::BufferSource lands and we're able to use it, this can be simplified.
   KJ_ASSERT(handle->IsArrayBuffer() || handle->IsArrayBufferView());
   std::shared_ptr<v8::BackingStore> store;
@@ -1897,7 +1897,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
   KJ_IF_SOME(errored, source.tryGetErrored(js)) {
     source.release(js);
     if (!preventAbort) {
-      KJ_IF_SOME(writable, parent.state.tryGet<IoOwn<Writable>>()) {
+      KJ_IF_SOME(writable, parent.state.tryGetUnsafe<IoOwn<Writable>>()) {
         auto ex = js.exceptionToKj(js.v8Ref(errored));
         writable->abort(kj::mv(ex));
         return js.rejectedPromise<void>(errored);
@@ -1910,7 +1910,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
     return js.resolvedPromise();
   }
 
-  KJ_IF_SOME(errored, parent.state.tryGet<StreamStates::Errored>()) {
+  KJ_IF_SOME(errored, parent.state.tryGetUnsafe<StreamStates::Errored>()) {
     parent.writeState.transitionTo<Unlocked>();
     if (!preventCancel) {
       auto reason = errored.getHandle(js);
@@ -1929,7 +1929,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
         // We'll only be here if the sink is in the Writable state.
         auto& ioContext = IoContext::current();
         return ioContext
-            .awaitIo(js, parent.state.get<IoOwn<Writable>>()->sink->end(), [](jsg::Lock&) {})
+            .awaitIo(js, parent.state.getUnsafe<IoOwn<Writable>>()->sink->end(), [](jsg::Lock&) {})
             .then(js, ioContext.addFunctor([this](jsg::Lock& js) { parent.finishClose(js); }),
                 ioContext.addFunctor([this](jsg::Lock& js, jsg::Value reason) {
           parent.finishError(js, reason.getHandle(js));
@@ -1977,7 +1977,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
     // Undefined and null are perfectly valid values to pass through a ReadableStream,
     // but we can't interpret them as bytes so if we get them here, we error the pipe.
     auto error = js.v8TypeError("This WritableStream only supports writing byte types."_kj);
-    auto& writable = parent.state.get<IoOwn<Writable>>();
+    auto& writable = parent.state.getUnsafe<IoOwn<Writable>>();
     auto ex = js.exceptionToKj(js.v8Ref(error));
     writable->abort(kj::mv(ex));
     // The error condition will be handled at the start of the next iteration.
@@ -2030,7 +2030,7 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
       }
     }
   }
-  KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
+  KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
     visitor.visit(locked);
   }
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
@@ -2039,7 +2039,7 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 void ReadableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
+  KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     visitor.visit(locked);
   }
 }
@@ -2058,7 +2058,7 @@ bool ReadableStreamInternalController::PipeLocked::isClosed() {
 
 kj::Maybe<v8::Local<v8::Value>> ReadableStreamInternalController::PipeLocked::tryGetErrored(
     jsg::Lock& js) {
-  KJ_IF_SOME(errored, inner.state.tryGet<StreamStates::Errored>()) {
+  KJ_IF_SOME(errored, inner.state.tryGetUnsafe<StreamStates::Errored>()) {
     return errored.getHandle(js);
   }
   return kj::none;
@@ -2092,7 +2092,7 @@ kj::Maybe<kj::Promise<void>> ReadableStreamInternalController::PipeLocked::tryPu
     WritableStreamSink& sink, bool end) {
   // This is safe because the caller should have already checked isClosed and tryGetErrored
   // and handled those before calling tryPumpTo.
-  auto& readable = KJ_ASSERT_NONNULL(inner.state.tryGet<Readable>());
+  auto& readable = KJ_ASSERT_NONNULL(inner.state.tryGetUnsafe<Readable>());
   return IoContext::current().waitForDeferredProxy(readable->pumpTo(sink, end));
 }
 
@@ -2230,7 +2230,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
 }
 
 StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {
-  return state.tryGet<Readable>()
+  return state.tryGetUnsafe<Readable>()
       .map([](Readable& readable) {
     return readable->getPreferredEncoding();
   }).orDefault(StreamEncoding::IDENTITY);
@@ -2270,7 +2270,7 @@ void WritableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& trac
       tracker.trackFieldWithSize("IoOwn<WritableStreamSink>", sizeof(IoOwn<WritableStreamSink>));
     }
   }
-  KJ_IF_SOME(writerLocked, writeState.tryGet<WriterLocked>()) {
+  KJ_IF_SOME(writerLocked, writeState.tryGetUnsafe<WriterLocked>()) {
     tracker.trackField("writerLocked", writerLocked);
   }
   tracker.trackField("pendingAbort", maybePendingAbort);
