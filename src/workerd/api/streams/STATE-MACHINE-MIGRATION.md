@@ -107,9 +107,11 @@ These track lock states - different semantic pattern, may not benefit as much:
 
 ## Tier 4: Hard (Complex Multi-State with Pending State Logic)
 
-- [ ] **standard.h:221** - `ReadableImpl` (template)
+- [x] **standard.h:221** - `ReadableImpl` (template)
   - `kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue>`
-  - With maybePendingState pattern
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, ActiveState<Queue>, ...>`
+  - Uses `isInactive()` for checking terminal states, `transitionTo<>()` for transitions
+  - Note: Added NAME constant to `StreamStates::Closed` and `StreamStates::Erroring`
 
 - [ ] **standard.h:370** - `WritableImpl` (template)
   - `kj::OneOf<StreamStates::Closed, StreamStates::Errored, StreamStates::Erroring, Writable>`

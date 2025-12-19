@@ -1181,6 +1181,21 @@ KJ_TEST("ComposableStateMachine: with ActiveState spec") {
   KJ_EXPECT(result2 == kj::none);
 }
 
+KJ_TEST("ComposableStateMachine: whenActiveOr") {
+  ComposableStateMachine<ActiveState<CActive>, CActive, CClosed, CErrored> machine;
+
+  machine.transitionTo<CActive>(kj::str("resource"));
+
+  // whenActiveOr executes when active
+  auto result = machine.whenActiveOr([](CActive& a) { return a.resourceName.size(); }, 0ul);
+  KJ_EXPECT(result == 8);
+
+  // After close, returns default
+  machine.transitionTo<CClosed>();
+  auto result2 = machine.whenActiveOr([](CActive& a) { return a.resourceName.size(); }, 999ul);
+  KJ_EXPECT(result2 == 999);
+}
+
 KJ_TEST("ComposableStateMachine: with PendingStates spec") {
   ComposableStateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
