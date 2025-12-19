@@ -1576,7 +1576,7 @@ class StateMachine {
       return "(none)"_kj;
     }
     kj::StringPtr result = "(unknown)"_kj;
-    visitPendingStateNames([&result]<typename S>(const S&) { result = _::getStateName<S>(); });
+    visitPendingStates([&result]<typename S>(const S&) { result = _::getStateName<S>(); });
     return result;
   }
 
@@ -1720,7 +1720,7 @@ class StateMachine {
         "This usually means you're trying to transition inside a withState() callback.");
   }
 
-  // Helper to visit state names (using index sequence)
+  // Helper for currentStateName()
   template <typename Visitor>
   void visitStateNames(Visitor&& visitor) const {
     visitStateNamesImpl(kj::fwd<Visitor>(visitor), std::make_index_sequence<STATE_COUNT>{});
@@ -1732,11 +1732,9 @@ class StateMachine {
       using S = std::tuple_element_t<I, StatesTuple>;
       if (state.template is<S>()) {
         visitor.template operator()<S>(state.template get<S>());
-        return true;
       }
-      return false;
     };
-    (tryVisit.template operator()<Is>() || ...);
+    (tryVisit.template operator()<Is>(), ...);
   }
 
   // Helper for visit() - non-const version
@@ -1753,22 +1751,18 @@ class StateMachine {
         using S = std::tuple_element_t<I, StatesTuple>;
         if (state.template is<S>()) {
           visitor(state.template get<S>());
-          return true;
         }
-        return false;
       };
-      (tryVisit.template operator()<Is>() || ...);
+      (tryVisit.template operator()<Is>(), ...);
     } else {
       ReturnType result{};
       auto tryVisit = [&]<size_t I>() {
         using S = std::tuple_element_t<I, StatesTuple>;
         if (state.template is<S>()) {
           result = visitor(state.template get<S>());
-          return true;
         }
-        return false;
       };
-      (tryVisit.template operator()<Is>() || ...);
+      (tryVisit.template operator()<Is>(), ...);
       return result;
     }
   }
@@ -1786,22 +1780,18 @@ class StateMachine {
         using S = std::tuple_element_t<I, StatesTuple>;
         if (state.template is<S>()) {
           visitor(state.template get<S>());
-          return true;
         }
-        return false;
       };
-      (tryVisit.template operator()<Is>() || ...);
+      (tryVisit.template operator()<Is>(), ...);
     } else {
       ReturnType result{};
       auto tryVisit = [&]<size_t I>() {
         using S = std::tuple_element_t<I, StatesTuple>;
         if (state.template is<S>()) {
           result = visitor(state.template get<S>());
-          return true;
         }
-        return false;
       };
-      (tryVisit.template operator()<Is>() || ...);
+      (tryVisit.template operator()<Is>(), ...);
       return result;
     }
   }
@@ -1834,52 +1824,48 @@ class StateMachine {
       }
     }
 
-    visitPendingStateNames([this]<typename S>(S& s) { this->state.template init<S>(kj::mv(s)); });
+    visitPendingStates([this]<typename S>(S& s) { this->state.template init<S>(kj::mv(s)); });
     pendingState = StateUnion();
   }
 
   template <typename Visitor>
-  void visitPendingStateNames(Visitor&& visitor) const
+  void visitPendingStates(Visitor&& visitor) const
     requires(HAS_PENDING)
   {
-    visitPendingStateNamesImpl(kj::fwd<Visitor>(visitor), std::make_index_sequence<STATE_COUNT>{});
+    visitPendingStatesImpl(kj::fwd<Visitor>(visitor), std::make_index_sequence<STATE_COUNT>{});
   }
 
   template <typename Visitor>
-  void visitPendingStateNames(Visitor&& visitor)
+  void visitPendingStates(Visitor&& visitor)
     requires(HAS_PENDING)
   {
-    visitPendingStateNamesImpl(kj::fwd<Visitor>(visitor), std::make_index_sequence<STATE_COUNT>{});
+    visitPendingStatesImpl(kj::fwd<Visitor>(visitor), std::make_index_sequence<STATE_COUNT>{});
   }
 
   template <typename Visitor, size_t... Is>
-  void visitPendingStateNamesImpl(Visitor&& visitor, std::index_sequence<Is...>) const
+  void visitPendingStatesImpl(Visitor&& visitor, std::index_sequence<Is...>) const
     requires(HAS_PENDING)
   {
     auto tryVisit = [&]<size_t I>() {
       using S = std::tuple_element_t<I, StatesTuple>;
       if (pendingState.template is<S>()) {
         visitor.template operator()<S>(pendingState.template get<S>());
-        return true;
       }
-      return false;
     };
-    (tryVisit.template operator()<Is>() || ...);
+    (tryVisit.template operator()<Is>(), ...);
   }
 
   template <typename Visitor, size_t... Is>
-  void visitPendingStateNamesImpl(Visitor&& visitor, std::index_sequence<Is...>)
+  void visitPendingStatesImpl(Visitor&& visitor, std::index_sequence<Is...>)
     requires(HAS_PENDING)
   {
     auto tryVisit = [&]<size_t I>() {
       using S = std::tuple_element_t<I, StatesTuple>;
       if (pendingState.template is<S>()) {
         visitor.template operator()<S>(pendingState.template get<S>());
-        return true;
       }
-      return false;
     };
-    (tryVisit.template operator()<Is>() || ...);
+    (tryVisit.template operator()<Is>(), ...);
   }
 
   // Helper for visitForGc - visits the current state if the visitor can handle it
@@ -1892,11 +1878,9 @@ class StateMachine {
         if constexpr (requires { visitor.visit(state.template get<S>()); }) {
           visitor.visit(state.template get<S>());
         }
-        return true;
       }
-      return false;
     };
-    (tryVisit.template operator()<Is>() || ...);
+    (tryVisit.template operator()<Is>(), ...);
   }
 
   template <typename Visitor, size_t... Is>
@@ -1908,11 +1892,9 @@ class StateMachine {
         if constexpr (requires { visitor.visit(state.template get<S>()); }) {
           visitor.visit(state.template get<S>());
         }
-        return true;
       }
-      return false;
     };
-    (tryVisit.template operator()<Is>() || ...);
+    (tryVisit.template operator()<Is>(), ...);
   }
 };
 
