@@ -65,13 +65,19 @@ These follow the exact pattern of the compression.c++ conversion (Active/Closed/
 
 These track lock states - different semantic pattern, may not benefit as much:
 
-- [ ] **readable.h:57** - `ReaderImpl`
+- [x] **readable.h:57** - `ReaderImpl`
   - `kj::OneOf<Initial, Attached, StreamStates::Closed, Released>`
   - Reader attachment tracking
+  - Closed = stream ended naturally or errored (detach() called)
+  - Released = user explicitly released the lock (releaseLock() called)
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Released>, ActiveState<Attached>>` with `Attached` struct wrapping `jsg::Ref<ReadableStream>`
 
-- [ ] **writable.h:95** - `WritableStreamDefaultWriter`
+- [x] **writable.h:95** - `WritableStreamDefaultWriter`
   - `kj::OneOf<Initial, Attached, Released, StreamStates::Closed>`
   - Writer attachment tracking
+  - Closed = stream ended naturally or errored (detach() called)
+  - Released = user explicitly released the lock (releaseLock() called)
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Released>, ActiveState<Attached>>` with `Attached` struct wrapping `jsg::Ref<WritableStream>`
 
 - [ ] **standard.c++:133** - `ReadableLockImpl`
   - `kj::OneOf<Locked, PipeLocked, ReaderLocked, Unlocked>`
