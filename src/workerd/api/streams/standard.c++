@@ -1118,7 +1118,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   signal->triggerAbort(js, jsg::JsValue(reason));
 
   // We have to check this again after the AbortSignal is triggered.
-  if (state.template is<StreamStates::Closed>() || state.template is<StreamStates::Errored>()) {
+  if (state.isTerminal()) {
     return js.resolvedPromise();
   }
 
@@ -1269,7 +1269,8 @@ void WritableImpl<Self>::doClose(jsg::Lock& js) {
   KJ_ASSERT(inFlightWrite == kj::none);
   KJ_ASSERT(maybePendingAbort == kj::none);
   KJ_ASSERT(writeRequests.empty());
-  state.template init<StreamStates::Closed>();
+  // State should have already been transitioned to Closed
+  KJ_ASSERT(state.template is<StreamStates::Closed>());
   algorithms.clear();
 
   KJ_IF_SOME(owner, tryGetOwner()) {
@@ -1284,7 +1285,8 @@ void WritableImpl<Self>::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
   KJ_ASSERT(inFlightWrite == kj::none);
   KJ_ASSERT(maybePendingAbort == kj::none);
   KJ_ASSERT(writeRequests.empty());
-  state = js.v8Ref(reason);
+  // State should have already been transitioned to Errored
+  KJ_ASSERT(state.template is<StreamStates::Errored>());
   algorithms.clear();
 
   KJ_IF_SOME(owner, tryGetOwner()) {
@@ -1306,7 +1308,7 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
   auto reason = erroring.reason.getHandle(js);
   KJ_ASSERT(inFlightWrite == kj::none);
   KJ_ASSERT(inFlightClose == kj::none);
-  state.template init<StreamStates::Errored>(kj::mv(erroring.reason));
+  state.template transitionTo<StreamStates::Errored>(kj::mv(erroring.reason));
 
   while (!writeRequests.empty()) {
     dequeueWriteRequest().resolver.reject(js, reason);
@@ -1366,7 +1368,7 @@ void WritableImpl<Self>::finishInFlightClose(
   }
   KJ_ASSERT(maybePendingAbort == kj::none);
 
-  state.template init<StreamStates::Closed>();
+  state.template transitionTo<StreamStates::Closed>();
   doClose(js);
 }
 
@@ -1459,7 +1461,7 @@ void WritableImpl<Self>::startErroring(
   KJ_IF_SOME(owner, tryGetOwner()) {
     owner.maybeRejectReadyPromise(js, reason);
   }
-  state.template init<StreamStates::Erroring>(js.v8Ref(reason));
+  state.template transitionTo<StreamStates::Erroring>(js.v8Ref(reason));
   if (inFlightWrite == kj::none && inFlightClose == kj::none && flags.started) {
     finishErroring(js, kj::mv(self));
   }
@@ -1524,15 +1526,10 @@ jsg::Promise<void> WritableImpl<Self>::write(
 
 template <typename Self>
 void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
-    KJ_CASE_ONEOF(writable, Writable) {}
-    KJ_CASE_ONEOF(error, StreamStates::Errored) {
-      visitor.visit(error);
-    }
-    KJ_CASE_ONEOF(erroring, StreamStates::Erroring) {
-      visitor.visit(erroring.reason);
-    }
+  KJ_IF_SOME(error, state.template tryGet<StreamStates::Errored>()) {
+    visitor.visit(error);
+  } else KJ_IF_SOME(erroring, state.template tryGet<StreamStates::Erroring>()) {
+    visitor.visit(erroring.reason);
   }
   visitor.visit(inFlightWrite, inFlightClose, closeRequest, algorithms, signal);
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
@@ -1543,7 +1540,7 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
 
 template <typename Self>
 bool WritableImpl<Self>::isWritable() const {
-  return state.template is<Writable>();
+  return state.isActive();
 }
 
 template <typename Self>
