@@ -4147,7 +4147,9 @@ kj::Maybe<uint16_t> Worker::Actor::getHibernationEventType() {
 
 kj::Own<Worker::Actor> Worker::Actor::addRef() {
   KJ_IF_SOME(t, tracker) {
-    return kj::addRef(*this).attach(t.get()->startRequest());
+    // We can attachToThisReference() here, attached object's lifetime being tied to refcounted
+    // instance is deliberate.
+    return kj::addRef(*this).attachToThisReference(t.get()->startRequest());
   } else {
     return kj::addRef(*this);
   }
