@@ -49,13 +49,15 @@ These follow the exact pattern of the compression.c++ conversion (Active/Closed/
   - 5 states with clear lifecycle
   - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, kj::Exception>, ErrorState<kj::Exception>, ...>` (both Closed and Exception are terminal; abort() uses forceTransitionTo for Closed→Exception)
 
-- [ ] **queue.h:296** - `QueueImpl`
+- [x] **queue.h:296** - `QueueImpl`
   - `kj::OneOf<Ready, Closed, Errored>` (Errored = jsg::Value)
   - Note: Errored type alias needs struct wrapper for ErrorState<>
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, ErrorState<Errored>, ActiveState<Ready>>` with `Errored` struct wrapping `jsg::Value reason`
 
-- [ ] **queue.h:562** - `ConsumerImpl`
+- [x] **queue.h:562** - `ConsumerImpl`
   - `kj::OneOf<Ready, Closed, Errored>`
   - Same as QueueImpl
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, ErrorState<Errored>, ActiveState<Ready>>` with shared `Errored` struct
 
 ---
 
