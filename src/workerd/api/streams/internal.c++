@@ -726,7 +726,10 @@ void ReadableStreamInternalController::doCancel(
 }
 
 void ReadableStreamInternalController::doClose(jsg::Lock& js) {
-  state.init<StreamStates::Closed>();
+  // If already in a terminal state, nothing to do.
+  if (state.isTerminal()) return;
+
+  state.transitionTo<StreamStates::Closed>();
   KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
   } else {
@@ -735,7 +738,10 @@ void ReadableStreamInternalController::doClose(jsg::Lock& js) {
 }
 
 void ReadableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-  state.init<StreamStates::Errored>(js.v8Ref(reason));
+  // If already in a terminal state, nothing to do.
+  if (state.isTerminal()) return;
+
+  state.transitionTo<StreamStates::Errored>(js.v8Ref(reason));
   KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
   } else {
@@ -828,7 +834,7 @@ kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::remov
     }
     KJ_CASE_ONEOF(readable, Readable) {
       auto result = kj::mv(readable);
-      state.init<StreamStates::Closed>();
+      state.transitionTo<StreamStates::Closed>();
       return kj::Maybe<kj::Own<ReadableStreamSource>>(kj::mv(result));
     }
   }
@@ -1311,7 +1317,7 @@ kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamInternalController::removeS
     }
     KJ_CASE_ONEOF(writable, IoOwn<Writable>) {
       auto result = kj::mv(writable->sink);
-      state.init<StreamStates::Closed>();
+      state.transitionTo<StreamStates::Closed>();
       return kj::Maybe<kj::Own<WritableStreamSink>>(kj::mv(result));
     }
   }
@@ -1335,7 +1341,7 @@ void WritableStreamInternalController::detach(jsg::Lock& js) {
       kj::throwFatalException(js.exceptionToKj(errored.addRef(js)));
     }
     KJ_CASE_ONEOF(writable, IoOwn<Writable>) {
-      state.init<StreamStates::Closed>();
+      state.transitionTo<StreamStates::Closed>();
       return;
     }
   }
@@ -1431,7 +1437,10 @@ bool WritableStreamInternalController::isErrored() {
 }
 
 void WritableStreamInternalController::doClose(jsg::Lock& js) {
-  state.init<StreamStates::Closed>();
+  // If already in a terminal state, nothing to do.
+  if (state.isTerminal()) return;
+
+  state.transitionTo<StreamStates::Closed>();
   KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
     maybeResolvePromise(js, locked.getReadyFulfiller());
@@ -1443,7 +1452,10 @@ void WritableStreamInternalController::doClose(jsg::Lock& js) {
 }
 
 void WritableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-  state.init<StreamStates::Errored>(js.v8Ref(reason));
+  // If already in a terminal state, nothing to do.
+  if (state.isTerminal()) return;
+
+  state.transitionTo<StreamStates::Errored>(js.v8Ref(reason));
   KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());

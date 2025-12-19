@@ -120,24 +120,36 @@ These track lock states - different semantic pattern, may not benefit as much:
   - Uses `isActive()` for writable check, `isTerminal()` for abort checks
   - Note: `doClose()`/`doError()` now assert state already transitioned instead of transitioning
 
-- [ ] **standard.c++:715-728** - `ReadableStreamJsController`
+- [x] **standard.c++:715-728** - `ReadableStreamJsController`
   - Main + pending state machines
-  - Perfect candidate for PendingStates<>
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, Initial, Closed, Errored, ValueReadable, ByteReadable>`
+  - Added `Initial` state for pre-setup (avoids need for `forceTransitionTo` during construction)
+  - Added terminal guards to `doClose()` and `doError()`
 
-- [ ] **standard.c++:848** - `WritableStreamJsController`
+- [x] **standard.c++:848** - `WritableStreamJsController`
   - `kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller>`
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, Initial, Closed, Errored, Controller>`
+  - Added `Initial` state for pre-setup
+  - Added terminal guards to `doClose()` and `doError()`
 
-- [ ] **internal.h:148** - `ReadableStreamInternalController::state`
+- [x] **internal.h:148** - `ReadableStreamInternalController::state`
   - `kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable>`
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, Closed, Errored, Readable>`
+  - Added terminal guards to `doClose()` and `doError()`
 
-- [ ] **internal.h:270** - `WritableStreamInternalController::state`
+- [x] **internal.h:270** - `WritableStreamInternalController::state`
   - `kj::OneOf<StreamStates::Closed, StreamStates::Errored, IoOwn<Writable>>`
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, Closed, Errored, IoOwn<Writable>>`
+  - Added terminal guards to `doClose()` and `doError()`
 
-- [ ] **standard.c++:2713** - Tee class state
+- [x] **standard.c++:2767** - AllReader class state (was incorrectly labeled as "Tee class")
   - `kj::OneOf<StreamStates::Closed, StreamStates::Errored, jsg::Ref<ReadableStream>>`
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, Errored>, Closed, Errored, jsg::Ref<ReadableStream>>`
 
-- [ ] **standard.c++:2843** - PumpToReader state
+- [x] **standard.c++:2905** - PumpToReader state
   - `kj::OneOf<Pumping, StreamStates::Closed, kj::Exception, jsg::Ref<ReadableStream>>`
+  - **DONE**: Converted to `ComposableStateMachine<TerminalStates<Closed, kj::Exception>, Pumping, Closed, kj::Exception, jsg::Ref<ReadableStream>>`
+  - Updated `isErroredOrClosed()` to use `state.isTerminal()`
 
 - [x] **readable-source-adapter.c++:519** - `Active` inner class
   - `kj::OneOf<Idle, Readable, Reading, Done, Canceling, Canceled>`

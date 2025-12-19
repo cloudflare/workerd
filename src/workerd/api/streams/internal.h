@@ -39,10 +39,12 @@ class ReadableStreamInternalController: public ReadableStreamController {
  public:
   using Readable = IoOwn<ReadableStreamSource>;
 
-  explicit ReadableStreamInternalController(StreamStates::Closed closed): state(closed) {}
+  explicit ReadableStreamInternalController(StreamStates::Closed closed)
+      : state(State::create<StreamStates::Closed>()) {}
   explicit ReadableStreamInternalController(StreamStates::Errored errored)
-      : state(kj::mv(errored)) {}
-  explicit ReadableStreamInternalController(Readable readable): state(kj::mv(readable)) {}
+      : state(State::create<StreamStates::Errored>(kj::mv(errored))) {}
+  explicit ReadableStreamInternalController(Readable readable)
+      : state(State::create<Readable>(kj::mv(readable))) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamInternalController);
 
@@ -147,7 +149,17 @@ class ReadableStreamInternalController: public ReadableStreamController {
   };
 
   kj::Maybe<ReadableStream&> owner;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
+
+  // State machine for ReadableStreamInternalController:
+  // Closed and Errored are terminal states (stream is done).
+  // Readable is the active state (stream has data).
+  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<Readable>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      Readable>;
+  State state;
 
   // Lock state machine for ReadableStreamInternalController:
   // All states can transition to any other state (no terminal states).
@@ -180,14 +192,16 @@ class WritableStreamInternalController: public WritableStreamController {
     void abort(kj::Exception&& ex);
   };
 
-  explicit WritableStreamInternalController(StreamStates::Closed closed): state(closed) {}
+  explicit WritableStreamInternalController(StreamStates::Closed closed)
+      : state(State::create<StreamStates::Closed>()) {}
   explicit WritableStreamInternalController(StreamStates::Errored errored)
-      : state(kj::mv(errored)) {}
+      : state(State::create<StreamStates::Errored>(kj::mv(errored))) {}
   explicit WritableStreamInternalController(kj::Own<WritableStreamSink> writable,
       kj::Maybe<kj::Own<ByteStreamObserver>> observer,
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none)
-      : state(IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable)))),
+      : state(State::create<IoOwn<Writable>>(
+            IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable))))),
         observer(kj::mv(observer)),
         maybeHighWaterMark(maybeHighWaterMark),
         maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {}
@@ -280,7 +294,17 @@ class WritableStreamInternalController: public WritableStreamController {
   };
 
   kj::Maybe<WritableStream&> owner;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, IoOwn<Writable>> state;
+
+  // State machine for WritableStreamInternalController:
+  // Closed and Errored are terminal states (stream is done).
+  // IoOwn<Writable> is the active state (stream is writable).
+  using State = ComposableStateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<IoOwn<Writable>>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      IoOwn<Writable>>;
+  State state;
 
   // Lock state machine for WritableStreamInternalController:
   // All states can transition to any other state (no terminal states).
