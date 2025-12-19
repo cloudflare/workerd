@@ -854,5 +854,76 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed start 2)") {
   });
 }
 
+// ======================================================================================
+// Execution Termination Tests
+
+// Test that execution termination during a read doesn't cause an assertion failure.
+// This tests the fix for the production error:
+// "expected !js.v8Isolate->IsExecutionTerminating()"
+//
+// Note: This test verifies that if IsExecutionTerminating() is true after readCallback()
+// returns, we handle it gracefully instead of asserting. However, actually triggering
+// the termination check in the exact right spot in a unit test is difficult because
+// V8 only checks the termination flag during JS execution, not during C++ callbacks.
+// The production scenario occurs when the termination happens during actual JS execution
+// inside readCallback() (e.g., user's pull function runs too long).
+KJ_TEST("ReadableStream handles execution termination during read") {
+  RsIsolate isolate(v8System, kj::heap<jsg::IsolateObserver>());
+  isolate.runInLockScope([&](RsIsolate::Lock& lock) {
+    // We need to handle termination at this level because the context scope
+    // will propagate the termination exception.
+    v8::TryCatch outerTryCatch(lock.v8Isolate);
+    bool testCompleted = false;
+
+    try {
+      JSG_WITHIN_CONTEXT_SCOPE(
+          lock, lock.newContext<RsContext>().getHandle(lock), [&](jsg::Lock& js) {
+        v8::TryCatch tryCatch(js.v8Isolate);
+
+        auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+
+        // Set up a stream where the pull callback terminates execution
+        rs->getController().setup(js,
+            UnderlyingSource{
+              .pull =
+                  [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+          // Terminate execution - this simulates CPU time limit exceeded
+          js.terminateNextExecution();
+
+          // Force V8 to check the termination flag by doing JS work.
+          // This is similar to what terminateExecutionNow() does.
+          jsg::check(v8::JSON::Stringify(js.v8Context(), js.str("test"_kj)));
+
+          // We shouldn't get here - termination should have been triggered
+          return js.resolvedPromise();
+        },
+            },
+            StreamQueuingStrategy{.highWaterMark = 0});
+
+        // Start a read - this will call pull which terminates execution
+        auto promise = rs->getController().readAllText(js, 100);
+
+        // Run microtasks - this will propagate the termination
+        js.runMicrotasks();
+
+        // If we get here without the assertion failing, the fix works
+        testCompleted = true;
+      });
+    } catch (jsg::JsExceptionThrown&) {
+      // Expected - execution was terminated
+      // The important thing is we didn't hit the assertion failure
+      testCompleted = true;
+    }
+
+    // Cancel termination so cleanup can proceed
+    if (lock.v8Isolate->IsExecutionTerminating()) {
+      lock.v8Isolate->CancelTerminateExecution();
+    }
+
+    // The test passes if we got here without an assertion failure
+    KJ_ASSERT(testCompleted, "Test did not complete as expected");
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api
