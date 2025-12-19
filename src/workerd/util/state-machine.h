@@ -35,7 +35,7 @@
 //     }
 //   }
 //
-// THE PROBLEM: Use-After-Free (UAF)
+// THE PROBLEM: Use-After-Free (UAF) from unsound state-transitions
 //
 // The `readable` reference points into the kj::OneOf's internal storage. If ANY
 // code path between obtaining that reference and using it triggers a state
@@ -57,9 +57,9 @@
 //
 // HOW StateMachine HELPS:
 //
-// 1. TRANSITION LOCKING via withState()/whenActive():
+// 1. TRANSITION LOCKING via whenState()/whenActive():
 //
-//    state.withState<Readable>([](Readable& r) {
+//    state.whenState<Readable>([](Readable& r) {
 //      r.source->read();         // If this tries to transition...
 //      r.buffer.size();          // ...it throws instead of UAF
 //    });
@@ -163,7 +163,7 @@
 // 1. TRANSITION LOCKING: The state machine can be locked during callbacks to
 //    prevent transitions that would invalidate references:
 //
-//      machine.withState<Active>([](Active& a) {
+//      machine.whenState<Active>([](Active& a) {
 //        // machine.transitionTo<Closed>();  // Would fail - locked!
 //        a.resource->read();  // Safe - Active cannot be destroyed
 //      });
@@ -171,7 +171,7 @@
 // 2. DEBUG ASSERTIONS: In debug builds, the machine tracks active references
 //    and asserts if a transition occurs while references exist.
 //
-// 3. SAFE ACCESS PATTERNS: Prefer withState() and whenActive() over get()
+// 3. SAFE ACCESS PATTERNS: Prefer whenState() and whenActive() over get()
 //    to ensure references don't outlive their validity.
 //
 // UNSAFE PATTERNS TO AVOID:
@@ -180,18 +180,18 @@
 //   Active& active = machine.getUnsafe<Active>();
 //   machine.transitionTo<Closed>();  // active is now dangling!
 //
-//   // DO: Use withState() for safe scoped access
-//   machine.withState<Active>([](Active& a) {
+//   // DO: Use whenState() for safe scoped access
+//   machine.whenState<Active>([](Active& a) {
 //     // a is guaranteed valid for the duration of the callback
 //   });
 //
 //   // DON'T: Transition inside a callback (will fail if locked)
-//   machine.withState<Active>([&](Active& a) {
+//   machine.whenState<Active>([&](Active& a) {
 //     machine.transitionTo<Closed>();  // Fails!
 //   });
 //
 //   // DO: Return a value and transition after
-//   auto result = machine.withState<Active>([](Active& a) {
+//   auto result = machine.whenState<Active>([](Active& a) {
 //     return a.computeSomething();
 //   });
 //   machine.transitionTo<Closed>();
@@ -217,13 +217,13 @@
 //   StateMachine<Readable, Closed, Errored> state;
 //   state.transitionTo<Readable>(...);
 //
-//   // RECOMMENDED: Use withState() for safe scoped access
-//   state.withState<Readable>([](Readable& r) {
+//   // RECOMMENDED: Use whenState() for safe scoped access
+//   state.whenState<Readable>([](Readable& r) {
 //     r.source->read();  // Safe - transitions blocked during callback
 //   });
 //
 //   // Or with a return value
-//   auto size = state.withState<Readable>([](Readable& r) {
+//   auto size = state.whenState<Readable>([](Readable& r) {
 //     return r.source->size();
 //   });  // Returns kj::Maybe<size_t>
 //
@@ -333,7 +333,7 @@
 //   });
 //
 //   // Or for specific state:
-//   state.withState<Readable>([](Readable& r) {
+//   state.whenState<Readable>([](Readable& r) {
 //     r.source->read();
 //   });
 //
@@ -1033,12 +1033,12 @@ class StateMachine {
   //
   // The "Unsafe" suffix serves as a visual warning at every call site,
   // encouraging developers to:
-  //   1. Use safe alternatives (withState(), whenActive()) when possible
+  //   1. Use safe alternatives (whenState(), whenActive()) when possible
   //   2. Carefully audit code paths that could trigger transitions
   //   3. Keep the reference's lifetime as short as possible
   //
   // Safe alternatives:
-  //   - withState<S>(callback)  - Locks transitions during callback
+  //   - whenState<S>(callback)  - Locks transitions during callback
   //   - whenActive(callback)    - Locks transitions, only runs if active
   //   - acquireTransitionLock() - RAII lock for manual control
 
@@ -1106,7 +1106,7 @@ class StateMachine {
   // Returns the function's result wrapped in Maybe (none if not in state).
   // For void functions, returns true if executed, false if not in state.
   template <typename S, typename Func>
-  auto withState(
+  auto whenState(
       Func&& func) -> std::conditional_t<std::is_void_v<decltype(func(kj::instance<S&>()))>,
                        bool,
                        kj::Maybe<decltype(func(kj::instance<S&>()))>>
@@ -1131,7 +1131,7 @@ class StateMachine {
 
   // Const version for read-only access
   template <typename S, typename Func>
-  auto withState(Func&& func) const
+  auto whenState(Func&& func) const
       -> std::conditional_t<std::is_void_v<decltype(func(kj::instance<const S&>()))>,
           bool,
           kj::Maybe<decltype(func(kj::instance<const S&>()))>>
@@ -1376,7 +1376,7 @@ class StateMachine {
           kj::Maybe<decltype(func(kj::instance<ActiveStateType&>()))>>
     requires(HAS_ACTIVE)
   {
-    return withState<ActiveStateType>(kj::fwd<Func>(func));
+    return whenState<ActiveStateType>(kj::fwd<Func>(func));
   }
 
   template <typename Func>
@@ -1386,7 +1386,7 @@ class StateMachine {
           kj::Maybe<decltype(func(kj::instance<const ActiveStateType&>()))>>
     requires(HAS_ACTIVE)
   {
-    return withState<ActiveStateType>(kj::fwd<Func>(func));
+    return whenState<ActiveStateType>(kj::fwd<Func>(func));
   }
 
   // Execute a function if active, or return a default value.
@@ -1658,7 +1658,7 @@ class StateMachine {
   // - Implementing new patterns that the state machine doesn't support yet
   // - Interfacing with APIs that expect kj::OneOf directly
   //
-  // STRONGLY PREFER: withState(), transitionTo(), and other type-safe methods.
+  // STRONGLY PREFER: whenState(), transitionTo(), and other type-safe methods.
   // TODO(later): Revisit whether these should be kept.
   StateUnion& underlying() KJ_LIFETIMEBOUND {
     return state;
@@ -1680,9 +1680,9 @@ class StateMachine {
   //     }
   //   }
   //
-  // For safe access, use withState() instead:
+  // For safe access, use whenState() instead:
   //
-  //   machine.withState<Active>([](Active& active) {
+  //   machine.whenState<Active>([](Active& active) {
   //     someFunction();  // If this tries to transition, it throws
   //     active.foo();    // Safe - transitions are locked
   //   });
@@ -1702,7 +1702,7 @@ class StateMachine {
  private:
   StateUnion state;
 
-  // Counter for detecting illegal transitions from within withState()/whenActiveOr() callbacks.
+  // Counter for detecting illegal transitions from within whenState()/whenActiveOr() callbacks.
   // Marked mutable because const methods use it for internal bookkeeping while not changing
   // the logical state (i.e., which state the machine is in). This class is NOT thread-safe;
   // callers are responsible for synchronization if needed. The const qualifier on methods
@@ -1717,7 +1717,7 @@ class StateMachine {
   void requireUnlocked() const {
     KJ_REQUIRE(transitionLockCount == 0,
         "Cannot transition state machine while transitions are locked. "
-        "This usually means you're trying to transition inside a withState() callback.");
+        "This usually means you're trying to transition inside a whenState() callback.");
   }
 
   // Helper for currentStateName()
@@ -1867,6 +1867,17 @@ class StateMachine {
     };
     (tryVisit.template operator()<Is>(), ...);
   }
+
+  // TODO(later): If we decide to ever move state-machine.h into kj, then the visitForGc
+  // details will need to be revisited since those are specific to workerd.
+  // The reasons we can't support this in the regular visit() public API are:
+  // * Need to support uninitialized states
+  // * Need to support visitors which don't implement overloads for all state types
+  // * Need to support visitors with visit() functions instead of operator()
+  // Points 1 and 2 could perhaps be encapsulated in a public API named something like weakVisit(),
+  // and point 3 could be taken care of by saying "Your visitor must have either a visit() or
+  // operator(), but not both."
+  // For now, tho, we will just keep this here and we can revisit later.
 
   // Helper for visitForGc - visits the current state if the visitor can handle it
   template <typename Visitor, size_t... Is>

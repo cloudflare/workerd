@@ -210,27 +210,27 @@ KJ_TEST("StateMachine: currentStateName introspection") {
 // Memory Safety Tests
 // =============================================================================
 
-KJ_TEST("StateMachine: withState provides safe scoped access") {
+KJ_TEST("StateMachine: whenState provides safe scoped access") {
   StateMachine<Idle, Running, Completed, Failed> machine;
   machine.transitionTo<Running>(kj::str("task"));
 
-  // withState returns result and locks transitions
-  auto result = machine.withState<Running>([](Running& r) { return r.taskName.size(); });
+  // whenState returns result and locks transitions
+  auto result = machine.whenState<Running>([](Running& r) { return r.taskName.size(); });
   KJ_EXPECT(result != kj::none);
   KJ_EXPECT(KJ_ASSERT_NONNULL(result) == 4);
 
   // Returns none for wrong state
-  auto result2 = machine.withState<Idle>([](Idle& i) { return i.initialized; });
+  auto result2 = machine.whenState<Idle>([](Idle& i) { return i.initialized; });
   KJ_EXPECT(result2 == kj::none);
 }
 
-KJ_TEST("StateMachine: withState blocks transitions during callback") {
+KJ_TEST("StateMachine: whenState blocks transitions during callback") {
   StateMachine<Idle, Running, Completed, Failed> machine;
   machine.transitionTo<Running>(kj::str("task"));
 
   // Cannot transition while locked
   auto tryTransitionInCallback = [&]() {
-    machine.withState<Running>([&](Running&) {
+    machine.whenState<Running>([&](Running&) {
       // Attempting to transition while locked should throw
       machine.transitionTo<Completed>(42);
     });
@@ -264,20 +264,20 @@ KJ_TEST("StateMachine: transition lock count is tracked") {
   KJ_EXPECT(!machine.isTransitionLocked());
 }
 
-KJ_TEST("StateMachine: void withState returns bool") {
+KJ_TEST("StateMachine: void whenState returns bool") {
   StateMachine<Idle, Running, Completed, Failed> machine;
   machine.transitionTo<Running>(kj::str("task"));
 
   bool executed = false;
 
   // void callback returns true when executed
-  bool result = machine.withState<Running>([&](Running&) { executed = true; });
+  bool result = machine.whenState<Running>([&](Running&) { executed = true; });
   KJ_EXPECT(result == true);
   KJ_EXPECT(executed);
 
   // void callback returns false when not in state
   executed = false;
-  bool result2 = machine.withState<Idle>([&](Idle&) { executed = true; });
+  bool result2 = machine.whenState<Idle>([&](Idle&) { executed = true; });
   KJ_EXPECT(result2 == false);
   KJ_EXPECT(!executed);
 }
@@ -553,13 +553,13 @@ KJ_TEST("StateMachine: KJ_SWITCH_ONEOF works") {
   KJ_EXPECT(result == "active: test");
 }
 
-KJ_TEST("StateMachine: withState locks transitions") {
+KJ_TEST("StateMachine: whenState locks transitions") {
   StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   // Cannot transition while locked
   auto tryTransitionInCallback = [&]() {
-    machine.withState<CActive>([&](CActive&) { machine.transitionTo<CClosed>(); });
+    machine.whenState<CActive>([&](CActive&) { machine.transitionTo<CClosed>(); });
   };
   KJ_EXPECT_THROW_MESSAGE("transitions are locked", tryTransitionInCallback());
 
@@ -582,20 +582,20 @@ KJ_TEST("StateMachine: currentStateName") {
   KJ_EXPECT(machine.currentStateName() == "errored"_kj);
 }
 
-KJ_TEST("StateMachine: const withState works") {
+KJ_TEST("StateMachine: const whenState works") {
   StateMachine<CActive, CClosed, CErrored> machine;
   machine.transitionTo<CActive>(kj::str("resource"));
 
   const auto& constMachine = machine;
 
-  // Const withState works and returns value
+  // Const whenState works and returns value
   auto result =
-      constMachine.withState<CActive>([](const CActive& a) { return a.resourceName.size(); });
+      constMachine.whenState<CActive>([](const CActive& a) { return a.resourceName.size(); });
   KJ_EXPECT(result != kj::none);
   KJ_EXPECT(KJ_ASSERT_NONNULL(result) == 8);  // "resource"
 
-  // Const withState returns none for wrong state
-  auto result2 = constMachine.withState<CClosed>([](const CClosed&) { return 42; });
+  // Const whenState returns none for wrong state
+  auto result2 = constMachine.whenState<CClosed>([](const CClosed&) { return 42; });
   KJ_EXPECT(result2 == kj::none);
 }
 
@@ -922,20 +922,20 @@ KJ_TEST("StateMachine: applyPendingStateImpl respects terminal") {
   KJ_EXPECT(!machine.hasPendingState());  // Pending was cleared
 }
 
-KJ_TEST("StateMachine: endOperation inside withState throws") {
+KJ_TEST("StateMachine: endOperation inside whenState throws") {
   // This test verifies that ending an operation (which could apply a pending state)
-  // inside a withState() callback throws an error. This prevents UAF where a
+  // inside a whenState() callback throws an error. This prevents UAF where a
   // transition invalidates the reference being used in the callback.
   StateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
 
   // This pattern would cause UAF without the safety check:
-  //   withState gets reference to Active
+  //   whenState gets reference to Active
   //   scopedOperation ends, applies pending state -> Active is destroyed
   //   callback continues using destroyed Active reference
   auto tryUnsafePattern = [&]() {
-    machine.withState<CActive>([&](CActive&) {
+    machine.whenState<CActive>([&](CActive&) {
       {
         auto op = machine.scopedOperation();
         auto _ KJ_UNUSED = machine.deferTransitionTo<CClosed>();
@@ -949,20 +949,20 @@ KJ_TEST("StateMachine: endOperation inside withState throws") {
   KJ_EXPECT(machine.is<CActive>());
 }
 
-KJ_TEST("StateMachine: endOperation outside withState works") {
-  // Verify the correct pattern still works: end operations outside withState
+KJ_TEST("StateMachine: endOperation outside whenState works") {
+  // Verify the correct pattern still works: end operations outside whenState
   StateMachine<PendingStates<CClosed, CErrored>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
 
   {
     auto op = machine.scopedOperation();
-    machine.withState<CActive>([&](CActive& a) {
+    machine.whenState<CActive>([&](CActive& a) {
       // Safe to use 'a' here - no operation ending in this scope
       KJ_EXPECT(a.resourceName == "resource");
     });
     auto _ KJ_UNUSED = machine.deferTransitionTo<CClosed>();
-  }  // op ends here, OUTSIDE any withState callback - safe!
+  }  // op ends here, OUTSIDE any whenState callback - safe!
 
   KJ_EXPECT(machine.is<CClosed>());
 }
