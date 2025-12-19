@@ -154,7 +154,7 @@ WritableStreamSinkJsAdapter::~WritableStreamSinkJsAdapter() noexcept(false) {
 }
 
 kj::Maybe<const kj::Exception&> WritableStreamSinkJsAdapter::isErrored() {
-  return state.tryGetError();
+  return state.tryGetErrorUnsafe();
 }
 
 bool WritableStreamSinkJsAdapter::isClosed() {
@@ -166,14 +166,14 @@ bool WritableStreamSinkJsAdapter::isClosing() {
 }
 
 kj::Maybe<ssize_t> WritableStreamSinkJsAdapter::getDesiredSize() {
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     return open.active->getDesiredSize();
   }
   return kj::none;
 }
 
 jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::JsValue& value) {
-  KJ_IF_SOME(exc, state.tryGetError()) {
+  KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
     return js.rejectedPromise<void>(js.exceptionToJs(kj::cp(exc)));
@@ -185,7 +185,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
     return js.rejectedPromise<void>(js.typeError("Write after close is not allowed"));
   }
 
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     // Deference the IoOwn once to get the active state.
     auto& active = *open.active;
 
@@ -305,7 +305,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
 }
 
 jsg::Promise<void> WritableStreamSinkJsAdapter::flush(jsg::Lock& js) {
-  KJ_IF_SOME(exc, state.tryGetError()) {
+  KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
     return js.rejectedPromise<void>(js.exceptionToJs(kj::cp(exc)));
@@ -317,7 +317,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::flush(jsg::Lock& js) {
     return js.rejectedPromise<void>(js.typeError("Flush after close is not allowed"));
   }
 
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     // Deference the IoOwn once to get the active state.
     auto& active = *open.active;
 
@@ -344,7 +344,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::flush(jsg::Lock& js) {
 // Transitions the adapter into the closing state. Once the write queue
 // is empty, we will close the sink and transition to the closed state.
 jsg::Promise<void> WritableStreamSinkJsAdapter::end(jsg::Lock& js) {
-  KJ_IF_SOME(exc, state.tryGetError()) {
+  KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
     return js.rejectedPromise<void>(js.exceptionToJs(kj::cp(exc)));
@@ -357,7 +357,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::end(jsg::Lock& js) {
     return js.resolvedPromise();
   }
 
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     auto& ioContext = IoContext::current();
     auto& active = *open.active;
 
@@ -397,7 +397,7 @@ void WritableStreamSinkJsAdapter::abort(kj::Exception&& exception) {
   // operations in the active write queue *before* we transition to the errored
   // state. This ensures that any pending writes are interrupted and do not
   // complete.
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     open.active->abort(kj::cp(exception));
   }
   // Use forceTransitionTo because abort can be called from any state.
@@ -450,7 +450,7 @@ WritableStreamSinkJsAdapter::BackpressureState::BackpressureState(
 
 void WritableStreamSinkJsAdapter::maybeSignalBackpressure(jsg::Lock& js) {
   // We should only be signaling backpressure if we are in an active state.
-  KJ_ASSERT_NONNULL(state.tryGetActive());
+  KJ_ASSERT_NONNULL(state.tryGetActiveUnsafe());
   // Indicate that backpressure is being applied. If we are already in a
   // backpressure state (isWaiting() is true), this is a no-op.
   if (!backpressureState.isWaiting()) {
@@ -461,7 +461,7 @@ void WritableStreamSinkJsAdapter::maybeSignalBackpressure(jsg::Lock& js) {
 }
 
 void WritableStreamSinkJsAdapter::maybeReleaseBackpressure(jsg::Lock& js) {
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     if (open.active->getDesiredSize() > 0) {
       // The desired size is now > 0, so we can release backpressure.
       // If backpressure is already released or aborted, this is a non-op.
@@ -498,7 +498,7 @@ void WritableStreamSinkJsAdapter::visitForMemoryInfo(jsg::MemoryTracker& tracker
 }
 
 kj::Maybe<const WritableStreamSinkJsAdapter::Options&> WritableStreamSinkJsAdapter::getOptions() {
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     return open.active->options;
   } else {
     return kj::none;
@@ -578,7 +578,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(kj::ArrayPtr<const byte> bu
 
 kj::Promise<void> WritableStreamSinkKjAdapter::write(
     kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
-  KJ_IF_SOME(exc, state.tryGetError()) {
+  KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     kj::throwFatalException(kj::cp(exc));
   }
 
@@ -586,7 +586,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
     KJ_FAIL_REQUIRE("Cannot write after close.");
   }
 
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     auto& active = *open.active;
     KJ_REQUIRE(!active.writePending, "Cannot have multiple concurrent writes.");
     KJ_IF_SOME(exception, active.pendingAbort) {
@@ -632,13 +632,13 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
       return IoContext::current().awaitJs(js, kj::mv(promise));
     })).then([self = selfRef.addRef()]() {
       self->runIfAlive([&](WritableStreamSinkKjAdapter& self) {
-        KJ_IF_SOME(open, self.state.tryGetActive()) {
+        KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
           open.active->writePending = false;
         }
       });
     }, [self = selfRef.addRef()](kj::Exception exception) {
       self->runIfAlive([&](WritableStreamSinkKjAdapter& self) {
-        KJ_IF_SOME(open, self.state.tryGetActive()) {
+        KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
           open.active->writePending = false;
           open.active->pendingAbort = kj::cp(exception);
         }
@@ -650,7 +650,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
 }
 
 kj::Promise<void> WritableStreamSinkKjAdapter::end() {
-  KJ_IF_SOME(exc, state.tryGetError()) {
+  KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     return kj::cp(exc);
   }
 
@@ -658,7 +658,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::end() {
     return kj::READY_NOW;
   }
 
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     auto& active = *open.active;
     KJ_REQUIRE(!active.writePending, "Cannot have multiple concurrent writes.");
     KJ_IF_SOME(exception, active.pendingAbort) {
@@ -678,7 +678,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::end() {
       return IoContext::current().awaitJs(js, kj::mv(promise));
     })).catch_([self = selfRef.addRef()](kj::Exception exception) {
       self->runIfAlive([&](WritableStreamSinkKjAdapter& self) {
-        KJ_IF_SOME(open, self.state.tryGetActive()) {
+        KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
           open.active->pendingAbort = kj::cp(exception);
         }
       });
@@ -689,7 +689,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::end() {
 }
 
 void WritableStreamSinkKjAdapter::abort(kj::Exception reason) {
-  KJ_IF_SOME(open, state.tryGetActive()) {
+  KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
     open.active->abort(kj::cp(reason));
   }
   // Use forceTransitionTo because abort can be called from any state.

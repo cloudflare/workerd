@@ -289,7 +289,7 @@ class CompressionStreamImpl: public kj::Refcounted,
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     KJ_ASSERT(minBytes <= maxBytes);
     // Re-throw any stored exception
-    KJ_IF_SOME(exception, state.tryGetError()) {
+    KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
       kj::throwFatalException(kj::cp(exception));
     }
     // If stream has ended normally and no buffered data, return EOF
@@ -305,7 +305,7 @@ class CompressionStreamImpl: public kj::Refcounted,
   // Helper to check that the stream is still active (Open state).
   // Throws an appropriate error if the stream has ended or errored.
   void requireActive(kj::StringPtr errorMessage) {
-    KJ_IF_SOME(exception, state.tryGetError()) {
+    KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
       kj::throwFatalException(kj::cp(exception));
     }
     // isActive() returns true only if in Open state (the ActiveState)

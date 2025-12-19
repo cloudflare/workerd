@@ -291,7 +291,7 @@ class ReadableSourceImpl: public ReadableSource {
     if (state.is<Closed>()) {
       co_return 0;
     }
-    KJ_IF_SOME(open, state.tryGetActive()) {
+    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
       KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being read");
       co_return co_await canceler.wrap(readInner(open, buffer, minBytes));
       // If the source is dropped while a read is in progress, the canceler will
@@ -311,7 +311,7 @@ class ReadableSourceImpl: public ReadableSource {
       kj::throwFatalException(KJ_EXCEPTION(FAILED, "jsg.Error: Stream is already being read"));
     }
 
-    KJ_IF_SOME(errored, state.tryGetError()) {
+    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       output.abort(kj::cp(errored));
       kj::throwFatalException(kj::cp(errored));
     }
@@ -323,7 +323,7 @@ class ReadableSourceImpl: public ReadableSource {
       co_return;
     }
 
-    KJ_IF_SOME(open, state.tryGetActive()) {
+    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
       // Ownership of the underlying inner stream is transferred to the pump operation,
       // where it will be either fully consumed or errored out. In either case, this
       // ReadableSource becomes closed and no longer usable once pumpTo() is called.
@@ -353,7 +353,7 @@ class ReadableSourceImpl: public ReadableSource {
 
   kj::Maybe<size_t> tryGetLength(rpc::StreamEncoding encoding) override {
     if (encoding == rpc::StreamEncoding::IDENTITY) {
-      KJ_IF_SOME(open, state.tryGetActive()) {
+      KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
         return open.stream->tryGetLength();
       }
     }
@@ -386,7 +386,7 @@ class ReadableSourceImpl: public ReadableSource {
   }
 
   Tee tee(size_t limit) override {
-    KJ_IF_SOME(errored, state.tryGetError()) {
+    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       return Tee{
         .branch1 = newErroredReadableSource(kj::cp(errored)),
         .branch2 = newErroredReadableSource(kj::cp(errored)),
@@ -400,7 +400,7 @@ class ReadableSourceImpl: public ReadableSource {
       };
     }
 
-    KJ_IF_SOME(open, state.tryGetActive()) {
+    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
       KJ_IF_SOME(result, tryTee(limit)) {
         setClosed();
         return kj::mv(result);
@@ -423,7 +423,7 @@ class ReadableSourceImpl: public ReadableSource {
  protected:
   // Throws the stored exception if in error state.
   void throwIfErrored() {
-    KJ_IF_SOME(exception, state.tryGetError()) {
+    KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
       kj::throwFatalException(kj::cp(exception));
     }
   }
@@ -464,7 +464,7 @@ class ReadableSourceImpl: public ReadableSource {
 
   kj::AsyncInputStream& setStream(kj::Own<kj::AsyncInputStream> stream) {
     auto& inner = *stream;
-    state.get<Open>().stream = kj::mv(stream);
+    state.getUnsafe<Open>().stream = kj::mv(stream);
     return inner;
   }
 
@@ -817,7 +817,7 @@ class EncodedAsyncInputStream final: public ReadableSourceImpl {
     // Note that if we haven't called read() yet, then the inner stream is still
     // in its original encoding. If read() has been called, however, then the inner
     // stream will be wrapped and will be in identity encoding.
-    auto& open = KJ_ASSERT_NONNULL(getState().tryGetActive());
+    auto& open = KJ_ASSERT_NONNULL(getState().tryGetActiveUnsafe());
     auto tee = kj::newTee(kj::mv(open.stream), limit);
     return Tee{
       .branch1 =

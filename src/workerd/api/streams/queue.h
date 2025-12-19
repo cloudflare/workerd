@@ -162,7 +162,7 @@ class QueueImpl final {
   // Closes the queue. The close is forwarded on to all consumers.
   // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the close callback, invalidating the iterator.
       auto consumers = ready.consumers.snapshot();
@@ -186,7 +186,7 @@ class QueueImpl final {
   // all pending consume promises.
   // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::Value reason) {
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the error callback, invalidating the iterator.
       auto consumers = ready.consumers.snapshot();
@@ -202,7 +202,7 @@ class QueueImpl final {
   // If we are already closed or errored, set totalQueueSize to zero.
   void maybeUpdateBackpressure() {
     totalQueueSize = 0;
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       auto consumers = ready.consumers.snapshot();
       for (auto consumer: consumers) {
         totalQueueSize = kj::max(totalQueueSize, consumer->size());
@@ -216,7 +216,7 @@ class QueueImpl final {
   // operations, then any left over data will be pushed into the consumer's buffer.
   // Asserts if the queue is closed or errored.
   void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
-    auto& ready = state.requireActive("The queue is closed or errored.");
+    auto& ready = state.requireActiveUnsafe("The queue is closed or errored.");
 
     auto consumers = ready.consumers.snapshot();
     for (auto consumer: consumers) {
@@ -240,7 +240,7 @@ class QueueImpl final {
   }
 
   bool wantsRead() const {
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       auto consumers = ready.consumers.snapshot();
       for (auto consumer: consumers) {
         if (consumer->hasReadRequests()) return true;
@@ -252,7 +252,7 @@ class QueueImpl final {
   // Specific queue implementations may provide additional state that is attached
   // to the Ready struct.
   kj::Maybe<State&> getState() KJ_LIFETIMEBOUND {
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       return ready;
     }
     return kj::none;
@@ -295,13 +295,13 @@ class QueueImpl final {
   QueueState state;
 
   void addConsumer(ConsumerImpl* consumer) {
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.template tryGetUnsafe<Ready>()) {
       ready.consumers.add(consumer);
     }
   }
 
   void removeConsumer(ConsumerImpl* consumer) {
-    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.template tryGetUnsafe<Ready>()) {
       ready.consumers.remove(consumer);
       maybeUpdateBackpressure();
     }
@@ -354,7 +354,7 @@ class ConsumerImpl final {
 
   void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
     // Already closed or errored - nothing to do.
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       for (auto& request: ready.readRequests) {
         request->resolveAsDone(js);
       }
@@ -364,7 +364,7 @@ class ConsumerImpl final {
 
   void close(jsg::Lock& js) {
     // If we are already closed or errored, then we do nothing here.
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // If we are not already closing, enqueue a Close sentinel.
       if (!isClosing()) {
         ready.buffer.push_back(Close{});
@@ -393,7 +393,7 @@ class ConsumerImpl final {
     // This can happen during iteration over consumers in QueueImpl::push() when
     // resolving a read request on one consumer triggers JavaScript code that
     // closes or errors another consumer in the same queue.
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // If the consumer is already closing or the entry is empty, do nothing.
       if (isClosing() || entry->getSize() == 0) {
         return;
@@ -408,10 +408,10 @@ class ConsumerImpl final {
     if (state.template is<Closed>()) {
       return request.resolveAsDone(js);
     }
-    KJ_IF_SOME(errored, state.tryGetError()) {
+    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       return request.reject(js, errored.reason);
     }
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       Self::handleRead(js, ready, *this, queue, kj::mv(request));
       return maybeDrainAndSetState(js);
     }
@@ -419,7 +419,7 @@ class ConsumerImpl final {
   }
 
   void reset() {
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       UpdateBackpressureScope scope(queue);
       ready.buffer.clear();
       ready.queueTotalSize = 0;
@@ -432,7 +432,7 @@ class ConsumerImpl final {
   }
 
   void resolveRead(jsg::Lock& js, ReadRequest& req) {
-    auto& ready = state.requireActive();
+    auto& ready = state.requireActiveUnsafe();
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
     req.resolve(js);
@@ -440,7 +440,7 @@ class ConsumerImpl final {
   }
 
   void resolveReadAsDone(jsg::Lock& js, ReadRequest& req) {
-    auto& ready = state.requireActive();
+    auto& ready = state.requireActiveUnsafe();
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
     req.resolveAsDone(js);
@@ -452,14 +452,14 @@ class ConsumerImpl final {
       other.state.template transitionTo<Closed>();
       return;
     }
-    KJ_IF_SOME(errored, state.tryGetError()) {
+    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       other.state.template transitionTo<Errored>(errored.reason.addRef(js));
       return;
     }
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // We copy the buffered state but not the readRequests.
       auto& otherReady = KJ_REQUIRE_NONNULL(
-          other.state.tryGetActive(), "The new consumer should not be closed or errored.");
+          other.state.tryGetActiveUnsafe(), "The new consumer should not be closed or errored.");
       otherReady.queueTotalSize = ready.queueTotalSize;
       for (auto& item: ready.buffer) {
         KJ_SWITCH_ONEOF(item) {
@@ -481,7 +481,7 @@ class ConsumerImpl final {
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
     // Already closed or errored - nothing to do.
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       for (auto& request: ready.readRequests) {
         request->resolver.reject(js, reason);
       }
@@ -492,7 +492,7 @@ class ConsumerImpl final {
   void visitForGc(jsg::GcVisitor& visitor) {
     // Technically we shouldn't really have to GC visit the stored error here but there
     // should not be any harm in doing so.
-    KJ_IF_SOME(errored, state.tryGetError()) {
+    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       visitor.visit(errored.reason);
     }
     // There's no reason to GC visit the promise resolver or buffer in Ready state and it is
@@ -550,7 +550,7 @@ class ConsumerImpl final {
   bool isClosing() {
     // Closing state is determined by whether there is a Close sentinel that has been
     // pushed into the end of Ready state buffer.
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       if (ready.buffer.empty()) {
         return false;
       }
@@ -561,7 +561,7 @@ class ConsumerImpl final {
 
   void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
-    KJ_IF_SOME(ready, state.tryGetActive()) {
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       UpdateBackpressureScope scope(queue);
       KJ_IF_SOME(reason, maybeReason) {
         // If maybeReason != nullptr, then we are draining because of an error.
@@ -994,7 +994,7 @@ size_t QueueImpl<Self>::jsgGetMemorySelfSize() const {
 
 template <typename Self>
 void QueueImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  KJ_IF_SOME(errored, state.tryGetError()) {
+  KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
     tracker.trackField("error", errored.reason);
   }
 }
@@ -1011,9 +1011,9 @@ size_t ConsumerImpl<Self>::jsgGetMemorySelfSize() const {
 
 template <typename Self>
 void ConsumerImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  KJ_IF_SOME(errored, state.tryGetError()) {
+  KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
     tracker.trackField("error", errored.reason);
-  } else KJ_IF_SOME(ready, state.tryGetActive()) {
+  } else KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
     tracker.trackField("inner", ready);
   }
 }

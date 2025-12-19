@@ -99,8 +99,8 @@
 //    Instead of: state.is<kj::Exception>() || state.is<Closed>()
 //    Write:      state.isTerminal()  or  state.isInactive()
 //
-//    Instead of: KJ_IF_SOME(e, state.tryGet<kj::Exception>()) { ... }
-//    Write:      KJ_IF_SOME(e, state.tryGetError()) { ... }
+//    Instead of: KJ_IF_SOME(e, state.tryGetUnsafe<kj::Exception>()) { ... }
+//    Write:      KJ_IF_SOME(e, state.tryGetErrorUnsafe()) { ... }
 //
 // WHEN TO USE:
 //
@@ -177,7 +177,7 @@
 // UNSAFE PATTERNS TO AVOID:
 //
 //   // DON'T: Store references from get() across transitions
-//   Active& active = machine.get<Active>();
+//   Active& active = machine.getUnsafe<Active>();
 //   machine.transitionTo<Closed>();  // active is now dangling!
 //
 //   // DO: Use withState() for safe scoped access
@@ -1026,9 +1026,24 @@ class StateMachine {
   // ---------------------------------------------------------------------------
   // Core State Access (always available)
   // ---------------------------------------------------------------------------
+  //
+  // NAMING CONVENTION: Methods with "Unsafe" suffix return raw references to
+  // state data without any protection against use-after-free. These references
+  // can dangle if a state transition occurs while the reference is held.
+  //
+  // The "Unsafe" suffix serves as a visual warning at every call site,
+  // encouraging developers to:
+  //   1. Use safe alternatives (withState(), whenActive()) when possible
+  //   2. Carefully audit code paths that could trigger transitions
+  //   3. Keep the reference's lifetime as short as possible
+  //
+  // Safe alternatives:
+  //   - withState<S>(callback)  - Locks transitions during callback
+  //   - whenActive(callback)    - Locks transitions, only runs if active
+  //   - acquireTransitionLock() - RAII lock for manual control
 
   template <typename S>
-  S& get() KJ_LIFETIMEBOUND
+  S& getUnsafe() KJ_LIFETIMEBOUND
     requires(_::isInTuple<S, StatesTuple>)
   {
     requireInitialized();
@@ -1037,7 +1052,7 @@ class StateMachine {
   }
 
   template <typename S>
-  const S& get() const KJ_LIFETIMEBOUND
+  const S& getUnsafe() const KJ_LIFETIMEBOUND
     requires(_::isInTuple<S, StatesTuple>)
   {
     requireInitialized();
@@ -1046,14 +1061,14 @@ class StateMachine {
   }
 
   template <typename S>
-  kj::Maybe<S&> tryGet() KJ_LIFETIMEBOUND
+  kj::Maybe<S&> tryGetUnsafe() KJ_LIFETIMEBOUND
     requires(_::isInTuple<S, StatesTuple>)
   {
     return state.template tryGet<S>();
   }
 
   template <typename S>
-  kj::Maybe<const S&> tryGet() const KJ_LIFETIMEBOUND
+  kj::Maybe<const S&> tryGetUnsafe() const KJ_LIFETIMEBOUND
     requires(_::isInTuple<S, StatesTuple>)
   {
     return state.template tryGet<S>();
@@ -1264,32 +1279,32 @@ class StateMachine {
 
   // Get the error state if currently errored.
   //
-  // WARNING: This returns an UNLOCKED reference - same risks as get()/tryGet().
-  // Error states are typically terminal so the risk is lower, but the reference
-  // can still dangle if forceTransitionTo() is used.
-  kj::Maybe<ErrorStateType&> tryGetError() KJ_LIFETIMEBOUND
+  // WARNING: Returns an UNLOCKED reference - can dangle if forceTransitionTo() is used.
+  kj::Maybe<ErrorStateType&> tryGetErrorUnsafe() KJ_LIFETIMEBOUND
     requires(HAS_ERROR)
   {
-    return tryGet<ErrorStateType>();
+    return tryGetUnsafe<ErrorStateType>();
   }
 
-  kj::Maybe<const ErrorStateType&> tryGetError() const KJ_LIFETIMEBOUND
+  kj::Maybe<const ErrorStateType&> tryGetErrorUnsafe() const KJ_LIFETIMEBOUND
     requires(HAS_ERROR)
   {
-    return tryGet<ErrorStateType>();
+    return tryGetUnsafe<ErrorStateType>();
   }
 
   // Get the error state, asserting we are errored.
-  ErrorStateType& getError() KJ_LIFETIMEBOUND
+  //
+  // WARNING: Returns an UNLOCKED reference - can dangle if forceTransitionTo() is used.
+  ErrorStateType& getErrorUnsafe() KJ_LIFETIMEBOUND
     requires(HAS_ERROR)
   {
-    return get<ErrorStateType>();
+    return getUnsafe<ErrorStateType>();
   }
 
-  const ErrorStateType& getError() const KJ_LIFETIMEBOUND
+  const ErrorStateType& getErrorUnsafe() const KJ_LIFETIMEBOUND
     requires(HAS_ERROR)
   {
-    return get<ErrorStateType>();
+    return getUnsafe<ErrorStateType>();
   }
 
   // ---------------------------------------------------------------------------
@@ -1313,26 +1328,24 @@ class StateMachine {
 
   // Get the active state if currently active.
   //
-  // WARNING: This returns an UNLOCKED reference - same risks as get()/tryGet().
-  // The reference can dangle if the machine transitions. Prefer whenActive()
-  // for safe access with locked transitions.
-  kj::Maybe<ActiveStateType&> tryGetActive() KJ_LIFETIMEBOUND
+  // WARNING: Returns an UNLOCKED reference - can dangle if the machine transitions.
+  // Prefer whenActive() for safe access with locked transitions.
+  kj::Maybe<ActiveStateType&> tryGetActiveUnsafe() KJ_LIFETIMEBOUND
     requires(HAS_ACTIVE)
   {
-    return tryGet<ActiveStateType>();
+    return tryGetUnsafe<ActiveStateType>();
   }
 
-  kj::Maybe<const ActiveStateType&> tryGetActive() const KJ_LIFETIMEBOUND
+  kj::Maybe<const ActiveStateType&> tryGetActiveUnsafe() const KJ_LIFETIMEBOUND
     requires(HAS_ACTIVE)
   {
-    return tryGet<ActiveStateType>();
+    return tryGetUnsafe<ActiveStateType>();
   }
 
   // Get the active state, throwing KJ_REQUIRE if not active.
   //
-  // WARNING: This returns an UNLOCKED reference - same risks as get()/tryGet().
-  // The reference can dangle if the machine transitions.
-  ActiveStateType& requireActive(kj::StringPtr message = nullptr) KJ_LIFETIMEBOUND
+  // WARNING: Returns an UNLOCKED reference - can dangle if the machine transitions.
+  ActiveStateType& requireActiveUnsafe(kj::StringPtr message = nullptr) KJ_LIFETIMEBOUND
     requires(HAS_ACTIVE)
   {
     if (message == nullptr) {
@@ -1342,7 +1355,7 @@ class StateMachine {
     return state.template get<ActiveStateType>();
   }
 
-  const ActiveStateType& requireActive(kj::StringPtr message = nullptr) const KJ_LIFETIMEBOUND
+  const ActiveStateType& requireActiveUnsafe(kj::StringPtr message = nullptr) const KJ_LIFETIMEBOUND
     requires(HAS_ACTIVE)
   {
     if (message == nullptr) {
@@ -1475,15 +1488,17 @@ class StateMachine {
   }
 
   // Get the pending state if it matches the specified type.
+  //
+  // WARNING: Returns an UNLOCKED reference - can dangle if the pending state is applied.
   template <typename S>
-  kj::Maybe<S&> tryGetPendingState() KJ_LIFETIMEBOUND
+  kj::Maybe<S&> tryGetPendingStateUnsafe() KJ_LIFETIMEBOUND
     requires(HAS_PENDING) && (PendingSpec::template contains<S>)
   {
     return pendingState.template tryGet<S>();
   }
 
   template <typename S>
-  kj::Maybe<const S&> tryGetPendingState() const KJ_LIFETIMEBOUND
+  kj::Maybe<const S&> tryGetPendingStateUnsafe() const KJ_LIFETIMEBOUND
     requires(HAS_PENDING) && (PendingSpec::template contains<S>)
   {
     return pendingState.template tryGet<S>();
@@ -1644,6 +1659,7 @@ class StateMachine {
   // - Interfacing with APIs that expect kj::OneOf directly
   //
   // STRONGLY PREFER: withState(), transitionTo(), and other type-safe methods.
+  // TODO(later): Revisit whether these should be kept.
   StateUnion& underlying() KJ_LIFETIMEBOUND {
     return state;
   }
@@ -1973,18 +1989,18 @@ class StateMachine {
 //   ErrorableStateMachine<Readable, Closed, Errored> state;
 //
 //   // Old pattern (verbose):
-//   KJ_IF_SOME(errored, state.tryGet<Errored>()) {
+//   KJ_IF_SOME(errored, state.tryGetUnsafe<Errored>()) {
 //     return errored.getHandle(js);
 //   }
 //
 //   // New pattern (cleaner):
-//   KJ_IF_SOME(errored, state.tryGetError()) {
+//   KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
 //     return errored.getHandle(js);
 //   }
 //
 //   // Or simply:
 //   if (state.isErrored()) {
-//     auto& err = state.getError();
+//     auto& err = state.getErrorUnsafe();
 //   }
 //
 // Example 4: State Introspection for Debugging
@@ -2059,9 +2075,9 @@ class StateMachine {
 //
 //   // UNSAFE patterns to avoid:
 //   //
-//   //   Active& a = state.get<Active>();  // Reference not locked!
-//   //   state.transitionTo<Done>();       // a is now dangling!
-//   //   a.doSomething();                  // USE-AFTER-FREE!
+//   //   Active& a = state.getUnsafe<Active>();  // Reference not locked!
+//   //   state.transitionTo<Done>();             // a is now dangling!
+//   //   a.doSomething();                        // USE-AFTER-FREE!
 //   //
 //   //   state.withState<Active>([&](Active& a) {
 //   //     state.transitionTo<Done>();     // FAILS - transitions locked!
@@ -2116,7 +2132,7 @@ class StateMachine {
 //     auto lock = state.acquireTransitionLock();
 //
 //     // All transitions blocked while lock is held
-//     auto& active = state.get<Active>();
+//     auto& active = state.getUnsafe<Active>();
 //     active.doStep1();
 //     active.doStep2();
 //     active.doStep3();

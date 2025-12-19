@@ -73,7 +73,7 @@ KJ_TEST("StateMachine: state data access") {
 
   // Modify state data
   running.progress = 50;
-  KJ_EXPECT(machine.get<Running>().progress == 50);
+  KJ_EXPECT(machine.getUnsafe<Running>().progress == 50);
 }
 
 KJ_TEST("StateMachine: tryGet returns none for wrong state") {
@@ -81,15 +81,15 @@ KJ_TEST("StateMachine: tryGet returns none for wrong state") {
   machine.transitionTo<Idle>();
 
   // tryGet for correct state
-  KJ_IF_SOME(idle, machine.tryGet<Idle>()) {
+  KJ_IF_SOME(idle, machine.tryGetUnsafe<Idle>()) {
     KJ_EXPECT(!idle.initialized);
   } else {
     KJ_FAIL_EXPECT("Should have gotten Idle state");
   }
 
   // tryGet for wrong state
-  KJ_EXPECT(machine.tryGet<Running>() == kj::none);
-  KJ_EXPECT(machine.tryGet<Completed>() == kj::none);
+  KJ_EXPECT(machine.tryGetUnsafe<Running>() == kj::none);
+  KJ_EXPECT(machine.tryGetUnsafe<Completed>() == kj::none);
 }
 
 KJ_TEST("StateMachine: isAnyOf checks multiple states") {
@@ -123,20 +123,20 @@ KJ_TEST("StateMachine: transitionFromTo with precondition") {
   auto result2 = machine.transitionFromTo<Running, Completed>(100);
   KJ_EXPECT(result2 != kj::none);
   KJ_EXPECT(machine.is<Completed>());
-  KJ_EXPECT(machine.get<Completed>().result == 100);
+  KJ_EXPECT(machine.getUnsafe<Completed>().result == 100);
 }
 
 KJ_TEST("StateMachine: factory create") {
   auto machine = StateMachine<Idle, Running, Completed, Failed>::create<Running>(kj::str("task"));
   KJ_EXPECT(machine.is<Running>());
-  KJ_EXPECT(machine.get<Running>().taskName == "task");
+  KJ_EXPECT(machine.getUnsafe<Running>().taskName == "task");
 }
 
 KJ_TEST("StateMachine: uninitialized state throws on get") {
   StateMachine<Idle, Running, Completed, Failed> machine;
 
   // get() on uninitialized machine should throw with clear message
-  auto tryGet = [&]() { machine.get<Idle>(); };
+  auto tryGet = [&]() { machine.getUnsafe<Idle>(); };
   KJ_EXPECT_THROW_MESSAGE("used before initialization", tryGet());
 }
 
@@ -312,7 +312,7 @@ KJ_TEST("StateMachine: basic usage without specs") {
   machine.transitionTo<CActive>(kj::str("resource"));
   KJ_EXPECT(machine.isInitialized());
   KJ_EXPECT(machine.is<CActive>());
-  KJ_EXPECT(machine.get<CActive>().resourceName == "resource");
+  KJ_EXPECT(machine.getUnsafe<CActive>().resourceName == "resource");
 
   machine.transitionTo<CClosed>();
   KJ_EXPECT(machine.is<CClosed>());
@@ -326,7 +326,7 @@ KJ_TEST("StateMachine: uninitialized state throws on get") {
   StateMachine<CActive, CClosed, CErrored> machine;
 
   // get() on uninitialized machine should throw with clear message
-  auto tryGet = [&]() { machine.get<CActive>(); };
+  auto tryGet = [&]() { machine.getUnsafe<CActive>(); };
   KJ_EXPECT_THROW_MESSAGE("used before initialization", tryGet());
 }
 
@@ -375,18 +375,18 @@ KJ_TEST("StateMachine: with ErrorState spec") {
 
   machine.transitionTo<CActive>(kj::str("resource"));
   KJ_EXPECT(!machine.isErrored());
-  KJ_EXPECT(machine.tryGetError() == kj::none);
+  KJ_EXPECT(machine.tryGetErrorUnsafe() == kj::none);
 
   machine.transitionTo<CErrored>(kj::str("something went wrong"));
   KJ_EXPECT(machine.isErrored());
 
-  KJ_IF_SOME(err, machine.tryGetError()) {
+  KJ_IF_SOME(err, machine.tryGetErrorUnsafe()) {
     KJ_EXPECT(err.reason == "something went wrong");
   } else {
     KJ_FAIL_EXPECT("Should have gotten error");
   }
 
-  KJ_EXPECT(machine.getError().reason == "something went wrong");
+  KJ_EXPECT(machine.getErrorUnsafe().reason == "something went wrong");
 }
 
 KJ_TEST("StateMachine: with ActiveState spec") {
@@ -396,7 +396,7 @@ KJ_TEST("StateMachine: with ActiveState spec") {
   KJ_EXPECT(machine.isActive());
   KJ_EXPECT(!machine.isInactive());
 
-  KJ_IF_SOME(active, machine.tryGetActive()) {
+  KJ_IF_SOME(active, machine.tryGetActiveUnsafe()) {
     KJ_EXPECT(active.resourceName == "resource");
   } else {
     KJ_FAIL_EXPECT("Should be active");
@@ -431,27 +431,28 @@ KJ_TEST("StateMachine: whenActiveOr") {
   KJ_EXPECT(result2 == 999);
 }
 
-KJ_TEST("StateMachine: requireActive") {
+KJ_TEST("StateMachine: requireActiveUnsafe") {
   StateMachine<ActiveState<CActive>, CActive, CClosed, CErrored> machine;
 
   machine.transitionTo<CActive>(kj::str("resource"));
 
-  // requireActive returns reference when active
-  auto& active = machine.requireActive();
+  // requireActiveUnsafeUnsafe returns reference when active
+  auto& active = machine.requireActiveUnsafe();
   KJ_EXPECT(active.resourceName == "resource");
 
-  // requireActive with custom message works when active
-  auto& active2 = machine.requireActive("Custom message");
+  // requireActiveUnsafe with custom message works when active
+  auto& active2 = machine.requireActiveUnsafe("Custom message");
   KJ_EXPECT(active2.resourceName == "resource");
 
   machine.transitionTo<CClosed>();
 
-  // requireActive throws when not active
+  // requireActiveUnsafe throws when not active
   KJ_EXPECT_THROW_MESSAGE(
-      "State machine is not in the active state", (void)machine.requireActive());
+      "State machine is not in the active state", (void)machine.requireActiveUnsafe());
 
-  // requireActive throws custom message when not active
-  KJ_EXPECT_THROW_MESSAGE("Stream is closed", (void)machine.requireActive("Stream is closed"));
+  // requireActiveUnsafe throws custom message when not active
+  KJ_EXPECT_THROW_MESSAGE(
+      "Stream is closed", (void)machine.requireActiveUnsafe("Stream is closed"));
 }
 
 KJ_TEST("StateMachine: with PendingStates spec") {
@@ -509,7 +510,7 @@ KJ_TEST("StateMachine: full-featured stream-like usage") {
 
   // Safe access with whenActive
   machine.whenActive([](CActive& a) { a.resourceName = kj::str("modified"); });
-  KJ_EXPECT(machine.get<CActive>().resourceName == "modified");
+  KJ_EXPECT(machine.getUnsafe<CActive>().resourceName == "modified");
 
   // Start a read operation
   machine.beginOperation();

@@ -57,7 +57,7 @@ class WritableSinkImpl: public WritableSink {
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override final {
     throwIfErrored();
-    KJ_IF_SOME(open, state.tryGetActive()) {
+    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
       KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
       try {
         co_return co_await canceler.wrap(encodeAndWrite(prepareWrite(kj::mv(open.stream)), buffer));
@@ -71,7 +71,7 @@ class WritableSinkImpl: public WritableSink {
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override final {
     throwIfErrored();
-    KJ_IF_SOME(open, state.tryGetActive()) {
+    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
       KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
       try {
         co_return co_await canceler.wrap(encodeAndWrite(prepareWrite(kj::mv(open.stream)), pieces));
@@ -88,7 +88,7 @@ class WritableSinkImpl: public WritableSink {
     if (state.is<Closed>()) {
       co_return;
     }
-    KJ_IF_SOME(open, state.tryGetActive()) {
+    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
       KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
       // The AsyncOutputStream interface does not yet have an end() method.
       // Instead, we just drop it, signaling EOF. Eventually, it might get
@@ -122,7 +122,7 @@ class WritableSinkImpl: public WritableSink {
  protected:
   // Throws the stored exception if in error state.
   void throwIfErrored() {
-    KJ_IF_SOME(exception, state.tryGetError()) {
+    KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
       kj::throwFatalException(kj::cp(exception));
     }
   }
@@ -174,7 +174,7 @@ class WritableSinkImpl: public WritableSink {
     auto& ret = *inner;
     // Update the stream in place without a state transition.
     // This is called from prepareWrite() which may wrap/transform the stream.
-    state.get<Open>().stream = kj::mv(inner);
+    state.getUnsafe<Open>().stream = kj::mv(inner);
     return ret;
   }
 
