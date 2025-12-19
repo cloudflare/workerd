@@ -91,11 +91,17 @@ These track lock states - different semantic pattern, may not benefit as much:
   - **DONE**: Converted to `ComposableStateMachine<Unlocked, Locked, WriterLocked, PipeLocked>`
   - Bug fix: Changed `releaseWriter()` to use `tryGet<>()` instead of `get<>()` (matching `releaseReader()` pattern)
 
-- [ ] **internal.h:149** - `ReadableStreamInternalController::readState`
+- [x] **internal.h:149** - `ReadableStreamInternalController::readState`
   - `kj::OneOf<Unlocked, Locked, PipeLocked, ReaderLocked>`
+  - Lock state (no terminal states - cyclic transitions allowed)
+  - **DONE**: Converted to `ComposableStateMachine<Unlocked, Locked, PipeLocked, ReaderLocked>`
+  - Note: Also added NAME constant to `PipeLocked` class
 
-- [ ] **internal.h:271** - `WritableStreamInternalController::writeState`
+- [x] **internal.h:271** - `WritableStreamInternalController::writeState`
   - `kj::OneOf<Unlocked, Locked, PipeLocked, WriterLocked>`
+  - Lock state (no terminal states - cyclic transitions allowed)
+  - **DONE**: Converted to `ComposableStateMachine<Unlocked, Locked, PipeLocked, WriterLocked>`
+  - Note: Also added NAME constant to `PipeLocked` struct
 
 ---
 
