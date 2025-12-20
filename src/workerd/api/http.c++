@@ -8,6 +8,7 @@
 #include "headers.h"
 #include "queue.h"
 #include "sockets.h"
+#include "streams/readable-source.h"
 #include "system-streams.h"
 #include "util.h"
 #include "worker-rpc.h"
@@ -202,8 +203,12 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   auto buf = buffer.clone(js);
 
   if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
-    auto memStream = newMemoryInputStream(buf.view, kj::heap(kj::mv(buf.ownBytes)));
-    auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
+    // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
+    // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
+    // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
+    // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
+    // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+    auto rs = streams::newMemorySource(buf.view, kj::heap(kj::mv(buf.ownBytes)));
 
     return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
       kj::mv(contentType)};
@@ -261,8 +266,12 @@ void Body::rewindBody(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     auto bufferCopy = KJ_ASSERT_NONNULL(i.buffer).clone(js);
     if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
-      auto memStream = newMemoryInputStream(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
-      auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
+      // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
+      // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
+      // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
+      // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
+      // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+      auto rs = streams::newMemorySource(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
       i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
     } else {
       // TODO(cleanup): Remove once the Autogate is removed.

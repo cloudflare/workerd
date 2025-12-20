@@ -1,5 +1,6 @@
 #include "ffi.h"
 
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -146,7 +147,7 @@ void global_make_weak(Isolate* isolate, Global* value, size_t data, WeakCallback
 }
 
 // FunctionCallbackInfo
-v8::Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
+Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
   return args->GetIsolate();
 }
 
@@ -166,7 +167,7 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
-Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor) {
+Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
   // Construct lazily.
   v8::EscapableHandleScope scope(isolate);
 
@@ -244,9 +245,10 @@ Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
 }
 
 Realm* realm_from_isolate(Isolate* isolate) {
-  auto realm = ::workerd::jsg::getAlignedPointerFromEmbedderData<Realm>(
-      isolate->GetCurrentContext(), ::workerd::jsg::ContextPointerSlot::RUST_REALM);
-  return &KJ_ASSERT_NONNULL(realm);
+  auto* realm =
+      static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
+  KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
+  return realm;
 }
 
 // Errors

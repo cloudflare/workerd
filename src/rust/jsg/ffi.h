@@ -57,7 +57,7 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
 size_t unwrap_resource(Isolate* isolate, Local value);
 
 // FunctionCallbackInfo
-v8::Isolate* fci_get_isolate(FunctionCallbackInfo* args);
+Isolate* fci_get_isolate(FunctionCallbackInfo* args);
 Local fci_get_this(FunctionCallbackInfo* args);
 size_t fci_get_length(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
@@ -76,7 +76,7 @@ inline void register_add_builtin_module(ModuleRegistry& registry,
   registry.addBuiltinModule(specifier, kj::mv(callback), moduleType);
 }
 
-Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);
+Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor);
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate);
