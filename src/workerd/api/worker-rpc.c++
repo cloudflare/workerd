@@ -519,7 +519,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       // after the call completes whether or not it will return any streams. If it's unused,
       // though, it should only be a couple allocations.
       auto resultStreamSink = kj::refcounted<StreamSinkImpl>();
-      builder.setResultsStreamSink(kj::addRef(*resultStreamSink));
+      builder.getResultsStreamHandler().setStreamSink(kj::addRef(*resultStreamSink));
 
       auto callResult = builder.send();
 
@@ -1078,7 +1078,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
                       [callContext, ownCallContext = kj::mv(ownCallContext),
                           paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup),
                           paramsStreamSink = kj::mv(invocationResult.streamSink),
-                          resultStreamSink = params.getResultsStreamSink(),
+                          resultStreamSink = params.getResultsStreamHandler().getStreamSink(),
                           callPipelineFulfiller = kj::mv(callPipelineFulfiller)](
                           jsg::Lock& js, jsg::Value value) mutable {
         jsg::JsValue resultValue(value.getHandle(js));
