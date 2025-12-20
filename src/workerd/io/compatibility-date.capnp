@@ -1282,4 +1282,28 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # This feature exists for experimental use only, and will be removed once we have a properly
   # auditable and revocable storage mechanism.
+
+  rpcParamsDupStubs @152 :Bool
+    $compatEnableFlag("rpc_params_dup_stubs")
+    $compatDisableFlag("rpc_params_transfer_stubs")
+    $compatEnableDate("2026-01-20");
+  # Changes the ownership semantics of RPC stubs embedded in the parameters of an RPC call.
+  #
+  # When the RPC system was first introduced, RPC stubs that were embedded in the params or return
+  # value of some other call had their ownership transferred. That is, the original stub was
+  # implicitly disposed, with a duplicate stub being delivered to the destination.
+  #
+  # This turns out to compose poorly with another rule: in the callee, any stubs received in the
+  # params of a call are automatically disposed when the call returns. These two rules combine to
+  # mean that if you proxy a call -- i.e. the implementation of an RPC just makes another RPC call
+  # passing along the same params -- then any stubs in the params get disposed twice. Worse, if
+  # the eventual recipient of the stub wants to keep a duplicate past the end of the call, this
+  # may not work because the copy of the stub in the proxy layer gets disposed anyway, breaking the
+  # connection.
+  #
+  # For this reason, the pure-JS implementation of Cap'n Web switched to saying that stubs in params
+  # do NOT transfer ownership -- they are simply duplicated. This compat flag fixes the Workers
+  # Runtime built-in RPC to match Cap'n Web behavior.
+  #
+  # In particular, this fixes: https://github.com/cloudflare/capnweb/issues/110
 }

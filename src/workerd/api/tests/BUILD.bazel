@@ -276,6 +276,12 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-params-ownership-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-params-ownership-test.js"],
+)
+
+wd_test(
     src = "memory-cache-test.wd-test",
     args = ["--experimental"],
     data = ["memory-cache-test.js"],

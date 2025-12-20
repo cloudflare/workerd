@@ -492,8 +492,12 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           }
           auto arr = v8::Array::New(js.v8Isolate, argv.data(), argv.size());
 
-          auto externalHandler =
-              RpcSerializerExternalHandler([&]() -> rpc::JsValue::StreamSink::Client {
+          auto stubOwnership = FeatureFlags::get(js).getRpcParamsDupStubs()
+              ? RpcSerializerExternalHandler::DUPLICATE
+              : RpcSerializerExternalHandler::TRANSFER;
+
+          RpcSerializerExternalHandler externalHandler(
+              stubOwnership, [&]() -> rpc::JsValue::StreamSink::Client {
             // A stream was encountered in the params, so we must expect the response to contain
             // paramsStreamSink. But we don't have the response yet. So, we need to set up a
             // temporary promise client, which we hook to the response a little bit later.
@@ -842,11 +846,13 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     builder.setRpcTarget(kj::mv(cap));
   });
 
-  // Instead of disposing the stub immediately, we add a disposer to the serializer
-  // that will be executed when the pipeline is finished. This ensures the stub
-  // remains valid for the duration of any pipelined operations.
-  externalHandler->addStubDisposer(
-      kj::heap(kj::defer([self = JSG_THIS]() mutable { self->dispose(); })));
+  if (externalHandler->getStubOwnership() == RpcSerializerExternalHandler::TRANSFER) {
+    // Instead of disposing the stub immediately, we add a disposer to the serializer
+    // that will be executed when the pipeline is finished. This ensures the stub
+    // remains valid for the duration of any pipelined operations.
+    externalHandler->addStubDisposer(
+        kj::heap(kj::defer([self = JSG_THIS]() mutable { self->dispose(); })));
+  }
 }
 
 jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
@@ -1592,7 +1598,8 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
   auto hasDispose = maybeDispose != kj::none;
 
   // Now that we've extracted our dispose function, we can serialize our value.
-  auto externalHandler = RpcSerializerExternalHandler(kj::mv(getStreamSinkFunc));
+  RpcSerializerExternalHandler externalHandler(
+      RpcSerializerExternalHandler::TRANSFER, kj::mv(getStreamSinkFunc));
   serializeJsValue(js, value, externalHandler, kj::mv(makeBuilder));
 
   auto stubDisposers = externalHandler.releaseStubDisposers();
@@ -1721,6 +1728,62 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Handle can't possibly be missing during serialization, it's how we got here.
   auto handle = jsg::JsObject(KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js)));
 
+  if (externalHandler->getStubOwnership() == RpcSerializerExternalHandler::DUPLICATE) {
+    // This message isn't supposed to take ownership of stubs. What does that mean for an
+    // RpcTarget? You might argue that it means we should never call the disposer. But that's not
+    // really enough: what if the real owner *does* call the disposer, before our stub is done
+    // with it? How do we make sure the RpcTarget stays alive?
+    //
+    // Things get clearer if we look at a real use case: pure-JS Cap'n Web stubs. We don't see
+    // them as stubs (since they are not instances of JsRpcStub). Instead, we see them as
+    // RpcTargets. But we need the semantics to come out the same: when passed as a parameter
+    // to a native RPC call, we need to duplicate the stub, because the original copy might very
+    // well be disposed before we use it.
+    //
+    // How do we duplicate this non-native stub? Well... proper way to duplicate a pure-JS Cap'n
+    // Web stub is, of course, to call its `dup()` method.
+    //
+    // So how about we just do that? If the target has a `dup()` method, we call it, and we take
+    // ownership of the result, instead of taking ownership of the original object.
+    auto dup = handle.get(js, "dup");
+    KJ_IF_SOME(dupFunc, dup.tryCast<jsg::JsFunction>()) {
+      auto replacement = dupFunc.call(js, handle);
+      bool replaced = false;
+
+      // We got a duplicate. Is it still an RpcTarget?
+      KJ_IF_SOME(replacementObj, replacement.tryCast<jsg::JsObject>()) {
+        if (replacementObj.isInstanceOf<JsRpcTarget>(js)) {
+          // It is! Let's replace our handle with the duplicate!
+          handle = replacementObj;
+          replaced = true;
+        }
+      }
+
+      JSG_REQUIRE(replaced, DOMDataCloneError,
+          "Couldn't create a stub for the RcpTarget because it has a dup() method which did not "
+          "return another RpcTarget. Either remove the dup() method or make sure it returns an "
+          "RpcTarget.");
+    } else {
+      // If no dup() method was present, then what?
+      //
+      // The pedantic argument would say: we need to throw an exception. But that would lead to a
+      // pretty poor development experience as people would have to fiddle with adding dup()
+      // methods to all their RpcTargets.
+      //
+      // Another argument might say: we should just use the RpcTarget but never call the disposer
+      // since we don't own it. But that would probably be confusing. People would wonder why their
+      // disposers are never called.
+      //
+      // If someone passes an RpcTarget with no dup() method, but which does have a disposer, as
+      // the argument to an RPC method, *probably* they just want the disposer to be called when
+      // the callee is done with the object. That is, they want us to take ownership after all. If
+      // that is *not* what they want, then they can always implement a dup() method to make it
+      // clear.
+      //
+      // So, we will just "take ownership" of the target after all, and call its disposer.
+    }
+  }
+
   rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle);
 
   externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
@@ -1732,8 +1795,33 @@ void RpcSerializerExternalHandler::serializeFunction(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
   serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
 
+  auto handle = jsg::JsObject(func);
+
+  // Similar to JsRpcTarget::serialize(), we may need to dup() the function.
+  if (stubOwnership == RpcSerializerExternalHandler::DUPLICATE) {
+    auto dup = handle.get(js, "dup");
+    KJ_IF_SOME(dupFunc, dup.tryCast<jsg::JsFunction>()) {
+      auto replacement = dupFunc.call(js, handle);
+      bool replaced = false;
+
+      // We got a duplicate. Is it still a Function?
+      KJ_IF_SOME(replacementObj, replacement.tryCast<jsg::JsObject>()) {
+        if (isFunctionForRpc(js, replacementObj)) {
+          // It is! Let's replace our handle with the duplicate!
+          handle = replacementObj;
+          replaced = true;
+        }
+      }
+
+      JSG_REQUIRE(replaced, DOMDataCloneError,
+          "Couldn't create a stub for the function because it has a dup() method which did not "
+          "return another function. Either remove the dup() method or make sure it returns a "
+          "function.");
+    }
+  }
+
   rpc::JsRpcTarget::Client cap =
-      kj::heap<TransientJsRpcTarget>(js, IoContext::current(), jsg::JsObject(func), true);
+      kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, true);
   write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.setRpcTarget(kj::mv(cap));
   });
@@ -1757,6 +1845,31 @@ void RpcSerializerExternalHandler::serializeProxy(
       "Proxy could not be serialized because it is not a valid RPC receiver type. The "
       "Proxy must emulate either a plain object or an RpcTarget, as indicated by the "
       "Proxy's prototype chain.");
+
+  // Similar to JsRpcTarget::serialize(), we may need to dup() the proxy.
+  if (stubOwnership == RpcSerializerExternalHandler::DUPLICATE) {
+    auto dup = handle.get(js, "dup");
+    KJ_IF_SOME(dupFunc, dup.tryCast<jsg::JsFunction>()) {
+      auto replacement = dupFunc.call(js, handle);
+      bool replaced = false;
+
+      // We got a duplicate. Is it still the same type?
+      KJ_IF_SOME(replacementObj, replacement.tryCast<jsg::JsObject>()) {
+        KJ_IF_SOME(stubType, checkStubType(js, replacementObj)) {
+          if (stubType == allowInstanceProperties) {
+            // It is! Let's replace our handle with the duplicate!
+            handle = replacementObj;
+            replaced = true;
+          }
+        }
+      }
+
+      JSG_REQUIRE(replaced, DOMDataCloneError,
+          "Couldn't create a stub for the Proxy because it has a dup() method which did not "
+          "return the same underlying type (RpcTarget or Function) as the Proxy itself represents. "
+          "Either remove the dup() method or make sure it returns an RpcTarget.");
+    }
+  }
 
   // Great, we've concluded we can indeed point a stub at this proxy.
   serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
