@@ -104,6 +104,7 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
+      ActorRoutingMode routingMode,
       SpanParent parentSpan) override {
     KJ_FAIL_REQUIRE("no actor channels");
   }

@@ -3292,10 +3292,13 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
+      ActorRoutingMode routingMode,
       SpanParent parentSpan) override {
     JSG_REQUIRE(mode == ActorGetMode::GET_OR_CREATE, Error,
         "workerd only supports GET_OR_CREATE mode for getting actor stubs");
     JSG_REQUIRE(!enableReplicaRouting, Error, "workerd does not support replica routing.");
+    JSG_REQUIRE(routingMode == ActorRoutingMode::DEFAULT, Error,
+        "workerd does not support replica routing.");
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 

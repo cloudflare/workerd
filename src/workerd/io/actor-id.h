@@ -14,6 +14,15 @@ enum class ActorGetMode {
   GET_EXISTING
 };
 
+// Routing mode for actor requests when replicas are available.
+enum class ActorRoutingMode {
+  // Use default routing behavior (may route to replicas if available).
+  DEFAULT,
+
+  // Always route to the primary, even if replicas exist.
+  PRIMARY_ONLY
+};
+
 // An abstract class that implements generation of global actor IDs in a particular namespace.
 //
 // This is NOT at I/O type. Each global actor namespace binding holds one instance of this which
