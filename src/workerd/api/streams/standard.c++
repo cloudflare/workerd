@@ -3458,8 +3458,16 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
-  } else {
-    (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
+  } else KJ_IF_SOME(pipeLocked, lock.state.tryGetUnsafe<WritableLockImpl::PipeLocked>()) {
+    // When the writable side of a pipe errors, we need to release the source stream.
+    // The pipeLoop may be waiting on a read from the source that will never complete,
+    // so we need to proactively release the source here.
+    if (!pipeLocked.flags.preventCancel) {
+      pipeLocked.source.release(js, reason);
+    } else {
+      pipeLocked.source.release(js);
+    }
+    lock.state.transitionTo<Unlocked>();
   }
 }
 

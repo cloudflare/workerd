@@ -435,3 +435,74 @@ export const teeWithCancelMidStream = {
     assert.strictEqual(r1d.done, true);
   },
 };
+
+// ============================================================================
+
+export const testCancelPipethrough = {
+  async test() {
+    const enc = new TextEncoder();
+    const transform = new IdentityTransformStream();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('hello'));
+      },
+    });
+    const readable = rs.pipeThrough(transform);
+
+    const reader = readable.getReader();
+
+    assert.ok(rs.locked);
+    assert.ok(transform.writable.locked);
+
+    reader.cancel(new Error('boom'));
+    reader.releaseLock();
+
+    // We've got to wait a tick to allow the event loop to turn over to
+    // process the abort... This is due to a quirk of IdentityTransformStream
+    // being a kj-backed stream requiring the event loop to process the abort.
+    await scheduler.wait(1);
+
+    assert.ok(!rs.locked);
+    assert.ok(!transform.readable.locked);
+    assert.ok(!transform.writable.locked);
+
+    // Our JavaScript ReadableStream should be closed (not errored).
+    // Cancel propagates back and closes the source stream.
+    const reader2 = rs.getReader();
+    const result = await reader2.read();
+    assert.ok(result.done);
+    assert.strictEqual(result.value, undefined);
+  },
+};
+
+export const testCancelPipethrough2 = {
+  async test() {
+    const enc = new TextEncoder();
+    const transform = new TransformStream();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('hello'));
+      },
+    });
+    const readable = rs.pipeThrough(transform);
+
+    const reader = readable.getReader();
+
+    assert.ok(rs.locked);
+    assert.ok(transform.writable.locked);
+
+    reader.cancel(new Error('boom'));
+    reader.releaseLock();
+
+    assert.ok(!rs.locked);
+    assert.ok(!transform.readable.locked);
+    assert.ok(!transform.writable.locked);
+
+    // Our JavaScript ReadableStream should be closed (not errored).
+    // Cancel propagates back and closes the source stream.
+    const reader2 = rs.getReader();
+    const result = await reader2.read();
+    assert.ok(result.done);
+    assert.strictEqual(result.value, undefined);
+  },
+};
