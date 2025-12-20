@@ -111,15 +111,6 @@ jsg::Optional<kj::Array<kj::String>> getTraceScriptTags(const Trace& trace) {
   }
 }
 
-template <typename Enum>
-kj::String enumToStr(const Enum& var) {
-  // TODO(cleanup): Port this to capnproto.
-  auto enums = capnp::Schema::from<Enum>().getEnumerants();
-  uint i = static_cast<uint>(var);
-  KJ_ASSERT(i < enums.size(), "invalid enum value");
-  return kj::str(enums[i].getProto().getName());
-}
-
 kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
     jsg::Lock& js, const Trace& trace, const tracing::FetchEventInfo& eventInfo) {
   const auto getCf = [&]() -> jsg::Optional<jsg::V8Ref<v8::Object>> {
@@ -201,8 +192,8 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       dispatchNamespace(mapCopyString(trace.dispatchNamespace)),
       scriptTags(getTraceScriptTags(trace)),
       durableObjectId(mapCopyString(trace.durableObjectId)),
-      executionModel(enumToStr(trace.executionModel)),
-      outcome(enumToStr(trace.outcome)),
+      executionModel(kj::str(trace.executionModel)),
+      outcome(kj::str(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
       wallTime(trace.wallTime / kj::MILLISECONDS),
       truncated(trace.truncated) {}
