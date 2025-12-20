@@ -38,9 +38,9 @@ struct Closed {
 //   ReadRequest -> Closed (empty write closes while read pending)
 //   Any -> kj::Exception (cancel/abort)
 //   Closed -> kj::Exception (abort can force-transition a closed stream to error)
-// Both Closed and kj::Exception are terminal states. abort() uses forceTransitionTo
-// to allow the exceptional Closed -> Exception transition.
-using IdentityTransformState = StateMachine<TerminalStates<Closed, kj::Exception>,
+// Closed is terminal, kj::Exception is implicitly terminal via ErrorState.
+// abort() uses forceTransitionTo to allow the exceptional Closed -> Exception transition.
+using IdentityTransformState = StateMachine<TerminalStates<Closed>,
     ErrorState<kj::Exception>,
     Idle,
     ReadRequest,

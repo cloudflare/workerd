@@ -261,8 +261,8 @@ class WritableStreamSinkJsAdapter final {
   // State machine for tracking writable sink adapter lifecycle:
   //   Open -> Closed (normal close via end())
   //   Open -> kj::Exception (error via abort() or write failure)
-  // Both Closed and kj::Exception are terminal states.
-  using State = StateMachine<TerminalStates<Closed, kj::Exception>,
+  // Closed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using State = StateMachine<TerminalStates<Closed>,
       ErrorState<kj::Exception>,
       ActiveState<Open>,
       Open,
@@ -471,8 +471,8 @@ class WritableStreamSinkKjAdapter final: public WritableSink {
   // State machine for tracking writable sink adapter lifecycle:
   //   KjOpen -> KjClosed (normal close via end())
   //   KjOpen -> kj::Exception (error via abort() or write failure)
-  // Both KjClosed and kj::Exception are terminal states.
-  using KjState = StateMachine<TerminalStates<KjClosed, kj::Exception>,
+  // KjClosed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using KjState = StateMachine<TerminalStates<KjClosed>,
       ErrorState<kj::Exception>,
       ActiveState<KjOpen>,
       KjOpen,

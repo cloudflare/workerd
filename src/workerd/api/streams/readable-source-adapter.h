@@ -245,8 +245,8 @@ class ReadableStreamSourceJsAdapter final {
   // State machine for tracking readable source adapter lifecycle:
   //   Open -> Closed (normal close)
   //   Open -> kj::Exception (error via cancel or read failure)
-  // Both Closed and kj::Exception are terminal states.
-  using State = StateMachine<TerminalStates<Closed, kj::Exception>,
+  // Closed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using State = StateMachine<TerminalStates<Closed>,
       ErrorState<kj::Exception>,
       ActiveState<Open>,
       Open,
@@ -387,8 +387,8 @@ class ReadableSourceKjAdapter final: public ReadableSource {
   // State machine for tracking readable source adapter lifecycle:
   //   KjOpen -> KjClosed (normal close)
   //   KjOpen -> kj::Exception (error via cancel or read failure)
-  // Both KjClosed and kj::Exception are terminal states.
-  using KjState = StateMachine<TerminalStates<KjClosed, kj::Exception>,
+  // KjClosed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using KjState = StateMachine<TerminalStates<KjClosed>,
       ErrorState<kj::Exception>,
       ActiveState<KjOpen>,
       KjOpen,

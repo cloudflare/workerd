@@ -878,8 +878,8 @@ class WritableStreamJsController final: public WritableStreamController {
   // State machine for WritableStreamJsController:
   // Initial is the default state before setup() is called
   // Controller is the active state (stream is writable)
-  // Closed and Errored are terminal states (stream is done)
-  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  // Closed is terminal, Errored is implicitly terminal via ErrorState
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
       ErrorState<StreamStates::Errored>,
       ActiveState<Controller>,
       Initial,
@@ -2736,9 +2736,9 @@ class AllReader {
 
  private:
   // State machine for AllReader:
-  // Closed and Errored are terminal states (reading is done).
+  // Closed is terminal, Errored is implicitly terminal via ErrorState.
   // jsg::Ref<ReadableStream> is the active state (still reading).
-  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
       ErrorState<StreamStates::Errored>,
       ActiveState<jsg::Ref<ReadableStream>>,
       StreamStates::Closed,

@@ -151,9 +151,9 @@ class ReadableStreamInternalController: public ReadableStreamController {
   kj::Maybe<ReadableStream&> owner;
 
   // State machine for ReadableStreamInternalController:
-  // Closed and Errored are terminal states (stream is done).
+  // Closed is terminal, Errored is implicitly terminal via ErrorState.
   // Readable is the active state (stream has data).
-  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
       ErrorState<StreamStates::Errored>,
       ActiveState<Readable>,
       StreamStates::Closed,
@@ -296,9 +296,9 @@ class WritableStreamInternalController: public WritableStreamController {
   kj::Maybe<WritableStream&> owner;
 
   // State machine for WritableStreamInternalController:
-  // Closed and Errored are terminal states (stream is done).
+  // Closed is terminal, Errored is implicitly terminal via ErrorState.
   // IoOwn<Writable> is the active state (stream is writable).
-  using State = StateMachine<TerminalStates<StreamStates::Closed, StreamStates::Errored>,
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
       ErrorState<StreamStates::Errored>,
       ActiveState<IoOwn<Writable>>,
       StreamStates::Closed,

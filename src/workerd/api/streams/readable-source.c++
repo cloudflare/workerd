@@ -245,8 +245,8 @@ struct Open {
 // State machine for tracking readable source lifecycle:
 //   Open -> Closed (normal close after EOF or pumpTo)
 //   Open -> kj::Exception (error via cancel() or read failure)
-// Both Closed and kj::Exception are terminal states.
-using ReadableSourceState = StateMachine<TerminalStates<Closed, kj::Exception>,
+// Closed is terminal, kj::Exception is implicitly terminal via ErrorState.
+using ReadableSourceState = StateMachine<TerminalStates<Closed>,
     ErrorState<kj::Exception>,
     ActiveState<Open>,
     Open,

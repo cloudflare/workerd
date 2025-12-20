@@ -478,8 +478,8 @@ class CompressionStreamImpl: public kj::Refcounted,
   // State machine for tracking compression stream lifecycle:
   //   Open -> Ended (normal close via end())
   //   Open -> kj::Exception (error via abortWrite())
-  // Both Ended and kj::Exception are terminal states.
-  StateMachine<TerminalStates<Ended, kj::Exception>,
+  // Ended is terminal, kj::Exception is implicitly terminal via ErrorState.
+  StateMachine<TerminalStates<Ended>,
       ErrorState<kj::Exception>,
       ActiveState<Open>,
       Open,
