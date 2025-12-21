@@ -64,7 +64,7 @@ rust_library(
         "@crates_vendor__swc_atoms-7.0.0//:swc_atoms",
         "@crates_vendor__swc_sourcemap-9.3.4//:swc_sourcemap",
         "@crates_vendor__swc_visit-2.0.1//:swc_visit",
-        "@crates_vendor__tracing-0.1.43//:tracing",
+        "@crates_vendor__tracing-0.1.44//:tracing",
         "@crates_vendor__unicode-width-0.1.14//:unicode_width",
         "@crates_vendor__url-2.5.7//:url",
     ],

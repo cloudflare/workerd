@@ -3,9 +3,9 @@
 http = use_extension("@//:build/exts/http.bzl", "http")
 http.archive(
     name = "capnp-cpp",
-    sha256 = "0429076f317d21655ecd2a92e6972ea49632b15e5433bde99e36e082b061e72f",
-    strip_prefix = "capnproto-capnproto-8db2b3c/c++",
+    sha256 = "0884582731fb8b9a6ef7a0d58056535d0480533256958d3eaae189d706bc43aa",
+    strip_prefix = "capnproto-capnproto-0776402/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/8db2b3c13a9f18b18b2375811fef6261218e0b01",
+    url = "https://github.com/capnproto/capnproto/tarball/07764022ba75c6924a250d5be0bf2e83250602a0",
 )
 use_repo(http, "capnp-cpp")

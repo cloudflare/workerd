@@ -4,9 +4,9 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "6c80c566f9158b07330f96fa5e522756bdb229013b8b6e41d787d37a3147aec3",
+    sha256 = "6ea51d54c1a76418663a0c3a5bb48656bfed175c914ffc10279150a88506a0b6",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v7.7.0/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v7.7.1/singleheader.zip",
 )
 use_repo(http, "simdutf")

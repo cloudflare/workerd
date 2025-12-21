@@ -44,9 +44,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.1",
+    version = "1.2.2",
     deps = [
-        "@crates_vendor__camino-1.2.1//:build_script_build",
+        "@crates_vendor__camino-1.2.2//:build_script_build",
         "@crates_vendor__serde_core-1.0.228//:serde_core",
     ],
 )
@@ -99,7 +99,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.1",
+    version = "1.2.2",
     visibility = ["//visibility:private"],
 )
 
