@@ -7,6 +7,136 @@
 
 namespace workerd {
 
-// TODO(now): implement
+// =======================================================================================
+// ReadableStream handling
+
+namespace {
+
+// TODO(cleanup): These classes have been copied from streams/readable.c++. The copies there can be
+//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
+//   StreamSink-related code. For now I'm not trying to avoid duplication.
+
+// HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
+//   wrap the two ends of the pipe in special adapters that track whether end() was called.
+class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream {
+ public:
+  ExplicitEndOutputPipeAdapter(
+      kj::Own<kj::AsyncOutputStream> inner, kj::Own<kj::RefcountedWrapper<bool>> ended)
+      : inner(kj::mv(inner)),
+        ended(kj::mv(ended)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    return KJ_REQUIRE_NONNULL(inner)->write(buffer);
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    return KJ_REQUIRE_NONNULL(inner)->write(pieces);
+  }
+
+  kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+      kj::AsyncInputStream& input, uint64_t amount) override {
+    return KJ_REQUIRE_NONNULL(inner)->tryPumpFrom(input, amount);
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return KJ_REQUIRE_NONNULL(inner)->whenWriteDisconnected();
+  }
+
+  kj::Promise<void> end() override {
+    // Signal to the other side that end() was actually called.
+    ended->getWrapped() = true;
+    inner = kj::none;
+    return kj::READY_NOW;
+  }
+
+ private:
+  kj::Maybe<kj::Own<kj::AsyncOutputStream>> inner;
+  kj::Own<kj::RefcountedWrapper<bool>> ended;
+};
+
+class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
+ public:
+  ExplicitEndInputPipeAdapter(kj::Own<kj::AsyncInputStream> inner,
+      kj::Own<kj::RefcountedWrapper<bool>> ended,
+      kj::Maybe<uint64_t> expectedLength)
+      : inner(kj::mv(inner)),
+        ended(kj::mv(ended)),
+        expectedLength(expectedLength) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    size_t result = co_await inner->tryRead(buffer, minBytes, maxBytes);
+
+    KJ_IF_SOME(l, expectedLength) {
+      KJ_ASSERT(result <= l);
+      l -= result;
+      if (l == 0) {
+        // If we got all the bytes we expected, we treat this as a successful end, because the
+        // underlying KJ pipe is not actually going to wait for the other side to drop. This is
+        // consistent with the behavior of Content-Length in HTTP anyway.
+        ended->getWrapped() = true;
+      }
+    }
+
+    if (result < minBytes) {
+      // Verify that end() was called.
+      if (!ended->getWrapped()) {
+        JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
+      }
+    }
+    co_return result;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return inner->tryGetLength();
+  }
+
+  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
+    return inner->pumpTo(output, amount);
+  }
+
+ private:
+  kj::Own<kj::AsyncInputStream> inner;
+  kj::Own<kj::RefcountedWrapper<bool>> ended;
+  kj::Maybe<uint64_t> expectedLength;
+};
+
+}  // namespace
+
+class ExternalPusherImpl::InputStreamImpl final: public ExternalPusher::InputStream::Server {
+ public:
+  InputStreamImpl(kj::Own<kj::AsyncInputStream> stream): stream(kj::mv(stream)) {}
+
+  kj::Maybe<kj::Own<kj::AsyncInputStream>> stream;
+};
+
+kj::Promise<void> ExternalPusherImpl::pushByteStream(PushByteStreamContext context) {
+  kj::Maybe<uint64_t> expectedLength;
+  auto lp1 = context.getParams().getLengthPlusOne();
+  if (lp1 > 0) {
+    expectedLength = lp1 - 1;
+  }
+
+  auto pipe = kj::newOneWayPipe(expectedLength);
+
+  auto endedFlag = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+
+  auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), kj::addRef(*endedFlag));
+  auto in =
+      kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
+
+  auto results = context.initResults(capnp::MessageSize{4, 2});
+
+  results.setSource(inputStreamSet.add(kj::heap<InputStreamImpl>(kj::mv(in))));
+  results.setSink(byteStreamFactory.kjToCapnp(kj::mv(out)));
+  return kj::READY_NOW;
+}
+
+kj::Own<kj::AsyncInputStream> ExternalPusherImpl::unwrapStream(
+    ExternalPusher::InputStream::Client cap) {
+  auto& unwrapped = KJ_REQUIRE_NONNULL(
+      inputStreamSet.tryGetLocalServerSync(cap), "pushed external is not a byte stream");
+
+  return KJ_REQUIRE_NONNULL(kj::mv(kj::downcast<InputStreamImpl>(unwrapped).stream),
+      "pushed byte stream has already been consumed");
+}
 
 }  // namespace workerd

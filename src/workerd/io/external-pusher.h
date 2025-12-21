@@ -11,15 +11,29 @@
 
 namespace workerd {
 
+using kj::byte;
+
 // Implements JsValue.ExternalPusher from worker-interface.capnp.
 //
 // ExternalPusher allows a remote peer to "push" certain kinds of objects into our address space
 // so that they can then be embedded in `JsValue` as `External` values.
 class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj::Refcounted {
  public:
-  ExternalPusherImpl(capnp::ByteStreamFactory& byteStreamFactory) {}
+  ExternalPusherImpl(capnp::ByteStreamFactory& byteStreamFactory)
+      : byteStreamFactory(byteStreamFactory) {}
 
-  // TODO(now): Implement methods.
+  using ExternalPusher = rpc::JsValue::ExternalPusher;
+
+  kj::Own<kj::AsyncInputStream> unwrapStream(ExternalPusher::InputStream::Client cap);
+
+  kj::Promise<void> pushByteStream(PushByteStreamContext context) override;
+
+ private:
+  capnp::ByteStreamFactory& byteStreamFactory;
+
+  capnp::CapabilityServerSet<ExternalPusher::InputStream> inputStreamSet;
+
+  class InputStreamImpl;
 };
 
 }  // namespace workerd
