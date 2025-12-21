@@ -43,3 +43,13 @@ use_repo(
     # Needed to retrieve lol-html header
     "crates_vendor__lol_html_c_api-1.3.0",
 )
+
+# rust-based lolhtml dependency, including the API header.
+# Presented as a separate repository to allow overrides.
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
+new_local_repository(
+    name = "com_cloudflare_lol_html",
+    build_file = "@workerd//deps/rust:BUILD.lolhtml",
+    path = "empty",
+)

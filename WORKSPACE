@@ -1,7 +1,5 @@
 workspace(name = "workerd")
 
-load("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
-
 # ========================================================================================
 # Rust bootstrap
 
@@ -14,14 +12,6 @@ http_archive(
     strip_prefix = "cloudflare-workerd-cxx-916f0e7",
     type = "tgz",
     url = "https://github.com/cloudflare/workerd-cxx/tarball/916f0e7be8f1d43fe5ece1b72edd3c5844243d7b",
-)
-
-# rust-based lolhtml dependency, including the API header.
-# Presented as a separate repository to allow overrides.
-new_local_repository(
-    name = "com_cloudflare_lol_html",
-    build_file = "@workerd//deps/rust:BUILD.lolhtml",
-    path = "empty",
 )
 
 load("//build/deps:dep_pyodide.bzl", "dep_pyodide")
