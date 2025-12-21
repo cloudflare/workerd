@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "bumpalo",
+    name = "capnp",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,8 +29,9 @@ rust_library(
         ],
     ),
     crate_features = [
-        "allocator-api2",
+        "alloc",
         "default",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -39,13 +40,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=bumpalo",
+        "crate-name=capnp",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "3.19.0",
-    deps = [
-        "@crates_vendor__allocator-api2-0.2.21//:allocator_api2",
-    ],
+    version = "0.23.1",
 )

@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "0.23.0",
     deps = [
-        "@crates_vendor__capnp-0.23.0//:capnp",
+        "@crates_vendor__capnp-0.23.1//:capnp",
         "@crates_vendor__futures-channel-0.3.31//:futures_channel",
         "@crates_vendor__futures-util-0.3.31//:futures_util",
     ],

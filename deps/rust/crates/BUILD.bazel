@@ -68,14 +68,14 @@ alias(
 )
 
 alias(
-    name = "capnp-0.23.0",
-    actual = "@crates_vendor__capnp-0.23.0//:capnp",
+    name = "capnp-0.23.1",
+    actual = "@crates_vendor__capnp-0.23.1//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.23.0//:capnp",
+    actual = "@crates_vendor__capnp-0.23.1//:capnp",
     tags = ["manual"],
 )
 
@@ -104,14 +104,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.49",
-    actual = "@crates_vendor__cc-1.2.49//:cc",
+    name = "cc-1.2.50",
+    actual = "@crates_vendor__cc-1.2.50//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.49//:cc",
+    actual = "@crates_vendor__cc-1.2.50//:cc",
     tags = ["manual"],
 )
 
@@ -392,14 +392,14 @@ alias(
 )
 
 alias(
-    name = "tracing-0.1.43",
-    actual = "@crates_vendor__tracing-0.1.43//:tracing",
+    name = "tracing-0.1.44",
+    actual = "@crates_vendor__tracing-0.1.44//:tracing",
     tags = ["manual"],
 )
 
 alias(
     name = "tracing",
-    actual = "@crates_vendor__tracing-0.1.43//:tracing",
+    actual = "@crates_vendor__tracing-0.1.44//:tracing",
     tags = ["manual"],
 )
 
