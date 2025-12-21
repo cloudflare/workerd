@@ -16,10 +16,6 @@ http_archive(
     url = "https://github.com/cloudflare/workerd-cxx/tarball/916f0e7be8f1d43fe5ece1b72edd3c5844243d7b",
 )
 
-load("//:build/rust_toolchains.bzl", "rust_toolchains")
-
-rust_toolchains()
-
 # rust-based lolhtml dependency, including the API header.
 # Presented as a separate repository to allow overrides.
 new_local_repository(
