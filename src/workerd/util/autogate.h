@@ -26,6 +26,8 @@ enum class AutogateKey {
   FETCH_REQUEST_MEMORY_ADJUSTMENT,
   // Enable Rust-backed Node.js DNS implementation
   RUST_BACKED_NODE_DNS,
+  // Use ExternalPusher instead of StreamSink to handle streams in RPC.
+  RPC_USE_EXTERNAL_PUSHER,
   NumOfKeys  // Reserved for iteration.
 };
 

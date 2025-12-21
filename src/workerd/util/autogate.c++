@@ -31,6 +31,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "fetch-request-memory-adjustment"_kj;
     case AutogateKey::RUST_BACKED_NODE_DNS:
       return "rust-backed-node-dns"_kj;
+    case AutogateKey::RPC_USE_EXTERNAL_PUSHER:
+      return "rpc-use-external-pusher"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
