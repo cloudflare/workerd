@@ -1,0 +1,45 @@
+bazel_dep(name = "rules_rust", version = "0.68.1")
+
+RUST_STABLE_VERSION = "1.91.0"  # LLVM 21
+
+RUST_NIGHTLY_VERSION = "nightly/2025-10-30"
+
+# List of additional triples to be configured on top of the local platform triple
+RUST_TARGET_TRIPLES = [
+    # Add support for macOS cross-compilation
+    "x86_64-apple-darwin",
+    # Add support for macOS rosetta
+    "aarch64-unknown-linux-gnu",
+]
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    allocator_library = "@rules_rust//ffi/rs:empty",
+    edition = "2024",
+    extra_rustc_flags_triples = {
+        # Enable ISA extensions matching the ones used for C++. The clmul feature is not included as
+        # it is still "unstable" as of 1.86.0.
+        "x86_64-unknown-linux-gnu": ["-Ctarget-feature=+sse4.2"],
+        "x86_64-apple-darwin": ["-Ctarget-feature=+sse4.2"],
+        "x86_64-pc-windows-msvc": ["-Ctarget-feature=+sse4.2"],
+        "aarch64-unknown-linux-gnu": ["-Ctarget-feature=+crc"],
+        # No options needed for aarch64-apple-darwin: CRC feature is enabled by default.
+    },
+    extra_target_triples = RUST_TARGET_TRIPLES,
+    rustfmt_version = RUST_NIGHTLY_VERSION,
+    versions = [
+        RUST_STABLE_VERSION,
+        RUST_NIGHTLY_VERSION,
+    ],
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+crate_repositories = use_extension("//deps/rust:extension.bzl", "crate_repositories")
+use_repo(
+    crate_repositories,
+    "crates_vendor",
+    # Needed to retrieve lol-html header
+    "crates_vendor__lol_html_c_api-1.3.0",
+)
