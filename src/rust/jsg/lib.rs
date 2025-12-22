@@ -11,7 +11,10 @@ use kj_rs::KjMaybe;
 
 pub mod modules;
 pub mod v8;
+mod wrappable;
+
 pub use v8::ffi::ExceptionType;
+pub use wrappable::Wrappable;
 
 use crate::v8::ToLocalValue;
 
@@ -610,25 +613,6 @@ impl Drop for Realm {
 #[expect(clippy::unnecessary_box_returns)]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
     unsafe { Box::new(Realm::from_isolate(v8::IsolatePtr::from_ffi(isolate))) }
-}
-
-/// Handles a result by setting the return value or throwing an error.
-///
-/// # Safety
-/// The caller must ensure V8 operations are performed within the correct isolate/context.
-pub unsafe fn handle_result<T: Type<This = T>, E: std::fmt::Display>(
-    lock: &mut Lock,
-    args: &mut v8::FunctionCallbackInfo,
-    result: Result<T, E>,
-) {
-    match result {
-        Ok(result) => args.set_return_value(T::wrap(result, lock)),
-        Err(err) => {
-            // TODO(soon): Make sure to use jsg::Error trait here and dynamically call proper method to throw the error.
-            let description = err.to_string();
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &description) };
-        }
-    }
 }
 
 impl Type for String {

@@ -48,6 +48,16 @@ Local local_new_object(Isolate* isolate) {
   return to_ffi(kj::mv(object));
 }
 
+Local local_new_null(Isolate* isolate) {
+  v8::Local<v8::Primitive> null = v8::Null(isolate);
+  return to_ffi(kj::mv(null));
+}
+
+Local local_new_undefined(Isolate* isolate) {
+  v8::Local<v8::Primitive> undefined = v8::Undefined(isolate);
+  return to_ffi(kj::mv(undefined));
+}
+
 bool local_eq(const Local& lhs, const Local& rhs) {
   return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
 }

@@ -160,6 +160,33 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 /// ```
 ///
+/// # Return Types
+///
+/// Return values are handled via the [`jsg::Wrappable`] trait. Any type implementing
+/// `Wrappable` can be returned from a method. Built-in implementations include:
+///
+/// - `()` - returns `undefined` in JavaScript
+/// - `Result<T, E>` where `T: Wrappable` - unwraps the value or throws a JavaScript exception
+/// - `NonCoercible<T>` - unwraps and returns the inner value
+/// - `String`, `bool`, `f64` - primitive types
+///
+/// ```ignore
+/// #[jsg_method]
+/// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
+///     // Errors are thrown as JavaScript exceptions
+/// }
+///
+/// #[jsg_method]
+/// pub fn get_name(&self) -> String {
+///     self.name.clone()
+/// }
+///
+/// #[jsg_method]
+/// pub fn reset(&self) {
+///     // Returns undefined
+/// }
+/// ```
+///
 /// # Example
 ///
 /// ```ignore
@@ -236,7 +263,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let this = args.this();
             let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
             let result = self_.#fn_name(#(#arg_refs),*);
-            unsafe { jsg::handle_result(&mut lock, &mut args, result) };
+            jsg::Wrappable::wrap_return(result, &mut lock, &mut args);
         }
     };
 
