@@ -18,3 +18,57 @@ pip.parse(
     requirements_lock = "//build/deps:requirements.txt",
 )
 use_repo(pip, "py_deps", "v8_python_deps")
+
+pyodide = use_extension("//build/deps:dep_pyodide.bzl", "pyodide")
+
+[
+    use_repo(
+        pyodide,
+        repo.format(version = version),
+    )
+    for repo in [
+        "beautifulsoup4_src_{version}",
+        "fastapi_src_{version}",
+        "pyodide-{version}",
+        "python-workers-runtime-sdk_src_{version}",
+        "shapely_src_{version}",
+    ]
+    for version in [
+        "0.26.0a2",
+        "0.28.2",
+        "development",
+    ]
+    # Exclusions: some packages are absent in some versions
+    if repo.format(version = version) not in [
+        "pyodide-development",
+        "shapely_src_0.26.0a2",
+    ]
+]
+
+[
+    use_repo(
+        pyodide,
+        repo.format(version = version),
+    )
+    for repo in [
+        "all_pyodide_wheels_{version}",
+        "pyodide-lock_{version}.json",
+    ]
+    for version in [
+        "20240829.4",
+        "20250808",
+    ]
+]
+
+use_repo(
+    pyodide,
+    "pyodide-snapshot-baseline-4569679fb.bin",
+    "pyodide-snapshot-baseline-61eedf943.bin",
+    "pyodide-snapshot-ew-py-package-snapshot_fastapi-v2.bin",
+    "pyodide-snapshot-ew-py-package-snapshot_numpy-v2.bin",
+    "pyodide-snapshot-package_snapshot_fastapi-a6ccb56fe.bin",
+    "pyodide-snapshot-package_snapshot_numpy-60c9cb28e.bin",
+    "pyodide-snapshot-snapshot_a6b652a95810783f5078b9a5dbd4a07c30718acb4ff724e82c25db7353dd7f2d.bin",
+    "pyodide_0.26.0a2_2024-03-01_75.capnp.bin",
+    "pyodide_0.28.2_2025-01-16_6.capnp.bin",
+)
