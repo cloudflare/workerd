@@ -32,7 +32,7 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
             });
             let mut dns_util_template = DnsUtilTemplate::new(&mut lock);
 
-            jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template).into_ffi()
+            jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template).as_ffi()
         },
         jsg::modules::ModuleType::INTERNAL,
     );

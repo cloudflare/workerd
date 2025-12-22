@@ -133,7 +133,7 @@ fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
         });
         let mut template = MyResourceTemplate::new(&mut lock);
         let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
-        ctx.set_global_safe("resource", wrapped.into_ffi());
+        ctx.set_global_safe("resource", wrapped.as_ffi());
 
         // String method accepts string
         assert_eq!(

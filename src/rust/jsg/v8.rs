@@ -229,7 +229,7 @@ impl<'a, T> Local<'a, T> {
     ///
     /// # Safety
     /// The returned FFI handle must not outlive the `HandleScope` that owns the V8 value.
-    pub unsafe fn into_ffi(mut self) -> ffi::Local {
+    pub unsafe fn as_ffi(mut self) -> ffi::Local {
         let handle = ffi::Local {
             ptr: self.handle.ptr,
         };
@@ -308,7 +308,7 @@ impl<T> Clone for Local<'_, T> {
 // Value-specific implementations
 impl<'a> Local<'a, Value> {
     pub fn to_global(self, lock: &'a mut Lock) -> Global<Value> {
-        unsafe { ffi::local_to_global(lock.isolate().as_ffi(), self.into_ffi()).into() }
+        unsafe { ffi::local_to_global(lock.isolate().as_ffi(), self.as_ffi()).into() }
     }
 }
 
@@ -320,14 +320,14 @@ impl PartialEq for Local<'_, Value> {
 
 impl<'a> From<Local<'a, Object>> for Local<'a, Value> {
     fn from(value: Local<'a, Object>) -> Self {
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
+        unsafe { Self::from_ffi(value.isolate, value.as_ffi()) }
     }
 }
 
 // TODO: We need to figure out a smart way of avoiding duplication.
 impl<'a> From<Local<'a, FunctionTemplate>> for Local<'a, Value> {
     fn from(value: Local<'a, FunctionTemplate>) -> Self {
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
+        unsafe { Self::from_ffi(value.isolate, value.as_ffi()) }
     }
 }
 
@@ -339,7 +339,7 @@ impl<'a> Local<'a, Object> {
                 lock.isolate().as_ffi(),
                 &mut self.handle,
                 key,
-                value.into_ffi(),
+                value.as_ffi(),
             );
         }
     }
@@ -364,7 +364,7 @@ impl<'a> Local<'a, Object> {
 
 impl<'a> From<Local<'a, Value>> for Local<'a, Object> {
     fn from(value: Local<'a, Value>) -> Self {
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
+        unsafe { Self::from_ffi(value.isolate, value.as_ffi()) }
     }
 }
 
@@ -432,7 +432,7 @@ impl<T> Global<T> {
 impl<T> From<Local<'_, T>> for Global<T> {
     fn from(local: Local<'_, T>) -> Self {
         Self {
-            handle: unsafe { ffi::local_to_global(local.isolate.as_ffi(), local.into_ffi()) },
+            handle: unsafe { ffi::local_to_global(local.isolate.as_ffi(), local.as_ffi()) },
             _marker: PhantomData,
         }
     }
@@ -563,7 +563,7 @@ impl<'a> FunctionCallbackInfo<'a> {
 
     pub fn set_return_value(&self, value: Local<Value>) {
         unsafe {
-            ffi::fci_set_return_value(self.0, value.into_ffi());
+            ffi::fci_set_return_value(self.0, value.as_ffi());
         }
     }
 }

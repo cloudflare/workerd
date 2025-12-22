@@ -136,7 +136,7 @@ pub fn unwrap_resource<'a, R: Resource>(
     value: v8::Local<v8::Value>,
 ) -> &'a mut R {
     let ptr =
-        unsafe { v8::ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) as *mut R };
+        unsafe { v8::ffi::unwrap_resource(lock.isolate().as_ffi(), value.as_ffi()) as *mut R };
     unsafe { &mut *ptr }
 }
 
@@ -389,7 +389,7 @@ pub trait Type: Sized {
     fn is_exact_v8_type(value: &v8::Local<v8::Value>) -> bool;
 
     /// Unwraps a V8 value into this type without coercion.
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::ffi::Local) -> Self;
+    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self;
 }
 
 pub enum Member {
@@ -629,8 +629,8 @@ impl Type for String {
         value.is_string()
     }
 
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::ffi::Local) -> Self {
-        unsafe { v8::ffi::unwrap_string(isolate.as_ffi(), value) }
+    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
+        unsafe { v8::ffi::unwrap_string(isolate.as_ffi(), value.as_ffi()) }
     }
 }
 
@@ -652,8 +652,8 @@ impl Type for bool {
         value.is_boolean()
     }
 
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::ffi::Local) -> Self {
-        unsafe { v8::ffi::unwrap_boolean(isolate.as_ffi(), value) }
+    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
+        unsafe { v8::ffi::unwrap_boolean(isolate.as_ffi(), value.as_ffi()) }
     }
 }
 
@@ -675,7 +675,7 @@ impl Type for f64 {
         value.is_number()
     }
 
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::ffi::Local) -> Self {
-        unsafe { v8::ffi::unwrap_number(isolate.as_ffi(), value) }
+    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
+        unsafe { v8::ffi::unwrap_number(isolate.as_ffi(), value.as_ffi()) }
     }
 }

@@ -111,7 +111,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 value.is_object()
             }
 
-            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::ffi::Local) -> Self {
+            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::Local<jsg::v8::Value>) -> Self {
                 // TODO(soon): Implement proper unwrapping for struct types
                 unimplemented!("Struct unwrap is not yet supported")
             }
@@ -261,7 +261,7 @@ fn generate_unwrap_code(
                     }
                     return;
                 }
-                let value = unsafe { <#inner_type as jsg::Type>::unwrap(lock.isolate(), arg_value.into_ffi()) };
+                let value = <#inner_type as jsg::Type>::unwrap(lock.isolate(), arg_value);
                 jsg::NonCoercible::new(value)
             };
         };
@@ -270,7 +270,7 @@ fn generate_unwrap_code(
     if is_str_reference(ty) {
         quote! {
             let #arg_name = unsafe {
-                jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), args.get(#index).into_ffi())
+                jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), args.get(#index).as_ffi())
             };
         }
     } else {
@@ -363,7 +363,7 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
                 value.is_object()
             }
 
-            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::ffi::Local) -> Self {
+            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::Local<jsg::v8::Value>) -> Self {
                 // TODO(soon): Implement proper unwrapping for resource types
                 unimplemented!("Resource unwrap is not yet supported")
             }
