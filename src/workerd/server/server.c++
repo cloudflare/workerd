@@ -1699,10 +1699,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   kj::uint fetchStatus = 0;
 };
 
-class SpanSubmitter final: public kj::Refcounted {
+class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
-  SpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
-  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
+  SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
+  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
     tracing::CompleteSpan span2(
@@ -1718,43 +1718,14 @@ class SpanSubmitter final: public kj::Refcounted {
     workerTracer->addSpan(kj::mv(span2));
   }
 
-  tracing::SpanId makeSpanId() {
-    return tracing::SpanId(predictableSpanId++);
+  tracing::SpanId makeSpanId() override {
+    return tracing::SpanId(nextSpanId++);
   }
-  KJ_DISALLOW_COPY_AND_MOVE(SpanSubmitter);
+  KJ_DISALLOW_COPY_AND_MOVE(SequentialSpanSubmitter);
 
  private:
-  uint64_t predictableSpanId = 0;
+  uint64_t nextSpanId = 1;
   kj::Own<WorkerTracer> workerTracer;
-};
-
-class WorkerTracerSpanObserver: public SpanObserver {
- public:
-  WorkerTracerSpanObserver(
-      kj::Own<SpanSubmitter> spanSubmitter, tracing::SpanId parentSpanId = tracing::SpanId::nullId)
-      : spanSubmitter(kj::mv(spanSubmitter)),
-        spanId(this->spanSubmitter->makeSpanId()),
-        parentSpanId(parentSpanId) {}
-
-  KJ_DISALLOW_COPY_AND_MOVE(WorkerTracerSpanObserver);
-
-  [[nodiscard]] kj::Own<SpanObserver> newChild() override {
-    return kj::refcounted<WorkerTracerSpanObserver>(kj::addRef(*spanSubmitter), spanId);
-  }
-
-  void report(const Span& span) override {
-    spanSubmitter->submitSpan(spanId, parentSpanId, span);
-  }
-
-  // Provide I/O time to the tracing system for user spans.
-  kj::Date getTime() override {
-    return IoContext::current().now();
-  }
-
- private:
-  kj::Own<SpanSubmitter> spanSubmitter;
-  tracing::SpanId spanId;
-  tracing::SpanId parentSpanId;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -2201,8 +2172,8 @@ class Server::WorkerService final: public Service,
 
     KJ_IF_SOME(w, workerTracer) {
       w->setMakeUserRequestSpanFunc([&w = *w]() {
-        return SpanParent(
-            kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(w))));
+        return SpanParent(kj::refcounted<UserSpanObserver>(
+            kj::refcounted<SequentialSpanSubmitter>(kj::addRef(w))));
       });
     }
     kj::Own<RequestObserver> observer =

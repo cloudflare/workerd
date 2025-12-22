@@ -53,3 +53,20 @@ new_local_repository(
     build_file = "@workerd//deps/rust:BUILD.lolhtml",
     path = "empty",
 )
+
+# workerd-cxx
+http = use_extension("@//:build/exts/http.bzl", "http")
+
+inject_repo(
+    http,
+    **{"crates.io": "crates_vendor"}
+)
+
+http.archive(
+    name = "workerd-cxx",
+    sha256 = "7ddce8e81d0b81adf6f07f18376a6fea9dca42e6b03b2fcf703c62196c270ad0",
+    strip_prefix = "cloudflare-workerd-cxx-916f0e7",
+    type = "tgz",
+    url = "https://github.com/cloudflare/workerd-cxx/tarball/916f0e7be8f1d43fe5ece1b72edd3c5844243d7b",
+)
+use_repo(http, "workerd-cxx")

@@ -75,7 +75,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .expect("Named fields must have identifiers")
                 .to_string();
             Some(quote! {
-                let #field_name = jsg::v8::ToLocalValue::to_local(&self.#field_name, lock);
+                let #field_name = jsg::v8::ToLocalValue::to_local(&this.#field_name, lock);
                 obj.set(lock, #field_name_str, #field_name);
             })
         } else {
@@ -87,11 +87,13 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         #input
 
         impl jsg::Type for #name {
+            type This = Self;
+
             fn class_name() -> &'static str {
                 #class_name
             }
 
-            fn wrap<'a, 'b>(&self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            fn wrap<'a, 'b>(this: Self::This, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
@@ -103,6 +105,15 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                     #(#field_assignments)*
                     obj.into()
                 }
+            }
+
+            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                value.is_object()
+            }
+
+            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::Local<jsg::v8::Value>) -> Self {
+                // TODO(soon): Implement proper unwrapping for struct types
+                unimplemented!("Struct unwrap is not yet supported")
             }
         }
 
@@ -119,16 +130,47 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Creates a `{method_name}_callback` extern "C" function that bridges JavaScript and Rust.
 /// If no name is provided, automatically converts `snake_case` to `camelCase`.
 ///
+/// # Supported Parameter Types
+///
+/// | Type       | `T`           | `NonCoercible<T>` |
+/// |------------|---------------|-------------------|
+/// | `&str`     | ✅ Supported  | ❌                |
+/// | `T: Type`  | ❌            | ✅ Supported      |
+///
+/// Any type implementing [`jsg::Type`] can be used with `NonCoercible<T>`.
+/// Built-in types include `String`, `bool`, and `f64`.
+///
+/// # `NonCoercible<T>` Parameters
+///
+/// Use `NonCoercible<T>` when you want to accept a value only if it's already the expected
+/// type, without JavaScript's automatic type coercion:
+///
+/// ```ignore
+/// #[jsg_method]
+/// pub fn strict_string(&self, param: NonCoercible<String>) -> Result<String, Error> {
+///     // Only accepts actual strings - passing null/undefined/numbers will throw
+///     // Access via Deref: *param, or via AsRef: param.as_ref()
+///     Ok(param.as_ref().clone())
+/// }
+///
+/// #[jsg_method]
+/// pub fn strict_bool(&self, param: NonCoercible<bool>) -> Result<bool, Error> {
+///     // Only accepts actual booleans
+///     Ok(*param)
+/// }
+/// ```
+///
 /// # Example
-/// ```rust
+///
+/// ```ignore
 /// // With explicit name
-/// #[jsg::method(name = "parseRecord")]
+/// #[jsg_method(name = "parseRecord")]
 /// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
 ///     // implementation
 /// }
 ///
 /// // Without name - automatically becomes "parseRecord"
-/// #[jsg::method]
+/// #[jsg_method]
 /// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
 ///     // implementation
 /// }
@@ -210,11 +252,34 @@ fn is_str_reference(ty: &Type) -> bool {
     }
 }
 
+/// Returns true if the type is `NonCoercible<T>`.
+fn is_non_coercible(ty: &Type) -> bool {
+    let Type::Path(type_path) = ty else {
+        return false;
+    };
+    type_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|seg| seg.ident == "NonCoercible")
+}
+
 fn generate_unwrap_code(
     arg_name: &syn::Ident,
     ty: &Type,
     index: usize,
 ) -> quote::__private::TokenStream {
+    // Check for NonCoercible<T> types
+    if is_non_coercible(ty) {
+        return quote! {
+            let Some(#arg_name) = (unsafe {
+                <#ty>::unwrap(&mut lock, args.get(#index))
+            }) else {
+                return;
+            };
+        };
+    }
+
     if is_str_reference(ty) {
         quote! {
             let #arg_name = unsafe {
@@ -223,7 +288,7 @@ fn generate_unwrap_code(
         }
     } else {
         quote! {
-            compile_error!("Unsupported parameter type for jsg::method. Currently only &str is supported.");
+            compile_error!("Unsupported parameter type for jsg::method. Currently only &str and NonCoercible<T> are supported.");
         }
     }
 }
@@ -294,15 +359,26 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[automatically_derived]
         impl jsg::Type for #name {
+            type This = jsg::Ref<Self>;
+
             fn class_name() -> &'static str {
                 #class_name
             }
 
-            fn wrap<'a, 'b>(&self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            fn wrap<'a, 'b>(_this: Self::This, _lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
                 todo!("Implement wrap for jsg::Resource")
+            }
+
+            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                value.is_object()
+            }
+
+            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::Local<jsg::v8::Value>) -> Self {
+                // TODO(soon): Implement proper unwrapping for resource types
+                unimplemented!("Resource unwrap is not yet supported")
             }
         }
 
@@ -353,7 +429,7 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 
                     method_registrations.push(quote! {
                         jsg::Member::Method {
-                            name: #js_name,
+                            name: #js_name.to_owned(),
                             callback: Self::#callback_name,
                         }
                     });
