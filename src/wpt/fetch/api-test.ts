@@ -842,14 +842,5 @@ export default {
   'response/response-stream-disturbed-6.any.js': {},
   'response/response-stream-disturbed-by-pipe.any.js': {},
   'response/response-stream-disturbed-util.js': {},
-  'response/response-stream-with-broken-then.any.js': {
-    comment:
-      'Triggers an internal error: promise.h:103: failed: expected Wrappable::tryUnwrapOpaque(isolate, handle) != nullptr',
-    expectedFailures: [
-      'Attempt to inject {done: false, value: bye} via Object.prototype.then.',
-      'Attempt to inject value: undefined via Object.prototype.then.',
-      'Attempt to inject undefined via Object.prototype.then.',
-      'Attempt to inject 8.2 via Object.prototype.then.',
-    ],
-  },
+  'response/response-stream-with-broken-then.any.js': {},
 } satisfies TestRunnerConfig;

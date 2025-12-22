@@ -1316,4 +1316,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Node.js-compatible versions from node:timers. setTimeout and setInterval return
   # Timeout objects with methods like refresh(), ref(), unref(), and hasRef().
   # This flag requires nodejs_compat or nodejs_compat_v2 to be enabled.
+
+  useNullPrototypeForOpaqueWrappers @154 :Bool
+    $compatEnableFlag("use_null_prototype_for_opaque_wrappers")
+    $compatDisableFlag("use_object_prototype_for_opaque_wrappers")
+    $compatEnableDate("2026-01-13");
+  # When enabled, internal opaque wrapper objects (used to pass C++ values through V8 promises)
+  # have a null prototype instead of inheriting from Object.prototype. This prevents
+  # Object.prototype.then patches from intercepting internal promise operations, which is
+  # required for WPT compliance. The streams spec requires that piping operations are not
+  # observable through Object.prototype.then interception.
 }

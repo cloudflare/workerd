@@ -424,18 +424,6 @@ IsolateBase::IsolateBase(V8System& system,
     });
 
     ptr->GetHeapProfiler()->AddBuildEmbedderGraphCallback(buildEmbedderGraph, this);
-
-    {
-      // We don't need a v8::Locker here since there's no way another thread could be using the
-      // isolate yet, but we do need v8::Isolate::Scope.
-      v8::Isolate::Scope isolateScope(ptr);
-      v8::HandleScope scope(ptr);
-
-      // Create opaqueTemplate
-      auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
-      opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
-      this->opaqueTemplate.Reset(ptr, opaqueTemplate);
-    }
   });
 }
 
@@ -455,8 +443,26 @@ IsolateBase::~IsolateBase() noexcept(false) {
 }
 
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {
-  return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
-      ->opaqueTemplate.Get(isolate);
+  auto& self = *static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+
+  // Lazily create the template on first use so the flag is already set.
+  if (self.opaqueTemplate.IsEmpty()) {
+    v8::HandleScope scope(isolate);
+    auto tmpl = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
+    tmpl->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
+
+    if (self.shouldUseNullPrototypeForOpaqueWrappers()) {
+      // Use null prototype to prevent Object.prototype.then patches from intercepting
+      // internal promise operations (required for WPT compliance).
+      auto protoProvider = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
+      protoProvider->RemovePrototype();
+      tmpl->SetPrototypeProviderTemplate(protoProvider);
+    }
+
+    self.opaqueTemplate.Reset(isolate, tmpl);
+  }
+
+  return self.opaqueTemplate.Get(isolate);
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
