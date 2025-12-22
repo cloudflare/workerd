@@ -71,12 +71,12 @@ fn v8_unwrap_boolean_returns_correct_values() {
 
         let bool_true = true.to_local(&mut lock);
         let unwrapped_true =
-            jsg::v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), bool_true.as_ffi());
+            jsg::v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), bool_true.into_ffi());
         assert!(unwrapped_true);
 
         let bool_false = false.to_local(&mut lock);
         let unwrapped_false =
-            jsg::v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), bool_false.as_ffi());
+            jsg::v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), bool_false.into_ffi());
         assert!(!unwrapped_false);
     });
 }
@@ -88,15 +88,16 @@ fn v8_unwrap_number_returns_correct_values() {
         let mut lock = Lock::from_isolate_ptr(isolate);
 
         let num = 2.5f64.to_local(&mut lock);
-        let unwrapped = jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), num.as_ffi());
+        let unwrapped = jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), num.into_ffi());
         assert!((unwrapped - 2.5).abs() < f64::EPSILON);
 
         let zero = 0.0f64.to_local(&mut lock);
-        let unwrapped_zero = jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), zero.as_ffi());
+        let unwrapped_zero = jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), zero.into_ffi());
         assert!(unwrapped_zero.abs() < f64::EPSILON);
 
         let negative = (-42.5f64).to_local(&mut lock);
-        let unwrapped_neg = jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), negative.as_ffi());
+        let unwrapped_neg =
+            jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), negative.into_ffi());
         assert!((unwrapped_neg - (-42.5)).abs() < f64::EPSILON);
     });
 }
@@ -108,16 +109,17 @@ fn v8_unwrap_string_returns_correct_values() {
         let mut lock = Lock::from_isolate_ptr(isolate);
 
         let s = "hello world".to_local(&mut lock);
-        let unwrapped = jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), s.as_ffi());
+        let unwrapped = jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), s.into_ffi());
         assert_eq!(unwrapped.as_str(), "hello world");
 
         let empty = "".to_local(&mut lock);
-        let unwrapped_empty = jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), empty.as_ffi());
+        let unwrapped_empty =
+            jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), empty.into_ffi());
         assert_eq!(unwrapped_empty.as_str(), "");
 
         let unicode = "こんにちは".to_local(&mut lock);
         let unwrapped_unicode =
-            jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), unicode.as_ffi());
+            jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), unicode.into_ffi());
         assert_eq!(unwrapped_unicode.as_str(), "こんにちは");
     });
 }

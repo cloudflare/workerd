@@ -107,7 +107,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
 
-            fn is_exact_v8_type(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
                 value.is_object()
             }
 
@@ -130,16 +130,47 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Creates a `{method_name}_callback` extern "C" function that bridges JavaScript and Rust.
 /// If no name is provided, automatically converts `snake_case` to `camelCase`.
 ///
+/// # Supported Parameter Types
+///
+/// | Type       | `T`           | `NonCoercible<T>` |
+/// |------------|---------------|-------------------|
+/// | `&str`     | ✅ Supported  | ❌                |
+/// | `T: Type`  | ❌            | ✅ Supported      |
+///
+/// Any type implementing [`jsg::Type`] can be used with `NonCoercible<T>`.
+/// Built-in types include `String`, `bool`, and `f64`.
+///
+/// # `NonCoercible<T>` Parameters
+///
+/// Use `NonCoercible<T>` when you want to accept a value only if it's already the expected
+/// type, without JavaScript's automatic type coercion:
+///
+/// ```ignore
+/// #[jsg_method]
+/// pub fn strict_string(&self, param: NonCoercible<String>) -> Result<String, Error> {
+///     // Only accepts actual strings - passing null/undefined/numbers will throw
+///     // Access via Deref: *param, or via AsRef: param.as_ref()
+///     Ok(param.as_ref().clone())
+/// }
+///
+/// #[jsg_method]
+/// pub fn strict_bool(&self, param: NonCoercible<bool>) -> Result<bool, Error> {
+///     // Only accepts actual booleans
+///     Ok(*param)
+/// }
+/// ```
+///
 /// # Example
-/// ```rust
+///
+/// ```ignore
 /// // With explicit name
-/// #[jsg::method(name = "parseRecord")]
+/// #[jsg_method(name = "parseRecord")]
 /// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
 ///     // implementation
 /// }
 ///
 /// // Without name - automatically becomes "parseRecord"
-/// #[jsg::method]
+/// #[jsg_method]
 /// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
 ///     // implementation
 /// }
@@ -221,26 +252,16 @@ fn is_str_reference(ty: &Type) -> bool {
     }
 }
 
-/// Extracts the inner type from `NonCoercible<T>`, returning the type tokens.
-fn get_non_coercible_inner_type(ty: &Type) -> Option<&Type> {
+/// Returns true if the type is `NonCoercible<T>`.
+fn is_non_coercible(ty: &Type) -> bool {
     let Type::Path(type_path) = ty else {
-        return None;
+        return false;
     };
-
-    let seg = type_path.path.segments.last()?;
-    if seg.ident != "NonCoercible" {
-        return None;
-    }
-
-    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
-        return None;
-    };
-
-    let syn::GenericArgument::Type(inner_type) = args.args.first()? else {
-        return None;
-    };
-
-    Some(inner_type)
+    type_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|seg| seg.ident == "NonCoercible")
 }
 
 fn generate_unwrap_code(
@@ -248,21 +269,13 @@ fn generate_unwrap_code(
     ty: &Type,
     index: usize,
 ) -> quote::__private::TokenStream {
-    // Check for NonCoercible<T> types - uses Type trait methods
-    if let Some(inner_type) = get_non_coercible_inner_type(ty) {
+    // Check for NonCoercible<T> types
+    if is_non_coercible(ty) {
         return quote! {
-            let #arg_name = {
-                let arg_value = args.get(#index);
-                if !<#inner_type as jsg::Type>::is_exact_v8_type(&arg_value) {
-                    let type_name = <#inner_type as jsg::Type>::class_name();
-                    let error_msg = format!("Expected a {} value but got {}", type_name, arg_value.type_of());
-                    unsafe {
-                        jsg::v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &error_msg);
-                    }
-                    return;
-                }
-                let value = <#inner_type as jsg::Type>::unwrap(lock.isolate(), arg_value);
-                jsg::NonCoercible::new(value)
+            let Some(#arg_name) = (unsafe {
+                <#ty>::unwrap(&mut lock, args.get(#index))
+            }) else {
+                return;
             };
         };
     }
@@ -270,7 +283,7 @@ fn generate_unwrap_code(
     if is_str_reference(ty) {
         quote! {
             let #arg_name = unsafe {
-                jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), args.get(#index).as_ffi())
+                jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), args.get(#index).into_ffi())
             };
         }
     } else {
@@ -359,7 +372,7 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
                 todo!("Implement wrap for jsg::Resource")
             }
 
-            fn is_exact_v8_type(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
                 value.is_object()
             }
 
@@ -416,7 +429,7 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 
                     method_registrations.push(quote! {
                         jsg::Member::Method {
-                            name: #js_name,
+                            name: #js_name.to_owned(),
                             callback: Self::#callback_name,
                         }
                     });
@@ -448,11 +461,11 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 
         #[automatically_derived]
         impl jsg::Resource for #self_ty {
-            fn members() -> &'static [jsg::Member]
+            fn members() -> Vec<jsg::Member>
             where
                 Self: Sized,
             {
-                &[
+                vec![
                     #(#method_registrations,)*
                 ]
             }

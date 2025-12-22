@@ -42,7 +42,7 @@ fn resource_method_callback_receives_correct_self() {
         });
         let mut template = EchoResourceTemplate::new(&mut lock);
         let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
-        ctx.set_global_safe("echoResource", wrapped.as_ffi());
+        ctx.set_global_safe("echoResource", wrapped.into_ffi());
 
         // Call the method from JavaScript
         assert_eq!(
@@ -68,7 +68,7 @@ fn resource_method_can_be_called_multiple_times() {
         });
         let mut template = EchoResourceTemplate::new(&mut lock);
         let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
-        ctx.set_global_safe("echo", wrapped.as_ffi());
+        ctx.set_global_safe("echo", wrapped.into_ffi());
 
         // First call
         assert_eq!(
