@@ -471,35 +471,24 @@ struct JsValue {
       }
 
       readableStream :group {
-        # A ReadableStream. The sender of the JsValue will use the associated StreamSink to open a
-        # stream of type `ByteStream`.
+        # A ReadableStream.
 
         stream @10 :ExternalPusher.InputStream;
-        # If present, a stream pushed using the destination isolate's ExternalPusher.
-        #
-        # If null (deprecated), then the sender will use the associated StreamSink to open a stream
-        # of type `ByteStream`. StreamSink is in the process of being replaced by ExternalPusher.
+        # A stream pushed using the destination isolate's ExternalPusher.
 
         encoding @4 :StreamEncoding;
         # Bytes read from the stream have this encoding.
 
-        expectedLength :union {
-          # NOTE: This is obsolete when `stream` is set. Instead, the length is passed to
-          #   ExternalPusher.pushByteStream().
-
-          unknown @5 :Void;
-          known @6 :UInt64;
+        obsoleteUnion :union {
+          # With `StreamSink`, the length was sent here. With `ExternalPusher` it's sent to
+          # `ExternalPusher.pushByteStream()`.
+          obsolete5 @5 :Void;
+          obsolete6 @6 :UInt64;
         }
       }
 
-      abortTrigger @7 :Void;
-      # Indicates that an `AbortTrigger` is being passed, see the `AbortTrigger` interface for the
-      # mechanism used to trigger the abort later. This is modeled as a stream, since the sender is
-      # the one that will later on send the abort signal. This external will have an associated
-      # stream in the corresponding `StreamSink` with type `AbortTrigger`.
-      #
-      # TODO(soon): This will be obsolete when we stop using `StreamSink`; `abortSignal` will
-      #   replace it. (The name is wrong anyway -- this is the signal end, not the trigger end.)
+      obsolete7 @7 :Void;
+      # Obsolete `abortTrigger` (the `StreamSink` way of handling `AbortSignal`).
 
       abortSignal @11 :ExternalPusher.AbortSignal;
       # Indicates that an `AbortSignal` is being passed.
@@ -510,29 +499,6 @@ struct JsValue {
 
       # TODO(soon): WebSocket, Request, Response
     }
-  }
-
-  interface StreamSink {
-    # A JsValue may contain streams that flow from the sender to the receiver. We don't want such
-    # streams to require a network round trip before the stream can begin pumping. So, we need a
-    # place to start sending bytes right away.
-    #
-    # To that end, JsRpcTarget::call() returns a `paramsStreamSink`. Immediately upon sending the
-    # request, the client can use promise pipelining to begin pushing bytes to this object.
-    #
-    # Similarly, the caller passes a `resultsStreamSink` to the callee. If the response contains
-    # any streams, it can start pushing to this immediately after responding.
-    #
-    # TODO(soon): This design is overcomplicated since it requires allocating StreamSinks for every
-    #   request, even when not used, and requires a lot of weird promise magic. The newer
-    #   ExternalPusher design is simpler, and only incurs overhead when used. Once all of
-    #   production has been updated to understand ExternalPusher, then we can flip an autogate to
-    #   use it by default. Once that has rolled out globally, we can remove StreamSink.
-
-    startStream @0 (externalIndex :UInt32) -> (stream :Capability);
-    # Opens a stream corresponding to the given index in the JsValue's `externals` array. The type
-    # of capability returned depends on the type of external. E.g. for `readableStream`, it is a
-    # `ByteStream`.
   }
 
   interface ExternalPusher {
@@ -650,13 +616,11 @@ interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
     }
 
     resultsStreamHandler :union {
-      # We're in the process of switching from `StreamSink` to `ExternalPusher`. A caller will only
-      # offer one or the other, and expect the callee to use that. (Initially, callers will still
-      # send StreamSink for backwards-compatibility, but once all recipients are able to understand
-      # ExternalPusher, we'll flip an autogate to make callers send it.)
+      # Historically there was a different way to handle streams, before `ExternalPusher`. Now
+      # we always use `ExteranlPusher`.
 
-      streamSink @4 :JsValue.StreamSink;
-      # StreamSink used for ReadableStreams found in the results.
+      obsolete4 @4 :Capability;
+      # Obsolete StreamSink, replaced by ExternalPusher.
 
       externalPusher @5 :JsValue.ExternalPusher;
       # ExternalPusher object which will push into the caller's isolate. Use this to push externals
@@ -685,9 +649,8 @@ interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
     # `callPipeline` until the disposer is invoked. If `hasDisposer` is false, `callPipeline` can
     # safely be dropped immediately.
 
-    paramsStreamSink @3 :JsValue.StreamSink;
-    # StreamSink used for ReadableStreams found in the params. The caller begins sending bytes for
-    # these streams immediately using promise pipelining.
+    obsolete3 @3 :Capability;
+    # Obsolete StreamSink, replaced by ExternalPusher.
   }
 
   call @0 CallParams -> CallResults;
