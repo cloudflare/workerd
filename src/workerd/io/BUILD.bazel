@@ -116,6 +116,7 @@ wd_cc_library(
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:small-set",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:state-machine",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
