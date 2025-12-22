@@ -57,6 +57,11 @@ pub mod ffi {
         pub unsafe fn local_is_string(value: &Local) -> bool;
         pub unsafe fn local_is_boolean(value: &Local) -> bool;
         pub unsafe fn local_is_number(value: &Local) -> bool;
+        pub unsafe fn local_is_null(value: &Local) -> bool;
+        pub unsafe fn local_is_undefined(value: &Local) -> bool;
+        pub unsafe fn local_is_null_or_undefined(value: &Local) -> bool;
+        pub unsafe fn local_is_object(value: &Local) -> bool;
+        pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -254,6 +259,38 @@ impl<'a, T> Local<'a, T> {
 
     pub fn is_number(&self) -> bool {
         unsafe { ffi::local_is_number(&self.handle) }
+    }
+
+    pub fn is_null(&self) -> bool {
+        unsafe { ffi::local_is_null(&self.handle) }
+    }
+
+    pub fn is_undefined(&self) -> bool {
+        unsafe { ffi::local_is_undefined(&self.handle) }
+    }
+
+    pub fn is_null_or_undefined(&self) -> bool {
+        unsafe { ffi::local_is_null_or_undefined(&self.handle) }
+    }
+
+    /// Returns true if the value is a JavaScript object.
+    ///
+    /// Note: Unlike JavaScript's `typeof` operator which returns "object" for `null`,
+    /// this method returns `false` for `null` values. Use `is_null_or_undefined()`
+    /// to check for nullish values separately.
+    pub fn is_object(&self) -> bool {
+        unsafe { ffi::local_is_object(&self.handle) }
+    }
+
+    /// Returns the JavaScript type of the underlying value as a string.
+    ///
+    /// Uses V8's native `TypeOf` method which returns the same result as
+    /// JavaScript's `typeof` operator: "undefined", "boolean", "number",
+    /// "bigint", "string", "symbol", "function", or "object".
+    ///
+    /// Note: For `null`, this returns "object" (JavaScript's historical behavior).
+    pub fn type_of(&self) -> String {
+        unsafe { ffi::local_type_of(self.isolate.as_ffi(), &self.handle) }
     }
 
     /// Returns the isolate associated with this local handle.

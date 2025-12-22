@@ -265,4 +265,31 @@ mod tests {
         assert_eq!(error.name.to_string(), "TypeError");
         assert!(error.message.contains("Failed to parse integer"));
     }
+
+    #[test]
+    fn type_of_returns_correct_js_types() {
+        let harness = crate::Harness::new();
+        harness.run_in_context(|isolate, _ctx| unsafe {
+            let mut lock = Lock::from_isolate_ptr(isolate);
+
+            let str_val = "hello".to_local(&mut lock);
+            assert_eq!(str_val.type_of(), "string");
+            assert!(str_val.is_string());
+            assert!(!str_val.is_null_or_undefined());
+
+            let num_val = 42u32.to_local(&mut lock);
+            assert_eq!(num_val.type_of(), "number");
+            assert!(num_val.is_number());
+            assert!(!num_val.is_null_or_undefined());
+
+            let bool_val = true.to_local(&mut lock);
+            assert_eq!(bool_val.type_of(), "boolean");
+            assert!(bool_val.is_boolean());
+            assert!(!bool_val.is_null_or_undefined());
+
+            let obj_val = lock.new_object();
+            assert_eq!(obj_val.type_of(), "object");
+            assert!(!obj_val.is_null_or_undefined());
+        });
+    }
 }

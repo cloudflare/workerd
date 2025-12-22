@@ -107,14 +107,13 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
 
-            fn is_exact_v8_type(_value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
-                // TODO(soon): Implement proper type checking for struct types
-                unimplemented!("NonCoercible<Struct> is not yet supported")
+            fn is_exact_v8_type(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                value.is_object()
             }
 
-            unsafe fn unwrap(_isolate: *mut jsg::v8::ffi::Isolate, _value: jsg::v8::ffi::Local) -> Self {
+            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::ffi::Local) -> Self {
                 // TODO(soon): Implement proper unwrapping for struct types
-                unimplemented!("NonCoercible<Struct> is not yet supported")
+                unimplemented!("Struct unwrap is not yet supported")
             }
         }
 
@@ -256,15 +255,13 @@ fn generate_unwrap_code(
                 let arg_value = args.get(#index);
                 if !<#inner_type as jsg::Type>::is_exact_v8_type(&arg_value) {
                     let type_name = <#inner_type as jsg::Type>::class_name();
-                    let error_msg = format!("Expected a {} value (type coercion is disabled)", type_name);
+                    let error_msg = format!("Expected a {} value but got {}", type_name, arg_value.type_of());
                     unsafe {
                         jsg::v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &error_msg);
                     }
                     return;
                 }
-                let value = unsafe {
-                    <#inner_type as jsg::Type>::unwrap(lock.isolate().as_ffi(), arg_value.into_ffi())
-                };
+                let value = unsafe { <#inner_type as jsg::Type>::unwrap(lock.isolate(), arg_value.into_ffi()) };
                 jsg::NonCoercible::new(value)
             };
         };
@@ -362,14 +359,13 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
                 todo!("Implement wrap for jsg::Resource")
             }
 
-            fn is_exact_v8_type(_value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
-                // TODO(soon): Implement proper type checking for resource types
-                unimplemented!("NonCoercible<Resource> is not yet supported")
+            fn is_exact_v8_type(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                value.is_object()
             }
 
-            unsafe fn unwrap(_isolate: *mut jsg::v8::ffi::Isolate, _value: jsg::v8::ffi::Local) -> Self {
+            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::ffi::Local) -> Self {
                 // TODO(soon): Implement proper unwrapping for resource types
-                unimplemented!("NonCoercible<Resource> is not yet supported")
+                unimplemented!("Resource unwrap is not yet supported")
             }
         }
 

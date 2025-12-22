@@ -39,6 +39,11 @@ bool local_has_value(const Local& val);
 bool local_is_string(const Local& val);
 bool local_is_boolean(const Local& val);
 bool local_is_number(const Local& val);
+bool local_is_null(const Local& val);
+bool local_is_undefined(const Local& val);
+bool local_is_null_or_undefined(const Local& val);
+bool local_is_object(const Local& val);
+::rust::String local_type_of(Isolate* isolate, const Local& val);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);

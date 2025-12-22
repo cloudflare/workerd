@@ -68,6 +68,29 @@ bool local_is_number(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsNumber();
 }
 
+bool local_is_null(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNull();
+}
+
+bool local_is_undefined(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUndefined();
+}
+
+bool local_is_null_or_undefined(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNullOrUndefined();
+}
+
+bool local_is_object(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsObject();
+}
+
+::rust::String local_type_of(Isolate* isolate, const Local& val) {
+  auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
+  v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
+  v8::String::Utf8Value utf8(isolate, typeStr);
+  return ::rust::String(*utf8, utf8.length());
+}
+
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
