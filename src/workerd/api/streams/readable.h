@@ -267,10 +267,10 @@ public:
                                    returnFunction,
                                    ValuesOptions);
   struct Transform {
-    jsg::Ref<WritableStream> writable;
     jsg::Ref<ReadableStream> readable;
+    jsg::Ref<WritableStream> writable;
 
-    JSG_STRUCT(writable, readable);
+    JSG_STRUCT(readable, writable);
     JSG_STRUCT_TS_OVERRIDE(ReadableWritablePair<R = any, W = any> {
       readable: ReadableStream<R>;
       writable: WritableStream<W>;

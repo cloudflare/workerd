@@ -84,27 +84,7 @@ export default {
       'Piping from a closed readable stream to a closed writable stream',
     ],
   },
-  'piping/pipe-through.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      "pipeThrough should brand-check readable and not allow 'null'",
-      "pipeThrough should brand-check readable and not allow 'undefined'",
-      "pipeThrough should brand-check readable and not allow '0'",
-      "pipeThrough should brand-check readable and not allow 'NaN'",
-      "pipeThrough should brand-check readable and not allow 'true'",
-      "pipeThrough should brand-check readable and not allow 'ReadableStream'",
-      "pipeThrough should brand-check readable and not allow '[object ReadableStream]'",
-      "pipeThrough should brand-check writable and not allow 'null'",
-      "pipeThrough should brand-check writable and not allow 'undefined'",
-      "pipeThrough should brand-check writable and not allow '0'",
-      "pipeThrough should brand-check writable and not allow 'NaN'",
-      "pipeThrough should brand-check writable and not allow 'true'",
-      "pipeThrough should brand-check writable and not allow 'WritableStream'",
-      "pipeThrough should brand-check writable and not allow '[object WritableStream]'",
-      'pipeThrough should rethrow errors from accessing readable or writable',
-      'pipeThrough() should throw if readable/writable getters throw',
-    ],
-  },
+  'piping/pipe-through.any.js': {},
   'piping/then-interception.any.js': {
     comment:
       'failed: expected Wrappable::tryUnwrapOpaque(isolate, handle) != nullptr',
