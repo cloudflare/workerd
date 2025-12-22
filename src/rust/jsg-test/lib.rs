@@ -12,6 +12,10 @@ mod eval_tests;
 mod non_coercible_tests;
 
 #[cfg(test)]
+#[path = "tests/resource_callback.rs"]
+mod resource_callback_tests;
+
+#[cfg(test)]
 #[path = "tests/unwrap.rs"]
 mod unwrap_tests;
 

@@ -138,10 +138,13 @@ double unwrap_number(Isolate* isolate, Local value) {
 size_t unwrap_resource(Isolate* isolate, Local value) {
   auto v8_obj = local_from_ffi<v8::Object>(kj::mv(value));
   KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
-                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX) ==
+                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+                static_cast<v8::EmbedderDataTypeTag>(
+                    ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) ==
       const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
   return reinterpret_cast<size_t>(v8_obj->GetAlignedPointerFromInternalField(
-      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 }
 
 // Global<T>
