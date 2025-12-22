@@ -550,10 +550,25 @@ export const byobReaderConstraints = {
 // Test cancel error type propagation
 export const cancelErrorTypePropagation = {
   async test() {
+    class ExampleError extends Error {
+      constructor() {
+        super('foo bar');
+        this.name = 'ExampleError';
+      }
+    }
+
     const cancelErrorTests = [
       {
         cancelWith: new Error('test'),
         expectError: 'Error: test',
+      },
+      {
+        cancelWith: 'test',
+        expectError: 'Error: test',
+      },
+      {
+        cancelWith: 'jsg.Error: test',
+        expectError: 'Error: jsg.Error: test',
       },
       {
         cancelWith: new TypeError('Problems!'),
@@ -578,6 +593,11 @@ export const cancelErrorTypePropagation = {
       {
         cancelWith: undefined,
         expectError: 'Error: Stream was cancelled.',
+      },
+      {
+        cancelWith: new ExampleError(),
+        expectError: 'Error: ExampleError: foo bar',
+        errorType: Error,
       },
     ];
 
