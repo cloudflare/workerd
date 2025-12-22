@@ -352,7 +352,7 @@ ReadableStream::Reader ReadableStream::getReader(
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(mode, o.mode) {
       JSG_REQUIRE(
-          mode == "byob", RangeError, "mode must be undefined or 'byob' in call to getReader().");
+          mode == "byob", TypeError, "mode must be undefined or 'byob' in call to getReader().");
       // No need to check that the ReadableStream implementation is a byte stream: the first
       // invocation of read() will do that for us and throw if necessary. Also, we should really
       // just support reading non-byte streams with BYOB readers.

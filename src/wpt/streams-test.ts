@@ -328,7 +328,6 @@ export default {
   'readable-byte-streams/templated.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
-      'ReadableStream with byte source (empty): calling getReader with invalid arguments should throw appropriate errors',
       'ReadableStream with byte source (empty) BYOB reader: canceling via the reader should cause the reader to act closed',
     ],
   },
@@ -438,8 +437,6 @@ export default {
       // TODO(conform): The spec allows error to be called with no argument at all, treating
       // it as undefined, currently we require that undefined is passed explicitly.
       'ReadableStreamDefaultReader closed promise should be rejected with undefined if that is the error',
-      // TODO(conform): The spec expects this to be a TypeError, not a RangeError
-      'getReader() should call ToString() on mode',
     ],
   },
   'readable-streams/floating-point-total-queue-size.any.js': {
@@ -484,8 +481,6 @@ export default {
       "ReadableStream can't be constructed with garbage",
       // TODO(conform): We currently allow the empty type value
       "ReadableStream can't be constructed with an invalid type",
-      // TODO(conform): The spec expects a TypeError here, not a RangeError
-      'default ReadableStream getReader() should only accept mode:undefined',
       // TODO(conform): The spec expects us to call pull an extra time here despite. [Despite what? -NP]
       'ReadableStream: should pull after start, and after every read',
       // TODO(conform): The standard generally anticipates that the closed
@@ -581,7 +576,6 @@ export default {
       'ReadableStream reader (closed via cancel after getting reader): closed should fulfill with undefined',
     ],
     expectedFailures: [
-      'ReadableStream (empty): calling getReader with invalid arguments should throw appropriate errors',
       'ReadableStream reader (closed before getting reader): releasing the lock should cause closed to reject and change identity',
       'ReadableStream reader (closed after getting reader): releasing the lock should cause closed to reject and change identity',
       'ReadableStream reader (closed via cancel after getting reader): releasing the lock should cause closed to reject and change identity',
