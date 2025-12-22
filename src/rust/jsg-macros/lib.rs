@@ -448,11 +448,11 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 
         #[automatically_derived]
         impl jsg::Resource for #self_ty {
-            fn members() -> Vec<jsg::Member>
+            fn members() -> &'static [jsg::Member]
             where
                 Self: Sized,
             {
-                vec![
+                &[
                     #(#method_registrations,)*
                 ]
             }

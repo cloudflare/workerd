@@ -36,9 +36,9 @@ mod ffi {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
+fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor<'static> {
     let mut descriptor = v8::ffi::ResourceDescriptor {
-        name: R::class_name().into(),
+        name: R::class_name(),
         constructor: KjMaybe::None,
         methods: Vec::new(),
         static_methods: Vec::new(),
@@ -48,13 +48,13 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
         match m {
             Member::Constructor { callback } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
-                    callback: callback as usize,
+                    callback: *callback as usize,
                 });
             }
             Member::Method { name, callback } => {
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
-                    name: name.to_owned(),
-                    callback: callback as usize,
+                    name,
+                    callback: *callback as usize,
                 });
             }
             Member::Property {
@@ -66,8 +66,8 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                 descriptor
                     .static_methods
                     .push(v8::ffi::StaticMethodDescriptor {
-                        name: name.to_owned(),
-                        callback: callback as usize,
+                        name,
+                        callback: *callback as usize,
                     });
             }
         }
@@ -478,7 +478,7 @@ impl ResourceState {
 /// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
 pub trait Resource: Type {
     /// Returns the list of methods, properties, and constructors exposed to JavaScript.
-    fn members() -> Vec<Member>
+    fn members() -> &'static [Member]
     where
         Self: Sized;
 

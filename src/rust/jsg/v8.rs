@@ -4,7 +4,7 @@ use std::ptr::NonNull;
 
 use crate::Lock;
 
-#[expect(clippy::missing_safety_doc)]
+#[expect(clippy::missing_safety_doc, clippy::elidable_lifetime_names)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
     #[derive(Debug)]
@@ -121,21 +121,21 @@ pub mod ffi {
         callback: usize,
     }
 
-    pub struct MethodDescriptor {
-        name: String,
+    pub struct MethodDescriptor<'a> {
+        name: &'a str,
         callback: usize,
     }
 
-    pub struct StaticMethodDescriptor {
-        name: String,
+    pub struct StaticMethodDescriptor<'a> {
+        name: &'a str,
         callback: usize,
     }
 
-    pub struct ResourceDescriptor {
-        pub name: String,
+    pub struct ResourceDescriptor<'a> {
+        pub name: &'a str,
         pub constructor: KjMaybe<ConstructorDescriptor>,
-        pub methods: Vec<MethodDescriptor>,
-        pub static_methods: Vec<StaticMethodDescriptor>,
+        pub methods: Vec<MethodDescriptor<'a>>,
+        pub static_methods: Vec<StaticMethodDescriptor<'a>>,
     }
 
     // Resources
