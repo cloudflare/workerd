@@ -58,9 +58,9 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
  public:
   // The limit is the maximum number of bytes that can be fed through the stream.
   // If kj::none, there is no limit.
-  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none): limit(limit) {
-    state.transitionTo<Idle>();
-  }
+  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none)
+      : limit(limit),
+        state(IdentityTransformState::create<Idle>()) {}
 
   ~IdentityTransformStreamImpl() noexcept(false) {
     // Due to the different natures of JS and C++ disposal, there is no point in enforcing the limit

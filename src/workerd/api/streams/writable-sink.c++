@@ -37,15 +37,14 @@ class WritableSinkImpl: public WritableSink {
  public:
   WritableSinkImpl(kj::Own<kj::AsyncOutputStream> inner,
       rpc::StreamEncoding encoding = rpc::StreamEncoding::IDENTITY)
-      : encoding(encoding) {
-    state.transitionTo<Open>(kj::mv(inner));
-  }
-  WritableSinkImpl(): encoding(rpc::StreamEncoding::IDENTITY) {
-    state.transitionTo<Closed>();
-  }
-  WritableSinkImpl(kj::Exception reason): encoding(rpc::StreamEncoding::IDENTITY) {
-    state.transitionTo<kj::Exception>(kj::mv(reason));
-  }
+      : state(WritableSinkState::create<Open>(kj::mv(inner))),
+        encoding(encoding) {}
+  WritableSinkImpl()
+      : state(WritableSinkState::create<Closed>()),
+        encoding(rpc::StreamEncoding::IDENTITY) {}
+  WritableSinkImpl(kj::Exception reason)
+      : state(WritableSinkState::create<kj::Exception>(kj::mv(reason))),
+        encoding(rpc::StreamEncoding::IDENTITY) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(WritableSinkImpl);
 

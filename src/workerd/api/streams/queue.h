@@ -152,9 +152,9 @@ class QueueImpl final {
   using Entry = typename Self::Entry;
   using State = typename Self::State;
 
-  explicit QueueImpl(size_t highWaterMark): highWaterMark(highWaterMark) {
-    state.template transitionTo<Ready>();
-  }
+  explicit QueueImpl(size_t highWaterMark)
+      : highWaterMark(highWaterMark),
+        state(QueueState::template create<Ready>()) {}
 
   QueueImpl(QueueImpl&&) = default;
   QueueImpl& operator=(QueueImpl&&) = default;
@@ -341,8 +341,8 @@ class ConsumerImpl final {
 
   ConsumerImpl(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none)
       : queue(queue),
+        state(ConsumerState::template create<Ready>()),
         stateListener(stateListener) {
-    state.template transitionTo<Ready>();
     queue.addConsumer(this);
   }
 

@@ -10,9 +10,9 @@
 
 namespace workerd::api {
 
-WritableStreamDefaultWriter::WritableStreamDefaultWriter(): ioContext(tryGetIoContext()) {
-  state.transitionTo<Initial>();
-}
+WritableStreamDefaultWriter::WritableStreamDefaultWriter()
+    : ioContext(tryGetIoContext()),
+      state(WriterState::create<Initial>()) {}
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {

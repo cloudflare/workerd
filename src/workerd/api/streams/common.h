@@ -312,6 +312,10 @@ struct Erroring {
   jsg::Value reason;
 
   Erroring(jsg::Value reason): reason(kj::mv(reason)) {}
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(reason);
+  }
 };
 }  // namespace StreamStates
 

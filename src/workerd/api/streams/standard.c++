@@ -1117,11 +1117,7 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
 
 template <typename Self>
 void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_SOME(errored, state.template tryGetUnsafe<StreamStates::Errored>()) {
-    visitor.visit(errored);
-  } else KJ_IF_SOME(queue, state.template tryGetUnsafe<Queue>()) {
-    visitor.visit(queue);
-  }
+  state.visitForGc(visitor);
   KJ_IF_SOME(pendingCancel, maybePendingCancel) {
     visitor.visit(pendingCancel.fulfiller, pendingCancel.promise);
   }
@@ -1558,11 +1554,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
 
 template <typename Self>
 void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_SOME(error, state.template tryGetUnsafe<StreamStates::Errored>()) {
-    visitor.visit(error);
-  } else KJ_IF_SOME(erroring, state.template tryGetUnsafe<StreamStates::Erroring>()) {
-    visitor.visit(erroring.reason);
-  }
+  state.visitForGc(visitor);
   visitor.visit(inFlightWrite, inFlightClose, closeRequest, algorithms, signal);
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     visitor.visit(*pendingAbort);

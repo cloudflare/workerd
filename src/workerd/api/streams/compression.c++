@@ -245,9 +245,8 @@ class CompressionStreamImpl: public kj::Refcounted,
   explicit CompressionStreamImpl(kj::String format,
       Context::ContextFlags flags,
       kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
-      : context(mode, format, flags, kj::mv(externalMemoryTarget)) {
-    state.template transitionTo<Open>();
-  }
+      : state(decltype(state)::template create<Open>()),
+        context(mode, format, flags, kj::mv(externalMemoryTarget)) {}
 
   // WritableStreamSink implementation ---------------------------------------------------
 

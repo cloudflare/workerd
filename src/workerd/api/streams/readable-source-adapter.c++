@@ -125,10 +125,9 @@ struct ReadableStreamSourceJsAdapter::Active {
 
 ReadableStreamSourceJsAdapter::ReadableStreamSourceJsAdapter(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableSource> source)
-    : selfRef(kj::rc<WeakRef<ReadableStreamSourceJsAdapter>>(
-          kj::Badge<ReadableStreamSourceJsAdapter>{}, *this)) {
-  state.transitionTo<Open>(ioContext.addObject(kj::heap<Active>(kj::mv(source))));
-}
+    : state(State::create<Open>(ioContext.addObject(kj::heap<Active>(kj::mv(source))))),
+      selfRef(kj::rc<WeakRef<ReadableStreamSourceJsAdapter>>(
+          kj::Badge<ReadableStreamSourceJsAdapter>{}, *this)) {}
 
 ReadableStreamSourceJsAdapter::~ReadableStreamSourceJsAdapter() noexcept(false) {
   selfRef->invalidate();
@@ -703,9 +702,8 @@ ReadableSourceKjAdapter::Active::Active(
     jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream)
     : ioContext(ioContext),
       stream(kj::mv(stream)),
-      reader(initReader(js, this->stream)) {
-  state.transitionTo<Idle>();
-}
+      reader(initReader(js, this->stream)),
+      state(InnerState::create<Idle>()) {}
 
 ReadableSourceKjAdapter::Active::~Active() noexcept(false) {
   cancel(KJ_EXCEPTION(DISCONNECTED, "ReadableSourceKjAdapter is canceled."));
@@ -734,11 +732,10 @@ void ReadableSourceKjAdapter::Active::cancel(kj::Exception reason) {
 
 ReadableSourceKjAdapter::ReadableSourceKjAdapter(
     jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream, Options options)
-    : options(options),
+    : state(KjState::create<KjOpen>(kj::heap<Active>(js, ioContext, kj::mv(stream)))),
+      options(options),
       selfRef(
-          kj::rc<WeakRef<ReadableSourceKjAdapter>>(kj::Badge<ReadableSourceKjAdapter>{}, *this)) {
-  state.transitionTo<KjOpen>(kj::heap<Active>(js, ioContext, kj::mv(stream)));
-}
+          kj::rc<WeakRef<ReadableSourceKjAdapter>>(kj::Badge<ReadableSourceKjAdapter>{}, *this)) {}
 
 ReadableSourceKjAdapter::~ReadableSourceKjAdapter() noexcept(false) {
   selfRef->invalidate();

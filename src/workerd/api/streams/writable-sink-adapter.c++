@@ -129,11 +129,11 @@ struct WritableStreamSinkJsAdapter::Active final {
 
 WritableStreamSinkJsAdapter::WritableStreamSinkJsAdapter(
     jsg::Lock& js, IoContext& ioContext, kj::Own<WritableSink> sink, kj::Maybe<Options> options)
-    : backpressureState(newBackpressureState(js)),
+    : state(State::create<Open>(
+          ioContext.addObject(kj::heap<Active>(kj::mv(sink), kj::mv(options).orDefault({}))))),
+      backpressureState(newBackpressureState(js)),
       selfRef(kj::rc<WeakRef<WritableStreamSinkJsAdapter>>(
           kj::Badge<WritableStreamSinkJsAdapter>{}, *this)) {
-  state.transitionTo<Open>(
-      ioContext.addObject(kj::heap<Active>(kj::mv(sink), kj::mv(options).orDefault({}))));
   // We want the initial backpressure state to be "ready".
   backpressureState.release(js);
 }
@@ -186,7 +186,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
   }
 
   KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-    // Deference the IoOwn once to get the active state.
+    // Dereference the IoOwn once to get the active state.
     auto& active = *open.active;
 
     // If close is pending, we cannot accept any more writes.
@@ -318,7 +318,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::flush(jsg::Lock& js) {
   }
 
   KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-    // Deference the IoOwn once to get the active state.
+    // Dereference the IoOwn once to get the active state.
     auto& active = *open.active;
 
     // If close is pending, we cannot accept any more writes.
@@ -562,10 +562,9 @@ void WritableStreamSinkKjAdapter::Active::abort(kj::Exception reason) {
 
 WritableStreamSinkKjAdapter::WritableStreamSinkKjAdapter(
     jsg::Lock& js, IoContext& ioContext, jsg::Ref<WritableStream> stream)
-    : selfRef(kj::rc<WeakRef<WritableStreamSinkKjAdapter>>(
-          kj::Badge<WritableStreamSinkKjAdapter>{}, *this)) {
-  state.transitionTo<KjOpen>(kj::heap<Active>(js, ioContext, kj::mv(stream)));
-}
+    : state(KjState::create<KjOpen>(kj::heap<Active>(js, ioContext, kj::mv(stream)))),
+      selfRef(kj::rc<WeakRef<WritableStreamSinkKjAdapter>>(
+          kj::Badge<WritableStreamSinkKjAdapter>{}, *this)) {}
 
 WritableStreamSinkKjAdapter::~WritableStreamSinkKjAdapter() noexcept(false) {
   selfRef->invalidate();

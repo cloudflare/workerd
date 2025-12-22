@@ -16,9 +16,8 @@ namespace workerd::api {
 
 ReaderImpl::ReaderImpl(ReadableStreamController::Reader& reader)
     : ioContext(tryGetIoContext()),
-      reader(reader) {
-  state.transitionTo<Initial>();
-}
+      reader(reader),
+      state(ReaderState::create<Initial>()) {}
 
 ReaderImpl::~ReaderImpl() noexcept(false) {
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {

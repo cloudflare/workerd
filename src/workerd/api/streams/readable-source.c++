@@ -259,15 +259,14 @@ class ReadableSourceImpl: public ReadableSource {
  public:
   ReadableSourceImpl(kj::Own<kj::AsyncInputStream> input,
       rpc::StreamEncoding encoding = rpc::StreamEncoding::IDENTITY)
-      : encoding(encoding) {
-    state.transitionTo<Open>(kj::mv(input));
-  }
-  ReadableSourceImpl(kj::Exception reason): encoding(rpc::StreamEncoding::IDENTITY) {
-    state.transitionTo<kj::Exception>(kj::mv(reason));
-  }
-  ReadableSourceImpl(): encoding(rpc::StreamEncoding::IDENTITY) {
-    state.transitionTo<Closed>();
-  }
+      : state(ReadableSourceState::create<Open>(kj::mv(input))),
+        encoding(encoding) {}
+  ReadableSourceImpl(kj::Exception reason)
+      : state(ReadableSourceState::create<kj::Exception>(kj::mv(reason))),
+        encoding(rpc::StreamEncoding::IDENTITY) {}
+  ReadableSourceImpl()
+      : state(ReadableSourceState::create<Closed>()),
+        encoding(rpc::StreamEncoding::IDENTITY) {}
   KJ_DISALLOW_COPY_AND_MOVE(ReadableSourceImpl);
   virtual ~ReadableSourceImpl() noexcept(false) {
     canceler.cancel(KJ_EXCEPTION(DISCONNECTED, "stream was dropped"));
