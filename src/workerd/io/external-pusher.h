@@ -26,14 +26,32 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
 
   kj::Own<kj::AsyncInputStream> unwrapStream(ExternalPusher::InputStream::Client cap);
 
+  // Box which holds the reason why an AbortSignal was aborted. May be either:
+  // - A serialized V8 value if the signal was aborted from JavaScript.
+  // - A KJ exception if the connection from the trigger was lost.
+  using PendingAbortReason = kj::RefcountedWrapper<kj::OneOf<kj::Array<byte>, kj::Exception>>;
+
+  struct AbortSignal {
+    // Resolves when `reason` has been filled in.
+    kj::Promise<void> signal;
+
+    // The abort reason box, will be uninitialized until `signal` resolves.
+    kj::Own<PendingAbortReason> reason;
+  };
+
+  AbortSignal unwrapAbortSignal(ExternalPusher::AbortSignal::Client cap);
+
   kj::Promise<void> pushByteStream(PushByteStreamContext context) override;
+  kj::Promise<void> pushAbortSignal(PushAbortSignalContext context) override;
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
 
   capnp::CapabilityServerSet<ExternalPusher::InputStream> inputStreamSet;
+  capnp::CapabilityServerSet<ExternalPusher::AbortSignal> abortSignalSet;
 
   class InputStreamImpl;
+  class AbortSignalImpl;
 };
 
 }  // namespace workerd

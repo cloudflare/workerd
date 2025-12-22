@@ -8,6 +8,7 @@
 // TODO(cleanup): Rename to events.h?
 
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/external-pusher.h>
 #include <workerd/io/io-own.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
@@ -571,9 +572,7 @@ class AbortSignal final: public EventTarget {
       jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
       Flag flag = Flag::NONE);
 
-  using PendingReason = kj::RefcountedWrapper<
-      kj::OneOf<kj::Array<kj::byte> /* v8Serialized */, kj::Exception /* if capability is dropped */
-          >>;
+  using PendingReason = ExternalPusherImpl::PendingAbortReason;
 
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
