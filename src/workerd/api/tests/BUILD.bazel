@@ -158,15 +158,6 @@ wd_test(
 )
 
 wd_test(
-    src = "abortsignal-external-pusher-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "abortsignal-test.js",
-        "abortsignal-test.wd-test",
-    ],
-)
-
-wd_test(
     src = "actor-stub-test.wd-test",
     args = ["--experimental"],
     data = ["actor-stub-test.js"],
@@ -282,15 +273,6 @@ wd_test(
     src = "js-rpc-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
-)
-
-wd_test(
-    src = "js-rpc-external-pusher-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "js-rpc-test.js",
-        "js-rpc-test.wd-test",
-    ],
 )
 
 wd_test(

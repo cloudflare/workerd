@@ -36,18 +36,12 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 25;
 // handle RPC specially should use this.
 class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandler {
  public:
-  using GetStreamSinkFunc = kj::Function<rpc::JsValue::StreamSink::Client()>;
-  using GetExternalPusherFunc = kj::Function<rpc::JsValue::ExternalPusher::Client()>;
-  using GetStreamHandlerFunc = kj::OneOf<GetStreamSinkFunc, GetExternalPusherFunc>;
-
   enum StubOwnership { TRANSFER, DUPLICATE };
 
-  // `getStreamSinkFunc` will be called at most once, the first time a stream is encountered in
-  // serialization, to get the StreamSink that should be used.
   RpcSerializerExternalHandler(
-      StubOwnership stubOwnership, GetStreamHandlerFunc getStreamHandlerFunc)
+      StubOwnership stubOwnership, rpc::JsValue::ExternalPusher::Client externalPusher)
       : stubOwnership(stubOwnership),
-        getStreamHandlerFunc(kj::mv(getStreamHandlerFunc)) {}
+        externalPusher(kj::mv(externalPusher)) {}
 
   inline StubOwnership getStubOwnership() {
     return stubOwnership;
@@ -55,9 +49,10 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   using BuilderCallback = kj::Function<void(rpc::JsValue::External::Builder)>;
 
-  // Returns the ExternalPusher for the remote side. Returns kj::none if this serialization is
-  // using the older StreamSink approach, in which case you need to call `writeStream()` instead.
-  kj::Maybe<rpc::JsValue::ExternalPusher::Client> getExternalPusher();
+  // Returns the ExternalPusher for the remote side.
+  rpc::JsValue::ExternalPusher::Client getExternalPusher() {
+    return externalPusher;
+  }
 
   // Add an external. The value is a callback which will be invoked later to fill in the
   // JsValue::External in the Cap'n Proto structure. The external array cannot be allocated until
@@ -66,13 +61,6 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
   void write(BuilderCallback callback) {
     externals.add(kj::mv(callback));
   }
-
-  // Like write(), but use this when there is also a stream associated with the external, i.e.
-  // using StreamSink. This returns a capability which will eventually resolve to the stream.
-  //
-  // StreamSink is being replaced by ExternalPusher. You should only call writeStream() if
-  // getExternalPusher() returns kj::none. If ExternalPusher is available, this method will throw.
-  capnp::Capability::Client writeStream(BuilderCallback callback);
 
   // Build the final list.
   capnp::Orphan<capnp::List<rpc::JsValue::External>> build(capnp::Orphanage orphanage);
@@ -108,50 +96,31 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
  private:
   StubOwnership stubOwnership;
-  GetStreamHandlerFunc getStreamHandlerFunc;
+  rpc::JsValue::ExternalPusher::Client externalPusher;
 
   kj::Vector<BuilderCallback> externals;
   kj::Vector<kj::Own<void>> stubDisposers;
-
-  kj::Maybe<rpc::JsValue::StreamSink::Client> streamSink;
-  kj::Maybe<rpc::JsValue::ExternalPusher::Client> externalPusher;
 };
 
 class RpcStubDisposalGroup;
-class StreamSinkImpl;
 
 // ExternalHandler used when deserializing RPC messages. Deserialization functions with which to
 // handle RPC specially should use this.
 class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHandler {
  public:
-  // The `streamSink` parameter should be provided if a StreamSink already exists, e.g. when
-  // deserializing results. If omitted, it will be constructed on-demand.
-  RpcDeserializerExternalHandler(capnp::List<rpc::JsValue::External>::Reader externals,
-      RpcStubDisposalGroup& disposalGroup,
-      kj::Maybe<StreamSinkImpl&> streamSink)
+  RpcDeserializerExternalHandler(
+      capnp::List<rpc::JsValue::External>::Reader externals, RpcStubDisposalGroup& disposalGroup)
       : externals(externals),
-        disposalGroup(disposalGroup),
-        streamSink(streamSink) {}
+        disposalGroup(disposalGroup) {}
   ~RpcDeserializerExternalHandler() noexcept(false);
 
   // Read and return the next external.
   rpc::JsValue::External::Reader read();
 
-  // Call immediately after `read()` when reading an external that is associated with a stream.
-  // `stream` is published back to the sender via StreamSink.
-  void setLastStream(capnp::Capability::Client stream);
-
   // All stubs deserialized as part of a particular parameter or result set are placed in a
   // common disposal group so that they can be disposed together.
   RpcStubDisposalGroup& getDisposalGroup() {
     return disposalGroup;
-  }
-
-  // Call after serialization is complete to get the StreamSink that should handle streams found
-  // while deserializing. Returns none if there were no streams. This should only be called if
-  // a `streamSink` was NOT passed to the constructor.
-  kj::Maybe<rpc::JsValue::StreamSink::Client> getStreamSink() {
-    return kj::mv(streamSinkCap);
   }
 
  private:
@@ -160,9 +129,6 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
 
   kj::UnwindDetector unwindDetector;
   RpcStubDisposalGroup& disposalGroup;
-
-  kj::Maybe<StreamSinkImpl&> streamSink;
-  kj::Maybe<rpc::JsValue::StreamSink::Client> streamSinkCap;
 };
 
 // Base class for objects which can be sent over RPC, but doing so actually sends a stub which

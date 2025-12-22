@@ -519,93 +519,6 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
 
 namespace {
 
-// TODO(cleanup): These classes have been copied to external-pusher.c++. The copies here can be
-//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
-//   StreamSink-related code. For now I'm not trying to avoid duplication.
-
-// HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
-//   wrap the two ends of the pipe in special adapters that track whether end() was called.
-class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream {
- public:
-  ExplicitEndOutputPipeAdapter(
-      kj::Own<kj::AsyncOutputStream> inner, kj::Own<kj::RefcountedWrapper<bool>> ended)
-      : inner(kj::mv(inner)),
-        ended(kj::mv(ended)) {}
-
-  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-    return KJ_REQUIRE_NONNULL(inner)->write(buffer);
-  }
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    return KJ_REQUIRE_NONNULL(inner)->write(pieces);
-  }
-
-  kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
-      kj::AsyncInputStream& input, uint64_t amount) override {
-    return KJ_REQUIRE_NONNULL(inner)->tryPumpFrom(input, amount);
-  }
-
-  kj::Promise<void> whenWriteDisconnected() override {
-    return KJ_REQUIRE_NONNULL(inner)->whenWriteDisconnected();
-  }
-
-  kj::Promise<void> end() override {
-    // Signal to the other side that end() was actually called.
-    ended->getWrapped() = true;
-    inner = kj::none;
-    return kj::READY_NOW;
-  }
-
- private:
-  kj::Maybe<kj::Own<kj::AsyncOutputStream>> inner;
-  kj::Own<kj::RefcountedWrapper<bool>> ended;
-};
-
-class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
- public:
-  ExplicitEndInputPipeAdapter(kj::Own<kj::AsyncInputStream> inner,
-      kj::Own<kj::RefcountedWrapper<bool>> ended,
-      kj::Maybe<uint64_t> expectedLength)
-      : inner(kj::mv(inner)),
-        ended(kj::mv(ended)),
-        expectedLength(expectedLength) {}
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t result = co_await inner->tryRead(buffer, minBytes, maxBytes);
-
-    KJ_IF_SOME(l, expectedLength) {
-      KJ_ASSERT(result <= l);
-      l -= result;
-      if (l == 0) {
-        // If we got all the bytes we expected, we treat this as a successful end, because the
-        // underlying KJ pipe is not actually going to wait for the other side to drop. This is
-        // consistent with the behavior of Content-Length in HTTP anyway.
-        ended->getWrapped() = true;
-      }
-    }
-
-    if (result < minBytes) {
-      // Verify that end() was called.
-      if (!ended->getWrapped()) {
-        JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
-      }
-    }
-    co_return result;
-  }
-
-  kj::Maybe<uint64_t> tryGetLength() override {
-    return inner->tryGetLength();
-  }
-
-  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
-    return inner->pumpTo(output, amount);
-  }
-
- private:
-  kj::Own<kj::AsyncInputStream> inner;
-  kj::Own<kj::RefcountedWrapper<bool>> ended;
-  kj::Maybe<uint64_t> expectedLength;
-};
-
 // Wrapper around ReadableStreamSource that prevents deferred proxying. We need this for RPC
 // streams because although they are "system streams", they become disconnected when the IoContext
 // is destroyed, due to the JsRpcCustomEvent being canceled.
@@ -680,37 +593,21 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   StreamEncoding encoding = controller.getPreferredEncoding();
   auto expectedLength = controller.tryGetLength(encoding);
 
-  capnp::ByteStream::Client streamCap = [&]() {
-    KJ_IF_SOME(pusher, externalHandler->getExternalPusher()) {
-      auto req = pusher.pushByteStreamRequest(capnp::MessageSize{2, 0});
-      KJ_IF_SOME(el, expectedLength) {
-        req.setLengthPlusOne(el + 1);
-      }
-      auto pipeline = req.sendForPipeline();
+  auto req = externalHandler->getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
+  KJ_IF_SOME(el, expectedLength) {
+    req.setLengthPlusOne(el + 1);
+  }
+  auto pipeline = req.sendForPipeline();
 
-      externalHandler->write([encoding, expectedLength, source = pipeline.getSource()](
-                                 rpc::JsValue::External::Builder builder) mutable {
-        auto rs = builder.initReadableStream();
-        rs.setStream(kj::mv(source));
-        rs.setEncoding(encoding);
-      });
-
-      return pipeline.getSink();
-    } else {
-      return externalHandler
-          ->writeStream(
-              [encoding, expectedLength](rpc::JsValue::External::Builder builder) mutable {
-        auto rs = builder.initReadableStream();
-        rs.setEncoding(encoding);
-        KJ_IF_SOME(l, expectedLength) {
-          rs.getExpectedLength().setKnown(l);
-        }
-      }).castAs<capnp::ByteStream>();
-    }
-  }();
+  externalHandler->write([encoding, expectedLength, source = pipeline.getSource()](
+                             rpc::JsValue::External::Builder builder) mutable {
+    auto rs = builder.initReadableStream();
+    rs.setStream(kj::mv(source));
+    rs.setEncoding(encoding);
+  });
 
   kj::Own<capnp::ExplicitEndOutputStream> kjStream =
-      ioctx.getByteStreamFactory().capnpToKjExplicitEnd(kj::mv(streamCap));
+      ioctx.getByteStreamFactory().capnpToKjExplicitEnd(pipeline.getSink());
 
   auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
 
@@ -741,25 +638,7 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   auto& ioctx = IoContext::current();
 
-  kj::Own<kj::AsyncInputStream> in;
-  if (rs.hasStream()) {
-    in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
-  } else {
-    kj::Maybe<uint64_t> expectedLength;
-    auto el = rs.getExpectedLength();
-    if (el.isKnown()) {
-      expectedLength = el.getKnown();
-    }
-
-    auto pipe = kj::newOneWayPipe(expectedLength);
-
-    auto endedFlag = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
-
-    auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), kj::addRef(*endedFlag));
-    in = kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
-
-    externalHandler->setLastStream(ioctx.getByteStreamFactory().kjToCapnp(kj::mv(out)));
-  }
+  auto in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
 
   return js.alloc<ReadableStream>(ioctx,
       kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));

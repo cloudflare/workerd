@@ -572,56 +572,6 @@ class AbortTriggerRpcClient final {
   rpc::AbortTrigger::Client client;
 };
 
-namespace {
-// The jsrpc handler that receives aborts from the remote and triggers them locally
-//
-// TODO(cleanup): This class has been copied to external-pusher.c++. The copy here can be
-//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
-//   StreamSink-related code. For now I'm not trying to avoid duplication.
-class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
- public:
-  AbortTriggerRpcServer(kj::Own<kj::PromiseFulfiller<void>> fulfiller,
-      kj::Own<AbortSignal::PendingReason>&& pendingReason)
-      : fulfiller(kj::mv(fulfiller)),
-        pendingReason(kj::mv(pendingReason)) {}
-
-  kj::Promise<void> abort(AbortContext abortCtx) override {
-    auto params = abortCtx.getParams();
-    auto reason = params.getReason().getV8Serialized();
-
-    pendingReason->getWrapped() = kj::heapArray(reason.asBytes());
-    fulfiller->fulfill();
-    return kj::READY_NOW;
-  }
-
-  kj::Promise<void> release(ReleaseContext releaseCtx) override {
-    released = true;
-    return kj::READY_NOW;
-  }
-
-  ~AbortTriggerRpcServer() noexcept(false) {
-    if (pendingReason->getWrapped() != nullptr) {
-      // Already triggered
-      return;
-    }
-
-    if (!released) {
-      pendingReason->getWrapped() = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
-          "An AbortSignal received over RPC was implicitly aborted because the connection back to "
-          "its trigger was lost.");
-    }
-
-    // Always fulfill the promise in case the AbortSignal was waiting
-    fulfiller->fulfill();
-  }
-
- private:
-  kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-  kj::Own<AbortSignal::PendingReason> pendingReason;
-  bool released = false;
-};
-}  // namespace
-
 AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
     jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
     Flag flag)
@@ -862,28 +812,19 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     return;
   }
 
-  auto triggerCap = [&]() -> rpc::AbortTrigger::Client {
-    KJ_IF_SOME(pusher, externalHandler->getExternalPusher()) {
-      auto pipeline = pusher.pushAbortSignalRequest(capnp::MessageSize{2, 0}).sendForPipeline();
+  auto pipeline = externalHandler->getExternalPusher()
+                      .pushAbortSignalRequest(capnp::MessageSize{2, 0})
+                      .sendForPipeline();
 
-      externalHandler->write(
-          [signal = pipeline.getSignal()](rpc::JsValue::External::Builder builder) mutable {
-        builder.setAbortSignal(kj::mv(signal));
-      });
-
-      return pipeline.getTrigger();
-    } else {
-      return externalHandler
-          ->writeStream([&](rpc::JsValue::External::Builder builder) mutable {
-        builder.setAbortTrigger();
-      }).castAs<rpc::AbortTrigger>();
-    }
-  }();
+  externalHandler->write(
+      [signal = pipeline.getSignal()](rpc::JsValue::External::Builder builder) mutable {
+    builder.setAbortSignal(kj::mv(signal));
+  });
 
   auto& ioContext = IoContext::current();
   // Keep track of every AbortSignal cloned from this one.
   // If this->triggerAbort(...) is called, each rpcClient will be informed.
-  rpcClients.add(ioContext.addObject(kj::heap<AbortTriggerRpcClient>(kj::mv(triggerCap))));
+  rpcClients.add(ioContext.addObject(kj::heap<AbortTriggerRpcClient>(pipeline.getTrigger())));
 }
 
 jsg::Ref<AbortSignal> AbortSignal::deserialize(
@@ -914,24 +855,12 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
   auto& ioctx = IoContext::current();
 
   auto reader = externalHandler->read();
-  if (reader.isAbortTrigger()) {
-    // Old-style StreamSink.
-    // TODO(cleanup): Remove this once the ExternalPusher autogate has rolled out.
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    auto pendingReason = ioctx.addObject(kj::refcounted<PendingReason>());
+  KJ_REQUIRE(reader.isAbortSignal(), "external table slot type does't match serialization tag");
 
-    externalHandler->setLastStream(
-        kj::heap<AbortTriggerRpcServer>(kj::mv(paf.fulfiller), kj::addRef(*pendingReason)));
-    signal->rpcAbortPromise = ioctx.addObject(kj::heap(kj::mv(paf.promise)));
-    signal->pendingReason = kj::mv(pendingReason);
-  } else {
-    KJ_REQUIRE(reader.isAbortSignal(), "external table slot type does't match serialization tag");
+  auto resolvedSignal = ioctx.getExternalPusher()->unwrapAbortSignal(reader.getAbortSignal());
 
-    auto resolvedSignal = ioctx.getExternalPusher()->unwrapAbortSignal(reader.getAbortSignal());
-
-    signal->rpcAbortPromise = ioctx.addObject(kj::heap(kj::mv(resolvedSignal.signal)));
-    signal->pendingReason = ioctx.addObject(kj::mv(resolvedSignal.reason));
-  }
+  signal->rpcAbortPromise = ioctx.addObject(kj::heap(kj::mv(resolvedSignal.signal)));
+  signal->pendingReason = ioctx.addObject(kj::mv(resolvedSignal.reason));
 
   return signal;
 }
