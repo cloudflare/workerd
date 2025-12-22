@@ -367,6 +367,18 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-r2-patterns-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-r2-patterns-test.js"],
+)
+
+wd_test(
+    src = "streams-respond-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-respond-test.js"],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],
