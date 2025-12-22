@@ -1,0 +1,10 @@
+# Same as abortsignal-test.wd-test, but enabling the autogate
+# workerd-autogate-rpc-use-external-pusher.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = import "abortsignal-test.wd-test".services,
+  v8Flags = [ "--expose-gc" ],
+  autogates = [ "workerd-autogate-rpc-use-external-pusher" ]
+);
