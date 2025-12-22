@@ -10,7 +10,6 @@ export const responseBodyMethodsJsByob = {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
-    // Test arrayBuffer() with BYOB stream
     {
       const rs = new ReadableStream({
         type: 'bytes',
@@ -24,10 +23,10 @@ export const responseBodyMethodsJsByob = {
       });
 
       const resp = new Response(rs);
+
       strictEqual(dec.decode(await resp.arrayBuffer()), 'hello');
     }
 
-    // Test text() with BYOB stream
     {
       const rs = new ReadableStream({
         type: 'bytes',
@@ -41,6 +40,7 @@ export const responseBodyMethodsJsByob = {
       });
 
       const resp = new Response(rs);
+
       strictEqual(await resp.text(), 'hello');
     }
   },
@@ -50,7 +50,6 @@ export const responseBodyMethodsJsByob = {
 export const requestBodyMethodsJsByob = {
   async test() {
     const enc = new TextEncoder();
-
     const wrapped = new ReadableStream({
       type: 'bytes',
       async pull(c) {
@@ -59,7 +58,6 @@ export const requestBodyMethodsJsByob = {
       },
     });
 
-    // Create a Request with a dummy request and replace body
     const req = new Request('http://example.com', {
       method: 'POST',
       body: wrapped,

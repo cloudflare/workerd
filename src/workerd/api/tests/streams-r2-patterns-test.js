@@ -68,8 +68,10 @@ export const identityTransformReadAtLeast = {
     const reader = readable.getReader({ mode: 'byob' });
     const writer = writable.getWriter();
 
-    // This pattern of writes/reads tests the atLeast calculation when
-    // individual writes are < atLeast.
+    // There's been a latent bug in IdentityTransformStream ever since
+    // readAtLeast was introduced that caused it to mishandle the atLeast
+    // calculation when individual writes were < atLeast.
+
     for (let n = 0; n < 8; n++) {
       writer.write(new Uint8Array(1));
     }
@@ -101,6 +103,10 @@ export const fixedLengthStreamReadAtLeast = {
 
     const reader = readable.getReader({ mode: 'byob' });
     const writer = writable.getWriter();
+
+    // There's been a latent bug in IdentityTransformStream ever since
+    // readAtLeast was introduced that caused it to mishandle the atLeast
+    // calculation when individual writes were < atLeast.
 
     for (let n = 0; n < 8; n++) {
       writer.write(new Uint8Array(1));
@@ -157,15 +163,12 @@ export const closedByobTeeOnStart = {
 
     const [b1, b2] = rs.tee();
 
-    // Use waitUntil to consume branch 2 in the background
     const branch2Promise = consume(b2);
     ctx.waitUntil(branch2Promise);
 
-    // Consume branch 1 directly
     const result1 = await consume(b1);
     strictEqual(result1, 'hello');
 
-    // Wait for branch 2 to complete as well
     const result2 = await branch2Promise;
     strictEqual(result2, 'hello');
   },
