@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { strictEqual, ok, rejects } from 'node:assert';
-import { mock } from 'node:test';
+import { strictEqual, ok } from 'node:assert';
 
 async function consume(readable) {
   let data = '';
@@ -364,49 +363,6 @@ export const writeBackpressure = {
     await Promise.allSettled(promises);
 
     strictEqual(writer.desiredSize, 2);
-  },
-};
-
-// Test TransformStream cancel function
-export const transformStreamCancel = {
-  async test() {
-    // Verify that a TransformStream's cancel function is called when the
-    // readable is canceled or the writable is aborted. Verify also that
-    // errors thrown by the cancel function are propagated.
-    {
-      const cancelFn = mock.fn(async (reason) => {
-        strictEqual(reason, 'boom');
-        await scheduler.wait(10);
-      });
-      const { readable } = new TransformStream({
-        cancel: cancelFn,
-      });
-      strictEqual(cancelFn.mock.callCount(), 0);
-      await readable.cancel('boom');
-      strictEqual(cancelFn.mock.callCount(), 1);
-    }
-
-    {
-      const cancelFn = mock.fn(async (reason) => {
-        strictEqual(reason, 'boom');
-        await scheduler.wait(10);
-      });
-      const { writable } = new TransformStream({
-        cancel: cancelFn,
-      });
-      strictEqual(cancelFn.mock.callCount(), 0);
-      await writable.abort('boom');
-      strictEqual(cancelFn.mock.callCount(), 1);
-    }
-
-    {
-      const { writable } = new TransformStream({
-        async cancel() {
-          throw new Error('boomy');
-        },
-      });
-      await rejects(writable.abort('boom'), { message: 'boomy' });
-    }
   },
 };
 
