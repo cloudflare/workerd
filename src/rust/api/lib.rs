@@ -48,7 +48,7 @@ mod tests {
     #[test]
     fn test_wrap_resource_equality() {
         let harness = Harness::new();
-        harness.run_in_context(|isolate| unsafe {
+        harness.run_in_context(|isolate, _ctx| unsafe {
             let mut lock = jsg::Lock::from_isolate_ptr(isolate);
             let dns_util = jsg::Ref::new(DnsUtil {
                 _state: ResourceState::default(),

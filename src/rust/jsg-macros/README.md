@@ -20,24 +20,6 @@ pub struct MyRecord {
 }
 ```
 
-## `#[jsg_method]`
-
-Generates FFI callback functions for JSG resource methods. The `name` parameter is optional and defaults to converting the method name from `snake_case` to `camelCase`.
-
-```rust
-impl DnsUtil {
-    #[jsg_method(name = "parseCaaRecord")]
-    pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
-        // implementation
-    }
-
-    #[jsg_method]
-    pub fn parse_naptr_record(&self, record: &str) -> Result<NaptrRecord, DnsParserError> {
-        // Exposed as "parseNaptrRecord" in JavaScript
-    }
-}
-```
-
 ## `#[jsg_resource]`
 
 Generates boilerplate for JSG resources. Applied to both struct definitions and impl blocks. Automatically implements `jsg::Type::class_name()` using the struct name, or a custom name if provided via the `name` parameter.
