@@ -44,38 +44,6 @@ filegroup(
 
 SNAPSHOT_R2 = "https://pyodide-capnp-bin.edgeworker.net/"
 
-def _snapshot_http_file(bundle_name, folder, snapshot, integrity, hash, r2_base = SNAPSHOT_R2):
-    if not snapshot:
-        return
-    if not integrity:
-        fail("Snapshot %s from bundle %s has missing integrity" % (snapshot, bundle_name))
-    if folder == "baseline-snapshot/":
-        key = hash
-    else:
-        key = snapshot
-    http_file(
-        name = "pyodide-snapshot-" + snapshot,
-        integrity = integrity,
-        url = r2_base + folder + key,
-    )
-
-def _snapshot_http_files(
-        name,
-        baseline_snapshot = None,
-        baseline_snapshot_hash = None,
-        baseline_snapshot_integrity = None,
-        numpy_snapshot = None,
-        numpy_snapshot_integrity = None,
-        fastapi_snapshot = None,
-        fastapi_snapshot_integrity = None,
-        dedicated_fastapi_snapshot = None,
-        dedicated_fastapi_snapshot_integrity = None,
-        **_kwds):
-    _snapshot_http_file(name, "baseline-snapshot/", baseline_snapshot, baseline_snapshot_integrity, baseline_snapshot_hash)
-    _snapshot_http_file(name, "test-snapshot/", numpy_snapshot, numpy_snapshot_integrity, None)
-    _snapshot_http_file(name, "test-snapshot/", fastapi_snapshot, fastapi_snapshot_integrity, None)
-    _snapshot_http_file(name, "", dedicated_fastapi_snapshot, dedicated_fastapi_snapshot_integrity, None, VENDOR_R2)
-
 def dep_pyodide():
     for info in PYODIDE_VERSIONS:
         _pyodide_core(**info)
@@ -87,5 +55,50 @@ def dep_pyodide():
     for info in PYTHON_LOCKFILES:
         _pyodide_packages(**info)
 
+    # Accumulator to de-duplicate generated http_file rules.
+    gen_http_file = {}
+
+    def _snapshot_http_files(
+            name,
+            baseline_snapshot = None,
+            baseline_snapshot_hash = None,
+            baseline_snapshot_integrity = None,
+            numpy_snapshot = None,
+            numpy_snapshot_integrity = None,
+            fastapi_snapshot = None,
+            fastapi_snapshot_integrity = None,
+            dedicated_fastapi_snapshot = None,
+            dedicated_fastapi_snapshot_integrity = None,
+            **_kwds):
+        def _snapshot_http_file(bundle_name, folder, snapshot, integrity, hash, r2_base = SNAPSHOT_R2):
+            if not snapshot:
+                return
+            if not integrity:
+                fail("Snapshot %s from bundle %s has missing integrity" % (snapshot, bundle_name))
+            if folder == "baseline-snapshot/":
+                key = hash
+            else:
+                key = snapshot
+            gen_http_file[snapshot] = struct(
+                integrity = integrity,
+                url = r2_base + folder + key,
+            )
+
+        _snapshot_http_file(name, "baseline-snapshot/", baseline_snapshot, baseline_snapshot_integrity, baseline_snapshot_hash)
+        _snapshot_http_file(name, "test-snapshot/", numpy_snapshot, numpy_snapshot_integrity, None)
+        _snapshot_http_file(name, "test-snapshot/", fastapi_snapshot, fastapi_snapshot_integrity, None)
+        _snapshot_http_file(name, "", dedicated_fastapi_snapshot, dedicated_fastapi_snapshot_integrity, None, VENDOR_R2)
+
     for ver in BUNDLE_VERSION_INFO.values():
         _snapshot_http_files(**ver)
+    for snapshot, info in gen_http_file.items():
+        http_file(
+            name = "pyodide-snapshot-" + snapshot,
+            integrity = info.integrity,
+            url = info.url,
+        )
+
+def _impl(module_ctx):
+    dep_pyodide()
+
+pyodide = module_extension(implementation = _impl)

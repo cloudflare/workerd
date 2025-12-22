@@ -1,0 +1,236 @@
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 31ead093..32309584 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -11,7 +11,7 @@ rust_library(
+     visibility = ["//visibility:public"],
+     deps = [
+         ":core",
+-        "@crates.io//:foldhash",
++        "@crates_vendor//:foldhash",
+     ],
+ )
+ 
+@@ -32,9 +32,9 @@ rust_library(
+     crate_root = "syntax/mod.rs",
+     edition = "2021",
+     deps = [
+-        "@crates.io//:proc-macro2",
+-        "@crates.io//:quote",
+-        "@crates.io//:syn",
++        "@crates_vendor//:proc-macro2",
++        "@crates_vendor//:quote",
++        "@crates_vendor//:syn",
+     ],
+ )
+ 
+@@ -46,10 +46,10 @@ rust_library(
+     edition = "2021",
+     deps = [
+         ":syntax",
+-        "@crates.io//:codespan-reporting",
+-        "@crates.io//:proc-macro2",
+-        "@crates.io//:quote",
+-        "@crates.io//:syn",
++        "@crates_vendor//:codespan-reporting",
++        "@crates_vendor//:proc-macro2",
++        "@crates_vendor//:quote",
++        "@crates_vendor//:syn",
+     ],
+ )
+ 
+@@ -61,11 +61,11 @@ rust_binary(
+     deps = [
+         ":gen",
+         ":syntax",
+-        "@crates.io//:clap",
+-        "@crates.io//:codespan-reporting",
+-        "@crates.io//:proc-macro2",
+-        "@crates.io//:quote",
+-        "@crates.io//:syn",
++        "@crates_vendor//:clap",
++        "@crates_vendor//:codespan-reporting",
++        "@crates_vendor//:proc-macro2",
++        "@crates_vendor//:quote",
++        "@crates_vendor//:syn",
+     ],
+ )
+ 
+@@ -87,15 +87,15 @@ rust_proc_macro(
+     srcs = glob(["macro/src/*.rs"]),
+     edition = "2021",
+     proc_macro_deps = [
+-        "@crates.io//:rustversion",
++        "@crates_vendor//:rustversion",
+     ],
+     visibility = ["//tests:__pkg__"],
+     deps = [
+         ":gen",
+         ":syntax",
+-        "@crates.io//:proc-macro2",
+-        "@crates.io//:quote",
+-        "@crates.io//:syn",
++        "@crates_vendor//:proc-macro2",
++        "@crates_vendor//:quote",
++        "@crates_vendor//:syn",
+     ],
+ )
+ 
+@@ -109,12 +109,12 @@ rust_library(
+     deps = [
+         ":gen",
+         ":syntax",
+-        "@crates.io//:cc",
+-        "@crates.io//:codespan-reporting",
+-        "@crates.io//:proc-macro2",
+-        "@crates.io//:quote",
+-        "@crates.io//:scratch",
+-        "@crates.io//:syn",
++        "@crates_vendor//:cc",
++        "@crates_vendor//:codespan-reporting",
++        "@crates_vendor//:proc-macro2",
++        "@crates_vendor//:quote",
++        "@crates_vendor//:scratch",
++        "@crates_vendor//:syn",
+     ],
+ )
+ 
+@@ -127,10 +127,10 @@ rust_library(
+     deps = [
+         ":gen",
+         ":syntax",
+-        "@crates.io//:cc",
+-        "@crates.io//:proc-macro2",
+-        "@crates.io//:quote",
+-        "@crates.io//:syn",
++        "@crates_vendor//:cc",
++        "@crates_vendor//:proc-macro2",
++        "@crates_vendor//:quote",
++        "@crates_vendor//:syn",
+     ],
+ )
+ 
+diff --git a/MODULE.bazel.lock b/MODULE.bazel.lock
+index 271b97f7..4b1206ce 100644
+--- a/MODULE.bazel.lock
++++ b/MODULE.bazel.lock
+@@ -1,5 +1,5 @@
+ {
+-  "lockFileVersion": 18,
++  "lockFileVersion": 24,
+   "registryFileHashes": {
+     "https://bcr.bazel.build/bazel_registry.json": "8a28e4aff06ee60aed2a8c281907fb8bcbf3b753c91fb5a5c57da3215d5b3497",
+     "https://bcr.bazel.build/modules/abseil-cpp/20210324.2/MODULE.bazel": "7cd0312e064fde87c8d1cd79ba06c876bd23630c83466e9500321be55c96ace2",
+@@ -154,97 +154,6 @@
+     "https://bcr.bazel.build/modules/zlib/1.3.1/MODULE.bazel": "751c9940dcfe869f5f7274e1295422a34623555916eb98c174c1e945594bf198"
+   },
+   "selectedYankedVersions": {},
+-  "moduleExtensions": {
+-    "//:capnp_cpp.bzl%capnp_cpp": {
+-      "general": {
+-        "bzlTransitiveDigest": "qEBGI+2gJxN9bcJ8vJpVWk/XnAY8pV/UqMv9f0/4pfI=",
+-        "usagesDigest": "NcY49Lqyy8czgriyQfqodZtzPlf0EyttkWX8b7osJtY=",
+-        "recordedFileInputs": {},
+-        "recordedDirentsInputs": {},
+-        "envVariables": {},
+-        "generatedRepoSpecs": {
+-          "capnp-cpp": {
+-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+-            "attributes": {
+-              "url": "https://github.com/capnproto/capnproto/tarball/c525eb1680bdd94f3d814f81f148643ee5086525",
+-              "strip_prefix": "capnproto-capnproto-c525eb1/c++",
+-              "type": "tgz",
+-              "sha256": "7b60e840dbc62bb3140a9dff9ae38253688fc63722dcea6769108e9356e6362b"
+-            }
+-          }
+-        },
+-        "recordedRepoMappingEntries": [
+-          [
+-            "",
+-            "bazel_tools",
+-            "bazel_tools"
+-          ]
+-        ]
+-      }
+-    },
+-    "@@rules_kotlin+//src/main/starlark/core/repositories:bzlmod_setup.bzl%rules_kotlin_extensions": {
+-      "general": {
+-        "bzlTransitiveDigest": "OlvsB0HsvxbR8ZN+J9Vf00X/+WVz/Y/5Xrq2LgcVfdo=",
+-        "usagesDigest": "QI2z8ZUR+mqtbwsf2fLqYdJAkPOHdOV+tF2yVAUgRzw=",
+-        "recordedFileInputs": {},
+-        "recordedDirentsInputs": {},
+-        "envVariables": {},
+-        "generatedRepoSpecs": {
+-          "com_github_jetbrains_kotlin_git": {
+-            "repoRuleId": "@@rules_kotlin+//src/main/starlark/core/repositories:compiler.bzl%kotlin_compiler_git_repository",
+-            "attributes": {
+-              "urls": [
+-                "https://github.com/JetBrains/kotlin/releases/download/v1.9.23/kotlin-compiler-1.9.23.zip"
+-              ],
+-              "sha256": "93137d3aab9afa9b27cb06a824c2324195c6b6f6179d8a8653f440f5bd58be88"
+-            }
+-          },
+-          "com_github_jetbrains_kotlin": {
+-            "repoRuleId": "@@rules_kotlin+//src/main/starlark/core/repositories:compiler.bzl%kotlin_capabilities_repository",
+-            "attributes": {
+-              "git_repository_name": "com_github_jetbrains_kotlin_git",
+-              "compiler_version": "1.9.23"
+-            }
+-          },
+-          "com_github_google_ksp": {
+-            "repoRuleId": "@@rules_kotlin+//src/main/starlark/core/repositories:ksp.bzl%ksp_compiler_plugin_repository",
+-            "attributes": {
+-              "urls": [
+-                "https://github.com/google/ksp/releases/download/1.9.23-1.0.20/artifacts.zip"
+-              ],
+-              "sha256": "ee0618755913ef7fd6511288a232e8fad24838b9af6ea73972a76e81053c8c2d",
+-              "strip_version": "1.9.23-1.0.20"
+-            }
+-          },
+-          "com_github_pinterest_ktlint": {
+-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
+-            "attributes": {
+-              "sha256": "01b2e0ef893383a50dbeb13970fe7fa3be36ca3e83259e01649945b09d736985",
+-              "urls": [
+-                "https://github.com/pinterest/ktlint/releases/download/1.3.0/ktlint"
+-              ],
+-              "executable": true
+-            }
+-          },
+-          "rules_android": {
+-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+-            "attributes": {
+-              "sha256": "cd06d15dd8bb59926e4d65f9003bfc20f9da4b2519985c27e190cddc8b7a7806",
+-              "strip_prefix": "rules_android-0.1.1",
+-              "urls": [
+-                "https://github.com/bazelbuild/rules_android/archive/v0.1.1.zip"
+-              ]
+-            }
+-          }
+-        },
+-        "recordedRepoMappingEntries": [
+-          [
+-            "rules_kotlin+",
+-            "bazel_tools",
+-            "bazel_tools"
+-          ]
+-        ]
+-      }
+-    }
+-  }
++  "moduleExtensions": {},
++  "facts": {}
+ }
+diff --git a/kj-rs/BUILD.bazel b/kj-rs/BUILD.bazel
+index ff53ba9f..7f44ddf8 100644
+--- a/kj-rs/BUILD.bazel
++++ b/kj-rs/BUILD.bazel
+@@ -26,7 +26,7 @@ rust_library(
+         ":bridge",
+         ":kj-rs-lib",
+         "@workerd-cxx//:cxx",
+-        "@crates.io//:static_assertions",
++        "@crates_vendor//:static_assertions",
+     ],
+ )
+ 

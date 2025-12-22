@@ -88,7 +88,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache${{ inputs.phase}}-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache${{ inputs.phase}}-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
           # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
           # ends up with a larger cache at the end when starting with an available cache entry,
           # resulting in a snowballing cache size and cache download/upload times.

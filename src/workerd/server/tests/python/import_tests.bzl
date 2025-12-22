@@ -45,7 +45,8 @@ def _test(name, directory, wd_test, py_file, python_version, **kwds):
         python_flags = [python_version],
         use_snapshot = None,
         make_snapshot = False,
-        args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels_%s" % pkg_tag],
+        # TODO: +pyodide+ is a bzlmod canonical repository name
+        args = ["--experimental", "--pyodide-package-disk-cache-dir", "../+pyodide+all_pyodide_wheels_%s" % pkg_tag],
         skip_default_data = True,
         data = [py_file, "@all_pyodide_wheels_%s//:whls" % pkg_tag],
         **kwds
