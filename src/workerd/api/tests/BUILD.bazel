@@ -586,3 +586,9 @@ wd_test(
     args = ["--experimental"],
     data = ["compression-streams-test.js"],
 )
+
+wd_test(
+    src = "identity-transform-stream-state-machine-test.wd-test",
+    args = ["--experimental"],
+    data = ["identity-transform-stream-state-machine-test.js"],
+)

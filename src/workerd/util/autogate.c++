@@ -33,6 +33,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "rust-backed-node-dns"_kj;
     case AutogateKey::COMPRESSION_STREAM_USE_STATE_MACHINE:
       return "compression-stream-use-state-machine"_kj;
+    case AutogateKey::IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE:
+      return "identity-transform-stream-use-state-machine"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
