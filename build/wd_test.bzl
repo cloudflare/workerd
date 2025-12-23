@@ -9,6 +9,8 @@ def wd_test(
         python_snapshot_test = False,
         generate_default_variant = True,
         generate_all_autogates_variant = True,
+        generate_all_compat_flags_variant = True,
+        compat_date = "",
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -19,8 +21,16 @@ def wd_test(
      data: Additional files which the .capnp config file may embed. All TypeScript files will be compiled,
      their resulting files will be passed to the test as well. Usually TypeScript or Javascript source files.
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
-     autogates_variant: If True (default), generate an @all-autogates variant of the test.
-     default_variant: If True (default), generate the default (non-autogates) variant of the test.
+     generate_default_variant: If True (default), generate the default variant with oldest compat date.
+     generate_all_autogates_variant: If True (default), generate @all-autogates variants.
+     generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
+     compat_date: If specified, use this compat date for the default variant instead of 2000-01-01.
+        Does not affect the @all-compat-flags variant which always uses 2999-12-31.
+
+    The following test variants are generated based on the flags:
+     - name@ (if generate_default_variant): oldest compat date (0000-00-00)
+     - name@all-compat-flags (if generate_all_compat_flags_variant): newest compat date (9999-12-31)
+     - name@all-autogates (if generate_all_autogates_variant): all autogates + oldest compat date
     """
 
     # Add workerd binary to "data" dependencies.
@@ -55,28 +65,50 @@ def wd_test(
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
 
     # Add initial arguments for `workerd test` command.
-    args = [
+    base_args = [
         "$(location //src/workerd/server:workerd_cross)",
         "test",
         "$(location {})".format(src),
     ] + args
 
+    # Define the compat-date args for each variant
+    # Note: dates must be in range [2000-01-01, 2999-12-31] due to parsing constraints
+    default_compat_args = ["--compat-date=2000-01-01"]
+    newest_compat_args = ["--compat-date=2999-12-31"]
+
+    if compat_date:
+        default_compat_args = ["--compat-date={}".format(compat_date)]
+
+    # Generate variants based on the flags
+    # Default variant: oldest compat date
     if generate_default_variant:
         _wd_test(
             src = src,
             name = name + "@",
             data = data,
-            args = args,
+            args = base_args + default_compat_args,
             python_snapshot_test = python_snapshot_test,
             **kwargs
         )
 
+    # All compat flags variant: newest compat date
+    if generate_all_compat_flags_variant:
+        _wd_test(
+            src = src,
+            name = name + "@all-compat-flags",
+            data = data,
+            args = base_args + newest_compat_args,
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
+
+    # All autogates variant: all autogates + oldest compat date
     if generate_all_autogates_variant:
         _wd_test(
             src = src,
             name = name + "@all-autogates",
             data = data,
-            args = args + ["--all-autogates"],
+            args = base_args + default_compat_args + ["--all-autogates"],
             python_snapshot_test = python_snapshot_test,
             **kwargs
         )

@@ -942,6 +942,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     },
             "Enable all autogates. This is useful for testing code paths that are guarded by "
             "autogates.")
+        .addOptionWithArg({"compat-date"}, CLI_METHOD(setTestCompatDate), "<date>",
+            "Set the compatibility date for all workers. When specified, workers must NOT "
+            "specify compatibilityDate in the config. Use '0000-00-00' for oldest behavior "
+            "or '9999-12-31' for newest behavior.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
         .callAfterParsing(CLI_METHOD(test))
         .build();
@@ -1283,6 +1287,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     }
   }
 
+  void setTestCompatDate(kj::StringPtr date) {
+    testCompatDate = kj::str(date);
+  }
+
   void compile() {
     if (hadErrors) {
       // Errors were already reported with context.error(), so context.exit() will exit with a
@@ -1464,6 +1472,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       util::Autogate::initAllAutogates();
     }
 
+    KJ_IF_SOME(compatDate, testCompatDate) {
+      server->setTestCompatibilityDateOverride(kj::str(compatDate));
+    }
+
     // Enable loopback sockets in tests only.
     network.enableLoopback();
 
@@ -1532,6 +1544,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool noVerbose = false;
   bool predictable = false;
   bool allAutogates = false;
+  kj::Maybe<kj::String> testCompatDate;
   kj::Maybe<FileWatcher> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
