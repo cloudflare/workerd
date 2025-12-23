@@ -1689,6 +1689,14 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
         "Failed to initialize node:buffer module");
   }
 
+  // When enable_nodejs_global_timers is enabled, load the module that makes all 6 timer
+  // functions (setTimeout, setInterval, clearTimeout, clearInterval, setImmediate,
+  // clearImmediate) available on globalThis as Node.js-compatible versions from node:timers.
+  if (featureFlags.getEnableNodejsGlobalTimers()) {
+    JSG_REQUIRE_NONNULL(js.resolveInternalModule("node-internal:internal_timers_global_override"),
+        Error, "Failed to initialize node-internal:internal_timers_global_override module");
+  }
+
   return js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES);
 }
 }  // anonymous namespace

@@ -366,6 +366,12 @@ wd_test(
 )
 
 wd_test(
+    src = "timers-global-override-test.wd-test",
+    args = ["--experimental"],
+    data = ["timers-global-override-test.js"],
+)
+
+wd_test(
     src = "async_hooks-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["async_hooks-nodejs-test.js"],
