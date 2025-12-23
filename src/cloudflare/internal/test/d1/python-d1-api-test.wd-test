@@ -8,8 +8,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker.py", pythonModule = embed "d1-api-test.py")
         ],
-        compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat", %PYTHON_FEATURE_FLAGS],
+        compatibilityFlags = ["nodejs_compat", %PYTHON_FEATURE_FLAGS, "disable_python_no_global_handlers"],
         bindings = [
         (
           name = "d1",
@@ -26,7 +25,6 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "d1-mock",
       worker = (
-        compatibilityDate = "2023-01-15",
         compatibilityFlags = ["experimental", "nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "d1-mock.js")

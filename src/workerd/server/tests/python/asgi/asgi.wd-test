@@ -10,8 +10,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           ( name = "SELF", service = "python-asgi" ),
         ],
-        compatibilityDate = "2025-08-15",
-        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "rpc", "python_no_global_handlers"],
       )
     )
   ],

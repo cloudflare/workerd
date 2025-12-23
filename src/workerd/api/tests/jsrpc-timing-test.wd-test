@@ -24,8 +24,7 @@ const mainWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "jsrpc-timing-test.js")
   ],
-  compatibilityDate = "2024-01-01",
-  compatibilityFlags = ["nodejs_compat", "experimental", "precise_timers"],
+  compatibilityFlags = ["nodejs_compat", "experimental", "precise_timers", "rpc", "streams_enable_constructors"],
   bindings = [
     (name = "StreamingService", service = (name = "jsrpc-timing-test", entrypoint = "StreamingService")),
   ],
@@ -36,6 +35,5 @@ const tailWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "jsrpc-timing-test-tail.js")
   ],
-  compatibilityDate = "2024-01-01",
   compatibilityFlags = ["experimental", "nodejs_compat", "precise_timers"],
 );

@@ -7,8 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "abortable-fetch-test.js")
         ],
-        compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "url_original", "fetch_legacy_url"],
         bindings = [
           (name = "subrequest", service = "abortable-fetch-test")
         ]

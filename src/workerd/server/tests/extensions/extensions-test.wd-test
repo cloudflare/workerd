@@ -8,7 +8,6 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "extensions-test.js")
         ],
-        compatibilityDate = "2023-01-15",
         compatibilityFlags = ["nodejs_compat"],
         bindings = [
           (

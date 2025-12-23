@@ -8,8 +8,7 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
-  compatibilityDate = "2022-09-16",
-  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc", "fetcher_has_get_put_delete"],
 
   modules = [
     (name = "worker", esModule = embed "js-rpc-flag.js"),

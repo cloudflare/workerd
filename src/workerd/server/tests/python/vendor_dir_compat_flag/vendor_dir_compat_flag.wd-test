@@ -9,8 +9,7 @@ const unitTests :Workerd.Config = (
           (name = "vendor/a.py", pythonModule = embed "vendor/a.py"),
           (name = "numpy", pythonRequirement = "")
         ],
-        compatibilityDate = "2024-01-15",
-        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workers_force_new_vendor_path"],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workers_force_new_vendor_path", "disable_python_no_global_handlers"],
       )
     ),
   ],
