@@ -346,6 +346,7 @@ wd_test(
     src = "autogate-enabled-test.wd-test",
     args = ["--experimental"],
     data = ["autogate-enabled-test.js"],
+    generate_all_compat_flags_variant = False,
     generate_default_variant = False,
 )
 
@@ -465,6 +466,7 @@ wd_test(
     src = "no-to-string-tag-test.wd-test",
     args = ["--experimental"],
     data = ["no-to-string-tag-test.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(

@@ -7,8 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker.py", pythonModule = embed "to-markdown-api-test.py")
         ],
-        compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat", %PYTHON_FEATURE_FLAGS],
+        compatibilityFlags = ["nodejs_compat", "disable_python_no_global_handlers", %PYTHON_FEATURE_FLAGS],
         bindings = [
         (
           name = "ai",
@@ -25,7 +24,6 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "to-markdown-mock",
       worker = (
-        compatibilityDate = "2023-01-15",
         compatibilityFlags = ["experimental", "nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "to-markdown-mock.js")

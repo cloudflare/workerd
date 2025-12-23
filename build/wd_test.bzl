@@ -28,8 +28,8 @@ def wd_test(
         Does not affect the @all-compat-flags variant which always uses 2999-12-31.
 
     The following test variants are generated based on the flags:
-     - name@ (if generate_default_variant): oldest compat date (0000-00-00)
-     - name@all-compat-flags (if generate_all_compat_flags_variant): newest compat date (9999-12-31)
+     - name@ (if generate_default_variant): oldest compat date (2000-01-01)
+     - name@all-compat-flags (if generate_all_compat_flags_variant): newest compat date (2999-12-31)
      - name@all-autogates (if generate_all_autogates_variant): all autogates + oldest compat date
     """
 

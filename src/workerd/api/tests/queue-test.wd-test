@@ -11,8 +11,7 @@ const unitTests :Workerd.Config = (
           ( name = "QUEUE", queue = "queue-test" ),
           ( name = "SERVICE", service = "queue-test" ),
         ],
-        compatibilityDate = "2023-07-24",
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "queues_json_messages", "rpc", "capture_async_api_throws", "disable_fast_jsg_struct"],
       )
     ),
   ],

@@ -14,7 +14,6 @@ const unitTests :Workerd.Config = (
           (name = "invalid2", commonJsModule = "require('invalid3');"),
           (name = "invalid3", esModule = "await new Promise(() => {});"),
         ],
-        compatibilityDate = "2024-08-01",
         compatibilityFlags = ["disable_top_level_await_in_require", "nodejs_compat_v2"]
       )
     ),

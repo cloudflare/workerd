@@ -137,7 +137,8 @@ KJ_TEST("compatibility flag parsing") {
   expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
       "(formDataParserSupportsFiles = true)",
       {"The compatibility flag formdata_parser_supports_files became the default as of "
-       "2021-11-03 so does not need to be specified anymore."});
+       "2021-11-03 so does not need to be specified anymore."},
+      CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE);
   expectCompileCompatibilityFlags(
       "2021-05-17", {"unknown_feature"_kj}, "()", {"No such compatibility flag: unknown_feature"});
 

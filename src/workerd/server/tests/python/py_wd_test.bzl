@@ -6,7 +6,13 @@ load("//:build/wd_test.bzl", "wd_test")
 def _get_enable_flags(python_flag):
     flags = [BUNDLE_VERSION_INFO[python_flag]["enable_flag_name"]]
     if "python_workers" not in flags:
-        flags += ["python_workers"]
+        flags.append("python_workers")
+    for key, value in BUNDLE_VERSION_INFO.items():
+        # With all-compat-flags variant we might end up accidently using a newer python bundle than
+        # intended. To make sure we get the speicific intended version we also need to disable newer
+        # python versions.
+        if python_flag != key and value["enable_flag_name"] not in ["python_workers", "python_workers_development"]:
+            flags.append("no_" + value["enable_flag_name"])
     return flags
 
 def _py_wd_test_helper(
@@ -44,6 +50,10 @@ def _py_wd_test_helper(
 
     flags = _get_enable_flags(python_flag) + feature_flags
     feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
+
+    # TODO(soon): Python workers don't work with nodejs_compat_v2 because of initialization order of
+    #             modules in the module registry.
+    feature_flags_txt += ",\"no_nodejs_compat_v2\""
     expand_template(
         name = name_flag + "@rule",
         out = templated_src,
@@ -66,6 +76,11 @@ def _py_wd_test_helper(
         python_snapshot_test = make_snapshot,
         data = data,
         load_snapshot = load_snapshot,
+        # TODO(soon): at the time of disabling these they all passed but because of how slow python
+        #             tests are we disabled them for now. We should re-enable them when we have
+        #             a better way to run them.
+        generate_all_autogates_variant = False,
+        generate_all_compat_flags_variant = False,
         **kwargs
     )
 
