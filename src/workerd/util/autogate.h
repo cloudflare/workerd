@@ -26,6 +26,8 @@ enum class AutogateKey {
   FETCH_REQUEST_MEMORY_ADJUSTMENT,
   // Enable Rust-backed Node.js DNS implementation
   RUST_BACKED_NODE_DNS,
+  // Switch the CompressionStream to use the new state machine-based impl
+  COMPRESSION_STREAM_USE_STATE_MACHINE,
   NumOfKeys  // Reserved for iteration.
 };
 
