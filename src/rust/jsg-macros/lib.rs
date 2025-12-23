@@ -130,48 +130,16 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Creates a `{method_name}_callback` extern "C" function that bridges JavaScript and Rust.
 /// If no name is provided, automatically converts `snake_case` to `camelCase`.
 ///
-/// # Supported Parameter Types
+/// Parameters and return values are handled via the [`jsg::Wrappable`] trait.
+/// See `jsg/wrappable.rs` for supported types.
 ///
-/// | Type       | `T`           | `NonCoercible<T>` |
-/// |------------|---------------|-------------------|
-/// | `&str`     | ✅ Supported  | ❌                |
-/// | `T: Type`  | ❌            | ✅ Supported      |
+/// Use `NonCoercible<T>` to reject values that would require JavaScript coercion.
+/// Use `&str` for string parameters (internally unwrapped as `String` and borrowed).
 ///
-/// Any type implementing [`jsg::Type`] can be used with `NonCoercible<T>`.
-/// Built-in types include `String`, `bool`, and `f64`.
-///
-/// # `NonCoercible<T>` Parameters
-///
-/// Use `NonCoercible<T>` when you want to accept a value only if it's already the expected
-/// type, without JavaScript's automatic type coercion:
+/// # Example
 ///
 /// ```ignore
-/// #[jsg_method]
-/// pub fn strict_string(&self, param: NonCoercible<String>) -> Result<String, Error> {
-///     // Only accepts actual strings - passing null/undefined/numbers will throw
-///     // Access via Deref: *param, or via AsRef: param.as_ref()
-///     Ok(param.as_ref().clone())
-/// }
-///
-/// #[jsg_method]
-/// pub fn strict_bool(&self, param: NonCoercible<bool>) -> Result<bool, Error> {
-///     // Only accepts actual booleans
-///     Ok(*param)
-/// }
-/// ```
-///
-/// # Return Types
-///
-/// Return values are handled via the [`jsg::Wrappable`] trait. Any type implementing
-/// `Wrappable` can be returned from a method. Built-in implementations include:
-///
-/// - `()` - returns `undefined` in JavaScript
-/// - `Result<T, E>` where `T: Wrappable` - unwraps the value or throws a JavaScript exception
-/// - `NonCoercible<T>` - unwraps and returns the inner value
-/// - `String`, `bool`, `f64` - primitive types
-///
-/// ```ignore
-/// #[jsg_method]
+/// #[jsg_method(name = "parseRecord")]
 /// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
 ///     // Errors are thrown as JavaScript exceptions
 /// }
@@ -179,27 +147,6 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// #[jsg_method]
 /// pub fn get_name(&self) -> String {
 ///     self.name.clone()
-/// }
-///
-/// #[jsg_method]
-/// pub fn reset(&self) {
-///     // Returns undefined
-/// }
-/// ```
-///
-/// # Example
-///
-/// ```ignore
-/// // With explicit name
-/// #[jsg_method(name = "parseRecord")]
-/// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
-///     // implementation
-/// }
-///
-/// // Without name - automatically becomes "parseRecord"
-/// #[jsg_method]
-/// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
-///     // implementation
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -296,7 +243,8 @@ fn generate_unwrap_code(
     ty: &Type,
     index: usize,
 ) -> quote::__private::TokenStream {
-    // Check for NonCoercible<T> types
+    // Check for NonCoercible<T> types - these use their inherent unwrap method
+    // which validates the type and returns Option<Self>
     if is_non_coercible(ty) {
         return quote! {
             let Some(#arg_name) = (unsafe {
@@ -307,16 +255,16 @@ fn generate_unwrap_code(
         };
     }
 
+    // For &str references, unwrap as String and borrow
     if is_str_reference(ty) {
-        quote! {
-            let #arg_name = unsafe {
-                jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), args.get(#index).into_ffi())
-            };
-        }
-    } else {
-        quote! {
-            compile_error!("Unsupported parameter type for jsg::method. Currently only &str and NonCoercible<T> are supported.");
-        }
+        return quote! {
+            let #arg_name = <String as jsg::Wrappable>::unwrap(lock.isolate(), args.get(#index));
+        };
+    }
+
+    // For all other types, use Wrappable::unwrap
+    quote! {
+        let #arg_name = <#ty as jsg::Wrappable>::unwrap(lock.isolate(), args.get(#index));
     }
 }
 

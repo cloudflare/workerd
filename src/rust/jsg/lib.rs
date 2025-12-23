@@ -16,8 +16,6 @@ mod wrappable;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::Wrappable;
 
-use crate::v8::ToLocalValue;
-
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 mod ffi {
     extern "Rust" {
@@ -613,73 +611,4 @@ impl Drop for Realm {
 #[expect(clippy::unnecessary_box_returns)]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
     unsafe { Box::new(Realm::from_isolate(v8::IsolatePtr::from_ffi(isolate))) }
-}
-
-impl Type for String {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "string"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_string()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_string(isolate.as_ffi(), value.into_ffi()) }
-    }
-}
-
-impl Type for bool {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "boolean"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_boolean()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_boolean(isolate.as_ffi(), value.into_ffi()) }
-    }
-}
-
-impl Type for f64 {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "number"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_number()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_number(isolate.as_ffi(), value.into_ffi()) }
-    }
 }
