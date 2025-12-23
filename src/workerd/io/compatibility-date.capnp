@@ -1306,4 +1306,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Runtime built-in RPC to match Cap'n Web behavior.
   #
   # In particular, this fixes: https://github.com/cloudflare/capnweb/issues/110
+
+  enableNodejsGlobalTimers @153 :Bool
+    $compatEnableFlag("enable_nodejs_global_timers")
+    $compatDisableFlag("no_nodejs_global_timers")
+    $experimental;
+  # When enabled, all 6 timer functions (setTimeout, setInterval, clearTimeout,
+  # clearInterval, setImmediate, clearImmediate) are available on globalThis as
+  # Node.js-compatible versions from node:timers. setTimeout and setInterval return
+  # Timeout objects with methods like refresh(), ref(), unref(), and hasRef().
+  # This flag requires nodejs_compat or nodejs_compat_v2 to be enabled.
 }
