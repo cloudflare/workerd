@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "compat-flag-disabled-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "compat-flag-disabled-test.js")
+        ],
+        # compatibilityDate is set via --compat-date flag, do not specify here
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
