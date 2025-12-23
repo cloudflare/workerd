@@ -12,7 +12,6 @@ const config :Workerd.Config = (
         modules = [
           (name = "worker.js", esModule = embed "http-socket-test.js")
         ],
-        compatibilityDate = "2024-04-22",
         compatibilityFlags = ["nodejs_compat", "experimental"],
         bindings = [
           (name = "HTTP_SOCKET_SERVER_PORT", fromEnvironment = "HTTP_SOCKET_SERVER_PORT"),

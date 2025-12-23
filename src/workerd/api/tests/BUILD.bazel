@@ -31,6 +31,7 @@ wd_test(
         "tail-worker-test-jsrpc.js",
         "websocket-hibernation.js",
     ],
+    generate_all_compat_flags_variant = False,
 )
 
 # Test to validate timing semantics for JSRPC streaming responses.
@@ -267,12 +268,14 @@ wd_test(
     src = "js-rpc-flag.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-flag.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
     src = "js-rpc-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
@@ -346,6 +349,7 @@ wd_test(
     src = "autogate-enabled-test.wd-test",
     args = ["--experimental"],
     data = ["autogate-enabled-test.js"],
+    generate_all_compat_flags_variant = False,
     generate_default_variant = False,
 )
 
@@ -432,6 +436,7 @@ wd_test(
         "--no-verbose",
     ],
     data = ["js-rpc-test.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
@@ -465,6 +470,7 @@ wd_test(
     src = "no-to-string-tag-test.wd-test",
     args = ["--experimental"],
     data = ["no-to-string-tag-test.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(

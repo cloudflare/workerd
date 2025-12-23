@@ -7,7 +7,6 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "compat-flag-enabled-test.js")
         ],
-        # compatibilityDate is set via --compat-date flag, do not specify here
         compatibilityFlags = ["nodejs_compat"],
       )
     ),
