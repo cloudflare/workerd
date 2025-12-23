@@ -831,7 +831,8 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 }
 
 kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::
-    armAlarmHandler(kj::Date scheduledTime, bool noCache, kj::StringPtr actorId) {
+    armAlarmHandler(
+        kj::Date scheduledTime, kj::Date currentTime, bool noCache, kj::StringPtr actorId) {
   KJ_ASSERT(!inAlarmHandler);
 
   if (haveDeferredDelete) {
@@ -846,6 +847,19 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
       // If there's a clean db time that differs from the requested handler's scheduled time, this
       // run should be canceled.
       if (willFireEarlier(scheduledTime, localAlarmState)) {
+        // If the local alarm time is already in the past, just run the handler now. This avoids
+        // blocking alarm execution on storage sync when storage is overloaded. The alarm will
+        // either delete itself on success or reschedule on failure.
+        if (localAlarmState != kj::none && willFireEarlier(localAlarmState, currentTime)) {
+          LOG_WARNING_PERIODICALLY(
+              "NOSENTRY SQLite alarm overdue, running despite AlarmManager mismatch", scheduledTime,
+              KJ_ASSERT_NONNULL(localAlarmState), currentTime, actorId);
+          haveDeferredDelete = true;
+          inAlarmHandler = true;
+          static const DeferredAlarmDeleter disposer;
+          return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
+        }
+
         // If the handler's scheduled time is earlier than the clean scheduled time, we may be
         // recovering from a failed db commit or scheduling request, so we need to request that
         // the alarm be rescheduled for the current db time, and tell the caller to wait for
@@ -876,10 +890,23 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         // which suggests that either the alarm manager is working with stale data or that local
         // alarm time has somehow gotten out of sync with the scheduled alarm time.
 
-        // Only log if the alarm manager is significantly late (>10 seconds behind SQLite)
         // We know localAlarmState has a value here because we're in the branch where it's earlier
         // than scheduledTime (not equal, and not later).
         auto localTime = KJ_ASSERT_NONNULL(localAlarmState);
+
+        // If the local alarm time is already in the past, just run the handler now. This avoids
+        // blocking alarm execution on storage sync when storage is overloaded.
+        if (localTime <= currentTime) {
+          LOG_WARNING_PERIODICALLY(
+              "NOSENTRY SQLite alarm overdue, running despite stale AlarmManager time",
+              scheduledTime, localTime, currentTime, actorId);
+          haveDeferredDelete = true;
+          inAlarmHandler = true;
+          static const DeferredAlarmDeleter disposer;
+          return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
+        }
+
+        // Only log if the alarm manager is significantly late (>10 seconds behind SQLite)
         if (scheduledTime - localTime > 10 * kj::SECONDS) {
           LOG_WARNING_PERIODICALLY(
               "NOSENTRY SQLite alarm handler canceled.", scheduledTime, actorId, localTime);

@@ -164,7 +164,10 @@ kj::Maybe<kj::Promise<void>> ActorCache::evictStale(kj::Date now) {
 }
 
 kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCache::armAlarmHandler(
-    kj::Date scheduledTime, bool noCache, kj::StringPtr actorId) {
+    kj::Date scheduledTime,
+    kj::Date /*currentTime -- unused*/,
+    bool noCache,
+    kj::StringPtr actorId) {
   noCache = noCache || lru.options.noCache;
 
   KJ_ASSERT(!currentAlarmTime.is<DeferredAlarmDelete>());

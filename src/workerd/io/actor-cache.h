@@ -234,8 +234,13 @@ class ActorCacheInterface: public ActorCacheOps {
   };
 
   // Call when entering the alarm handler.
-  virtual kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") = 0;
+  //
+  // `currentTime` is used to determine if an overdue alarm should run immediately even when
+  // the local alarm state differs from the scheduled time (to avoid blocking on storage sync).
+  virtual kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
+      kj::Date currentTime,
+      bool noCache = false,
+      kj::StringPtr actorId = "") = 0;
 
   virtual void cancelDeferredAlarmDeletion() = 0;
 
@@ -346,8 +351,10 @@ class ActorCache final: public ActorCacheInterface {
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
 
-  kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
+  kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
+      kj::Date currentTime,
+      bool noCache = false,
+      kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
   // See ActorCacheInterface
