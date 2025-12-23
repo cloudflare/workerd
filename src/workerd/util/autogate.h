@@ -59,12 +59,16 @@ class Autogate {
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
   static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
 
+  // Initializes all autogates to true. Used for testing with the --all-autogates flag.
+  static void initAllAutogates();
+
   // Destroys an initialized global Autogate instance. Used only for testing.
   static void deinitAutogate();
 
  private:
-  bool gates[static_cast<unsigned long>(AutogateKey::NumOfKeys)];
+  bool gates[static_cast<unsigned long>(AutogateKey::NumOfKeys)] = {};
 
+  Autogate() = default;
   Autogate(capnp::List<capnp::Text>::Reader autogates);
 };
 

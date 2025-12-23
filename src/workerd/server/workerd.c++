@@ -935,6 +935,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     },
             "Enable predictable mode. This makes workerd behave more deterministically by using "
             "pre-set values instead of random data or timestamps to facilitate testing.")
+        .addOption({"all-autogates"},
+            [this]() {
+      allAutogates = true;
+      return true;
+    },
+            "Enable all autogates. This is useful for testing code paths that are guarded by "
+            "autogates.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
         .callAfterParsing(CLI_METHOD(test))
         .build();
@@ -1453,6 +1460,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     if (predictable) {
       setPredictableModeForTest();
     }
+    if (allAutogates) {
+      util::Autogate::initAllAutogates();
+    }
 
     // Enable loopback sockets in tests only.
     network.enableLoopback();
@@ -1521,6 +1531,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool configOnly = false;
   bool noVerbose = false;
   bool predictable = false;
+  bool allAutogates = false;
   kj::Maybe<FileWatcher> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();

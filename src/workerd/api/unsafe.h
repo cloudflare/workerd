@@ -100,8 +100,13 @@ class UnsafeModule: public jsg::Object {
   UnsafeModule(jsg::Lock&, const jsg::Url&) {}
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
 
+  // Returns true if the TEST_WORKERD autogate is enabled.
+  // This is used to verify that the all-autogates test variant is working correctly.
+  bool isTestAutogateEnabled();
+
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
+    JSG_METHOD(isTestAutogateEnabled);
   }
 };
 
