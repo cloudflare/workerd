@@ -1499,7 +1499,7 @@ template <typename Self>
 void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   KJ_ASSERT(isWritable());
   KJ_ASSERT(!isCloseQueuedOrInFlight());
-  bool bp = getDesiredSize() < 0;
+  bool bp = getDesiredSize() <= 0;
 
   if (bp != flags.backpressure) {
     flags.backpressure = bp;
