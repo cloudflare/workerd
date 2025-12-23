@@ -230,25 +230,6 @@ impl<T: Type> NonCoercible<T> {
     pub fn new(value: T) -> Self {
         Self { value }
     }
-
-    /// Unwraps a V8 value into `NonCoercible<T>`, throwing a JavaScript error if the value
-    /// is not exactly the expected type.
-    ///
-    /// Returns `Some(NonCoercible<T>)` if the value is the exact type, or `None` if an error
-    /// was thrown (in which case the caller should return early).
-    ///
-    /// # Safety
-    /// The caller must ensure `lock` is valid and `value` is a valid V8 local handle.
-    pub unsafe fn unwrap(lock: &mut Lock, value: v8::Local<v8::Value>) -> Option<Self> {
-        if !T::is_exact(&value) {
-            let type_name = T::class_name();
-            let error_msg = format!("Expected a {} value but got {}", type_name, value.type_of());
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &error_msg) };
-            return None;
-        }
-        let inner = T::unwrap(lock.isolate(), value);
-        Some(Self::new(inner))
-    }
 }
 
 impl<T: Type> From<T> for NonCoercible<T> {

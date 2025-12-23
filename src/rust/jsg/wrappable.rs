@@ -98,14 +98,20 @@ impl Type for f64 {
 /// Trait for converting between Rust and JavaScript values.
 ///
 /// Provides bidirectional conversion: `wrap` converts Rust to JavaScript,
-/// `unwrap` converts JavaScript to Rust. The `wrap_return` method is a
-/// convenience for setting function return values.
+/// `unwrap` converts JavaScript to Rust. The `try_unwrap` method is used
+/// by macros to unwrap parameters with proper error handling.
 pub trait Wrappable: Sized {
     /// Converts this Rust value into a JavaScript value.
     fn wrap(self, lock: &mut Lock) -> v8::Local<'_, v8::Value>;
 
     /// Converts a JavaScript value into this Rust type.
     fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self;
+
+    /// Attempts to unwrap a JavaScript value, returning None and throwing a JS error on failure.
+    /// Most types simply delegate to `unwrap`, but `NonCoercible<T>` validates the type first.
+    fn try_unwrap(lock: &mut Lock, value: v8::Local<v8::Value>) -> Option<Self> {
+        Some(Self::unwrap(lock.isolate(), value))
+    }
 
     /// Wraps this value and sets it as the function return value.
     fn wrap_return(self, lock: &mut Lock, args: &mut v8::FunctionCallbackInfo) {
@@ -169,6 +175,19 @@ impl<T: Type<This = T>> Wrappable for NonCoercible<T> {
 
     fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
         Self::new(T::unwrap(isolate, value))
+    }
+
+    fn try_unwrap(lock: &mut Lock, value: v8::Local<v8::Value>) -> Option<Self> {
+        if !T::is_exact(&value) {
+            let error_msg = format!(
+                "Expected a {} value but got {}",
+                T::class_name(),
+                value.type_of()
+            );
+            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &error_msg) };
+            return None;
+        }
+        Some(Self::new(T::unwrap(lock.isolate(), value)))
     }
 }
 
