@@ -739,7 +739,6 @@ export default {
       'Aborting a WritableStream puts it in an errored state with the error passed to abort()',
       'if a writer is created for a stream with a pending abort, its ready should be rejected with the abort error',
       'sink abort() should not be called if stream was erroring due to bad strategy before abort() was called',
-      "WritableStream if sink's abort throws, for an abort performed during a write, the promise returned by ws.abort() rejects",
       'writer.abort() while there is an in-flight write, and then finish the write with rejection',
       'writer.abort(), controller.error() while there is an in-flight write, and then finish the write',
       'writer.abort(), controller.error() while there is an in-flight close, and then finish the close',
@@ -774,7 +773,6 @@ export default {
     expectedFailures: [
       'when close is called on a WritableStream in waiting state, ready promise should be fulfilled',
       'releaseLock() should not change the result of sync close()',
-      'close() on an errored stream should reject',
     ],
   },
   'writable-streams/constructor.any.js': {
@@ -815,13 +813,7 @@ export default {
       'ready promise should fire before closed on releaseLock',
     ],
   },
-  'writable-streams/properties.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'sink method write should be called with the right number of arguments',
-      "sink method write should be called even when it's located on the prototype chain",
-    ],
-  },
+  'writable-streams/properties.any.js': {},
   'writable-streams/reentrant-strategy.any.js': {
     comment: 'A hanging Promise was canceled.',
     disabledTests: true,
@@ -830,15 +822,12 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       "underlying sink's write or close should not be called if start throws",
-      'when start() rejects, writer promises should reject in standard order',
     ],
   },
   'writable-streams/write.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
-      'write() on a stream with HWM 0 should not cause the ready Promise to resolve',
       'WritableStream should transition to waiting until write is acknowledged',
-      "when sink's write throws an error, the stream should become errored and the promise should reject",
     ],
   },
 } satisfies TestRunnerConfig;

@@ -1467,7 +1467,7 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
         dealWithRejection(js, kj::mv(self), handle);
       });
 
-  flags.backpressure = getDesiredSize() < 0;
+  flags.backpressure = getDesiredSize() <= 0;
 
   maybeRunAlgorithm(js, startAlgorithm, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
@@ -3341,6 +3341,10 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
           js, js.v8TypeError("This WritableStream has been closed."_kj), markAsHandled);
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      if (FeatureFlags::get(js).getPedanticWpt()) {
+        return rejectedMaybeHandledPromise<void>(
+            js, js.v8TypeError("This WritableStream has been errored."_kj), markAsHandled);
+      }
       return rejectedMaybeHandledPromise<void>(js, errored.getHandle(js), markAsHandled);
     }
     KJ_CASE_ONEOF(controller, Controller) {

@@ -177,13 +177,14 @@ void WritableStreamDefaultWriter::replaceReadyPromise(
   this->readyPromise = KJ_ASSERT_NONNULL(this->readyPromisePending).whenResolved(js);
 }
 
-jsg::Promise<void> WritableStreamDefaultWriter::write(jsg::Lock& js, v8::Local<v8::Value> chunk) {
+jsg::Promise<void> WritableStreamDefaultWriter::write(
+    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this writer was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
-      return stream->getController().write(js, chunk);
+      return stream->getController().write(js, kj::mv(chunk));
     }
     KJ_CASE_ONEOF(r, Released) {
       return js.rejectedPromise<void>(

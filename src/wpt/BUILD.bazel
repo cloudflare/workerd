@@ -111,6 +111,7 @@ wpt_test(
 wpt_test(
     name = "streams",
     size = "large",
+    compat_flags = ["pedantic_wpt"],
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )
