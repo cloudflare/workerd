@@ -58,6 +58,9 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             fn wrap<'a, 'b>(this: Self::This, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where 'b: 'a,
             {
+                // TODO(soon): Use a precached ObjectTemplate instance to create the object,
+                // similar to how C++ JSG optimizes object creation. This would avoid recreating
+                // the object shape on every wrap() call and improve performance.
                 unsafe {
                     let mut obj = lock.new_object();
                     #(#field_assignments)*
