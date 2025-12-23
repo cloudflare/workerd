@@ -1320,7 +1320,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   useNullPrototypeForOpaqueWrappers @154 :Bool
     $compatEnableFlag("use_null_prototype_for_opaque_wrappers")
     $compatDisableFlag("use_object_prototype_for_opaque_wrappers")
-    $compatEnableDate("2026-01-24");
+    $compatEnableDate("2026-01-27");
   # When enabled, internal opaque wrapper objects (used to pass C++ values through V8 promises)
   # have a null prototype instead of inheriting from Object.prototype. This prevents
   # Object.prototype.then patches from intercepting internal promise operations, which is
