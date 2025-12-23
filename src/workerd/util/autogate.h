@@ -28,6 +28,8 @@ enum class AutogateKey {
   RUST_BACKED_NODE_DNS,
   // Switch the CompressionStream to use the new state machine-based impl
   COMPRESSION_STREAM_USE_STATE_MACHINE,
+  // Switch the IdentityTransformStream to use the new state machine-based impl
+  IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE,
   NumOfKeys  // Reserved for iteration.
 };
 
