@@ -5,7 +5,9 @@
 #pragma once
 
 #include "common.h"
+
 #include <kj/function.h>
+#include <workerd/util/state-machine.h>
 
 namespace workerd::api {
 
@@ -40,7 +42,9 @@ public:
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  struct Initial {};
+  struct Initial {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "initial"_kj;
+  };
   // While a Reader is attached to a ReadableStream, it holds a strong reference to the
   // ReadableStream to prevent it from being GC'ed so long as the Reader is available.
   // Once the reader is closed, released, or GC'ed the reference to the ReadableStream
@@ -48,13 +52,42 @@ private:
   // it being held anywhere. If the reader is still attached to the ReadableStream when
   // it is destroyed, the ReadableStream's reference to the reader is cleared but the
   // ReadableStream remains in the "reader locked" state, per the spec.
-  using Attached = jsg::Ref<ReadableStream>;
-  struct Released {};
+  struct Attached {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "attached"_kj;
+    jsg::Ref<ReadableStream> stream;
+  };
+  // Released: The user explicitly called releaseLock() to detach the reader from the stream.
+  // The stream remains usable and can be locked by a new reader.
+  struct Released {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "released"_kj;
+  };
+  // Closed: The underlying stream ended (closed or errored) while the reader was attached.
+  // The stream is no longer usable.
+  struct Closed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+
+  // State machine for ReaderImpl:
+  //   Initial -> Attached (attach() called)
+  //   Attached -> Closed (detach() called when stream closes)
+  //   Attached -> Released (releaseLock() called)
+  // Closed and Released are terminal states.
+  // Initial is not terminal but most methods assert if called in this state.
+  using ReaderState = StateMachine<TerminalStates<Closed, Released>,
+      ActiveState<Attached>,
+      Initial,
+      Attached,
+      Closed,
+      Released>;
 
   kj::Maybe<IoContext&> ioContext;
   ReadableStreamController::Reader& reader;
 
-  kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
+  ReaderState state;
+
+  inline void assertAttachedOrTerminal() const {
+    KJ_ASSERT(!state.is<Initial>(), "this reader was never attached");
+  }
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 
   friend class ReadableStreamDefaultReader;

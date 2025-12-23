@@ -10,6 +10,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/observer.h>
 #include <workerd/util/ring-buffer.h>
+#include <workerd/util/state-machine.h>
 
 namespace workerd::api {
 
@@ -38,10 +39,12 @@ class ReadableStreamInternalController: public ReadableStreamController {
  public:
   using Readable = IoOwn<ReadableStreamSource>;
 
-  explicit ReadableStreamInternalController(StreamStates::Closed closed): state(closed) {}
+  explicit ReadableStreamInternalController(StreamStates::Closed closed)
+      : state(State::create<StreamStates::Closed>()) {}
   explicit ReadableStreamInternalController(StreamStates::Errored errored)
-      : state(kj::mv(errored)) {}
-  explicit ReadableStreamInternalController(Readable readable): state(kj::mv(readable)) {}
+      : state(State::create<StreamStates::Errored>(kj::mv(errored))) {}
+  explicit ReadableStreamInternalController(Readable readable)
+      : state(State::create<Readable>(kj::mv(readable))) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamInternalController);
 
@@ -122,6 +125,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   class PipeLocked: public PipeController {
    public:
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
     PipeLocked(ReadableStreamInternalController& inner): inner(inner) {}
 
     bool isClosed() override;
@@ -145,8 +149,28 @@ class ReadableStreamInternalController: public ReadableStreamController {
   };
 
   kj::Maybe<ReadableStream&> owner;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
-  kj::OneOf<Unlocked, Locked, PipeLocked, ReaderLocked> readState = Unlocked();
+
+  // State machine for ReadableStreamInternalController:
+  // Closed is terminal, Errored is implicitly terminal via ErrorState.
+  // Readable is the active state (stream has data).
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<Readable>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      Readable>;
+  State state;
+
+  // Lock state machine for ReadableStreamInternalController:
+  // All states can transition to any other state (no terminal states).
+  //   Unlocked -> Locked (removeSink() or pumpTo() called)
+  //   Unlocked -> ReaderLocked (lockReader() called)
+  //   Unlocked -> PipeLocked (tryPipeLock() called)
+  //   ReaderLocked -> Unlocked (releaseReader() called)
+  //   PipeLocked -> Unlocked (release() or doClose/doError called)
+  //   Locked -> (remains until stream is done)
+  using ReadLockState = StateMachine<Unlocked, Locked, PipeLocked, ReaderLocked>;
+  ReadLockState readState = ReadLockState::create<Unlocked>();
   bool disturbed = false;
   bool readPending = false;
 
@@ -168,14 +192,16 @@ class WritableStreamInternalController: public WritableStreamController {
     void abort(kj::Exception&& ex);
   };
 
-  explicit WritableStreamInternalController(StreamStates::Closed closed): state(closed) {}
+  explicit WritableStreamInternalController(StreamStates::Closed closed)
+      : state(State::create<StreamStates::Closed>()) {}
   explicit WritableStreamInternalController(StreamStates::Errored errored)
-      : state(kj::mv(errored)) {}
+      : state(State::create<StreamStates::Errored>(kj::mv(errored))) {}
   explicit WritableStreamInternalController(kj::Own<WritableStreamSink> writable,
       kj::Maybe<kj::Own<ByteStreamObserver>> observer,
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none)
-      : state(IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable)))),
+      : state(State::create<IoOwn<Writable>>(
+            IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable))))),
         observer(kj::mv(observer)),
         maybeHighWaterMark(maybeHighWaterMark),
         maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {}
@@ -263,12 +289,33 @@ class WritableStreamInternalController: public WritableStreamController {
   jsg::Promise<void> closeImpl(jsg::Lock& js, bool markAsHandled);
 
   struct PipeLocked {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
     ReadableStream& ref;
   };
 
   kj::Maybe<WritableStream&> owner;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, IoOwn<Writable>> state;
-  kj::OneOf<Unlocked, Locked, PipeLocked, WriterLocked> writeState = Unlocked();
+
+  // State machine for WritableStreamInternalController:
+  // Closed is terminal, Errored is implicitly terminal via ErrorState.
+  // IoOwn<Writable> is the active state (stream is writable).
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<IoOwn<Writable>>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      IoOwn<Writable>>;
+  State state;
+
+  // Lock state machine for WritableStreamInternalController:
+  // All states can transition to any other state (no terminal states).
+  //   Unlocked -> Locked (removeSink() or detach() called)
+  //   Unlocked -> WriterLocked (lockWriter() called)
+  //   Unlocked -> PipeLocked (tryPipeFrom() called)
+  //   WriterLocked -> Unlocked (releaseWriter() called)
+  //   WriterLocked -> Locked (doClose/doError called - stream closed but writer still attached)
+  //   PipeLocked -> Unlocked (pipe completes)
+  using WriteLockState = StateMachine<Unlocked, Locked, PipeLocked, WriterLocked>;
+  WriteLockState writeState = WriteLockState::create<Unlocked>();
 
   kj::Maybe<kj::Own<ByteStreamObserver>> observer;
 

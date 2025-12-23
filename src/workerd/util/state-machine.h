@@ -1286,6 +1286,29 @@ class StateMachine {
     return state.template get<ActiveStateType>();
   }
 
+  // Get the active state, throwing KJ_REQUIRE if not active.
+  //
+  // WARNING: Returns an UNLOCKED reference - can dangle if the machine transitions.
+  ActiveStateType& requireActiveUnsafe(kj::StringPtr message = nullptr) KJ_LIFETIMEBOUND
+    requires(HAS_ACTIVE)
+  {
+    if (message == nullptr) {
+      message = "State machine is not in the active state"_kj;
+    }
+    KJ_REQUIRE(isActive(), message);
+    return state.template get<ActiveStateType>();
+  }
+
+  const ActiveStateType& requireActiveUnsafe(kj::StringPtr message = nullptr) const KJ_LIFETIMEBOUND
+    requires(HAS_ACTIVE)
+  {
+    if (message == nullptr) {
+      message = "State machine is not in the active state"_kj;
+    }
+    KJ_REQUIRE(isActive(), message);
+    return state.template get<ActiveStateType>();
+  }
+
   // Execute a function only if in the active state.
   // LOCKS TRANSITIONS during callback execution to prevent use-after-free.
   // Returns the function's result wrapped in Maybe, or none if not active.
@@ -1308,6 +1331,33 @@ class StateMachine {
     requires(HAS_ACTIVE)
   {
     return whenState<ActiveStateType>(kj::fwd<Func>(func));
+  }
+
+  // Execute a function if active, or return a default value.
+  // LOCKS TRANSITIONS during callback execution.
+  template <typename Func, typename Default>
+  auto whenActiveOr(
+      Func&& func, Default&& defaultValue) -> decltype(func(kj::instance<ActiveStateType&>()))
+    requires(HAS_ACTIVE)
+  {
+    if (!isActive()) {
+      return kj::fwd<Default>(defaultValue);
+    }
+    auto lock = acquireTransitionLock();
+    return func(state.template get<ActiveStateType>());
+  }
+
+  template <typename Func, typename Default>
+  auto whenActiveOr(Func&& func,
+      Default&& defaultValue) const -> decltype(func(kj::instance<const ActiveStateType&>()))
+    requires(HAS_ACTIVE)
+  {
+    if (!isActive()) {
+      return kj::fwd<Default>(defaultValue);
+    }
+    ++transitionLockCount;
+    KJ_DEFER(--transitionLockCount);
+    return func(state.template get<ActiveStateType>());
   }
 
   // Execute a function if active, or return a default value.
