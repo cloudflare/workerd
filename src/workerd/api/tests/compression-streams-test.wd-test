@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# TODO(cleanup): This is a copy of an existing test in streams-test. Once the autogate is remvoed,
+# this separate test can be deleted.
+const unitTests :Workerd.Config = (
+  autogates = ["workerd-autogate-compression-stream-use-state-machine"],
+  services = [
+    ( name = "compression-streams-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "compression-streams-test.js")
+        ],
+        compatibilityDate = "2025-12-15",
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

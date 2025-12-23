@@ -578,3 +578,11 @@ wd_test(
     args = ["--experimental"],
     data = ["headers-immutable-prototype-test.js"],
 )
+
+# TODO(cleanup): This is a copy of an existing test in streams-test. Once the autogate is remvoed,
+# this separate test can be deleted.
+wd_test(
+    src = "compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["compression-streams-test.js"],
+)
