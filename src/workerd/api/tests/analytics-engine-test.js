@@ -23,6 +23,5 @@ export default {
     });
 
     assert.equal(await isWritten(5000), true);
-    return new Response('');
   },
 };

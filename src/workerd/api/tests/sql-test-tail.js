@@ -1,14 +1,17 @@
 import * as assert from 'node:assert';
 
-let invocationPromises = [];
-let spans = new Map();
+import {
+  invocationPromises,
+  spans,
+  testTailHandler,
+} from 'test:instrumentation-tail';
 
-export default {
+export default testTailHandler;
+
+export const test = {
   async test(ctrl, env, ctx) {
     await Promise.allSettled(invocationPromises);
-    let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession'
-    );
+    let received = spans.values();
 
     const reduced = received.reduce((acc, curr) => {
       if (!acc[curr.name]) acc[curr.name] = 0;
@@ -35,56 +38,5 @@ export default {
       durable_object_storage_getAlarm: 1,
       testSessionsAPIBookmark: 20,
     });
-    return new Response('');
-  },
-
-  tailStream(event, env, ctx) {
-    let resolveFn;
-    invocationPromises.push(
-      new Promise((resolve, reject) => {
-        resolveFn = resolve;
-      })
-    );
-    const topLevelSpanId = event.event.spanId;
-
-    return (event) => {
-      try {
-        let spanKey =
-          event.invocationId + (event.event.spanId || event.spanContext.spanId);
-        switch (event.event.type) {
-          case 'spanOpen':
-            // The span ids will change between tests, but Map preserves insertion order
-            spans.set(spanKey, {
-              name: event.event.name,
-            });
-            break;
-          case 'attributes': {
-            let span = spans.get(spanKey);
-            if (event.spanContext.spanId == topLevelSpanId) {
-              // top-level JsRpc method name attribute – transform into a span with the given name
-              const rpcMethodName = event.event.info.find(
-                (item) => item['name'] === 'jsrpc.method'
-              ).value;
-              span = { name: rpcMethodName };
-            }
-            for (let { name, value } of event.event.info) {
-              span[name] = value;
-            }
-            spans.set(spanKey, span);
-            break;
-          }
-          case 'spanClose': {
-            let span = spans.get(spanKey);
-            span['closed'] = true;
-            break;
-          }
-          case 'outcome':
-            resolveFn();
-            break;
-        }
-      } catch (e) {
-        resolveFn();
-      }
-    };
   },
 };
