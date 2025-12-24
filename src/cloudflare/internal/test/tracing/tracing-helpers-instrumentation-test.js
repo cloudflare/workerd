@@ -19,7 +19,7 @@ export const validateSpans = {
     await collector.waitForCompletion();
 
     // Get all spans and prepare for validation
-    const allSpans = collector.getSpans();
+    const allSpans = collector.spans.values();
     const spansByTest = groupSpansBy(allSpans, 'test');
 
     // Define the core tests that validate withSpan behavior

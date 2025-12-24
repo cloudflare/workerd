@@ -560,9 +560,8 @@ kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "prewarm() can only be called once"));
   incomingRequest->getMetrics().setIsPrewarm();
 
-  // TODO(streaming-tail): Should prewarm be reflected in the tail stream somehow?
-
-  // Intentionally don't call incomingRequest->delivered() for prewarm requests.
+  // Intentionally don't call incomingRequest->delivered() for prewarm requests and do not create
+  // an Onset event, prewarm is not being traced.
 
   // TODO(someday): Ideally, middleware workers would forward prewarm() to the next stage. At
   //   present we don't have a good way to decide what stage that is, especially given that we'll
