@@ -6,7 +6,11 @@ const config :Workerd.Config = (
     (name = "TEST_TMPDIR", disk = (writable = true)),
     (name = "tail", worker = .tailWorker),
   ],
-
+  extensions = [ (
+    modules = [
+      ( name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
+    ]
+  ) ],
   v8Flags = [ "--expose-gc" ],
 );
 
