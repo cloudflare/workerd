@@ -13,7 +13,11 @@ export default testTailHandler;
 export const test = {
   async test() {
     await Promise.allSettled(invocationPromises);
-    let received = Array.from(spans.values());
+    // filter out non-KV spans including jsRpc calls
+    let received = Array.from(spans.values()).filter((span) =>
+      span.name.match('kv')
+    );
+
     assert.deepStrictEqual(received, expectedSpans);
   },
 };
@@ -178,5 +182,4 @@ const expectedSpans = [
     'db.operation.name': 'list',
     closed: true,
   },
-  { name: 'durable_object_subrequest', closed: true },
 ];

@@ -124,6 +124,7 @@ wd_test(
     src = "sql-test.wd-test",
     args = ["--experimental"],
     data = [
+        "instrumentation-tail-worker.js",
         "sql-test.js",
         "sql-test-tail.js",
     ],
