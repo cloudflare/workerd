@@ -2641,6 +2641,8 @@ interface Transformer<I = any, O = any> {
   expectedLength?: number;
 }
 interface StreamPipeOptions {
+  preventAbort?: boolean;
+  preventCancel?: boolean;
   /**
    * Pipes this readable stream to a given writable stream destination. The way in which the piping process behaves under various error conditions can be customized with a number of passed options. It returns a promise that fulfills when the piping process completes successfully, or rejects if any errors were encountered.
    *
@@ -2659,8 +2661,6 @@ interface StreamPipeOptions {
    * The signal option can be set to an AbortSignal to allow aborting an ongoing pipe operation via the corresponding AbortController. In this case, this source readable stream will be canceled, and destination aborted, unless the respective options preventCancel or preventAbort are set.
    */
   preventClose?: boolean;
-  preventAbort?: boolean;
-  preventCancel?: boolean;
   signal?: AbortSignal;
 }
 type ReadableStreamReadResult<R = any> =
@@ -2953,13 +2953,13 @@ declare abstract class TransformStreamDefaultController<O = any> {
   terminate(): void;
 }
 interface ReadableWritablePair<R = any, W = any> {
+  readable: ReadableStream<R>;
   /**
    * Provides a convenient, chainable way of piping this readable stream through a transform stream (or any other { writable, readable } pair). It simply pipes the stream into the writable side of the supplied pair, and returns the readable side for further use.
    *
    * Piping a stream will lock it for the duration of the pipe, preventing any other consumer from acquiring a reader.
    */
   writable: WritableStream<W>;
-  readable: ReadableStream<R>;
 }
 /**
  * The **`WritableStream`** interface of the Streams API provides a standard abstraction for writing streaming data to a destination, known as a sink.

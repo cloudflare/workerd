@@ -84,7 +84,13 @@ export default {
       'Piping from a closed readable stream to a closed writable stream',
     ],
   },
-  'piping/pipe-through.any.js': {},
+  'piping/pipe-through.any.js': {
+    comment: 'Windows has different property access order',
+    expectedFailures:
+      process.platform === 'win32'
+        ? ['pipeThrough() should throw if readable/writable getters throw']
+        : [],
+  },
   'piping/then-interception.any.js': {
     comment:
       'failed: expected Wrappable::tryUnwrapOpaque(isolate, handle) != nullptr',
@@ -93,19 +99,7 @@ export default {
       'tee should not be observable',
     ],
   },
-  'piping/throwing-options.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'pipeThrough should stop after getting preventAbort throws',
-      'pipeThrough should stop after getting preventCancel throws',
-      'pipeThrough should stop after getting preventClose throws',
-      'pipeThrough should stop after getting signal throws',
-      'pipeTo should stop after getting preventAbort throws',
-      'pipeTo should stop after getting preventCancel throws',
-      'pipeTo should stop after getting preventClose throws',
-      'pipeTo should stop after getting signal throws',
-    ],
-  },
+  'piping/throwing-options.any.js': {},
   'piping/transform-streams.any.js': {},
 
   'queuing-strategies-size-function-per-global.window.js': {
