@@ -26,9 +26,12 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
+    // If true, use real timers instead of mock timers that never advance.
+    // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
+    bool useRealTimers;
   };
 
-  TestFixture(SetupParams&& params = {});
+  TestFixture(SetupParams&& params = {.useRealTimers = false});
 
   struct V8Environment {
     v8::Isolate* isolate;

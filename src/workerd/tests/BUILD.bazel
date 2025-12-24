@@ -111,6 +111,17 @@ wd_cc_benchmark(
     ],
 )
 
+# Benchmark for comparing stream piping implementations
+wd_cc_benchmark(
+    name = "bench-stream-piping",
+    srcs = ["bench-stream-piping.c++"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],
