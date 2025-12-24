@@ -725,7 +725,6 @@ export default {
     expectedFailures: [
       'start: errors in start cause WritableStream constructor to throw',
       'write: returning a rejected promise (second write) should cause writer write() and ready to reject',
-      'write: returning a promise that becomes rejected after the writer write() should cause writer write() and ready to reject',
     ],
   },
   'writable-streams/byte-length-queuing-strategy.any.js': {
@@ -738,7 +737,6 @@ export default {
   'writable-streams/close.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
-      'when close is called on a WritableStream in waiting state, ready promise should be fulfilled',
       'releaseLock() should not change the result of sync close()',
     ],
   },
@@ -791,10 +789,5 @@ export default {
       "underlying sink's write or close should not be called if start throws",
     ],
   },
-  'writable-streams/write.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'WritableStream should transition to waiting until write is acknowledged',
-    ],
-  },
+  'writable-streams/write.any.js': {},
 } satisfies TestRunnerConfig;
