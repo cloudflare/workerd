@@ -2,6 +2,8 @@
 #include "readable-source.h"
 #include "readable.h"
 
+#include <workerd/util/state-machine.h>
+
 namespace workerd::api::streams {
 
 // We provide two utility adapters here: ReadableStreamSourceJsAdapter and
@@ -232,8 +234,25 @@ class ReadableStreamSourceJsAdapter final {
 
  private:
   struct Active;
-  struct Closed final {};
-  kj::OneOf<IoOwn<Active>, Closed, kj::Exception> state;
+  struct Closed final {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+  struct Open {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+    IoOwn<Active> active;
+  };
+
+  // State machine for tracking readable source adapter lifecycle:
+  //   Open -> Closed (normal close)
+  //   Open -> kj::Exception (error via cancel or read failure)
+  // Closed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using State = StateMachine<TerminalStates<Closed>,
+      ErrorState<kj::Exception>,
+      ActiveState<Open>,
+      Open,
+      Closed,
+      kj::Exception>;
+  State state;
 
   kj::Rc<WeakRef<ReadableStreamSourceJsAdapter>> selfRef;
 };
@@ -357,10 +376,35 @@ class ReadableSourceKjAdapter final: public ReadableSource {
  private:
   struct Active;
   KJ_DECLARE_NON_POLYMORPHIC(Active);
-  struct Closed {};
-  kj::OneOf<kj::Own<Active>, Closed, kj::Exception> state;
+  struct KjClosed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+  struct KjOpen {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+    kj::Own<Active> active;
+  };
+
+  // State machine for tracking readable source adapter lifecycle:
+  //   KjOpen -> KjClosed (normal close)
+  //   KjOpen -> kj::Exception (error via cancel or read failure)
+  // KjClosed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using KjState = StateMachine<TerminalStates<KjClosed>,
+      ErrorState<kj::Exception>,
+      ActiveState<KjOpen>,
+      KjOpen,
+      KjClosed,
+      kj::Exception>;
+  KjState state;
   const Options options;
   kj::Rc<WeakRef<ReadableSourceKjAdapter>> selfRef;
+
+  // Checks if the inner Active state is Canceling or Canceled.
+  // If so, transitions to error state and throws the exception.
+  void throwIfCancelingOrCanceled(Active& active);
+
+  // Checks if the inner Active state is Canceling or Canceled.
+  // If so, transitions to error state and returns the exception.
+  kj::Maybe<kj::Exception> checkCancelingOrCanceled(Active& active);
 
   kj::Promise<size_t> readImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
 
