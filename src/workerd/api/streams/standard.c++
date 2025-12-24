@@ -870,6 +870,10 @@ class WritableStreamJsController final: public WritableStreamController {
 
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
+  // Error through the underlying controller if available, going through the proper
+  // error transition (Erroring -> Errored).
+  void errorIfNeeded(jsg::Lock& js, v8::Local<v8::Value> reason);
+
   kj::Maybe<int> getDesiredSize() override;
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override;
@@ -3835,6 +3839,16 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   }
 }
 
+void WritableStreamJsController::errorIfNeeded(jsg::Lock& js, v8::Local<v8::Value> reason) {
+  // Error through the underlying controller if available, which goes through the proper
+  // error transition (Erroring -> Errored). This allows close() to be called while the
+  // stream is "erroring" and reject with the stored error.
+  KJ_IF_SOME(controller, state.tryGetUnsafe<Controller>()) {
+    controller->error(js, reason);
+  }
+  // If state is not Controller (already Closed or Errored), this is a no-op.
+}
+
 kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {
@@ -4248,23 +4262,43 @@ jsg::Promise<void> TransformStreamDefaultController::write(
 
 jsg::Promise<void> TransformStreamDefaultController::abort(
     jsg::Lock& js, v8::Local<v8::Value> reason) {
-  KJ_IF_SOME(finish, algorithms.maybeFinish) {
-    return finish.whenResolved(js);
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // If a finish operation is already in progress, return the existing promise
+    // or handle the case where we're being called synchronously from within another
+    // finish operation.
+    if (algorithms.finishStarted) {
+      KJ_IF_SOME(finish, algorithms.maybeFinish) {
+        return finish.whenResolved(js);
+      }
+      // finishStarted is true but maybeFinish is not set yet - this means we're being
+      // called synchronously from within another finish operation (like cancel).
+      // We need to error the stream with the abort reason so that both the current
+      // operation and this abort reject with the abort reason.
+      error(js, reason);
+      return js.rejectedPromise<void>(js.v8Ref(reason));
+    }
+
+    // Mark that we're starting a finish operation before running the algorithm.
+    algorithms.finishStarted = true;
+  } else {
+    KJ_IF_SOME(finish, algorithms.maybeFinish) {
+      return finish.whenResolved(js);
+    }
   }
+
   return algorithms.maybeFinish
       .emplace(maybeRunAlgorithm(js, algorithms.cancel,
           JSG_VISITABLE_LAMBDA(
               (this, ref = JSG_THIS, reason = jsg::JsRef(js, jsg::JsValue(reason))), (ref, reason),
               (jsg::Lock & js)->jsg::Promise<void> {
                 // If the readable side is errored, return a rejected promise with the stored error
-                KJ_IF_SOME(controller, tryGetReadableController()) {
-                KJ_IF_SOME(error, controller.getMaybeErrorState(js)) {
-                return js.rejectedPromise<void>(kj::mv(error));
+                {
+                KJ_IF_SOME(err, getReadableErrorState(js)) {
+                return js.rejectedPromise<void>(kj::mv(err));
                 } else {
-                }  // Else block to avert dangling else compiler warning.
-                } else {
-                }  // Else block to avert dangling else compiler warning.
-
+                // Else block to avert dangling else compiler warning.
+                }
+                }
                 // Otherwise... error with the given reason and resolve the abort promise
                 error(js, reason.getHandle(js));
                 return js.resolvedPromise();
@@ -4279,15 +4313,57 @@ jsg::Promise<void> TransformStreamDefaultController::abort(
 }
 
 jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
+  auto flags = FeatureFlags::get(js);
+  if (flags.getPedanticWpt()) {
+    // If a finish operation is already in progress (e.g., from cancel or abort),
+    // we should not run flush. Per the WHATWG streams spec, close/flush should
+    // coordinate with cancel to avoid calling both.
+    if (algorithms.finishStarted) {
+      KJ_IF_SOME(finish, algorithms.maybeFinish) {
+        return finish.whenResolved(js);
+      }
+      // finishStarted is true but maybeFinish is not set yet - this means we're being
+      // called synchronously from within another finish operation. If the stream was
+      // errored during that operation, return a rejected promise with the error.
+      KJ_IF_SOME(writableController, tryGetWritableController()) {
+        KJ_IF_SOME(err, writableController.isErroredOrErroring(js)) {
+          return js.rejectedPromise<void>(err);
+        }
+      }
+      KJ_IF_SOME(err, getReadableErrorState(js)) {
+        return js.rejectedPromise<void>(kj::mv(err));
+      }
+      return js.resolvedPromise();
+    }
+
+    // Mark that we're starting a finish operation before running the algorithm,
+    // since the algorithm may synchronously call other finish operations.
+    algorithms.finishStarted = true;
+  }
+
   auto onSuccess =
       JSG_VISITABLE_LAMBDA((ref = JSG_THIS), (ref), (jsg::Lock & js)->jsg::Promise<void> {
-        KJ_IF_SOME(readableController, ref->tryGetReadableController()) {
-        // Allows for a graceful close of the readable side. Close will
-        // complete once all of the queued data is read or the stream
-        // errors.
-        readableController.close(js);
+        // If the stream was errored during the flush algorithm (e.g., by controller.error()
+        // or by a parallel cancel() calling abort()), we should reject with that error.
+        if (FeatureFlags::get(js).getPedanticWpt()) {
+        KJ_IF_SOME(err, ref->getReadableErrorState(js)) {
+        return js.rejectedPromise<void>(kj::mv(err));
         } else {
         // Else block to avert dangling else compiler warning.
+        }
+        }
+        // Allows for a graceful close of the readable side. Close will
+        // complete once all of the queued data is read or the stream
+        // errors. Only close if the stream can still be closed (e.g.,
+        // it wasn't closed by a cancel operation from within flush).
+        {
+        KJ_IF_SOME(readableController, ref->tryGetReadableController()) {
+        if (readableController.canCloseOrEnqueue()) {
+        readableController.close(js);
+        }
+        } else {
+        // Else block to avert dangling else compiler warning.
+        }
         }
         return js.resolvedPromise();
       });
@@ -4297,6 +4373,13 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
         ref->error(js, reason.getHandle(js));
         return js.rejectedPromise<void>(kj::mv(reason));
       });
+
+  if (flags.getPedanticWpt()) {
+    return algorithms.maybeFinish
+        .emplace(
+            maybeRunAlgorithm(js, algorithms.flush, kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS))
+        .whenResolved(js);
+  }
 
   return maybeRunAlgorithm(js, algorithms.flush, kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS);
 }
@@ -4309,14 +4392,42 @@ jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
 
 jsg::Promise<void> TransformStreamDefaultController::cancel(
     jsg::Lock& js, v8::Local<v8::Value> reason) {
-  KJ_IF_SOME(finish, algorithms.maybeFinish) {
-    return finish.whenResolved(js);
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // If a finish operation is already in progress, return the existing promise
+    // or check for errors if we're being called synchronously from within another
+    // finish operation.
+    if (algorithms.finishStarted) {
+      KJ_IF_SOME(finish, algorithms.maybeFinish) {
+        return finish.whenResolved(js);
+      }
+      // finishStarted is true but maybeFinish is not set yet - check if the stream
+      // was errored during that operation.
+      KJ_IF_SOME(err, getReadableErrorState(js)) {
+        return js.rejectedPromise<void>(kj::mv(err));
+      }
+      return js.resolvedPromise();
+    }
+
+    // Mark that we're starting a finish operation before running the algorithm.
+    algorithms.finishStarted = true;
   }
+
   return algorithms.maybeFinish
       .emplace(maybeRunAlgorithm(js, algorithms.cancel,
           JSG_VISITABLE_LAMBDA(
               (this, ref = JSG_THIS, reason = jsg::JsRef(js, jsg::JsValue(reason))), (ref, reason),
               (jsg::Lock & js)->jsg::Promise<void> {
+                // If the stream was errored during the cancel algorithm (e.g., by controller.error()
+                // or by a parallel abort()), we should reject with that error.
+                if (FeatureFlags::get(js).getPedanticWpt()) {
+                KJ_IF_SOME(err, getReadableErrorState(js)) {
+                readable = kj::none;
+                errorWritableAndUnblockWrite(js, reason.getHandle(js));
+                return js.rejectedPromise<void>(kj::mv(err));
+                } else {
+                // Else block to avert dangling else compiler warning.
+                }
+                }
                 readable = kj::none;
                 errorWritableAndUnblockWrite(js, reason.getHandle(js));
                 return js.resolvedPromise();
@@ -4365,7 +4476,12 @@ void TransformStreamDefaultController::errorWritableAndUnblockWrite(
     jsg::Lock& js, v8::Local<v8::Value> reason) {
   algorithms.clear();
   KJ_IF_SOME(writableController, tryGetWritableController()) {
-    if (writableController.isWritable()) {
+    if (FeatureFlags::get(js).getPedanticWpt()) {
+      // Use errorIfNeeded which goes through the proper error transition (Erroring -> Errored).
+      // This allows close() to be called while the stream is "erroring" and reject with the
+      // stored error, which is the expected behavior per the WHATWG streams spec.
+      writableController.errorIfNeeded(js, reason);
+    } else if (writableController.isWritable()) {
       writableController.doError(js, reason);
     }
     writable = kj::none;
@@ -4445,6 +4561,13 @@ kj::Maybe<WritableStreamJsController&> TransformStreamDefaultController::
     tryGetWritableController() {
   KJ_IF_SOME(w, writable) {
     return static_cast<WritableStreamJsController&>(w->getController());
+  }
+  return kj::none;
+}
+
+kj::Maybe<jsg::Value> TransformStreamDefaultController::getReadableErrorState(jsg::Lock& js) {
+  KJ_IF_SOME(controller, tryGetReadableController()) {
+    return controller.getMaybeErrorState(js);
   }
   return kj::none;
 }
