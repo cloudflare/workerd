@@ -3749,7 +3749,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 }
 
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
-  InputGate::Lock inputLock = co_await impl->inputGate.wait();
+  InputGate::Lock inputLock = co_await impl->inputGate.wait(context.getCurrentTraceSpan());
 
   try {
     bool containerRunning = false;
@@ -3793,7 +3793,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       handler.missingSuperclass = info.missingSuperclass;
 
       impl->classInstance = kj::mv(handler);
-    }, inputLock.addRef());
+    }, inputLock.addRef(context.getCurrentTraceSpan()));
     // We addRef() the inputLock above rather than kj::mv() it so that the lock remains held
     // through the catch block below, if an exception is thrown. This is important since we
     // MUST update `impl->classInstance` to something other than `Initializing` before we
