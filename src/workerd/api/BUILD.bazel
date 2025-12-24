@@ -531,6 +531,19 @@ wd_cc_library(
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
+    ]
+]
+
+[
+    kj_test(
+        src = f,
+        deps = [
+            "//src/workerd/io",
+            "//src/workerd/io:promise-wrapper",
+            "//src/workerd/tests:test-fixture",
+        ],
+    )
+    for f in [
         "streams/queue-test.c++",
         "streams/standard-test.c++",
     ]
