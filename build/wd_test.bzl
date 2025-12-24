@@ -7,6 +7,8 @@ def wd_test(
         args = [],
         ts_deps = [],
         python_snapshot_test = False,
+        generate_default_variant = True,
+        generate_all_autogates_variant = True,
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -17,6 +19,8 @@ def wd_test(
      data: Additional files which the .capnp config file may embed. All TypeScript files will be compiled,
      their resulting files will be passed to the test as well. Usually TypeScript or Javascript source files.
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
+     autogates_variant: If True (default), generate an @all-autogates variant of the test.
+     default_variant: If True (default), generate the default (non-autogates) variant of the test.
     """
 
     # Add workerd binary to "data" dependencies.
@@ -57,14 +61,25 @@ def wd_test(
         "$(location {})".format(src),
     ] + args
 
-    _wd_test(
-        src = src,
-        name = name,
-        data = data,
-        args = args,
-        python_snapshot_test = python_snapshot_test,
-        **kwargs
-    )
+    if generate_default_variant:
+        _wd_test(
+            src = src,
+            name = name + "@",
+            data = data,
+            args = args,
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
+
+    if generate_all_autogates_variant:
+        _wd_test(
+            src = src,
+            name = name + "@all-autogates",
+            data = data,
+            args = args + ["--all-autogates"],
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
 
 WINDOWS_TEMPLATE = """
 @echo off
@@ -192,7 +207,7 @@ def _wd_test_impl(ctx):
         # Include all file types that might contain testable code
         extensions = ["cc", "c++", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc", "js", "ts", "mjs", "wd-test", "capnp"],
     )
-    environment = {}
+    environment = dict(ctx.attr.env)
     if ctx.attr.python_snapshot_test:
         environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = ""
     if ctx.attr.load_snapshot:
@@ -272,6 +287,8 @@ _wd_test = rule(
         ),
         "python_snapshot_test": attr.bool(),
         "load_snapshot": attr.label(allow_single_file = True),
+        # Environment variables to set when running the test
+        "env": attr.string_dict(),
         # A reference to the Windows platform label, needed for the implementation of wd_test
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },
