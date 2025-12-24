@@ -111,6 +111,20 @@ wd_cc_benchmark(
     ],
 )
 
+# Benchmark for comparing stream piping implementations
+# Tagged manual because it takes too long for CI - run explicitly with:
+#   bazel run //src/workerd/tests:bench-stream-piping
+wd_cc_benchmark(
+    name = "bench-stream-piping",
+    srcs = ["bench-stream-piping.c++"],
+    tags = ["manual"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],
