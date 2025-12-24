@@ -287,12 +287,12 @@ class ReadableStreamSource {
 };
 
 struct PipeToOptions {
-  jsg::Optional<bool> preventClose;
   jsg::Optional<bool> preventAbort;
   jsg::Optional<bool> preventCancel;
+  jsg::Optional<bool> preventClose;
   jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
-  JSG_STRUCT(preventClose, preventAbort, preventCancel, signal);
+  JSG_STRUCT(preventAbort, preventCancel, preventClose, signal);
   JSG_STRUCT_TS_OVERRIDE(StreamPipeOptions);
 
   // An additional, internal only property that is used to indicate

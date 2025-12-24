@@ -85,25 +85,11 @@ export default {
     ],
   },
   'piping/pipe-through.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      "pipeThrough should brand-check readable and not allow 'null'",
-      "pipeThrough should brand-check readable and not allow 'undefined'",
-      "pipeThrough should brand-check readable and not allow '0'",
-      "pipeThrough should brand-check readable and not allow 'NaN'",
-      "pipeThrough should brand-check readable and not allow 'true'",
-      "pipeThrough should brand-check readable and not allow 'ReadableStream'",
-      "pipeThrough should brand-check readable and not allow '[object ReadableStream]'",
-      "pipeThrough should brand-check writable and not allow 'null'",
-      "pipeThrough should brand-check writable and not allow 'undefined'",
-      "pipeThrough should brand-check writable and not allow '0'",
-      "pipeThrough should brand-check writable and not allow 'NaN'",
-      "pipeThrough should brand-check writable and not allow 'true'",
-      "pipeThrough should brand-check writable and not allow 'WritableStream'",
-      "pipeThrough should brand-check writable and not allow '[object WritableStream]'",
-      'pipeThrough should rethrow errors from accessing readable or writable',
-      'pipeThrough() should throw if readable/writable getters throw',
-    ],
+    comment: 'Windows has different property access order',
+    expectedFailures:
+      process.platform === 'win32'
+        ? ['pipeThrough() should throw if readable/writable getters throw']
+        : [],
   },
   'piping/then-interception.any.js': {
     comment:
@@ -113,19 +99,7 @@ export default {
       'tee should not be observable',
     ],
   },
-  'piping/throwing-options.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'pipeThrough should stop after getting preventAbort throws',
-      'pipeThrough should stop after getting preventCancel throws',
-      'pipeThrough should stop after getting preventClose throws',
-      'pipeThrough should stop after getting signal throws',
-      'pipeTo should stop after getting preventAbort throws',
-      'pipeTo should stop after getting preventCancel throws',
-      'pipeTo should stop after getting preventClose throws',
-      'pipeTo should stop after getting signal throws',
-    ],
-  },
+  'piping/throwing-options.any.js': {},
   'piping/transform-streams.any.js': {},
 
   'queuing-strategies-size-function-per-global.window.js': {
