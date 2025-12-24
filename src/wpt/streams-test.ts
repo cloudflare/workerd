@@ -734,7 +734,6 @@ export default {
       "Aborting a WritableStream before it starts should cause the writer's unsettled ready promise to reject",
       "WritableStream if sink's abort throws, the promise returned by multiple writer.abort()s is the same and rejects",
       'when calling abort() twice on the same stream, both should give the same promise that fulfills with undefined',
-      'the abort signal is signalled synchronously - write',
       'Aborting a WritableStream causes any outstanding write() promises to be rejected with the reason supplied',
       'Aborting a WritableStream puts it in an errored state with the error passed to abort()',
       'if a writer is created for a stream with a pending abort, its ready should be rejected with the abort error',

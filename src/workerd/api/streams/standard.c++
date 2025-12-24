@@ -1135,7 +1135,17 @@ WritableImpl<Self>::WritableImpl(
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::abort(
     jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason) {
-  signal->triggerAbort(js, jsg::JsValue(reason));
+  // Per the spec, the signal.reason should be a DOMException with name 'AbortError'
+  // when no reason is provided, but the stored error should remain as the original reason.
+  auto signalReason = [&]() -> jsg::JsValue {
+    if (reason->IsUndefined() && FeatureFlags::get(js).getPedanticWpt()) {
+      auto ex = js.domException(
+          kj::str("AbortError"), kj::str("This writable stream has been aborted."), kj::none);
+      return jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+    }
+    return jsg::JsValue(reason);
+  }();
+  signal->triggerAbort(js, signalReason);
 
   // We have to check this again after the AbortSignal is triggered.
   if (state.template is<StreamStates::Closed>() || state.template is<StreamStates::Errored>()) {
