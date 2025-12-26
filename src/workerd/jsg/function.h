@@ -179,6 +179,22 @@ class Function<Ret(Args...)> {
     __builtin_unreachable();
   }
 
+  // Call the function with a custom receiver (the `this` value).
+  // This is useful when the spec requires a function to be called with a specific receiver,
+  // such as `undefined`, even if the function was extracted from an object property.
+  Ret callWithReceiver(jsg::Lock& jsl, v8::Local<v8::Value> receiver, Args... args) {
+    KJ_SWITCH_ONEOF(impl) {
+      KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
+        // Native functions don't use the receiver, so just call normally.
+        return (*native)(jsl, kj::fwd<Args>(args)...);
+      }
+      KJ_CASE_ONEOF(js, JsImpl) {
+        return (*js.wrapper)(jsl, receiver, js.handle.getHandle(jsl), kj::fwd<Args>(args)...);
+      }
+    }
+    __builtin_unreachable();
+  }
+
   // Get a handle to the underlying function. If this is a native function,
   // `makeNativeWrapper(Ref<Func>&)` is called to create the wrapper.
   //
