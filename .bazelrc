@@ -10,6 +10,9 @@ build --test_size_filters=-enormous
 # corresponds to small,medium,large,enormous tests (medium is default)
 build --test_timeout=3,15,60,240
 
+# Use GitHub mirror for BCR to work around bcr.bazel.build outages
+common --registry=https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main/
+
 # We're only using bzlmod in a nominal capacity so far
 common --enable_workspace
 
