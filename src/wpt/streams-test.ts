@@ -727,13 +727,7 @@ export default {
       'write: returning a rejected promise (second write) should cause writer write() and ready to reject',
     ],
   },
-  'writable-streams/byte-length-queuing-strategy.any.js': {
-    comment:
-      'TypeError: The value cannot be converted because it is not an integer.',
-    expectedFailures: [
-      'Closing a writable stream with in-flight writes below the high water mark delays the close call properly',
-    ],
-  },
+  'writable-streams/byte-length-queuing-strategy.any.js': {},
   'writable-streams/close.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
