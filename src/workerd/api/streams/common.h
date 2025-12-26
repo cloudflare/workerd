@@ -713,7 +713,7 @@ class WritableStreamController {
   // writable stream locked and in a state where no further writes can be made.
   virtual void detach(jsg::Lock& js) = 0;
 
-  virtual kj::Maybe<int> getDesiredSize() = 0;
+  virtual kj::Maybe<int> getDesiredSize(jsg::Lock& js) = 0;
 
   // True if a Writer has been locked to this controller.
   virtual bool isLockedToWriter() const = 0;

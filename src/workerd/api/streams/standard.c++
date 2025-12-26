@@ -783,7 +783,7 @@ class WritableStreamJsController final: public WritableStreamController {
 
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
-  kj::Maybe<int> getDesiredSize() override;
+  kj::Maybe<int> getDesiredSize(jsg::Lock& js) override;
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override;
   kj::Maybe<v8::Local<v8::Value>> isErroredOrErroring(jsg::Lock& js);
@@ -1181,7 +1181,7 @@ kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
 }
 
 template <typename Self>
-ssize_t WritableImpl<Self>::getDesiredSize() {
+ssize_t WritableImpl<Self>::getDesiredSize(jsg::Lock& js) {
   return highWaterMark - amountBuffered;
 }
 
@@ -1477,7 +1477,7 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
         dealWithRejection(js, kj::mv(self), handle);
       });
 
-  flags.backpressure = getDesiredSize() <= 0;
+  flags.backpressure = getDesiredSize(js) <= 0;
 
   maybeRunAlgorithm(js, startAlgorithm, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
@@ -1499,7 +1499,7 @@ template <typename Self>
 void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   KJ_ASSERT(isWritable());
   KJ_ASSERT(!isCloseQueuedOrInFlight());
-  bool bp = getDesiredSize() <= 0;
+  bool bp = getDesiredSize(js) <= 0;
 
   if (bp != flags.backpressure) {
     flags.backpressure = bp;
@@ -3244,8 +3244,8 @@ void WritableStreamDefaultController::error(
   impl.error(js, JSG_THIS, reason.orDefault(js.undefined()));
 }
 
-ssize_t WritableStreamDefaultController::getDesiredSize() {
-  return impl.getDesiredSize();
+ssize_t WritableStreamDefaultController::getDesiredSize(jsg::Lock& js) {
+  return impl.getDesiredSize(js);
 }
 
 jsg::Ref<AbortSignal> WritableStreamDefaultController::getSignal() {
@@ -3394,7 +3394,7 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   }
 }
 
-kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
+kj::Maybe<int> WritableStreamJsController::getDesiredSize(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return 0;
@@ -3403,7 +3403,14 @@ kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
       return kj::none;
     }
     KJ_CASE_ONEOF(controller, Controller) {
-      return controller->getDesiredSize();
+      if (FeatureFlags::get(js).getPedanticWpt()) {
+        // Per the spec, desiredSize should be null when the stream is erroring.
+        if (controller->isErroring()) {
+          return kj::none;
+        }
+      }
+
+      return controller->getDesiredSize(js);
     }
   }
   KJ_UNREACHABLE;
@@ -3414,6 +3421,10 @@ kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroring(jsg::Lock
     return controller->isErroring(js);
   }
   return kj::none;
+}
+
+bool WritableStreamDefaultController::isErroring() const {
+  return impl.state.is<StreamStates::Erroring>();
 }
 
 kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroredOrErroring(jsg::Lock& js) {
