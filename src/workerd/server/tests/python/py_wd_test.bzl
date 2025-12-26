@@ -81,11 +81,14 @@ def _snapshot_file(snapshot):
     return [":" + snapshot]
 
 def _snapshot_files(
+        name,
         baseline_snapshot = None,
         numpy_snapshot = None,
         fastapi_snapshot = None,
         dedicated_fastapi_snapshot = None,
         **_kwds):
+    if name == "development":
+        return []
     result = []
     result += _snapshot_file(baseline_snapshot)
     result += _snapshot_file(numpy_snapshot)
@@ -93,7 +96,29 @@ def _snapshot_files(
     result += _snapshot_file(dedicated_fastapi_snapshot)
     return result
 
-def python_test_setup():
+def _snapshot_file_group():
+    snapshots = []
+    for x in BUNDLE_VERSION_INFO.values():
+        snapshots += _snapshot_files(**x)
+
+    native.filegroup(
+        name = "python_snapshots",
+        data = snapshots,
+        visibility = ["//visibility:public"],
+    )
+
+def _capnp_bundle(id, **_kwds):
+    if id == "dev":
+        return
+    name = "pyodide_%s.capnp.bin" % id
+    copy_file(
+        name = name + "@rule",
+        src = "@%s//file" % name,
+        out = "pyodide-bundle-cache/" + name,
+        visibility = ["//visibility:public"],
+    )
+
+def _capnp_bundles_file_group():
     # pyodide_dev.capnp.bin represents a custom pyodide version "dev" that is generated
     # at build time using the latest contents of the src/pyodide directory.
     # This is used to run tests to ensure that they are always run against the latest build of
@@ -104,17 +129,15 @@ def python_test_setup():
         out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
         visibility = ["//visibility:public"],
     )
-    data = []
-    for x in BUNDLE_VERSION_INFO.values():
-        if x["name"] == "development":
-            continue
-        data += _snapshot_files(**x)
+    for info in BUNDLE_VERSION_INFO.values():
+        _capnp_bundle(**info)
 
-    native.filegroup(
-        name = "python_snapshots",
-        data = data,
-        visibility = ["//visibility:public"],
-    )
+def _capnp_rules():
+    return ["//src/workerd/server/tests/python:pyodide_%s.capnp.bin@rule" % info["id"] for info in BUNDLE_VERSION_INFO.values()]
+
+def python_test_setup():
+    _capnp_bundles_file_group()
+    _snapshot_file_group()
 
 def compute_python_flags(python_flags, skip_python_flags):
     if python_flags == "all":
@@ -154,7 +177,7 @@ def py_wd_test(
         name = directory
     elif name == None:
         name = src.removesuffix(".wd-test")
-    data += ["//src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule"]
+    data += _capnp_rules()
     args = args + [
         "--pyodide-bundle-disk-cache-dir",
         "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)/..",

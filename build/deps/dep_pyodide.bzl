@@ -42,9 +42,18 @@ filegroup(
         url = VENDOR_R2 + name + pyver + "-vendored-for-ew-testing.zip",
     )
 
-SNAPSHOT_R2 = "https://pyodide-capnp-bin.edgeworker.net/"
+PYODIDE_CAPN_BIN = "https://pyodide-capnp-bin.edgeworker.net/"
 
-def _snapshot_http_file(bundle_name, folder, snapshot, integrity, hash, r2_base = SNAPSHOT_R2):
+def _capnp_bundle(id = None, integrity = None, **_kwds):
+    if not id or not integrity:
+        return
+    http_file(
+        name = "pyodide_%s.capnp.bin" % id,
+        integrity = integrity,
+        url = PYODIDE_CAPN_BIN + "pyodide_%s.capnp.bin" % id,
+    )
+
+def _snapshot_http_file(bundle_name, folder, snapshot, integrity, hash, r2_base = PYODIDE_CAPN_BIN):
     if not snapshot:
         return
     if not integrity:
@@ -81,6 +90,7 @@ def dep_pyodide():
         _pyodide_core(**info)
 
     for info in BUNDLE_VERSION_INFO.values():
+        _capnp_bundle(**info)
         for pkg in info["vendored_packages_for_tests"].values():
             _py_vendor_test_deps(version = info["name"], **pkg)
 
