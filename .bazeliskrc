@@ -1,0 +1,3 @@
+# Use GitHub as mirror for Bazel binary downloads
+# This works around outages at releases.bazel.build
+BAZELISK_BASE_URL=https://github.com/bazelbuild/bazel/releases/download
