@@ -385,6 +385,7 @@ class WritableImpl {
     uint8_t started : 1 = 0;
     uint8_t starting : 1 = 0;
     uint8_t backpressure : 1 = 0;
+    uint8_t pedanticWpt : 1 = 0;
   };
   Flags flags{};
 
@@ -597,11 +598,16 @@ class WritableStreamDefaultController: public jsg::Object {
 
   void error(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
-  ssize_t getDesiredSize();
+  kj::Maybe<ssize_t> getDesiredSize();
 
   jsg::Ref<AbortSignal> getSignal();
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
+
+  // Returns true if the stream is in the erroring state. Unlike the overload
+  // that takes a lock, this method does not require a lock since it doesn't
+  // return the error reason.
+  bool isErroring() const;
 
   bool isStarted() {
     return impl.flags.started;

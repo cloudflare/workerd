@@ -23,7 +23,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
   jsg::MemoizedIdentity<jsg::Promise<void>>& getReady();
-  kj::Maybe<int> getDesiredSize(jsg::Lock& js);
+  kj::Maybe<int> getDesiredSize();
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
