@@ -734,12 +734,7 @@ export default {
       'Closing a writable stream with in-flight writes below the high water mark delays the close call properly',
     ],
   },
-  'writable-streams/close.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'releaseLock() should not change the result of sync close()',
-    ],
-  },
+  'writable-streams/close.any.js': {},
   'writable-streams/constructor.any.js': {
     comment: 'These are mostly about validation of params',
     expectedFailures:

@@ -1210,7 +1210,19 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
             finishInFlightClose(js, kj::mv(self), reason.getHandle(js));
           });
 
-      maybeRunAlgorithm(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+      // Per the spec, the close algorithm should always run asynchronously, even if
+      // there's no user-provided close handler. This ensures that releaseLock() can
+      // reject the closed promise before the close completes.
+      if (FeatureFlags::get(js).getPedanticWpt() && algorithms.close == kj::none) {
+        KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+          js.resolvedPromise().then(
+              js, ioContext.addFunctor(kj::mv(onSuccess)), ioContext.addFunctor(kj::mv(onFailure)));
+        } else {
+          js.resolvedPromise().then(js, kj::mv(onSuccess), kj::mv(onFailure));
+        }
+      } else {
+        maybeRunAlgorithm(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+      }
     }
     return;
   }
