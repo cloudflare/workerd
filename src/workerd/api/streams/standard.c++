@@ -3490,6 +3490,14 @@ void WritableStreamJsController::setup(jsg::Lock& js,
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
+
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // Per the spec, the type property for WritableStream's underlying sink must be undefined.
+    // If it's anything else, throw a RangeError.
+    JSG_REQUIRE(underlyingSink.type == kj::none, RangeError,
+        "Invalid underlying sink type. Only undefined is valid.");
+  }
+
   // We account for the memory usage of the WritableStreamDefaultController and AbortSignal together
   // because their lifetimes are identical and memory accounting itself has a memory overhead.
   state = js.allocAccounted<WritableStreamDefaultController>(

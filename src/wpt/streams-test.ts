@@ -747,12 +747,10 @@ export default {
         ? [
             'controller argument should be passed to start method',
             'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
-            "WritableStream can't be constructed with a defined type",
           ]
         : [
             'controller argument should be passed to start method',
             'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
-            "WritableStream can't be constructed with a defined type",
             'underlyingSink argument should be converted after queuingStrategy argument',
           ],
   },
