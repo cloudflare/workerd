@@ -192,7 +192,7 @@ class Function<Ret(Args...)> {
         return (*js.wrapper)(jsl, receiver, js.handle.getHandle(jsl), kj::fwd<Args>(args)...);
       }
     }
-    __builtin_unreachable();
+    KJ_UNREACHABLE;
   }
 
   // Get a handle to the underlying function. If this is a native function,
