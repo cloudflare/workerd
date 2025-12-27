@@ -452,7 +452,6 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     auto traceSpan = context.makeTraceSpan("r2_head"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_head"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bindingName()) {
@@ -478,6 +477,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     auto requestJson = json.encode(requestBuilder);
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),
@@ -509,7 +509,6 @@ R2Bucket::get(jsg::Lock& js,
     auto traceSpan = context.makeTraceSpan("r2_get"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_get"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bindingName()) {
@@ -538,6 +537,7 @@ R2Bucket::get(jsg::Lock& js,
     auto requestJson = json.encode(requestBuilder);
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),
@@ -599,7 +599,6 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     auto traceSpan = context.makeTraceSpan("r2_put"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_put"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bindingName()) {
@@ -841,6 +840,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     cancelReader.cancel();
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, jwt);
 
@@ -875,7 +875,6 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     auto traceSpan = context.makeTraceSpan("r2_createMultipartUpload"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_createMultipartUpload"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bindingName()) {
@@ -967,6 +966,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     auto requestJson = json.encode(requestBuilder);
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
@@ -1005,7 +1005,6 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     auto traceSpan = context.makeTraceSpan("r2_delete"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_delete"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bindingName()) {
@@ -1042,6 +1041,7 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
@@ -1068,7 +1068,6 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     auto traceSpan = context.makeTraceSpan("r2_list"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_list"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bindingName()) {
@@ -1173,6 +1172,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),

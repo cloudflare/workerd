@@ -210,7 +210,6 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
       urlRecord.fragment == kj::none, DOMSyntaxError, wsErr, "The url fragment must be empty.");
 
   kj::HttpHeaders headers(context.getHeaderTable());
-  auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
 
   // Set protocols header if necessary.
   KJ_IF_SOME(variant, protocols) {
@@ -260,6 +259,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
+  auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
   auto prom =
       ([](auto& context, auto connUrl, auto headers, auto client) -> kj::Promise<PackedWebSocket> {
     auto response = co_await client->openWebSocket(connUrl, headers);
