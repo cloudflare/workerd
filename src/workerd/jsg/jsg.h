@@ -1610,6 +1610,15 @@ class Promise;
 template <typename T>
 struct PromiseResolverPair;
 
+template <typename T>
+class DeferredPromise;
+
+template <typename T>
+struct DeferredPromiseResolverPair;
+
+template <typename T>
+DeferredPromiseResolverPair<T> newDeferredPromiseAndResolver();
+
 // Convenience template to detect a `jsg::Promise` type.
 template <typename T>
 struct IsPromise_ {
@@ -2514,6 +2523,18 @@ class Lock {
   template <typename T>
   PromiseResolverPair<T> newPromiseAndResolver();
 
+  // Create a new DeferredPromise and its corresponding resolver.
+  // DeferredPromise is an optimized alternative to jsg::Promise that defers
+  // V8 promise creation until needed. Useful when promises often resolve
+  // synchronously.
+  //
+  // Usage:
+  //     auto [promise, resolver] = js.newDeferredPromiseAndResolver<int>();
+  template <typename T>
+  DeferredPromiseResolverPair<T> newDeferredPromiseAndResolver() {
+    return jsg::newDeferredPromiseAndResolver<T>();
+  }
+
   // Construct an immediately-resolved promise resolving to the given value.
   template <typename T>
   Promise<T> resolvedPromise(T&& value);
@@ -3000,6 +3021,8 @@ inline Value SelfRef::asValue(Lock& js) const {
 // clang-format off
 // These includes are needed for the JSG type glue macros to work.
 #include "promise.h"
+// NOLINTNEXTLINE(misc-header-include-cycle)
+#include "deferred-promise.h"
 #include "modules.h"
 #include "resource.h"
 // JSG has very entrenched include cycles

@@ -312,6 +312,57 @@ class Promise {
     });
   }
 
+  // If the promise is rejected, return the rejection reason as a jsg::Value, consuming
+  // the Promise. If it is pending or fulfilled, returns null. This can be used as an
+  // optimization (e.g., in DeferredPromise::fromJsPromise), but you must never rely on
+  // it for correctness.
+  kj::Maybe<Value> tryConsumeRejected(Lock& js) {
+    return js.withinHandleScope([&]() -> kj::Maybe<Value> {
+      auto handle =
+          KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once").getHandle(js);
+      switch (handle->State()) {
+        case v8::Promise::kPending:
+        case v8::Promise::kFulfilled:
+          return kj::none;
+        case v8::Promise::kRejected:
+          v8Promise = kj::none;
+          return Value(js.v8Isolate, handle->Result());
+      }
+    });
+  }
+
+  // Marker type for void promise resolution in tryConsumeSettled
+  struct Resolved {};
+
+  // Result type for tryConsumeSettled - either resolved value/marker or rejection reason
+  using SettledResult =
+      std::conditional_t<isVoid<T>(), kj::OneOf<Resolved, Value>, kj::OneOf<T, Value>>;
+
+  // If the promise is settled (resolved or rejected), return the result, consuming the
+  // Promise. Returns a OneOf containing either the resolved value (T, or Resolved marker
+  // for void) or rejection reason (Value). If pending, returns none. This combines
+  // tryConsumeResolved and tryConsumeRejected into a single state check for better performance.
+  kj::Maybe<SettledResult> tryConsumeSettled(Lock& js) {
+    return js.withinHandleScope([&]() -> kj::Maybe<SettledResult> {
+      auto handle =
+          KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once").getHandle(js);
+      switch (handle->State()) {
+        case v8::Promise::kPending:
+          return kj::none;
+        case v8::Promise::kFulfilled:
+          v8Promise = kj::none;
+          if constexpr (isVoid<T>()) {
+            return SettledResult(Resolved{});
+          } else {
+            return SettledResult(unwrapOpaque<T>(js.v8Isolate, handle->Result()));
+          }
+        case v8::Promise::kRejected:
+          v8Promise = kj::none;
+          return SettledResult(Value(js.v8Isolate, handle->Result()));
+      }
+    });
+  }
+
   class Resolver {
    public:
     Resolver(v8::Isolate* isolate, v8::Local<v8::Promise::Resolver> v8Resolver)
