@@ -118,7 +118,7 @@ kj::Maybe<int> WritableStreamDefaultWriter::getDesiredSize(jsg::Lock& js) {
       KJ_FAIL_ASSERT("this writer was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
-      return stream->getController().getDesiredSize();
+      return stream->getController().getDesiredSize(js);
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
       return 0;

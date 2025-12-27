@@ -1343,7 +1343,7 @@ void WritableStreamInternalController::detach(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<int> WritableStreamInternalController::getDesiredSize() {
+kj::Maybe<int> WritableStreamInternalController::getDesiredSize(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return 0;

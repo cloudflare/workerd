@@ -294,7 +294,7 @@ class WritableImpl {
   void finishInFlightWrite(
       jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
 
-  ssize_t getDesiredSize();
+  ssize_t getDesiredSize(jsg::Lock& js);
 
   bool isCloseQueuedOrInFlight();
 
@@ -597,11 +597,16 @@ class WritableStreamDefaultController: public jsg::Object {
 
   void error(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
-  ssize_t getDesiredSize();
+  ssize_t getDesiredSize(jsg::Lock& js);
 
   jsg::Ref<AbortSignal> getSignal();
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
+
+  // Returns true if the stream is in the erroring state. Unlike the overload
+  // that takes a lock, this method does not require a lock since it doesn't
+  // return the error reason.
+  bool isErroring() const;
 
   bool isStarted() {
     return impl.flags.started;
