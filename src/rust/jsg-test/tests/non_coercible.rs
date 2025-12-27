@@ -1,7 +1,7 @@
 use jsg::Lock;
 use jsg::NonCoercible;
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::Resource;
+use jsg::Type;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
@@ -9,7 +9,7 @@ use crate::EvalResult;
 
 #[jsg_resource]
 struct MyResource {
-    _state: ResourceState,
+    _unused: u32,
 }
 
 #[jsg_resource]
@@ -128,11 +128,8 @@ fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
     let harness = crate::Harness::new();
     harness.run_in_context(|isolate, ctx| unsafe {
         let mut lock = Lock::from_isolate_ptr(isolate);
-        let resource = jsg::Ref::new(MyResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = MyResourceTemplate::new(&mut lock);
-        let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
+        let resource = MyResource::alloc(&mut lock, MyResource { _unused: 0 });
+        let wrapped = MyResource::wrap(resource, &mut lock);
         ctx.set_global_safe("resource", wrapped.into_ffi());
 
         // String method accepts string

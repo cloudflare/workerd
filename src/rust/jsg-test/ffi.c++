@@ -6,6 +6,7 @@
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
+#include <cppgc/common.h>
 #include <v8.h>
 
 #include <kj/common.h>
@@ -111,17 +112,15 @@ void TestHarness::run_in_context(::rust::Fn<void(Isolate*, EvalContext&)> callba
   });
 }
 
-void TestHarness::set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const {
-  isolate->runInLockScope([&](TestIsolate::Lock& lock) {
-    auto context = lock.newContext<TestContext>();
-    v8::Local<v8::Context> v8Context = context.getHandle(lock.v8Isolate);
-    v8::Context::Scope contextScope(v8Context);
+void request_gc(Isolate* isolate) {
+  // Request V8 garbage collection
+  isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 
-    v8::Local<v8::String> key = ::workerd::jsg::check(v8::String::NewFromUtf8(
-        lock.v8Isolate, name.data(), v8::NewStringType::kNormal, static_cast<int>(name.size())));
-    v8::Local<v8::Value> v8Value = ::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value));
-    ::workerd::jsg::check(v8Context->Global()->Set(v8Context, key, v8Value));
-  });
+  // Also explicitly trigger cppgc collection for the CppHeap
+  if (auto* cppHeap = isolate->GetCppHeap()) {
+    cppHeap->CollectGarbageForTesting(cppgc::EmbedderStackState::kNoHeapPointers);
+  }
 }
 
 }  // namespace rust::jsg_test

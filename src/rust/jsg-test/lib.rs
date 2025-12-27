@@ -11,7 +11,6 @@ mod ffi {
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
-
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
     }
@@ -25,7 +24,6 @@ mod ffi {
 
     unsafe extern "C++" {
         include!("workerd/rust/jsg-test/ffi.h");
-
         type TestHarness;
         type EvalContext;
 
@@ -40,6 +38,13 @@ mod ffi {
 
         #[cxx_name = "set_global"]
         pub fn set_global_safe(self: &EvalContext, name: &str, value: Local);
+
+        /// Triggers a full garbage collection for testing purposes.
+        /// Note: For GC to actually collect objects, they must not be reachable from the
+        /// current HandleScope.
+        #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
+        #[allow(dead_code)]
+        pub unsafe fn request_gc(isolate: *mut Isolate);
     }
 }
 
@@ -56,6 +61,12 @@ impl Harness {
     pub fn run_in_context(&self, callback: fn(*mut v8::ffi::Isolate, Pin<&mut EvalContext>)) {
         unsafe { self.0.run_in_context(callback) }
     }
+
+    pub fn request_gc(lock: &mut jsg::Lock) {
+        unsafe {
+            ffi::request_gc(lock.isolate().as_ffi());
+        }
+    }
 }
 
 impl Default for Harness {
@@ -63,3 +74,4 @@ impl Default for Harness {
         Self::new()
     }
 }
+
