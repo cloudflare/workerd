@@ -1484,12 +1484,6 @@ CompleteSpan CompleteSpan::clone() const {
   }
   return copy;
 }
-
-kj::String CompleteSpan::toString() const {
-  return kj::str("CompleteSpan: ", operationName,
-      kj::strArray(
-          KJ_MAP(tag, tags) { return kj::str("(", tag.key, ", ", tag.value, ")"); }, ", "));
-}
 }  // namespace tracing
 
 // ======================================================================================

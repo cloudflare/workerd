@@ -16,10 +16,10 @@ export const test = {
     // Wait for all the tailStream executions to finish
     await Promise.allSettled(invocationPromises);
 
-    // Recorded streaming tail worker events, in insertion order,
-    // filtering spans not associated with KV
-    let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession'
+    // Recorded streaming tail worker events, in insertion order, filtering spans not associated
+    // with KV, including jsRpc calls
+    let received = Array.from(spans.values()).filter((span) =>
+      span.name.match('kv')
     );
 
     // spans emitted by kv-test.js in execution order
