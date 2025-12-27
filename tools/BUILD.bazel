@@ -27,7 +27,7 @@ native_binary(
         {
             "@bazel_tools//src/conditions:linux_x86_64": "@clang_tidy_linux_amd64//file:downloaded",
             "@bazel_tools//src/conditions:linux_aarch64": "@clang_tidy_linux_arm64//file:downloaded",
-            "@bazel_tools//src/conditions:darwin_arm64": "@clang_tidy_macos_arm64//file:downloaded",
+            "@bazel_tools//src/conditions:darwin_arm64": "@clang_tidy_darwin_arm64//file:downloaded",
             "@bazel_tools//src/conditions:windows_x64": "@clang_tidy_windows_amd64//file:downloaded",
         },
     ),
