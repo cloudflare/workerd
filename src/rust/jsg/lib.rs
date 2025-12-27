@@ -11,9 +11,10 @@ use kj_rs::KjMaybe;
 
 pub mod modules;
 pub mod v8;
-pub use v8::ffi::ExceptionType;
+mod wrappable;
 
-use crate::v8::ToLocalValue;
+pub use v8::ffi::ExceptionType;
+pub use wrappable::Wrappable;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 mod ffi {
@@ -228,25 +229,6 @@ impl<T: Type> NonCoercible<T> {
     /// Creates a new `NonCoercible` wrapper around the given value.
     pub fn new(value: T) -> Self {
         Self { value }
-    }
-
-    /// Unwraps a V8 value into `NonCoercible<T>`, throwing a JavaScript error if the value
-    /// is not exactly the expected type.
-    ///
-    /// Returns `Some(NonCoercible<T>)` if the value is the exact type, or `None` if an error
-    /// was thrown (in which case the caller should return early).
-    ///
-    /// # Safety
-    /// The caller must ensure `lock` is valid and `value` is a valid V8 local handle.
-    pub unsafe fn unwrap(lock: &mut Lock, value: v8::Local<v8::Value>) -> Option<Self> {
-        if !T::is_exact(&value) {
-            let type_name = T::class_name();
-            let error_msg = format!("Expected a {} value but got {}", type_name, value.type_of());
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &error_msg) };
-            return None;
-        }
-        let inner = T::unwrap(lock.isolate(), value);
-        Some(Self::new(inner))
     }
 }
 
@@ -610,92 +592,4 @@ impl Drop for Realm {
 #[expect(clippy::unnecessary_box_returns)]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
     unsafe { Box::new(Realm::from_isolate(v8::IsolatePtr::from_ffi(isolate))) }
-}
-
-/// Handles a result by setting the return value or throwing an error.
-///
-/// # Safety
-/// The caller must ensure V8 operations are performed within the correct isolate/context.
-pub unsafe fn handle_result<T: Type<This = T>, E: std::fmt::Display>(
-    lock: &mut Lock,
-    args: &mut v8::FunctionCallbackInfo,
-    result: Result<T, E>,
-) {
-    match result {
-        Ok(result) => args.set_return_value(T::wrap(result, lock)),
-        Err(err) => {
-            // TODO(soon): Make sure to use jsg::Error trait here and dynamically call proper method to throw the error.
-            let description = err.to_string();
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &description) };
-        }
-    }
-}
-
-impl Type for String {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "string"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_string()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_string(isolate.as_ffi(), value.into_ffi()) }
-    }
-}
-
-impl Type for bool {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "boolean"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_boolean()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_boolean(isolate.as_ffi(), value.into_ffi()) }
-    }
-}
-
-impl Type for f64 {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "number"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_number()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_number(isolate.as_ffi(), value.into_ffi()) }
-    }
 }

@@ -52,6 +52,8 @@ pub mod ffi {
         pub unsafe fn local_new_string(isolate: *mut Isolate, value: &str) -> Local;
         pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_new_undefined(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
         pub unsafe fn local_has_value(value: &Local) -> bool;
         pub unsafe fn local_is_string(value: &Local) -> bool;
@@ -210,7 +212,6 @@ impl<T> Drop for Local<'_, T> {
 }
 
 // Common implementations for all Local<'a, T>
-#[expect(clippy::elidable_lifetime_names)]
 impl<'a, T> Local<'a, T> {
     /// Creates a `Local` from an FFI handle.
     ///
@@ -243,6 +244,19 @@ impl<'a, T> Local<'a, T> {
     /// The caller must ensure the returned reference is not used after this `Local` is dropped.
     pub unsafe fn as_ffi(&self) -> &ffi::Local {
         &self.handle
+    }
+
+    pub fn null(lock: &mut crate::Lock) -> Local<'a, Value> {
+        unsafe { Local::from_ffi(lock.isolate(), ffi::local_new_null(lock.isolate().as_ffi())) }
+    }
+
+    pub fn undefined(lock: &mut crate::Lock) -> Local<'a, Value> {
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::local_new_undefined(lock.isolate().as_ffi()),
+            )
+        }
     }
 
     pub fn has_value(&self) -> bool {

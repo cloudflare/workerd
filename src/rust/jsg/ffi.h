@@ -34,6 +34,8 @@ Local local_new_number(Isolate* isolate, double value);
 Local local_new_string(Isolate* isolate, ::rust::Str value);
 Local local_new_boolean(Isolate* isolate, bool value);
 Local local_new_object(Isolate* isolate);
+Local local_new_null(Isolate* isolate);
+Local local_new_undefined(Isolate* isolate);
 bool local_eq(const Local& lhs, const Local& rhs);
 bool local_has_value(const Local& val);
 bool local_is_string(const Local& val);
