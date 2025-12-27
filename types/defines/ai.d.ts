@@ -1195,6 +1195,25 @@ export declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell {
   inputs: Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input;
   postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Output;
 }
+export interface Ai_Cf_Black_Forest_Labs_Flux_2_Dev_Input {
+  /**
+   * A multipart request containing the prompt for the image you want to generate.
+   */
+multipart: {
+    body: ReadableStream<Uint8Array>;
+    contentType: string;
+}
+}
+export interface Ai_Cf_Black_Forest_Labs_Flux_2_Dev_Output {
+  /**
+   * The generated image in Base64 format.
+   */
+  image?: string;
+}
+export declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_2_Dev {
+  inputs: Ai_Cf_Black_Forest_Labs_Flux_2_Dev_Input;
+  postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_2_Dev_Output;
+}
 export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input =
   | Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Prompt
   | Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Messages;
@@ -5371,6 +5390,7 @@ export interface AiModels {
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
   "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
+  "@cf/black-forest-labs/flux-2-dev": Base_Ai_Cf_Black_Forest_Labs_Flux_2_Dev;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast": Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
