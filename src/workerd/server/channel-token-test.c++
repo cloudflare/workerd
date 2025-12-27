@@ -94,7 +94,7 @@ KJ_TEST("channel token basics") {
 
   auto corruptedToken = [&](uint index) {
     auto copy = kj::heapArray(token.asPtr());
-    copy[index] = 0;
+    copy[index] ^= 1;
     return copy;
   };
 
@@ -146,7 +146,7 @@ KJ_TEST("channel tokens for storage") {
 
   auto corruptedToken = [&](uint index) {
     auto copy = kj::heapArray(token.asPtr());
-    copy[index] = 0;
+    copy[index] ^= 1;
     return copy;
   };
 
