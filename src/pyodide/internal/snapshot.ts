@@ -793,7 +793,7 @@ function collectSnapshot(
       snapshotType,
     });
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
-    DiskCache.put('snapshot.bin', snapshot);
+    DiskCache.putSnapshot('snapshot.bin', snapshot);
   } else {
     throw new PythonWorkersInternalError('Unreachable');
   }
