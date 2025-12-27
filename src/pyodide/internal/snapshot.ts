@@ -557,25 +557,39 @@ ${describeValue(obj)}
   return new PythonUserError(error);
 }
 
-type CustomSerialized = { pyodide_entrypoint_helper: true };
+/**
+ * Global objects that we need a custom serializer
+ */
+export type CustomSerializedObjects = {
+  pyodide_entrypoint_helper: PyodideEntrypointHelper;
+  cloudflare_compat_flags: CompatibilityFlags;
+};
+
+type CustomSerialized = {
+  [K in keyof CustomSerializedObjects]: { [P in K]: true };
+}[keyof CustomSerializedObjects];
 
 function getHiwireSerializer(
-  pyodide_entrypoint_helper: PyodideEntrypointHelper
+  globalObj: CustomSerializedObjects
 ): (obj: any) => CustomSerialized {
   return function serializer(obj: any): CustomSerialized {
-    if (obj === pyodide_entrypoint_helper) {
+    if (obj === globalObj.pyodide_entrypoint_helper) {
       return { pyodide_entrypoint_helper: true };
+    } else if (obj === globalObj.cloudflare_compat_flags) {
+      return { cloudflare_compat_flags: true };
     }
     throw createUnserializableObjectError(obj);
   };
 }
 
 function getHiwireDeserializer(
-  pyodide_entrypoint_helper: PyodideEntrypointHelper
+  globalObj: CustomSerializedObjects
 ): (obj: CustomSerialized) => any {
   return function deserializer(obj) {
     if ('pyodide_entrypoint_helper' in obj) {
-      return pyodide_entrypoint_helper;
+      return globalObj.pyodide_entrypoint_helper;
+    } else if ('cloudflare_compat_flags' in obj) {
+      return globalObj.cloudflare_compat_flags;
     }
     unreachable(obj, `Can't deserialize ${obj}`);
   };
@@ -589,14 +603,14 @@ function getHiwireDeserializer(
 function makeLinearMemorySnapshot(
   Module: Module,
   importedModulesList: string[],
-  pyodide_entrypoint_helper: PyodideEntrypointHelper,
+  customSerializedObjects: CustomSerializedObjects,
   snapshotType: ArtifactBundler.SnapshotType
 ): Uint8Array {
   const dsoHandles = recordDsoHandles(Module);
   let hiwire: SnapshotConfig | undefined;
   if (Module.API.version !== '0.26.0a2') {
     hiwire = Module.API.serializeHiwireState(
-      getHiwireSerializer(pyodide_entrypoint_helper)
+      getHiwireSerializer(customSerializedObjects)
     );
   }
   const settings: SnapshotSettings = {
@@ -771,7 +785,7 @@ export function maybeRestoreSnapshot(Module: Module): void {
 function collectSnapshot(
   Module: Module,
   importedModulesList: string[],
-  pyodide_entrypoint_helper: PyodideEntrypointHelper,
+  customSerializedObjects: CustomSerializedObjects,
   snapshotType: ArtifactBundler.SnapshotType
 ): void {
   if (!IS_EW_VALIDATING && !SHOULD_SNAPSHOT_TO_DISK) {
@@ -782,7 +796,7 @@ function collectSnapshot(
   const snapshot = makeLinearMemorySnapshot(
     Module,
     importedModulesList,
-    pyodide_entrypoint_helper,
+    customSerializedObjects,
     snapshotType
   );
   entropyAfterSnapshot(Module);
@@ -805,7 +819,7 @@ function collectSnapshot(
  */
 export function maybeCollectDedicatedSnapshot(
   Module: Module,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+  customSerializedObjects: CustomSerializedObjects | null
 ): void {
   if (!IS_CREATING_SNAPSHOT) {
     return;
@@ -823,12 +837,12 @@ export function maybeCollectDedicatedSnapshot(
     );
   }
 
-  if (!pyodide_entrypoint_helper) {
+  if (!customSerializedObjects) {
     throw new PythonWorkersInternalError(
-      'pyodide_entrypoint_helper is required for dedicated snapshot'
+      'customSerializedObjects is required for dedicated snapshot'
     );
   }
-  collectSnapshot(Module, [], pyodide_entrypoint_helper, 'dedicated');
+  collectSnapshot(Module, [], customSerializedObjects, 'dedicated');
 }
 
 /**
@@ -839,7 +853,7 @@ export function maybeCollectDedicatedSnapshot(
  */
 export function maybeCollectSnapshot(
   Module: Module,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper
+  customSerializedObjects: CustomSerializedObjects
 ): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
@@ -857,21 +871,21 @@ export function maybeCollectSnapshot(
   collectSnapshot(
     Module,
     importedModulesList,
-    pyodide_entrypoint_helper,
+    customSerializedObjects,
     IS_CREATING_BASELINE_SNAPSHOT ? 'baseline' : 'package'
   );
 }
 
 export function finalizeBootstrap(
   Module: Module,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper
+  customSerializedObjects: CustomSerializedObjects
 ): void {
   Module.API.config._makeSnapshot =
     IS_CREATING_SNAPSHOT && Module.API.version !== '0.26.0a2';
   enterJaegerSpan('finalize_bootstrap', () => {
     Module.API.finalizeBootstrap(
       LOADED_SNAPSHOT_META?.hiwire,
-      getHiwireDeserializer(pyodide_entrypoint_helper)
+      getHiwireDeserializer(customSerializedObjects)
     );
   });
   // finalizeBootstrap overrides LD_LIBRARY_PATH. Restore it.
