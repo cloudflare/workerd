@@ -144,7 +144,7 @@ kj::Promise<void> loadPyodidePackage(const api::pyodide::PythonConfig& pyConfig,
     kj::Network& network,
     kj::Timer& timer) {
 
-  auto path = kj::str("python-package-bucket/", packagesVersion, "/", filename);
+  auto path = kj::str(packagesVersion, "/", filename);
   // First check if we already have this package in memory
   if (pyodidePackageManager.getPyodidePackage(path) != kj::none) {
     co_return;
