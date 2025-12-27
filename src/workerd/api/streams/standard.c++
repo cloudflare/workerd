@@ -1516,7 +1516,10 @@ jsg::Promise<void> WritableImpl<Self>::write(
   size_t size = 1;
   KJ_IF_SOME(sizeFunc, algorithms.size) {
     kj::Maybe<jsg::Value> failure;
-    js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
+    // Per the streams spec, the size function should be called with `undefined` as `this`,
+    // not as a method on the strategy object.
+    js.tryCatch([&] { size = sizeFunc.callWithReceiver(js, js.v8Undefined(), value); },
+        [&](jsg::Value exception) {
       startErroring(js, self.addRef(), exception.getHandle(js));
       failure = kj::mv(exception);
     });
@@ -1957,7 +1960,10 @@ void ReadableStreamDefaultController::enqueue(
   size_t size = 1;
   bool errored = false;
   KJ_IF_SOME(sizeFunc, impl.algorithms.size) {
-    js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
+    // Per the streams spec, the size function should be called with `undefined` as `this`,
+    // not as a method on the strategy object.
+    js.tryCatch([&] { size = sizeFunc.callWithReceiver(js, js.v8Undefined(), value); },
+        [&](jsg::Value exception) {
       impl.doError(js, kj::mv(exception));
       errored = true;
     });

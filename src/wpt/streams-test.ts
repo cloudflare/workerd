@@ -773,7 +773,6 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'desiredSize on a writer for an errored stream',
-      "WritableStream's strategy.size should not be called as a method",
       'closed and ready on a released writer',
       'ready promise should fire before closed on releaseLock',
     ],
