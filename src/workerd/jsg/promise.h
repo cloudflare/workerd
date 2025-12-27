@@ -25,7 +25,9 @@ namespace workerd::jsg {
 template <typename T, bool = isGcVisitable<T>()>
 struct OpaqueWrappable;
 
-struct OpaqueWrappableBase: public Wrappable {
+#define PUBLIC_VISIBILITY [[clang::lto_visibility_public]]
+
+struct PUBLIC_VISIBILITY OpaqueWrappableBase: public Wrappable {
   kj::StringPtr jsgGetMemoryName() const override final {
     return "OpaqueWrappable"_kjc;
   }
@@ -34,8 +36,13 @@ struct OpaqueWrappableBase: public Wrappable {
   }
 };
 
+// We declare OpaqueWrappable<T> specializations here as final to allow the compiler
+// to optimize dynamic_cast<T*> to simply check if the vtable is equal to T's vtable.
+// This provides a minor performance improvement when interacting with opaque-wrapped
+// values.
+
 template <typename T>
-struct OpaqueWrappable<T, false>: public OpaqueWrappableBase {
+struct PUBLIC_VISIBILITY OpaqueWrappable<T, false> final: public OpaqueWrappableBase {
   // Used to implement wrapOpaque().
 
   OpaqueWrappable(T&& value): value(kj::mv(value)) {}
@@ -49,10 +56,17 @@ struct OpaqueWrappable<T, false>: public OpaqueWrappableBase {
 };
 
 template <typename T>
-struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
+struct PUBLIC_VISIBILITY OpaqueWrappable<T, true> final: public OpaqueWrappableBase {
   // When T is GC-visitable, make sure to implement visitation.
 
-  using OpaqueWrappable<T, false>::OpaqueWrappable;
+  OpaqueWrappable(T&& value): value(kj::mv(value)) {}
+
+  T value;
+  bool movedAway = false;
+
+  size_t jsgGetMemorySelfSize() const override final {
+    return sizeof(OpaqueWrappable);
+  }
 
   void jsgVisitForGc(GcVisitor& visitor) override {
     if (!this->movedAway) {
