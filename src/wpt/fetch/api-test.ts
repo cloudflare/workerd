@@ -751,9 +751,8 @@ export default {
     omittedTests: true,
   },
   'response/response-clone.any.js': {
-    comment: 'TODO Investigate this',
+    comment: 'structureClone for teed ReadableStreams not fully implemented',
     expectedFailures: [
-      "Check Response's clone with default values, without body",
       'Check response clone use structureClone for teed ReadableStreams (Int8Arraychunk)',
       'Check response clone use structureClone for teed ReadableStreams (Int16Arraychunk)',
       'Check response clone use structureClone for teed ReadableStreams (Int32Arraychunk)',
@@ -783,10 +782,7 @@ export default {
       'ReadableStream pull() Error propagates to Response.formData() Promise',
     ],
   },
-  'response/response-error.any.js': {
-    comment: 'Likely just missing validation',
-    expectedFailures: ["Throws TypeError when responseInit's statusText is Ā"],
-  },
+  'response/response-error.any.js': {},
   'response/response-from-stream.any.js': {
     comment: 'Missing expected exception (TypeError)',
     expectedFailures: [
@@ -797,42 +793,15 @@ export default {
     comment: 'Likely just missing validation',
     expectedFailures: ['Ensure response headers are immutable'],
   },
-  'response/response-init-001.any.js': {
-    comment: 'statusText should be inited to OK',
-    expectedFailures: ['Check default value for statusText attribute'],
-  },
+  'response/response-init-001.any.js': {},
   'response/response-init-002.any.js': {},
   'response/response-init-contenttype.any.js': {},
-  'response/response-static-error.any.js': {
-    comment:
-      'We need to make Headers immutable when constructing Response.error()',
-    expectedFailures: [
-      "the 'guard' of the Headers instance should be immutable",
-    ],
-  },
+  'response/response-static-error.any.js': {},
   'response/response-static-json.any.js': {
-    comment: 'statusText does not match the status code',
-    expectedFailures: [
-      // For this test specifically: failed to throw on non-encodable data
-      'Check static json() throws when data is not encodable',
-      'Check response returned by static json() with init undefined',
-      'Check response returned by static json() with init {"status":400}',
-      'Check response returned by static json() with init {"headers":{}}',
-      'Check response returned by static json() with init {"headers":{"content-type":"foo/bar"}}',
-      'Check response returned by static json() with init {"headers":{"x-foo":"bar"}}',
-    ],
+    comment: 'Needs investigation',
+    expectedFailures: ['Check static json() throws when data is not encodable'],
   },
-  'response/response-static-redirect.any.js': {
-    comment: 'statusText does not match the status code',
-    expectedFailures: [
-      'Check default redirect response',
-      'Check response returned by static method redirect(), status = 301',
-      'Check response returned by static method redirect(), status = 302',
-      'Check response returned by static method redirect(), status = 303',
-      'Check response returned by static method redirect(), status = 307',
-      'Check response returned by static method redirect(), status = 308',
-    ],
-  },
+  'response/response-static-redirect.any.js': {},
   'response/response-stream-bad-chunk.any.js': {},
   'response/response-stream-disturbed-1.any.js': {},
   'response/response-stream-disturbed-2.any.js': {},
