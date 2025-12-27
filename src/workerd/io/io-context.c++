@@ -307,8 +307,6 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     }
   }
 
-  context->incomingRequests.remove(*this);
-
   KJ_IF_SOME(a, context->actor) {
     a.getMetrics().endRequest();
   }
@@ -335,6 +333,8 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
       context->waitUntilTasks.clear();
     }
   }
+
+  context->incomingRequests.remove(*this);
 }
 
 InputGate::Lock IoContext::getInputLock() {
