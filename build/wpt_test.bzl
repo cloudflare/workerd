@@ -40,9 +40,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
     wpt_cacert = "@wpt//:tools/certs/cacert.pem"
 
     if compat_date == "":
-        compat_date_path = "//src/workerd/io:trimmed-supported-compatibility-date.txt"
-    else:
-        compat_date_path = None
+        compat_date = "2999-12-31"
 
     _wpt_js_test_gen(
         name = js_test_gen_rule,
@@ -60,8 +58,6 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         test_config = test_config_as_js,
         test_js_generated = js_test_gen_rule,
         harness = harness,
-        compat_date = compat_date,
-        compat_date_path = compat_date_path,
         autogates = autogates,
         wpt_cacert = wpt_cacert,
         compat_flags = compat_flags + ["experimental", "nodejs_compat", "unsupported_process_actual_platform"],
@@ -75,15 +71,14 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_cacert,  # i.e. "wpt/tools/certs/cacert.pem",
     ]
 
-    if compat_date_path:
-        data.append(compat_date_path)  # i.e. trimmed-supported-compatibility-date.txt
-
     wd_test(
         name = "{}".format(name),
         src = wd_test_gen_rule,
         args = ["--experimental"],
         sidecar_port_bindings = PORT_BINDINGS if start_server else [],
         sidecar = "@wpt//:entrypoint" if start_server else None,
+        compat_date = compat_date,
+        generate_all_compat_flags_variant = False,  # Already using future date where possible.
         data = data,
         **kwargs
     )
@@ -233,11 +228,6 @@ def _wpt_wd_test_gen_impl(ctx):
     src = ctx.actions.declare_file("{}.wd-test".format(ctx.attr.test_name))
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
-    if ctx.file.compat_date_path != None:
-        compat_date = "compatibilityDate = embed \"{}\",".format(wd_test_relative_path(src, ctx.file.compat_date_path))
-    else:
-        compat_date = "compatibilityDate = \"{}\",".format(ctx.attr.compat_date)
-
     ctx.actions.write(
         output = src,
         content = WPT_WD_TEST_TEMPLATE.format(
@@ -248,7 +238,6 @@ def _wpt_wd_test_gen_impl(ctx):
             harness_modules = generate_harness_modules(src, ctx.attr.harness.files),
             wpt_cacert = wd_test_relative_path(src, ctx.file.wpt_cacert),
             autogates = generate_autogates_field(ctx.attr.autogates),
-            compat_date = compat_date,
             compat_flags = generate_compat_flags_field(ctx.attr.compat_flags),
         ),
     )
@@ -270,10 +259,6 @@ _wpt_wd_test_gen = rule(
         "test_js_generated": attr.label(allow_single_file = True),
         # Target specifying the files in the WPT test harness
         "harness": attr.label(),
-        # A string representing the compatibility date
-        "compat_date": attr.string(mandatory = False, default = ""),
-        # Target specifying the location of the trimmed-supported-compatibility-date.txt file
-        "compat_date_path": attr.label(allow_single_file = True, mandatory = False, default = None),
         # Target specifying the location of the WPT CA certificate
         "wpt_cacert": attr.label(allow_single_file = True),
         # A list of autogates to specify in the generated wd-test file
@@ -305,7 +290,6 @@ const unitTests :Workerd.Config = (
           (name = "GEN_TEST_STATS", fromEnvironment = "GEN_TEST_STATS"),
           {bindings}
         ],
-        {compat_date}
         {compat_flags}
       )
     ),

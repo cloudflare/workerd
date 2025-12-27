@@ -7,8 +7,10 @@ def _generate_import_py_file(imports):
     for imp in imports:
         res += "import " + imp + "\n"
 
-    res += "def test():\n"
-    res += "   pass"
+    res += "from workers import WorkerEntrypoint\n"
+    res += "class Default(WorkerEntrypoint):\n"
+    res += "    def test(self):\n"
+    res += "        pass"
     return res
 
 WD_FILE_TEMPLATE = """
@@ -22,7 +24,6 @@ const unitTests :Workerd.Config = (
                     (name = "worker.py", pythonModule = embed "./worker.py"),
                     {requirements}
                 ],
-                compatibilityDate = "2024-05-02",
                 compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
             )
         ),

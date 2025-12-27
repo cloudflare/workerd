@@ -7,8 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "cluster-nodejs-test.js")
         ],
-        compatibilityDate = "2025-09-03",
-        compatibilityFlags = ["nodejs_compat", "enable_nodejs_cluster_module"],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_cluster_module"],
       )
     ),
   ],

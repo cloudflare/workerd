@@ -4199,7 +4199,19 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   // TODO(beta): Factor out FeatureFlags from WorkerBundle.
   auto featureFlags = arena.initRoot<CompatibilityFlags>();
 
-  if (conf.hasCompatibilityDate()) {
+  KJ_IF_SOME(overrideDate, testCompatibilityDateOverride) {
+    // When testCompatibilityDateOverride is set, the config must NOT specify compatibilityDate.
+    if (conf.hasCompatibilityDate()) {
+      errorReporter.addError(kj::str(
+          "Worker specifies compatibilityDate but --compat-date was provided. "
+          "When using --compat-date, workers must not specify compatibilityDate in the config. "
+          "Use compatibilityFlags to enable/disable specific flags if needed."));
+    }
+    // Use FUTURE_FOR_TEST to allow any valid date (including far future like 2999-12-31)
+    // without validation against CODE_VERSION or current date.
+    compileCompatibilityFlags(overrideDate, conf.getCompatibilityFlags(), featureFlags,
+        errorReporter, experimental, CompatibilityDateValidation::FUTURE_FOR_TEST);
+  } else if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
         featureFlags, errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION);
   } else {

@@ -7,7 +7,6 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "autorag-api-test.js")
         ],
-        compatibilityDate = "2023-01-15",
         compatibilityFlags = ["nodejs_compat"],
         bindings = [
         (
@@ -25,7 +24,6 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "autorag-mock",
       worker = (
-        compatibilityDate = "2023-01-15",
         compatibilityFlags = ["experimental", "nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "autorag-mock.js")

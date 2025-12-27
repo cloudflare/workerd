@@ -9,7 +9,6 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "d1-api-test-with-sessions.js"),
           (name = "d1-api-test-common", esModule = embed "d1-api-test-common.js"),
         ],
-        compatibilityDate = "2023-01-15",
 
         # NOTE: We provide the extra compatibility flag to enable the Sessions API.
         compatibilityFlags = ["nodejs_compat"],
@@ -34,7 +33,6 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "d1-mock",
       worker = (
-        compatibilityDate = "2023-01-15",
         compatibilityFlags = ["experimental", "nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "d1-mock.js")

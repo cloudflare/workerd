@@ -14,9 +14,8 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
-  compatibilityDate = "2025-08-01",
 
-  compatibilityFlags = ["enable_ctx_exports", "nodejs_compat"],
+  compatibilityFlags = ["enable_ctx_exports", "nodejs_compat", "rpc"],
 
   streamingTails = ["tail"],
 
@@ -37,6 +36,5 @@ const tailWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "sync-kv-instrumentation-test.js")
   ],
-  compatibilityDate = "2024-10-14",
   compatibilityFlags = ["experimental", "nodejs_compat"],
 );

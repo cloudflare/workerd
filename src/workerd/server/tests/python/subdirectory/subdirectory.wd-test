@@ -9,7 +9,6 @@ const unitTests :Workerd.Config = (
           (name = "subdir/__init__.py", pythonModule = embed "./subdir/__init__.py"),
           (name = "subdir/a.py", pythonModule = embed "./subdir/a.py"),
         ],
-        compatibilityDate = "2025-08-15",
         compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
       )
     ),

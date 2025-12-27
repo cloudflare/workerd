@@ -8,9 +8,8 @@ const config :Workerd.Config = (
 );
 
 const pyWorker :Workerd.Worker = (
-  compatibilityDate = "2025-03-04",
 
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "rpc", "disable_python_no_global_handlers"],
 
   modules = [
     (name = "workflow.py", pythonModule = embed "workflow.py"),
@@ -22,9 +21,8 @@ const pyWorker :Workerd.Worker = (
 );
 
 const jsWorker :Workerd.Worker = (
-  compatibilityDate = "2025-03-04",
 
-  compatibilityFlags = ["nodejs_compat"],
+  compatibilityFlags = ["nodejs_compat", "rpc", "disable_python_no_global_handlers"],
 
   modules = [
     (name = "worker", esModule = embed "worker.js"),

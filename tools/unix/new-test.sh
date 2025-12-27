@@ -20,7 +20,6 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "$TEST_BASENAME.js")
         ],
-       compatibilityDate = "$(date +%Y-%m-%d)",
        compatibilityFlags = ["nodejs_compat_v2"],
       )
     ),

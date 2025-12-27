@@ -8,9 +8,8 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
-  compatibilityDate = "2025-08-15",
 
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "rpc", "python_no_global_handlers"],
 
   modules = [
     (name = "worker.py", pythonModule = embed "worker.py"),
