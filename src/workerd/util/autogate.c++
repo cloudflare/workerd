@@ -35,6 +35,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "compression-stream-use-state-machine"_kj;
     case AutogateKey::IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE:
       return "identity-transform-stream-use-state-machine"_kj;
+    case AutogateKey::RPC_USE_EXTERNAL_PUSHER:
+      return "rpc-use-external-pusher"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

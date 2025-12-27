@@ -9,6 +9,7 @@
 
 #include <workerd/api/deferred-proxy.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/external-pusher.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/io-thread-context.h>
@@ -772,6 +773,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return thread.getHeaderIds();
   }
 
+  kj::Rc<ExternalPusherImpl> getExternalPusher();
+
   // Subrequest channel numbers for the two special channels.
   // NULL = The channel used by global fetch() when the Request has no fetcher attached.
   // NEXT = DEPRECATED: The fetcher attached to Requests delivered by a FetchEvent, so that we can
@@ -1011,6 +1014,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
   //   objects which reference `deleteQueue` in their destructors.
   OwnedObjectList ownedObjects;
+
+  kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
 
   // Implementation detail of makeCachePutStream().
 
