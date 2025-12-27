@@ -91,14 +91,7 @@ export default {
         ? ['pipeThrough() should throw if readable/writable getters throw']
         : [],
   },
-  'piping/then-interception.any.js': {
-    comment:
-      'failed: expected Wrappable::tryUnwrapOpaque(isolate, handle) != nullptr',
-    expectedFailures: [
-      'piping should not be observable',
-      'tee should not be observable',
-    ],
-  },
+  'piping/then-interception.any.js': {},
   'piping/throwing-options.any.js': {},
   'piping/transform-streams.any.js': {},
 
