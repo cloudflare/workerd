@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workerd/io/io-context.h>
+#include <workerd/jsg/external-tags.h>
 #include <workerd/jsg/jsg.h>
 
 #include <capnp/dynamic.h>
@@ -218,8 +219,9 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
       void* schemaAsPtr;
       memcpy(&schemaAsPtr, &schema, sizeof(schema));
 
+      constexpr auto tag = static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpSchema);
       auto constructor = v8::FunctionTemplate::New(
-          js.v8Isolate, &constructorCallback, v8::External::New(js.v8Isolate, schemaAsPtr));
+          js.v8Isolate, &constructorCallback, v8::External::New(js.v8Isolate, schemaAsPtr, tag));
 
       auto prototype = constructor->PrototypeTemplate();
       auto signature = v8::Signature::New(js.v8Isolate, constructor);
@@ -321,9 +323,10 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
 
     for (auto& method: methods) {
       auto name = jsg::v8StrIntern(js.v8Isolate, method.getProto().getName());
+      constexpr auto tag = static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpInterfaceMethod);
       prototype->Set(name,
           v8::FunctionTemplate::New(js.v8Isolate, &methodCallback,
-              v8::External::New(js.v8Isolate, &method), signature, 0,
+              v8::External::New(js.v8Isolate, &method, tag), signature, 0,
               v8::ConstructorBehavior::kThrow));
     }
   }
@@ -332,7 +335,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     jsg::liftKj(args, [&]() {
       auto data = args.Data();
       KJ_ASSERT(data->IsExternal());
-      void* schemaAsPtr = data.As<v8::External>()->Value();
+      constexpr auto tag = static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpSchema);
+      void* schemaAsPtr = data.As<v8::External>()->Value(tag);
       capnp::Schema schema;
       memcpy(&schema, &schemaAsPtr, sizeof(schema));
 
@@ -365,8 +369,9 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     jsg::liftKj(args, [&]() {
       auto data = args.Data();
       KJ_ASSERT(data->IsExternal());
+      constexpr auto tag = static_cast<uint16_t>(jsg::JsgExternalIds::kCapnpInterfaceMethod);
       auto& method =
-          *reinterpret_cast<capnp::InterfaceSchema::Method*>(data.As<v8::External>()->Value());
+          *reinterpret_cast<capnp::InterfaceSchema::Method*>(data.As<v8::External>()->Value(tag));
 
       auto& js = jsg::Lock::from(args.GetIsolate());
       auto obj = args.This();
