@@ -25,9 +25,25 @@ namespace workerd::jsg {
 template <typename T, bool = isGcVisitable<T>()>
 struct OpaqueWrappable;
 
-#define PUBLIC_VISIBILITY [[clang::lto_visibility_public]]
+// Type tag used to identify OpaqueWrappable<T> types without relying on RTTI/dynamic_cast.
+// This avoids issues with thin-LTO where vtable deduplication can cause dynamic_cast
+// to fail for final classes. See https://github.com/llvm/llvm-project/issues/71196
+// The address of the inline static variable serves as a unique type tag per T.
+// inline static variables have external linkage and are guaranteed to have
+// a single address across all translation units.
+template <typename T>
+struct OpaqueWrappableTypeTag final {
+  inline static const char storage = 0;
+  static const void* get() {
+    return &storage;
+  }
+};
 
-struct PUBLIC_VISIBILITY OpaqueWrappableBase: public Wrappable {
+struct OpaqueWrappableBase: public Wrappable {
+  const void* const typeTag;
+
+  explicit OpaqueWrappableBase(const void* tag): typeTag(tag) {}
+
   kj::StringPtr jsgGetMemoryName() const override final {
     return "OpaqueWrappable"_kjc;
   }
@@ -36,16 +52,13 @@ struct PUBLIC_VISIBILITY OpaqueWrappableBase: public Wrappable {
   }
 };
 
-// We declare OpaqueWrappable<T> specializations here as final to allow the compiler
-// to optimize dynamic_cast<T*> to simply check if the vtable is equal to T's vtable.
-// This provides a minor performance improvement when interacting with opaque-wrapped
-// values.
-
 template <typename T>
-struct PUBLIC_VISIBILITY OpaqueWrappable<T, false> final: public OpaqueWrappableBase {
+struct OpaqueWrappable<T, false> final: public OpaqueWrappableBase {
   // Used to implement wrapOpaque().
 
-  OpaqueWrappable(T&& value): value(kj::mv(value)) {}
+  OpaqueWrappable(T&& value)
+      : OpaqueWrappableBase(OpaqueWrappableTypeTag<T>::get()),
+        value(kj::mv(value)) {}
 
   T value;
   bool movedAway = false;
@@ -56,10 +69,12 @@ struct PUBLIC_VISIBILITY OpaqueWrappable<T, false> final: public OpaqueWrappable
 };
 
 template <typename T>
-struct PUBLIC_VISIBILITY OpaqueWrappable<T, true> final: public OpaqueWrappableBase {
+struct OpaqueWrappable<T, true> final: public OpaqueWrappableBase {
   // When T is GC-visitable, make sure to implement visitation.
 
-  OpaqueWrappable(T&& value): value(kj::mv(value)) {}
+  OpaqueWrappable(T&& value)
+      : OpaqueWrappableBase(OpaqueWrappableTypeTag<T>::get()),
+        value(kj::mv(value)) {}
 
   T value;
   bool movedAway = false;
@@ -109,8 +124,9 @@ T unwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
 
   Wrappable& wrappable = KJ_ASSERT_NONNULL(Wrappable::tryUnwrapOpaque(isolate, handle));
-  OpaqueWrappable<T>* holder = dynamic_cast<OpaqueWrappable<T>*>(&wrappable);
-  KJ_ASSERT(holder != nullptr);
+  auto* base = static_cast<OpaqueWrappableBase*>(&wrappable);
+  KJ_ASSERT(base->typeTag == OpaqueWrappableTypeTag<T>::get());
+  auto* holder = static_cast<OpaqueWrappable<T>*>(base);
   KJ_ASSERT(!holder->movedAway);
   holder->movedAway = true;
   return kj::mv(holder->value);
@@ -125,8 +141,9 @@ T& unwrapOpaqueRef(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
 
   Wrappable& wrappable = KJ_ASSERT_NONNULL(Wrappable::tryUnwrapOpaque(isolate, handle));
-  OpaqueWrappable<T>* holder = dynamic_cast<OpaqueWrappable<T>*>(&wrappable);
-  KJ_ASSERT(holder != nullptr);
+  auto* base = static_cast<OpaqueWrappableBase*>(&wrappable);
+  KJ_ASSERT(base->typeTag == OpaqueWrappableTypeTag<T>::get());
+  auto* holder = static_cast<OpaqueWrappable<T>*>(base);
   KJ_ASSERT(!holder->movedAway);
   return holder->value;
 }
@@ -140,8 +157,9 @@ void dropOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   static_assert(!isV8Ref<T>());
 
   KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, handle)) {
-    OpaqueWrappable<T>* holder = dynamic_cast<OpaqueWrappable<T>*>(&wrappable);
-    if (holder != nullptr) {
+    auto* base = static_cast<OpaqueWrappableBase*>(&wrappable);
+    if (base->typeTag == OpaqueWrappableTypeTag<T>::get()) {
+      auto* holder = static_cast<OpaqueWrappable<T>*>(base);
       holder->movedAway = true;
       auto drop KJ_UNUSED = kj::mv(holder->value);
     }
