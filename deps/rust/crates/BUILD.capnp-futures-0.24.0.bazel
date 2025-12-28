@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "derive_more",
+    name = "capnp_futures",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,26 +28,22 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "add",
-        "add_assign",
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__derive_more-impl-2.1.0//:derive_more_impl",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=derive_more",
+        "crate-name=capnp-futures",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.1.0",
+    version = "0.24.0",
+    deps = [
+        "@crates_vendor__capnp-0.24.0//:capnp",
+        "@crates_vendor__futures-channel-0.3.31//:futures_channel",
+        "@crates_vendor__futures-util-0.3.31//:futures_util",
+    ],
 )

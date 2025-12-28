@@ -47,13 +47,13 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.145",
+    version = "1.0.148",
     deps = [
-        "@crates_vendor__itoa-1.0.15//:itoa",
+        "@crates_vendor__itoa-1.0.17//:itoa",
         "@crates_vendor__memchr-2.7.6//:memchr",
-        "@crates_vendor__ryu-1.0.21//:ryu",
         "@crates_vendor__serde_core-1.0.228//:serde_core",
-        "@crates_vendor__serde_json-1.0.145//:build_script_build",
+        "@crates_vendor__serde_json-1.0.148//:build_script_build",
+        "@crates_vendor__zmij-1.0.0//:zmij",
     ],
 )
 
@@ -108,7 +108,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.145",
+    version = "1.0.148",
     visibility = ["//visibility:private"],
 )
 

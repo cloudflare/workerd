@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "itoa",
+    name = "derive_more",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,17 +28,26 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "add",
+        "add_assign",
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__derive_more-impl-2.1.1//:derive_more_impl",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=itoa",
+        "crate-name=derive_more",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.15",
+    version = "2.1.1",
 )
