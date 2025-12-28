@@ -55,7 +55,7 @@ rust_library(
     ],
     version = "2.0.111",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.103//:proc_macro2",
+        "@crates_vendor__proc-macro2-1.0.104//:proc_macro2",
         "@crates_vendor__quote-1.0.42//:quote",
         "@crates_vendor__unicode-ident-1.0.22//:unicode_ident",
     ],

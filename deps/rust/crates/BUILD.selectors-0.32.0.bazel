@@ -45,7 +45,7 @@ rust_library(
     deps = [
         "@crates_vendor__bitflags-2.10.0//:bitflags",
         "@crates_vendor__cssparser-0.35.0//:cssparser",
-        "@crates_vendor__derive_more-2.1.0//:derive_more",
+        "@crates_vendor__derive_more-2.1.1//:derive_more",
         "@crates_vendor__log-0.4.29//:log",
         "@crates_vendor__new_debug_unreachable-1.0.6//:debug_unreachable",
         "@crates_vendor__phf-0.11.3//:phf",
