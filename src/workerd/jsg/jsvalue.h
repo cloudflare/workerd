@@ -155,9 +155,6 @@ class JsValue final {
   JsValue structuredClone(
       Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers = kj::none) KJ_WARN_UNUSED_RESULT;
 
-  template <typename T>
-  static kj::Maybe<T&> tryGetExternal(Lock& js, const JsValue& value) KJ_WARN_UNUSED_RESULT;
-
   explicit JsValue(v8::Local<v8::Value> inner);
 
  private:
@@ -525,12 +522,6 @@ inline kj::Maybe<T> JsValue::tryCast() const {
   else {
     return kj::none;
   }
-}
-
-template <typename T>
-inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
-  if (!value.isExternal()) return kj::none;
-  return kj::Maybe<T&>(*static_cast<T*>(value.inner.As<v8::External>()->Value()));
 }
 
 template <typename T>
@@ -905,10 +896,6 @@ inline JsObject Lock::objNoProto() {
 
 inline JsMap Lock::map() {
   return JsMap(v8::Map::New(v8Isolate));
-}
-
-inline JsValue Lock::external(void* ptr) {
-  return JsValue(v8::External::New(v8Isolate, ptr));
 }
 
 inline JsValue Lock::error(kj::StringPtr message) {
