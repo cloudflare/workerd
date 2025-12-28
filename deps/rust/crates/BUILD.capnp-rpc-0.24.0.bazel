@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "dtoa",
+    name = "capnp_rpc",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,16 +29,21 @@ rust_library(
         ],
     ),
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=dtoa",
+        "crate-name=capnp-rpc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.10",
+    version = "0.24.0",
+    deps = [
+        "@crates_vendor__capnp-0.24.0//:capnp",
+        "@crates_vendor__capnp-futures-0.24.0//:capnp_futures",
+        "@crates_vendor__futures-0.3.31//:futures",
+    ],
 )
