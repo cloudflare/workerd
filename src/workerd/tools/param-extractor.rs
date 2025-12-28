@@ -1,5 +1,6 @@
 use std::ffi::OsStr;
 use std::fs::File;
+use std::io::BufRead;
 use std::io::BufReader;
 use std::io::BufWriter;
 use std::io::Write;
@@ -57,9 +58,21 @@ fn main() -> Result<()> {
     let clang_ast = args.value_from_os_str("--input", |path_str| {
         let path = Path::new(path_str);
         let file = File::open(path)?;
-        let serde = match path.extension().and_then(OsStr::to_str) {
-            Some("gz") => serde_json::from_reader(BufReader::new(GzDecoder::new(file))),
-            _ => serde_json::from_reader(BufReader::new(file)),
+        let serde = {
+            let reader: &mut dyn BufRead = {
+                if Some("gz") == path.extension().and_then(OsStr::to_str) {
+                    &mut BufReader::new(GzDecoder::new(file))
+                } else {
+                    &mut BufReader::new(file)
+                }
+            };
+
+            let mut deserializer = serde_json::Deserializer::from_reader(reader);
+            // Note: serde_json doesn't support custom recursion limits, only disabling.
+            // We disable the limit to handle deeply nested AST structures (default 128 is
+            // insufficient for the clang AST dump, which can be deeply nested).
+            deserializer.disable_recursion_limit();
+            ClangNode::deserialize(&mut deserializer)
         };
         serde.map_err(anyhow::Error::from)
     })?;
