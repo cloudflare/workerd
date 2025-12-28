@@ -71,11 +71,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   void enableDebugPort(kj::String addr) {
     debugPortOverride = kj::mv(addr);
   }
-  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
-    pythonConfig.packageDiskCacheRoot = kj::mv(dkr);
+  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.packageDiskCacheRoot = kj::mv(dir);
   }
-  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
-    pythonConfig.pyodideDiskCacheRoot = kj::mv(dkr);
+  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.pyodideDiskCacheRoot = kj::mv(dir);
   }
   void setPythonCreateSnapshot() {
     pythonConfig.createSnapshot = true;
@@ -85,6 +85,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   }
   void setPythonLoadSnapshot(kj::String snapshot) {
     pythonConfig.loadSnapshotFromDisk = kj::mv(snapshot);
+  }
+  void setPythonSnapshotDirectory(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.snapshotDirectory = kj::mv(dir);
   }
 
   // Runs the server using the given config.

@@ -559,10 +559,23 @@ jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key)
   }
 }
 
-// TODO: DiskCache is currently only used for --python-save-snapshot. Can we use ArtifactBundler for
-// this instead and remove DiskCache completely?
 void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   KJ_IF_SOME(root, cacheRoot) {
+    kj::Path path(key);
+    auto file = root->tryOpenFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+    KJ_IF_SOME(f, file) {
+      f->writeAll(data);
+    } else {
+      KJ_LOG(ERROR, "DiskCache: Failed to open file", key);
+    }
+  } else {
+    return;
+  }
+}
+
+void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
+  KJ_IF_SOME(root, snapshotRoot) {
     kj::Path path(key);
     auto file = root->tryOpenFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 

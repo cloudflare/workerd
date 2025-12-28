@@ -24,6 +24,10 @@ def _py_wd_test_helper(
     templated_src = name_flag.replace("/", "-") + "@template"
     templated_src = "/".join(src.split("/")[:-1] + [templated_src])
 
+    pkg_tag = BUNDLE_VERSION_INFO[python_flag]["packages"]
+    data = data + ["@all_pyodide_wheels_%s//:whls" % pkg_tag]
+    args = args + ["--pyodide-package-disk-cache-dir", "../all_pyodide_wheels_%s" % pkg_tag]
+
     load_snapshot = None
     pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
     if use_snapshot == "stacked":
@@ -182,7 +186,7 @@ def py_wd_test(
         "--pyodide-bundle-disk-cache-dir",
         "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)/..",
         "--experimental",
-        "--pyodide-package-disk-cache-dir",
+        "--python-snapshot-dir",
         ".",
     ]
     tags = tags + ["py_wd_test", "python"]

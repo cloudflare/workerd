@@ -161,7 +161,7 @@ kj::Maybe<kj::Array<kj::byte>> tryGetMetadataSnapshot(
     const PythonConfig& pythonConfig, api::pyodide::SnapshotToDisk snapshotToDisk) {
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot = kj::none;
   KJ_IF_SOME(snapshot, pythonConfig.loadSnapshotFromDisk) {
-    auto& root = KJ_REQUIRE_NONNULL(pythonConfig.packageDiskCacheRoot);
+    auto& root = KJ_REQUIRE_NONNULL(pythonConfig.snapshotDirectory);
     kj::Path path(snapshot);
     auto maybeFile = root->tryOpenFile(path);
     if (maybeFile == kj::none) {
@@ -612,7 +612,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
       // Inject disk cache module
       modules->addBuiltinModule("pyodide-internal:disk_cache",
-          lockParam.alloc<DiskCache>(impl->pythonConfig.packageDiskCacheRoot),
+          lockParam.alloc<DiskCache>(
+              impl->pythonConfig.packageDiskCacheRoot, impl->pythonConfig.snapshotDirectory),
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject a (disabled) SimplePythonLimiter

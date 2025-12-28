@@ -832,7 +832,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       return true;
     }, "Save a baseline snapshot to the disk cache")
         .addOptionWithArg({"python-load-snapshot"}, CLI_METHOD(setPythonLoadSnapshot), "<path>",
-            "Load a snapshot from the package disk cache.");
+            "Load a snapshot from the python snapshot directory.")
+        .addOptionWithArg({"python-snapshot-dir"}, CLI_METHOD(setPythonSnapshotDirectory), "<path>",
+            "Set the snapshot snapshot directory.");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
@@ -1119,6 +1121,12 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 
   void setPythonLoadSnapshot(kj::StringPtr pathStr) {
     server->setPythonLoadSnapshot(kj::str(pathStr));
+  }
+  void setPythonSnapshotDirectory(kj::StringPtr pathStr) {
+    kj::Path path = fs->getCurrentPath().eval(pathStr);
+    kj::Maybe<kj::Own<const kj::Directory>> dir =
+        fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
+    server->setPythonSnapshotDirectory(kj::mv(dir));
   }
 
   void parsePythonCompatFlag(kj::StringPtr compatFlagStr) {
