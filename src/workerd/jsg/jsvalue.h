@@ -530,7 +530,8 @@ inline kj::Maybe<T> JsValue::tryCast() const {
 template <typename T>
 inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
   if (!value.isExternal()) return kj::none;
-  return kj::Maybe<T&>(*static_cast<T*>(value.inner.As<v8::External>()->Value()));
+  return kj::Maybe<T&>(
+      *static_cast<T*>(value.inner.As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault)));
 }
 
 template <typename T>
@@ -908,7 +909,7 @@ inline JsMap Lock::map() {
 }
 
 inline JsValue Lock::external(void* ptr) {
-  return JsValue(v8::External::New(v8Isolate, ptr));
+  return JsValue(v8::External::New(v8Isolate, ptr, v8::kExternalPointerTypeTagDefault));
 }
 
 inline JsValue Lock::error(kj::StringPtr message) {
