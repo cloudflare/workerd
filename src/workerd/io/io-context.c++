@@ -285,6 +285,9 @@ kj::Date IoContext::IncomingRequest::now() {
 
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!wasDelivered) {
+    KJ_IF_SOME(w, workerTracer) {
+      w->markUnused();
+    }
     // Request was never added to context->incomingRequests in the first place.
     return;
   }
