@@ -440,7 +440,6 @@ wd_cc_library(
         "encoding-shared.h",
     ],
     implementation_deps = [
-        "//src/workerd/io:features",
         "//src/workerd/util:strings",
         "@simdutf",
     ],
@@ -449,6 +448,7 @@ wd_cc_library(
         ":util",
         "//src/rust/encoding",
         "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/io:features",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
         "@simdutf",
@@ -629,6 +629,7 @@ kj_test(
     src = "encoding-test.c++",
     deps = [
         ":encoding",
+        "//src/workerd/io",
     ],
 )
 
