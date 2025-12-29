@@ -58,7 +58,8 @@ declare global {
   function token(): string;
   function setup(func: UnknownFunc | Record<string, unknown>): void;
   function add_completion_callback(func: UnknownFunc): void;
-  function garbageCollect(): void;
+  // Provided by /common/gc.js
+  function garbageCollect(): Promise<void>;
   function format_value(val: unknown): string;
   function createBuffer(
     type: 'ArrayBuffer' | 'SharedArrayBuffer',
@@ -137,12 +138,6 @@ globalThis.setup = (func): void => {
 
 globalThis.add_completion_callback = (func: UnknownFunc): void => {
   globalThis.state.completionCallbacks.push(func);
-};
-
-globalThis.garbageCollect = (): void => {
-  if (typeof gc === 'function') {
-    gc();
-  }
 };
 
 globalThis.format_value = (val): string => {
