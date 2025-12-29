@@ -153,21 +153,23 @@ export const testClearIntervalAcceptsBothTypes = {
 };
 
 // Test that the refresh() method works correctly
+// NOTE: Using larger timing margins (200ms/100ms instead of 50ms/30ms) because
+// Windows has ~15.6ms timer resolution and significant jitter under load.
 export const testTimeoutRefresh = {
   async test() {
     let callCount = 0;
 
-    // Create a timeout that would fire in 50ms
+    // Create a timeout that would fire in 200ms
     const timeout = globalThis.setTimeout(() => {
       callCount++;
-    }, 50);
+    }, 200);
 
-    // Wait 30ms, then refresh (reset the timer)
-    await new Promise((r) => globalThis.setTimeout(r, 30));
+    // Wait 100ms, then refresh (reset the timer)
+    await new Promise((r) => globalThis.setTimeout(r, 100));
     timeout.refresh();
 
-    // Wait another 30ms (total 60ms from start, but only 30ms from refresh)
-    await new Promise((r) => globalThis.setTimeout(r, 30));
+    // Wait another 100ms (total 200ms from start, but only 100ms from refresh)
+    await new Promise((r) => globalThis.setTimeout(r, 100));
 
     // The callback shouldn't have fired yet since we refreshed
     strictEqual(
@@ -176,8 +178,8 @@ export const testTimeoutRefresh = {
       'Callback should not have fired yet after refresh'
     );
 
-    // Wait another 30ms for the refreshed timer to fire
-    await new Promise((r) => globalThis.setTimeout(r, 30));
+    // Wait another 150ms for the refreshed timer to fire (with margin)
+    await new Promise((r) => globalThis.setTimeout(r, 150));
 
     // Now it should have fired
     strictEqual(callCount, 1, 'Callback should have fired once');
