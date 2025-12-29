@@ -90,6 +90,13 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     pythonConfig.snapshotDirectory = kj::mv(dir);
   }
 
+  // Set the compatibility date to use for all workers. When set, workers in the config must NOT
+  // specify compatibilityDate (an error is reported if they do). This is used for testing to
+  // ensure tests run with both old and new compat dates.
+  void setTestCompatibilityDateOverride(kj::String date) {
+    testCompatibilityDateOverride = kj::mv(date);
+  }
+
   // Runs the server using the given config.
   kj::Promise<void> run(jsg::V8System& v8System,
       config::Config::Reader conf,
@@ -137,6 +144,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     .loadSnapshotFromDisk = kj::none};
 
   bool experimental = false;
+
+  // When set, overrides compatibilityDate for all workers and enforces that workers don't
+  // specify their own compatibilityDate.
+  kj::Maybe<kj::String> testCompatibilityDateOverride;
 
   Worker::LoggingOptions loggingOptions;
 

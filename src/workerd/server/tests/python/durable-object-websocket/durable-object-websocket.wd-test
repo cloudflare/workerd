@@ -9,9 +9,8 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
-  compatibilityDate = "2025-11-10",
 
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
 
   modules = [
     (name = "worker.py", pythonModule = embed "worker.py"),
@@ -32,9 +31,8 @@ const mainWorker :Workerd.Worker = (
 
 
 const testerWorker :Workerd.Worker = (
-  compatibilityDate = "2025-11-10",
 
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
 
   modules = [
     (name = "tester.js", esModule = embed "tester.js"),

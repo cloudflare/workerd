@@ -10,7 +10,6 @@ const unitTests :Workerd.Config = (
            commonJsModule = "exports.foo = 1",
            namedExports = ["foo", "bar"])
         ],
-        compatibilityDate = "2023-01-15",
         compatibilityFlags = ["nodejs_compat"],
       )
     ),

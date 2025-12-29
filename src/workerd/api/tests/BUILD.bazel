@@ -346,6 +346,7 @@ wd_test(
     src = "autogate-enabled-test.wd-test",
     args = ["--experimental"],
     data = ["autogate-enabled-test.js"],
+    generate_all_compat_flags_variant = False,
     generate_default_variant = False,
 )
 
@@ -355,6 +356,24 @@ wd_test(
     args = ["--experimental"],
     data = ["autogate-disabled-test.js"],
     generate_all_autogates_variant = False,
+)
+
+# Test that verifies compat flags are ENABLED - only runs in @all-compat-flags variant
+wd_test(
+    src = "compat-flag-enabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["compat-flag-enabled-test.js"],
+    generate_all_autogates_variant = False,
+    generate_default_variant = False,
+)
+
+# Test that verifies compat flags are DISABLED - only runs in default variant
+wd_test(
+    src = "compat-flag-disabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["compat-flag-disabled-test.js"],
+    generate_all_autogates_variant = False,
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
@@ -447,6 +466,7 @@ wd_test(
     src = "no-to-string-tag-test.wd-test",
     args = ["--experimental"],
     data = ["no-to-string-tag-test.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
