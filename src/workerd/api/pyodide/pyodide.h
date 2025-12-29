@@ -57,6 +57,7 @@ class PyodidePackageManager {
 struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
+  kj::Maybe<kj::Own<const kj::Directory>> snapshotDirectory;
   const PyodideBundleManager pyodideBundleManager;
   const PyodidePackageManager pyodidePackageManager;
   bool createSnapshot;
@@ -426,17 +427,23 @@ class DiskCache: public jsg::Object {
   static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT;  // always set to kj::none
 
   const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot;
+  const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot;
 
  public:
-  DiskCache(): cacheRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
-  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot): cacheRoot(cacheRoot) {};
+  DiskCache(): cacheRoot(NULL_CACHE_ROOT), snapshotRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
+  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot,
+      const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot)
+      : cacheRoot(cacheRoot),
+        snapshotRoot(snapshotRoot) {};
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
+  void putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
 
   JSG_RESOURCE_TYPE(DiskCache) {
     JSG_METHOD(get);
     JSG_METHOD(put);
+    JSG_METHOD(putSnapshot);
   }
 };
 
