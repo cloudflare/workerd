@@ -512,6 +512,18 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
     } else if ((value)->IsArrayBufferView()) {
       auto view = value.As<v8::ArrayBufferView>();
       return view->ByteLength();
+    } else {
+      // Per the WHATWG Streams spec, ByteLengthQueuingStrategy.size should return
+      // GetV(chunk, "byteLength"), which means getting the byteLength property
+      // from any object, not just ArrayBuffer/ArrayBufferView.
+      KJ_IF_SOME(obj, jsg::JsValue(value).tryCast<jsg::JsObject>()) {
+        auto byteLength = obj.get(js, "byteLength"_kj);
+        KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
+          KJ_IF_SOME(val, num.value(js)) {
+            return static_cast<uint32_t>(val);
+          }
+        }
+      }
     }
   }
   return kj::none;
