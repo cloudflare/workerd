@@ -1178,7 +1178,7 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
         // to something else (e.g. Done, Canceling, Canceled), we discard the leftover.
         KJ_IF_SOME(leftOver, context->maybeLeftOver) {
           if (activePtr->state.is<Active::Idle>()) {
-            activePtr->state = kj::mv(leftOver);
+            activePtr->state.transitionTo<Active::Readable>(kj::mv(leftOver));
           }
         }
         return context->totalRead;
@@ -1306,14 +1306,14 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
       // We must do this BEFORE starting the next read so that active->state is Idle
       // when the next read's promise continuation tries to save its leftover.
       kj::Maybe<Active::Readable> maybeLeftover;
-      KJ_IF_SOME(readable, active->state.tryGet<Active::Readable>()) {
+      KJ_IF_SOME(readable, active->state.tryGetUnsafe<Active::Readable>()) {
         maybeLeftover = kj::mv(readable);
       }
 
       // Start working on the next read. At this point, if there was leftover, we've
       // moved it to maybeLeftover, so the next read can safely set its leftover
       // to active->state when it completes.
-      active->state.init<Active::Idle>();
+      active->state.transitionTo<Active::Idle>();
       readPromise = pumpReadImpl(*active, buffers[currentReadBuf], minBytes, minReadPolicy);
 
       {
