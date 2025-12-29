@@ -745,11 +745,9 @@ export default {
     expectedFailures:
       process.platform === 'win32'
         ? [
-            'controller argument should be passed to start method',
             'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
           ]
         : [
-            'controller argument should be passed to start method',
             'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
             'underlyingSink argument should be converted after queuingStrategy argument',
           ],
@@ -770,7 +768,6 @@ export default {
   'writable-streams/general.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
-      'desiredSize on a writer for an errored stream',
       "WritableStream's strategy.size should not be called as a method",
       'closed and ready on a released writer',
       'ready promise should fire before closed on releaseLock',

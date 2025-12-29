@@ -1130,7 +1130,9 @@ template <typename Self>
 WritableImpl<Self>::WritableImpl(
     jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
     : owner(owner.addWeakRef()),
-      signal(kj::mv(abortSignal)) {}
+      signal(kj::mv(abortSignal)) {
+  flags.pedanticWpt = FeatureFlags::get(js).getPedanticWpt();
+}
 
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::abort(
@@ -3244,7 +3246,11 @@ void WritableStreamDefaultController::error(
   impl.error(js, JSG_THIS, reason.orDefault(js.undefined()));
 }
 
-ssize_t WritableStreamDefaultController::getDesiredSize() {
+kj::Maybe<ssize_t> WritableStreamDefaultController::getDesiredSize() {
+  // Per the spec, desiredSize should be null when the stream is erroring.
+  if (impl.flags.pedanticWpt && isErroring()) {
+    return kj::none;
+  }
   return impl.getDesiredSize();
 }
 
@@ -3403,7 +3409,7 @@ kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
       return kj::none;
     }
     KJ_CASE_ONEOF(controller, Controller) {
-      return controller->getDesiredSize();
+      return controller->getDesiredSize().map([](ssize_t size) -> int { return size; });
     }
   }
   KJ_UNREACHABLE;
@@ -3414,6 +3420,10 @@ kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroring(jsg::Lock
     return controller->isErroring(js);
   }
   return kj::none;
+}
+
+bool WritableStreamDefaultController::isErroring() const {
+  return impl.state.is<StreamStates::Erroring>();
 }
 
 kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroredOrErroring(jsg::Lock& js) {
