@@ -871,6 +871,12 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(!flags.started && !flags.starting);
   flags.starting = true;
 
+  // Per the streams spec, the size function should be called with `undefined` as `this`,
+  // not as a method on the strategy object.
+  KJ_IF_SOME(sizeFunc, algorithms.size) {
+    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.v8Undefined()));
+  }
+
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     flags.started = true;
     flags.starting = false;
@@ -1446,6 +1452,11 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
   algorithms.close = kj::mv(underlyingSink.close);
   algorithms.abort = kj::mv(underlyingSink.abort);
   algorithms.size = kj::mv(queuingStrategy.size);
+  // Per the streams spec, the size function should be called with `undefined` as `this`,
+  // not as a method on the strategy object.
+  KJ_IF_SOME(sizeFunc, algorithms.size) {
+    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.v8Undefined()));
+  }
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());

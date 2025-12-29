@@ -768,7 +768,6 @@ export default {
   'writable-streams/general.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
-      "WritableStream's strategy.size should not be called as a method",
       'closed and ready on a released writer',
       'ready promise should fire before closed on releaseLock',
     ],
