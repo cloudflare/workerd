@@ -555,21 +555,20 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
       writeResult.written == length, "writeInto must completely overwrite the backing buffer");
 
   auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());
-  utf8_length = simdutf::utf8_length_from_utf16_with_replacement(data, length).count;
+  auto lengthResult = simdutf::utf8_length_from_utf16_with_replacement(data, length);
+  utf8_length = lengthResult.count;
+
+  if (lengthResult.error == simdutf::SURROGATE) {
+    // If there are surrogates there may be unpaired surrogates. Fix them.
+    simdutf::to_well_formed_utf16(data, length, data);
+  } else {
+    KJ_DASSERT(lengthResult.error == simdutf::SUCCESS);
+  }
 
   auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
-  auto result = simdutf::convert_utf16_to_utf8_with_errors(
-      data, length, reinterpret_cast<char*>(backingStore->Data()));
-
-  if (result.error != simdutf::SUCCESS) {
-    // Oh, no, there are unpaired surrogates.  This is hopefully rare.
-    simdutf::to_well_formed_utf16(data, length, data);
-    [[maybe_unused]] auto written =
-        simdutf::convert_utf16_to_utf8(data, length, reinterpret_cast<char*>(backingStore->Data()));
-    KJ_DASSERT(written == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
-  } else {
-    KJ_DASSERT(result.count == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
-  }
+  [[maybe_unused]] auto written =
+      simdutf::convert_utf16_to_utf8(data, length, reinterpret_cast<char*>(backingStore->Data()));
+  KJ_DASSERT(written == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
 
   auto array =
       v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8_length);
