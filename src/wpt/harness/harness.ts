@@ -295,7 +295,6 @@ const EXCLUDED_PATHS = new Set([
   '/resources/utils.js',
   '/common/utils.js',
   '/common/get-host-info.sub.js',
-  '/common/gc.js',
   '/common/sab.js',
 ]);
 
