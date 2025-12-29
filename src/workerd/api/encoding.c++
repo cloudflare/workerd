@@ -555,7 +555,7 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
       writeResult.written == length, "writeInto must completely overwrite the backing buffer");
 
   auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());
-  utf8_length = simdutf::utf8_length_from_utf16_with_replacement(data, length);
+  utf8_length = simdutf::utf8_length_from_utf16_with_replacement(data, length).count;
 
   auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
   auto result = simdutf::convert_utf16_to_utf8_with_errors(
@@ -632,7 +632,7 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
 
     size_t chunkUtf8Len;
     if constexpr (UTF16) {
-      chunkUtf8Len = simdutf::utf8_length_from_utf16_with_replacement(data + pos, chunkSize);
+      chunkUtf8Len = simdutf::utf8_length_from_utf16_with_replacement(data + pos, chunkSize).count;
     } else {
       chunkUtf8Len = simdutf::utf8_length_from_latin1(data + pos, chunkSize);
     }
@@ -728,7 +728,8 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
       auto data = reinterpret_cast<const char16_t*>(view.data16());
       read = findBestFit(data, length, bufferSize);
       if (read != 0) {
-        KJ_DASSERT(simdutf::utf8_length_from_utf16_with_replacement(data, read) <= bufferSize);
+        KJ_DASSERT(
+            simdutf::utf8_length_from_utf16_with_replacement(data, read).count <= bufferSize);
         simdutf::result result =
             simdutf::convert_utf16_to_utf8_with_errors(data, read, outputBuf.begin());
         if (result.error == simdutf::SUCCESS) {
