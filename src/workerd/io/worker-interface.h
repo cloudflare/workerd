@@ -133,9 +133,7 @@ class WorkerInterface: public kj::HttpService {
 
     // Get event info for tracing.
     // Return none if this event type doesn't need tracing.
-    virtual kj::Maybe<tracing::EventInfo> getEventInfo() const {
-      return kj::none;
-    }
+    virtual tracing::EventInfo getEventInfo() const = 0;
 
     // If the CustomEvent fails before any of the other methods are called, this may be invoked
     // to report the failure reason.

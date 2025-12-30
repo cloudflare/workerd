@@ -530,7 +530,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
 
 }  // namespace
 
-kj::Maybe<tracing::EventInfo> QueueCustomEvent::getEventInfo() const {
+tracing::EventInfo QueueCustomEvent::getEventInfo() const {
   kj::String queueName;
   uint32_t batchSize;
   KJ_SWITCH_ONEOF(params) {
@@ -544,7 +544,7 @@ kj::Maybe<tracing::EventInfo> QueueCustomEvent::getEventInfo() const {
     }
   }
 
-  return tracing::EventInfo(tracing::QueueEventInfo(kj::mv(queueName), batchSize));
+  return tracing::QueueEventInfo(kj::mv(queueName), batchSize);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(

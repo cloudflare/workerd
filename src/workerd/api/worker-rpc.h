@@ -468,8 +468,8 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override {
-    return tracing::EventInfo(tracing::JsRpcEventInfo(nullptr));
+  tracing::EventInfo getEventInfo() const override {
+    return tracing::JsRpcEventInfo(nullptr);
   }
 
   rpc::JsRpcTarget::Client getCap() {

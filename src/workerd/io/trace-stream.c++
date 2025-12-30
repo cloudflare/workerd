@@ -907,8 +907,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 };
 }  // namespace
 
-kj::Maybe<EventInfo> TailStreamCustomEvent::getEventInfo() const {
-  return EventInfo(TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
+EventInfo TailStreamCustomEvent::getEventInfo() const {
+  return TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(

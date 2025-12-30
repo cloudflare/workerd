@@ -185,26 +185,26 @@ HibernatableWebSocketCustomEvent::HibernatableWebSocketCustomEvent(
       manager(manager) {}
 
 // TODO(cleanup): Try to reduce duplication with consumeParams()
-kj::Maybe<tracing::EventInfo> HibernatableWebSocketCustomEvent::getEventInfo() const {
+tracing::EventInfo HibernatableWebSocketCustomEvent::getEventInfo() const {
   // Try to extract event type from params if available
   KJ_SWITCH_ONEOF(params) {
     KJ_CASE_ONEOF(socketParams, HibernatableSocketParams) {
       KJ_SWITCH_ONEOF(socketParams.eventType) {
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
-          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
-              tracing::HibernatableWebSocketEventInfo::Message()));
+          return tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Message());
         }
         KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
-          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
-              tracing::HibernatableWebSocketEventInfo::Message()));
+          return tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Message());
         }
         KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
-          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
-              tracing::HibernatableWebSocketEventInfo::Close{close.code, close.wasClean}));
+          return tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Close{close.code, close.wasClean});
         }
         KJ_CASE_ONEOF(error, HibernatableSocketParams::Error) {
-          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
-              tracing::HibernatableWebSocketEventInfo::Error()));
+          return tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Error());
         }
       }
     }
@@ -214,17 +214,16 @@ kj::Maybe<tracing::EventInfo> HibernatableWebSocketCustomEvent::getEventInfo() c
       switch (payload.which()) {
         case rpc::HibernatableWebSocketEventMessage::Payload::TEXT:
         case rpc::HibernatableWebSocketEventMessage::Payload::DATA:
-          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
-              tracing::HibernatableWebSocketEventInfo::Message()));
+          return tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Message());
         case rpc::HibernatableWebSocketEventMessage::Payload::CLOSE: {
           auto close = payload.getClose();
-          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
-              tracing::HibernatableWebSocketEventInfo::Close{
-                close.getCode(), close.getWasClean()}));
+          return tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Close{close.getCode(), close.getWasClean()});
         }
         case rpc::HibernatableWebSocketEventMessage::Payload::ERROR:
-          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
-              tracing::HibernatableWebSocketEventInfo::Error()));
+          return tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Error());
       }
       KJ_UNREACHABLE;
     }

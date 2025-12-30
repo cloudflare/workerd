@@ -639,8 +639,8 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
 }
 }  // namespace
 
-kj::Maybe<tracing::EventInfo> TraceCustomEvent::getEventInfo() const {
-  return tracing::EventInfo(tracing::TraceEventInfo(traces));
+tracing::EventInfo TraceCustomEvent::getEventInfo() const {
+  return tracing::TraceEventInfo(traces);
 }
 
 auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,

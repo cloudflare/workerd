@@ -629,7 +629,7 @@ class TraceCustomEvent final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
+  tracing::EventInfo getEventInfo() const override;
 
   kj::Promise<Result> notSupported() override {
     KJ_UNIMPLEMENTED("trace event not supported");
