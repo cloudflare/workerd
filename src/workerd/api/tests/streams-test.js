@@ -572,8 +572,7 @@ export const readableStreamFromCancelResolvesWhenReturnMissing = {
     const reader = rs.getReader();
 
     // Should resolve without error when return() is missing
-    await reader.cancel();
-    await reader.closed;
+    await Promise.all([reader.cancel(), reader.closed]);
   },
 };
 
