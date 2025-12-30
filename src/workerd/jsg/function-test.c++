@@ -193,7 +193,7 @@ struct FunctionContext: public ContextGlobalObject {
 
   kj::String testTryCatch2(Lock& js, jsg::Function<int()> thrower) {
     // Here we prove that the macro is if-else friendly.
-    // Note that clang-format doesn't recognize it as a `try`, so we get wonky formatting.
+    // Note that clang-format doesn't recognize it as a `try`, so we get wonky formatting. Oh well.
     if (true) JSG_TRY {
         return kj::str(thrower(js));
       }

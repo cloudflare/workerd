@@ -505,31 +505,46 @@ jsg::Promise<void> maybeRunAlgorithm(
   // throws synchronously, we have to convert that synchronous throw
   // into a proper rejected jsg::Promise.
   KJ_IF_SOME(algorithm, maybeAlgorithm) {
-    // We need two layers of tryCatch here, unfortunately. The inner layer
+    // We need two layers of JSG_TRY here, unfortunately. The inner layer
     // covers the algorithm implementation itself and is our typical error
     // handling path. It ensures that if the algorithm throws an exception,
     // that is properly converted in to a rejected promise that is *then*
-    // handled by the onFailure handler that is passed in. The outer tryCatch
+    // handled by the onFailure handler that is passed in. The outer JSG_TRY
     // handles the rare and generally unexpected failure of the calls to
     // .then() itself, which can throw JS exceptions synchronously in certain
     // rare cases. For those we return a rejected promise but do not call the
     // onFailure case since such errors are generally indicative of a fatal
     // condition in the isolate (e.g. out of memory, other fatal exception, etc).
-    return js.tryCatch([&] {
+    JSG_TRY {
       KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-        return js
-            .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
-                [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
-            .then(js, ioContext.addFunctor(kj::mv(onSuccess)),
-                ioContext.addFunctor(kj::mv(onFailure)));
+        auto getInnerPromise = [&]() -> jsg::Promise<void> {
+          JSG_TRY {
+            return algorithm(js, kj::fwd<decltype(args)>(args)...);
+          }
+          catch (...) {
+            jsg::Value exception = getCaughtExceptionAsJsg();
+            return js.rejectedPromise<void>(kj::mv(exception));
+          }
+        };
+        return getInnerPromise().then(
+            js, ioContext.addFunctor(kj::mv(onSuccess)), ioContext.addFunctor(kj::mv(onFailure)));
       } else {
-        return js
-            .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
-                [&](jsg::Value&& exception) {
-          return js.rejectedPromise<void>(kj::mv(exception));
-        }).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+        auto getInnerPromise = [&]() -> jsg::Promise<void> {
+          JSG_TRY {
+            return algorithm(js, kj::fwd<decltype(args)>(args)...);
+          }
+          catch (...) {
+            jsg::Value exception = getCaughtExceptionAsJsg();
+            return js.rejectedPromise<void>(kj::mv(exception));
+          }
+        };
+        return getInnerPromise().then(js, kj::mv(onSuccess), kj::mv(onFailure));
       }
-    }, [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+    }
+    catch (...) {
+      jsg::Value exception = getCaughtExceptionAsJsg();
+      return js.rejectedPromise<void>(kj::mv(exception));
+    }
   }
 
   // If the algorithm does not exist, we just handle it as a success and move on.
@@ -1529,10 +1544,11 @@ jsg::Promise<void> WritableImpl<Self>::write(
   size_t size = 1;
   KJ_IF_SOME(sizeFunc, algorithms.size) {
     kj::Maybe<jsg::Value> failure;
-    js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
+    JSG_TRY_CATCH(getSizeFuncException) try { size = sizeFunc(js, value); } catch (...) {
+      auto exception = getSizeFuncException();
       startErroring(js, self.addRef(), exception.getHandle(js));
       failure = kj::mv(exception);
-    });
+    }
     KJ_IF_SOME(exception, failure) {
       return js.rejectedPromise<void>(kj::mv(exception));
     }
