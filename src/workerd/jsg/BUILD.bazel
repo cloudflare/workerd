@@ -203,6 +203,7 @@ wd_cc_library(
         "url.h",
     ],
     implementation_deps = [
+        "//src/workerd/util:own-util",
         "//src/workerd/util:strings",
         "@ada-url",
     ],

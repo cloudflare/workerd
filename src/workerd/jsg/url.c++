@@ -1,5 +1,6 @@
 #include "url.h"
 
+#include <workerd/util/own-util.h>
 #include <workerd/util/strings.h>
 
 #include <kj/hash.h>
@@ -592,10 +593,6 @@ inline bool isValidCodepoint(uint32_t codepoint, bool first) {
       u_hasBinaryProperty(codepoint, UCHAR_ID_CONTINUE);
 };
 
-inline kj::Maybe<kj::String> strFromMaybePtr(const kj::Maybe<kj::StringPtr>& ptr) {
-  return ptr.map([](const kj::StringPtr& ptr) { return kj::str(ptr); });
-}
-
 using Canonicalizer = kj::Maybe<kj::String>(kj::StringPtr, kj::Maybe<kj::StringPtr>);
 
 kj::Maybe<kj::String> canonicalizeProtocol(
@@ -704,7 +701,7 @@ kj::Maybe<kj::String> chooseStr(kj::Maybe<kj::String> str, kj::Maybe<kj::StringP
   KJ_IF_SOME(s, str) {
     return kj::mv(s);
   } else {
-    return strFromMaybePtr(other);
+    return mapCopyString(other);
   }
 }
 
@@ -748,13 +745,13 @@ kj::String escapePatternString(kj::ArrayPtr<const char> str) {
 struct CompileComponentOptions {
   kj::Maybe<char> delimiter;
   kj::Maybe<char> prefix;
-  kj::String segmentWildcardRegexp;
+  kj::ConstString segmentWildcardRegexp;
 
-  kj::String initSegmentWildcardRegexp() {
+  kj::ConstString initSegmentWildcardRegexp() {
     KJ_IF_SOME(c, delimiter) {
-      return kj::str("[^\\", c, "]+");
+      return kj::ConstString(kj::str("[^\\", c, "]+"));
     } else {
-      return kj::str("[^]+");
+      return kj::ConstString("[^]+"_kjc);
     }
   }
 
@@ -1203,7 +1200,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
   size_t index = 0;
   size_t nextNumericName = 0;
 
-  auto segmentWildcardRegex = options.segmentWildcardRegexp.asPtr();
+  const kj::ConstString& segmentWildcardRegex = options.segmentWildcardRegexp;
 
   auto appendToPendingFixedValue = [&](kj::StringPtr value) mutable {
     KJ_IF_SOME(pending, pendingFixedValue) {
@@ -1314,7 +1311,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       }
       return kj::none;
     }
-    auto regexValue = kj::String();
+    kj::String regexValue = nullptr;
     KJ_IF_SOME(token, regexOrWildcardToken) {
       if (token.type == Token::Type::ASTERISK) {
         regexValue = kj::str(".*");
@@ -1468,9 +1465,10 @@ RegexAndNameList generateRegexAndNameList(
 
     KJ_DASSERT(part.name.size() > 0);
     nameList.add(kj::mv(part.name));
-    auto value = part.type == Part::Type::SEGMENT_WILDCARD ? kj::str(options.segmentWildcardRegexp)
-        : part.type == Part::Type::FULL_WILDCARD           ? kj::str(".*")
-                                                           : kj::mv(part.value);
+    kj::ConstString value = part.type == Part::Type::SEGMENT_WILDCARD
+        ? options.segmentWildcardRegexp.clone()
+        : part.type == Part::Type::FULL_WILDCARD ? ".*"_kjc
+                                                 : kj::ConstString(kj::mv(part.value));
 
     if (part.prefix == kj::none && part.suffix == kj::none) {
       if (part.modifier == Part::Modifier::NONE || part.modifier == Part::Modifier::OPTIONAL) {
@@ -1702,7 +1700,7 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
   bool protocolMatchesSpecialScheme = false;
 
   UrlPattern::Init result{
-    .baseUrl = strFromMaybePtr(options.baseUrl),
+    .baseUrl = mapCopyString(options.baseUrl),
   };
 
   kj::Array<Token> tokens = nullptr;
