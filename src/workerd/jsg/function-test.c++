@@ -191,10 +191,27 @@ struct FunctionContext: public ContextGlobalObject {
     });
   }
 
+  kj::String testTryCatch2(Lock& js, jsg::Function<int()> thrower) {
+    // Here we prove that the macro is if-else friendly.
+    // Note that clang-format doesn't recognize it as a `try`, so we get wonky formatting.
+    if (true) JSG_TRY {
+        return kj::str(thrower(js));
+      }
+    catch (...) {
+      Value exception = getCaughtExceptionAsJsg();
+      auto handle = exception.getHandle(js);
+      return kj::str("caught: ", handle);
+    }
+    else {
+      KJ_UNREACHABLE;
+    }
+  }
+
   JSG_RESOURCE_TYPE(FunctionContext) {
     JSG_METHOD(test);
     JSG_METHOD(test2);
     JSG_METHOD(testTryCatch);
+    JSG_METHOD(testTryCatch2);
 
     JSG_READONLY_PROTOTYPE_PROPERTY(square, getSquare);
     JSG_READONLY_PROTOTYPE_PROPERTY(gcLambda, getGcLambda);
@@ -220,6 +237,9 @@ KJ_TEST("jsg::Function<T>") {
 
   e.expectEval("testTryCatch(() => { return 123; })", "string", "123");
   e.expectEval("testTryCatch(() => { throw new Error('foo'); })", "string", "caught: Error: foo");
+
+  e.expectEval("testTryCatch2(() => { return 123; })", "string", "123");
+  e.expectEval("testTryCatch2(() => { throw new Error('foo'); })", "string", "caught: Error: foo");
 }
 
 }  // namespace

@@ -2995,6 +2995,123 @@ inline Value SelfRef::asValue(Lock& js) const {
   return Value(js.v8Isolate, getHandle(js).As<v8::Value>());
 }
 
+namespace _ {
+
+// Helper class for converting caught exceptions to JSG Values in catch blocks.
+// This is used internally by the JSG_TRY macro to provide clean exception handling
+// that works with both JavaScript exceptions and KJ exceptions.
+//
+// The class automatically sets up a v8::TryCatch when constructed and can convert
+// any caught exception to a jsg::Value when called. It handles:
+// - JsExceptionThrown: Returns the V8 exception value directly
+// - kj::Exception: Converts to JS using Lock::exceptionToJs()
+//
+// Usage is typically through JSG_TRY macro:
+//   JSG_TRY {
+//     someCodeThatMightThrow();
+//   }
+//   catch (...) {
+//     auto jsException = getCaughtExceptionAsJsg();
+//     // Handle the JS-converted exception
+//   }
+//
+// IMPORTANT: The operator() can only be called once per instance, as it consumes
+// the internal TryCatch holder. Subsequent calls will throw.
+//
+// WARNING: Never call the exception converter function in the try block!
+// It will fail with a raw `throw` because there's no active exception to re-throw.
+// Only call it from within catch blocks where an exception has actually been caught.
+class GetCaughtExceptionAsJsg {
+ public:
+  GetCaughtExceptionAsJsg() {
+    maybeHolder.emplace(Lock::current().v8Isolate);
+  }
+
+  // Handle any in-flight JsExceptionThrown or kj::Exception. If a JsExceptionThrown is found, our
+  // v8::TryCatch's currently held exception value is returned. If a kj::Exception is found, it is
+  // converted to a JS value by passing it and `options` to `Lock::exceptionToJs()`.
+  Value operator()(ExceptionToJsOptions options = {}) {
+    // This function always consumes the holder.
+    KJ_DEFER(maybeHolder = kj::none);
+    auto& tryCatch =
+        KJ_REQUIRE_NONNULL(maybeHolder, "getCaughtExceptionAsJsg() can only be called once")
+            .tryCatch;
+
+    // Same logic as that found in `jsg::Lock::tryCatch()`.
+    try {
+      throw;
+    } catch (JsExceptionThrown&) {
+      if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+        tryCatch.ReThrow();
+        throw;
+      }
+      return Value(Lock::current().v8Isolate, tryCatch.Exception());
+    } catch (kj::Exception& e) {
+      return Lock::current().exceptionToJs(kj::mv(e), options);
+    }
+  }
+
+ private:
+  // Simple wrapper to work around v8::TryCatch's deleted operator new.
+  struct Holder {
+    v8::TryCatch tryCatch;
+    explicit Holder(v8::Isolate* isolate): tryCatch(isolate) {}
+  };
+
+  kj::Maybe<Holder> maybeHolder;
+};
+
+}  // namespace _
+
+// General-purpose macro for introducing scoped variables into a statement. Uses the
+// KJ_IF_SOME-style scoping trick where the variable is declared in an if condition that's always
+// false, followed by an else that executes the actual statement. This allows the variable to be in
+// scope for the entire statement, and more importantly to go out of scope at the end of the
+// statement without needing braces. The scope is tied to the statement itself, not to a block.
+//
+// It is valid to use multiple KJ_STMT_SCOPED macros for a single statement.
+//
+// TODO(now): Move to libkj.
+#define KJ_STMT_SCOPED(decl)                                                                       \
+  if (decl; false) {                                                                               \
+  } else
+
+// JSG_TRY_CATCH macro for exception handling with a custom-named exception converter.
+// Unlike JSG_TRY, this doesn't include the `try` keyword, giving more explicit control.
+// More transparent to colleagues and clang-format since it shows raw try-catch syntax.
+//
+// Usage:
+//   JSG_TRY_CATCH(getCaughtExceptionAsJsg) try {
+//     someCodeThatMightThrow();
+//   } catch (...) {
+//     jsg::Value exception = getCaughtExceptionAsJsg();
+//     // Handle the JS-converted exception
+//   }
+//
+// WARNING: Never call the exception converter function in the try block!
+// It will fail with a raw `throw` because there's no active exception to re-throw.
+// Only call it from within catch blocks where an exception has actually been caught.
+#define JSG_TRY_CATCH(name) KJ_STMT_SCOPED(::workerd::jsg::_::GetCaughtExceptionAsJsg name)
+
+// JSG_TRY is a convenience macro implemented in terms of JSG_TRY_CATCH.
+// It automatically names the exception converter `getCaughtExceptionAsJsg` and includes the `try`
+// keyword.
+//
+// Note: This macro doesn't play well with clang-format due to the embedded `try` keyword.
+//
+// Usage:
+//   JSG_TRY {
+//     someCodeThatMightThrow();
+//   } catch (...) {
+//     jsg::Value exception = getCaughtExceptionAsJsg();
+//     // Handle the JS-converted exception
+//   }
+//
+// WARNING: Never call getCaughtExceptionAsJsg() in the try block!
+// It will fail with a raw `throw` because there's no active exception to re-throw.
+// Only call it from within catch blocks where an exception has actually been caught.
+#define JSG_TRY JSG_TRY_CATCH(getCaughtExceptionAsJsg) try
+
 }  // namespace workerd::jsg
 
 // clang-format off
