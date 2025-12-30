@@ -213,7 +213,7 @@ class AsyncGenerator final {
       if (active.returnExistsButNotCallable) {
         maybeActive = kj::none;
         return js.rejectedPromise<kj::Maybe<T>>(
-            js.typeError("property 'return' is not a function"_kj));
+            js.typeError("Property 'return' is not a function"_kj));
       }
 
       KJ_IF_SOME(return_, active.maybeReturn) {
