@@ -99,6 +99,7 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 - We use compatibility-date.capnp to introduce feature flags when we need to change the behavior
 
 ## Risky Changes
+- **Breaking changes** must be behind a compatibility flag (defined in `src/workerd/io/compatibility-date.capnp`)
 - We use autogates (defined in `src/workerd/util/autogate.*`) flags to make risky changes conditional for testing/slow rollout.
 
 ## Development Workflow
