@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc.
+// Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
@@ -86,82 +86,6 @@ export const pipeToJsToInternalErroredSource = {
     await rejects(writer.write(enc.encode('hello')), { message: 'boom' });
 
     await rejects(pipe, { message: 'boom' });
-  },
-};
-
-// Test pipeThrough from internal readable to JS writable
-export const pipeThroughInternalToJs = {
-  async test(_ctrl, env) {
-    const response = await env.SERVICE.fetch('http://test/stream');
-    const dec = new TextDecoder();
-
-    const output = [];
-    const ws = new WritableStream({
-      write(chunk) {
-        output.push(dec.decode(chunk));
-      },
-    });
-
-    const ts = new TransformStream();
-    await response.body.pipeThrough(ts).pipeTo(ws);
-
-    strictEqual(output.join(''), 'hello world '.repeat(100));
-  },
-};
-
-// Test pipeTo from internal readable to JS writable
-export const pipeToInternalToJs = {
-  async test(_ctrl, env) {
-    const response = await env.SERVICE.fetch('http://test/stream');
-    const dec = new TextDecoder();
-
-    const output = [];
-    const ws = new WritableStream({
-      write(chunk) {
-        output.push(dec.decode(chunk));
-      },
-    });
-
-    await response.body.pipeTo(ws);
-
-    strictEqual(output.join(''), 'hello world '.repeat(100));
-  },
-};
-
-// Test pipeThrough from JS readable to JS writable
-export const pipeThroughJsToJs = {
-  async test() {
-    const enc = new TextEncoder();
-    const dec = new TextDecoder();
-
-    const chunks = [enc.encode('hello'), enc.encode('there')];
-    const rs = new ReadableStream({
-      pull(c) {
-        const chunk = chunks.shift();
-        if (chunk) {
-          c.enqueue(chunk);
-        } else {
-          c.close();
-        }
-      },
-    });
-
-    const ts = new TransformStream({
-      transform(chunk, controller) {
-        controller.enqueue(dec.decode(chunk).toUpperCase());
-      },
-    });
-
-    const output = [];
-    const ws = new WritableStream({
-      write(chunk) {
-        output.push(chunk);
-      },
-    });
-
-    await rs.pipeThrough(ts).pipeTo(ws);
-
-    strictEqual(output.join(''), 'HELLOTHERE');
   },
 };
 

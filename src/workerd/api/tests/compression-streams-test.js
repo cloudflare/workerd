@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc.
+// Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
@@ -198,7 +198,7 @@ export const decompressionError = {
     // A second attempt to read also fails
     await rejects(reader.read(), TypeError);
 
-    // Also await the write promise to prevent unhandled rejection
+    // Ensure the write operation completes before the test ends
     await writePromise;
   },
 };
@@ -353,24 +353,14 @@ export const transformRoundtrip = {
   },
 };
 
-// Test fetch → TransformStream → CompressionStream pipeline
-// This exercises the pipe implementation of both internal and standard streams.
-// The specific bug that prompted this test is that the pipe implementation of internal
-// was not properly propagating the close signal from the JavaScript-backed
-// ReadableStream to the internal writable, causing the flow of data to hang.
+// Test piping JS-backed stream to internal Response body.
+// Regression test for close signal propagation from JS ReadableStream to internal writable.
 export const compressionPipeline = {
   async test(_ctrl, env) {
-    const { readable, writable } = new TransformStream();
+    const response = await env.SERVICE.fetch('http://test/compressionPipeline');
+    strictEqual(response.status, 200);
 
-    // Fetch data from service, pipe through JS TransformStream, compress, decompress
-    const fetchPromise = (async () => {
-      const response = await env.SERVICE.fetch('http://test/stream');
-      await response.body.pipeTo(writable);
-    })();
-
-    // Pipe through compression then decompression to verify data integrity
-    const compressed = readable.pipeThrough(new CompressionStream('gzip'));
-    const decompressed = compressed.pipeThrough(
+    const decompressed = response.body.pipeThrough(
       new DecompressionStream('gzip')
     );
 
@@ -381,17 +371,58 @@ export const compressionPipeline = {
     }
     result += dec.decode();
 
-    await fetchPromise;
+    strictEqual(result, 'hello world '.repeat(100));
+  },
+};
+
+// Test DecompressionStream readable piped to internal Response body.
+export const decompressionPipeline = {
+  async test(_ctrl, env) {
+    const response = await env.SERVICE.fetch(
+      'http://test/decompressionPipeline'
+    );
+    strictEqual(response.status, 200);
+
+    const dec = new TextDecoder();
+    let result = '';
+    for await (const chunk of response.body) {
+      result += dec.decode(chunk, { stream: true });
+    }
+    result += dec.decode();
 
     strictEqual(result, 'hello world '.repeat(100));
   },
 };
 
-// Default fetch handler for service binding requests
+// Test strictCompression: closing without finishing decompression should error
+export const strictCompressionCloseWithoutFinish = {
+  async test() {
+    const ds = new DecompressionStream('gzip');
+    const writer = ds.writable.getWriter();
+    await rejects(writer.close(), TypeError);
+  },
+};
+
+// Test strictCompression: trailing data after valid gzip stream should error
+export const strictCompressionTrailingData = {
+  async test() {
+    const ds = new DecompressionStream('gzip');
+    const writer = ds.writable.getWriter();
+
+    // Gzipped string "FOOBAR", plus a trailing 0xFF byte
+    const trailingStrm = new Uint8Array([
+      0x1f, 0x8b, 0x08, 0x00, 0xf9, 0x05, 0xb7, 0x59, 0x00, 0x03, 0x4b, 0xcb,
+      0xcf, 0x4f, 0x4a, 0x2c, 0x02, 0x00, 0x95, 0x1f, 0xf6, 0x9e, 0x06, 0x00,
+      0x00, 0x00, 0xff,
+    ]);
+
+    await rejects(writer.write(trailingStrm), TypeError);
+  },
+};
+
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     if (request.url.includes('/compressed')) {
-      // Return gzip-compressed data
       const data = 'hello world '.repeat(100);
       const enc = new TextEncoder();
       const { readable, writable } = new CompressionStream('gzip');
@@ -403,9 +434,23 @@ export default {
       });
     }
     if (request.url.includes('/stream')) {
-      // Return uncompressed streaming data
-      const data = 'hello world '.repeat(100);
-      return new Response(data);
+      return new Response('hello world '.repeat(100));
+    }
+    if (request.url.includes('/compressionPipeline')) {
+      // Pipe through TransformStream → CompressionStream → Response body (internal writable)
+      const response = await env.SERVICE.fetch('http://test/stream');
+      const { readable, writable } = new TransformStream();
+      response.body.pipeTo(writable);
+      const compressed = readable.pipeThrough(new CompressionStream('gzip'));
+      return new Response(compressed, { encodeBody: 'manual' });
+    }
+    if (request.url.includes('/decompressionPipeline')) {
+      // Pipe DecompressionStream readable → Response body (internal writable)
+      const response = await env.SERVICE.fetch('http://test/compressed');
+      const decompressed = response.body.pipeThrough(
+        new DecompressionStream('gzip')
+      );
+      return new Response(decompressed);
     }
     return new Response('Not found', { status: 404 });
   },

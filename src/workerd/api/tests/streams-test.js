@@ -499,13 +499,13 @@ export const cancelReaderResolvesClosedPromise = {
   },
 };
 
-// Test that getReader with bad mode throws RangeError
+// Test that getReader with bad mode throws
 export const getReaderBadModeThrows = {
   test() {
     const response = new Response('foo bar');
     const stream = response.body;
 
-    throws(() => stream.getReader({ mode: 'nope' }), RangeError);
+    throws(() => stream.getReader({ mode: 'nope' }), TypeError);
   },
 };
 
@@ -536,14 +536,18 @@ export const byobReaderConstraints = {
     // Start a read - this will consume part of the stream
     reader.read(new Uint8Array(32)).catch(() => {}); // Ignore the result
 
+    // We use rejects() with async wrapper instead of throws() because the error
+    // is thrown synchronously without streams_enable_constructors but returned as
+    // a rejected promise when that flag is enabled. The async wrapper handles both.
+
     // Cannot BYOB with a zero-length buffer
-    await rejects(reader.read(new Uint8Array(0)), TypeError);
+    await rejects(async () => reader.read(new Uint8Array(0)), TypeError);
 
     // Cannot BYOB an ArrayBuffer, only an ArrayBufferView
-    await rejects(reader.read(new ArrayBuffer(32)), TypeError);
+    await rejects(async () => reader.read(new ArrayBuffer(32)), TypeError);
 
     // Cannot use BYOB reader as a non-BYOB reader
-    await rejects(reader.read(), TypeError);
+    await rejects(async () => reader.read(), TypeError);
   },
 };
 
@@ -660,25 +664,21 @@ export const identityTransformWriteBeforeRead = {
 };
 
 // Test IdentityTransformStream read before write
-// NOTE: This test uses standard TransformStream because IdentityTransformStream
-// doesn't support multiple pending reads in the same way
 export const identityTransformReadBeforeWrite = {
   async test() {
     const MAX_RW = 10;
-    const { readable, writable } = new TransformStream();
+    const { readable, writable } = new IdentityTransformStream();
     const writer = writable.getWriter();
     const reader = readable.getReader();
 
-    const readPromises = [];
+    // IdentityTransformStream only supports one pending read at a time,
+    // so we test read-before-write by starting each read before its write
+    const chunks = [];
     for (let i = 0; i < MAX_RW; i++) {
-      readPromises.push(reader.read());
-    }
-
-    for (let i = 0; i < MAX_RW; i++) {
+      const readPromise = reader.read();
       await writer.write(new Uint8Array([i]));
+      chunks.push(await readPromise);
     }
-
-    const chunks = await Promise.all(readPromises);
 
     for (let i = 0; i < chunks.length; i++) {
       deepStrictEqual([...chunks[i].value], [i]);

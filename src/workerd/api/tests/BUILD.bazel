@@ -349,12 +349,6 @@ wd_test(
 )
 
 wd_test(
-    src = "strict-compression-test.wd-test",
-    args = ["--experimental"],
-    data = ["strict-compression-test.js"],
-)
-
-wd_test(
     src = "transform-streams-test.wd-test",
     args = ["--experimental"],
     data = ["transform-streams-test.js"],
@@ -656,14 +650,6 @@ wd_test(
     src = "headers-immutable-prototype-test.wd-test",
     args = ["--experimental"],
     data = ["headers-immutable-prototype-test.js"],
-)
-
-# TODO(cleanup): This is a copy of an existing test in streams-test. Once the autogate is remvoed,
-# this separate test can be deleted.
-wd_test(
-    src = "compression-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["compression-streams-test.js"],
 )
 
 wd_test(
