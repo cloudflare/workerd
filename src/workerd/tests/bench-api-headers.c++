@@ -92,8 +92,7 @@ BENCHMARK_F(ApiHeaders, set_append)(benchmark::State& state) {
       for (size_t i = 0; i < 1000; ++i) {
         auto headers = js.alloc<api::Headers>();
         // Set common headers with various representative lengths
-        for (int n = 0; n < 13; n++) {
-          auto& h = kHeaders[n];
+        for (auto& h: kHeaders) {
           if (h.append) {
             headers->append(env.js, kj::str(h.name), kj::str(h.value));
           } else {
