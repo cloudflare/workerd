@@ -514,6 +514,11 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
   size_t utf8_length = 0;
   auto length = str.length(js);
 
+#ifdef KJ_DEBUG
+  bool wasAlreadyFlat = str.isFlat();
+  KJ_DEFER({ KJ_ASSERT(wasAlreadyFlat || !str.isFlat()); });
+#endif
+
   // Note: writeInto() doesn't flatten the string - it calls writeTo() which chains through
   // Write2 -> WriteV2 -> WriteHelperV2 -> String::WriteToFlat.
   // This means we may read from multiple string segments, but that's fine for our use case.
@@ -533,16 +538,14 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
     auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
     if (utf8_length == length) {
       // ASCII fast path: no conversion needed, Latin-1 is same as UTF-8 for ASCII
-      memcpy(backingStore->Data(), latin1Buffer.begin(), length);
+      kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), length).copyFrom(latin1Buffer);
     } else {
       [[maybe_unused]] auto written =
           simdutf::convert_latin1_to_utf8(reinterpret_cast<const char*>(latin1Buffer.begin()),
               length, reinterpret_cast<char*>(backingStore->Data()));
       KJ_DASSERT(utf8_length == written);
     }
-    auto array = v8::Uint8Array::New(
-        v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8_length);
-    return jsg::JsUint8Array(array);
+    return jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, utf8_length);
   }
 
   // Use off-heap allocation for intermediate UTF-16 buffer to avoid wasting V8 heap space
@@ -570,24 +573,21 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
       simdutf::convert_utf16_to_utf8(data, length, reinterpret_cast<char*>(backingStore->Data()));
   KJ_DASSERT(written == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
 
-  auto array =
-      v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8_length);
-  return jsg::JsUint8Array(array);
+  return jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, utf8_length);
 }
 
 namespace {
 
 constexpr bool isSurrogatePair(uint16_t lead, uint16_t trail) {
   // We would like to use simdutf::trim_partial_utf16, but it's not guaranteed
-  // to work right on invalid UTF-16.
+  // to work right on invalid UTF-16. Hence, we need this method to check for
+  // surrogate pairs and correctly trim utf16 chunks.
   return (lead & 0xfc00) == 0xd800 && (trail & 0xfc00) == 0xdc00;
 }
 
 // Ignores surrogates conservatively.
 constexpr size_t simpleUtfEncodingLength(uint16_t c) {
-  if (c < 0x80) return 1;
-  if (c < 0x400) return 2;
-  return 3;
+  return 1 + (c >= 0x80) + (c >= 0x400);
 }
 
 // Find how many UTF-16 or Latin1 code units fit when converted to UTF-8.
@@ -669,6 +669,7 @@ size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
 
 }  // namespace
 
+// Test helpers used by encoding-test.c++ to verify findBestFit behavior.
 namespace test {
 
 size_t bestFit(const char* str, size_t bufferSize) {
@@ -710,7 +711,7 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
           simdutf::validate_ascii_with_errors(data, kj::min(length, bufferSize));
       written = read = result.count;
       auto outAddr = outputBuf.begin();
-      memcpy(outAddr, data, read);
+      kj::arrayPtr(outAddr, read).copyFrom(kj::arrayPtr(data, read));
       outAddr += read;
       data += read;
       length -= read;
