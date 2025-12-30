@@ -728,12 +728,7 @@ export default {
     ],
   },
   'writable-streams/byte-length-queuing-strategy.any.js': {},
-  'writable-streams/close.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'releaseLock() should not change the result of sync close()',
-    ],
-  },
+  'writable-streams/close.any.js': {},
   'writable-streams/constructor.any.js': {
     comment: 'These are mostly about validation of params',
     expectedFailures:

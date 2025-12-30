@@ -537,6 +537,51 @@ jsg::Promise<void> maybeRunAlgorithm(
   return js.resolvedPromise();
 }
 
+jsg::Promise<void> maybeRunAlgorithmAsync(
+    jsg::Lock& js, auto& maybeAlgorithm, auto&& onSuccess, auto&& onFailure, auto&&... args) {
+  // The algorithm is a JavaScript function mapped through jsg::Function.
+  // It is expected to return a Promise mapped via jsg::Promise. If the
+  // function returns synchronously, the jsg::Promise wrapper ensures
+  // that it is properly mapped to a jsg::Promise, but if the Promise
+  // throws synchronously, we have to convert that synchronous throw
+  // into a proper rejected jsg::Promise.
+  KJ_IF_SOME(algorithm, maybeAlgorithm) {
+    // We need two layers of tryCatch here, unfortunately. The inner layer
+    // covers the algorithm implementation itself and is our typical error
+    // handling path. It ensures that if the algorithm throws an exception,
+    // that is properly converted in to a rejected promise that is *then*
+    // handled by the onFailure handler that is passed in. The outer tryCatch
+    // handles the rare and generally unexpected failure of the calls to
+    // .then() itself, which can throw JS exceptions synchronously in certain
+    // rare cases. For those we return a rejected promise but do not call the
+    // onFailure case since such errors are generally indicative of a fatal
+    // condition in the isolate (e.g. out of memory, other fatal exception, etc).
+    return js.tryCatch([&] {
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+        return js
+            .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
+                [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
+            .then(js, ioContext.addFunctor(kj::mv(onSuccess)),
+                ioContext.addFunctor(kj::mv(onFailure)));
+      } else {
+        return js
+            .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
+                [&](jsg::Value&& exception) {
+          return js.rejectedPromise<void>(kj::mv(exception));
+        }).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+      }
+    }, [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+  }
+
+  // If the algorithm does not exist, we handle it as a success but ensure
+  // it runs asynchronously by scheduling via a resolved promise.
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    return js.resolvedPromise().then(js, ioContext.addFunctor(kj::mv(onSuccess)));
+  } else {
+    return js.resolvedPromise().then(js, kj::mv(onSuccess));
+  }
+}
+
 int getHighWaterMark(
     const UnderlyingSource& underlyingSource, const StreamQueuingStrategy& queuingStrategy) {
   bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
@@ -1218,7 +1263,14 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
             finishInFlightClose(js, kj::mv(self), reason.getHandle(js));
           });
 
-      maybeRunAlgorithm(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+      // Per the spec, the close algorithm should always run asynchronously, even if
+      // there's no user-provided close handler. This ensures that releaseLock() can
+      // reject the closed promise before the close completes.
+      if (FeatureFlags::get(js).getPedanticWpt()) {
+        maybeRunAlgorithmAsync(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+      } else {
+        maybeRunAlgorithm(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+      }
     }
     return;
   }
