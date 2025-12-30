@@ -1021,7 +1021,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
         // The escape character is invalid if it comes at the end!
         if (it == input.end()) {
           if (policy == Token::Policy::STRICT) {
-            return kj::str("Syntax error in URL Pattern: invalid escape character at ", pos);
+            return kj::ConstString(
+                kj::str("Syntax error in URL Pattern: invalid escape character at ", pos));
           }
           tokenList.add(Token::invalidChar(pos++, c));
         } else {
@@ -1043,7 +1044,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
         // The name token is invalid if it comes at the end!
         if (it == input.end()) {
           if (policy == Token::Policy::STRICT) {
-            return kj::str("Syntax error in URL Pattern: invalid name start at ", pos);
+            return kj::ConstString(
+                kj::str("Syntax error in URL Pattern: invalid name start at ", pos));
           }
           tokenList.add(Token::invalidChar(pos++, c));
           break;
@@ -1053,7 +1055,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
         if (start == pos) {
           // There was a name token suffix without a valid name! Oh, the inhumanity of it all.
           if (policy == Token::Policy::STRICT) {
-            return kj::str("Syntax error in URL Pattern: invalid name start at ", pos - 1);
+            return kj::ConstString(
+                kj::str("Syntax error in URL Pattern: invalid name start at ", pos - 1));
           }
           tokenList.add(Token::invalidChar(pos - 1, c));
         } else {
@@ -1073,7 +1076,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
         // The group token is invalid if it comes at the end!
         if (it == input.end()) {
           if (policy == Token::Policy::STRICT) {
-            return kj::str("Syntax error in URL Pattern: invalid regex start at ", pos);
+            return kj::ConstString(
+                kj::str("Syntax error in URL Pattern: invalid regex start at ", pos));
           }
           tokenList.add(Token::invalidChar(pos++, c));
           break;
@@ -1085,14 +1089,16 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
           auto rc = *it;
           if (!isAscii(rc)) {
             if (policy == Token::Policy::STRICT) {
-              return kj::str("Syntax error in URL Pattern: invalid regex character at ", pos);
+              return kj::ConstString(
+                  kj::str("Syntax error in URL Pattern: invalid regex character at ", pos));
             }
             tokenList.add(Token::invalidChar(pos, rc));
             error = true;
             break;
           } else if (pos == start && rc == '?') {
             if (policy == Token::Policy::STRICT) {
-              return kj::str("Syntax error in URL Pattern: invalid regex character at ", pos);
+              return kj::ConstString(
+                  kj::str("Syntax error in URL Pattern: invalid regex character at ", pos));
             }
             tokenList.add(Token::invalidChar(pos, rc));
             error = true;
@@ -1102,8 +1108,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
             // The escape character is invalid if it comes at the end of input
             if (it == input.end()) {
               if (policy == Token::Policy::STRICT) {
-                return kj::str(
-                    "Syntax error in URL Pattern: invalid escape character in regex at ", pos);
+                return kj::ConstString(kj::str(
+                    "Syntax error in URL Pattern: invalid escape character in regex at ", pos));
               }
               tokenList.add(Token::invalidChar(pos, rc));
               error = true;
@@ -1113,8 +1119,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
             rc = *it;
             if (!isAscii(rc)) {
               if (policy == Token::Policy::STRICT) {
-                return kj::str(
-                    "Syntax error in URL Pattern: invalid escaped character in regex at ", pos);
+                return kj::ConstString(kj::str(
+                    "Syntax error in URL Pattern: invalid escaped character in regex at ", pos));
               }
               tokenList.add(Token::invalidChar(pos, rc));
               error = true;
@@ -1136,7 +1142,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
             // The group open character is invalid if it comes at the end of input
             if (it == input.end()) {
               if (policy == Token::Policy::STRICT) {
-                return kj::str("Syntax error in URL Pattern: invalid group in regex at ", pos);
+                return kj::ConstString(
+                    kj::str("Syntax error in URL Pattern: invalid group in regex at ", pos));
               }
               tokenList.add(Token::invalidChar(pos, rc));
               error = true;
@@ -1146,7 +1153,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
             rc = *it;
             if (rc != '?') {
               if (policy == Token::Policy::STRICT) {
-                return kj::str("Syntax error in URL Pattern: invalid group in regex at ", pos);
+                return kj::ConstString(
+                    kj::str("Syntax error in URL Pattern: invalid group in regex at ", pos));
               }
               tokenList.add(Token::invalidChar(pos, rc));
               error = true;
@@ -1159,7 +1167,8 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
         if (error) continue;
         if (depth > 0 || start == pos) {
           if (policy == Token::Policy::STRICT) {
-            return kj::str("Syntax error in URL Pattern: invalid regex segment at ", start);
+            return kj::ConstString(
+                kj::str("Syntax error in URL Pattern: invalid regex segment at ", start));
           }
           tokenList.add(Token::invalidSegment(start, input.slice(start, pos - 1)));
         } else {
@@ -1186,7 +1195,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
     kj::StringPtr input, Canonicalizer canonicalizer, const CompileComponentOptions& options) {
   kj::Array<Token> tokens = nullptr;
   KJ_SWITCH_ONEOF(tokenize(input, Token::Policy::STRICT)) {
-    KJ_CASE_ONEOF(err, kj::String) {
+    KJ_CASE_ONEOF(err, kj::ConstString) {
       return kj::mv(err);
     }
     KJ_CASE_ONEOF(list, kj::Array<Token>) {
@@ -1282,7 +1291,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
 
   auto addPart = [&](kj::Maybe<kj::String> maybePrefix, kj::Maybe<Token&> nameToken,
                      kj::Maybe<Token&> regexOrWildcardToken, kj::Maybe<kj::String> suffix,
-                     kj::Maybe<Token&> modifierToken) mutable -> kj::Maybe<kj::String> {
+                     kj::Maybe<Token&> modifierToken) mutable -> kj::Maybe<kj::ConstString> {
     auto modifier = maybeTokenToModifier(modifierToken);
     if (nameToken == kj::none && regexOrWildcardToken == kj::none &&
         modifier == Part::Modifier::NONE) {
@@ -1292,7 +1301,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       return kj::none;
     }
     if (!maybeAddPartFromPendingFixedValue()) {
-      return kj::str("Syntax error in URL Pattern");
+      return kj::ConstString("Syntax error in URL Pattern"_kjc);
     }
     if (nameToken == kj::none && regexOrWildcardToken == kj::none) {
       KJ_DASSERT(suffix == kj::none || KJ_ASSERT_NONNULL(suffix).size() == 0);
@@ -1305,7 +1314,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
               .value = kj::mv(canonical),
             });
           } else {
-            return kj::str("Syntax error in URL Pattern");
+            return kj::ConstString("Syntax error in URL Pattern"_kjc);
           }
         }
       }
@@ -1324,12 +1333,12 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
     auto type = Part::Type::REGEXP;
     if (regexValue == segmentWildcardRegex) {
       type = Part::Type::SEGMENT_WILDCARD;
-      regexValue = kj::String();
+      regexValue = nullptr;
     } else if (regexValue == ".*") {
       type = Part::Type::FULL_WILDCARD;
-      regexValue = kj::String();
+      regexValue = nullptr;
     }
-    auto name = kj::String();
+    kj::String name = nullptr;
     KJ_IF_SOME(token, nameToken) {
       name = kj::String(token);
     } else if (regexOrWildcardToken != kj::none) {
@@ -1337,7 +1346,8 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
     }
 
     if (isDuplicateName(name)) {
-      return kj::str("Syntax error in URL Pattern: Duplicated part names [", name, "]");
+      return kj::ConstString(
+          kj::str("Syntax error in URL Pattern: Duplicated part names [", name, "]"));
     }
 
     kj::Maybe<kj::String> encodedPrefix;
@@ -1346,14 +1356,14 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       KJ_IF_SOME(canonical, canonicalizer(prefix, kj::none)) {
         encodedPrefix = kj::mv(canonical);
       } else {
-        return kj::str("Syntax error in URL Pattern");
+        return kj::ConstString("Syntax error in URL Pattern"_kjc);
       }
     }
     KJ_IF_SOME(s, suffix) {
       KJ_IF_SOME(canonical, canonicalizer(s, kj::none)) {
         encodedSuffix = kj::mv(canonical);
       } else {
-        return kj::str("Syntax error in URL Pattern");
+        return kj::ConstString("Syntax error in URL Pattern"_kjc);
       }
     }
 
@@ -1396,7 +1406,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
         }
       }
       if (!maybeAddPartFromPendingFixedValue()) {
-        return kj::str("Syntax error in URL Pattern");
+        return kj::ConstString("Syntax error in URL Pattern"_kjc);
       }
       auto modifierToken = tryConsumeModifierToken();
       KJ_IF_SOME(err,
@@ -1420,7 +1430,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       regexOrWildcardToken = tryConsumeRegexOrWildcardToken(nameToken);
       auto suffix = consumeText();
       if (tryConsumeToken(Token::Type::CLOSE) == kj::none) {
-        return kj::str("Syntax error in URL Pattern: Missing required close token");
+        return kj::ConstString("Syntax error in URL Pattern: Missing required close token"_kjc);
       }
       auto modifierToken = tryConsumeModifierToken();
       KJ_IF_SOME(err,
@@ -1431,11 +1441,11 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       continue;
     }
     if (!maybeAddPartFromPendingFixedValue()) {
-      return kj::str("Syntax error in URL Pattern");
+      return kj::ConstString("Syntax error in URL Pattern"_kjc);
     }
 
     if (tryConsumeToken(Token::Type::END) == kj::none) {
-      return kj::str("Syntax error in URL Pattern: Missing required end token");
+      return kj::ConstString("Syntax error in URL Pattern: Missing required end token"_kjc);
     }
   }
 
@@ -1655,7 +1665,7 @@ UrlPattern::Result<UrlPattern::Component> tryCompileComponent(kj::Maybe<kj::Stri
     const CompileComponentOptions& options) {
   auto pattern = kj::mv(input).orDefault([] { return kj::str(MODIFIER_ZERO_OR_MORE); });
   KJ_SWITCH_ONEOF(parsePattern(pattern, canonicalizer, options)) {
-    KJ_CASE_ONEOF(err, kj::String) {
+    KJ_CASE_ONEOF(err, kj::ConstString) {
       return kj::mv(err);
     }
     KJ_CASE_ONEOF(partList, kj::Array<Part>) {
@@ -1705,7 +1715,7 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
 
   kj::Array<Token> tokens = nullptr;
   KJ_SWITCH_ONEOF(tokenize(input, Token::Policy::LENIENT)) {
-    KJ_CASE_ONEOF(err, kj::String) {
+    KJ_CASE_ONEOF(err, kj::ConstString) {
       return kj::mv(err);
     }
     KJ_CASE_ONEOF(list, kj::Array<Token>) {
@@ -1840,7 +1850,7 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
     kj::Maybe<kj::String> input = makeComponentString();
     KJ_SWITCH_ONEOF(tryCompileComponent(
                         input, &canonicalizeProtocol, CompileComponentOptions::DEFAULT)) {
-      KJ_CASE_ONEOF(err, kj::String) {
+      KJ_CASE_ONEOF(err, kj::ConstString) {
         // Ignore any errors at this point. If the component is invalid we'll
         // catch it later.
         return false;
@@ -1991,7 +2001,8 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
   }
 
   if (result.protocol == kj::none && result.baseUrl == kj::none) {
-    return kj::str("Syntax error in URL Pattern: a relative pattern must have a base URL.");
+    return kj::ConstString(
+        "Syntax error in URL Pattern: a relative pattern must have a base URL."_kjc);
   }
 
   return kj::mv(result);
@@ -2011,7 +2022,7 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompileInit(
 
   KJ_SWITCH_ONEOF(tryCompileComponent(
                       init.protocol, &canonicalizeProtocol, CompileComponentOptions::DEFAULT)) {
-    KJ_CASE_ONEOF(err, kj::String) {
+    KJ_CASE_ONEOF(err, kj::ConstString) {
       return kj::mv(err);
     }
     KJ_CASE_ONEOF(component, UrlPattern::Component) {
@@ -2022,9 +2033,9 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompileInit(
 
   const auto handleComponent =
       [&](auto& input, Canonicalizer canonicalizer,
-          const CompileComponentOptions& options) -> kj::Maybe<kj::String> {
+          const CompileComponentOptions& options) -> kj::Maybe<kj::ConstString> {
     KJ_SWITCH_ONEOF(tryCompileComponent(input, canonicalizer, options)) {
-      KJ_CASE_ONEOF(err, kj::String) {
+      KJ_CASE_ONEOF(err, kj::ConstString) {
         return kj::mv(err);
       }
       KJ_CASE_ONEOF(component, UrlPattern::Component) {
@@ -2112,7 +2123,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
       result.baseUrl = kj::mv(base);
       maybeBaseUrl = kj::mv(url);
     } else {
-      return kj::str("Invalid base URL.");
+      return kj::ConstString("Invalid base URL."_kjc);
     }
   }
 
@@ -2184,7 +2195,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
   // each individually.
 
   bool isAbsolute = false;
-  auto scratch = ([&]() -> kj::OneOf<Url, kj::String> {
+  auto scratch = ([&]() -> kj::OneOf<Url, kj::ConstString> {
     KJ_IF_SOME(protocol, chooseStr(kj::mv(init.protocol), options.protocol)) {
       // The protocol value we are given might not be valid. We'll check by
       // attempting to use it to parse a URL.
@@ -2204,7 +2215,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         return kj::mv(parsed);
       } else {
         // Doh, parsing failed. The protocol component is invalid.
-        return kj::str("Invalid URL protocol component");
+        return kj::ConstString("Invalid URL protocol component"_kjc);
       }
     } else {
       // There was not protocol component in the init or options. We still might
@@ -2222,37 +2233,37 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
   })();
 
   KJ_SWITCH_ONEOF(scratch) {
-    KJ_CASE_ONEOF(err, kj::String) {
+    KJ_CASE_ONEOF(err, kj::ConstString) {
       // Invalid URL protocol component.
       return kj::mv(err);
     }
     KJ_CASE_ONEOF(url, Url) {
       KJ_IF_SOME(username, chooseStr(kj::mv(init.username), options.username)) {
         if (!url.setUsername(username.asPtr())) {
-          return kj::str("Invalid URL username component");
+          return kj::ConstString("Invalid URL username component"_kjc);
         }
         result.username = kj::str(url.getUsername());
       }
       KJ_IF_SOME(password, chooseStr(kj::mv(init.password), options.password)) {
         if (!url.setPassword(password.asPtr())) {
-          return kj::str("Invalid URL password component");
+          return kj::ConstString("Invalid URL password component"_kjc);
         }
         result.password = kj::str(url.getPassword());
       }
       KJ_IF_SOME(hostname, chooseStr(kj::mv(init.hostname), options.hostname)) {
         if (!isValidHostnameInput(hostname) || !url.setHostname(hostname.asPtr())) {
-          return kj::str("Invalid URL hostname component");
+          return kj::ConstString("Invalid URL hostname component"_kjc);
         }
         result.hostname = kj::str(url.getHostname());
       }
       KJ_IF_SOME(port, chooseStr(kj::mv(init.port), options.port)) {
         if (port.size() > 5 || !std::all_of(port.begin(), port.end(), isAsciiDigit)) {
-          return kj::str("Invalid URL port component");
+          return kj::ConstString("Invalid URL port component"_kjc);
         }
         if (port.size() == 0) {
           url.setPort(kj::none);
         } else if (!url.setPort(kj::Maybe(port.asPtr()))) {
-          return kj::str("Invalid URL port component");
+          return kj::ConstString("Invalid URL port component"_kjc);
         }
         result.port = kj::str(url.getPort());
       }
@@ -2262,7 +2273,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
           // or options. This tells us that we are not going to resolve the path
           // relative to the base URL at all.
           if (!url.setPathname(pathname.asPtr())) {
-            return kj::str("Invalid URL pathname component");
+            return kj::ConstString("Invalid URL pathname component"_kjc);
           }
           result.pathname = kj::str(url.getPathname());
         } else {
@@ -2275,11 +2286,11 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
             KJ_IF_SOME(resolved, base.resolve(pathname.asPtr())) {
               result.pathname = kj::str(resolved.getPathname());
             } else {
-              return kj::str("Invalid URL pathname component");
+              return kj::ConstString("Invalid URL pathname component"_kjc);
             }
           } else {
             if (!url.setPathname(pathname.asPtr())) {
-              return kj::str("Invalid URL pathname component");
+              return kj::ConstString("Invalid URL pathname component"_kjc);
             }
             result.pathname = kj::str(url.getPathname());
           }
@@ -2315,7 +2326,7 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(
     Init init, kj::Maybe<CompileOptions> maybeOptions) {
   auto options = maybeOptions.orDefault({});
   KJ_SWITCH_ONEOF(processInit(kj::mv(init))) {
-    KJ_CASE_ONEOF(err, kj::String) {
+    KJ_CASE_ONEOF(err, kj::ConstString) {
       return kj::mv(err);
     }
     KJ_CASE_ONEOF(init, UrlPattern::Init) {
@@ -2329,12 +2340,12 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(
     kj::StringPtr input, kj::Maybe<CompileOptions> maybeOptions) {
   auto options = maybeOptions.orDefault({});
   KJ_SWITCH_ONEOF(tryParseConstructorString(input, options)) {
-    KJ_CASE_ONEOF(err, kj::String) {
+    KJ_CASE_ONEOF(err, kj::ConstString) {
       return kj::mv(err);
     }
     KJ_CASE_ONEOF(init, UrlPattern::Init) {
       KJ_SWITCH_ONEOF(processInit(kj::mv(init))) {
-        KJ_CASE_ONEOF(err, kj::String) {
+        KJ_CASE_ONEOF(err, kj::ConstString) {
           return kj::mv(err);
         }
         KJ_CASE_ONEOF(init, UrlPattern::Init) {

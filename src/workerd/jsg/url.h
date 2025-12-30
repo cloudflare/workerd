@@ -245,7 +245,7 @@ class UrlPattern final {
   // If the value is T, the operation is successful.
   // If the value is kj::String, that's an Error message.
   template <typename T>
-  using Result = kj::OneOf<T, kj::String>;
+  using Result = kj::OneOf<T, kj::ConstString>;
 
   // An individual, compiled component of a URLPattern.
   class Component final {
