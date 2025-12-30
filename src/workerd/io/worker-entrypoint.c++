@@ -638,12 +638,6 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
     // TODO(someday) If the request responsible for fulfilling this alarm were to be cancelled, then
     // we could probably take over and try to fulfill it ourselves. Maybe we'd want to loop on
     // `actor.getAlarm()`? We'd have to distinguish between rescheduling and request cancellation.
-
-    // Mark the tracer as unused since we're not actually running this alarm - we're just waiting
-    // for the existing alarm's result.
-    KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-      t.markUnused();
-    }
     auto result = co_await promise;
     co_return result;
   }
