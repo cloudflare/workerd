@@ -31,6 +31,7 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/util/exception.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/use-perfetto-categories.h>
@@ -1429,11 +1430,11 @@ class Server::InspectorService final: public kj::HttpService, public kj::HttpSer
             KJ_LOG(INFO, kj::str("Inspector client attaching [", id, "]"));
             auto webSocket = response.acceptWebSocket(responseHeaders);
             kj::Duration timerOffset = 0 * kj::MILLISECONDS;
-            try {
+            KJ_TRY {
               co_return co_await ref->attachInspector(
                   isolateThreadExecutor->addRef(), timer, timerOffset, *webSocket);
-            } catch (...) {
-              auto exception = kj::getCaughtExceptionAsKj();
+            }
+            KJ_CATCH(kj::Exception & exception) {
               if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
                 // This likely just means that the inspector client was closed.
                 // Nothing to do here but move along.
@@ -1616,12 +1617,12 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
-    try {
+    KJ_TRY {
       SimpleResponseObserver responseWrapper(&fetchStatus, response);
       co_await KJ_ASSERT_NONNULL(inner).request(method, url, headers, requestBody, responseWrapper);
-    } catch (...) {
+    }
+    KJ_CATCH(kj::Exception & exception) {
       fetchStatus = 500;
-      auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
       kj::throwFatalException(kj::mv(exception));
     }
