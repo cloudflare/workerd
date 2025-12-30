@@ -536,11 +536,11 @@ export const readableStreamFromCancelRejectsWhenReturnNotMethod = {
 export const readableStreamFromCancelRejectsWhenReturnNonObject = {
   async test() {
     const iterable = {
-      next() {
-        return Promise.resolve({ value: undefined, done: true });
+      async next() {
+        return { value: undefined, done: true };
       },
-      return() {
-        return Promise.resolve(42); // fulfills with non-object
+      async return() {
+        return 42; // fulfills with non-object
       },
       [Symbol.asyncIterator]() {
         return this;
