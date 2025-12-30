@@ -42,6 +42,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Web Platform Tests**: `just wpt-test <test_name>`
 - **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`)
 
+### Testing with Autogates
+The `workerd:unsafe` module provides `isTestAutogateEnabled()` to check if the TEST_WORKERD autogate is enabled. This is useful for writing tests that need different behavior depending on whether autogates are enabled (e.g., in the `@all-autogates` test variant).
+
+To use `workerd:unsafe`, add `"unsafe_module"` to compatibilityFlags in your `.wd-test` file:
+```
+compatibilityFlags = ["nodejs_compat", "unsafe_module"],
+```
+
+Then import and use in your test:
+```js
+import unsafe from 'workerd:unsafe';
+
+const isEnabled = unsafe.isTestAutogateEnabled();
+```
+
 
 ## Architecture
 
