@@ -301,25 +301,31 @@ export const tsCancel = {
     // readable is canceled or the writable is aborted. Verify also that
     // errors thrown by the cancel function are propagated.
     {
-      const cancelFn = mock.fn(async (reason) => {
-        strictEqual(reason, 'boom');
-        await scheduler.wait(10);
+      let cancelCalled = false;
+      const { readable } = new TransformStream({
+        async cancel(reason) {
+          strictEqual(reason, 'boom');
+          await scheduler.wait(10);
+          cancelCalled = true;
+        },
       });
-      const { readable } = new TransformStream({ cancel: cancelFn });
-      strictEqual(cancelFn.mock.callCount(), 0);
+      ok(!cancelCalled);
       await readable.cancel('boom');
-      strictEqual(cancelFn.mock.callCount(), 1);
+      ok(cancelCalled);
     }
 
     {
-      const cancelFn = mock.fn(async (reason) => {
-        strictEqual(reason, 'boom');
-        await scheduler.wait(10);
+      let cancelCalled = false;
+      const { writable } = new TransformStream({
+        async cancel(reason) {
+          strictEqual(reason, 'boom');
+          await scheduler.wait(10);
+          cancelCalled = true;
+        },
       });
-      const { writable } = new TransformStream({ cancel: cancelFn });
-      strictEqual(cancelFn.mock.callCount(), 0);
+      ok(!cancelCalled);
       await writable.abort('boom');
-      strictEqual(cancelFn.mock.callCount(), 1);
+      ok(cancelCalled);
     }
 
     {
