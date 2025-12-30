@@ -471,11 +471,11 @@ export const readableStreamFromCancelRejectsWhenReturnRejects = {
   async test() {
     const rejectError = new Error('return error');
     const iterable = {
-      next() {
-        return Promise.resolve({ value: undefined, done: true });
+      async next() {
+        return { value: undefined, done: true };
       },
-      return() {
-        return Promise.reject(rejectError);
+      async return() {
+        throw rejectError;
       },
       [Symbol.asyncIterator]() {
         return this;
