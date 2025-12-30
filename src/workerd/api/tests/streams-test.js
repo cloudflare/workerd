@@ -514,8 +514,8 @@ export const readableStreamFromCancelRejectsWhenReturnThrows = {
 export const readableStreamFromCancelRejectsWhenReturnNotMethod = {
   async test() {
     const iterable = {
-      next() {
-        return Promise.resolve({ value: undefined, done: true });
+      async next() {
+        return { value: undefined, done: true };
       },
       return: 42, // exists but not callable
       [Symbol.asyncIterator]() {
