@@ -9,6 +9,19 @@
 namespace workerd::api {
 namespace test {
 
+// These tests verify the findBestFit() function used by TextEncoder.encodeInto().
+//
+// bestFit(input, bufferSize) returns the number of input code units that can be
+// fully converted to UTF-8 and fit within the given output buffer size in bytes.
+//
+// The key insight is that different characters expand to different UTF-8 byte lengths:
+//   - ASCII (U+0000-U+007F): 1 byte per code unit
+//   - Latin-1 extended (U+0080-U+00FF): 2 bytes per code unit
+//   - BMP characters (U+0100-U+FFFF): 2-3 bytes per code unit
+//   - Supplementary characters (U+10000+): 4 bytes, encoded as surrogate pairs in UTF-16
+//
+// The function must never split a surrogate pair, so if there's only room for part of
+// a multi-byte character, it stops before that character.
 KJ_TEST("BestFitASCII") {
   // If there's zero input or output space, the answer is zero.
   KJ_ASSERT(bestFit("", 0) == 0);
