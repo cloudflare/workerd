@@ -1266,6 +1266,9 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
       // Per the spec, the close algorithm should always run asynchronously, even if
       // there's no user-provided close handler. This ensures that releaseLock() can
       // reject the closed promise before the close completes.
+      // The original maybeRunAlgorithm would call the onSuccess continuation
+      // synchronously if algorithms.close is not specified. maybeRunAlgorithmAsync
+      // always defers to a microtask.
       if (FeatureFlags::get(js).getPedanticWpt()) {
         maybeRunAlgorithmAsync(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
       } else {
