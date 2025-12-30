@@ -205,8 +205,17 @@ class AsyncGenerator final {
   }
 
   // If nothing is returned, the generator is complete.
+  // Per GetMethod spec (https://262.ecma-international.org/#sec-getmethod), if the 'return'
+  // property exists but is not callable, we throw a TypeError.
   Promise<kj::Maybe<T>> return_(Lock& js, kj::Maybe<T> maybeValue = kj::none) {
     KJ_IF_SOME(active, maybeActive) {
+      // Per GetMethod spec: if property exists but is not callable, throw TypeError
+      if (active.returnExistsButNotCallable) {
+        maybeActive = kj::none;
+        return js.rejectedPromise<kj::Maybe<T>>(
+            js.typeError("property 'return' is not a function"_kj));
+      }
+
       KJ_IF_SOME(return_, active.maybeReturn) {
         auto& selfRef = KJ_ASSERT_NONNULL(maybeSelfRef);
         return js.tryCatch([&] {
@@ -217,17 +226,13 @@ class AsyncGenerator final {
             }
             return js.resolvedPromise(kj::mv(result.value));
           }, [ref = selfRef.addRef()](Lock& js, Value exception) {
-            Promise<kj::Maybe<T>> retPromise = nullptr;
-            if (ref->runIfAlive([&](AsyncGenerator& self) {
-              retPromise = self.throw_(js, kj::mv(exception));
-            })) {
-              return kj::mv(retPromise);
-            }
+            // Per spec, rejections from return() should be propagated directly
+            ref->runIfAlive([&](AsyncGenerator& self) { self.maybeActive = kj::none; });
             return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
           });
         }, [&](Value exception) {
           maybeActive = kj::none;
-          return throw_(js, kj::mv(exception));
+          return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
         });
       }
       maybeActive = kj::none;
@@ -276,6 +281,9 @@ class AsyncGenerator final {
     kj::Maybe<NextSignature> maybeNext;
     kj::Maybe<ReturnSignature> maybeReturn;
     kj::Maybe<ThrowSignature> maybeThrow;
+    // Per GetMethod spec, if property exists but is not callable, we should throw TypeError.
+    // We track this state to defer the error to when return_() is actually called.
+    bool returnExistsButNotCallable = false;
 
     template <typename TypeWrapper>
     Active(Lock& js, JsObject object, TypeWrapper*)
@@ -283,6 +291,9 @@ class AsyncGenerator final {
           maybeReturn(
               tryGetGeneratorFunction<ReturnSignature, TypeWrapper>(js, object, "return"_kj)),
           maybeThrow(tryGetGeneratorFunction<ThrowSignature, TypeWrapper>(js, object, "throw"_kj)) {
+      // Check if return property exists but isn't callable (per GetMethod spec)
+      returnExistsButNotCallable =
+          maybeReturn == kj::none && !object.get(js, "return"_kj).isNullOrUndefined();
     }
     Active(Active&&) = default;
     Active& operator=(Active&&) = default;
