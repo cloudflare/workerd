@@ -7,7 +7,11 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "transform-streams-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors", "transformstream_enable_standard_constructor"]
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
+        ]
       )
     ),
   ],
