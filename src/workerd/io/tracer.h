@@ -178,6 +178,9 @@ class WorkerTracer final: public BaseTracer {
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Own<Trace>>>> completeFulfiller;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+
+  // false if there are no BTWs, if true BTWs may be present.
+  bool hasBufferedTailWorkers;
 };
 
 class SpanSubmitter: public kj::Refcounted {
