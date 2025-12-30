@@ -225,6 +225,12 @@ wd_test(
 )
 
 wd_test(
+    src = "encoding-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["encoding-streams-test.js"],
+)
+
+wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
     data = ["events-test.js"],
@@ -334,6 +340,36 @@ wd_test(
     src = "stub-storage-test.wd-test",
     args = ["--experimental"],
     data = ["stub-storage-test.js"],
+)
+
+wd_test(
+    src = "compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["compression-streams-test.js"],
+)
+
+wd_test(
+    src = "transform-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["transform-streams-test.js"],
+)
+
+wd_test(
+    src = "pipe-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["pipe-streams-test.js"],
+)
+
+wd_test(
+    src = "streams-r2-patterns-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-r2-patterns-test.js"],
+)
+
+wd_test(
+    src = "streams-respond-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-respond-test.js"],
 )
 
 wd_test(
@@ -614,14 +650,6 @@ wd_test(
     src = "headers-immutable-prototype-test.wd-test",
     args = ["--experimental"],
     data = ["headers-immutable-prototype-test.js"],
-)
-
-# TODO(cleanup): This is a copy of an existing test in streams-test. Once the autogate is remvoed,
-# this separate test can be deleted.
-wd_test(
-    src = "compression-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["compression-streams-test.js"],
 )
 
 wd_test(
