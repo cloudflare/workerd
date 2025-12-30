@@ -1,4 +1,4 @@
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, rejects } from 'node:assert';
 
 const enc = new TextEncoder();
 
@@ -463,6 +463,116 @@ export const readableStreamFromNoopAsyncGen = {
       chunks.push(chunk);
     }
     deepStrictEqual(chunks, []);
+  },
+};
+
+// Tests for ReadableStream.from() cancel behavior per WPT spec
+export const readableStreamFromCancelRejectsWhenReturnRejects = {
+  async test() {
+    const rejectError = new Error('return error');
+    const iterable = {
+      async next() {
+        return { value: undefined, done: true };
+      },
+      async return() {
+        throw rejectError;
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+
+    const rs = ReadableStream.from(iterable);
+    const reader = rs.getReader();
+
+    await rejects(reader.cancel(), rejectError);
+  },
+};
+
+export const readableStreamFromCancelRejectsWhenReturnThrows = {
+  async test() {
+    const throwError = new Error('return throws');
+    const iterable = {
+      async next() {
+        return { value: undefined, done: true };
+      },
+      return() {
+        throw throwError;
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+
+    const rs = ReadableStream.from(iterable);
+    const reader = rs.getReader();
+
+    await rejects(reader.cancel(), (err) => err === throwError);
+  },
+};
+
+export const readableStreamFromCancelRejectsWhenReturnNotMethod = {
+  async test() {
+    const iterable = {
+      async next() {
+        return { value: undefined, done: true };
+      },
+      return: 42, // exists but not callable
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+
+    const rs = ReadableStream.from(iterable);
+    const reader = rs.getReader();
+
+    await rejects(reader.cancel(), {
+      name: 'TypeError',
+      message: /return/,
+    });
+  },
+};
+
+export const readableStreamFromCancelRejectsWhenReturnNonObject = {
+  async test() {
+    const iterable = {
+      async next() {
+        return { value: undefined, done: true };
+      },
+      async return() {
+        return 42; // fulfills with non-object
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+
+    const rs = ReadableStream.from(iterable);
+    const reader = rs.getReader();
+
+    await rejects(reader.cancel(), {
+      name: 'TypeError',
+    });
+  },
+};
+
+export const readableStreamFromCancelResolvesWhenReturnMissing = {
+  async test() {
+    const iterable = {
+      async next() {
+        return { value: undefined, done: true };
+      },
+      // no return method
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+
+    const rs = ReadableStream.from(iterable);
+    const reader = rs.getReader();
+
+    // Should resolve without error when return() is missing
+    await Promise.all([reader.cancel(), reader.closed]);
   },
 };
 

@@ -422,19 +422,7 @@ export default {
       'Floating point arithmetic must manifest near 0 (total ends up zero)',
     ],
   },
-  'readable-streams/from.any.js': {
-    comment: 'See comments on tests',
-    disabledTests: [
-      // A hanging promise was cancelled
-      'ReadableStream.from: cancel() rejects when return() rejects',
-      'ReadableStream.from: cancel() rejects when return() fulfills with a non-object',
-    ],
-    expectedFailures: [
-      // TODO(soon): This one is a bit pedantic. We ignore the case where return() is not
-      // a method whereas the spec expects us to return a rejected promise in this case.
-      'ReadableStream.from: cancel() rejects when return() is not a method',
-    ],
-  },
+  'readable-streams/from.any.js': {},
   'readable-streams/garbage-collection.any.js': {
     comment: 'See comments on individual tests',
     disabledTests: [
