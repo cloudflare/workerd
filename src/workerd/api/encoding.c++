@@ -503,7 +503,7 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
     auto str = input.orDefault(js.str());
     auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
         "Cannot allocate space for TextEncoder.encode");
-    auto result = str.writeInto(
+    [[maybe_unused]] auto result = str.writeInto(
         js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
     KJ_DASSERT(result.written == view.size());
     return jsg::JsUint8Array(view.getHandle(js).As<v8::Uint8Array>());
