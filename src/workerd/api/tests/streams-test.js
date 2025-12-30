@@ -493,8 +493,8 @@ export const readableStreamFromCancelRejectsWhenReturnThrows = {
   async test() {
     const throwError = new Error('return throws');
     const iterable = {
-      next() {
-        return Promise.resolve({ value: undefined, done: true });
+      async next() {
+        return { value: undefined, done: true };
       },
       return() {
         throw throwError;
