@@ -35,7 +35,7 @@ jobs:
           [
             { name: linux, arch: X64, image: ubuntu-22.04 },
             { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm },
-            { name: macOS, arch: ARM64, image: macos-15 },
+            { name: macOS, arch: ARM64, image: macos-15, use_lld: true },
             { name: windows, arch: X64, image: windows-2025 },
           ]
         config: [
@@ -76,6 +76,7 @@ jobs:
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
       extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}'
+      macos_use_lld: ${{ matrix.os.use_lld || false }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
