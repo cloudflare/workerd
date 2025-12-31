@@ -139,7 +139,7 @@
       "label": "Bazel run all tests (dbg)",
       "type": "shell",
       "command": "bazel",
-      "args": ["test", "-c", "dbg", "--cache_test_results=no", "//..."],
+      "args": ["test", "-c", "dbg", "--nocache_test_results", "//..."],
       "group": {
         "kind": "test",
         "isDefault": true
@@ -158,7 +158,7 @@
       "label": "Bazel run all tests (fastbuild)",
       "type": "shell",
       "command": "bazel",
-      "args": ["test", "-c", "fastbuild", "--cache_test_results=no", "//..."],
+      "args": ["test", "-c", "fastbuild", "--nocache_test_results", "//..."],
       "group": {
         "kind": "test",
         "isDefault": true
@@ -177,7 +177,7 @@
       "label": "Bazel run all tests (opt)",
       "type": "shell",
       "command": "bazel",
-      "args": ["test", "-c", "opt", "--cache_test_results=no", "//..."],
+      "args": ["test", "-c", "opt", "--nocache_test_results", "//..."],
       "group": {
         "kind": "test",
         "isDefault": true
