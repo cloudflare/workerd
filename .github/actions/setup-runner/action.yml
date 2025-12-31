@@ -34,6 +34,8 @@ runs:
       if: runner.os == 'Windows'
       # Set a custom output root directory to avoid long file name issues.
       run: |
+        # Enable Developer Mode to allow Bazel to create real symlinks
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
         git config --global core.symlinks true
         git config --show-scope --show-origin core.symlinks
         git config --system core.longpaths true
