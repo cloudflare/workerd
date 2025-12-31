@@ -27,6 +27,7 @@ import {
   reportError,
 } from 'pyodide-internal:util';
 import { LOADED_SNAPSHOT_TYPE } from 'pyodide-internal:snapshot';
+export { createImportProxy } from 'pyodide-internal:serializeJsModule';
 import { patch_env_helper } from 'pyodide-internal:envHelpers';
 
 type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
@@ -86,16 +87,14 @@ function get_pyodide_entrypoint_helper(): PyodideEntrypointHelper {
   return _pyodide_entrypoint_helper;
 }
 
-export function setDoAnImport(
-  func: (mod: string) => Promise<any>,
-  cloudflareWorkersModule: any,
-  cloudflareSocketsModule: any,
+export async function setDoAnImport(
+  doAnImport: (mod: string) => Promise<any>,
   workerEntrypoint: any
-): void {
+): Promise<void> {
   _pyodide_entrypoint_helper = {
-    doAnImport: func,
-    cloudflareWorkersModule,
-    cloudflareSocketsModule,
+    doAnImport,
+    cloudflareWorkersModule: await doAnImport('cloudflare:workers'),
+    cloudflareSocketsModule: await doAnImport('cloudflare:sockets'),
     workerEntrypoint,
     patchWaitUntil,
     patch_env_helper,

@@ -7,7 +7,11 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker.py", pythonModule = embed "worker.py"),
         ],
-        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_no_global_handlers", "unwrap_custom_thenables", "disable_python_dedicated_snapshot"],
+        compatibilityFlags = [
+          %PYTHON_FEATURE_FLAGS,
+          "disable_python_no_global_handlers",
+          "unwrap_custom_thenables"
+        ],
         bindings = [
           (name = "FOO", text = "BAR"),
           (name = "CACHE", memoryCache = (
