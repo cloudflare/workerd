@@ -13,7 +13,7 @@
 // Configure tcmalloc for deterministic benchmarks on Linux.
 // tcmalloc uses probabilistic heap sampling which can introduce variance in benchmark results.
 // WD_USE_TCMALLOC is defined when tcmalloc is enabled (Linux + use_tcmalloc flag).
-#if defined(WD_USE_TCMALLOC)
+#ifdef WD_USE_TCMALLOC
 #include "tcmalloc/malloc_extension.h"
 
 namespace workerd::bench {
