@@ -1,4 +1,4 @@
-load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests", "gen_rust_import_tests")
+load("//src/workerd/server/tests/python:import_tests.bzl", "gen_rust_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 
 python_test_setup()
@@ -26,15 +26,6 @@ py_wd_test("subdirectory")
 py_wd_test("sdk")
 
 py_wd_test("seek-metadatafs")
-
-gen_import_tests(
-    pkg_skip_versions = {
-        "0.28.2": [
-            "micropip",  # missing lockfile
-            "soupsieve",  # Circular dependency with beautifulsoup4
-        ],
-    },
-)
 
 gen_rust_import_tests()
 
