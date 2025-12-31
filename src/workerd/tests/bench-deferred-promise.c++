@@ -14,7 +14,6 @@
 // 3. Pending with continuations - Setup overhead comparison
 // 4. Conversion to JS - Cost when you do need a V8 promise
 
-#include <workerd/jsg/deferred-promise.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/tests/bench-tools.h>

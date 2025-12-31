@@ -10,6 +10,8 @@ namespace {
 
 V8System v8System;
 
+int deferredPromiseTestResult = 0;
+
 struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
   // Test basic resolve/reject flow
   void testBasicResolve(jsg::Lock& js) {
@@ -684,7 +686,57 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
     KJ_DBG("Address in test function", addressInThisFunction);
   }
 
+  DeferredPromise<kj::String> makeDeferredPromise(jsg::Lock& js) {
+    auto [p, r] = js.newDeferredPromiseAndResolver<int>();
+    deferredResolver = kj::mv(r);
+    return p.then(js, [](jsg::Lock&, int i) { return i * 2; })
+        .then(js, [](jsg::Lock& js, int i) {
+      return jsg::DeferredPromise<int>::resolved(i + 2);
+    }).then(js, [](jsg::Lock& js, int i) { return kj::str(i); });
+  }
+
+  void deferredResolvePromise(Lock& js, int i) {
+    KJ_ASSERT_NONNULL(deferredResolver).resolve(js, kj::mv(i));
+  }
+
+  void setDeferredResult(jsg::Lock& js, DeferredPromise<kj::String> promise) {
+    // Throwing away the result of `.then()` doesn't cancel it!
+    promise
+        .then(js, [](jsg::Lock&, kj::String str) {
+      deferredPromiseTestResult = str.parseAs<int>();
+    }).then(js, [](jsg::Lock&) { deferredPromiseTestResult += 60000; });
+  }
+
+  void testReceiveResolved(jsg::Lock& js, DeferredPromise<int> promise, int expected) {
+    int result = 0;
+    KJ_IF_SOME(value, promise.tryConsumeResolved()) {
+      result = value;
+    } else {
+      KJ_FAIL_REQUIRE("Promise was not resolved");
+    }
+    KJ_EXPECT(result == expected);
+  }
+
+  void testReceiveRejected(jsg::Lock& js, DeferredPromise<int> promise) {
+    KJ_IF_SOME(exception, promise.tryConsumeRejected()) {
+      KJ_EXPECT(exception.getDescription().contains("boom"));
+    } else {
+      KJ_FAIL_REQUIRE("Promise was not rejected");
+    }
+  }
+
+  void testReceiveThenable(jsg::Lock& js, DeferredPromise<int> promise, int expected) {
+    int result = 0;
+    promise.then(js, [&result](jsg::Lock&, int value) { result = value; });
+    // We have to pump the microtask queue to resolve thenables.
+    js.runMicrotasks();
+    KJ_EXPECT(result == expected);
+  }
+
   JSG_RESOURCE_TYPE(DeferredPromiseContext) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(deferredPromise, makeDeferredPromise);
+    JSG_METHOD(deferredResolvePromise);
+    JSG_METHOD(setDeferredResult);
     JSG_METHOD(testBasicResolve);
     JSG_METHOD(testBasicReject);
     JSG_METHOD(testThenSync);
@@ -716,7 +768,12 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(testAsyncStackTraceOnThrow);
     JSG_METHOD(testAsyncStackTraceDepth);
     JSG_METHOD(testContinuationTraceAddress);
+    JSG_METHOD(testReceiveResolved);
+    JSG_METHOD(testReceiveRejected);
+    JSG_METHOD(testReceiveThenable);
   }
+
+  kj::Maybe<DeferredPromise<int>::Resolver> deferredResolver;
 };
 
 JSG_DECLARE_ISOLATE_TYPE(DeferredPromiseIsolate, DeferredPromiseContext);
@@ -874,6 +931,36 @@ KJ_TEST("DeferredPromise async stack trace depth") {
 KJ_TEST("DeferredPromise continuation trace address") {
   Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
   e.expectEval("testContinuationTraceAddress()", "undefined", "undefined");
+}
+
+KJ_TEST("jsg::DeferredPromise<T>") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+
+  e.expectEval("setDeferredResult(deferredPromise.then(i => i + 1 /* oops, i is a string */));\n"
+               "deferredResolvePromise(123)",
+      "undefined", "undefined");
+
+  KJ_EXPECT(deferredPromiseTestResult == 0);
+
+  e.runMicrotasks();
+
+  KJ_EXPECT(deferredPromiseTestResult == 62481);
+}
+
+KJ_TEST("DeferredPromise continuation trace address") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testReceiveResolved(Promise.resolve(123), 123)", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise receive rejected") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testReceiveRejected(Promise.reject(new Error('boom')))", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise receive thenable") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval(
+      "testReceiveThenable({ then: (resolve) => resolve(456) }, 456)", "undefined", "undefined");
 }
 
 }  // namespace

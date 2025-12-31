@@ -71,6 +71,8 @@
 //   - When integrating with existing code that expects jsg::Promise<T>
 //   - When you need full V8 promise semantics (microtask timing guarantees)
 //   - When the promise needs to be observable from JavaScript
+//   - When the JS promise needs to be preserved. The DeferredPromise does
+//     not maintain a persistent reference to the V8 promise after fromJsPromise()
 //
 // API Reference:
 // --------------
@@ -87,6 +89,7 @@
 //     - isResolved()            - True if resolved with a value
 //     - isRejected()            - True if rejected with an error
 //     - tryConsumeResolved()    - Get value if already resolved (CONSUMES promise)
+//     - tryConsumeRejected()    - Get exception if already rejected (CONSUMES promise)
 //
 //   Conversion:
 //     - toJsPromise(js)         - Convert to jsg::Promise (creates V8 promise)
@@ -158,6 +161,21 @@
 //   deferred.then(js, [](jsg::Lock&, int v) { return v * 2; })
 //          .then(js, [](jsg::Lock&, int v) { return v + 10; })
 //          .then(js, [](jsg::Lock&, int v) { /* final handling */ });
+//
+// TypeWrapper Integration:
+// -------------------------
+// DeferredPromise<T> integrates with the type wrapper system. When a jsg exposed
+// method accepts a DeferredPromise<T>, and the value is a JS promise that is
+// already resolved, the value is unwrapped synchronously without the need for
+// an additional microtask hop. If the JS promise is rejected, the rejection is
+// also propagated synchronously. If the JS promise is still pending, or if the
+// value is a thenable, the full async conversion path via jsg::Promise<T> is used.
+// Otherwise the value is unwrapped directly as already resolved.
+//
+// When a DeferredPromise<T> is returned to JavaScript, it is converted to a
+// JS promise. If the DeferredPromise is already resolved or rejected, the JS promise
+// is created in that state immediately. Otherwise, a pending JS promise is created and
+// resolved/rejected when the DeferredPromise settles.
 //
 // Ownership Model:
 // ----------------
@@ -1342,6 +1360,23 @@ class DeferredPromise {
     return kj::none;
   }
 
+  // Optimization: Get the rejection exception if already rejected, consuming the promise.
+  // Returns kj::none if pending or resolved.
+  // This is useful for fast-path error handling when the exception is expected
+  // to be immediately available.
+  // CONSUMES the promise - cannot call .then() or tryConsumeRejected() again.
+  kj::Maybe<kj::Exception> tryConsumeRejected() {
+    using Rejected = typename _::DeferredPromiseState<T>::Rejected;
+    using Consumed = typename _::DeferredPromiseState<T>::Consumed;
+    KJ_IF_SOME(rejected, state->state.template tryGetUnsafe<Rejected>()) {
+      auto exception = kj::mv(rejected.exception);
+      // Note: forceTransitionTo needed because ErrorState makes Rejected implicitly terminal
+      state->state.template forceTransitionTo<Consumed>();
+      return kj::mv(exception);
+    }
+    return kj::none;
+  }
+
   // ======================================================================================
   // GC Integration
 
@@ -1817,7 +1852,7 @@ class DeferredPromise {
         // Extract value before transition since reference becomes invalid
         if constexpr (isVoid<T>()) {
           state->state.template transitionTo<Consumed>();
-          return DeferredPromise<T>::resolved();
+          return DeferredPromise<void>::resolved();
         } else {
           auto value = kj::mv(const_cast<Resolved&>(resolved).value);
           state->state.template transitionTo<Consumed>();
@@ -1833,7 +1868,7 @@ class DeferredPromise {
         try {
           if constexpr (isVoid<T>()) {
             errorFunc(js, kj::mv(exception));
-            return DeferredPromise<T>::resolved();
+            return DeferredPromise<void>::resolved();
           } else {
             return DeferredPromise<T>::resolved(errorFunc(js, kj::mv(exception)));
           }
@@ -1887,6 +1922,129 @@ inline DeferredPromiseResolverPair<T> newDeferredPromiseAndResolver() {
   return {.promise = DeferredPromise<T>(kj::mv(state)),
     .resolver = DeferredPromiseResolver<T>(kj::mv(stateRef))};
 }
+
+// A key difference between jsg::Promise and jsg::DeferredPromise is that the
+// latter does not preserve the reference to the original JS Promise object and
+// will not roundtrip to produce the same promise.
+template <typename TypeWrapper>
+class DeferredPromiseWrapper {
+ public:
+  template <typename T>
+  static constexpr const char* getName(DeferredPromise<T>*) {
+    return "Promise";
+  }
+
+  template <typename T>
+  v8::Local<v8::Promise> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      DeferredPromise<T>&& promise) {
+    KJ_IF_SOME(ex, promise.tryConsumeRejected()) {
+      // The promise is already rejected, create an immediately rejected JS promise
+      // to avoid the overhead of creating a full jsg::Promise.
+      auto jsError = js.exceptionToJsValue(kj::mv(ex));
+      auto v8PromiseResolver = check(v8::Promise::Resolver::New(context));
+      check(v8PromiseResolver->Reject(context, jsError.getHandle(js)));
+      return v8PromiseResolver->GetPromise();
+    }
+
+    auto& wrapper = *static_cast<TypeWrapper*>(this);
+    KJ_IF_SOME(value, promise.tryConsumeResolved()) {
+      // The promise is already resolved, create an immediately resolved JS promise
+      // to avoid the overhead of creating a full jsg::Promise and an additional microtask.
+      auto v8PromiseResolver = check(v8::Promise::Resolver::New(context));
+      if constexpr (isVoid<T>()) {
+        check(v8PromiseResolver->Resolve(context, v8::Undefined(js.v8Isolate)));
+      } else {
+        auto jsValue = wrapper.wrap(js, context, creator, kj::mv(value));
+        check(v8PromiseResolver->Resolve(context, jsValue));
+      }
+      return v8PromiseResolver->GetPromise();
+    }
+
+    // The deferred promise is still pending, wrap it as a jsg::Promise to handle
+    // continuations and eventual unwrapping of the result.
+    return wrapper.wrap(js, context, creator, promise.toJsPromise(js));
+  }
+
+  template <typename T>
+  kj::Maybe<DeferredPromise<T>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      DeferredPromise<T>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto& wrapper = *static_cast<TypeWrapper*>(this);
+
+    // If the handle is a Promise that is already resolved or rejected, we can optimize
+    // by creating a DeferredPromise that is already settled rather than going through
+    // the full jsg::Promise unwrapping process.
+    if (handle->IsPromise()) {
+      auto promise = handle.As<v8::Promise>();
+      switch (promise->State()) {
+        case v8::Promise::PromiseState::kPending: {
+          // The promise is still pending, fall through to normal unwrapping via jsg::Promise.
+          break;
+        }
+        case v8::Promise::PromiseState::kFulfilled: {
+          // The promise is already fulfilled, create an already-resolved DeferredPromise.
+          if constexpr (isVoid<T>()) {
+            return DeferredPromise<T>::resolved();
+          } else {
+            KJ_IF_SOME(value,
+                wrapper.tryUnwrap(
+                    js, context, promise->Result(), static_cast<T*>(nullptr), parentObject)) {
+              return DeferredPromise<T>::resolved(kj::mv(value));
+            }
+            return kj::none;
+          }
+        }
+        case v8::Promise::PromiseState::kRejected: {
+          // The promise is already rejected, create an already-rejected DeferredPromise.
+          auto exception = js.exceptionToKj(js.v8Ref(promise->Result()));
+          return DeferredPromise<T>::rejected(js, kj::mv(exception));
+        }
+      }
+
+      // Promise is still pending, Unwrap via jsg::Promise.
+      KJ_IF_SOME(jsPromise,
+          wrapper.tryUnwrap(js, context, handle, static_cast<Promise<T>*>(nullptr), parentObject)) {
+        return DeferredPromise<T>::fromJsPromise(js, kj::mv(jsPromise));
+      }
+      return kj::none;
+    } else {
+      // Value is not a Promise. Treat it as an already-resolved value.
+
+      // If the value is thenable, we need to convert it into a proper Promise first.
+      // Unfortunately there's no optimized way to do this, we have to pass it through
+      // a Promise microtask.
+      if (isThenable(context, handle)) {
+        auto paf = check(v8::Promise::Resolver::New(context));
+        check(paf->Resolve(context, handle));
+        return tryUnwrap(js, context, paf->GetPromise(), static_cast<DeferredPromise<T>*>(nullptr),
+            parentObject);
+      }
+
+      // The value is not thenable, treat it as a resolved value.
+      if constexpr (isVoid<T>()) {
+        return DeferredPromise<T>::resolved();
+      } else {
+        KJ_IF_SOME(value, wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+          return DeferredPromise<T>::resolved(kj::mv(value));
+        }
+        return kj::none;
+      }
+    }
+  }
+
+ private:
+  static bool isThenable(v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
+    if (handle->IsObject()) {
+      auto obj = handle.As<v8::Object>();
+      return check(obj->Has(context, v8StrIntern(v8::Isolate::GetCurrent(), "then")));
+    }
+    return false;
+  }
+};
 
 // ======================================================================================
 // When NOT To Use DeferredPromise (Even For Pure C++ Code)
