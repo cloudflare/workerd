@@ -66,14 +66,14 @@ build:ci-linux --config=ci-linux-common --config=ci-limit-storage --remote_downl
 build:ci-linux-arm --config=ci-linux-common --config=ci-limit-storage
 
 build:ci-linux-debug --config=ci-linux-common --config=ci-limit-storage
-build:ci-linux-debug --config=debug --config=rust-debug
+build:ci-linux-debug --config=debug
 
 build:ci-linux-arm-debug --config=ci-linux-debug
 
 build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
 # we're really struggling to fit asan build into worker disk size
 # having asan without symbols is better than none
-build:ci-linux-asan --config=asan --copt="-g0" --strip=always
+build:ci-linux-asan --config=asan --copt="-g0" --@rules_rust//:extra_rustc_flag=-Cdebuginfo=0 --strip=always
 build:ci-linux-arm-asan --config=ci-linux-asan
 
 # Build container tests on Linux CI
