@@ -433,16 +433,20 @@ class ConsumerImpl final {
     auto& ready = state.requireActiveUnsafe();
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
-    req.resolve(js);
+    // Pop the request before resolving to ensure the request is fully owned locally.
+    auto request = kj::mv(ready.readRequests.front());
     ready.readRequests.pop_front();
+    request->resolve(js);
   }
 
   void resolveReadAsDone(jsg::Lock& js, ReadRequest& req) {
     auto& ready = state.requireActiveUnsafe();
     KJ_REQUIRE(!ready.readRequests.empty());
     KJ_REQUIRE(&req == ready.readRequests.front().get());
-    req.resolveAsDone(js);
+    // Pop the request before resolving to ensure the request is fully owned locally.
+    auto request = kj::mv(ready.readRequests.front());
     ready.readRequests.pop_front();
+    request->resolveAsDone(js);
   }
 
   void cloneTo(jsg::Lock& js, ConsumerImpl& other) {
