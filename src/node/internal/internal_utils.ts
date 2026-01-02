@@ -49,71 +49,74 @@ export function normalizeEncoding(enc?: string): Encoding | undefined {
 }
 
 export function getEncodingOps(enc: unknown): Encoding | undefined {
-  // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
-  enc += '';
-  // @ts-expect-error TS18046 TS complains about unknown can not have length.
-  switch (enc.length) {
+  if (enc === undefined) return UTF8;
+  let encoding = String(enc);
+  switch (encoding.length) {
     case 4:
-      if (enc === 'UTF8') return UTF8;
-      if (enc === 'ucs2' || enc === 'UCS2') return UTF16LE;
-      enc = `${enc}`.toLowerCase();
-      if (enc === 'utf8') return UTF8;
-      if (enc === 'ucs2') return UTF16LE;
+      if (encoding === 'UTF8') return UTF8;
+      if (encoding === 'ucs2' || encoding === 'UCS2') return UTF16LE;
+      encoding = encoding.toLowerCase();
+      if (encoding === 'utf8') return UTF8;
+      if (encoding === 'ucs2') return UTF16LE;
       break;
     case 3:
-      if (enc === 'hex' || enc === 'HEX' || `${enc}`.toLowerCase() === 'hex') {
+      if (
+        encoding === 'hex' ||
+        encoding === 'HEX' ||
+        encoding.toLowerCase() === 'hex'
+      ) {
         return HEX;
       }
       break;
     case 5:
-      if (enc === 'ascii') return ASCII;
-      if (enc === 'ucs-2') return UTF16LE;
-      if (enc === 'UTF-8') return UTF8;
-      if (enc === 'ASCII') return ASCII;
-      if (enc === 'UCS-2') return UTF16LE;
-      enc = `${enc}`.toLowerCase();
-      if (enc === 'utf-8') return UTF8;
-      if (enc === 'ascii') return ASCII;
-      if (enc === 'ucs-2') return UTF16LE;
+      if (encoding === 'ascii') return ASCII;
+      if (encoding === 'ucs-2') return UTF16LE;
+      if (encoding === 'UTF-8') return UTF8;
+      if (encoding === 'ASCII') return ASCII;
+      if (encoding === 'UCS-2') return UTF16LE;
+      encoding = encoding.toLowerCase();
+      if (encoding === 'utf-8') return UTF8;
+      if (encoding === 'ascii') return ASCII;
+      if (encoding === 'ucs-2') return UTF16LE;
       break;
     case 6:
-      if (enc === 'base64') return BASE64;
-      if (enc === 'latin1' || enc === 'binary') return LATIN1;
-      if (enc === 'BASE64') return BASE64;
-      if (enc === 'LATIN1' || enc === 'BINARY') return LATIN1;
-      enc = `${enc}`.toLowerCase();
-      if (enc === 'base64') return BASE64;
-      if (enc === 'latin1' || enc === 'binary') return LATIN1;
+      if (encoding === 'base64') return BASE64;
+      if (encoding === 'latin1' || encoding === 'binary') return LATIN1;
+      if (encoding === 'BASE64') return BASE64;
+      if (encoding === 'LATIN1' || encoding === 'BINARY') return LATIN1;
+      encoding = encoding.toLowerCase();
+      if (encoding === 'base64') return BASE64;
+      if (encoding === 'latin1' || encoding === 'binary') return LATIN1;
       break;
     case 7:
       if (
-        enc === 'utf16le' ||
-        enc === 'UTF16LE' ||
-        `${enc}`.toLowerCase() === 'utf16le'
+        encoding === 'utf16le' ||
+        encoding === 'UTF16LE' ||
+        encoding.toLowerCase() === 'utf16le'
       ) {
         return UTF16LE;
       }
       break;
     case 8:
       if (
-        enc === 'utf-16le' ||
-        enc === 'UTF-16LE' ||
-        `${enc}`.toLowerCase() === 'utf-16le'
+        encoding === 'utf-16le' ||
+        encoding === 'UTF-16LE' ||
+        encoding.toLowerCase() === 'utf-16le'
       ) {
         return UTF16LE;
       }
       break;
     case 9:
       if (
-        enc === 'base64url' ||
-        enc === 'BASE64URL' ||
-        `${enc}`.toLowerCase() === 'base64url'
+        encoding === 'base64url' ||
+        encoding === 'BASE64URL' ||
+        encoding.toLowerCase() === 'base64url'
       ) {
         return BASE64URL;
       }
       break;
     default:
-      if (enc === '') return UTF8;
+      if (encoding === '') return UTF8;
   }
   return undefined;
 }
