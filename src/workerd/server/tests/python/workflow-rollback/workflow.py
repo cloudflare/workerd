@@ -58,10 +58,7 @@ class WorkflowRollbackExample(WorkflowEntrypoint):
         await step_2()
 
         # Trigger rollback
-        try:
-            raise ValueError("test error")
-        except ValueError as e:
-            await step.rollback_all(e)
+        await step.rollback_all(ValueError("test error"))
 
         return results
 
@@ -221,7 +218,7 @@ class WorkflowRollbackExample(WorkflowEntrypoint):
         @step_2.undo
         async def undo_2(error, value):
             executed.append("undo_2")
-            raise Exception("undo_2 failed")
+            raise RuntimeError("undo_2 failed")
 
         @step.with_rollback("step_3")
         async def step_3():
