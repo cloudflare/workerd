@@ -1,0 +1,615 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yagiz Nizipli <yagiz@nizipli.com>
+Date: Fri, 2 Jan 2026 10:29:32 -0500
+Subject: [async] Pre-allocate await closures to avoid per-await allocation
+
+Reuse the same await context and resolve/reject closures across all
+await expressions in an async function. This saves ~160-288 bytes per
+additional await by avoiding repeated closure allocation.
+
+The closures are allocated once in AsyncFunctionEnter (or lazily on
+first await for TurboFan-created objects) and stored in the
+JSAsyncFunctionObject for reuse
+
+diff --git a/src/builtins/builtins-async-function-gen.cc b/src/builtins/builtins-async-function-gen.cc
+index 71e4eaa365cb..1c004c02b2a2 100644
+--- a/src/builtins/builtins-async-function-gen.cc
++++ b/src/builtins/builtins-async-function-gen.cc
+@@ -127,6 +127,16 @@ TF_BUILTIN(AsyncFunctionEnter, AsyncFunctionBuiltinsAssembler) {
+   StoreObjectFieldNoWriteBarrier(
+       async_function_object, JSAsyncFunctionObject::kPromiseOffset, promise);
+
++  // Initialize closure fields to undefined. They will be lazily allocated
++  // on first await. This saves memory for async functions that never suspend
++  // (e.g., conditional awaits, early returns).
++  StoreObjectFieldRoot(async_function_object,
++                       JSAsyncFunctionObject::kAwaitResolveClosureOffset,
++                       RootIndex::kUndefinedValue);
++  StoreObjectFieldRoot(async_function_object,
++                       JSAsyncFunctionObject::kAwaitRejectClosureOffset,
++                       RootIndex::kUndefinedValue);
++
+   Return(async_function_object);
+ }
+
+@@ -204,9 +214,9 @@ void AsyncFunctionBuiltinsAssembler::AsyncFunctionAwait() {
+
+   TNode<JSPromise> outer_promise = LoadObjectField<JSPromise>(
+       async_function_object, JSAsyncFunctionObject::kPromiseOffset);
+-  Await(context, async_function_object, value, outer_promise,
+-        RootIndex::kAsyncFunctionAwaitResolveClosureSharedFun,
+-        RootIndex::kAsyncFunctionAwaitRejectClosureSharedFun);
++
++  AwaitWithReusableClosures(context, async_function_object, value,
++                            outer_promise);
+
+   // Return outer promise to avoid adding an load of the outer promise before
+   // suspending in BytecodeGenerator.
+diff --git a/src/builtins/builtins-async-gen.cc b/src/builtins/builtins-async-gen.cc
+index 31c8f59df358..94964f2e95db 100644
+--- a/src/builtins/builtins-async-gen.cc
++++ b/src/builtins/builtins-async-gen.cc
+@@ -24,27 +24,52 @@ class ValueUnwrapContext {
+
+ }  // namespace
+
++TNode<Context> AsyncBuiltinsAssembler::AllocateAwaitContext(
++    TNode<NativeContext> native_context, TNode<JSGeneratorObject> generator) {
++  static const int kAwaitContextSize =
++      FixedArray::SizeFor(Context::MIN_CONTEXT_EXTENDED_SLOTS);
++  TNode<Context> await_context =
++      UncheckedCast<Context>(AllocateInNewSpace(kAwaitContextSize));
++  TNode<Map> map = CAST(LoadContextElementNoCell(
++      native_context, Context::AWAIT_CONTEXT_MAP_INDEX));
++  StoreMapNoWriteBarrier(await_context, map);
++  StoreObjectFieldNoWriteBarrier(
++      await_context, Context::kLengthOffset,
++      SmiConstant(Context::MIN_CONTEXT_EXTENDED_SLOTS));
++  const TNode<Object> empty_scope_info =
++      LoadContextElementNoCell(native_context, Context::SCOPE_INFO_INDEX);
++  StoreContextElementNoWriteBarrier(await_context, Context::SCOPE_INFO_INDEX,
++                                    empty_scope_info);
++  StoreContextElementNoWriteBarrier(await_context, Context::PREVIOUS_INDEX,
++                                    native_context);
++  StoreContextElementNoWriteBarrier(await_context, Context::EXTENSION_INDEX,
++                                    generator);
++  return await_context;
++}
++
+ TNode<Object> AsyncBuiltinsAssembler::Await(TNode<Context> context,
+                                             TNode<JSGeneratorObject> generator,
+                                             TNode<JSAny> value,
+                                             TNode<JSPromise> outer_promise,
+                                             RootIndex on_resolve_sfi,
+                                             RootIndex on_reject_sfi) {
+-  return Await(
+-      context, generator, value, outer_promise,
+-      [&](TNode<Context> context, TNode<NativeContext> native_context) {
+-        auto on_resolve = AllocateRootFunctionWithContext(
+-            on_resolve_sfi, context, native_context);
+-        auto on_reject = AllocateRootFunctionWithContext(on_reject_sfi, context,
+-                                                         native_context);
+-        return std::make_pair(on_resolve, on_reject);
+-      });
++  return Await(context, generator, value, outer_promise,
++               [&](TNode<NativeContext> native_context) {
++                 TNode<Context> await_context =
++                     AllocateAwaitContext(native_context, generator);
++                 auto on_resolve = AllocateRootFunctionWithContext(
++                     on_resolve_sfi, await_context, native_context);
++                 auto on_reject = AllocateRootFunctionWithContext(
++                     on_reject_sfi, await_context, native_context);
++                 return std::make_pair(on_resolve, on_reject);
++               });
+ }
+
+-TNode<Object> AsyncBuiltinsAssembler::Await(
+-    TNode<Context> context, TNode<JSGeneratorObject> generator,
+-    TNode<JSAny> value, TNode<JSPromise> outer_promise,
+-    const CreateClosures& CreateClosures) {
++TNode<Object> AsyncBuiltinsAssembler::Await(TNode<Context> context,
++                                            TNode<JSGeneratorObject> generator,
++                                            TNode<JSAny> value,
++                                            TNode<JSPromise> outer_promise,
++                                            const GetClosures& get_closures) {
+   const TNode<NativeContext> native_context = LoadNativeContext(context);
+
+   // We do the `PromiseResolve(%Promise%,value)` avoiding to unnecessarily
+@@ -99,31 +124,8 @@ TNode<Object> AsyncBuiltinsAssembler::Await(
+     value = var_value.value();
+   }
+
+-  static const int kClosureContextSize =
+-      FixedArray::SizeFor(Context::MIN_CONTEXT_EXTENDED_SLOTS);
+-  TNode<Context> closure_context =
+-      UncheckedCast<Context>(AllocateInNewSpace(kClosureContextSize));
+-  {
+-    // Initialize the await context, storing the {generator} as extension.
+-    TNode<Map> map = CAST(LoadContextElementNoCell(
+-        native_context, Context::AWAIT_CONTEXT_MAP_INDEX));
+-    StoreMapNoWriteBarrier(closure_context, map);
+-    StoreObjectFieldNoWriteBarrier(
+-        closure_context, Context::kLengthOffset,
+-        SmiConstant(Context::MIN_CONTEXT_EXTENDED_SLOTS));
+-    const TNode<Object> empty_scope_info =
+-        LoadContextElementNoCell(native_context, Context::SCOPE_INFO_INDEX);
+-    StoreContextElementNoWriteBarrier(
+-        closure_context, Context::SCOPE_INFO_INDEX, empty_scope_info);
+-    StoreContextElementNoWriteBarrier(closure_context, Context::PREVIOUS_INDEX,
+-                                      native_context);
+-    StoreContextElementNoWriteBarrier(closure_context, Context::EXTENSION_INDEX,
+-                                      generator);
+-  }
+-
+-  // Allocate and initialize resolve and reject handlers
+-  auto [on_resolve, on_reject] =
+-      CreateClosures(closure_context, native_context);
++  // Get or allocate resolve and reject handlers
++  auto [on_resolve, on_reject] = get_closures(native_context);
+
+   // Deal with PromiseHooks and debug support in the runtime. This
+   // also allocates the throwaway promise, which is only needed in
+@@ -158,6 +160,58 @@ TNode<Object> AsyncBuiltinsAssembler::Await(
+                      on_resolve, on_reject, var_throwaway.value());
+ }
+
++TNode<Object> AsyncBuiltinsAssembler::AwaitWithReusableClosures(
++    TNode<Context> context, TNode<JSAsyncFunctionObject> async_function_object,
++    TNode<JSAny> value, TNode<JSPromise> outer_promise) {
++  return Await(
++      context, async_function_object, value, outer_promise,
++      [&](TNode<NativeContext> native_context) {
++        // Lazily allocate closures on first await, then reuse them for
++        // subsequent awaits.
++        TVARIABLE(JSFunction, var_on_resolve);
++        TVARIABLE(JSFunction, var_on_reject);
++        Label closures_ready(this), allocate_closures(this, Label::kDeferred);
++
++        TNode<HeapObject> maybe_resolve = LoadObjectField<HeapObject>(
++            async_function_object,
++            JSAsyncFunctionObject::kAwaitResolveClosureOffset);
++        GotoIf(IsUndefined(maybe_resolve), &allocate_closures);
++
++        var_on_resolve = CAST(maybe_resolve);
++        var_on_reject = LoadObjectField<JSFunction>(
++            async_function_object,
++            JSAsyncFunctionObject::kAwaitRejectClosureOffset);
++        Goto(&closures_ready);
++
++        BIND(&allocate_closures);
++        {
++          TNode<Context> await_context =
++              AllocateAwaitContext(native_context, async_function_object);
++
++          TNode<JSFunction> resolve_closure = AllocateRootFunctionWithContext(
++              RootIndex::kAsyncFunctionAwaitResolveClosureSharedFun,
++              await_context, native_context);
++          TNode<JSFunction> reject_closure = AllocateRootFunctionWithContext(
++              RootIndex::kAsyncFunctionAwaitRejectClosureSharedFun,
++              await_context, native_context);
++
++          StoreObjectField(async_function_object,
++                           JSAsyncFunctionObject::kAwaitResolveClosureOffset,
++                           resolve_closure);
++          StoreObjectField(async_function_object,
++                           JSAsyncFunctionObject::kAwaitRejectClosureOffset,
++                           reject_closure);
++
++          var_on_resolve = resolve_closure;
++          var_on_reject = reject_closure;
++          Goto(&closures_ready);
++        }
++
++        BIND(&closures_ready);
++        return std::make_pair(var_on_resolve.value(), var_on_reject.value());
++      });
++}
++
+ TNode<JSFunction> AsyncBuiltinsAssembler::CreateUnwrapClosure(
+     TNode<NativeContext> native_context, TNode<Boolean> done) {
+   const TNode<Context> closure_context =
+diff --git a/src/builtins/builtins-async-gen.h b/src/builtins/builtins-async-gen.h
+index a1bd4b23a0f4..52f0fab44631 100644
+--- a/src/builtins/builtins-async-gen.h
++++ b/src/builtins/builtins-async-gen.h
+@@ -17,22 +17,36 @@ class AsyncBuiltinsAssembler : public PromiseBuiltinsAssembler {
+       : PromiseBuiltinsAssembler(state) {}
+
+  protected:
+-  // Perform steps to resume generator after `value` is resolved.
+-  // `on_reject` is the SharedFunctioninfo instance used to create the reject
+-  // closure. `on_resolve` is the SharedFunctioninfo instance used to create the
+-  // resolve closure. Returns the Promise-wrapped `value`.
+-  using CreateClosures =
++  // Allocates an await context that stores the generator as extension.
++  TNode<Context> AllocateAwaitContext(TNode<NativeContext> native_context,
++                                      TNode<JSGeneratorObject> generator);
++
++  // Callback that returns (on_resolve, on_reject) closures.
++  // Responsible for allocating context and closures, or reusing existing ones.
++  using GetClosures =
+       std::function<std::pair<TNode<JSFunction>, TNode<JSFunction>>(
+-          TNode<Context>, TNode<NativeContext>)>;
++          TNode<NativeContext>)>;
++
++  // Perform steps to resume generator after `value` is resolved.
++  // Returns the Promise-wrapped `value`.
+   TNode<Object> Await(TNode<Context> context,
+                       TNode<JSGeneratorObject> generator, TNode<JSAny> value,
+                       TNode<JSPromise> outer_promise,
+-                      const CreateClosures& CreateClosures);
++                      const GetClosures& get_closures);
+   TNode<Object> Await(TNode<Context> context,
+                       TNode<JSGeneratorObject> generator, TNode<JSAny> value,
+                       TNode<JSPromise> outer_promise, RootIndex on_resolve_sfi,
+                       RootIndex on_reject_sfi);
+
++  // Optimized Await for async functions that lazily allocates closures on
++  // first await and reuses them for subsequent awaits. This avoids per-await
++  // allocation of the context and closures, and saves memory for async
++  // functions that never suspend.
++  TNode<Object> AwaitWithReusableClosures(
++      TNode<Context> context,
++      TNode<JSAsyncFunctionObject> async_function_object, TNode<JSAny> value,
++      TNode<JSPromise> outer_promise);
++
+   // Return a new built-in function object as defined in
+   // Async Iterator Value Unwrap Functions
+   TNode<JSFunction> CreateUnwrapClosure(TNode<NativeContext> native_context,
+diff --git a/src/builtins/builtins-async-generator-gen.cc b/src/builtins/builtins-async-generator-gen.cc
+index 6e2cf809d6c7..779101788224 100644
+--- a/src/builtins/builtins-async-generator-gen.cc
++++ b/src/builtins/builtins-async-generator-gen.cc
+@@ -640,8 +640,9 @@ TF_BUILTIN(AsyncGeneratorReturn, AsyncGeneratorBuiltinsAssembler) {
+       CAST(LoadFirstAsyncGeneratorRequestFromQueue(generator));
+
+   const TNode<Smi> state = LoadGeneratorState(generator);
+-  auto MakeClosures = [&](TNode<Context> context,
+-                          TNode<NativeContext> native_context) {
++  auto MakeClosures = [&](TNode<NativeContext> native_context) {
++    TNode<Context> await_context =
++        AllocateAwaitContext(native_context, generator);
+     TVARIABLE(JSFunction, var_on_resolve);
+     TVARIABLE(JSFunction, var_on_reject);
+     Label closed(this), not_closed(this), done(this);
+@@ -649,19 +650,19 @@ TF_BUILTIN(AsyncGeneratorReturn, AsyncGeneratorBuiltinsAssembler) {
+
+     BIND(&closed);
+     var_on_resolve = AllocateRootFunctionWithContext(
+-        RootIndex::kAsyncGeneratorReturnClosedResolveClosureSharedFun, context,
+-        native_context);
++        RootIndex::kAsyncGeneratorReturnClosedResolveClosureSharedFun,
++        await_context, native_context);
+     var_on_reject = AllocateRootFunctionWithContext(
+-        RootIndex::kAsyncGeneratorReturnClosedRejectClosureSharedFun, context,
+-        native_context);
++        RootIndex::kAsyncGeneratorReturnClosedRejectClosureSharedFun,
++        await_context, native_context);
+     Goto(&done);
+
+     BIND(&not_closed);
+     var_on_resolve = AllocateRootFunctionWithContext(
+-        RootIndex::kAsyncGeneratorReturnResolveClosureSharedFun, context,
++        RootIndex::kAsyncGeneratorReturnResolveClosureSharedFun, await_context,
+         native_context);
+     var_on_reject = AllocateRootFunctionWithContext(
+-        RootIndex::kAsyncGeneratorAwaitRejectClosureSharedFun, context,
++        RootIndex::kAsyncGeneratorAwaitRejectClosureSharedFun, await_context,
+         native_context);
+     Goto(&done);
+
+diff --git a/src/compiler/access-builder.cc b/src/compiler/access-builder.cc
+index ff36dfa363dd..d0ac40110fbe 100644
+--- a/src/compiler/access-builder.cc
++++ b/src/compiler/access-builder.cc
+@@ -413,6 +413,26 @@ FieldAccess AccessBuilder::ForJSAsyncFunctionObjectPromise() {
+   return access;
+ }
+
++// static
++FieldAccess AccessBuilder::ForJSAsyncFunctionObjectAwaitResolveClosure() {
++  FieldAccess access = {
++      kTaggedBase,       JSAsyncFunctionObject::kAwaitResolveClosureOffset,
++      Handle<Name>(),    OptionalMapRef(),
++      Type::Any(),       MachineType::AnyTagged(),
++      kFullWriteBarrier, "JSAsyncFunctionObjectAwaitResolveClosure"};
++  return access;
++}
++
++// static
++FieldAccess AccessBuilder::ForJSAsyncFunctionObjectAwaitRejectClosure() {
++  FieldAccess access = {
++      kTaggedBase,       JSAsyncFunctionObject::kAwaitRejectClosureOffset,
++      Handle<Name>(),    OptionalMapRef(),
++      Type::Any(),       MachineType::AnyTagged(),
++      kFullWriteBarrier, "JSAsyncFunctionObjectAwaitRejectClosure"};
++  return access;
++}
++
+ // static
+ FieldAccess AccessBuilder::ForJSAsyncGeneratorObjectQueue() {
+   FieldAccess access = {
+diff --git a/src/compiler/access-builder.h b/src/compiler/access-builder.h
+index 4feaefc0a6cf..4f99daac67d9 100644
+--- a/src/compiler/access-builder.h
++++ b/src/compiler/access-builder.h
+@@ -144,6 +144,12 @@ class V8_EXPORT_PRIVATE AccessBuilder final
+   // Provides access to JSAsyncFunctionObject::promise() field.
+   static FieldAccess ForJSAsyncFunctionObjectPromise();
+
++  // Provides access to JSAsyncFunctionObject::await_resolve_closure() field.
++  static FieldAccess ForJSAsyncFunctionObjectAwaitResolveClosure();
++
++  // Provides access to JSAsyncFunctionObject::await_reject_closure() field.
++  static FieldAccess ForJSAsyncFunctionObjectAwaitRejectClosure();
++
+   // Provides access to JSAsyncGeneratorObject::queue() field.
+   static FieldAccess ForJSAsyncGeneratorObjectQueue();
+
+diff --git a/src/compiler/js-create-lowering.cc b/src/compiler/js-create-lowering.cc
+index d8be79207810..919eb0e25a63 100644
+--- a/src/compiler/js-create-lowering.cc
++++ b/src/compiler/js-create-lowering.cc
+@@ -824,6 +824,12 @@ Reduction JSCreateLowering::ReduceJSCreateAsyncFunctionObject(Node* node) {
+   a.Store(AccessBuilder::ForJSGeneratorObjectParametersAndRegisters(),
+           parameters_and_registers);
+   a.Store(AccessBuilder::ForJSAsyncFunctionObjectPromise(), promise);
++  // Initialize await closure fields to undefined. Closures are lazily
++  // allocated on first await in AwaitWithReusableClosures.
++  a.Store(AccessBuilder::ForJSAsyncFunctionObjectAwaitResolveClosure(),
++          jsgraph()->UndefinedConstant());
++  a.Store(AccessBuilder::ForJSAsyncFunctionObjectAwaitRejectClosure(),
++          jsgraph()->UndefinedConstant());
+   a.FinishAndChange(node);
+   return Changed(node);
+ }
+diff --git a/src/objects/js-generator.tq b/src/objects/js-generator.tq
+index 0aabb16bdbb1..ec9e7fbd3136 100644
+--- a/src/objects/js-generator.tq
++++ b/src/objects/js-generator.tq
+@@ -27,6 +27,10 @@ extern class JSGeneratorObject extends JSObject {
+
+ extern class JSAsyncFunctionObject extends JSGeneratorObject {
+   promise: JSPromise;
++  // Resolve/reject closures for await, reused across all await expressions.
++  // Initialized to undefined, lazily allocated on first await.
++  await_resolve_closure: JSFunction|Undefined;
++  await_reject_closure: JSFunction|Undefined;
+ }
+
+ extern class JSAsyncGeneratorObject extends JSGeneratorObject {
+diff --git a/test/mjsunit/es8/async-await-closure-reuse.js b/test/mjsunit/es8/async-await-closure-reuse.js
+new file mode 100644
+index 000000000000..bf733ba7aa67
+--- /dev/null
++++ b/test/mjsunit/es8/async-await-closure-reuse.js
+@@ -0,0 +1,229 @@
++// Copyright 2025 the V8 project authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Flags: --expose-gc --allow-natives-syntax
++
++// Verifies that pre-allocated await closures survive GC and work correctly
++// across multiple await expressions within an async function.
++
++function assertEqualsAsync(expected, run) {
++  var actual;
++  var hadValue = false;
++  var hadError = false;
++  var promise = run();
++
++  promise.then(function(value) { hadValue = true; actual = value; },
++               function(error) { hadError = true; actual = error; });
++
++  assertFalse(hadValue || hadError);
++
++  %PerformMicrotaskCheckpoint();
++
++  if (hadError) throw actual;
++
++  assertTrue(hadValue, "Expected '" + run.toString() + "' to produce a value");
++  assertEquals(expected, actual);
++}
++
++// Closures must survive GC between await expressions.
++(function TestMultipleAwaits() {
++  async function multiAwait(a, b, c) {
++    let x = await Promise.resolve(a);
++    gc();
++    let y = await Promise.resolve(b);
++    gc();
++    let z = await Promise.resolve(c);
++    return x + y + z;
++  }
++
++  assertEqualsAsync(6, () => multiAwait(1, 2, 3));
++  assertEqualsAsync(15, () => multiAwait(4, 5, 6));
++})();
++
++// Fields must be initialized before allocations that could trigger GC.
++(function TestGCDuringCreation() {
++  for (let i = 0; i < 100; i++) {
++    gc();
++    async function localAsync() {
++      return await Promise.resolve(i);
++    }
++    assertEqualsAsync(i, () => localAsync());
++  }
++})();
++
++// Each async function instance needs its own closures.
++(function TestNestedAsync() {
++  async function inner(x) {
++    gc();
++    return await Promise.resolve(x * 2);
++  }
++
++  async function outer(x) {
++    let a = await inner(x);
++    gc();
++    let b = await inner(a);
++    gc();
++    let c = await inner(b);
++    return c;
++  }
++
++  assertEqualsAsync(8, () => outer(1));
++  assertEqualsAsync(16, () => outer(2));
++})();
++
++// Closures must handle arbitrary numbers of await expressions.
++(function TestManyAwaits() {
++  async function manyAwaits() {
++    let result = 0;
++    for (let i = 0; i < 10; i++) {
++      result += await Promise.resolve(i);
++      if (i % 3 === 0) gc();
++    }
++    return result;  // 0+1+2+3+4+5+6+7+8+9 = 45
++  }
++
++  assertEqualsAsync(45, () => manyAwaits());
++})();
++
++// Reject closures must also be reused correctly.
++(function TestRejectClosureReuse() {
++  async function withRejections() {
++    let result = 0;
++    for (let i = 0; i < 5; i++) {
++      try {
++        await Promise.reject(new Error("error" + i));
++      } catch (e) {
++        result += i;
++        gc();
++      }
++    }
++    return result;  // 0+1+2+3+4 = 10
++  }
++
++  assertEqualsAsync(10, () => withRejections());
++})();
++
++// Concurrent async functions must not share closures.
++(function TestConcurrentAsync() {
++  async function asyncA(x) {
++    gc();
++    let a = await Promise.resolve(x);
++    gc();
++    let b = await Promise.resolve(a + 1);
++    return b;
++  }
++
++  async function asyncB(x) {
++    gc();
++    let a = await Promise.resolve(x * 2);
++    gc();
++    let b = await Promise.resolve(a * 2);
++    return b;
++  }
++
++  let promiseA = asyncA(5);
++  let promiseB = asyncB(3);
++
++  let resultA, resultB;
++  promiseA.then(v => resultA = v);
++  promiseB.then(v => resultB = v);
++
++  %PerformMicrotaskCheckpoint();
++
++  assertEquals(6, resultA);   // 5 + 1
++  assertEquals(12, resultB);  // 3 * 2 * 2
++})();
++
++// Pre-allocated closures must not break functions without awaits.
++(function TestNoAwait() {
++  async function noAwait(x) {
++    gc();
++    return x + 1;
++  }
++
++  assertEqualsAsync(43, () => noAwait(42));
++})();
++
++// Baseline case: single await should work correctly.
++(function TestSingleAwait() {
++  async function singleAwait(x) {
++    gc();
++    return await Promise.resolve(x * 2);
++  }
++
++  assertEqualsAsync(84, () => singleAwait(42));
++})();
++
++// Stress test: many concurrent async function instances.
++(function TestStressGC() {
++  let results = [];
++  let promises = [];
++
++  for (let i = 0; i < 50; i++) {
++    async function stress() {
++      let a = await Promise.resolve(i);
++      gc();
++      let b = await Promise.resolve(a + 1);
++      return b;
++    }
++    promises.push(stress().then(v => results.push(v)));
++  }
++
++  %PerformMicrotaskCheckpoint();
++
++  assertEquals(50, results.length);
++  for (let i = 0; i < 50; i++) {
++    assertTrue(results.includes(i + 1), "Missing result " + (i + 1));
++  }
++})();
++
++// Async arrow functions use the same optimization path.
++(function TestAsyncArrow() {
++  const arrowAsync = async (x) => {
++    gc();
++    let a = await Promise.resolve(x);
++    gc();
++    let b = await Promise.resolve(a + 10);
++    return b;
++  };
++
++  assertEqualsAsync(15, () => arrowAsync(5));
++})();
++
++// Async methods must each have their own closures.
++(function TestAsyncMethod() {
++  const obj = {
++    async method(x) {
++      gc();
++      let a = await Promise.resolve(x);
++      gc();
++      let b = await Promise.resolve(a * 3);
++      return b;
++    }
++  };
++
++  assertEqualsAsync(21, () => obj.method(7));
++})();
++
++// Class methods work the same as object methods.
++(function TestAsyncClassMethod() {
++  class MyClass {
++    constructor(multiplier) {
++      this.multiplier = multiplier;
++    }
++
++    async compute(x) {
++      gc();
++      let a = await Promise.resolve(x);
++      gc();
++      let b = await Promise.resolve(a * this.multiplier);
++      return b;
++    }
++  }
++
++  const instance = new MyClass(5);
++  assertEqualsAsync(50, () => instance.compute(10));
++})();
++
++print("All async closure reuse tests passed!");
