@@ -87,20 +87,18 @@ class WritableSinkImpl: public WritableSink {
     if (state.is<Closed>()) {
       co_return;
     }
-    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-      KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
-      // The AsyncOutputStream interface does not yet have an end() method.
-      // Instead, we just drop it, signaling EOF. Eventually, it might get
-      // an end method, at which point we should use that instead.
-      try {
-        co_await canceler.wrap(endImpl(*open.stream));
-        setClosed();
-        co_return;
-      } catch (...) {
-        handleOperationException();
-      }
+    auto& open = state.requireActiveUnsafe();
+    KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being written to");
+    // The AsyncOutputStream interface does not yet have an end() method.
+    // Instead, we just drop it, signaling EOF. Eventually, it might get
+    // an end method, at which point we should use that instead.
+    try {
+      co_await canceler.wrap(endImpl(*open.stream));
+      setClosed();
+      co_return;
+    } catch (...) {
+      handleOperationException();
     }
-    KJ_UNREACHABLE;
   }
 
   void abort(kj::Exception reason) override final {
