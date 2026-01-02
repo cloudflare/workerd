@@ -1,7 +1,7 @@
 use jsg::Error;
 use jsg::ExceptionType;
 use jsg::Lock;
-use jsg::Type;
+use jsg::Wrappable;
 use jsg::v8;
 use jsg::v8::ToLocalValue;
 use jsg_macros::jsg_struct;
@@ -31,7 +31,7 @@ fn objects_can_be_wrapped_and_unwrapped() {
         let instance = TestStruct {
             str: "test".to_owned(),
         };
-        let wrapped = TestStruct::wrap(instance, &mut lock);
+        let wrapped = instance.wrap(&mut lock);
         let mut obj: v8::Local<'_, v8::Object> = wrapped.into();
         assert!(obj.has(&mut lock, "str"));
         let str_value = obj.get(&mut lock, "str");
@@ -54,7 +54,7 @@ fn struct_with_multiple_properties() {
             age: 30,
             active: "true".to_owned(),
         };
-        let wrapped = MultiPropertyStruct::wrap(instance, &mut lock);
+        let wrapped = instance.wrap(&mut lock);
         let obj: v8::Local<'_, v8::Object> = wrapped.into();
 
         assert!(obj.has(&mut lock, "name"));
@@ -142,7 +142,7 @@ fn nested_object_properties() {
         let inner_instance = NestedStruct {
             inner: "nested value".to_owned(),
         };
-        let inner_wrapped = NestedStruct::wrap(inner_instance, &mut lock);
+        let inner_wrapped = inner_instance.wrap(&mut lock);
         outer.set(&mut lock, "nested", inner_wrapped);
 
         assert!(outer.has(&mut lock, "nested"));

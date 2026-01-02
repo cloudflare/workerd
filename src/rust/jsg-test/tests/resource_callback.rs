@@ -26,7 +26,7 @@ struct EchoResource {
 #[expect(clippy::unnecessary_wraps)]
 impl EchoResource {
     #[jsg_method]
-    pub fn echo(&self, message: &str) -> Result<String, String> {
+    pub fn echo(&self, message: String) -> Result<String, String> {
         Ok(format!("{}{}", self.prefix, message))
     }
 }

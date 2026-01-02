@@ -9,7 +9,7 @@ Generates the `jsg::Struct` and `jsg::Type` implementations for data structures.
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
-    pub critical: u8,
+    pub critical: f64,
     pub field: String,
     pub value: String,
 }
@@ -29,7 +29,7 @@ Parameters and return values are handled via the `jsg::Wrappable` trait. Any typ
 ```rust
 impl DnsUtil {
     #[jsg_method(name = "parseCaaRecord")]
-    pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
+    pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
         // Errors are thrown as JavaScript exceptions
     }
 
@@ -65,7 +65,7 @@ pub struct MyUtil {
 #[jsg_resource]
 impl DnsUtil {
     #[jsg_method]
-    pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
+    pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
         // implementation
     }
 }

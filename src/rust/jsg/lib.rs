@@ -14,6 +14,7 @@ pub mod v8;
 mod wrappable;
 
 pub use v8::ffi::ExceptionType;
+pub use wrappable::Unwrappable;
 pub use wrappable::Wrappable;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
@@ -230,6 +231,11 @@ impl<T: Type> NonCoercible<T> {
     pub fn new(value: T) -> Self {
         Self { value }
     }
+
+    /// Consumes the wrapper and returns the inner value.
+    pub fn into_inner(self) -> T {
+        self.value
+    }
 }
 
 impl<T: Type> From<T> for NonCoercible<T> {
@@ -366,32 +372,30 @@ impl<T: Resource> Clone for Ref<T> {
     }
 }
 
+/// Provides metadata about Rust types exposed to JavaScript.
+///
+/// This trait provides type information used for error messages, memory tracking,
+/// and type validation (for `NonCoercible<T>`). The actual conversion logic is in
+/// `Wrappable` (Rust → JS) and `Unwrappable` (JS → Rust).
+///
 /// TODO: Implement `memory_info(jsg::MemoryTracker)`
 pub trait Type: Sized {
-    /// The input type for [`wrap()`](Self::wrap). For primitive types this is typically `Self`,
-    /// but resource types may use `Ref<Self>` or other wrapper types.
-    type This;
-
+    /// The JavaScript class name for this type (used in error messages).
     fn class_name() -> &'static str;
+
     /// Same as jsgGetMemoryName
     fn memory_name() -> &'static str {
         std::any::type_name::<Self>()
     }
+
     /// Same as jsgGetMemorySelfSize
     fn memory_self_size() -> usize {
         std::mem::size_of::<Self>()
     }
-    /// Wraps this struct as a JavaScript value by deep-copying its fields.
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a;
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
     fn is_exact(value: &v8::Local<v8::Value>) -> bool;
-
-    /// Unwraps a V8 value into this type without coercion.
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self;
 }
 
 pub enum Member {

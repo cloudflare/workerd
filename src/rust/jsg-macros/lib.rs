@@ -1,7 +1,4 @@
-mod types;
-
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
 use quote::ToTokens;
 use quote::quote;
 use syn::Data;
@@ -10,10 +7,8 @@ use syn::Fields;
 use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
-use syn::Type;
 use syn::parse_macro_input;
 use syn::spanned::Spanned;
-use types::is_str_ref;
 
 /// Generates `jsg::Struct` and `jsg::Type` implementations for data structures.
 ///
@@ -51,27 +46,31 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         #input
 
         impl jsg::Type for #name {
-            type This = Self;
-
             fn class_name() -> &'static str { #class_name }
 
-            fn wrap<'a, 'b>(this: Self::This, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
-            where 'b: 'a,
+            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                value.is_object()
+            }
+        }
+
+        impl jsg::Wrappable for #name {
+            fn wrap<'a, 'b>(self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            where
+                'b: 'a,
             {
                 // TODO(soon): Use a precached ObjectTemplate instance to create the object,
                 // similar to how C++ JSG optimizes object creation. This would avoid recreating
                 // the object shape on every wrap() call and improve performance.
                 unsafe {
+                    let this = self;
                     let mut obj = lock.new_object();
                     #(#field_assignments)*
                     obj.into()
                 }
             }
+        }
 
-            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
-                value.is_object()
-            }
-
+        impl jsg::Unwrappable for #name {
             fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::Local<jsg::v8::Value>) -> Self {
                 unimplemented!("Struct unwrap is not yet supported")
             }
@@ -104,13 +103,15 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
-    let (unwraps, arg_refs): (Vec<_>, Vec<_>) = params
+    let (unwraps, arg_names): (Vec<_>, Vec<_>) = params
         .iter()
         .enumerate()
         .map(|(i, ty)| {
             let arg = syn::Ident::new(&format!("arg{i}"), fn_name.span());
-            let (unwrap, arg_ref) = generate_unwrap(&arg, ty, i);
-            (unwrap, arg_ref)
+            let unwrap = quote! {
+                let Some(#arg) = <#ty as jsg::Unwrappable>::try_unwrap(&mut lock, args.get(#i)) else { return; };
+            };
+            (unwrap, arg)
         })
         .unzip();
 
@@ -124,27 +125,11 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             #(#unwraps)*
             let this = args.this();
             let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
-            let result = self_.#fn_name(#(#arg_refs),*);
-            jsg::Wrappable::wrap_return(result, &mut lock, &mut args);
+            let result = self_.#fn_name(#(#arg_names),*);
+            args.set_return_value(jsg::Wrappable::wrap(result, &mut lock));
         }
     }
     .into()
-}
-
-fn generate_unwrap(arg: &syn::Ident, ty: &Type, index: usize) -> (TokenStream2, TokenStream2) {
-    // &str: unwrap as String and borrow
-    if is_str_ref(ty) {
-        let unwrap = quote! {
-            let Some(#arg) = <String as jsg::Wrappable>::try_unwrap(&mut lock, args.get(#index)) else { return; };
-        };
-        return (unwrap, quote! { &#arg });
-    }
-
-    // All types use Wrappable::try_unwrap
-    let unwrap = quote! {
-        let Some(#arg) = <#ty as jsg::Wrappable>::try_unwrap(&mut lock, args.get(#index)) else { return; };
-    };
-    (unwrap, quote! { #arg })
 }
 
 /// Generates boilerplate for JSG resources.
@@ -174,20 +159,25 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[automatically_derived]
         impl jsg::Type for #name {
-            type This = jsg::Ref<Self>;
-
             fn class_name() -> &'static str { #class_name }
-
-            fn wrap<'a, 'b>(_this: Self::This, _lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
-            where 'b: 'a,
-            {
-                todo!("Implement wrap for jsg::Resource")
-            }
 
             fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
                 value.is_object()
             }
+        }
 
+        #[automatically_derived]
+        impl jsg::Wrappable for #name {
+            fn wrap<'a, 'b>(self, _lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            where
+                'b: 'a,
+            {
+                unimplemented!("Resource wrap is not yet supported")
+            }
+        }
+
+        #[automatically_derived]
+        impl jsg::Unwrappable for #name {
             fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::Local<jsg::v8::Value>) -> Self {
                 unimplemented!("Resource unwrap is not yet supported")
             }
