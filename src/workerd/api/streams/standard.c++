@@ -2059,7 +2059,10 @@ ReadableStreamBYOBRequest::Impl::Impl(jsg::Lock& js,
     kj::Rc<WeakRef<ReadableByteStreamController>> controller)
     : readRequest(kj::mv(readRequest)),
       controller(kj::mv(controller)),
-      view(js.v8Ref(this->readRequest->getView(js))) {}
+      view(js.v8Ref(this->readRequest->getView(js))),
+      originalBufferByteLength(this->readRequest->getOriginalBufferByteLength(js)),
+      originalByteOffsetPlusBytesFilled(this->readRequest->getOriginalByteOffsetPlusBytesFilled()) {
+}
 
 void ReadableStreamBYOBRequest::Impl::updateView(jsg::Lock& js) {
   jsg::check(view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
@@ -2153,7 +2156,35 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
     if (!controller.canCloseOrEnqueue()) {
       JSG_REQUIRE(view.size() == 0, TypeError,
           "The view byte length must be zero after the stream is closed.");
-      KJ_ASSERT(impl.readRequest->isInvalidated());
+
+      if (FeatureFlags::get(js).getPedanticWpt()) {
+        // Per the spec, when the stream is closed:
+        // 1. The view byte length must be zero (TypeError if not)
+        // 2. The underlying buffer must not be detached (TypeError)
+        // 3. The buffer byte length must not be zero (RangeError)
+        // 4. The buffer byte length must match the original (RangeError)
+        auto handle = view.getHandle(js);
+        auto buffer = handle->IsArrayBuffer() ? handle.As<v8::ArrayBuffer>()
+                                              : handle.As<v8::ArrayBufferView>()->Buffer();
+        JSG_REQUIRE(
+            !buffer->WasDetached(), TypeError, "The underlying ArrayBuffer has been detached.");
+
+        JSG_REQUIRE(view.canDetach(js), TypeError, "Unable to use non-detachable ArrayBuffer.");
+        // Use the stored values since the ByobRequest may have been invalidated during close.
+        auto actualBufferByteLength = buffer->ByteLength();
+        JSG_REQUIRE(
+            actualBufferByteLength != 0, RangeError, "The underlying ArrayBuffer is zero-length.");
+        JSG_REQUIRE(actualBufferByteLength == impl.originalBufferByteLength, RangeError,
+            "The underlying ArrayBuffer is not the correct length.");
+        // The view's byte offset must match the original byte offset plus bytes filled.
+        auto viewByteOffset =
+            handle->IsArrayBuffer() ? 0 : handle.As<v8::ArrayBufferView>()->ByteOffset();
+        JSG_REQUIRE(viewByteOffset == impl.originalByteOffsetPlusBytesFilled, RangeError,
+            "The view has an invalid byte offset.");
+      } else {
+        KJ_ASSERT(impl.readRequest->isInvalidated());
+      }
+
       invalidate(js);
     } else {
       bool shouldInvalidate = false;
@@ -2238,6 +2269,17 @@ void ReadableByteStreamController::close(jsg::Lock& js) {
   KJ_IF_SOME(byobRequest, maybeByobRequest) {
     JSG_REQUIRE(!byobRequest->isPartiallyFulfilled(), TypeError,
         "This ReadableStream was closed with a partial read pending.");
+  } else if (FeatureFlags::get(js).getPedanticWpt()) {
+    // If maybeByobRequest is not set, check if there's a pending byob request.
+    // If so, materialize it before closing so it remains accessible after
+    // the state changes to Closed. This is required by the spec for proper
+    // respondWithNewView() error handling in the closed state.
+    // Only do this if the queue doesn't have a partially fulfilled read.
+    KJ_IF_SOME(queue, impl.state.tryGet<ByteQueue>()) {
+      if (!queue.hasPartiallyFulfilledRead()) {
+        getByobRequest(js);
+      }
+    }
   }
   impl.close(js);
 }
