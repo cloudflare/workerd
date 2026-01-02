@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "async-context.h"
 #include "deferred-promise.h"
 #include "jsg-test.h"
 
@@ -207,9 +208,7 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
       errorCaught = true;
       // The kj::Exception should have been converted to a JS Error
       v8::HandleScope scope(js.v8Isolate);
-      auto str = error.getHandle(js)->ToString(js.v8Context()).ToLocalChecked();
-      v8::String::Utf8Value utf8(js.v8Isolate, str);
-      errorMessage = kj::str(*utf8);
+      errorMessage = kj::str(check(error.getHandle(js)->ToString(js.v8Context())));
     });
 
     // Reject with kj::Exception - it should be converted to JS Error
@@ -236,9 +235,7 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
         [&errorCaught, &errorMessage](jsg::Lock& js, Value error) {
       errorCaught = true;
       v8::HandleScope scope(js.v8Isolate);
-      auto str = error.getHandle(js)->ToString(js.v8Context()).ToLocalChecked();
-      v8::String::Utf8Value utf8(js.v8Isolate, str);
-      errorMessage = kj::str(*utf8);
+      errorMessage = kj::str(check(error.getHandle(js)->ToString(js.v8Context())));
     });
 
     js.runMicrotasks();
@@ -731,6 +728,247 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
     // We have to pump the microtask queue to resolve thenables.
     js.runMicrotasks();
     KJ_EXPECT(result == expected);
+  }
+
+  // ======================================================================================
+  // Async Context Tests
+  // ======================================================================================
+
+  // Test that .then() captures the async context when called and restores it in the continuation
+  void testAsyncContextCapturedInThen(jsg::Lock& js) {
+    // Create a storage key and value to track async context
+    auto storageKey = kj::refcounted<AsyncContextFrame::StorageKey>();
+    auto testValue = js.v8Ref<v8::Value>(v8StrIntern(js.v8Isolate, "test-value-42"));
+
+    bool continuationRan = false;
+    kj::Maybe<AsyncContextFrame&> frameInContinuation;
+    kj::Maybe<Value&> valueInContinuation;
+
+    auto pair = newDeferredPromiseAndResolver<int>();
+
+    // Enter the async context frame, set up the continuation, then exit the frame
+    {
+      AsyncContextFrame::StorageScope storageScope(js, *storageKey, testValue.addRef(js));
+
+      // Set up continuation while in the async context
+      pair.promise.then(js, [&](jsg::Lock& js, int value) {
+        continuationRan = true;
+        // Capture the current async context when continuation runs
+        frameInContinuation = AsyncContextFrame::current(js);
+        KJ_IF_SOME(f, frameInContinuation) {
+          valueInContinuation = f.get(*storageKey);
+        }
+      });
+    }
+
+    // We're now outside the async context frame
+    KJ_EXPECT(AsyncContextFrame::current(js) == kj::none, "Should be in root context now");
+
+    // Resolve the promise - the continuation should run in the captured async context
+    pair.resolver.resolve(js, 42);
+
+    KJ_EXPECT(continuationRan, "Continuation should have run");
+    KJ_EXPECT(frameInContinuation != kj::none,
+        "Continuation should run in the captured async context frame");
+    KJ_EXPECT(valueInContinuation != kj::none,
+        "Async context value should be accessible in continuation");
+
+    // Verify the value is correct
+    KJ_IF_SOME(val, valueInContinuation) {
+      v8::HandleScope handleScope(js.v8Isolate);
+      auto str = kj::str(check(val.getHandle(js)->ToString(js.v8Context())));
+      KJ_EXPECT(str == "test-value-42"_kj);
+    }
+  }
+
+  // Test that .catch_() captures the async context when called and restores it in error handler
+  void testAsyncContextCapturedInCatch(jsg::Lock& js) {
+    auto storageKey = kj::refcounted<AsyncContextFrame::StorageKey>();
+    auto testValue = js.v8Ref<v8::Value>(v8StrIntern(js.v8Isolate, "catch-context-value"));
+
+    bool errorHandlerRan = false;
+    kj::Maybe<AsyncContextFrame&> frameInHandler;
+
+    auto pair = newDeferredPromiseAndResolver<int>();
+
+    {
+      AsyncContextFrame::StorageScope storageScope(js, *storageKey, testValue.addRef(js));
+
+      pair.promise.catch_(js, [&](jsg::Lock& js, kj::Exception) -> int {
+        errorHandlerRan = true;
+        frameInHandler = AsyncContextFrame::current(js);
+        return 0;
+      });
+    }
+
+    // We're now outside the async context frame
+    KJ_EXPECT(AsyncContextFrame::current(js) == kj::none);
+
+    // Reject the promise
+    pair.resolver.reject(js, JSG_KJ_EXCEPTION(FAILED, Error, "test error"));
+
+    KJ_EXPECT(errorHandlerRan, "Error handler should have run");
+    KJ_EXPECT(
+        frameInHandler != kj::none, "Error handler should run in the captured async context frame");
+  }
+
+  // Test that async context is captured for pending promise and restored on resolve
+  void testAsyncContextPendingThenResolve(jsg::Lock& js) {
+    auto storageKey = kj::refcounted<AsyncContextFrame::StorageKey>();
+    auto testValue = js.v8Ref<v8::Value>(v8StrIntern(js.v8Isolate, "pending-resolve-value"));
+
+    kj::Vector<kj::StringPtr> contextStates;
+    auto pair = newDeferredPromiseAndResolver<int>();
+
+    {
+      AsyncContextFrame::StorageScope storageScope(js, *storageKey, testValue.addRef(js));
+      contextStates.add(AsyncContextFrame::current(js) != kj::none ? "in-frame" : "root");
+
+      pair.promise.then(js, [&](jsg::Lock& js, int) {
+        contextStates.add(AsyncContextFrame::current(js) != kj::none ? "in-frame" : "root");
+      });
+    }
+
+    contextStates.add(AsyncContextFrame::current(js) != kj::none ? "in-frame" : "root");
+
+    pair.resolver.resolve(js, 1);
+
+    KJ_ASSERT(contextStates.size() == 3);
+    KJ_EXPECT(contextStates[0] == "in-frame", "Should be in frame when setting up .then()");
+    KJ_EXPECT(contextStates[1] == "root", "Should be in root after leaving scope");
+    KJ_EXPECT(contextStates[2] == "in-frame", "Continuation should restore the frame");
+  }
+
+  // Test that async context is captured for the error callback in .then(success, error)
+  void testAsyncContextCapturedInThenErrorCallback(jsg::Lock& js) {
+    auto storageKey = kj::refcounted<AsyncContextFrame::StorageKey>();
+    auto testValue = js.v8Ref<v8::Value>(v8StrIntern(js.v8Isolate, "then-error-callback-value"));
+
+    bool errorCallbackRan = false;
+    kj::Maybe<AsyncContextFrame&> frameInCallback;
+
+    auto pair = newDeferredPromiseAndResolver<int>();
+
+    {
+      AsyncContextFrame::StorageScope storageScope(js, *storageKey, testValue.addRef(js));
+
+      pair.promise.then(js, [](jsg::Lock&, int) { KJ_FAIL_REQUIRE("Should not be called"); },
+          [&](jsg::Lock& js, kj::Exception) {
+        errorCallbackRan = true;
+        frameInCallback = AsyncContextFrame::current(js);
+      });
+    }
+
+    pair.resolver.reject(js, JSG_KJ_EXCEPTION(FAILED, Error, "test"));
+
+    KJ_EXPECT(errorCallbackRan);
+    KJ_EXPECT(
+        frameInCallback != kj::none, "Error callback in .then() should restore async context");
+  }
+
+  // Test async context through a chain of .then() calls
+  void testAsyncContextThroughChain(jsg::Lock& js) {
+    auto storageKey = kj::refcounted<AsyncContextFrame::StorageKey>();
+    auto testValue = js.v8Ref<v8::Value>(v8StrIntern(js.v8Isolate, "chain-context-value"));
+
+    kj::Vector<bool> inFrameAtEachStep;
+    auto pair = newDeferredPromiseAndResolver<int>();
+
+    {
+      AsyncContextFrame::StorageScope storageScope(js, *storageKey, testValue.addRef(js));
+
+      pair.promise
+          .then(js,
+              [&](jsg::Lock& js, int v) -> int {
+        inFrameAtEachStep.add(AsyncContextFrame::current(js) != kj::none);
+        return v * 2;
+      })
+          .then(js, [&](jsg::Lock& js, int v) -> int {
+        inFrameAtEachStep.add(AsyncContextFrame::current(js) != kj::none);
+        return v + 10;
+      }).then(js, [&](jsg::Lock& js, int v) {
+        inFrameAtEachStep.add(AsyncContextFrame::current(js) != kj::none);
+      });
+    }
+
+    pair.resolver.resolve(js, 5);
+
+    KJ_ASSERT(inFrameAtEachStep.size() == 3);
+    for (size_t i = 0; i < inFrameAtEachStep.size(); ++i) {
+      KJ_EXPECT(inFrameAtEachStep[i], "Step", i, "should be in the async context frame");
+    }
+  }
+
+  // Test that different .then() calls capture their respective async contexts
+  void testAsyncContextDifferentFrames(jsg::Lock& js) {
+    auto storageKey = kj::refcounted<AsyncContextFrame::StorageKey>();
+
+    auto value1 = js.v8Ref<v8::Value>(v8StrIntern(js.v8Isolate, "frame-1"));
+    auto value2 = js.v8Ref<v8::Value>(v8StrIntern(js.v8Isolate, "frame-2"));
+
+    kj::String capturedValue1;
+    kj::String capturedValue2;
+
+    auto pair1 = newDeferredPromiseAndResolver<int>();
+    auto pair2 = newDeferredPromiseAndResolver<int>();
+
+    // Set up first continuation in frame1
+    {
+      AsyncContextFrame::StorageScope storageScope(js, *storageKey, value1.addRef(js));
+      pair1.promise.then(js, [&](jsg::Lock& js, int) {
+        KJ_IF_SOME(f, AsyncContextFrame::current(js)) {
+          KJ_IF_SOME(v, f.get(*storageKey)) {
+            v8::HandleScope handleScope(js.v8Isolate);
+            capturedValue1 = kj::str(check(v.getHandle(js)->ToString(js.v8Context())));
+          }
+        }
+      });
+    }
+
+    // Set up second continuation in frame2
+    {
+      AsyncContextFrame::StorageScope storageScope(js, *storageKey, value2.addRef(js));
+      pair2.promise.then(js, [&](jsg::Lock& js, int) {
+        KJ_IF_SOME(f, AsyncContextFrame::current(js)) {
+          KJ_IF_SOME(v, f.get(*storageKey)) {
+            v8::HandleScope handleScope(js.v8Isolate);
+            capturedValue2 = kj::str(check(v.getHandle(js)->ToString(js.v8Context())));
+          }
+        }
+      });
+    }
+
+    // Resolve in reverse order to ensure each captures its own context
+    pair2.resolver.resolve(js, 2);
+    pair1.resolver.resolve(js, 1);
+
+    KJ_EXPECT(capturedValue1 == "frame-1", capturedValue1);
+    KJ_EXPECT(capturedValue2 == "frame-2", capturedValue2);
+  }
+
+  // Test that already-resolved promise runs continuation in current context (not captured)
+  void testAsyncContextAlreadyResolved(jsg::Lock& js) {
+    auto storageKey = kj::refcounted<AsyncContextFrame::StorageKey>();
+    auto testValue = js.v8Ref<v8::Value>(v8StrIntern(js.v8Isolate, "already-resolved-value"));
+
+    kj::Maybe<AsyncContextFrame&> frameInContinuation;
+
+    // Create an already-resolved promise
+    auto promise = DeferredPromise<int>::resolved(42);
+
+    // Call .then() while in the async context - for already-resolved promises,
+    // the continuation runs immediately (synchronously), so it should be in the current frame
+    {
+      AsyncContextFrame::StorageScope storageScope(js, *storageKey, testValue.addRef(js));
+
+      promise.then(
+          js, [&](jsg::Lock& js, int) { frameInContinuation = AsyncContextFrame::current(js); });
+    }
+
+    // Since already-resolved promises run synchronously, the continuation should have
+    // run while we were still in the frame
+    KJ_EXPECT(frameInContinuation != kj::none,
+        "Already-resolved promise continuation should run in current frame");
   }
 
   JSG_RESOURCE_TYPE(DeferredPromiseContext) {

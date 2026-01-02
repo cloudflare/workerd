@@ -1458,6 +1458,13 @@ class DeferredPromise {
     // This will point to user code, not DeferredPromise internals.
     void* continuationTrace = JSG_GET_RETURN_ADDRESS();
 
+    // Capture the current async context frame to restore when continuation runs.
+    auto asyncContext = AsyncContextScope::capture(js);
+
+    static constexpr auto maybeAddRef = [](kj::Maybe<jsg::Ref<AsyncContextFrame>&> ref) {
+      return ref.map([](jsg::Ref<AsyncContextFrame>& r) { return r.addRef(); });
+    };
+
     KJ_SWITCH_ONEOF(state->state.underlying()) {
       KJ_CASE_ONEOF(pending, Pending) {
         // Ensure promise hasn't already been consumed
@@ -1470,8 +1477,10 @@ class DeferredPromise {
 
         // Set the success callback
         if constexpr (isVoid<T>()) {
-          pending.thenCallback = [f = kj::mv(func), rs = kj::mv(resultState), continuationTrace](
-                                     Lock& js) mutable {
+          pending.thenCallback = [f = kj::mv(func), rs = kj::mv(resultState), continuationTrace,
+                                     asyncContext = maybeAddRef(asyncContext)](Lock& js) mutable {
+            // Enter the async context that was current when .then() was called
+            AsyncContextScope asyncScope(js, asyncContext);
             try {
               if constexpr (isVoid<RawOutput>()) {
                 f(js);
@@ -1491,8 +1500,11 @@ class DeferredPromise {
             }
           };
         } else {
-          pending.thenCallback = [f = kj::mv(func), rs = kj::mv(resultState), continuationTrace](
+          pending.thenCallback = [f = kj::mv(func), rs = kj::mv(resultState), continuationTrace,
+                                     asyncContext = maybeAddRef(asyncContext)](
                                      Lock& js, T value) mutable {
+            // Enter the async context that was current when .then() was called
+            AsyncContextScope asyncScope(js, asyncContext);
             try {
               if constexpr (isVoid<RawOutput>()) {
                 f(js, kj::mv(value));
@@ -1514,8 +1526,13 @@ class DeferredPromise {
         }
 
         // Set the error callback - receives kj::Exception directly
+        // Note: asyncContext was moved into thenCallback above, so we need to capture it
+        // fresh here. Both callbacks need to restore the same async context.
         pending.catchCallback = [ef = kj::mv(errorFunc), rs = resultStateRef.addRef(),
-                                    continuationTrace](Lock& js, kj::Exception exception) mutable {
+                                    continuationTrace, asyncContext = maybeAddRef(asyncContext)](
+                                    Lock& js, kj::Exception exception) mutable {
+          // Enter the async context that was current when .then() was called
+          AsyncContextScope asyncScope(js, asyncContext);
           try {
             if constexpr (isVoid<RawOutput>()) {
               ef(js, kj::mv(exception));
@@ -1653,6 +1670,13 @@ class DeferredPromise {
     // This will point to user code, not DeferredPromise internals.
     void* continuationTrace = JSG_GET_RETURN_ADDRESS();
 
+    // Capture the current async context frame to restore when continuation runs.
+    auto asyncContext = AsyncContextScope::capture(js);
+
+    static constexpr auto maybeAddRef = [](kj::Maybe<jsg::Ref<AsyncContextFrame>&> ref) {
+      return ref.map([](jsg::Ref<AsyncContextFrame>& r) { return r.addRef(); });
+    };
+
     KJ_SWITCH_ONEOF(state->state.underlying()) {
       KJ_CASE_ONEOF(pending, Pending) {
         // Ensure promise hasn't already been consumed
@@ -1665,8 +1689,10 @@ class DeferredPromise {
 
         // Set the success callback
         if constexpr (isVoid<T>()) {
-          pending.thenCallback = [f = kj::mv(func), rs = kj::mv(resultState), continuationTrace](
-                                     Lock& js) mutable {
+          pending.thenCallback = [f = kj::mv(func), rs = kj::mv(resultState), continuationTrace,
+                                     asyncContext = maybeAddRef(asyncContext)](Lock& js) mutable {
+            // Enter the async context that was current when .then() was called
+            AsyncContextScope asyncScope(js, asyncContext);
             try {
               if constexpr (isVoid<RawOutput>()) {
                 f(js);
@@ -1686,8 +1712,11 @@ class DeferredPromise {
             }
           };
         } else {
-          pending.thenCallback = [f = kj::mv(func), rs = kj::mv(resultState), continuationTrace](
+          pending.thenCallback = [f = kj::mv(func), rs = kj::mv(resultState), continuationTrace,
+                                     asyncContext = maybeAddRef(asyncContext)](
                                      Lock& js, T value) mutable {
+            // Enter the async context that was current when .then() was called
+            AsyncContextScope asyncScope(js, asyncContext);
             try {
               if constexpr (isVoid<RawOutput>()) {
                 f(js, kj::mv(value));
@@ -1709,6 +1738,7 @@ class DeferredPromise {
         }
 
         // No error handler - propagate rejection (exception passed through directly)
+        // No need to restore async context since we're just propagating the exception.
         pending.catchCallback = [rs = resultStateRef.addRef()](
                                     Lock& js, kj::Exception exception) mutable {
           rs->reject(js, kj::mv(exception));
@@ -1806,6 +1836,13 @@ class DeferredPromise {
     // This will point to user code, not DeferredPromise internals.
     void* continuationTrace = JSG_GET_RETURN_ADDRESS();
 
+    // Capture the current async context frame to restore when error handler runs.
+    auto asyncContext = AsyncContextScope::capture(js);
+
+    static constexpr auto maybeAddRef = [](kj::Maybe<jsg::Ref<AsyncContextFrame>&> ref) {
+      return ref.map([](jsg::Ref<AsyncContextFrame>& r) { return r.addRef(); });
+    };
+
     KJ_SWITCH_ONEOF(state->state.underlying()) {
       KJ_CASE_ONEOF(pending, Pending) {
         // Ensure promise hasn't already been consumed
@@ -1816,7 +1853,7 @@ class DeferredPromise {
         auto resultState = kj::rc<_::DeferredPromiseState<T>>();
         auto resultStateRef = resultState.addRef();
 
-        // Success just propagates
+        // Success just propagates - no user callback invoked, no async context needed
         if constexpr (isVoid<T>()) {
           pending.thenCallback = [rs = kj::mv(resultState)](Lock& js) mutable { rs->resolve(js); };
         } else {
@@ -1826,7 +1863,10 @@ class DeferredPromise {
 
         // Error calls the handler - receives kj::Exception directly
         pending.catchCallback = [ef = kj::mv(errorFunc), rs = resultStateRef.addRef(),
-                                    continuationTrace](Lock& js, kj::Exception exception) mutable {
+                                    continuationTrace, asyncContext = maybeAddRef(asyncContext)](
+                                    Lock& js, kj::Exception exception) mutable {
+          // Enter the async context that was current when .catch_() was called
+          AsyncContextScope asyncScope(js, asyncContext);
           try {
             if constexpr (isVoid<T>()) {
               ef(js, kj::mv(exception));

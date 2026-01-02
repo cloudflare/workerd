@@ -2153,6 +2153,29 @@ constexpr bool isV8MaybeLocal() {
 }
 
 class AsyncContextFrame;
+
+// Helper for capturing and restoring async context in deferred promises.
+// This is declared here so deferred-promise.h can use it without needing
+// the full AsyncContextFrame definition. Implementation is in async-context.h.
+class AsyncContextScope {
+ public:
+  // Capture the current async context frame for later restoration.
+  // Returns an opaque reference that can be stored and used with enterScope().
+  static kj::Maybe<Ref<AsyncContextFrame>> capture(Lock& js);
+
+  // Create a scope that enters the captured async context frame.
+  // The frame is restored when the scope is destroyed.
+  AsyncContextScope(Lock& js, kj::Maybe<Ref<AsyncContextFrame>>& frame);
+  ~AsyncContextScope() noexcept(false);
+
+  KJ_DISALLOW_COPY(AsyncContextScope);
+  AsyncContextScope(AsyncContextScope&&) = default;
+
+ private:
+  v8::Isolate* isolate;
+  kj::Maybe<AsyncContextFrame&> prior;
+};
+
 template <typename T>
 class JsRef;
 
@@ -3021,6 +3044,11 @@ inline Value SelfRef::asValue(Lock& js) const {
 // clang-format off
 // These includes are needed for the JSG type glue macros to work.
 #include "promise.h"
+// async-context.h must come before deferred-promise.h because deferred-promise.h
+// uses AsyncContextFrame in its template methods. When async-context.h includes jsg.h,
+// the include guard prevents re-entry, so async-context.h completes first.
+// NOLINTNEXTLINE(misc-header-include-cycle)
+#include "async-context.h"
 // NOLINTNEXTLINE(misc-header-include-cycle)
 #include "deferred-promise.h"
 #include "modules.h"
