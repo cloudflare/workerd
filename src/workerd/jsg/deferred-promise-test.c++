@@ -207,7 +207,6 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
         [&errorCaught, &errorMessage](jsg::Lock& js, Value error) {
       errorCaught = true;
       // The kj::Exception should have been converted to a JS Error
-      v8::HandleScope scope(js.v8Isolate);
       errorMessage = kj::str(check(error.getHandle(js)->ToString(js.v8Context())));
     });
 
@@ -234,7 +233,6 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
     jsPromise.then(js, [](jsg::Lock&, int) { KJ_FAIL_REQUIRE("should not resolve"); },
         [&errorCaught, &errorMessage](jsg::Lock& js, Value error) {
       errorCaught = true;
-      v8::HandleScope scope(js.v8Isolate);
       errorMessage = kj::str(check(error.getHandle(js)->ToString(js.v8Context())));
     });
 
@@ -775,7 +773,6 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
 
     // Verify the value is correct
     KJ_IF_SOME(val, valueInContinuation) {
-      v8::HandleScope handleScope(js.v8Isolate);
       auto str = kj::str(check(val.getHandle(js)->ToString(js.v8Context())));
       KJ_EXPECT(str == "test-value-42"_kj);
     }
@@ -918,7 +915,6 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
       pair1.promise.then(js, [&](jsg::Lock& js, int) {
         KJ_IF_SOME(f, AsyncContextFrame::current(js)) {
           KJ_IF_SOME(v, f.get(*storageKey)) {
-            v8::HandleScope handleScope(js.v8Isolate);
             capturedValue1 = kj::str(check(v.getHandle(js)->ToString(js.v8Context())));
           }
         }
@@ -931,7 +927,6 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
       pair2.promise.then(js, [&](jsg::Lock& js, int) {
         KJ_IF_SOME(f, AsyncContextFrame::current(js)) {
           KJ_IF_SOME(v, f.get(*storageKey)) {
-            v8::HandleScope handleScope(js.v8Isolate);
             capturedValue2 = kj::str(check(v.getHandle(js)->ToString(js.v8Context())));
           }
         }
@@ -969,6 +964,160 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
     // run while we were still in the frame
     KJ_EXPECT(frameInContinuation != kj::none,
         "Already-resolved promise continuation should run in current frame");
+  }
+
+  // ======================================================================================
+  // Resolver Chaining Tests
+  // ======================================================================================
+
+  // Test resolving a resolver with another DeferredPromise that is already resolved
+  void testResolverChainDeferredAlreadyResolved(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<int>();
+    auto innerPromise = DeferredPromise<int>::resolved(42);
+
+    int result = 0;
+    outerPromise.then(js, [&](jsg::Lock&, int value) { result = value; });
+
+    outerResolver.resolve(js, kj::mv(innerPromise));
+
+    KJ_EXPECT(result == 42, "Outer promise should resolve with inner's value");
+  }
+
+  // Test resolving a resolver with another DeferredPromise that is pending
+  void testResolverChainDeferredPending(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<int>();
+    auto [innerPromise, innerResolver] = newDeferredPromiseAndResolver<int>();
+
+    int result = 0;
+    outerPromise.then(js, [&](jsg::Lock&, int value) { result = value; });
+
+    // Chain outer to inner
+    outerResolver.resolve(js, kj::mv(innerPromise));
+
+    // Outer shouldn't be resolved yet
+    KJ_EXPECT(result == 0, "Outer should still be pending");
+
+    // Resolve inner
+    innerResolver.resolve(js, 123);
+
+    KJ_EXPECT(result == 123, "Outer should resolve when inner resolves");
+  }
+
+  // Test resolving a resolver with another DeferredPromise that is already rejected
+  void testResolverChainDeferredAlreadyRejected(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<int>();
+    auto innerPromise =
+        DeferredPromise<int>::rejected(js, JSG_KJ_EXCEPTION(FAILED, Error, "inner error"));
+
+    bool errorHandled = false;
+    kj::String errorMsg;
+    outerPromise.then(js, [](jsg::Lock&, int) { KJ_FAIL_REQUIRE("Should not resolve"); },
+        [&](jsg::Lock&, kj::Exception ex) {
+      errorHandled = true;
+      errorMsg = kj::str(ex.getDescription());
+    });
+
+    outerResolver.resolve(js, kj::mv(innerPromise));
+
+    KJ_EXPECT(errorHandled, "Outer should reject when inner is rejected");
+    KJ_EXPECT(errorMsg.contains("inner error"));
+  }
+
+  // Test resolving a resolver with another DeferredPromise that rejects later
+  void testResolverChainDeferredRejectsLater(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<int>();
+    auto [innerPromise, innerResolver] = newDeferredPromiseAndResolver<int>();
+
+    bool errorHandled = false;
+    outerPromise.then(js, [](jsg::Lock&, int) { KJ_FAIL_REQUIRE("Should not resolve"); },
+        [&](jsg::Lock&, kj::Exception) { errorHandled = true; });
+
+    outerResolver.resolve(js, kj::mv(innerPromise));
+    KJ_EXPECT(!errorHandled, "Should still be pending");
+
+    innerResolver.reject(js, JSG_KJ_EXCEPTION(FAILED, Error, "delayed error"));
+    KJ_EXPECT(errorHandled, "Outer should reject when inner rejects");
+  }
+
+  // Test resolving a void resolver with another DeferredPromise<void>
+  void testResolverChainDeferredVoid(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<void>();
+    auto [innerPromise, innerResolver] = newDeferredPromiseAndResolver<void>();
+
+    bool resolved = false;
+    outerPromise.then(js, [&](jsg::Lock&) { resolved = true; });
+
+    outerResolver.resolve(js, kj::mv(innerPromise));
+    KJ_EXPECT(!resolved, "Should still be pending");
+
+    innerResolver.resolve(js);
+    KJ_EXPECT(resolved, "Outer should resolve when inner resolves");
+  }
+
+  // Test resolving a resolver with a jsg::Promise that is already resolved
+  void testResolverChainJsgAlreadyResolved(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<int>();
+    auto jsPromise = js.resolvedPromise(42);
+
+    int result = 0;
+    outerPromise.then(js, [&](jsg::Lock&, int value) { result = value; });
+
+    outerResolver.resolve(js, kj::mv(jsPromise));
+
+    KJ_EXPECT(result == 42, "Outer promise should resolve with JS promise's value");
+  }
+
+  // Test resolving a resolver with a jsg::Promise that is pending
+  void testResolverChainJsgPending(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<int>();
+    auto [jsPromise, jsResolver] = js.newPromiseAndResolver<int>();
+
+    int result = 0;
+    outerPromise.then(js, [&](jsg::Lock&, int value) { result = value; });
+
+    outerResolver.resolve(js, kj::mv(jsPromise));
+    KJ_EXPECT(result == 0, "Should still be pending");
+
+    jsResolver.resolve(js, 456);
+    js.runMicrotasks();
+
+    KJ_EXPECT(result == 456, "Outer should resolve when JS promise resolves");
+  }
+
+  // Test resolving a resolver with a jsg::Promise that is already rejected
+  void testResolverChainJsgAlreadyRejected(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<int>();
+    auto jsPromise = js.rejectedPromise<int>(JSG_KJ_EXCEPTION(FAILED, Error, "js error"));
+
+    bool errorHandled = false;
+    outerPromise.then(js, [](jsg::Lock&, int) { KJ_FAIL_REQUIRE("Should not resolve"); },
+        [&](jsg::Lock&, kj::Exception ex) {
+      errorHandled = true;
+      KJ_EXPECT(ex.getDescription().contains("js error"));
+    });
+
+    outerResolver.resolve(js, kj::mv(jsPromise));
+
+    KJ_EXPECT(errorHandled, "Outer should reject when JS promise is rejected");
+  }
+
+  // Test that resolving an already-resolved resolver with a promise has no effect
+  void testResolverChainAlreadyResolved(jsg::Lock& js) {
+    auto [outerPromise, outerResolver] = newDeferredPromiseAndResolver<int>();
+    auto [innerPromise, innerResolver] = newDeferredPromiseAndResolver<int>();
+
+    int result = 0;
+    outerPromise.then(js, [&](jsg::Lock&, int value) { result = value; });
+
+    // Resolve first
+    outerResolver.resolve(js, 100);
+    KJ_EXPECT(result == 100);
+
+    // Try to chain - should have no effect
+    outerResolver.resolve(js, kj::mv(innerPromise));
+    innerResolver.resolve(js, 999);
+
+    KJ_EXPECT(result == 100, "Result should not change after second resolve");
   }
 
   JSG_RESOURCE_TYPE(DeferredPromiseContext) {
@@ -1009,6 +1158,15 @@ struct DeferredPromiseContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(testReceiveResolved);
     JSG_METHOD(testReceiveRejected);
     JSG_METHOD(testReceiveThenable);
+    JSG_METHOD(testResolverChainDeferredAlreadyResolved);
+    JSG_METHOD(testResolverChainDeferredPending);
+    JSG_METHOD(testResolverChainDeferredAlreadyRejected);
+    JSG_METHOD(testResolverChainDeferredRejectsLater);
+    JSG_METHOD(testResolverChainDeferredVoid);
+    JSG_METHOD(testResolverChainJsgAlreadyResolved);
+    JSG_METHOD(testResolverChainJsgPending);
+    JSG_METHOD(testResolverChainJsgAlreadyRejected);
+    JSG_METHOD(testResolverChainAlreadyResolved);
   }
 
   kj::Maybe<DeferredPromise<int>::Resolver> deferredResolver;
@@ -1199,6 +1357,51 @@ KJ_TEST("DeferredPromise receive thenable") {
   Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
   e.expectEval(
       "testReceiveThenable({ then: (resolve) => resolve(456) }, 456)", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain with DeferredPromise already resolved") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainDeferredAlreadyResolved()", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain with DeferredPromise pending") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainDeferredPending()", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain with DeferredPromise already rejected") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainDeferredAlreadyRejected()", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain with DeferredPromise rejects later") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainDeferredRejectsLater()", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain with void DeferredPromise") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainDeferredVoid()", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain with jsg::Promise already resolved") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainJsgAlreadyResolved()", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain with jsg::Promise pending") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainJsgPending()", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain with jsg::Promise already rejected") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainJsgAlreadyRejected()", "undefined", "undefined");
+}
+
+KJ_TEST("DeferredPromise resolver chain when already resolved") {
+  Evaluator<DeferredPromiseContext, DeferredPromiseIsolate> e(v8System);
+  e.expectEval("testResolverChainAlreadyResolved()", "undefined", "undefined");
 }
 
 }  // namespace

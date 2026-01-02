@@ -984,6 +984,91 @@ class DeferredPromiseResolver {
     state->resolve(js);
   }
 
+  // Resolve with another DeferredPromise - chains the promises.
+  // When the inner promise settles, this promise settles with the same result.
+  // Has no effect if this promise is already resolved or rejected.
+  void resolve(Lock& js, DeferredPromise<T>&& promise) {
+    // If we're not pending, nothing to do
+    if (!state->isPending()) return;
+
+    // Fast path: if inner promise is already rejected, reject immediately
+    KJ_IF_SOME(exception, promise.tryConsumeRejected()) {
+      state->reject(js, kj::mv(exception));
+      return;
+    }
+
+    // Fast path: if inner promise is already resolved, resolve immediately
+    if constexpr (isVoid<T>()) {
+      if (promise.isResolved()) {
+        // Consume it by transitioning to consumed state
+        promise.state->state.template transitionTo<typename _::DeferredPromiseState<T>::Consumed>();
+        state->resolve(js);
+        return;
+      }
+    } else {
+      KJ_IF_SOME(value, promise.tryConsumeResolved()) {
+        state->resolve(js, kj::mv(value));
+        return;
+      }
+    }
+
+    // Inner promise is pending - chain by attaching continuations
+    if constexpr (isVoid<T>()) {
+      promise.then(js, [s = state.addRef()](Lock& js) mutable { s->resolve(js); },
+          [s = state.addRef()](
+              Lock& js, kj::Exception exception) mutable { s->reject(js, kj::mv(exception)); });
+    } else {
+      promise.then(js, [s = state.addRef()](Lock& js, T value) mutable {
+        s->resolve(js, kj::mv(value));
+      }, [s = state.addRef()](Lock& js, kj::Exception exception) mutable {
+        s->reject(js, kj::mv(exception));
+      });
+    }
+  }
+
+  // Resolve with a jsg::Promise - chains the promises.
+  // When the JS promise settles, this promise settles with the same result.
+  // Has no effect if this promise is already resolved or rejected.
+  void resolve(Lock& js, Promise<T>&& promise) {
+    // If we're not pending, nothing to do
+    if (!state->isPending()) return;
+
+    // Fast path: check if already settled
+    KJ_IF_SOME(settled, promise.tryConsumeSettled(js)) {
+      if constexpr (isVoid<T>()) {
+        KJ_SWITCH_ONEOF(settled) {
+          KJ_CASE_ONEOF(resolved, typename Promise<T>::Resolved) {
+            state->resolve(js);
+          }
+          KJ_CASE_ONEOF(error, Value) {
+            state->reject(js, kj::mv(error));
+          }
+        }
+      } else {
+        KJ_SWITCH_ONEOF(settled) {
+          KJ_CASE_ONEOF(value, T) {
+            state->resolve(js, kj::mv(value));
+          }
+          KJ_CASE_ONEOF(error, Value) {
+            state->reject(js, kj::mv(error));
+          }
+        }
+      }
+      return;
+    }
+
+    // JS promise is pending - chain by attaching continuations
+    // Note: jsg::Promise error handlers receive Value, not kj::Exception
+    if constexpr (isVoid<T>()) {
+      promise.then(js, [s = state.addRef()](Lock& js) mutable { s->resolve(js); },
+          [s = state.addRef()](Lock& js, Value error) mutable { s->reject(js, kj::mv(error)); });
+    } else {
+      promise.then(js, [s = state.addRef()](Lock& js, T value) mutable {
+        s->resolve(js, kj::mv(value));
+      }, [s = state.addRef()](Lock& js, Value error) mutable { s->reject(js, kj::mv(error)); });
+    }
+  }
+
   // Reject the promise with a kj::Exception.
   // The exception is stored natively to preserve async trace information.
   // Runs all attached error handlers synchronously.
