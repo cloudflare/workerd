@@ -291,15 +291,13 @@ class ReadableSourceImpl: public ReadableSource {
     if (state.is<Closed>()) {
       co_return 0;
     }
-    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-      KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being read");
-      co_return co_await canceler.wrap(readInner(open, buffer, minBytes));
-      // If the source is dropped while a read is in progress, the canceler will
-      // trigger and abort the read. In such cases, we don't want to wrap this
-      // await in a try catch because it isn't safe to continue using the stream
-      // as it may no longer exist.
-    }
-    KJ_UNREACHABLE;
+    auto& open = state.requireActiveUnsafe();
+    KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being read");
+    co_return co_await canceler.wrap(readInner(open, buffer, minBytes));
+    // If the source is dropped while a read is in progress, the canceler will
+    // trigger and abort the read. In such cases, we don't want to wrap this
+    // await in a try catch because it isn't safe to continue using the stream
+    // as it may no longer exist.
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(
@@ -323,32 +321,30 @@ class ReadableSourceImpl: public ReadableSource {
       co_return;
     }
 
-    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-      // Ownership of the underlying inner stream is transferred to the pump operation,
-      // where it will be either fully consumed or errored out. In either case, this
-      // ReadableSource becomes closed and no longer usable once pumpTo() is called.
-      // Critically... it is important that just because the ReadableSource is closed here
-      // does NOT mean that the underlying stream has been fully consumed.
-      auto stream = kj::mv(open.stream);
-      setClosed();
+    auto& open = state.requireActiveUnsafe();
+    // Ownership of the underlying inner stream is transferred to the pump operation,
+    // where it will be either fully consumed or errored out. In either case, this
+    // ReadableSource becomes closed and no longer usable once pumpTo() is called.
+    // Critically... it is important that just because the ReadableSource is closed here
+    // does NOT mean that the underlying stream has been fully consumed.
+    auto stream = kj::mv(open.stream);
+    setClosed();
 
-      if (output.getEncoding() != getEncoding()) {
-        // The target encoding is different from our current encoding.
-        // Let's ensure that our side is in identity encoding. The destination stream will
-        // take care of itself.
-        stream = ensureIdentityEncoding(kj::mv(stream));
-      } else {
-        // Since the encodings match, we can tell the output stream that it doesn't need to
-        // do any of the encoding work since we'll be providing data in the expected encoding.
-        KJ_ASSERT(getEncoding() == output.disownEncodingResponsibility());
-      }
-
-      // Note that because we are transferring ownership of the stream to the pump operation,
-      // and the pump itself should not rely on the ReadableSource for any state, it is
-      // safe to drop the ReadableSource once the pump operation begins.
-      co_return co_await pumpImpl(kj::mv(stream), output, end);
+    if (output.getEncoding() != getEncoding()) {
+      // The target encoding is different from our current encoding.
+      // Let's ensure that our side is in identity encoding. The destination stream will
+      // take care of itself.
+      stream = ensureIdentityEncoding(kj::mv(stream));
+    } else {
+      // Since the encodings match, we can tell the output stream that it doesn't need to
+      // do any of the encoding work since we'll be providing data in the expected encoding.
+      KJ_ASSERT(getEncoding() == output.disownEncodingResponsibility());
     }
-    KJ_UNREACHABLE;
+
+    // Note that because we are transferring ownership of the stream to the pump operation,
+    // and the pump itself should not rely on the ReadableSource for any state, it is
+    // safe to drop the ReadableSource once the pump operation begins.
+    co_return co_await pumpImpl(kj::mv(stream), output, end);
   }
 
   kj::Maybe<size_t> tryGetLength(rpc::StreamEncoding encoding) override {
@@ -400,20 +396,18 @@ class ReadableSourceImpl: public ReadableSource {
       };
     }
 
-    KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-      KJ_IF_SOME(result, tryTee(limit)) {
-        setClosed();
-        return kj::mv(result);
-      }
-
-      auto teeResult = kj::newTee(kj::mv(open.stream), limit);
+    auto& open = state.requireActiveUnsafe();
+    KJ_IF_SOME(result, tryTee(limit)) {
       setClosed();
-      return Tee{
-        .branch1 = newReadableSource(wrapTeeBranch(kj::mv(teeResult.branches[0]))),
-        .branch2 = newReadableSource(wrapTeeBranch(kj::mv(teeResult.branches[1]))),
-      };
+      return kj::mv(result);
     }
-    KJ_UNREACHABLE;
+
+    auto teeResult = kj::newTee(kj::mv(open.stream), limit);
+    setClosed();
+    return Tee{
+      .branch1 = newReadableSource(wrapTeeBranch(kj::mv(teeResult.branches[0]))),
+      .branch2 = newReadableSource(wrapTeeBranch(kj::mv(teeResult.branches[1]))),
+    };
   }
 
   rpc::StreamEncoding getEncoding() override {
