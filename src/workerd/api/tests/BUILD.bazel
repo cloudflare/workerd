@@ -373,6 +373,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-js-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-js-test.js"],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],

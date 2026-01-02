@@ -763,8 +763,96 @@ export const fixedLengthStreamPreconditions = {
   },
 };
 
+// Test non-standard readAtLeast() extension with default reader (should throw)
+export const readAtLeastDefaultReaderThrows = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull(c) {
+        c.enqueue(enc.encode('hello'));
+        c.close();
+      },
+    });
+
+    const reader = rs.getReader();
+    throws(() => reader.readAtLeast(1), TypeError);
+    reader.releaseLock();
+
+    // Consume the stream to clean up
+    for await (const _ of rs) {
+    }
+  },
+};
+
+// Test non-standard readAtLeast() extension with BYOB reader
+// Note: The original ew-test expected value=undefined on done, which was the legacy
+// behavior of internal streams. With `internal_stream_byob_return_view` compat flag
+// (enabled since 2024-05-13), the spec-compliant behavior returns an empty view.
+export const readAtLeastByobReader = {
+  async test(ctrl, env) {
+    // Use service binding to get chunked response
+    const response = await env.subrequest.fetch('http://test/chunked');
+    const reader = response.body.getReader({ mode: 'byob' });
+
+    // First readAtLeast: request min 4 bytes
+    // Server sends: 'foo' (3) + 'bar' (3) = 6 bytes, first chunk 'foo' only 3 bytes
+    // so readAtLeast(4) should wait for more data
+    let result = await reader.readAtLeast(4, new Uint8Array(20));
+    let value = new TextDecoder().decode(result.value);
+    strictEqual(result.done, false);
+    strictEqual(value.length, 6);
+    strictEqual(value, 'foobar');
+
+    // Regular read
+    result = await reader.read(new Uint8Array(20));
+    value = new TextDecoder().decode(result.value);
+    strictEqual(value.length, 1);
+    strictEqual(value, 'b');
+    strictEqual(result.done, false);
+
+    // Second readAtLeast: request min 4 bytes, only 'az' (2 bytes) remain
+    // Server sends: 'a' (1) + 'z' (1) = 2 bytes, then closes
+    result = await reader.readAtLeast(4, new Uint8Array(20));
+    value = new TextDecoder().decode(result.value);
+    strictEqual(value.length, 2);
+    strictEqual(value, 'az');
+    strictEqual(result.done, false);
+
+    // Final read should be done - spec requires empty view, not undefined
+    result = await reader.readAtLeast(4, new Uint8Array(20));
+    strictEqual(result.done, true);
+    ok(result.value instanceof Uint8Array);
+    strictEqual(result.value.byteLength, 0);
+  },
+};
+
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+
+    // Endpoint for chunked data for readAtLeast tests
+    if (url.pathname === '/chunked') {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        async pull(controller) {
+          // Simulate chunked input: foo, bar, b, a, z
+          const chunks = [
+            enc.encode('foo'),
+            enc.encode('bar'),
+            enc.encode('b'),
+            enc.encode('a'),
+            enc.encode('z'),
+          ];
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+            await scheduler.wait(1);
+          }
+          controller.close();
+        },
+      });
+      return new Response(rs);
+    }
+
     strictEqual(request.headers.get('content-length'), '10');
     return new Response(request.body);
   },
