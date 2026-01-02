@@ -11,6 +11,8 @@
 #include <workerd/io/observer.h>
 #include <workerd/util/ring-buffer.h>
 
+#include <kj/refcount.h>
+
 namespace workerd::api {
 
 // =======================================================================================
@@ -320,21 +322,102 @@ class WritableStreamInternalController: public WritableStreamController {
     }
   };
   struct Pipe {
-    WritableStreamInternalController& parent;
-    ReadableStreamController::PipeController& source;
-    kj::Maybe<jsg::Promise<void>::Resolver> promise;
-    bool preventAbort;
-    bool preventClose;
-    bool preventCancel;
-    kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+    // PipeState is ref-counted so that it can be safely captured by lambdas in pipeLoop().
+    // When drain() destroys the Pipe, the state survives as long as pending callbacks need it.
+    // The `aborted` flag is set when the Pipe is destroyed.
+    struct State: public kj::Refcounted {
+      WritableStreamInternalController& parent;
+      ReadableStreamController::PipeController& source;
+      kj::Maybe<jsg::Promise<void>::Resolver> promise;
+      kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
 
-    bool checkSignal(jsg::Lock& js);
-    jsg::Promise<void> pipeLoop(jsg::Lock& js);
-    jsg::Promise<void> write(v8::Local<v8::Value> value);
+      bool preventAbort;
+      bool preventClose;
+      bool preventCancel;
+
+      // True when the Pipe is being destroyed
+      bool aborted = false;
+
+      State(WritableStreamInternalController& parent,
+          ReadableStreamController::PipeController& source,
+          kj::Maybe<jsg::Promise<void>::Resolver> promise,
+          bool preventAbort,
+          bool preventClose,
+          bool preventCancel,
+          kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
+          : parent(parent),
+            source(source),
+            promise(kj::mv(promise)),
+            maybeSignal(kj::mv(maybeSignal)),
+            preventAbort(preventAbort),
+            preventClose(preventClose),
+            preventCancel(preventCancel) {}
+
+      bool checkSignal(jsg::Lock& js);
+      jsg::Promise<void> pipeLoop(jsg::Lock& js);
+      jsg::Promise<void> write(v8::Local<v8::Value> value);
+
+      JSG_MEMORY_INFO(State) {
+        tracker.trackField("resolver", promise);
+        tracker.trackField("signal", maybeSignal);
+      }
+    };
+
+    kj::Own<State> state;
+
+    Pipe(WritableStreamInternalController& parent,
+        ReadableStreamController::PipeController& source,
+        kj::Maybe<jsg::Promise<void>::Resolver> promise,
+        bool preventAbort,
+        bool preventClose,
+        bool preventCancel,
+        kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
+        : state(kj::refcounted<State>(parent,
+              source,
+              kj::mv(promise),
+              preventAbort,
+              preventClose,
+              preventCancel,
+              kj::mv(maybeSignal))) {}
+
+    ~Pipe() noexcept(false) {
+      state->aborted = true;
+    }
+
+    WritableStreamInternalController& parent() {
+      return state->parent;
+    }
+    ReadableStreamController::PipeController& source() {
+      return state->source;
+    }
+    kj::Maybe<jsg::Promise<void>::Resolver>& promise() {
+      return state->promise;
+    }
+    bool preventAbort() const {
+      return state->preventAbort;
+    }
+    bool preventClose() const {
+      return state->preventClose;
+    }
+    bool preventCancel() const {
+      return state->preventCancel;
+    }
+    kj::Maybe<jsg::Ref<AbortSignal>>& maybeSignal() {
+      return state->maybeSignal;
+    }
+
+    bool checkSignal(jsg::Lock& js) {
+      return state->checkSignal(js);
+    }
+    jsg::Promise<void> pipeLoop(jsg::Lock& js) {
+      return state->pipeLoop(js);
+    }
+    jsg::Promise<void> write(v8::Local<v8::Value> value) {
+      return state->write(value);
+    }
 
     JSG_MEMORY_INFO(Pipe) {
-      tracker.trackField("resolver", promise);
-      tracker.trackField("signal", maybeSignal);
+      tracker.trackField("state", state);
     }
   };
   struct WriteEvent {
