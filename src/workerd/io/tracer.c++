@@ -411,8 +411,8 @@ void BaseTracer::adjustSpanTime(tracing::CompleteSpan& span) {
           KJ_FAIL_ASSERT(
               "reported span without current request", span.operationName, hasCompleteTime);
         } else {
-          LOG_NOSENTRY(WARNING, "reported span without current request", span.operationName,
-              hasCompleteTime);
+          LOG_WARNING_PERIODICALLY(
+              "reported span without current request", span.operationName, hasCompleteTime);
         }
       }
     });
