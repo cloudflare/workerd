@@ -326,7 +326,6 @@ class CompressionStreamBase: public kj::Refcounted,
 
     canceler.cancel(kj::cp(reason));
     transitionToErrored(kj::mv(reason));
-    //state = kj::mv(reason);
   }
 
   kj::Promise<size_t> tryReadInternal(kj::ArrayPtr<kj::byte> dest, size_t minBytes) {
