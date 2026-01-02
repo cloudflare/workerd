@@ -1125,11 +1125,100 @@ def handler(func):
     return wrapper
 
 
+class _UndoStackEntry:
+    """Internal entry for tracking rollback handlers."""
+
+    def __init__(self, name: str, value: Any, undo_fn, undo_config: dict | None = None):
+        self.name = name
+        self.value = value
+        self.undo_fn = undo_fn
+        self.undo_config = undo_config
+
+
+class _RollbackStepWrapper:
+    """
+    Wrapper returned by step.with_rollback() that allows attaching an .undo decorator.
+
+    Usage:
+        @step.with_rollback("save to db")
+        async def save():
+            return await db.insert(data)
+
+        @save.undo
+        async def undo_save(error, record_id):
+            await db.delete(record_id)
+
+        record_id = await save()
+    """
+
+    def __init__(
+        self,
+        step_wrapper: "_WorkflowStepWrapper",
+        name: str,
+        do_fn,
+        config: dict | None = None,
+    ):
+        self._step_wrapper = step_wrapper
+        self._name = name
+        self._do_fn = do_fn
+        self._config = config
+        self._undo_fn = None
+        self._undo_config = None
+        self._step_name = name  # For compatibility with dependency resolution
+
+    def undo(self, config: dict | None = None):
+        """
+        Decorator to register an undo/compensation function for this step.
+
+        The undo function receives (error, value) where value is the result
+        of the do function.
+
+        Args:
+            config: Optional WorkflowStepConfig for the undo step's retry behavior.
+                   If not provided, inherits from the do step's config.
+        """
+
+        def decorator(fn):
+            self._undo_fn = fn
+            self._undo_config = config
+            return fn
+
+        # Support both @save.undo and @save.undo(config={...})
+        if callable(config):
+            fn = config
+            self._undo_fn = fn
+            self._undo_config = None
+            return fn
+
+        return decorator
+
+    async def __call__(self):
+        """Execute the step and register it on the undo stack if an undo handler is defined."""
+        result = await _do_call(
+            self._step_wrapper, self._name, self._config, self._do_fn
+        )
+
+        # Only add to undo stack if an undo handler was registered
+        if self._undo_fn is not None:
+            self._step_wrapper._undo_stack.append(
+                _UndoStackEntry(
+                    name=self._name,
+                    value=result,
+                    undo_fn=self._undo_fn,
+                    undo_config=self._undo_config or self._config,
+                )
+            )
+
+        return result
+
+
 class _WorkflowStepWrapper:
     def __init__(self, js_step):
         self._js_step = js_step
         self._memoized_dependencies = {}
         self._in_flight = {}
+        self._undo_stack: list[_UndoStackEntry] = []
+        self._is_rolling_back = False
 
     def do(self, name, depends=None, concurrent=False, config=None):
         def decorator(func):
@@ -1168,6 +1257,94 @@ class _WorkflowStepWrapper:
                 dict_converter=Object.fromEntries,
             ),
         )
+
+    def with_rollback(self, name: str, config: dict | None = None):
+        """
+        Decorator to define a step with rollback/compensation support (saga pattern).
+
+        Returns a callable wrapper that allows attaching an .undo decorator for
+        compensation logic. The undo function executes in LIFO order when
+        rollback_all() is called.
+
+        Args:
+            name: The name of the step.
+            config: Optional WorkflowStepConfig for configuring retry behavior.
+
+        Usage:
+            @step.with_rollback("save to db")
+            async def save():
+                return await db.insert(data)
+
+            @save.undo
+            async def undo_save(error, record_id):
+                await db.delete(record_id)
+
+            record_id = await save()
+
+            # Later, if something fails:
+            try:
+                await some_failing_step()
+            except Exception as e:
+                await step.rollback_all(e)
+                raise
+        """
+
+        def decorator(func):
+            return _RollbackStepWrapper(self, name, func, config)
+
+        return decorator
+
+    async def rollback_all(self, trigger_error: Exception):
+        """
+        Execute all registered undo handlers in LIFO (Last-In, First-Out) order.
+
+        This implements the saga pattern's compensation/rollback mechanism.
+        Each undo handler is wrapped in a step.do for durability and retry support.
+
+        Args:
+            trigger_error: The error that triggered the rollback. Passed to each
+                          undo handler as the first argument.
+
+        Raises:
+            RuntimeError: If called while a rollback is already in progress.
+            Exception: Re-raises the first undo failure if continueOnUndoFailure
+                      is not set (default behavior).
+
+        Usage:
+            try:
+                # ... workflow steps with rollback handlers ...
+            except Exception as e:
+                await step.rollback_all(e)
+                raise
+        """
+        if self._is_rolling_back:
+            raise RuntimeError(
+                "Cannot call rollback_all() while rollback is in progress"
+            )
+
+        if len(self._undo_stack) == 0:
+            return
+
+        self._is_rolling_back = True
+
+        try:
+            # Execute undos in LIFO order
+            while len(self._undo_stack) > 0:
+                entry = self._undo_stack.pop()
+                undo_step_name = f"__undo__{entry.name}"
+
+                # Create undo callback that invokes the user's undo function
+                async def make_undo_callback(e=entry, err=trigger_error):
+                    undo_result = e.undo_fn(err, e.value)
+                    if inspect.iscoroutine(undo_result):
+                        await undo_result
+
+                # Wrap undo in step.do for durability/retry
+                await _do_call(
+                    self, undo_step_name, entry.undo_config, make_undo_callback
+                )
+        finally:
+            self._is_rolling_back = False
 
     async def _resolve_dependency(self, dep):
         if dep._step_name in self._memoized_dependencies:
