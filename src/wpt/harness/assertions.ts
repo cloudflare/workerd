@@ -103,6 +103,24 @@ declare global {
     description?: string
   ): void;
 
+  function assert_greater_than_equal(
+    actual: number,
+    expected: number,
+    description?: string
+  ): void;
+
+  function assert_less_than(
+    actual: number,
+    expected: number,
+    description?: string
+  ): void;
+
+  function assert_less_than_equal(
+    actual: number,
+    expected: number,
+    description?: string
+  ): void;
+
   function promise_rejects_exactly(
     test: Test,
     exception: typeof Error,
@@ -479,6 +497,43 @@ globalThis.assert_regexp_match = (actual, expected, description): void => {
  */
 globalThis.assert_greater_than = (actual, expected, description): void => {
   ok(actual > expected, description);
+};
+
+/**
+ * Assert that ``actual`` is a number greater than or equal to ``expected``.
+ *
+ * @param actual - Test value.
+ * @param expected - Number that ``actual`` must be greater than or equal to.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_greater_than_equal = (
+  actual,
+  expected,
+  description
+): void => {
+  ok(actual >= expected, description);
+};
+
+/**
+ * Assert that ``actual`` is a number less than ``expected``.
+ *
+ * @param actual - Test value.
+ * @param expected - Number that ``actual`` must be less than.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_less_than = (actual, expected, description): void => {
+  ok(actual < expected, description);
+};
+
+/**
+ * Assert that ``actual`` is a number less than or equal to ``expected``.
+ *
+ * @param actual - Test value.
+ * @param expected - Number that ``actual`` must be less than or equal to.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_less_than_equal = (actual, expected, description): void => {
+  ok(actual <= expected, description);
 };
 
 /**
