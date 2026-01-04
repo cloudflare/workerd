@@ -52,9 +52,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.53",
+    version = "4.5.54",
     deps = [
-        "@crates_vendor__clap_builder-4.5.53//:clap_builder",
+        "@crates_vendor__clap_builder-4.5.54//:clap_builder",
     ],
 )
 
@@ -96,9 +96,9 @@ rust_binary(
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.53",
+    version = "4.5.54",
     deps = [
         ":clap",
-        "@crates_vendor__clap_builder-4.5.53//:clap_builder",
+        "@crates_vendor__clap_builder-4.5.54//:clap_builder",
     ],
 )
