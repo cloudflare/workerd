@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "getrandom",
+    name = "zmij",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,9 +29,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -39,30 +36,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=getrandom",
+        "crate-name=zmij",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.4",
+    version = "1.0.9",
     deps = [
-        "@crates_vendor__cfg-if-1.0.4//:cfg_if",
-        "@crates_vendor__getrandom-0.3.4//:build_script_build",
-    ] + select({
-        "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.179//:libc",  # cfg(any(target_os = "macos", target_os = "openbsd", target_os = "vita", target_os = "emscripten"))
-        ],
-        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.179//:libc",  # cfg(all(any(target_os = "linux", target_os = "android"), not(any(all(target_os = "linux", target_env = ""), getrandom_backend = "custom", getrandom_backend = "linux_raw", getrandom_backend = "rdrand", getrandom_backend = "rndr"))))
-        ],
-        "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.179//:libc",  # cfg(any(target_os = "macos", target_os = "openbsd", target_os = "vita", target_os = "emscripten"))
-        ],
-        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.179//:libc",  # cfg(all(any(target_os = "linux", target_os = "android"), not(any(all(target_os = "linux", target_env = ""), getrandom_backend = "custom", getrandom_backend = "linux_raw", getrandom_backend = "rdrand", getrandom_backend = "rndr"))))
-        ],
-        "//conditions:default": [],
-    }),
+        "@crates_vendor__zmij-1.0.9//:build_script_build",
+    ],
 )
 
 cargo_build_script(
@@ -84,9 +66,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "std",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -102,18 +81,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "getrandom",
+    pkg_name = "zmij",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=getrandom",
+        "crate-name=zmij",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.4",
+    version = "1.0.9",
     visibility = ["//visibility:private"],
 )
 
