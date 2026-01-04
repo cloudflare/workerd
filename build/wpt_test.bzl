@@ -295,6 +295,8 @@ const unitTests :Workerd.Config = (
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "HTTP_PORT", fromEnvironment = "HTTP_PORT"),
           (name = "HTTPS_PORT", fromEnvironment = "HTTPS_PORT"),
+          (name = "WS_PORT", fromEnvironment = "WS_PORT"),
+          (name = "WSS_PORT", fromEnvironment = "WSS_PORT"),
           (name = "GEN_TEST_CONFIG", fromEnvironment = "GEN_TEST_CONFIG"),
           (name = "GEN_TEST_REPORT", fromEnvironment = "GEN_TEST_REPORT"),
           (name = "GEN_TEST_STATS", fromEnvironment = "GEN_TEST_STATS"),

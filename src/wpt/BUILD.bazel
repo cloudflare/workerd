@@ -129,3 +129,17 @@ wpt_test(
     config = "performance-timeline-test.ts",
     wpt_directory = "@wpt//:performance-timeline@module",
 )
+
+wpt_test(
+    name = "websockets",
+    size = "large",
+    config = "websockets-test.ts",
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:websockets@module",
+)
