@@ -29,6 +29,15 @@ import { getBindingPath } from './common';
 // @ts-expect-error We're just exposing enough stuff for the tests to pass; it's not a perfect match
 globalThis.self = globalThis;
 
+// WPT tests use self.URL which requires URL to be an own property of globalThis
+globalThis.URL = URL;
+
+// Some WPT tests reference addEventListener at the top level during file evaluation.
+// workerd doesn't have addEventListener on the global (it uses module exports instead),
+// so we provide a no-op stub to allow test files to load without throwing.
+// Tests that actually need addEventListener functionality should be marked as omitted.
+globalThis.addEventListener = (): void => {};
+
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access --  We're just exposing enough stuff for the tests to pass; it's not a perfect match
 globalThis.Window = Object.getPrototypeOf(globalThis).constructor;
 
