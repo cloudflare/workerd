@@ -19,6 +19,7 @@ import {
   WORKFLOWS_ENABLED,
   LEGACY_GLOBAL_HANDLERS,
   LEGACY_INCLUDE_SDK,
+  COMPATIBILITY_FLAGS,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import {
@@ -145,12 +146,10 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = loadPyodide(
-        IS_WORKERD,
-        LOCKFILE,
-        WORKERD_INDEX_URL,
-        get_pyodide_entrypoint_helper()
-      );
+      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL, {
+        pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
+        cloudflare_compat_flags: COMPATIBILITY_FLAGS,
+      });
       await setupPatches(pyodide);
       return pyodide;
     })();
@@ -237,6 +236,8 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
       '_pyodide_entrypoint_helper',
       get_pyodide_entrypoint_helper()
     );
+
+    pyodide.registerJsModule('_cloudflare_compat_flags', COMPATIBILITY_FLAGS);
 
     // Inject modules that enable JS features to be used idiomatically from Python.
     if (LEGACY_INCLUDE_SDK) {
@@ -610,10 +611,11 @@ export async function initPython(): Promise<PythonInitResult> {
 
   // Collect a dedicated snapshot at the very end.
   const pyodide = await getPyodide();
-  maybeCollectDedicatedSnapshot(
-    pyodide._module,
-    get_pyodide_entrypoint_helper()
-  );
+  const customSerializedObjects = {
+    pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
+    cloudflare_compat_flags: COMPATIBILITY_FLAGS,
+  };
+  maybeCollectDedicatedSnapshot(pyodide._module, customSerializedObjects);
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }

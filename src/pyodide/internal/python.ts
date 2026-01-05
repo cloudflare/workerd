@@ -8,6 +8,7 @@ import {
   maybeRestoreSnapshot,
   finalizeBootstrap,
   isRestoringSnapshot,
+  type CustomSerializedObjects,
 } from 'pyodide-internal:snapshot';
 import {
   entropyMountFiles,
@@ -20,7 +21,6 @@ import {
   LEGACY_VENDOR_PATH,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
-import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
 
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
@@ -47,7 +47,7 @@ import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
  */
 function prepareWasmLinearMemory(
   Module: Module,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper
+  customSerializedObjects: CustomSerializedObjects
 ): void {
   maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
@@ -61,7 +61,7 @@ function prepareWasmLinearMemory(
     adjustSysPath(Module);
   }
   if (Module.API.version !== '0.26.0a2') {
-    finalizeBootstrap(Module, pyodide_entrypoint_helper);
+    finalizeBootstrap(Module, customSerializedObjects);
   }
 }
 
@@ -210,7 +210,7 @@ export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
   indexURL: string,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper
+  customSerializedObjects: CustomSerializedObjects
 ): Pyodide {
   try {
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
@@ -238,10 +238,10 @@ export function loadPyodide(
     });
 
     enterJaegerSpan('prepare_wasm_linear_memory', () => {
-      prepareWasmLinearMemory(Module, pyodide_entrypoint_helper);
+      prepareWasmLinearMemory(Module, customSerializedObjects);
     });
 
-    maybeCollectSnapshot(Module, pyodide_entrypoint_helper);
+    maybeCollectSnapshot(Module, customSerializedObjects);
     // Mount worker files after doing snapshot upload so we ensure that data from the files is never
     // present in snapshot memory.
     mountWorkerFiles(Module);
@@ -249,7 +249,7 @@ export function loadPyodide(
     if (Module.API.version === '0.26.0a2') {
       // Finish setting up Pyodide's ffi so we can use the nice Python interface
       // In newer versions we already did this in prepareWasmLinearMemory.
-      finalizeBootstrap(Module, pyodide_entrypoint_helper);
+      finalizeBootstrap(Module, customSerializedObjects);
     }
     const pyodide = Module.API.public_api;
 
