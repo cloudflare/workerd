@@ -50,7 +50,8 @@ export function normalizeEncoding(enc?: string): Encoding | undefined {
 
 export function getEncodingOps(enc: unknown): Encoding | undefined {
   if (enc === undefined) return UTF8;
-  let encoding = String(enc);
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string
+  let encoding = `${enc}`;
   switch (encoding.length) {
     case 4:
       if (encoding === 'UTF8') return UTF8;
