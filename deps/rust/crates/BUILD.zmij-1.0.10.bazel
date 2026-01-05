@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "windows_aarch64_gnullvm",
+    name = "zmij",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -36,14 +36,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=windows_aarch64_gnullvm",
+        "crate-name=zmij",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.52.6",
+    version = "1.0.10",
     deps = [
-        "@crates_vendor__windows_aarch64_gnullvm-0.52.6//:build_script_build",
+        "@crates_vendor__zmij-1.0.10//:build_script_build",
     ],
 )
 
@@ -81,18 +81,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "windows_aarch64_gnullvm",
+    pkg_name = "zmij",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=windows_aarch64_gnullvm",
+        "crate-name=zmij",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.52.6",
+    version = "1.0.10",
     visibility = ["//visibility:private"],
 )
 

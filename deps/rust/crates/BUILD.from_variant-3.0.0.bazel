@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "darling_core",
+rust_proc_macro(
+    name = "from_variant",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,10 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "strsim",
-        "suggestions",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -39,18 +35,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=darling_core",
+        "crate-name=from_variant",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.20.11",
+    version = "3.0.0",
     deps = [
-        "@crates_vendor__fnv-1.0.7//:fnv",
-        "@crates_vendor__ident_case-1.0.1//:ident_case",
-        "@crates_vendor__proc-macro2-1.0.104//:proc_macro2",
-        "@crates_vendor__quote-1.0.42//:quote",
-        "@crates_vendor__strsim-0.11.1//:strsim",
+        "@crates_vendor__swc_macros_common-1.0.1//:swc_macros_common",
         "@crates_vendor__syn-2.0.113//:syn",
     ],
 )

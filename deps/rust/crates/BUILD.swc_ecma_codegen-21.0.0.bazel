@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "swc_ecma_parser",
+    name = "swc_ecma_codegen",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,31 +28,37 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "typescript",
-        "unstable",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__swc_ecma_codegen_macros-2.0.2//:swc_ecma_codegen_macros",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=swc_ecma_parser",
+        "crate-name=swc_ecma_codegen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "22.0.3",
+    version = "21.0.0",
     deps = [
-        "@crates_vendor__either-1.15.0//:either",
+        "@crates_vendor__ascii-1.1.0//:ascii",
+        "@crates_vendor__compact_str-0.7.1//:compact_str",
+        "@crates_vendor__memchr-2.7.6//:memchr",
         "@crates_vendor__num-bigint-0.4.6//:num_bigint",
+        "@crates_vendor__once_cell-1.21.3//:once_cell",
+        "@crates_vendor__regex-1.12.2//:regex",
+        "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
+        "@crates_vendor__ryu-js-1.0.2//:ryu_js",
         "@crates_vendor__serde-1.0.228//:serde",
-        "@crates_vendor__swc_atoms-7.0.0//:swc_atoms",
-        "@crates_vendor__swc_common-14.0.4//:swc_common",
-        "@crates_vendor__swc_ecma_ast-14.0.0//:swc_ecma_ast",
-        "@crates_vendor__swc_ecma_lexer-22.0.2//:swc_ecma_lexer",
+        "@crates_vendor__swc_allocator-4.0.1//:swc_allocator",
+        "@crates_vendor__swc_atoms-9.0.0//:swc_atoms",
+        "@crates_vendor__swc_common-18.0.1//:swc_common",
+        "@crates_vendor__swc_ecma_ast-19.0.0//:swc_ecma_ast",
+        "@crates_vendor__swc_sourcemap-9.3.4//:swc_sourcemap",
         "@crates_vendor__tracing-0.1.44//:tracing",
     ],
 )
