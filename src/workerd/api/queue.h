@@ -353,7 +353,7 @@ class QueueCustomEvent final: public WorkerInterface::CustomEvent, public kj::Re
     return EVENT_TYPE;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
+  tracing::EventInfo getEventInfo() const override;
 
   QueueRetryBatch getRetryBatch() const {
     return {.retry = result.retryBatch.retry, .delaySeconds = result.retryBatch.delaySeconds};

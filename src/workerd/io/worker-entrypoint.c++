@@ -798,9 +798,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   // any user code executes (particularly important for actors whose constructors may run
   // during delivered()).
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    KJ_IF_SOME(eventInfo, event->getEventInfo()) {
-      t.setEventInfo(*incomingRequest, kj::mv(eventInfo));
-    }
+    t.setEventInfo(*incomingRequest, event->getEventInfo());
   }
 
   auto promise = event->run(kj::mv(incomingRequest), entrypointName, kj::mv(props), waitUntilTasks)

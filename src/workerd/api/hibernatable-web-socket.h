@@ -77,7 +77,7 @@ class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEven
     return typeId;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
+  tracing::EventInfo getEventInfo() const override;
 
   kj::Promise<Result> notSupported() override {
     KJ_UNIMPLEMENTED("hibernatable web socket event not supported");
