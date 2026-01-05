@@ -747,6 +747,10 @@ class DeferredPromiseState final: public kj::Refcounted {
       // Each observer receives a copy of the exception to propagate rejections
       auto observers = kj::mv(pending.resolutionObservers);
       for (auto& observer: observers) {
+        // Copying the exception is intentional to keep things simple. It is not expected
+        // that there will be many observers in the typical case. At some hypothetical future
+        // point we could optimize by sharing the exception in a refcounted wrapper if needed
+        // but copying kj::Exception here is cheap enough for now.
         getContinuationQueue().schedule(
             js, [obs = kj::mv(observer), e = kj::cp(exception)](Lock& js) mutable {
           obs(js, kj::mv(e));
