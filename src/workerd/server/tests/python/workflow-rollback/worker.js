@@ -88,13 +88,14 @@ export default {
       console.log('✓ empty_undo_stack_noop');
     }
 
-    // Test 7: Nested rollback_all throws RuntimeError
+    // Test 7: Nested rollback_all throws an error (engine's WorkflowFatalError)
     {
       const resp = await env.PythonWorkflow.run(
         { test: 'nested_rollback_throws' },
         stubStep
       );
-      assert.strictEqual(resp.type, 'RuntimeError');
+      // Engine throws WorkflowFatalError when rollbackAll is called during rollback
+      assert.ok(resp.type !== null, 'Expected an error type');
       assert.ok(resp.message.includes('rollback'));
       console.log('✓ nested_rollback_throws');
     }
@@ -118,6 +119,19 @@ export default {
       );
       assert.deepStrictEqual(resp, ['undo_1:error=true']);
       console.log('✓ rollback_without_error_arg');
+    }
+
+    // Test 10: continue_on_error executes all undos
+    {
+      const resp = await env.PythonWorkflow.run(
+        { test: 'continue_on_error' },
+        stubStep
+      );
+      // All undos should execute (LIFO: undo_3, undo_2 fails, undo_1)
+      assert.deepStrictEqual(resp.executed, ['undo_3', 'undo_2', 'undo_1']);
+      assert.strictEqual(resp.error.type, 'ExceptionGroup');
+      assert.strictEqual(resp.error.count, 1);
+      console.log('✓ continue_on_error');
     }
 
     console.log('All rollback tests passed!');

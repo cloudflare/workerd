@@ -1125,19 +1125,11 @@ def handler(func):
     return wrapper
 
 
-class _UndoStackEntry:
-    """Internal entry for tracking rollback handlers."""
-
-    def __init__(self, name: str, value: Any, undo_fn, undo_config: dict | None = None):
-        self.name = name
-        self.value = value
-        self.undo_fn = undo_fn
-        self.undo_config = undo_config
-
-
 class _RollbackStepWrapper:
     """
     Wrapper returned by step.with_rollback() that allows attaching an .undo decorator.
+
+    Delegates to the engine's withRollback for durable undo stack management.
 
     Usage:
         @step.with_rollback("save to db")
@@ -1193,23 +1185,15 @@ class _RollbackStepWrapper:
         return decorator
 
     async def __call__(self):
-        """Execute the step and register it on the undo stack if an undo handler is defined."""
-        result = await _do_call(
-            self._step_wrapper, self._name, self._config, self._do_fn
+        """Execute the step via engine's withRollback for durable undo stack."""
+        return await _withRollback_call(
+            self._step_wrapper,
+            self._name,
+            self._config,
+            self._undo_config,
+            self._do_fn,
+            self._undo_fn,
         )
-
-        # Only add to undo stack if an undo handler was registered
-        if self._undo_fn is not None:
-            self._step_wrapper._undo_stack.append(
-                _UndoStackEntry(
-                    name=self._name,
-                    value=result,
-                    undo_fn=self._undo_fn,
-                    undo_config=self._undo_config or self._config,
-                )
-            )
-
-        return result
 
 
 class _WorkflowStepWrapper:
@@ -1217,8 +1201,6 @@ class _WorkflowStepWrapper:
         self._js_step = js_step
         self._memoized_dependencies = {}
         self._in_flight = {}
-        self._undo_stack: list[_UndoStackEntry] = []
-        self._is_rolling_back = False
 
     def do(self, name, depends=None, concurrent=False, config=None):
         def decorator(func):
@@ -1294,57 +1276,36 @@ class _WorkflowStepWrapper:
 
         return decorator
 
-    async def rollback_all(self, trigger_error: Exception):
+    async def rollback_all(
+        self, trigger_error: Exception = None, *, continue_on_error: bool = False
+    ):
         """
-        Execute all registered undo handlers in LIFO (Last-In, First-Out) order.
-
-        This implements the saga pattern's compensation/rollback mechanism.
-        Each undo handler is wrapped in a step.do for durability and retry support.
+        Execute all registered undo handlers in LIFO order.
 
         Args:
-            trigger_error: The error that triggered the rollback. Passed to each
-                          undo handler as the first argument.
-
-        Raises:
-            RuntimeError: If called while a rollback is already in progress.
-            Exception: Re-raises the first undo failure if continueOnUndoFailure
-                      is not set (default behavior).
-
-        Usage:
-            try:
-                # ... workflow steps with rollback handlers ...
-            except Exception as e:
-                await step.rollback_all(e)
-                raise
+            trigger_error: Error passed to each undo handler.
+            continue_on_error: Continue after undo failure (raises AggregateError).
         """
-        if self._is_rolling_back:
-            raise RuntimeError(
-                "Cannot call rollback_all() while rollback is in progress"
+        try:
+            # Convert Python exception to JS error for the engine
+            js_error = None
+            if trigger_error is not None:
+                js_error = to_js(
+                    {
+                        "name": type(trigger_error).__name__,
+                        "message": str(trigger_error),
+                    },
+                    dict_converter=Object.fromEntries,
+                )
+
+            options = to_js(
+                {"continueOnError": continue_on_error},
+                dict_converter=Object.fromEntries,
             )
 
-        if len(self._undo_stack) == 0:
-            return
-
-        self._is_rolling_back = True
-
-        try:
-            # Execute undos in LIFO order
-            while len(self._undo_stack) > 0:
-                entry = self._undo_stack.pop()
-                undo_step_name = f"__undo__{entry.name}"
-
-                # Create undo callback that invokes the user's undo function
-                async def make_undo_callback(e=entry, err=trigger_error):
-                    undo_result = e.undo_fn(err, e.value)
-                    if inspect.iscoroutine(undo_result):
-                        await undo_result
-
-                # Wrap undo in step.do for durability/retry
-                await _do_call(
-                    self, undo_step_name, entry.undo_config, make_undo_callback
-                )
-        finally:
-            self._is_rolling_back = False
+            await self._js_step.rollbackAll(js_error, options)
+        except Exception as exc:
+            raise _from_js_error(exc) from exc
 
     async def _resolve_dependency(self, dep):
         if dep._step_name in self._memoized_dependencies:
@@ -1373,6 +1334,66 @@ async def _do_call(entrypoint, name, config, callback, *results):
                 )
 
             return python_from_rpc(coroutine)
+        except Exception as exc:
+            raise _from_js_error(exc) from exc
+
+    task = create_task(_closure())
+    entrypoint._in_flight[name] = task
+
+    try:
+        result = await task
+        entrypoint._memoized_dependencies[name] = result
+    finally:
+        del entrypoint._in_flight[name]
+
+    return result
+
+
+async def _withRollback_call(entrypoint, name, config, undo_config, do_fn, undo_fn):
+    """Call the engine's withRollback with Python callbacks wrapped for JS."""
+
+    async def _closure():
+        async def _do_callback():
+            result = do_fn()
+            if inspect.iscoroutine(result):
+                result = await result
+            return to_js(result, dict_converter=Object.fromEntries)
+
+        async def _undo_callback(js_err, js_value):
+            py_err = None
+            if js_err is not None:
+                py_err = (
+                    _from_js_error(js_err) if hasattr(js_err, "message") else js_err
+                )
+
+            py_value = python_from_rpc(js_value)
+
+            result = undo_fn(py_err, py_value)
+            if inspect.iscoroutine(result):
+                await result
+
+        handler = {"do": _do_callback}
+        if undo_fn is not None:
+            handler["undo"] = _undo_callback
+
+        js_handler = to_js(handler, dict_converter=Object.fromEntries)
+
+        js_config = None
+        if config is not None or undo_config is not None:
+            config_dict = dict(config) if config else {}
+            if undo_config is not None:
+                config_dict["undoConfig"] = undo_config
+            js_config = to_js(config_dict, dict_converter=Object.fromEntries)
+
+        try:
+            if js_config is None:
+                result = await entrypoint._js_step.withRollback(name, js_handler)
+            else:
+                result = await entrypoint._js_step.withRollback(
+                    name, js_handler, js_config
+                )
+
+            return python_from_rpc(result)
         except Exception as exc:
             raise _from_js_error(exc) from exc
 

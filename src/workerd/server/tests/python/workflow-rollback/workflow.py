@@ -29,6 +29,8 @@ class WorkflowRollbackExample(WorkflowEntrypoint):
             return await self._test_stop_on_first_undo_failure(step)
         elif test_name == "rollback_without_error_arg":
             return await self._test_rollback_without_error_arg(step)
+        elif test_name == "continue_on_error":
+            return await self._test_continue_on_error(step)
         else:
             raise ValueError(f"Unknown test: {test_name}")
 
@@ -178,7 +180,7 @@ class WorkflowRollbackExample(WorkflowEntrypoint):
         return {"success": True}
 
     async def _test_nested_rollback_throws(self, step):
-        """Test that calling rollback_all during rollback throws RuntimeError."""
+        """Test that calling rollback_all during rollback throws an error."""
         error_caught = {"type": None, "message": None}
 
         @step.with_rollback("step_1")
@@ -188,14 +190,18 @@ class WorkflowRollbackExample(WorkflowEntrypoint):
         @step_1.undo
         async def undo_1(error, value):
             # Try to call rollback_all from within an undo handler
+            # Engine throws WorkflowFatalError, Python-side catches as Exception
             try:
                 await step.rollback_all(Exception("nested"))
-            except RuntimeError as e:
-                error_caught["type"] = "RuntimeError"
+            except Exception as e:
+                error_caught["type"] = type(e).__name__
                 error_caught["message"] = str(e)
 
         await step_1()
-        await step.rollback_all(Exception("trigger"))
+        try:
+            await step.rollback_all(Exception("trigger"))
+        except Exception:
+            pass  # Rollback always throws after completion
 
         return error_caught
 
@@ -258,6 +264,52 @@ class WorkflowRollbackExample(WorkflowEntrypoint):
         await step.rollback_all(None)
 
         return results
+
+    async def _test_continue_on_error(self, step):
+        """Test that continue_on_error=True executes all undos and collects errors."""
+        executed = []
+
+        @step.with_rollback("step_1")
+        async def step_1():
+            return 1
+
+        @step_1.undo
+        async def undo_1(error, value):
+            executed.append("undo_1")
+
+        @step.with_rollback("step_2")
+        async def step_2():
+            return 2
+
+        @step_2.undo
+        async def undo_2(error, value):
+            executed.append("undo_2")
+            raise RuntimeError("undo_2 failed")
+
+        @step.with_rollback("step_3")
+        async def step_3():
+            return 3
+
+        @step_3.undo
+        async def undo_3(error, value):
+            executed.append("undo_3")
+
+        await step_1()
+        await step_2()
+        await step_3()
+
+        # With continue_on_error=True, all undos should execute
+        error_info = {"type": None, "count": 0}
+        try:
+            await step.rollback_all(Exception("trigger"), continue_on_error=True)
+        except ExceptionGroup as eg:
+            error_info["type"] = "ExceptionGroup"
+            error_info["count"] = len(eg.exceptions)
+        except Exception as e:
+            error_info["type"] = type(e).__name__
+
+        # All undos should have executed (LIFO: undo_3, undo_2, undo_1)
+        return {"executed": executed, "error": error_info}
 
 
 async def test(ctrl, env, ctx):
