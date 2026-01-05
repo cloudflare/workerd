@@ -39,6 +39,8 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
     harness = "//src/wpt:harness@js"
     wpt_cacert = "@wpt//:tools/certs/cacert.pem"
     wpt_common = "@wpt//:common@module"
+    wpt_resources = "@wpt//:resources@module"
+    wpt_interfaces = "@wpt//:interfaces@module"
 
     if compat_date == "":
         compat_date = "2999-12-31"
@@ -62,6 +64,8 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         autogates = autogates,
         wpt_cacert = wpt_cacert,
         wpt_common = wpt_common,
+        wpt_resources = wpt_resources,
+        wpt_interfaces = wpt_interfaces,
         compat_flags = compat_flags + ["experimental", "nodejs_compat", "unsupported_process_actual_platform"],
     )
 
@@ -72,6 +76,8 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         harness,  # e.g. wpt/harness/*.ts
         wpt_cacert,  # i.e. "wpt/tools/certs/cacert.pem",
         wpt_common,  # i.e. "wpt/common/**"
+        wpt_resources,  # i.e. "wpt/resources/**"
+        wpt_interfaces,  # i.e. "wpt/interfaces/**"
     ]
 
     wd_test(
@@ -231,11 +237,15 @@ def _wpt_wd_test_gen_impl(ctx):
     src = ctx.actions.declare_file("{}.wd-test".format(ctx.attr.test_name))
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
-    # Generate bindings for test directory files plus common/**/*.js
+    # Generate bindings for test directory files plus common/**/*.js, resources/**/*.js, and interfaces/**/*.idl
     bindings = generate_external_bindings(src, base, ctx.attr.wpt_directory.files)
     common_base = ctx.attr.wpt_common[WPTModuleInfo].base
     common_bindings = generate_common_bindings(src, common_base, ctx.attr.wpt_common.files)
-    all_bindings = bindings + ",\n" + common_bindings if bindings and common_bindings else (bindings or common_bindings)
+    resources_base = ctx.attr.wpt_resources[WPTModuleInfo].base
+    resources_bindings = generate_resources_bindings(src, resources_base, ctx.attr.wpt_resources.files)
+    interfaces_base = ctx.attr.wpt_interfaces[WPTModuleInfo].base
+    interfaces_bindings = generate_interfaces_bindings(src, interfaces_base, ctx.attr.wpt_interfaces.files)
+    all_bindings = ",\n".join([b for b in [bindings, common_bindings, resources_bindings, interfaces_bindings] if b])
     ctx.actions.write(
         output = src,
         content = WPT_WD_TEST_TEMPLATE.format(
@@ -271,6 +281,10 @@ _wpt_wd_test_gen = rule(
         "wpt_cacert": attr.label(allow_single_file = True),
         # Target specifying the WPT common directory module
         "wpt_common": attr.label(),
+        # Target specifying the WPT resources directory module
+        "wpt_resources": attr.label(),
+        # Target specifying the WPT interfaces directory module
+        "wpt_interfaces": attr.label(),
         # A list of autogates to specify in the generated wd-test file
         "autogates": attr.string_list(),
         # A list of compatibility flags to specify in the generated wd-test file
@@ -389,6 +403,59 @@ def generate_common_bindings(wd_test_file, base, files):
 
         relative_path = module_relative_path(base, file)
         result.append('(name = "/common/{}", {} = embed "{}")'.format(relative_path, binding_type, wd_test_relative_path(wd_test_file, file)))
+
+    return ",\n".join(result)
+
+def generate_resources_bindings(wd_test_file, base, files):
+    """
+    Generates appropriate bindings for each file in the WPT resources module.
+    Files are prefixed with /resources/ path.
+
+    Only JS files are included. Also adds an alias for /resources/WebIDLParser.js
+    which points to /resources/webidl2/lib/webidl2.js (matching the WPT server
+    rewrite rule in tools/serve/serve.py).
+    """
+
+    result = []
+    webidl2_file = None
+
+    for file in files.to_list():
+        if file.extension != "js":
+            # Skip non-JS files
+            continue
+
+        relative_path = module_relative_path(base, file)
+        file_path = wd_test_relative_path(wd_test_file, file)
+        result.append('(name = "/resources/{}", text = embed "{}")'.format(relative_path, file_path))
+
+        # Track the webidl2.js file for the alias
+        if relative_path == "webidl2/lib/webidl2.js":
+            webidl2_file = file_path
+
+    # Add the WebIDLParser.js alias (WPT server rewrites this to webidl2/lib/webidl2.js)
+    if webidl2_file:
+        result.append('(name = "/resources/WebIDLParser.js", text = embed "{}")'.format(webidl2_file))
+
+    return ",\n".join(result)
+
+def generate_interfaces_bindings(wd_test_file, base, files):
+    """
+    Generates appropriate bindings for each file in the WPT interfaces module.
+    Files are prefixed with /interfaces/ path.
+
+    Only IDL files are included (*.idl) which are used by idlharness tests.
+    """
+
+    result = []
+
+    for file in files.to_list():
+        if file.extension != "idl":
+            # Skip non-IDL files
+            continue
+
+        relative_path = module_relative_path(base, file)
+        file_path = wd_test_relative_path(wd_test_file, file)
+        result.append('(name = "/interfaces/{}", text = embed "{}")'.format(relative_path, file_path))
 
     return ",\n".join(result)
 
