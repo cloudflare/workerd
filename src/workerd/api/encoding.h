@@ -218,7 +218,7 @@ class TextEncoder final: public jsg::Object {
 
   static jsg::Ref<TextEncoder> constructor(jsg::Lock& js);
 
-  jsg::BufferSource encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input);
+  jsg::JsUint8Array encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input);
 
   EncodeIntoResult encodeInto(jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer);
 
@@ -236,11 +236,7 @@ class TextEncoder final: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(encoding, getEncoding);
     }
 
-    // `encode()` returns `jsg::BufferSource`, which may be an `ArrayBuffer` or `ArrayBufferView`,
-    // but the implementation uses `jsg::BufferSource::tryAlloc()` which always tries to allocate a
-    // `Uint8Array`. The spec defines that this function returns a `Uint8Array` too.
     JSG_TS_OVERRIDE({
-      encode(input?: string): Uint8Array;
       encodeInto(input: string, buffer: Uint8Array): TextEncoderEncodeIntoResult;
     });
   }
@@ -249,4 +245,11 @@ class TextEncoder final: public jsg::Object {
 #define EW_ENCODING_ISOLATE_TYPES                                                                  \
   api::TextDecoder, api::TextEncoder, api::TextDecoder::ConstructorOptions,                        \
       api::TextDecoder::DecodeOptions, api::TextEncoder::EncodeIntoResult
+
+namespace test {
+
+size_t bestFit(const char* str, size_t bufferSize);
+size_t bestFit(const char16_t* str, size_t bufferSize);
+
+}  // namespace test
 }  // namespace workerd::api

@@ -2757,6 +2757,14 @@ class Lock {
 
   // Utility method to safely allocate a v8::BackingStore with allocation failure handling.
   // Throws a javascript error if allocation fails.
+  //
+  // IMPORTANT: This method can trigger garbage collection, which may move or invalidate V8
+  // objects. Do NOT call this method while:
+  // - A v8::String::ValueView is alive (it holds internal V8 heap locks)
+  // - You have raw pointers to V8 heap data (e.g., from view.data8(), view.data16())
+  //
+  // Safe pattern: Copy V8 string data to off-heap memory FIRST (e.g., via JsString::writeInto()
+  // into kj::SmallArray), THEN call allocBackingStore(). See TextEncoder::encode() for example.
   std::unique_ptr<v8::BackingStore> allocBackingStore(
       size_t size, AllocOption init_mode = AllocOption::ZERO_INITIALIZED) KJ_WARN_UNUSED_RESULT;
 
