@@ -908,6 +908,14 @@ kj::Date IoContext::now() {
   return now(getCurrentIncomingRequest());
 }
 
+kj::Rc<ExternalPusherImpl> IoContext::getExternalPusher() {
+  KJ_IF_SOME(ep, externalPusher) {
+    return ep.addRef();
+  } else {
+    return externalPusher.emplace(kj::rc<ExternalPusherImpl>(getByteStreamFactory())).addRef();
+  }
+}
+
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {

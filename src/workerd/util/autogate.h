@@ -30,6 +30,8 @@ enum class AutogateKey {
   COMPRESSION_STREAM_USE_STATE_MACHINE,
   // Switch the IdentityTransformStream to use the new state machine-based impl
   IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE,
+  // Use ExternalPusher instead of StreamSink to handle streams in RPC.
+  RPC_USE_EXTERNAL_PUSHER,
   NumOfKeys  // Reserved for iteration.
 };
 

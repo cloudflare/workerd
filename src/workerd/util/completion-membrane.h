@@ -30,6 +30,10 @@ class CompletionMembrane final: public capnp::MembranePolicy, public kj::Refcoun
     return kj::addRef(*this);
   }
 
+  void reject(kj::Exception&& e) {
+    doneFulfiller->reject(kj::mv(e));
+  }
+
  private:
   kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
 };
