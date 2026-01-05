@@ -68,7 +68,11 @@ class InputGate {
       other.gate = nullptr;
     }
     ~Lock() noexcept(false) {
-      if (gate != nullptr) gate->releaseLock();
+      if (gate != nullptr) {
+        lockSpan.setTag("waiters"_kjc, static_cast<int64_t>(gate->waiters.size()));
+        lockSpan.setTag("lock_count"_kjc, static_cast<int64_t>(gate->lockCount));
+        gate->releaseLock();
+      }
     }
 
     // Increments the lock's refcount, returning a duplicate `Lock`. All `Lock`s must be dropped
@@ -334,6 +338,7 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise, SpanParent parentSp
     }
   } catch (kj::Exception& e) {
     setBroken(e);
+    lockSpan.setTag("error"_kjc, true);
     fulfiller->reject(kj::cp(e));
     kj::throwFatalException(kj::cp(e));
   }
