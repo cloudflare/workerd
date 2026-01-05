@@ -1687,10 +1687,34 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(js, signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
             .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
-      if (exception.getDescription().startsWith("invalid Content-Length header value")) {
+      auto desc = exception.getDescription();
+
+      if (desc.startsWith("invalid Content-Length header value")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
-      } else if (exception.getDescription().contains("NOSENTRY script not found")) {
+      } else if (desc.contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
+      }
+      // Handle TLS certificate validation errors with helpful messages
+      else if (desc.contains("TLS peer's certificate is not trusted")) {
+        return JSG_KJ_EXCEPTION(FAILED, Error,
+            "Network connection failed: The destination server's TLS certificate could not be "
+            "verified. If connecting to a server with a self-signed certificate in local "
+            "development, ensure NODE_EXTRA_CA_CERTS is set to a file containing the CA "
+            "certificate.");
+      } else if (desc.contains("TLS peer provided no certificate")) {
+        return JSG_KJ_EXCEPTION(FAILED, Error,
+            "Network connection failed: The destination server did not provide a TLS "
+            "certificate.");
+      } else if (desc.contains("peer disconnected without gracefully ending TLS session")) {
+        return JSG_KJ_EXCEPTION(FAILED, Error,
+            "Network connection failed: The connection was closed unexpectedly during TLS "
+            "handshake.");
+      } else if (desc.contains("OpenSSL error") || desc.contains("SSL_")) {
+        // Generic TLS/SSL error
+        return JSG_KJ_EXCEPTION(FAILED, Error,
+            "Network connection failed due to a TLS/SSL error. This may indicate a certificate "
+            "configuration issue. In local development, ensure the destination server's CA "
+            "certificate is trusted via NODE_EXTRA_CA_CERTS.");
       }
       return kj::mv(exception);
     }),

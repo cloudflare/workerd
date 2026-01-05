@@ -1,0 +1,34 @@
+# Copyright (c) 2024 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (
+      name = "main",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "fetch-tls-error-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "UNTRUSTED_TLS_PORT", fromEnvironment = "UNTRUSTED_TLS_PORT"),
+        ],
+      )
+    ),
+    # Internet service WITHOUT the test server's CA in trustedCertificates.
+    # This simulates the real-world scenario where a certificate is not trusted,
+    # which should trigger the TLS error handling we added.
+    ( name = "internet", 
+      network = ( 
+        allow = ["private"],
+        tlsOptions = (
+          # Intentionally NOT including any trusted certificates to trigger TLS error
+          trustedCertificates = [],
+        ),
+      ) 
+    ),
+  ],
+);
