@@ -81,9 +81,14 @@ declare global {
     maybeDescription?: string
   ): Promise<unknown>;
 
+  function assert_own_property(
+    object: object,
+    property_name: string | symbol,
+    description?: string
+  ): void;
   function assert_not_own_property(
     object: object,
-    property_name: string,
+    property_name: string | symbol,
     description?: string
   ): void;
   function promise_rejects_js(
@@ -440,6 +445,21 @@ globalThis.promise_rejects_dom = (
 };
 
 /**
+ * Assert that ``object`` has an own property with name ``property_name``.
+ *
+ * @param object - Object that should have the given property.
+ * @param property_name - Property name to test.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_own_property = (object, property_name, description): void => {
+  ok(
+    Object.prototype.hasOwnProperty.call(object, property_name),
+    `expected property ${String(property_name)} missing on object: ` +
+      (description ?? '')
+  );
+};
+
+/**
  * Assert that ``object`` does not have an own property with name ``property_name``.
  *
  * @param object - Object that should not have the given property.
@@ -453,7 +473,7 @@ globalThis.assert_not_own_property = (
 ): void => {
   ok(
     !Object.prototype.hasOwnProperty.call(object, property_name),
-    `unexpected property ${property_name} is found on object: ` +
+    `unexpected property ${String(property_name)} is found on object: ` +
       (description ?? '')
   );
 };
