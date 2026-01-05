@@ -3,34 +3,40 @@ load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS", 
 
 def _pyodide_core(*, version, sha256, **_kwds):
     # Use @workerd prefix on build_file so we can use this from edgeworker too
+    name = "pyodide-%s" % version
     http_archive(
-        name = "pyodide-%s" % version,
+        name = name,
         build_file = "@workerd//:build/BUILD.pyodide",
         sha256 = sha256,
         urls = ["https://github.com/pyodide/pyodide/releases/download/%s/pyodide-core-%s.tar.bz2" % (version, version)],
     )
+    return [name]
 
 def _pyodide_packages(*, tag, lockfile_hash, all_wheels_hash, **_kwds):
+    lock_name = "pyodide-lock_%s.json" % tag
     http_file(
-        name = "pyodide-lock_%s.json" % tag,
+        name = lock_name,
         sha256 = lockfile_hash,
         url = "https://github.com/cloudflare/pyodide-build-scripts/releases/download/%s/pyodide-lock.json" % tag,
     )
 
     # Use @workerd prefix on build_file so we can use this from edgeworker too
+    archive_name = "all_pyodide_wheels_%s" % tag
     http_archive(
-        name = "all_pyodide_wheels_%s" % tag,
+        name = archive_name,
         build_file = "@workerd//:build/BUILD.all_pyodide_wheels",
         sha256 = all_wheels_hash,
         urls = ["https://github.com/cloudflare/pyodide-build-scripts/releases/download/%s/all_wheels.zip" % tag],
     )
+    return [lock_name, archive_name]
 
 VENDOR_R2 = "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/"
 
 def _py_vendor_test_deps(version, name, sha256, abi, **_kwds):
     pyver = "-" + abi.replace(".", "") if abi else ""
+    archive_name = name + "_src_" + version
     http_archive(
-        name = name + "_src_" + version,
+        name = archive_name,
         build_file_content = """
 filegroup(
     name = "all_srcs",
@@ -41,29 +47,33 @@ filegroup(
         sha256 = sha256,
         url = VENDOR_R2 + name + pyver + "-vendored-for-ew-testing.zip",
     )
+    return [archive_name]
 
 PYODIDE_CAPN_BIN = "https://pyodide-capnp-bin.edgeworker.net/"
 
 def _capnp_bundle(id = None, integrity = None, **_kwds):
     if not id or not integrity:
         return
+    name = "pyodide_%s.capnp.bin" % id
     http_file(
-        name = "pyodide_%s.capnp.bin" % id,
+        name = name,
         integrity = integrity,
-        url = PYODIDE_CAPN_BIN + "pyodide_%s.capnp.bin" % id,
+        url = PYODIDE_CAPN_BIN + name,
     )
+    return [name]
 
 def dep_pyodide():
+    deps = []
     for info in PYODIDE_VERSIONS:
-        _pyodide_core(**info)
+        deps += _pyodide_core(**info)
 
     for info in BUNDLE_VERSION_INFO.values():
-        _capnp_bundle(**info)
+        deps += _capnp_bundle(**info)
         for pkg in info["vendored_packages_for_tests"].values():
-            _py_vendor_test_deps(version = info["name"], **pkg)
+            deps += _py_vendor_test_deps(version = info["name"], **pkg)
 
     for info in PYTHON_LOCKFILES:
-        _pyodide_packages(**info)
+        deps += _pyodide_packages(**info)
 
     # Accumulator to de-duplicate generated http_file rules.
     gen_http_file = {}
@@ -102,13 +112,20 @@ def dep_pyodide():
     for ver in BUNDLE_VERSION_INFO.values():
         _snapshot_http_files(**ver)
     for snapshot, info in gen_http_file.items():
+        name = "pyodide-snapshot-" + snapshot
         http_file(
-            name = "pyodide-snapshot-" + snapshot,
+            name = name,
             integrity = info.integrity,
             url = info.url,
         )
+        deps.append(name)
+    return deps
 
 def _impl(module_ctx):
-    dep_pyodide()
+    deps = dep_pyodide()
+    return module_ctx.extension_metadata(
+        root_module_direct_deps = deps,
+        root_module_direct_dev_deps = [],
+    )
 
 pyodide = module_extension(implementation = _impl)
