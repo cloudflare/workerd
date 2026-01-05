@@ -146,6 +146,7 @@ wpt_test(
 
 wpt_test(
     name = "eventsource",
+    size = "large",
     config = "eventsource-test.ts",
     start_server = True,
     target_compatible_with = select({
@@ -155,4 +156,10 @@ wpt_test(
         "//conditions:default": [],
     }),
     wpt_directory = "@wpt//:eventsource@module",
+)
+
+wpt_test(
+    name = "webidl",
+    config = "webidl-test.ts",
+    wpt_directory = "@wpt//:webidl@module",
 )
