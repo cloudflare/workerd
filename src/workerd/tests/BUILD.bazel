@@ -125,7 +125,7 @@ wd_cc_benchmark(
     ],
 )
 
-# Use `bazel run //src/workerd/tests:bench-deferred-promise` to benchmark
+# Use `bazel run //src/workerd/tests:bench-deferred-promise --config=benchmark` to benchmark
 # Compares jsg::Promise<T> vs jsg::DeferredPromise<T> performance
 wd_cc_benchmark(
     name = "bench-deferred-promise",
