@@ -88,6 +88,9 @@ class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEven
   // HibernatableSocketParams first.
   HibernatableSocketParams consumeParams();
 
+  // Peeks at params to extract the event type for tracing, without consuming them.
+  tracing::HibernatableWebSocketEventInfo::Type getEventType() const;
+
   uint16_t typeId;
   kj::OneOf<HibernatableSocketParams, kj::Own<HibernationReader>> params;
   kj::Maybe<uint32_t> timeoutMs;
