@@ -1166,22 +1166,14 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
     });
   };
 
-  int currentReadBuf = 0;
-  kj::SmallArray<kj::byte, 4 * MIN_BUFFER_SIZE> backing(bufferSize * 2);
-  kj::ArrayPtr<kj::byte> buffers[2] = {
-    backing.first(bufferSize),
-    backing.slice(bufferSize),
-  };
+  kj::SmallArray<kj::byte, 4 * MIN_BUFFER_SIZE> buffer(bufferSize * 2);
 
   // We will use an adaptive minBytes value to try to optimize read sizes based on
   // observed stream behavior. We start with a minBytes set to half the buffer size.
   // As the stream is read, we will adjust minBytes up or down depending on whether
   // the stream is consistently filling the buffer or not.
-  size_t minBytes = bufferSize >> 1;
+  size_t minBytes = buffer.size() >> 1;
   kj::Maybe<kj::Exception> pendingException;
-
-  // Initiate our first read.
-  auto readPromise = pumpReadImpl(*active, buffers[currentReadBuf], minBytes);
   size_t iterationCount = 0;
 
   try {
@@ -1189,7 +1181,7 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
       size_t amount = 0;
       {
         KJ_ON_SCOPE_FAILURE(readFailed = true);
-        amount = co_await readPromise;
+        amount = co_await pumpReadImpl(*active, buffer, minBytes);
       }
       iterationCount++;
 
@@ -1198,7 +1190,7 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
       if (amount < minBytes) {
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
         if (amount > 0) {
-          co_await output.write(buffers[currentReadBuf].slice(0, amount));
+          co_await output.write(buffer.first(amount));
         }
         if (end) {
           co_await output.end();
@@ -1206,28 +1198,25 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
         co_return;
       }
 
-      auto writeBuf = buffers[currentReadBuf].slice(0, amount);
-      currentReadBuf = 1 - currentReadBuf;  // switch buffers
-
       // Before we perform the next read, let's adapt minBytes based on stream behavior
       // we have observed on the previous read.
       if (iterationCount <= 3 || iterationCount % 10 == 0) {
-        if (amount == bufferSize) {
+        if (amount == buffer.size()) {
           // Stream is filling buffer completely... Use smaller minBytes to
           // increase responsiveness, should produce more reads with less data.
-          if (bufferSize >= 4 * DEFAULT_BUFFER_SIZE) {
+          if (buffer.size() >= 4 * DEFAULT_BUFFER_SIZE) {
             // For large buffers (≥64KB), be more aggressive about responsiveness.
             // 25% of a large buffer is still a substantial chunk (e.g., 32KB for 128KB).
-            minBytes = bufferSize >> 2;  // 25%
+            minBytes = buffer.size() >> 2;  // 25%
           } else {
             // For smaller buffers, 50% provides better balance, avoiding chunks
             // that are too small for efficient processing (e.g., keeps 16KB → 8KB).
-            minBytes = bufferSize >> 1;  // 50%
+            minBytes = buffer.size() >> 1;  // 50%
           }
         } else {
           // Stream didn't fill buffer - likely slower or at natural boundary.
           // Use higher minBytes to accumulate larger chunks and reduce iteration overhead.
-          minBytes = (bufferSize >> 2) + (bufferSize >> 1);  // 75%
+          minBytes = (buffer.size() >> 2) + (buffer.size() >> 1);  // 75%
         }
       }
 
@@ -1245,28 +1234,15 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
         }
       }
 
-      // If there's leftover data from the previous read (happens when a JS chunk
-      // is larger than the buffer), extract it before starting the next read.
-      // We must do this BEFORE starting the next read so that active->state is Idle
-      // when the next read's promise continuation tries to save its leftover.
-      kj::Maybe<Active::Readable> maybeLeftover;
-      KJ_IF_SOME(readable, active->state.tryGetUnsafe<Active::Readable>()) {
-        maybeLeftover = kj::mv(readable);
-      }
-
-      // Start working on the next read. At this point, if there was leftover, we've
-      // moved it to maybeLeftover, so the next read can safely set its leftover
-      // to active->state when it completes.
-      active->state.transitionTo<Active::Idle>();
-      readPromise = pumpReadImpl(*active, buffers[currentReadBuf], minBytes);
-
       {
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
-        co_await output.write(writeBuf);
+        co_await output.write(buffer.first(amount));
 
-        // Write any leftover from the previous read.
-        KJ_IF_SOME(leftover, maybeLeftover) {
-          co_await output.write(leftover.view);
+        // Write any leftover from the previous read (happens when a JS chunk
+        // is larger than the buffer).
+        KJ_IF_SOME(readable, active->state.tryGetUnsafe<Active::Readable>()) {
+          co_await output.write(readable.view);
+          active->state.transitionTo<Active::Idle>();
         }
       }
     }
