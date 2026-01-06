@@ -1086,23 +1086,14 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
   static_assert(MED_BUFFER_SIZE < MAX_BUFFER_SIZE);
   static_assert(MAX_BUFFER_SIZE < MEDIUM_THRESHOLD);
 
-  // Our stream may or may not have a known length.
+  // Size the buffer based on known stream length, if available.
   size_t bufferSize = DEFAULT_BUFFER_SIZE;
-  kj::Maybe<uint64_t> maybeRemaining = active->stream->tryGetLength(StreamEncoding::IDENTITY);
-  KJ_IF_SOME(length, maybeRemaining) {
-    // Streams that advertise their length SHOULD always tell the truth.
-    // But... on the off chance they don't, we'll still try to behave
-    // reasonably. At worst we will allocate a backing buffer and
-    // perform a single read. If this proves to be a performance issue,
-    // we can fall back to strictly enforcing the advertised length.
+  KJ_IF_SOME(length, active->stream->tryGetLength(StreamEncoding::IDENTITY)) {
     if (length <= MEDIUM_THRESHOLD) {
-      // When `length` is below the medium threshold, use
-      // the nearest power of 2 >= length within the range
-      // [MIN_BUFFER_SIZE, MED_BUFFER_SIZE].
+      // Use the nearest power of 2 >= length within [MIN_BUFFER_SIZE, MED_BUFFER_SIZE].
       bufferSize = kj::max(MIN_BUFFER_SIZE, std::bit_ceil(length));
       bufferSize = kj::min(MED_BUFFER_SIZE, bufferSize);
     } else {
-      // Otherwise, use the biggest buffer.
       bufferSize = MAX_BUFFER_SIZE;
     }
   }
@@ -1117,15 +1108,17 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
     active->state.transitionTo<Active::Idle>();
   }
 
-  static const auto pumpReadImpl = [](Active& active, kj::ArrayPtr<kj::byte> dest,
-                                       size_t minBytes) -> kj::Promise<size_t> {
+  static const auto pumpReadImpl = [](Active& active,
+                                       kj::ArrayPtr<kj::byte> dest) -> kj::Promise<size_t> {
     // Keep in mind that every call to pumpReadImpl requires acquiring the isolate lock!
+    // We use minBytes=1 since the continue-reading loop in readInternal and
+    // kMinRemainingForAdditionalRead handle opportunistic buffer filling.
     auto context = kj::heap<ReadContext>({
       .stream = active.stream.addRef(),
       .reader = active.reader.addRef(),
       .buffer = dest,
       .totalRead = 0,
-      .minBytes = minBytes,
+      .minBytes = 1,
       .adapterRef = kj::none,  // no need to track adapter liveness during pump
     });
 
@@ -1167,71 +1160,23 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
   };
 
   kj::SmallArray<kj::byte, 4 * MIN_BUFFER_SIZE> buffer(bufferSize * 2);
-
-  // We will use an adaptive minBytes value to try to optimize read sizes based on
-  // observed stream behavior. We start with a minBytes set to half the buffer size.
-  // As the stream is read, we will adjust minBytes up or down depending on whether
-  // the stream is consistently filling the buffer or not.
-  size_t minBytes = buffer.size() >> 1;
   kj::Maybe<kj::Exception> pendingException;
-  size_t iterationCount = 0;
 
   try {
     while (true) {
       size_t amount = 0;
       {
         KJ_ON_SCOPE_FAILURE(readFailed = true);
-        amount = co_await pumpReadImpl(*active, buffer, minBytes);
+        amount = co_await pumpReadImpl(*active, buffer);
       }
-      iterationCount++;
 
-      // If the read returned < minBytes, that indicates the stream is done.
-      // Let's write the bytes we got, end the output if needed, and exit.
-      if (amount < minBytes) {
+      // If the read returned 0, that indicates the stream is done.
+      if (amount == 0) {
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
-        if (amount > 0) {
-          co_await output.write(buffer.first(amount));
-        }
         if (end) {
           co_await output.end();
         }
         co_return;
-      }
-
-      // Before we perform the next read, let's adapt minBytes based on stream behavior
-      // we have observed on the previous read.
-      if (iterationCount <= 3 || iterationCount % 10 == 0) {
-        if (amount == buffer.size()) {
-          // Stream is filling buffer completely... Use smaller minBytes to
-          // increase responsiveness, should produce more reads with less data.
-          if (buffer.size() >= 4 * DEFAULT_BUFFER_SIZE) {
-            // For large buffers (≥64KB), be more aggressive about responsiveness.
-            // 25% of a large buffer is still a substantial chunk (e.g., 32KB for 128KB).
-            minBytes = buffer.size() >> 2;  // 25%
-          } else {
-            // For smaller buffers, 50% provides better balance, avoiding chunks
-            // that are too small for efficient processing (e.g., keeps 16KB → 8KB).
-            minBytes = buffer.size() >> 1;  // 50%
-          }
-        } else {
-          // Stream didn't fill buffer - likely slower or at natural boundary.
-          // Use higher minBytes to accumulate larger chunks and reduce iteration overhead.
-          minBytes = (buffer.size() >> 2) + (buffer.size() >> 1);  // 75%
-        }
-      }
-
-      KJ_IF_SOME(remaining, maybeRemaining) {
-        if (amount > remaining) {
-          // The stream lied about its length. Ignore further length tracking.
-          maybeRemaining = kj::none;
-        } else {
-          // Otherwise, set minBytes to whatever is expected to remain.
-          remaining -= amount;
-          maybeRemaining = remaining;
-          if (remaining < minBytes && remaining > 0) {
-            minBytes = remaining;
-          }
-        }
       }
 
       {
