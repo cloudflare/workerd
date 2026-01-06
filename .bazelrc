@@ -10,8 +10,8 @@ build --test_size_filters=-enormous
 # corresponds to small,medium,large,enormous tests (medium is default)
 build --test_timeout=3,15,60,240
 
-# We're only using bzlmod in a nominal capacity so far
-common --enable_workspace
+# Opt-in for Bazel 9 forward compatibility
+common --noenable_workspace
 
 # As part of starlarkification, Bazel 8 removes a number of rules which now need to be imported from
 # other repositories. In the long term, load() statements will be needed to import these rules. For
