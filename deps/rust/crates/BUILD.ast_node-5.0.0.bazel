@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "windows_sys",
+rust_proc_macro(
+    name = "ast_node",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,14 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "Win32",
-        "Win32_Foundation",
-        "Win32_System",
-        "Win32_System_Memory",
-        "Win32_System_Threading",
-        "default",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -43,13 +35,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=windows-sys",
+        "crate-name=ast_node",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.59.0",
+    version = "5.0.0",
     deps = [
-        "@crates_vendor__windows-targets-0.52.6//:windows_targets",
+        "@crates_vendor__quote-1.0.42//:quote",
+        "@crates_vendor__swc_macros_common-1.0.1//:swc_macros_common",
+        "@crates_vendor__syn-2.0.113//:syn",
     ],
 )

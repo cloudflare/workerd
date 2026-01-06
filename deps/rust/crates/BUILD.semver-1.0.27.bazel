@@ -16,9 +16,6 @@ rust_library(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
-    aliases = {
-        "@crates_vendor__serde_core-1.0.228//:serde_core": "serde",
-    },
     compile_data = glob(
         include = ["**"],
         allow_empty = True,
@@ -33,7 +30,6 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "serde",
         "std",
     ],
     crate_root = "src/lib.rs",
@@ -49,7 +45,4 @@ rust_library(
         "norustfmt",
     ],
     version = "1.0.27",
-    deps = [
-        "@crates_vendor__serde_core-1.0.228//:serde_core",
-    ],
 )
