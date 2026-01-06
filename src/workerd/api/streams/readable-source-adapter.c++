@@ -1078,8 +1078,8 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
 
   static constexpr size_t DEFAULT_BUFFER_SIZE = 16384;
   static constexpr size_t MIN_BUFFER_SIZE = 1024;
-  static constexpr size_t MED_BUFFER_SIZE = MIN_BUFFER_SIZE << 6;
-  static constexpr size_t MAX_BUFFER_SIZE = MIN_BUFFER_SIZE << 7;
+  static constexpr size_t MED_BUFFER_SIZE = MIN_BUFFER_SIZE << 7;  // 128KB
+  static constexpr size_t MAX_BUFFER_SIZE = MIN_BUFFER_SIZE << 8;  // 256KB
   static constexpr size_t MEDIUM_THRESHOLD = 1048576;
   static_assert(MIN_BUFFER_SIZE < DEFAULT_BUFFER_SIZE);
   static_assert(DEFAULT_BUFFER_SIZE < MED_BUFFER_SIZE);
