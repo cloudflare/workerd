@@ -291,7 +291,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // Performs the rest of the asynchronous commit, to be waited on after committing the local
   // sqlite db.  Should be called in the same turn of the event loop as
   // startPrecommitAlarmScheduling() and passed the state that it returned.
-  kj::Promise<void> commitImpl(PrecommitAlarmState precommitAlarmState);
+  kj::Promise<void> commitImpl(PrecommitAlarmState precommitAlarmState, SpanParent parentSpan);
 
   void taskFailed(kj::Exception&& exception) override;
 
