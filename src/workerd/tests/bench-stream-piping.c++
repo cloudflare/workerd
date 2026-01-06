@@ -4,7 +4,7 @@
 
 // Benchmark to compare stream piping implementations:
 // 1. Existing approach (ReadableStream::pumpTo via PumpToReader) - uses JS promise-based loop
-// 2. New approach (ReadableSourceKjAdapter::pumpTo) - uses double-buffering with adaptive reads
+// 2. New approach (ReadableSourceKjAdapter::pumpTo) - uses adaptive buffer sizing and vectored writes
 //
 // Run with: bazel run --config=opt //src/workerd/tests:bench-stream-piping
 
@@ -329,8 +329,7 @@ jsg::Ref<ReadableStream> createIoLatencyByteStream(
 //
 // With delays, we can observe:
 // 1. How throughput scales with I/O latency
-// 2. Whether double-buffering provides real overlap benefit
-// 3. The true cost of per-chunk I/O operations
+// 2. The true cost of per-chunk I/O operations
 jsg::Ref<ReadableStream> createTimedValueStream(jsg::Lock& js,
     size_t chunkSize,
     size_t numChunks,
@@ -801,13 +800,12 @@ static void Existing_Medium_SlowValue(benchmark::State& state) {
 // =============================================================================
 
 // I/O latency streams yield to the KJ event loop between chunks, simulating real network I/O.
-// This tests how the adaptive read policy responds to streams with actual I/O latency,
+// This tests how the pump behaves with streams that have actual I/O latency,
 // unlike microtask-based "slow" streams which complete within one JS event loop turn.
 //
 // Key differences from SlowValue:
 // - Each chunk requires a KJ event loop iteration (not just a microtask)
 // - pumpReadImpl returns early after each chunk
-// - Adaptive policy may switch to IMMEDIATE mode after observing small reads
 
 // I/O latency value streams
 static void New_Small_IoLatencyValue(benchmark::State& state) {

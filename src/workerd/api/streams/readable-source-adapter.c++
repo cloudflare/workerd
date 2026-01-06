@@ -824,8 +824,8 @@ jsg::Promise<kj::Own<ReadableSourceKjAdapter::ReadContext>> ReadableSourceKjAdap
   }));
 }
 
-// We separate out the actual read implementation so that it can be used by
-// both read and the pumpToImpl implementation.
+// The read implementation handles leftover data from previous reads where
+// a JS chunk was larger than the caller's buffer.
 kj::Promise<size_t> ReadableSourceKjAdapter::readImpl(
     Active& active, kj::ArrayPtr<kj::byte> dest, size_t minBytes) {
 
@@ -859,15 +859,13 @@ kj::Promise<size_t> ReadableSourceKjAdapter::readImpl(
     // Did we at least satisfy the minimum bytes?
     if (size >= minBytes) {
       // Awesome, we are technically done with this read.
-      // While we might actually have more room in our buffer, and the
-      // minReadyPolicy might be OPPORTUNISTIC, we will not try to
-      // read more from the stream right now so that we can avoid having
-      // to grab the isolate lock for this read. Instead, let's return
-      // what we have and let the caller call read again if/when they want.
-      // This risks leaving a fair amount of unused space in the buffer
-      // and requiring more read calls but it avoids the overhead of
-      // an additional isolate lock grab when we know we can at least
-      // provide some data right now.
+      // While we might actually have more room in our buffer, we will not try to
+      // read more from the stream right now so that we can avoid having to grab
+      // the isolate lock for this read. Instead, let's return what we have and
+      // let the caller call read again if/when they want. This risks leaving a
+      // fair amount of unused space in the buffer and requiring more read calls
+      // but it avoids the overhead of an additional isolate lock grab when we
+      // know we can at least provide some data right now.
       return size;
     }
   }
