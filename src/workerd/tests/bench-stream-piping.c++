@@ -38,6 +38,7 @@ struct StreamConfig {
   kj::Maybe<size_t> autoAllocateChunkSize;         // Only valid for BYTE streams
   kj::Duration chunkDelay = 0 * kj::MILLISECONDS;  // Delay between chunks for TIMED_* streams
   double highWaterMark = 0;                        // 0 means default (pull on demand)
+  bool includeExpectedLength = true;               // If false, stream won't report length
 };
 
 // =============================================================================
@@ -120,8 +121,12 @@ struct LatencySink final: public kj::AsyncOutputStream {
 // Uses a counter pointer similar to the unit tests in readable-source-adapter-test.c++.
 static size_t benchChunkCounterStatic = 0;
 
-jsg::Ref<ReadableStream> createValueStream(
-    jsg::Lock& js, size_t chunkSize, size_t numChunks, double highWaterMark, size_t* counter) {
+jsg::Ref<ReadableStream> createValueStream(jsg::Lock& js,
+    size_t chunkSize,
+    size_t numChunks,
+    double highWaterMark,
+    size_t* counter,
+    bool includeExpectedLength = true) {
   return ReadableStream::constructor(js,
       UnderlyingSource{
         .pull =
@@ -140,7 +145,8 @@ jsg::Ref<ReadableStream> createValueStream(
     }
     return js.resolvedPromise();
   },
-        .expectedLength = chunkSize * numChunks,
+        .expectedLength = includeExpectedLength ? kj::Maybe<uint64_t>(chunkSize * numChunks)
+                                                : kj::Maybe<uint64_t>(kj::none),
       },
       StreamQueuingStrategy{
         .highWaterMark = highWaterMark,
@@ -374,7 +380,8 @@ jsg::Ref<ReadableStream> createConfiguredStream(
 
   switch (config.type) {
     case StreamType::VALUE:
-      return createValueStream(js, chunkSize, numChunks, config.highWaterMark, counter);
+      return createValueStream(
+          js, chunkSize, numChunks, config.highWaterMark, counter, config.includeExpectedLength);
     case StreamType::BYTE:
       return createByteStream(
           js, chunkSize, numChunks, config.autoAllocateChunkSize, config.highWaterMark, counter);
@@ -474,6 +481,15 @@ static const StreamConfig VALUE_HWM_16K{
   .type = StreamType::VALUE,
   .autoAllocateChunkSize = kj::none,
   .highWaterMark = 16 * 1024,
+};
+
+// Value stream without expectedLength - forces default buffer size (32KB)
+// Used to test leftover mechanism when chunks > buffer
+static const StreamConfig VALUE_NO_LENGTH{
+  .type = StreamType::VALUE,
+  .autoAllocateChunkSize = kj::none,
+  .highWaterMark = 0,
+  .includeExpectedLength = false,
 };
 
 // Byte stream without autoAllocateChunkSize, default highWaterMark
@@ -576,6 +592,12 @@ static constexpr size_t MEDIUM_NUM_CHUNKS = 100;
 static constexpr size_t LARGE_CHUNK_SIZE = 65536;
 static constexpr size_t LARGE_NUM_CHUNKS = 16;
 
+// Huge chunks (exercises leftover mechanism): 524288 * 4 = 2,097,152 bytes (2MB)
+// These chunks (512KB each) are larger than the max buffer size (256KB * 2 = 512KB),
+// so each chunk will produce leftover data that needs to be handled.
+static constexpr size_t HUGE_CHUNK_SIZE = 524288;
+static constexpr size_t HUGE_NUM_CHUNKS = 4;
+
 // =============================================================================
 // Benchmark functions - Value streams
 // =============================================================================
@@ -630,6 +652,15 @@ static void New_Large_Value_HWM16K(benchmark::State& state) {
 }
 static void Existing_Large_Value_HWM16K(benchmark::State& state) {
   benchExistingApproachPumpTo(state, LARGE_CHUNK_SIZE, LARGE_NUM_CHUNKS, VALUE_HWM_16K);
+}
+
+// Huge chunks - exercises leftover mechanism (512KB chunks > buffer size)
+// Uses VALUE_NO_LENGTH to force default buffer size (32KB), ensuring leftover occurs
+static void New_Huge_Value(benchmark::State& state) {
+  benchNewApproachPumpTo(state, HUGE_CHUNK_SIZE, HUGE_NUM_CHUNKS, VALUE_NO_LENGTH);
+}
+static void Existing_Huge_Value(benchmark::State& state) {
+  benchExistingApproachPumpTo(state, HUGE_CHUNK_SIZE, HUGE_NUM_CHUNKS, VALUE_NO_LENGTH);
 }
 
 // =============================================================================
@@ -918,6 +949,10 @@ WD_BENCHMARK(New_Large_Byte_Auto64K);
 WD_BENCHMARK(Existing_Large_Byte_Auto64K);
 WD_BENCHMARK(New_Large_Byte_Auto64K_HWM16K);
 WD_BENCHMARK(Existing_Large_Byte_Auto64K_HWM16K);
+
+// Huge chunks - exercises leftover mechanism (512KB chunks > buffer size)
+WD_BENCHMARK(New_Huge_Value);
+WD_BENCHMARK(Existing_Huge_Value);
 
 // Slow value stream - async streams with microtask delays (tests batching overhead)
 WD_BENCHMARK(New_Small_SlowValue);

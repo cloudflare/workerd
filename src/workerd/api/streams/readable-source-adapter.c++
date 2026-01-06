@@ -1181,13 +1181,14 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
 
       {
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
-        co_await output.write(buffer.first(amount));
-
-        // Write any leftover from the previous read (happens when a JS chunk
-        // is larger than the buffer).
+        // Use vectored write if there's leftover data from a JS chunk larger than
+        // the buffer, combining both into a single write operation.
         KJ_IF_SOME(readable, active->state.tryGetUnsafe<Active::Readable>()) {
-          co_await output.write(readable.view);
+          kj::ArrayPtr<const kj::byte> pieces[2] = {buffer.first(amount), readable.view};
+          co_await output.write(pieces);
           active->state.transitionTo<Active::Idle>();
+        } else {
+          co_await output.write(buffer.first(amount));
         }
       }
     }
