@@ -4,7 +4,8 @@
 
 // Benchmark to compare stream piping implementations:
 // 1. Existing approach (ReadableStream::pumpTo via PumpToReader) - uses JS promise-based loop
-// 2. New approach (ReadableSourceKjAdapter::pumpTo) - uses double-buffering with adaptive reads
+// 2. New approach (ReadableSourceKjAdapter::pumpTo) - uses DrainingReader to pull all
+//    synchronously available data at once, then writes with vectored I/O
 //
 // Run with: bazel run --config=opt //src/workerd/tests:bench-stream-piping
 
@@ -405,6 +406,7 @@ static void benchNewApproachPumpTo(
   TestFixture fixture({.featureFlags = flags.asReader(), .useRealTimers = needsRealTimers});
 
   DiscardingSink sink;
+  size_t expectedBytes = chunkSize * numChunks;
 
   for (auto _: state) {
     sink.reset();
@@ -416,6 +418,10 @@ static void benchNewApproachPumpTo(
       auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
       return adapter->pumpTo(*writableSink, EndAfterPump::YES).attach(kj::mv(adapter));
     });
+
+    // Verify all expected bytes were written
+    KJ_ASSERT(sink.bytesWritten == expectedBytes, "New approach: expected", expectedBytes,
+        "bytes but got", sink.bytesWritten);
   }
 
   state.SetBytesProcessed(
@@ -438,6 +444,7 @@ static void benchExistingApproachPumpTo(
   TestFixture fixture({.featureFlags = flags.asReader(), .useRealTimers = needsRealTimers});
 
   DiscardingSink sink;
+  size_t expectedBytes = chunkSize * numChunks;
 
   for (auto _: state) {
     sink.reset();
@@ -450,6 +457,10 @@ static void benchExistingApproachPumpTo(
 
       return env.context.waitForDeferredProxy(stream->pumpTo(env.js, kj::mv(writableSink), true));
     });
+
+    // Verify all expected bytes were written
+    KJ_ASSERT(sink.bytesWritten == expectedBytes, "Existing approach: expected", expectedBytes,
+        "bytes but got", sink.bytesWritten);
   }
 
   state.SetBytesProcessed(

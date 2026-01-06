@@ -1304,5 +1304,204 @@ KJ_TEST("DrainingReader multiple sync chunks then close") {
   });
 }
 
+KJ_TEST("DrainingReader read from teed branches") {
+  // Test: DrainingReader works correctly on both branches of a teed stream
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            c->enqueue(js, toBytes(js, kj::str("chunk1")));
+            c->enqueue(js, toBytes(js, kj::str("chunk2")));
+            c->close(js);
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    // Tee the stream into two branches
+    auto branches = rs->tee(js);
+    KJ_ASSERT(branches.size() == 2);
+    auto& branch1 = branches[0];
+    auto& branch2 = branches[1];
+
+    // Create DrainingReader on branch1
+    KJ_IF_SOME(reader1, DrainingReader::create(js, *branch1)) {
+      bool read1Completed = false;
+      auto promise1 = reader1->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 2);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "chunk1");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "chunk2");
+        KJ_ASSERT(result.done);
+        read1Completed = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(read1Completed, "Branch1 read should complete");
+
+      reader1->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader for branch1");
+    }
+
+    // Create DrainingReader on branch2 - should get the same data
+    KJ_IF_SOME(reader2, DrainingReader::create(js, *branch2)) {
+      bool read2Completed = false;
+      auto promise2 = reader2->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 2);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "chunk1");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "chunk2");
+        KJ_ASSERT(result.done);
+        read2Completed = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(read2Completed, "Branch2 read should complete");
+
+      reader2->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader for branch2");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read from byte stream with BYOB support") {
+  // Test: DrainingReader works correctly with byte streams (which support BYOB reads)
+  // even though DrainingReader itself uses a default reader. This tests that closing
+  // the controller synchronously during draining works correctly - the controller's
+  // close triggers doClose() which must be deferred while onConsumerWantsData is active.
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+            // Enqueue multiple byte chunks - verifies DrainingReader handles
+            // byte stream chunks correctly and preserves order
+            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk1")));
+            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk2")));
+            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk3")));
+            // Close synchronously - this tests that the fix for use-after-free works.
+            // Without the fix, this would cause ByteReadable to be destroyed while
+            // onConsumerWantsData is still on the stack.
+            c->close(js);
+            return js.resolvedPromise();
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    // Use DrainingReader (which uses default reader) to drain the BYOB-capable byte stream
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should successfully drain all byte chunks in order
+        KJ_ASSERT(result.chunks.size() == 3, "Should get 3 chunks");
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "byob-chunk1");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "byob-chunk2");
+        KJ_ASSERT(kj::str(result.chunks[2].asChars()) == "byob-chunk3");
+        KJ_ASSERT(result.done);  // Stream closed, so done should be true
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read from stream with transform-like pattern") {
+  // Test: DrainingReader works correctly with a stream that simulates the
+  // TransformStream pattern where data is written to writable and read from readable
+  preamble([](jsg::Lock& js) {
+    // Create a stream where the controller is stored and chunks are enqueued asynchronously
+    // (simulating how TransformStream's readable side receives transformed data)
+    kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> savedController;
+    bool startResolved = false;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .start = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            savedController = c.addRef();
+            startResolved = true;
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      },
+      .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        // No-op pull - data comes from external enqueue calls (like transform writes)
+        return js.resolvedPromise();
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    js.runMicrotasks();
+    KJ_ASSERT(startResolved, "Stream should have started");
+
+    auto& controller = KJ_ASSERT_NONNULL(savedController, "Controller should be saved");
+
+    // Simulate TransformStream write->transform->enqueue pattern
+    // Enqueue transformed chunks (like what TransformStream's transform callback would do)
+    controller->enqueue(js, toBytes(js, kj::str("transformed-a")));
+    controller->enqueue(js, toBytes(js, kj::str("transformed-b")));
+
+    // Create DrainingReader to drain all buffered transformed data
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should drain all enqueued chunks
+        KJ_ASSERT(result.chunks.size() == 2);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "transformed-a");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "transformed-b");
+        KJ_ASSERT(!result.done);  // Stream not closed yet
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+
+      // Simulate more data being written/transformed
+      controller->enqueue(js, toBytes(js, kj::str("transformed-c")));
+      controller->close(js);
+
+      bool finalReadCompleted = false;
+      auto finalPromise =
+          reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "transformed-c");
+        KJ_ASSERT(result.done);  // Stream now closed
+        finalReadCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(finalReadCompleted);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

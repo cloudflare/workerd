@@ -235,7 +235,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   }
 
   // If we collected data, return it immediately.
-  if (chunks.size() > 0 || isClosing) {
+  if (!chunks.empty() || isClosing) {
     ready.hasPendingDrainingRead = false;
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
@@ -658,7 +658,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   }
 
   // If we collected data, return it immediately.
-  if (chunks.size() > 0 || isClosing) {
+  if (!chunks.empty() || isClosing) {
     ready.hasPendingDrainingRead = false;
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
@@ -670,7 +670,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   // We allocate a buffer for the read - the data will be copied into it.
   // The flag remains set (was set at the start) and will be cleared by the promise callbacks.
   constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
-  KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, kDefaultReadSize)) {
+  KJ_IF_SOME(store, jsg::BufferSource::tryAllocUnsafe(js, kDefaultReadSize)) {
     auto prp = js.newPromiseAndResolver<ReadResult>();
 
     ReadRequest::PullInto pullInto{
@@ -772,7 +772,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   if (queue.getConsumerCount() > 1) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
-    KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, amount)) {
+    KJ_IF_SOME(store, jsg::BufferSource::tryAllocUnsafe(js, amount)) {
       auto entry = kj::rc<Entry>(kj::mv(store));
 
       auto start = sourcePtr.slice(req.pullInto.filled);
@@ -818,7 +818,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   if (unaligned > 0) {
     auto start = sourcePtr.slice(amount - unaligned);
 
-    KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, unaligned)) {
+    KJ_IF_SOME(store, jsg::BufferSource::tryAllocUnsafe(js, unaligned)) {
       auto excess = kj::rc<Entry>(kj::mv(store));
       excess->toArrayPtr().first(unaligned).copyFrom(start.first(unaligned));
       consumer.push(js, kj::mv(excess));

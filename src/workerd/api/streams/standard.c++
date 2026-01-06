@@ -695,6 +695,14 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
+  // Increment the pending read count to prevent the controller from
+  // being closed/errored while a synchronous callback is in progress.
+  void incrementPendingReadCount();
+
+  // Decrement the pending read count and process any deferred close/error.
+  // This may destroy the ByteReadable/ValueReadable if close was deferred.
+  void decrementPendingReadCountAndProcess(jsg::Lock& js);
+
   bool canCloseOrEnqueue();
   bool hasBackpressure();
 
@@ -1843,6 +1851,13 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     // Returns true if the pull completed synchronously (meaning more pumping
     // might yield additional synchronous data), false otherwise.
     KJ_IF_SOME(s, state) {
+      // Save a reference to the owner before calling pull. The pull callback
+      // may trigger close/error which could destroy this ValueReadable. By
+      // incrementing pendingReadCount, we ensure doClose/doError defers the
+      // actual destruction until after we return.
+      ReadableStreamJsController& owner = s.owner;
+      owner.incrementPendingReadCount();
+
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
       if (s.consumer->hasPendingDrainingRead()) {
@@ -1850,7 +1865,16 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
       } else {
         s.controller->pull(js);
       }
-      return !s.controller->isPulling();
+
+      // Check if state is still valid BEFORE calling decrementPendingReadCountAndProcess,
+      // because that call may destroy this ValueReadable if close was deferred.
+      bool result =
+          state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
+
+      // Process any deferred close/error. This may destroy this ValueReadable.
+      owner.decrementPendingReadCountAndProcess(js);
+
+      return result;
     }
     return false;
   }
@@ -2022,6 +2046,13 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   // might yield additional synchronous data), false otherwise.
   bool onConsumerWantsData(jsg::Lock& js) override {
     KJ_IF_SOME(s, state) {
+      // Save a reference to the owner before calling pull. The pull callback
+      // may trigger close/error which could destroy this ByteReadable. By
+      // incrementing pendingReadCount, we ensure doClose/doError defers the
+      // actual destruction until after we return.
+      ReadableStreamJsController& owner = s.owner;
+      owner.incrementPendingReadCount();
+
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
       if (s.consumer->hasPendingDrainingRead()) {
@@ -2029,7 +2060,16 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
       } else {
         s.controller->pull(js);
       }
-      return !s.controller->isPulling();
+
+      // Check if state is still valid BEFORE calling decrementPendingReadCountAndProcess,
+      // because that call may destroy this ByteReadable if close was deferred.
+      bool result =
+          state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
+
+      // Process any deferred close/error. This may destroy this ByteReadable.
+      owner.decrementPendingReadCountAndProcess(js);
+
+      return result;
     }
     return false;
   }
@@ -2472,6 +2512,28 @@ void ReadableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   } else {
     state.init<StreamStates::Errored>(js.v8Ref(reason));
     lock.onError(js, reason);
+  }
+}
+
+void ReadableStreamJsController::incrementPendingReadCount() {
+  pendingReadCount++;
+}
+
+void ReadableStreamJsController::decrementPendingReadCountAndProcess(jsg::Lock& js) {
+  KJ_ASSERT(pendingReadCount > 0);
+  pendingReadCount--;
+  if (!isReadPending()) {
+    KJ_IF_SOME(pending, maybePendingState) {
+      KJ_SWITCH_ONEOF(pending) {
+        KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+          doClose(js);
+        }
+        KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+          doError(js, errored.getHandle(js));
+        }
+      }
+      maybePendingState = kj::none;
+    }
   }
 }
 
