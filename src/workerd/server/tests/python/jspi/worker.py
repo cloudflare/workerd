@@ -17,8 +17,8 @@ def jspi_sleep():
 # TODO(EW-9316): the below test wasn't actually testing jspi at top-level because it only ran in
 # worker and workerd used to not run the top-level at the top-level... this was fixed and now the
 # below fails.
-# print("Testing JSPI at top level...")
-# jspi_sleep()
+print("Testing JSPI at top level...")
+jspi_sleep()
 
 
 def test():
