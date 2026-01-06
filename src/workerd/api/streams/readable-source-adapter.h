@@ -296,26 +296,7 @@ class ReadableStreamSourceJsAdapter final {
 // the filled in Array after the read completes, but that's a larger refactor.
 class ReadableSourceKjAdapter final: public ReadableSource {
  public:
-  enum class MinReadPolicy {
-    // The read will complete as soon as at least minBytes have been read,
-    // even if more bytes are available and the buffer is not full. This
-    // may result in more read calls (keeping in mind that each read needs
-    // to acquire the isolate lock) but may keep the stream flowing more.
-    IMMEDIATE,
-    // The read will attempt to fill the entire buffer until either
-    // maxBytes, the stream ends, or we determine the buffer is "full enough".
-    // This will result in fewer read calls (and thus grabbing the isolate
-    // lock less often) but may result in higher latency for each read.
-    OPPORTUNISTIC,
-  };
-  struct Options {
-    MinReadPolicy minReadPolicy;
-  };
-
-  ReadableSourceKjAdapter(jsg::Lock& js,
-      IoContext& ioContext,
-      jsg::Ref<ReadableStream> stream,
-      Options options = {.minReadPolicy = MinReadPolicy::OPPORTUNISTIC});
+  ReadableSourceKjAdapter(jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream);
   ~ReadableSourceKjAdapter() noexcept(false);
 
   // Attempts to read at least minBytes and up to maxBytes into the provided
@@ -395,7 +376,6 @@ class ReadableSourceKjAdapter final: public ReadableSource {
       KjClosed,
       kj::Exception>;
   KjState state;
-  const Options options;
   kj::Rc<WeakRef<ReadableSourceKjAdapter>> selfRef;
 
   // Checks if the inner Active state is Canceling or Canceled.
@@ -411,7 +391,7 @@ class ReadableSourceKjAdapter final: public ReadableSource {
   static kj::Promise<void> pumpToImpl(
       kj::Own<Active> active, WritableSink& output, EndAfterPump end);
   static jsg::Promise<kj::Own<ReadContext>> readInternal(
-      jsg::Lock& js, kj::Own<ReadContext> context, MinReadPolicy minReadPolicy);
+      jsg::Lock& js, kj::Own<ReadContext> context);
 
   template <typename T>
   kj::Promise<kj::Array<T>> readAllImpl(size_t limit);
