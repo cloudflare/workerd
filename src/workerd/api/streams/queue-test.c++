@@ -1289,5 +1289,343 @@ KJ_TEST("ByteQueue push to closed consumer is safe") {
 
 #pragma endregion Re - entrancy Safety Tests
 
+#pragma region Draining Read Tests
+
+using DrainingReadContinuation = jsg::Promise<DrainingReadResult>(DrainingReadResult&&);
+using DrainingReadErrorContinuation = jsg::Promise<DrainingReadResult>(jsg::Value&&);
+
+KJ_TEST("ValueQueue draining read with buffered data") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Push an ArrayBuffer
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr()[0] = 'a';
+    store.asArrayPtr()[1] = 'b';
+    store.asArrayPtr()[2] = 'c';
+    store.asArrayPtr()[3] = 'd';
+    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 4));
+
+    // Push a string
+    auto str = jsg::v8Str(js.v8Isolate, "hello");
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(str.As<v8::Value>()), 5));
+
+    KJ_ASSERT(consumer.size() == 9);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 2);
+
+      // First chunk is the ArrayBuffer data
+      KJ_ASSERT(result.chunks[0].size() == 4);
+      KJ_ASSERT(result.chunks[0][0] == 'a');
+      KJ_ASSERT(result.chunks[0][1] == 'b');
+      KJ_ASSERT(result.chunks[0][2] == 'c');
+      KJ_ASSERT(result.chunks[0][3] == 'd');
+
+      // Second chunk is the string converted to UTF-8
+      KJ_ASSERT(result.chunks[1].size() == 5);
+      KJ_ASSERT(result.chunks[1][0] == 'h');
+      KJ_ASSERT(result.chunks[1][1] == 'e');
+      KJ_ASSERT(result.chunks[1][2] == 'l');
+      KJ_ASSERT(result.chunks[1][3] == 'l');
+      KJ_ASSERT(result.chunks[1][4] == 'o');
+
+      KJ_ASSERT(consumer.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read rejects with pending reads") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Queue a regular read
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+    consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+
+    KJ_ASSERT(consumer.hasReadRequests());
+
+    // Draining read should reject because there are pending reads
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue read rejects with pending draining read") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // No data in buffer, draining read will queue a pending draining read
+    consumer.drainingRead(js);
+
+    KJ_ASSERT(consumer.hasPendingDrainingRead());
+
+    // Regular read should reject because there's a pending draining read
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+
+    MustNotCall<ReadContinuation> readContinuation;
+    MustCall<ReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<ReadResult>(kj::mv(value));
+    });
+
+    consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+    prp.promise.then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read on closed stream") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    queue.close(js);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      KJ_ASSERT(result.done);
+      KJ_ASSERT(result.chunks.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read on errored stream") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read with buffered data") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // Push first chunk
+    auto store1 = jsg::BackingStore::alloc(js, 4);
+    store1.asArrayPtr()[0] = 'a';
+    store1.asArrayPtr()[1] = 'b';
+    store1.asArrayPtr()[2] = 'c';
+    store1.asArrayPtr()[3] = 'd';
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store1))));
+
+    // Push second chunk
+    auto store2 = jsg::BackingStore::alloc(js, 3);
+    store2.asArrayPtr()[0] = 'e';
+    store2.asArrayPtr()[1] = 'f';
+    store2.asArrayPtr()[2] = 'g';
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store2))));
+
+    KJ_ASSERT(consumer.size() == 7);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 2);
+
+      // First chunk
+      KJ_ASSERT(result.chunks[0].size() == 4);
+      KJ_ASSERT(result.chunks[0][0] == 'a');
+      KJ_ASSERT(result.chunks[0][1] == 'b');
+      KJ_ASSERT(result.chunks[0][2] == 'c');
+      KJ_ASSERT(result.chunks[0][3] == 'd');
+
+      // Second chunk
+      KJ_ASSERT(result.chunks[1].size() == 3);
+      KJ_ASSERT(result.chunks[1][0] == 'e');
+      KJ_ASSERT(result.chunks[1][1] == 'f');
+      KJ_ASSERT(result.chunks[1][2] == 'g');
+
+      KJ_ASSERT(consumer.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read rejects with pending reads") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // Queue a regular read
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+    consumer.read(js,
+        ByteQueue::ReadRequest(kj::mv(prp.resolver),
+            {
+              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+            }));
+
+    KJ_ASSERT(consumer.hasReadRequests());
+
+    // Draining read should reject because there are pending reads
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue read rejects with pending draining read") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // No data in buffer, draining read will queue a pending draining read
+    consumer.drainingRead(js);
+
+    KJ_ASSERT(consumer.hasPendingDrainingRead());
+
+    // Regular read should reject because there's a pending draining read
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+
+    MustNotCall<ReadContinuation> readContinuation;
+    MustCall<ReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<ReadResult>(kj::mv(value));
+    });
+
+    consumer.read(js,
+        ByteQueue::ReadRequest(kj::mv(prp.resolver),
+            {
+              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+            }));
+    prp.promise.then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read on closed stream") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    queue.close(js);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      KJ_ASSERT(result.done);
+      KJ_ASSERT(result.chunks.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read on errored stream") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read with close signal") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Push some data
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr()[0] = 'a';
+    store.asArrayPtr()[1] = 'b';
+    store.asArrayPtr()[2] = 'c';
+    store.asArrayPtr()[3] = 'd';
+    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 4));
+
+    // Close the queue
+    queue.close(js);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      // Should have the data and done should be true since stream is closed
+      KJ_ASSERT(result.done);
+      KJ_ASSERT(result.chunks.size() == 1);
+      KJ_ASSERT(result.chunks[0].size() == 4);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read with close signal") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // Push some data
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr()[0] = 'a';
+    store.asArrayPtr()[1] = 'b';
+    store.asArrayPtr()[2] = 'c';
+    store.asArrayPtr()[3] = 'd';
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+
+    // Close the queue
+    queue.close(js);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      // Should have the data and done should be true since stream is closed
+      KJ_ASSERT(result.done);
+      KJ_ASSERT(result.chunks.size() == 1);
+      KJ_ASSERT(result.chunks[0].size() == 4);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+#pragma endregion Draining Read Tests
+
 }  // namespace
 }  // namespace workerd::api

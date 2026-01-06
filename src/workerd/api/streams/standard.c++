@@ -1789,13 +1789,17 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     }
   }
 
-  void onConsumerWantsData(jsg::Lock& js) override {
+  bool onConsumerWantsData(jsg::Lock& js) override {
     // Called by the consumer when it has a queued pending read and needs
     // data to be provided to fulfill it. We need to notify the controller
     // to initiate pulling to provide the data.
+    // Returns true if the pull completed synchronously (meaning more pumping
+    // might yield additional synchronous data), false otherwise.
     KJ_IF_SOME(s, state) {
       s.controller->pull(js);
+      return !s.controller->isPulling();
     }
+    return false;
   }
 
   kj::Maybe<int> getDesiredSize() {
@@ -1949,10 +1953,14 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   // Called by the consumer when it has a queued pending read and needs
   // data to be provided to fulfill it. We need to notify the controller
   // to initiate pulling to provide the data.
-  void onConsumerWantsData(jsg::Lock& js) override {
+  // Returns true if the pull completed synchronously (meaning more pumping
+  // might yield additional synchronous data), false otherwise.
+  bool onConsumerWantsData(jsg::Lock& js) override {
     KJ_IF_SOME(s, state) {
       s.controller->pull(js);
+      return !s.controller->isPulling();
     }
+    return false;
   }
 
   kj::Maybe<int> getDesiredSize() {

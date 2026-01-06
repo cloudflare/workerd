@@ -174,6 +174,12 @@ class ReadableImpl {
   // True if the queue is current below the highwatermark.
   bool shouldCallPull();
 
+  // True if a pull is currently in progress (the pull promise is pending).
+  // Used by draining reads to determine if pumping completed synchronously.
+  bool isPulling() const {
+    return flags.pulling;
+  }
+
   // The consumer can be used to read from this readables queue so long as the queue
   // is open. The consumer instance may outlive the readable but will be put into
   // a closed state or errored state when the readable is destroyed.
@@ -421,6 +427,11 @@ class ReadableStreamDefaultController: public jsg::Object {
 
   void pull(jsg::Lock& js);
 
+  // True if a pull is currently in progress (the pull promise is pending).
+  bool isPulling() const {
+    return impl.isPulling();
+  }
+
   kj::Own<ValueQueue::Consumer> getConsumer(
       kj::Maybe<ValueQueue::ConsumerImpl::StateListener&> stateListener);
 
@@ -548,6 +559,11 @@ class ReadableByteStreamController: public jsg::Object {
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> getByobRequest(jsg::Lock& js);
 
   void pull(jsg::Lock& js);
+
+  // True if a pull is currently in progress (the pull promise is pending).
+  bool isPulling() const {
+    return impl.isPulling();
+  }
 
   kj::Own<ByteQueue::Consumer> getConsumer(
       kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener);

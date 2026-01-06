@@ -144,6 +144,13 @@ class ConsumerImpl;
 template <typename Self>
 class QueueImpl;
 
+// Result type for draining read operations. Always returns bytes, even for value streams.
+// Used by ReadableSourceKjAdapter for optimized pipe-to operations with vectored writes.
+struct DrainingReadResult {
+  kj::Array<kj::Array<kj::byte>> chunks;  // Multiple byte arrays for vectored writes
+  bool done = false;                      // True if stream is closed/closing
+};
+
 // Provides the underlying implementation shared by ByteQueue and ValueQueue.
 template <typename Self>
 class QueueImpl final {
@@ -318,7 +325,11 @@ class ConsumerImpl final {
   struct StateListener {
     virtual void onConsumerClose(jsg::Lock& js) = 0;
     virtual void onConsumerError(jsg::Lock& js, jsg::Value reason) = 0;
-    virtual void onConsumerWantsData(jsg::Lock& js) = 0;
+    // Called when the consumer has a pending read and needs data.
+    // Returns true if the pull algorithm completed synchronously (meaning
+    // more pumping might yield additional synchronous data), false if the
+    // pull is async (promise pending) or no pull was needed.
+    virtual bool onConsumerWantsData(jsg::Lock& js) = 0;
   };
 
   using QueueImpl = QueueImpl<Self>;
@@ -412,6 +423,12 @@ class ConsumerImpl final {
       return request.reject(js, errored.reason);
     }
     auto& ready = state.requireActiveUnsafe();
+    // Mutual exclusion with draining reads.
+    if (ready.hasPendingDrainingRead) {
+      auto error = jsg::Value(
+          js.v8Isolate, js.typeError("Cannot call read while there is a pending draining read"_kj));
+      return request.reject(js, error);
+    }
     Self::handleRead(js, ready, *this, queue, kj::mv(request));
     return maybeDrainAndSetState(js);
   }
@@ -528,6 +545,10 @@ class ConsumerImpl final {
     // grows. By heap-allocating each ReadRequest, we ensure reference stability.
     workerd::RingBuffer<kj::Own<ReadRequest>, 8> readRequests;
     size_t queueTotalSize = 0;
+    // True if there is a pending draining read operation. Draining reads are mutually
+    // exclusive with regular reads - read() will reject if this is true, and drainingRead()
+    // will reject if there are pending readRequests.
+    bool hasPendingDrainingRead = false;
 
     inline kj::StringPtr jsgGetMemoryName() const;
     inline size_t jsgGetMemorySelfSize() const;
@@ -688,6 +709,14 @@ class ValueQueue final {
 
     void read(jsg::Lock& js, ReadRequest request);
 
+    // Draining read for optimized pipe-to operations. Drains all currently buffered
+    // data, pumps the controller for synchronously available data, and converts
+    // all values to bytes. Values must be ArrayBuffer, ArrayBufferView, or string;
+    // other types will error the stream.
+    // Rejects if there are pending regular reads (mutual exclusion).
+    // Regular read() will reject if there is a pending draining read.
+    jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js);
+
     void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
     void reset();
@@ -698,6 +727,7 @@ class ValueQueue final {
         jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
 
     bool hasReadRequests();
+    bool hasPendingDrainingRead();
     void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
 
     void visitForGc(jsg::GcVisitor& visitor);
@@ -910,6 +940,13 @@ class ByteQueue final {
 
     void read(jsg::Lock& js, ReadRequest request);
 
+    // Draining read for optimized pipe-to operations. Drains all currently buffered
+    // data and pumps the controller for synchronously available data.
+    // Returns bytes directly without conversion (data is already bytes).
+    // Rejects if there are pending regular reads (mutual exclusion).
+    // Regular read() will reject if there is a pending draining read.
+    jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js);
+
     void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
     void reset();
@@ -919,6 +956,7 @@ class ByteQueue final {
     kj::Own<Consumer> clone(
         jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     bool hasReadRequests();
+    bool hasPendingDrainingRead();
     void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
 
     void visitForGc(jsg::GcVisitor& visitor);
