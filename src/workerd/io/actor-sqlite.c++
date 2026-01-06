@@ -205,7 +205,8 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     // makes since given the explicit commit call.
     auto commitPromise = actorSqlite.outputGate
                              .lockWhile(kj::evalNow([this, &precommitAlarmState]() {
-      return actorSqlite.commitImpl(kj::mv(KJ_ASSERT_NONNULL(precommitAlarmState)));
+      return actorSqlite.commitImpl(
+          kj::mv(KJ_ASSERT_NONNULL(precommitAlarmState)), actorSqlite.currentCommitSpan.addRef());
     }),
                                  actorSqlite.currentCommitSpan.addRef())
                              .fork();
@@ -288,10 +289,7 @@ void ActorSqlite::startImplicitTxn() {
     { auto drop = kj::mv(txn); }
 
     // Move the commit span out immediately so new writes can capture a fresh span.
-    // Attach it to the promise to keep it alive for the commit duration.
-    auto commitSpan = kj::mv(currentCommitSpan);
-
-    return commitImpl(kj::mv(precommitAlarmState)).attach(kj::mv(commitSpan));
+    return commitImpl(kj::mv(precommitAlarmState), kj::mv(currentCommitSpan));
   })
           // Unconditionally break the output gate if commit threw an error, no matter whether the
           // commit was confirmed or unconfirmed.
@@ -365,9 +363,9 @@ ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
   return kj::mv(state);
 }
 
-kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState precommitAlarmState) {
-  // TODO(perf): Add a SpanParent parameter and create a child span here to trace the actual
-  // commit duration. This will help identify what's taking time during commits.
+kj::Promise<void> ActorSqlite::commitImpl(
+    ActorSqlite::PrecommitAlarmState precommitAlarmState, SpanParent parentSpan) {
+  auto commitSpan = parentSpan.newChild("actor_sqlite_commit"_kjc);
 
   // We assume that exceptions thrown during commit will propagate to the caller, such that they
   // will ensure cancelDeferredAlarmDeletion() is called, if necessary.
