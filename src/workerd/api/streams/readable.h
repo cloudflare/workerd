@@ -187,6 +187,48 @@ private:
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
+// DrainingReader is a C++ only reader (not exposed to JavaScript) that performs
+// draining reads. It locks the stream like standard readers but uses drainingRead()
+// instead of regular read() to drain all synchronously available data at once.
+// This is intended for optimized pipe operations.
+class DrainingReader: public ReadableStreamController::Reader {
+ public:
+  explicit DrainingReader();
+
+  // Factory method to create and lock to a stream. Returns nullptr if stream is locked.
+  static kj::Maybe<kj::Own<DrainingReader>> create(jsg::Lock& js, ReadableStream& stream);
+
+  virtual ~DrainingReader() noexcept(false);
+
+  // Performs a draining read, returning all synchronously available data as bytes.
+  jsg::Promise<DrainingReadResult> read(jsg::Lock& js);
+
+  // Cancels the stream.
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+
+  // Releases the lock on the stream.
+  void releaseLock(jsg::Lock& js);
+
+  // Returns whether this reader is still attached to a stream.
+  bool isAttached() const;
+
+  // ReadableStreamController::Reader interface
+  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) override;
+  void detach() override;
+  bool isByteOriented() const override { return false; }
+
+  void visitForGc(jsg::GcVisitor& visitor);
+
+ private:
+  struct Initial {};
+  using Attached = jsg::Ref<ReadableStream>;
+  struct Released {};
+
+  kj::Maybe<IoContext&> ioContext;
+  kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
+  kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
+};
+
 class ReadableStream: public jsg::Object {
 private:
 

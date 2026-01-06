@@ -723,6 +723,8 @@ class ReadableStreamJsController final: public ReadableStreamController {
   kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override;
 
+  kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(jsg::Lock& js) override;
+
   // See the comment for releaseReader in common.h for details on the use of maybeJs
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
 
@@ -1138,6 +1140,39 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
     flags.pulling = false;
     if (flags.pullAgain) {
     flags.pullAgain = false;
+    pullIfNeeded(js, kj::mv(self));
+    }
+  });
+
+  auto onFailure = JSG_VISITABLE_LAMBDA(
+      (this, self = self.addRef()), (self), (jsg::Lock& js, jsg::Value reason) {
+        flags.pulling = false;
+        doError(js, kj::mv(reason));
+      });
+
+  maybeRunAlgorithm(js, algorithms.pull, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
+}
+
+template <typename Self>
+void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
+  // Like pullIfNeeded but bypasses the shouldCallPull() check. Used for draining reads
+  // which need to pull all available data regardless of backpressure settings.
+  if (!canCloseOrEnqueue()) {
+    return;
+  }
+
+  if (flags.pulling) {
+    flags.pullAgain = true;
+    return;
+  }
+  KJ_ASSERT(!flags.pullAgain);
+  flags.pulling = true;
+
+  auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
+    flags.pulling = false;
+    if (flags.pullAgain) {
+    flags.pullAgain = false;
+    // After a force pull, we go back to normal pullIfNeeded behavior.
     pullIfNeeded(js, kj::mv(self));
     }
   });
@@ -1744,6 +1779,18 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     return js.resolvedPromise(ReadResult{.done = true});
   }
 
+  jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js) {
+    KJ_IF_SOME(s, state) {
+      return s.consumer->drainingRead(js);
+    }
+
+    // We are canceled! Return done with empty chunks.
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = kj::Array<kj::Array<kj::byte>>(),
+      .done = true,
+    });
+  }
+
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
     // When a ReadableStream is canceled, the expected behavior is that the underlying
     // controller is notified and the cancel algorithm on the underlying source is
@@ -1796,7 +1843,13 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     // Returns true if the pull completed synchronously (meaning more pumping
     // might yield additional synchronous data), false otherwise.
     KJ_IF_SOME(s, state) {
-      s.controller->pull(js);
+      // For draining reads, use forcePull to bypass backpressure checks.
+      // This ensures we pull all available data regardless of highWaterMark.
+      if (s.consumer->hasPendingDrainingRead()) {
+        s.controller->forcePull(js);
+      } else {
+        s.controller->pull(js);
+      }
       return !s.controller->isPulling();
     }
     return false;
@@ -1916,6 +1969,18 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
+  jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js) {
+    KJ_IF_SOME(s, state) {
+      return s.consumer->drainingRead(js);
+    }
+
+    // We are canceled! Return done with empty chunks.
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = kj::Array<kj::Array<kj::byte>>(),
+      .done = true,
+    });
+  }
+
   // When a ReadableStream is canceled, the expected behavior is that the underlying
   // controller is notified and the cancel algorithm on the underlying source is
   // called. When there are multiple ReadableStreams sharing consumption of a
@@ -1957,7 +2022,13 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   // might yield additional synchronous data), false otherwise.
   bool onConsumerWantsData(jsg::Lock& js) override {
     KJ_IF_SOME(s, state) {
-      s.controller->pull(js);
+      // For draining reads, use forcePull to bypass backpressure checks.
+      // This ensures we pull all available data regardless of highWaterMark.
+      if (s.consumer->hasPendingDrainingRead()) {
+        s.controller->forcePull(js);
+      } else {
+        s.controller->pull(js);
+      }
       return !s.controller->isPulling();
     }
     return false;
@@ -2053,6 +2124,10 @@ void ReadableStreamDefaultController::error(jsg::Lock& js, v8::Local<v8::Value> 
 // data if needed.
 void ReadableStreamDefaultController::pull(jsg::Lock& js) {
   impl.pullIfNeeded(js, JSG_THIS);
+}
+
+void ReadableStreamDefaultController::forcePull(jsg::Lock& js) {
+  impl.forcePullIfNeeded(js, JSG_THIS);
 }
 
 kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
@@ -2294,6 +2369,10 @@ void ReadableByteStreamController::pull(jsg::Lock& js) {
   impl.pullIfNeeded(js, JSG_THIS);
 }
 
+void ReadableByteStreamController::forcePull(jsg::Lock& js) {
+  impl.forcePullIfNeeded(js, JSG_THIS);
+}
+
 kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
     kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener) {
   return impl.getConsumer(stateListener);
@@ -2512,6 +2591,46 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
       return deferControllerStateChange(
           js, *this, [&]() mutable { return consumer->read(js, kj::mv(maybeByobOptions)); });
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::drainingRead(
+    jsg::Lock& js) {
+  disturbed = true;
+
+  KJ_IF_SOME(pendingState, maybePendingState) {
+    KJ_SWITCH_ONEOF(pendingState) {
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+        return js.resolvedPromise(DrainingReadResult{
+          .chunks = kj::Array<kj::Array<kj::byte>>(),
+          .done = true,
+        });
+      }
+      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+        return js.rejectedPromise<DrainingReadResult>(errored.addRef(js));
+      }
+    }
+  }
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return js.resolvedPromise(DrainingReadResult{
+        .chunks = kj::Array<kj::Array<kj::byte>>(),
+        .done = true,
+      });
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return js.rejectedPromise<DrainingReadResult>(errored.addRef(js));
+    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+      // drainingRead has its own mutual exclusion handling, so we don't need
+      // the deferControllerStateChange wrapper used by regular reads.
+      return consumer->drainingRead(js);
+    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+      return consumer->drainingRead(js);
     }
   }
   KJ_UNREACHABLE;

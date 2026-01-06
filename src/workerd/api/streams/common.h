@@ -71,6 +71,14 @@ struct ReadResult {
   }
 };
 
+// Result type for draining read operations. Always returns bytes, even for value streams.
+// Used by DrainingReader for optimized pipe-to operations with vectored writes.
+// This is a C++ only type - not exposed to JavaScript.
+struct DrainingReadResult {
+  kj::Array<kj::Array<kj::byte>> chunks;  // Multiple byte arrays for vectored writes
+  bool done = false;                      // True if stream is closed/closing
+};
+
 struct StreamQueuingStrategy {
   using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
 
@@ -497,6 +505,17 @@ class ReadableStreamController {
   // are provided and the stream is not byte-oriented, the operation will return a rejected promise.
   virtual kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) = 0;
+
+  // Performs a draining read operation that:
+  // 1. Drains all currently buffered data from the queue
+  // 2. Pumps the controller for synchronously available data (respecting pull promise state)
+  // 3. Returns bytes even for value streams (converting ArrayBuffer/ArrayBufferView/string)
+  // 4. Has mutual exclusion with regular reads - returns rejected promise if pending regular reads
+  // 5. Returns done: true with final data when stream is closing
+  //
+  // This is a C++ only API (not exposed to JavaScript) intended for optimized pipe operations.
+  // Returns kj::none if the stream is locked in a way that prevents the read.
+  virtual kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(jsg::Lock& js) = 0;
 
   // The pipeTo implementation fully consumes the stream by directing all of its data at the
   // destination. Controllers should try to be as efficient as possible here. For instance, if

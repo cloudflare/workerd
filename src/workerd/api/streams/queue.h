@@ -144,12 +144,7 @@ class ConsumerImpl;
 template <typename Self>
 class QueueImpl;
 
-// Result type for draining read operations. Always returns bytes, even for value streams.
-// Used by ReadableSourceKjAdapter for optimized pipe-to operations with vectored writes.
-struct DrainingReadResult {
-  kj::Array<kj::Array<kj::byte>> chunks;  // Multiple byte arrays for vectored writes
-  bool done = false;                      // True if stream is closed/closing
-};
+// DrainingReadResult is defined in common.h
 
 // Provides the underlying implementation shared by ByteQueue and ValueQueue.
 template <typename Self>

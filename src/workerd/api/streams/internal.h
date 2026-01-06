@@ -62,6 +62,8 @@ class ReadableStreamInternalController: public ReadableStreamController {
   kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override;
 
+  kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(jsg::Lock& js) override;
+
   jsg::Promise<void> pipeTo(
       jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) override;
 

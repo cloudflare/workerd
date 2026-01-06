@@ -162,6 +162,11 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   auto& ready = impl.state.requireActiveUnsafe();
   ConsumerImpl::UpdateBackpressureScope scope(impl.queue);
 
+  // Mark that we're doing a draining read. This allows onConsumerWantsData()
+  // to use forcePull() which bypasses backpressure checks. The flag is cleared
+  // either synchronously (for immediate returns) or in promise callbacks (for async).
+  ready.hasPendingDrainingRead = true;
+
   // Collect all buffered data, converting values to bytes.
   kj::Vector<kj::Array<kj::byte>> chunks;
   bool isClosing = false;
@@ -195,12 +200,11 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   // Pump the controller for more synchronously available data.
   KJ_IF_SOME(listener, impl.stateListener) {
     while (!isClosing) {
-      size_t prevSize = ready.buffer.size();
+      size_t prevChunkCount = chunks.size();
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
-      // Check for new data or close sentinel.
-      while (ready.buffer.size() > prevSize ||
-          (!ready.buffer.empty() && ready.buffer.front().template is<ConsumerImpl::Close>())) {
+      // Drain all buffered data that was added by the pull.
+      while (!ready.buffer.empty() && !isClosing) {
         auto& item = ready.buffer.front();
         KJ_SWITCH_ONEOF(item) {
           KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
@@ -221,12 +225,10 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
             }
           }
         }
-        if (isClosing) break;
-        prevSize = ready.buffer.size();
       }
 
-      // If pull is async or no new data, stop pumping.
-      if (!pullCompletedSync || ready.buffer.size() == prevSize) {
+      // If pull is async or no new data was added, stop pumping.
+      if (!pullCompletedSync || chunks.size() == prevChunkCount) {
         break;
       }
     }
@@ -234,6 +236,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
 
   // If we collected data, return it immediately.
   if (chunks.size() > 0 || isClosing) {
+    ready.hasPendingDrainingRead = false;
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
       .done = isClosing,
@@ -242,8 +245,8 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
 
   // No data available - need to wait. Queue a pending draining read.
   // We create a ReadResult promise and transform it to DrainingReadResult.
+  // The flag remains set (was set at the start) and will be cleared by the promise callbacks.
   auto prp = js.newPromiseAndResolver<ReadResult>();
-  ready.hasPendingDrainingRead = true;
 
   ReadRequest request{.resolver = kj::mv(prp.resolver)};
   ready.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
@@ -593,6 +596,11 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   auto& ready = impl.state.requireActiveUnsafe();
   ConsumerImpl::UpdateBackpressureScope scope(impl.queue);
 
+  // Mark that we're doing a draining read. This allows onConsumerWantsData()
+  // to use forcePull() which bypasses backpressure checks. The flag is cleared
+  // either synchronously (for immediate returns) or in promise callbacks (for async).
+  ready.hasPendingDrainingRead = true;
+
   // Collect all buffered data (already bytes for ByteQueue).
   kj::Vector<kj::Array<kj::byte>> chunks;
   bool isClosing = false;
@@ -620,12 +628,11 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   // Pump the controller for more synchronously available data.
   KJ_IF_SOME(listener, impl.stateListener) {
     while (!isClosing) {
-      size_t prevSize = ready.buffer.size();
+      size_t prevChunkCount = chunks.size();
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
-      // Check for new data or close sentinel.
-      while (ready.buffer.size() > prevSize ||
-          (!ready.buffer.empty() && ready.buffer.front().template is<ConsumerImpl::Close>())) {
+      // Drain all buffered data that was added by the pull.
+      while (!ready.buffer.empty() && !isClosing) {
         auto& item = ready.buffer.front();
         KJ_SWITCH_ONEOF(item) {
           KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
@@ -641,12 +648,10 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
             ready.buffer.pop_front();
           }
         }
-        if (isClosing) break;
-        prevSize = ready.buffer.size();
       }
 
-      // If pull is async or no new data, stop pumping.
-      if (!pullCompletedSync || ready.buffer.size() == prevSize) {
+      // If pull is async or no new data was added, stop pumping.
+      if (!pullCompletedSync || chunks.size() == prevChunkCount) {
         break;
       }
     }
@@ -654,6 +659,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
 
   // If we collected data, return it immediately.
   if (chunks.size() > 0 || isClosing) {
+    ready.hasPendingDrainingRead = false;
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
       .done = isClosing,
@@ -662,10 +668,10 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
 
   // No data available - need to wait. Create a default read request.
   // We allocate a buffer for the read - the data will be copied into it.
+  // The flag remains set (was set at the start) and will be cleared by the promise callbacks.
   constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
   KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, kDefaultReadSize)) {
     auto prp = js.newPromiseAndResolver<ReadResult>();
-    ready.hasPendingDrainingRead = true;
 
     ReadRequest::PullInto pullInto{
       .store = kj::mv(store),

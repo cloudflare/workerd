@@ -677,6 +677,14 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
   KJ_UNREACHABLE;
 }
 
+kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::drainingRead(
+    jsg::Lock& js) {
+  // TODO(later): Implement proper drainingRead for internal controller.
+  // For now, return a rejected promise as a placeholder.
+  return js.rejectedPromise<DrainingReadResult>(
+      js.v8TypeError("drainingRead is not yet implemented for internal streams"_kj));
+}
+
 jsg::Promise<void> ReadableStreamInternalController::pipeTo(
     jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) {
 
