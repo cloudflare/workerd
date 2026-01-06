@@ -379,6 +379,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-iocontext-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-iocontext-test.js"],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],
