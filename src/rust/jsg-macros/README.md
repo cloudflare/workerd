@@ -24,7 +24,11 @@ pub struct MyRecord {
 
 Generates FFI callback functions for JSG resource methods. The `name` parameter is optional and defaults to converting the method name from `snake_case` to `camelCase`.
 
-Parameters and return values are handled via the `jsg::Wrappable` trait. Any type implementing `Wrappable` can be used as a parameter or return value. Use `NonCoercible<T>` to reject values that would require JavaScript coercion.
+Parameters and return values are handled via the `jsg::Wrappable` trait. Any type implementing `Wrappable` can be used as a parameter or return value:
+
+- `Option<T>` - accepts `T` or `undefined`, rejects `null`
+- `Nullable<T>` - accepts `T`, `null`, or `undefined`
+- `NonCoercible<T>` - rejects values that would require JavaScript coercion
 
 ```rust
 impl DnsUtil {

@@ -12,57 +12,56 @@
 //! | `String` | `string` |
 //! | `bool` | `boolean` |
 //! | `f64` | `number` |
-//! | `Option<T>` | `T` or `null`/`undefined` |
+//! | `Option<T>` | `T` or `undefined` |
+//! | `Nullable<T>` | `T`, `null`, or `undefined` |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
 //! | `T: Struct` | `object` |
 
 use std::fmt::Display;
 
+use crate::Error;
 use crate::Lock;
 use crate::NonCoercible;
+use crate::Nullable;
 use crate::Type;
 use crate::v8;
 use crate::v8::ToLocalValue;
 
 // =============================================================================
-// Wrappable trait (Rust → JavaScript)
+// ToJS trait (Rust → JavaScript)
 // =============================================================================
 
 /// Trait for converting Rust values to JavaScript.
 ///
 /// Provides Rust → JavaScript conversion.
-pub trait Wrappable: Sized {
+pub trait ToJS: Sized {
     /// Converts this Rust value into a JavaScript value.
-    fn wrap<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
         'b: 'a;
 }
 
 // =============================================================================
-// Unwrappable trait (JavaScript → Rust)
+// FromJS trait (JavaScript → Rust)
 // =============================================================================
 
 /// Trait for converting JavaScript values to Rust.
 ///
 /// Provides JS → Rust conversion. The `try_unwrap` method is used by macros
 /// to unwrap function parameters with proper error handling.
-pub trait Unwrappable: Sized {
-    /// Converts a JavaScript value into this Rust type.
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self;
+pub trait FromJS: Sized {
+    type ResultType;
 
-    /// Attempts to unwrap a JavaScript value, returning None and throwing a JS error on failure.
-    /// Most types simply delegate to `unwrap`, but `NonCoercible<T>` validates the type first.
-    fn try_unwrap(lock: &mut Lock, value: v8::Local<v8::Value>) -> Option<Self> {
-        Some(Self::unwrap(lock.isolate(), value))
-    }
+    /// Converts a JavaScript value into this Rust type.
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error>;
 }
 
 // =============================================================================
 // Primitive type implementations
 // =============================================================================
 
-/// Implements `Type`, `Wrappable`, and `Unwrappable` for primitive types.
+/// Implements `Type`, `ToJS`, and `FromJS` for primitive types.
 macro_rules! impl_primitive {
     { $type:ty, $class_name:literal, $is_exact:ident, $unwrap_fn:ident } => {
         impl Type for $type {
@@ -75,8 +74,8 @@ macro_rules! impl_primitive {
             }
         }
 
-        impl Wrappable for $type {
-            fn wrap<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+        impl ToJS for $type {
+            fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
             where
                 'b: 'a,
             {
@@ -84,9 +83,11 @@ macro_rules! impl_primitive {
             }
         }
 
-        impl Unwrappable for $type {
-            fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-                unsafe { v8::ffi::$unwrap_fn(isolate.as_ffi(), value.into_ffi()) }
+        impl FromJS for $type {
+            type ResultType = Self;
+
+            fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+                Ok(unsafe { v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi()) })
             }
         }
     };
@@ -100,8 +101,8 @@ impl_primitive!(f64, "number", is_number, unwrap_number);
 // Wrapper type implementations
 // =============================================================================
 
-impl Wrappable for () {
-    fn wrap<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+impl ToJS for () {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
         'b: 'a,
     {
@@ -109,15 +110,15 @@ impl Wrappable for () {
     }
 }
 
-impl<T: Wrappable, E: Display> Wrappable for Result<T, E> {
-    fn wrap<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+impl<T: ToJS, E: Display> ToJS for Result<T, E> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
         'b: 'a,
     {
         match self {
-            Ok(value) => value.wrap(lock),
+            Ok(value) => value.to_js(lock),
             Err(err) => {
-                // TODO(soon): Use jsg::Error trait to dynamically call proper method to throw the error.
+                // TODO(soon): Use Error trait to dynamically call proper method to throw the error.
                 let description = err.to_string();
                 unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &description) };
                 v8::Local::<v8::Value>::undefined(lock)
@@ -126,59 +127,99 @@ impl<T: Wrappable, E: Display> Wrappable for Result<T, E> {
     }
 }
 
-impl<T: Wrappable> Wrappable for Option<T> {
-    fn wrap<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+impl<T: ToJS> ToJS for Option<T> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
         'b: 'a,
     {
         match self {
-            Some(value) => value.wrap(lock),
-            None => v8::Local::<v8::Value>::null(lock),
+            Some(value) => value.to_js(lock),
+            None => v8::Local::<v8::Value>::undefined(lock),
         }
     }
 }
 
-impl<T: Type + Wrappable> Wrappable for NonCoercible<T> {
-    fn wrap<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+impl<T: Type + ToJS> ToJS for NonCoercible<T> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
         'b: 'a,
     {
-        self.into_inner().wrap(lock)
+        self.into_inner().to_js(lock)
     }
 }
 
-impl<T: Type + Unwrappable> Unwrappable for Option<T> {
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        if value.is_null() {
-            None
-        } else if value.is_undefined() {
-            let error_msg = format!(
-                "Expected a null or {} value but got undefined",
-                T::class_name()
-            );
-            unsafe { v8::ffi::isolate_throw_error(isolate.as_ffi(), &error_msg) };
-            None
-        } else {
-            Some(T::unwrap(isolate, value))
+impl<T: ToJS> ToJS for Nullable<T> {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        match self {
+            Self::Some(value) => value.to_js(lock),
+            Self::Null => v8::Local::<v8::Value>::null(lock),
+            Self::Undefined => v8::Local::<v8::Value>::undefined(lock),
         }
     }
 }
 
-impl<T: Type + Unwrappable> Unwrappable for NonCoercible<T> {
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        Self::new(T::unwrap(isolate, value))
-    }
+impl<T: Type + FromJS> FromJS for Option<T> {
+    type ResultType = Option<T::ResultType>;
 
-    fn try_unwrap(lock: &mut Lock, value: v8::Local<v8::Value>) -> Option<Self> {
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        if value.is_null() {
+            let error_msg = format!("Expected {} or undefined but got null", T::class_name());
+            // TODO(soon): Throw errors in the correct place. This function should return
+            // a result and the caller should handle the error.
+            let err = Error::new("TypeError", error_msg);
+            unsafe {
+                v8::ffi::isolate_throw_exception(
+                    lock.isolate().as_ffi(),
+                    err.to_local(lock.isolate()).into_ffi(),
+                );
+            }
+            Err(err)
+        } else if value.is_undefined() {
+            Ok(None)
+        } else {
+            Ok(Some(T::from_js(lock, value)?))
+        }
+    }
+}
+
+impl<T: Type + FromJS> FromJS for NonCoercible<T> {
+    type ResultType = NonCoercible<T::ResultType>;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         if !T::is_exact(&value) {
             let error_msg = format!(
                 "Expected a {} value but got {}",
                 T::class_name(),
                 value.type_of()
             );
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &error_msg) };
-            return None;
+            // TODO(soon): Throw errors in the correct place. This function should return
+            // a result and the caller should handle the error.
+            let err = Error::new("TypeError", error_msg);
+            unsafe {
+                v8::ffi::isolate_throw_exception(
+                    lock.isolate().as_ffi(),
+                    err.to_local(lock.isolate()).into_ffi(),
+                );
+            }
+            return Err(err);
         }
-        Some(Self::new(T::unwrap(lock.isolate(), value)))
+        Ok(<Self::ResultType>::new(T::from_js(lock, value)?))
+    }
+}
+
+impl<T: Type + FromJS> FromJS for Nullable<T> {
+    type ResultType = Nullable<T::ResultType>;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        if value.is_null() {
+            Ok(Nullable::Null)
+        } else if value.is_undefined() {
+            Ok(Nullable::Undefined)
+        } else {
+            Ok(Nullable::Some(T::from_js(lock, value)?))
+        }
     }
 }

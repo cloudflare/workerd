@@ -1,11 +1,8 @@
-use jsg::Lock;
 use jsg::NonCoercible;
 use jsg::ResourceState;
 use jsg::ResourceTemplate;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-
-use crate::EvalResult;
 
 #[jsg_resource]
 struct MyResource {
@@ -126,58 +123,46 @@ fn non_coercible_debug() {
 #[test]
 fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|isolate, ctx| unsafe {
-        let mut lock = Lock::from_isolate_ptr(isolate);
+    harness.run_in_context(|lock, ctx| {
         let resource = jsg::Ref::new(MyResource {
             _state: ResourceState::default(),
         });
-        let mut template = MyResourceTemplate::new(&mut lock);
-        let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
-        ctx.set_global_safe("resource", wrapped.into_ffi());
+        let mut template = MyResourceTemplate::new(lock);
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("resource", wrapped);
 
         // String method accepts string
-        assert_eq!(
-            ctx.eval_safe("resource.string('hello')"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "hello".to_owned(),
-            }
-        );
+        let result: String = ctx.eval(lock, "resource.string('hello')")?;
+        assert_eq!(result, "hello");
 
         // String method rejects number
-        let result = ctx.eval_safe("resource.string(123)");
-        assert!(!result.success);
-        assert!(result.result_value.contains("string"));
+        let result: Result<String, jsg::Error> = ctx.eval(lock, "resource.string(123)");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.name, "TypeError");
+        assert!(err.message.contains("string"));
 
         // Boolean method accepts boolean
-        assert_eq!(
-            ctx.eval_safe("resource.boolean(true)"),
-            EvalResult {
-                success: true,
-                result_type: "boolean".to_owned(),
-                result_value: "true".to_owned(),
-            }
-        );
+        let result: bool = ctx.eval(lock, "resource.boolean(true)")?;
+        assert!(result);
 
         // Boolean method rejects string
-        let result = ctx.eval_safe("resource.boolean('true')");
-        assert!(!result.success);
-        assert!(result.result_value.contains("boolean"));
+        let result: Result<bool, jsg::Error> = ctx.eval(lock, "resource.boolean('true')");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.name, "TypeError");
+        assert!(err.message.contains("boolean"));
 
         // Number method accepts number
-        assert_eq!(
-            ctx.eval_safe("resource.number(42.5)"),
-            EvalResult {
-                success: true,
-                result_type: "number".to_owned(),
-                result_value: "42.5".to_owned(),
-            }
-        );
+        let result: f64 = ctx.eval(lock, "resource.number(42.5)")?;
+        assert!((result - 42.5).abs() < f64::EPSILON);
 
         // Number method rejects string
-        let result = ctx.eval_safe("resource.number('42')");
-        assert!(!result.success);
-        assert!(result.result_value.contains("number"));
+        let result: Result<f64, jsg::Error> = ctx.eval(lock, "resource.number('42')");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.name, "TypeError");
+        assert!(err.message.contains("number"));
+        Ok(())
     });
 }

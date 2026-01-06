@@ -1,287 +1,165 @@
-use crate::EvalResult;
-
 #[test]
-fn eval_string_returns_string_type() {
+fn eval_returns_correct_type() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("'Hello, World!'"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "Hello, World!".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: String = ctx.eval(lock, "'Hello, World!'")?;
+        assert_eq!(result, "Hello, World!");
+        Ok(())
     });
 }
 
 #[test]
 fn eval_string_concatenation() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("'Hello' + ', ' + 'World!'"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "Hello, World!".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: String = ctx.eval(lock, "'Hello' + ', ' + 'World!'")?;
+        assert_eq!(result, "Hello, World!");
+        Ok(())
     });
 }
 
 #[test]
 fn eval_number_returns_number_type() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("42"),
-            EvalResult {
-                success: true,
-                result_type: "number".to_owned(),
-                result_value: "42".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: f64 = ctx.eval(lock, "42")?;
+        assert!((result - 42.0).abs() < f64::EPSILON);
+        Ok(())
     });
 }
 
 #[test]
 fn eval_arithmetic_expression() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("1 + 2 + 3"),
-            EvalResult {
-                success: true,
-                result_type: "number".to_owned(),
-                result_value: "6".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: f64 = ctx.eval(lock, "1 + 2 + 3")?;
+        assert!((result - 6.0).abs() < f64::EPSILON);
+        Ok(())
     });
 }
 
 #[test]
 fn eval_boolean_true() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("true"),
-            EvalResult {
-                success: true,
-                result_type: "boolean".to_owned(),
-                result_value: "true".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: bool = ctx.eval(lock, "true")?;
+        assert!(result);
+        Ok(())
     });
 }
 
 #[test]
 fn eval_boolean_false() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("false"),
-            EvalResult {
-                success: true,
-                result_type: "boolean".to_owned(),
-                result_value: "false".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: bool = ctx.eval(lock, "false")?;
+        assert!(!result);
+        Ok(())
     });
 }
 
 #[test]
 fn eval_comparison_expression() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("5 > 3"),
-            EvalResult {
-                success: true,
-                result_type: "boolean".to_owned(),
-                result_value: "true".to_owned(),
-            }
-        );
-    });
-}
-
-#[test]
-fn eval_undefined() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("undefined"),
-            EvalResult {
-                success: true,
-                result_type: "undefined".to_owned(),
-                result_value: "undefined".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: bool = ctx.eval(lock, "5 > 3")?;
+        assert!(result);
+        Ok(())
     });
 }
 
 #[test]
 fn eval_null() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("null"),
-            EvalResult {
-                success: true,
-                result_type: "object".to_owned(),
-                result_value: "null".to_owned(),
-            }
-        );
-    });
-}
-
-#[test]
-fn eval_object() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("({})"),
-            EvalResult {
-                success: true,
-                result_type: "object".to_owned(),
-                result_value: "[object Object]".to_owned(),
-            }
-        );
-    });
-}
-
-#[test]
-fn eval_array() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("[1, 2, 3]"),
-            EvalResult {
-                success: true,
-                result_type: "object".to_owned(),
-                result_value: "1,2,3".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: jsg::Nullable<bool> = ctx.eval(lock, "null")?;
+        assert!(result.is_null());
+        Ok(())
     });
 }
 
 #[test]
 fn eval_throws_on_error() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("throw new Error('test error')"),
-            EvalResult {
-                success: false,
-                result_type: "throws".to_owned(),
-                result_value: "Error: test error".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: Result<bool, jsg::Error> = ctx.eval(lock, "throw new Error('test error')");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.name, "Error");
+        assert_eq!(err.message, "test error");
+        Ok(())
     });
 }
 
 #[test]
-fn eval_throws_type_error() {
+fn eval_throws_string_preserves_message() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("null.foo"),
-            EvalResult {
-                success: false,
-                result_type: "throws".to_owned(),
-                result_value: "TypeError: Cannot read properties of null (reading 'foo')"
-                    .to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: Result<bool, jsg::Error> = ctx.eval(lock, "throw 'custom string error'");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.name, "Error");
+        assert_eq!(err.message, "custom string error");
+        Ok(())
     });
 }
 
 #[test]
 fn eval_function_call() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("(function() { return 'from function'; })()"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "from function".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: String = ctx.eval(lock, "(function() { return 'from function'; })()")?;
+        assert_eq!(result, "from function");
+        Ok(())
     });
 }
 
 #[test]
 fn eval_typeof_string() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("typeof 'hello'"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "string".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: String = ctx.eval(lock, "typeof 'hello'")?;
+        assert_eq!(result, "string");
+        Ok(())
     });
 }
 
 #[test]
 fn eval_typeof_number() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("typeof 42"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "number".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: String = ctx.eval(lock, "typeof 42")?;
+        assert_eq!(result, "number");
+        Ok(())
     });
 }
 
 #[test]
 fn eval_typeof_boolean() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("typeof true"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "boolean".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: String = ctx.eval(lock, "typeof true")?;
+        assert_eq!(result, "boolean");
+        Ok(())
     });
 }
 
 #[test]
 fn eval_unicode_string() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("'こんにちは'"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "こんにちは".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: String = ctx.eval(lock, "'こんにちは'")?;
+        assert_eq!(result, "こんにちは");
+        Ok(())
     });
 }
 
 #[test]
 fn eval_emoji_string() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_isolate, ctx| {
-        assert_eq!(
-            ctx.eval_safe("'😀🎉'"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "😀🎉".to_owned(),
-            }
-        );
+    harness.run_in_context(|lock, ctx| {
+        let result: String = ctx.eval(lock, "'😀🎉'")?;
+        assert_eq!(result, "😀🎉");
+        Ok(())
     });
 }

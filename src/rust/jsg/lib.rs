@@ -14,8 +14,8 @@ pub mod v8;
 mod wrappable;
 
 pub use v8::ffi::ExceptionType;
-pub use wrappable::Unwrappable;
-pub use wrappable::Wrappable;
+pub use wrappable::FromJS;
+pub use wrappable::ToJS;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 mod ffi {
@@ -142,22 +142,68 @@ pub fn unwrap_resource<'a, R: Resource>(
     unsafe { &mut *ptr }
 }
 
+#[derive(Debug)]
 pub struct Error {
-    pub name: v8::ffi::ExceptionType,
+    pub name: String,
     pub message: String,
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.name, self.message)
+    }
+}
+
 impl Error {
-    pub fn new(name: v8::ffi::ExceptionType, message: String) -> Self {
-        Self { name, message }
+    pub fn new(name: impl Into<String>, message: String) -> Self {
+        Self {
+            name: name.into(),
+            message,
+        }
+    }
+
+    /// Creates an Error from a V8 value (typically an exception).
+    ///
+    /// If the value is a native error, extracts the name and message properties.
+    /// Otherwise, converts the value to a string for the message.
+    pub fn from_value(lock: &mut Lock, value: v8::Local<v8::Value>) -> Self {
+        if value.is_native_error() {
+            let obj: v8::Local<v8::Object> = value.into();
+
+            let name = obj
+                .get(lock, "name")
+                .and_then(|v| String::from_js(lock, v).ok())
+                .unwrap_or_else(|| "Error".to_owned());
+
+            let message = obj
+                .get(lock, "message")
+                .and_then(|v| String::from_js(lock, v).ok())
+                .unwrap_or_else(|| "Unknown error".to_owned());
+
+            Self { name, message }
+        } else {
+            let message =
+                String::from_js(lock, value).unwrap_or_else(|_| "Unknown error".to_owned());
+            Self {
+                name: "Error".to_owned(),
+                message,
+            }
+        }
     }
 
     /// Creates a V8 exception from this error.
-    pub fn as_exception<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
+    pub fn to_local<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
+        let exception_type = match self.name.as_str() {
+            "TypeError" => v8::ffi::ExceptionType::TypeError,
+            "RangeError" => v8::ffi::ExceptionType::RangeError,
+            "ReferenceError" => v8::ffi::ExceptionType::ReferenceError,
+            "SyntaxError" => v8::ffi::ExceptionType::SyntaxError,
+            _ => v8::ffi::ExceptionType::Error,
+        };
         unsafe {
             v8::Local::from_ffi(
                 isolate,
-                v8::ffi::exception_create(isolate.as_ffi(), self.name, &self.message),
+                v8::ffi::exception_create(isolate.as_ffi(), exception_type, &self.message),
             )
         }
     }
@@ -166,7 +212,7 @@ impl Error {
 impl Default for Error {
     fn default() -> Self {
         Self {
-            name: v8::ffi::ExceptionType::Error,
+            name: "Error".to_owned(),
             message: "An unknown error occurred".to_owned(),
         }
     }
@@ -174,10 +220,7 @@ impl Default for Error {
 
 impl From<ParseIntError> for Error {
     fn from(err: ParseIntError) -> Self {
-        Self::new(
-            v8::ffi::ExceptionType::TypeError,
-            format!("Failed to parse integer: {err}"),
-        )
+        Self::new("TypeError", format!("Failed to parse integer: {err}"))
     }
 }
 
@@ -222,11 +265,11 @@ impl From<ParseIntError> for Error {
 /// input accordingly to avoid being a source of user confusion. Only use `NonCoercible` if
 /// you have a good reason to disable coercion.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NonCoercible<T: Type> {
+pub struct NonCoercible<T> {
     value: T,
 }
 
-impl<T: Type> NonCoercible<T> {
+impl<T> NonCoercible<T> {
     /// Creates a new `NonCoercible` wrapper around the given value.
     pub fn new(value: T) -> Self {
         Self { value }
@@ -238,23 +281,110 @@ impl<T: Type> NonCoercible<T> {
     }
 }
 
-impl<T: Type> From<T> for NonCoercible<T> {
+impl<T> From<T> for NonCoercible<T> {
     fn from(value: T) -> Self {
         Self::new(value)
     }
 }
 
-impl<T: Type> AsRef<T> for NonCoercible<T> {
+impl<T> AsRef<T> for NonCoercible<T> {
     fn as_ref(&self) -> &T {
         &self.value
     }
 }
 
-impl<T: Type> Deref for NonCoercible<T> {
+impl<T> Deref for NonCoercible<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+
+/// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
+///
+/// `Nullable<T>` is similar to `Option<T>` but also accepts `undefined` as a null-ish value.
+/// This is useful for JavaScript APIs where both `null` and `undefined` represent
+/// the absence of a value.
+///
+/// # Behavior
+///
+/// - `null` → `Nullable::Null`
+/// - `undefined` → `Nullable::Undefined`
+/// - `T` → `Nullable::Some(T)`
+///
+/// # Example
+///
+/// ```ignore
+/// use jsg::Nullable;
+///
+/// #[jsg_method]
+/// pub fn process(&self, value: Nullable<String>) -> Result<(), Error> {
+///     match value {
+///         Nullable::Some(s) => println!("Got value: {}", s),
+///         Nullable::Null => println!("Got null"),
+///         Nullable::Undefined => println!("Got undefined"),
+///     }
+///     Ok(())
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Nullable<T> {
+    Some(T),
+    Null,
+    Undefined,
+}
+
+impl<T> Nullable<T> {
+    /// Returns `true` if the nullable contains a value.
+    pub fn is_some(&self) -> bool {
+        matches!(self, Self::Some(_))
+    }
+
+    /// Returns `true` if the nullable is `Null`.
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    /// Returns `true` if the nullable is `Undefined`.
+    pub fn is_undefined(&self) -> bool {
+        matches!(self, Self::Undefined)
+    }
+
+    /// Returns `true` if the nullable is `Null` or `Undefined`.
+    pub fn is_null_or_undefined(&self) -> bool {
+        matches!(self, Self::Null | Self::Undefined)
+    }
+
+    /// Converts from `Nullable<T>` to `Option<T>`.
+    pub fn into_option(self) -> Option<T> {
+        match self {
+            Self::Some(v) => Some(v),
+            Self::Null | Self::Undefined => None,
+        }
+    }
+
+    /// Returns a reference to the contained value, or `None` if null or undefined.
+    pub fn as_ref(&self) -> Option<&T> {
+        match self {
+            Self::Some(v) => Some(v),
+            Self::Null | Self::Undefined => None,
+        }
+    }
+}
+
+impl<T> From<Option<T>> for Nullable<T> {
+    fn from(opt: Option<T>) -> Self {
+        match opt {
+            Some(v) => Self::Some(v),
+            None => Self::Null,
+        }
+    }
+}
+
+impl<T> From<Nullable<T>> for Option<T> {
+    fn from(nullable: Nullable<T>) -> Self {
+        nullable.into_option()
     }
 }
 
@@ -376,7 +506,7 @@ impl<T: Resource> Clone for Ref<T> {
 ///
 /// This trait provides type information used for error messages, memory tracking,
 /// and type validation (for `NonCoercible<T>`). The actual conversion logic is in
-/// `Wrappable` (Rust → JS) and `Unwrappable` (JS → Rust).
+/// `ToJS` (Rust → JS) and `FromJS` (JS → Rust).
 ///
 /// TODO: Implement `memory_info(jsg::MemoryTracker)`
 pub trait Type: Sized {

@@ -53,8 +53,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
-        impl jsg::Wrappable for #name {
-            fn wrap<'a, 'b>(self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+        impl jsg::ToJS for #name {
+            fn to_js<'a, 'b>(self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
@@ -70,9 +70,11 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
-        impl jsg::Unwrappable for #name {
-            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::Local<jsg::v8::Value>) -> Self {
-                unimplemented!("Struct unwrap is not yet supported")
+        impl jsg::FromJS for #name {
+            type ResultType = Self;
+
+            fn from_js(_lock: &mut jsg::Lock, _value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                todo!("Struct from_js is not yet supported")
             }
         }
 
@@ -83,7 +85,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Generates FFI callback for JSG methods.
 ///
-/// Parameters and return values are handled via `jsg::Wrappable`.
+/// Parameters and return values are handled via `jsg::FromJS`.
 /// See `jsg/wrappable.rs` for supported types.
 #[proc_macro_attribute]
 pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -109,7 +111,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|(i, ty)| {
             let arg = syn::Ident::new(&format!("arg{i}"), fn_name.span());
             let unwrap = quote! {
-                let Some(#arg) = <#ty as jsg::Unwrappable>::try_unwrap(&mut lock, args.get(#i)) else { return; };
+                let Ok(#arg) = <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#i)) else { return; };
             };
             (unwrap, arg)
         })
@@ -126,7 +128,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let this = args.this();
             let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
             let result = self_.#fn_name(#(#arg_names),*);
-            args.set_return_value(jsg::Wrappable::wrap(result, &mut lock));
+            args.set_return_value(jsg::ToJS::to_js(result, &mut lock));
         }
     }
     .into()
@@ -167,19 +169,21 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #[automatically_derived]
-        impl jsg::Wrappable for #name {
-            fn wrap<'a, 'b>(self, _lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+        impl jsg::ToJS for #name {
+            fn to_js<'a, 'b>(self, _lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
-                unimplemented!("Resource wrap is not yet supported")
+                todo!("Resource to_js is not yet supported")
             }
         }
 
         #[automatically_derived]
-        impl jsg::Unwrappable for #name {
-            fn unwrap(_isolate: jsg::v8::IsolatePtr, _value: jsg::v8::Local<jsg::v8::Value>) -> Self {
-                unimplemented!("Resource unwrap is not yet supported")
+        impl jsg::FromJS for #name {
+            type ResultType = jsg::Ref<Self>;
+
+            fn from_js(_lock: &mut jsg::Lock, _value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                todo!("Resource from_js is not yet supported")
             }
         }
 

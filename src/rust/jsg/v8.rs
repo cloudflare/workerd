@@ -17,6 +17,7 @@ pub mod ffi {
         ptr: usize,
     }
 
+    #[derive(Debug)]
     enum ExceptionType {
         RangeError,
         ReferenceError,
@@ -63,6 +64,7 @@ pub mod ffi {
         pub unsafe fn local_is_undefined(value: &Local) -> bool;
         pub unsafe fn local_is_null_or_undefined(value: &Local) -> bool;
         pub unsafe fn local_is_object(value: &Local) -> bool;
+        pub unsafe fn local_is_native_error(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
 
         // Local<Object>
@@ -294,6 +296,11 @@ impl<'a, T> Local<'a, T> {
     /// to check for nullish values separately.
     pub fn is_object(&self) -> bool {
         unsafe { ffi::local_is_object(&self.handle) }
+    }
+
+    /// Returns true if the value is a native JavaScript error.
+    pub fn is_native_error(&self) -> bool {
+        unsafe { ffi::local_is_native_error(&self.handle) }
     }
 
     /// Returns the JavaScript type of the underlying value as a string.

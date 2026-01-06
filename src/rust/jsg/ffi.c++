@@ -94,6 +94,10 @@ bool local_is_object(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsObject();
 }
 
+bool local_is_native_error(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNativeError();
+}
+
 ::rust::String local_type_of(Isolate* isolate, const Local& val) {
   auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
   v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);

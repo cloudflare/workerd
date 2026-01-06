@@ -8,13 +8,10 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use jsg::Lock;
 use jsg::ResourceState;
 use jsg::ResourceTemplate;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
-
-use crate::EvalResult;
 
 #[jsg_resource]
 struct EchoResource {
@@ -72,25 +69,19 @@ impl DirectReturnResource {
 #[test]
 fn resource_method_callback_receives_correct_self() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|isolate, ctx| unsafe {
-        let mut lock = Lock::from_isolate_ptr(isolate);
+    harness.run_in_context(|lock, ctx| {
         let resource = jsg::Ref::new(EchoResource {
             _state: ResourceState::default(),
             prefix: "Hello, ".to_owned(),
         });
-        let mut template = EchoResourceTemplate::new(&mut lock);
-        let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
-        ctx.set_global_safe("echoResource", wrapped.into_ffi());
+        let mut template = EchoResourceTemplate::new(lock);
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("echoResource", wrapped);
 
         // Call the method from JavaScript
-        assert_eq!(
-            ctx.eval_safe("echoResource.echo('World!')"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "Hello, World!".to_owned(),
-            }
-        );
+        let result: String = ctx.eval(lock, "echoResource.echo('World!')")?;
+        assert_eq!(result, "Hello, World!");
+        Ok(())
     });
 }
 
@@ -98,35 +89,23 @@ fn resource_method_callback_receives_correct_self() {
 #[test]
 fn resource_method_can_be_called_multiple_times() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|isolate, ctx| unsafe {
-        let mut lock = Lock::from_isolate_ptr(isolate);
+    harness.run_in_context(|lock, ctx| {
         let resource = jsg::Ref::new(EchoResource {
             _state: ResourceState::default(),
             prefix: ">> ".to_owned(),
         });
-        let mut template = EchoResourceTemplate::new(&mut lock);
-        let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
-        ctx.set_global_safe("echo", wrapped.into_ffi());
+        let mut template = EchoResourceTemplate::new(lock);
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("echo", wrapped);
 
         // First call
-        assert_eq!(
-            ctx.eval_safe("echo.echo('first')"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: ">> first".to_owned(),
-            }
-        );
+        let result: String = ctx.eval(lock, "echo.echo('first')")?;
+        assert_eq!(result, ">> first");
 
         // Second call
-        assert_eq!(
-            ctx.eval_safe("echo.echo('second')"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: ">> second".to_owned(),
-            }
-        );
+        let result: String = ctx.eval(lock, "echo.echo('second')")?;
+        assert_eq!(result, ">> second");
+        Ok(())
     });
 }
 
@@ -134,63 +113,37 @@ fn resource_method_can_be_called_multiple_times() {
 #[test]
 fn resource_method_returns_non_result_values() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|isolate, ctx| unsafe {
-        let mut lock = Lock::from_isolate_ptr(isolate);
+    harness.run_in_context(|lock, ctx| {
         let counter = Rc::new(Cell::new(42));
         let resource = jsg::Ref::new(DirectReturnResource {
             _state: ResourceState::default(),
             name: "TestResource".to_owned(),
             counter: counter.clone(),
         });
-        let mut template = DirectReturnResourceTemplate::new(&mut lock);
-        let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
-        ctx.set_global_safe("resource", wrapped.into_ffi());
+        let mut template = DirectReturnResourceTemplate::new(lock);
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("resource", wrapped);
 
-        assert_eq!(
-            ctx.eval_safe("resource.getName()"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "TestResource".to_owned(),
-            }
-        );
+        // Test getString returns string
+        let result: String = ctx.eval(lock, "resource.getName()")?;
+        assert_eq!(result, "TestResource");
 
-        assert_eq!(
-            ctx.eval_safe("resource.isValid()"),
-            EvalResult {
-                success: true,
-                result_type: "boolean".to_owned(),
-                result_value: "true".to_owned(),
-            }
-        );
+        // Test isValid returns boolean
+        let result: bool = ctx.eval(lock, "resource.isValid()")?;
+        assert!(result);
 
-        assert_eq!(
-            ctx.eval_safe("resource.getCounter()"),
-            EvalResult {
-                success: true,
-                result_type: "number".to_owned(),
-                result_value: "42".to_owned(),
-            }
-        );
+        // Test getCounter returns number
+        let result: f64 = ctx.eval(lock, "resource.getCounter()")?;
+        assert!((result - 42.0).abs() < f64::EPSILON);
 
-        assert_eq!(
-            ctx.eval_safe("resource.incrementCounter()"),
-            EvalResult {
-                success: true,
-                result_type: "undefined".to_owned(),
-                result_value: "undefined".to_owned(),
-            }
-        );
+        // Test incrementCounter returns undefined (we just check it doesn't error)
+        let _: Option<bool> = ctx.eval(lock, "resource.incrementCounter()")?;
         assert_eq!(counter.get(), 43);
 
-        assert_eq!(
-            ctx.eval_safe("resource.maybeName()"),
-            EvalResult {
-                success: true,
-                result_type: "string".to_owned(),
-                result_value: "TestResource".to_owned(),
-            }
-        );
+        // Test maybeName returns string for Some
+        let result: String = ctx.eval(lock, "resource.maybeName()")?;
+        assert_eq!(result, "TestResource");
+        Ok(())
     });
 }
 
@@ -198,24 +151,18 @@ fn resource_method_returns_non_result_values() {
 #[test]
 fn resource_method_returns_null_for_none() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|isolate, ctx| unsafe {
-        let mut lock = Lock::from_isolate_ptr(isolate);
+    harness.run_in_context(|lock, ctx| {
         let resource = jsg::Ref::new(DirectReturnResource {
             _state: ResourceState::default(),
             name: String::new(),
             counter: Rc::new(Cell::new(0)),
         });
-        let mut template = DirectReturnResourceTemplate::new(&mut lock);
-        let wrapped = jsg::wrap_resource(&mut lock, resource, &mut template);
-        ctx.set_global_safe("resource", wrapped.into_ffi());
+        let mut template = DirectReturnResourceTemplate::new(lock);
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("resource", wrapped);
 
-        assert_eq!(
-            ctx.eval_safe("resource.maybeName()"),
-            EvalResult {
-                success: true,
-                result_type: "object".to_owned(),
-                result_value: "null".to_owned(),
-            }
-        );
+        let result: Option<String> = ctx.eval(lock, "resource.maybeName()")?;
+        assert!(result.is_none());
+        Ok(())
     });
 }

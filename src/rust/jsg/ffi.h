@@ -45,6 +45,7 @@ bool local_is_null(const Local& val);
 bool local_is_undefined(const Local& val);
 bool local_is_null_or_undefined(const Local& val);
 bool local_is_object(const Local& val);
+bool local_is_native_error(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
 
 // Local<Object>

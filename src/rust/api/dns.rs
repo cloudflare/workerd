@@ -18,7 +18,13 @@ pub enum DnsParserError {
 
 impl From<DnsParserError> for jsg::Error {
     fn from(val: DnsParserError) -> Self {
-        Self::new(jsg::ExceptionType::Error, val.to_string())
+        match val {
+            DnsParserError::InvalidHexString(msg) | DnsParserError::InvalidDnsResponse(msg) => {
+                Self::new("Error", msg)
+            }
+            DnsParserError::ParseIntError(msg) => Self::new("RangeError", msg.to_string()),
+            DnsParserError::Unknown => Self::new("Error", "Unknown dns parser error".to_owned()),
+        }
     }
 }
 
