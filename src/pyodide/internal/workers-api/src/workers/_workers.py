@@ -1245,8 +1245,9 @@ class _WorkflowStepWrapper:
         Decorator to define a step with rollback/compensation support (saga pattern).
 
         Returns a callable wrapper that allows attaching an .undo decorator for
-        compensation logic. The undo function executes in LIFO order when
-        rollback_all() is called.
+        compensation logic. Undo functions execute automatically in LIFO order
+        when the workflow throws an uncaught error (if rollback config is enabled
+        at instance creation).
 
         Args:
             name: The name of the step.
@@ -1263,49 +1264,14 @@ class _WorkflowStepWrapper:
 
             record_id = await save()
 
-            # Later, if something fails:
-            try:
-                await some_failing_step()
-            except Exception as e:
-                await step.rollback_all(e)
-                raise
+            # If any step throws, undo functions run automatically
+            # (when instance created with rollback config enabled)
         """
 
         def decorator(func):
             return _RollbackStepWrapper(self, name, func, config)
 
         return decorator
-
-    async def rollback_all(
-        self, trigger_error: Exception = None, *, continue_on_error: bool = False
-    ):
-        """
-        Execute all registered undo handlers in LIFO order.
-
-        Args:
-            trigger_error: Error passed to each undo handler.
-            continue_on_error: Continue after undo failure (raises AggregateError).
-        """
-        try:
-            # Convert Python exception to JS error for the engine
-            js_error = None
-            if trigger_error is not None:
-                js_error = to_js(
-                    {
-                        "name": type(trigger_error).__name__,
-                        "message": str(trigger_error),
-                    },
-                    dict_converter=Object.fromEntries,
-                )
-
-            options = to_js(
-                {"continueOnError": continue_on_error},
-                dict_converter=Object.fromEntries,
-            )
-
-            await self._js_step.rollbackAll(js_error, options)
-        except Exception as exc:
-            raise _from_js_error(exc) from exc
 
     async def _resolve_dependency(self, dep):
         if dep._step_name in self._memoized_dependencies:

@@ -18,122 +18,58 @@ export default {
   async test(ctrl, env, ctx) {
     const stubStep = new Context();
 
-    // Test 1: Basic rollback
+    // Test 1: Basic with_rollback - executes do and returns value
     {
       const resp = await env.PythonWorkflow.run(
-        { test: 'basic_rollback' },
+        { test: 'with_rollback_basic' },
         stubStep
       );
-      assert.deepStrictEqual(resp, [
-        'do_1',
-        'do_2',
-        'undo_2:value_2',
-        'undo_1:value_1',
-      ]);
-      console.log('✓ basic_rollback');
+      assert.deepStrictEqual(resp, ['do_1', 'returned:value_1']);
+      console.log('✓ with_rollback_basic');
     }
 
-    // Test 2: LIFO order
+    // Test 2: Undo decorator properly registers handler
     {
       const resp = await env.PythonWorkflow.run(
-        { test: 'lifo_order' },
+        { test: 'with_rollback_undo_decorator' },
         stubStep
       );
-      assert.deepStrictEqual(resp, ['third', 'second', 'first']);
-      console.log('✓ lifo_order');
+      assert.strictEqual(resp.has_undo, true);
+      console.log('✓ with_rollback_undo_decorator');
     }
 
-    // Test 3: Steps without undo handlers
+    // Test 3: Handler structure captures return value
     {
       const resp = await env.PythonWorkflow.run(
-        { test: 'no_undo_handler' },
+        { test: 'with_rollback_undo_receives_value' },
         stubStep
       );
-      assert.deepStrictEqual(resp, [
-        'do_with_undo',
-        'do_without_undo',
-        'undo_with_undo',
-      ]);
-      console.log('✓ no_undo_handler');
+      assert.deepStrictEqual(resp.do_result, { id: 123, data: 'important' });
+      assert.strictEqual(resp.undo_registered, true);
+      console.log('✓ with_rollback_undo_receives_value');
     }
 
-    // Test 4: Undo receives value and error
+    // Test 4: Config and undoConfig are stored
     {
       const resp = await env.PythonWorkflow.run(
-        { test: 'undo_receives_value' },
+        { test: 'with_rollback_config' },
         stubStep
       );
-      assert.deepStrictEqual(resp.value, { id: 123, data: 'important' });
-      assert.strictEqual(resp.error_msg, 'the error message');
-      console.log('✓ undo_receives_value');
+      assert.deepStrictEqual(resp.step_config, { retries: { limit: 1 } });
+      assert.deepStrictEqual(resp.undo_config, { retries: { limit: 3 } });
+      console.log('✓ with_rollback_config');
     }
 
-    // Test 5: Undo with separate config
+    // Test 5: with_rollback works without undo handler
     {
       const resp = await env.PythonWorkflow.run(
-        { test: 'undo_with_config' },
+        { test: 'with_rollback_no_undo' },
         stubStep
       );
-      assert.strictEqual(resp.undo, 1);
-      console.log('✓ undo_with_config');
+      assert.deepStrictEqual(resp, ['do_without_undo', 'returned:value']);
+      console.log('✓ with_rollback_no_undo');
     }
 
-    // Test 6: Empty undo stack is no-op
-    {
-      const resp = await env.PythonWorkflow.run(
-        { test: 'empty_undo_stack_noop' },
-        stubStep
-      );
-      assert.strictEqual(resp.success, true);
-      console.log('✓ empty_undo_stack_noop');
-    }
-
-    // Test 7: Nested rollback_all throws an error (engine's WorkflowFatalError)
-    {
-      const resp = await env.PythonWorkflow.run(
-        { test: 'nested_rollback_throws' },
-        stubStep
-      );
-      // Engine throws WorkflowFatalError when rollbackAll is called during rollback
-      assert.ok(resp.type !== null, 'Expected an error type');
-      assert.ok(resp.message.includes('rollback'));
-      console.log('✓ nested_rollback_throws');
-    }
-
-    // Test 8: Stop on first undo failure
-    {
-      const resp = await env.PythonWorkflow.run(
-        { test: 'stop_on_first_undo_failure' },
-        stubStep
-      );
-      // LIFO order: undo_3 runs, undo_2 fails, undo_1 never runs
-      assert.deepStrictEqual(resp, ['undo_3', 'undo_2']);
-      console.log('✓ stop_on_first_undo_failure');
-    }
-
-    // Test 9: Rollback without error argument
-    {
-      const resp = await env.PythonWorkflow.run(
-        { test: 'rollback_without_error_arg' },
-        stubStep
-      );
-      assert.deepStrictEqual(resp, ['undo_1:error=true']);
-      console.log('✓ rollback_without_error_arg');
-    }
-
-    // Test 10: continue_on_error executes all undos
-    {
-      const resp = await env.PythonWorkflow.run(
-        { test: 'continue_on_error' },
-        stubStep
-      );
-      // All undos should execute (LIFO: undo_3, undo_2 fails, undo_1)
-      assert.deepStrictEqual(resp.executed, ['undo_3', 'undo_2', 'undo_1']);
-      assert.strictEqual(resp.error.type, 'ExceptionGroup');
-      assert.strictEqual(resp.error.count, 1);
-      console.log('✓ continue_on_error');
-    }
-
-    console.log('All rollback tests passed!');
+    console.log('All with_rollback tests passed!');
   },
 };
