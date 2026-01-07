@@ -540,6 +540,7 @@
         <option value="bad-sequential">Bad: Sequential Fetches</option>
         <option value="bad-duplicates">Bad: Duplicate Fetches</option>
         <option value="streams-pipeline">Streams Pipeline</option>
+        <option value="pathological">💀 Pathological Streams</option>
       </select>
       <select id="sort-mode">
         <option value="tree">Tree</option>
@@ -1009,7 +1010,8 @@ const userB = await fetch('/user/123');</pre>
           'good-parallel': 'sample-good-parallel.json',
           'bad-sequential': 'sample-bad-sequential.json',
           'bad-duplicates': 'sample-bad-duplicates.json',
-          'streams-pipeline': 'sample-streams-pipeline.json'
+          'streams-pipeline': 'sample-streams-pipeline.json',
+          'pathological': 'sample-pathological-streams.json'
         };
       try {
         const response = await fetch(files[demo]);
