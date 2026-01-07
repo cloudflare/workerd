@@ -105,7 +105,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
-    let (unwraps, arg_names): (Vec<_>, Vec<_>) = params
+    let (unwraps, arg_exprs): (Vec<_>, Vec<_>) = params
         .iter()
         .enumerate()
         .map(|(i, ty)| {
@@ -113,7 +113,15 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let unwrap = quote! {
                 let Ok(#arg) = <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#i)) else { return; };
             };
-            (unwrap, arg)
+            // For reference types (like &str), FromJS returns an owned type (String),
+            // so we need to borrow it when passing to the function.
+            let is_ref = matches!(ty.as_ref(), syn::Type::Reference(_));
+            let arg_expr = if is_ref {
+                quote! { &#arg }
+            } else {
+                quote! { #arg }
+            };
+            (unwrap, arg_expr)
         })
         .unzip();
 
@@ -127,7 +135,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             #(#unwraps)*
             let this = args.this();
             let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
-            let result = self_.#fn_name(#(#arg_names),*);
+            let result = self_.#fn_name(#(#arg_exprs),*);
             args.set_return_value(jsg::ToJS::to_js(result, &mut lock));
         }
     }

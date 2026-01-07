@@ -10,6 +10,7 @@
 //! |-----------|-----------------|
 //! | `()` | `undefined` |
 //! | `String` | `string` |
+//! | `&str` | `string` |
 //! | `bool` | `boolean` |
 //! | `f64` | `number` |
 //! | `Option<T>` | `T` or `undefined` |
@@ -96,6 +97,27 @@ macro_rules! impl_primitive {
 impl_primitive!(String, "string", is_string, unwrap_string);
 impl_primitive!(bool, "boolean", is_boolean, unwrap_boolean);
 impl_primitive!(f64, "number", is_number, unwrap_number);
+
+// Special implementation for &str - allows functions to accept &str parameters
+// by converting JavaScript strings to owned Strings, then borrowing.
+// The macro handles passing &arg instead of arg for reference types.zs
+impl Type for &str {
+    fn class_name() -> &'static str {
+        "string"
+    }
+
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_string()
+    }
+}
+
+impl FromJS for &str {
+    type ResultType = String;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) })
+    }
+}
 
 // =============================================================================
 // Wrapper type implementations

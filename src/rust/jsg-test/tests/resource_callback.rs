@@ -26,6 +26,11 @@ impl EchoResource {
     pub fn echo(&self, message: String) -> Result<String, String> {
         Ok(format!("{}{}", self.prefix, message))
     }
+
+    #[jsg_method]
+    pub fn greet(&self, name: &str) -> String {
+        format!("{}{}!", self.prefix, name)
+    }
 }
 
 #[jsg_resource]
@@ -105,6 +110,25 @@ fn resource_method_can_be_called_multiple_times() {
         // Second call
         let result: String = ctx.eval(lock, "echo.echo('second')")?;
         assert_eq!(result, ">> second");
+        Ok(())
+    });
+}
+
+/// Validates that methods can accept &str parameters.
+#[test]
+fn resource_method_accepts_str_ref_parameter() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Ref::new(EchoResource {
+            _state: ResourceState::default(),
+            prefix: "Hello, ".to_owned(),
+        });
+        let mut template = EchoResourceTemplate::new(lock);
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("echo", wrapped);
+
+        let result: String = ctx.eval(lock, "echo.greet('World')")?;
+        assert_eq!(result, "Hello, World!");
         Ok(())
     });
 }
