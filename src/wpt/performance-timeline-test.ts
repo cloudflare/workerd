@@ -17,10 +17,6 @@ export default {
       'PerformanceObserver with buffered flag should see past and future entries.',
     ],
   },
-  'buffered-flag-with-entryTypes-observer.tentative.any.js': {
-    comment: 'This is a tentative test',
-    omittedTests: true,
-  },
   'case-sensitivity.any.js': {
     comment: 'This is not yet implemented',
     disabledTests: [
@@ -92,71 +88,6 @@ export default {
     comment: 'This is not yet implemented',
     omittedTests: ['aborting a parser should block bfcache.'],
   },
-  'not-restored-reasons/performance-navigation-timing-attributes.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-bfcache-reasons-stay.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-bfcache.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-cross-origin-bfcache.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-fetch.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-iframes-without-attributes.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-lock.https.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-navigation-failure.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-not-bfcached.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-redirect-on-history.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-reload.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-same-origin-bfcache.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-same-origin-replace.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
   'not-restored-reasons/test-helper.js': {
     comment:
       'Test file /html/browsers/browsing-the-web/back-forward-cache/resources/rc-helper.js not found. Update wpt_test.bzl to handle this case.',

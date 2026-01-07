@@ -5,53 +5,7 @@
 import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
-  'compression-bad-chunks.tentative.any.js': {
-    comment:
-      'V8 assertion - Cannot construct ArrayBuffer with a BackingStore of SharedArrayBuffer',
-    disabledTests: true,
-  },
-  'compression-constructor-error.tentative.any.js': {},
-  'compression-including-empty-chunk.tentative.any.js': {},
   'compression-large-flush-output.any.js': {},
-  'compression-multiple-chunks.tentative.any.js': {},
-  'compression-output-length.tentative.any.js': {
-    comment:
-      'These tests require the sidecar which is not enabled for compression-test',
-    disabledTests: [
-      'the length of deflated (with -raw) data should be shorter than that of the original data',
-      'the length of deflated data should be shorter than that of the original data',
-      'the length of gzipped data should be shorter than that of the original data',
-    ],
-  },
-  'compression-stream.tentative.any.js': {
-    comment:
-      'These tests require the sidecar which is not enabled for compression-test',
-    disabledTests: [
-      'deflated small amount data should be reinflated back to its origin',
-      'deflated large amount data should be reinflated back to its origin',
-      'gzipped small amount data should be reinflated back to its origin',
-      'gzipped large amount data should be reinflated back to its origin',
-    ],
-  },
-  'compression-with-detach.tentative.window.js': {},
-  'decompression-bad-chunks.tentative.any.js': {
-    comment:
-      'V8 assertion - Cannot construct ArrayBuffer with a BackingStore of SharedArrayBuffer',
-    disabledTests: true,
-  },
-  'decompression-buffersource.tentative.any.js': {},
-  'decompression-constructor-error.tentative.any.js': {},
-  'decompression-correct-input.tentative.any.js': {},
-  'decompression-corrupt-input.tentative.any.js': {},
-  'decompression-empty-input.tentative.any.js': {},
-  'decompression-split-chunk.tentative.any.js': {},
-  'decompression-uint8array-output.tentative.any.js': {},
-  'decompression-with-detach.tentative.window.js': {
-    comment: 'Cannot redefine property: then',
-    expectedFailures: [
-      'data should be correctly decompressed even if input is detached partway',
-    ],
-  },
   'idlharness.https.any.js': {
     comment:
       'Workers expose globals differently than browsers - these interface tests fail',
