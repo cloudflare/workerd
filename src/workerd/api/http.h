@@ -1006,7 +1006,16 @@ class Response final: public Body {
       kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
 
   int getStatus();
+
+  // Returns the status text for the JavaScript Response.statusText property.
+  // Per Fetch spec, defaults to empty string "" if no status text was explicitly set.
   kj::StringPtr getStatusText();
+
+  // Returns the status text for sending over the HTTP wire protocol.
+  // Unlike getStatusText(), this returns the standard HTTP reason phrase (e.g., "OK", "Not Found")
+  // when no status text was explicitly set, since HTTP/1.1 requires a reason phrase.
+  kj::StringPtr getStatusTextForWireProtocol();
+
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
 
   bool getOk();

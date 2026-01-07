@@ -173,7 +173,7 @@ kj::Maybe<jsg::Ref<EventTarget>> Event::getCurrentTarget() {
   return kj::none;
 }
 
-jsg::Optional<jsg::Ref<EventTarget>> Event::getTarget() {
+kj::Maybe<jsg::Ref<EventTarget>> Event::getTarget() {
   return target.map([&](jsg::Ref<EventTarget>& t) { return t.addRef(); });
 }
 
@@ -184,6 +184,17 @@ kj::Array<jsg::Ref<EventTarget>> Event::composedPath() {
     return kj::arr(KJ_ASSERT_NONNULL(target).addRef());
   }
   return kj::Array<jsg::Ref<EventTarget>>();
+}
+
+void Event::initEvent(
+    kj::String type, jsg::Optional<bool> bubbles, jsg::Optional<bool> cancelable) {
+  // Per the spec, initEvent is a no-op if the event is currently being dispatched.
+  if (flags.isBeingDispatched) return;
+
+  this->ownType = kj::mv(type);
+  this->type = this->ownType;
+  flags.bubbles = bubbles.orDefault(false);
+  flags.cancelable = cancelable.orDefault(false);
 }
 
 void Event::beginDispatch(jsg::Ref<EventTarget> target) {

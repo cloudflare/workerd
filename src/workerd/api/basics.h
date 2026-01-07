@@ -140,13 +140,17 @@ class Event: public jsg::Object {
 
   // Because we don't support hierarchical EventTargets, this function
   // will always return the same value as getCurrentTarget().
-  jsg::Optional<jsg::Ref<EventTarget>> getTarget();
+  kj::Maybe<jsg::Ref<EventTarget>> getTarget();
 
   // For our implementation, since we do not support hierarchical EventTargets,
   // the composedPath is always either an empty array if the Event is currently
   // not being dispatched, or an array containing only the currentTarget if
   // it is being dispatched.
   kj::Array<jsg::Ref<EventTarget>> composedPath();
+
+  // Legacy method for re-initializing an event. Per the spec, this is a no-op
+  // if the event is currently being dispatched.
+  void initEvent(kj::String type, jsg::Optional<bool> bubbles, jsg::Optional<bool> cancelable);
 
   JSG_RESOURCE_TYPE(Event, CompatibilityFlags::Reader flags) {
     // Previously, we were setting all properties as instance properties,
@@ -205,6 +209,7 @@ class Event: public jsg::Object {
     JSG_METHOD(preventDefault);
     JSG_METHOD(stopPropagation);
     JSG_METHOD(composedPath);
+    JSG_METHOD(initEvent);
 
     JSG_STATIC_CONSTANT(NONE);
     JSG_STATIC_CONSTANT(CAPTURING_PHASE);

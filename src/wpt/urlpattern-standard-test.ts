@@ -19,8 +19,5 @@ export default {
   },
   'urlpattern-hasregexpgroups.any.js': {},
   'urlpattern.any.js': {},
-  'urlpattern.https.any.js': {
-    comment: 'Test cases are identical to urlpattern.any.js.',
-    omittedTests: true,
-  },
+  'urlpattern.https.any.js': {},
 } satisfies TestRunnerConfig;

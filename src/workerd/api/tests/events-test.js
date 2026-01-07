@@ -32,7 +32,7 @@ export const event = {
     strictEqual(event.returnValue, true);
     strictEqual(event.timeStamp, 0.0);
     strictEqual(event.cancelBubble, false);
-    strictEqual(event.currentTarget, undefined);
+    strictEqual(event.currentTarget, null);
     deepStrictEqual(event.composedPath(), []);
     event.stopImmediatePropagation();
     event.stopPropagation();
@@ -66,7 +66,7 @@ export const eventWithOptions = {
     strictEqual(event.returnValue, true);
     strictEqual(event.timeStamp, 0.0);
     strictEqual(event.cancelBubble, false);
-    strictEqual(event.currentTarget, undefined);
+    strictEqual(event.currentTarget, null);
     deepStrictEqual(event.composedPath(), []);
     event.stopImmediatePropagation();
     event.stopPropagation();
@@ -95,7 +95,7 @@ export const eventSubclass = {
     strictEqual(event.returnValue, true);
     strictEqual(event.timeStamp, 0.0);
     strictEqual(event.cancelBubble, false);
-    strictEqual(event.currentTarget, undefined);
+    strictEqual(event.currentTarget, null);
 
     // Everything except cancelBubble is read only and will throw
     // if attempts are made to modify
@@ -152,7 +152,7 @@ export const basicEventTarget = {
 
     const event = new Event('foo');
     strictEqual(event.eventPhase, Event.NONE);
-    strictEqual(event.currentTarget, undefined);
+    strictEqual(event.currentTarget, null);
 
     let dispatchCount = 0;
 
