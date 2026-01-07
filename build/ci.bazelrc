@@ -84,6 +84,7 @@ test:ci-linux-arm --build_tag_filters=-off-by-default
 # default. This is unhelpful for compile speeds and test performance, remove the DEBUG
 # define.
 build:ci-macOS --copt=-UDEBUG
+build:ci-macOS --local_ram_resources=HOST_RAM*.8
 build:ci-macOS --config=ci-limit-storage
 
 build:ci-macOS-debug --config=debug
