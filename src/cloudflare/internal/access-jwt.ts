@@ -123,24 +123,6 @@ interface Uint8ArrayConstructorWithBase64 {
 const Uint8ArrayWithBase64 =
   Uint8Array as unknown as Uint8ArrayConstructorWithBase64;
 
-/**
- * Base64url decode to string (RFC 4648 §5).
- */
-function base64UrlDecodeToString(input: string): string {
-  const bytes = Uint8ArrayWithBase64.fromBase64(input, {
-    alphabet: 'base64url',
-  });
-  return textDecoder.decode(bytes);
-}
-
-/**
- * Base64url decode to ArrayBuffer for signature verification.
- */
-function base64UrlDecodeToBytes(input: string): ArrayBuffer {
-  return Uint8ArrayWithBase64.fromBase64(input, { alphabet: 'base64url' })
-    .buffer as ArrayBuffer;
-}
-
 type FixedLengthArray<
   T,
   N extends number,
@@ -170,13 +152,21 @@ function parseJwt(token: string): {
   >;
 
   try {
-    const headerJson = base64UrlDecodeToString(headerB64);
-    const header = JSON.parse(headerJson) as JwtHeader;
+    const header = JSON.parse(
+      textDecoder.decode(
+        Uint8ArrayWithBase64.fromBase64(headerB64, { alphabet: 'base64url' })
+      )
+    ) as JwtHeader;
 
-    const payloadJson = base64UrlDecodeToString(payloadB64);
-    const payload = JSON.parse(payloadJson) as AccessJwtPayload;
+    const payload = JSON.parse(
+      textDecoder.decode(
+        Uint8ArrayWithBase64.fromBase64(payloadB64, { alphabet: 'base64url' })
+      )
+    ) as AccessJwtPayload;
 
-    const signature = base64UrlDecodeToBytes(signatureB64);
+    const signature = Uint8ArrayWithBase64.fromBase64(signatureB64, {
+      alphabet: 'base64url',
+    }).buffer as ArrayBuffer;
 
     // The signed part is the header and payload joined by a dot (not decoded)
     const signedPart = `${headerB64}.${payloadB64}`;
