@@ -5,7 +5,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  # Read repo
+  contents: read
+
+  # Read/write artifacts
+  actions: write
 
 jobs:
   test:
