@@ -1,0 +1,29 @@
+{
+  "requestDurationNs": 125000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 124500000, "destroyedAt": 124800000},
+    {"asyncId": 2, "triggerId": 1, "type": "fetch", "stackTraceId": 1, "createdAt": 500000, "callbackStartedAt": 35000000, "callbackEndedAt": 35800000, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 2, "type": "js-promise", "stackTraceId": 2, "createdAt": 36000000, "callbackStartedAt": 36500000, "callbackEndedAt": 37000000, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 3, "type": "fetch", "stackTraceId": 3, "createdAt": 37500000, "callbackStartedAt": 72000000, "callbackEndedAt": 72600000, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 2, "createdAt": 73000000, "callbackStartedAt": 73500000, "callbackEndedAt": 74000000, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 5, "type": "fetch", "stackTraceId": 4, "createdAt": 74500000, "callbackStartedAt": 110000000, "callbackEndedAt": 110500000, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 6, "type": "js-promise", "stackTraceId": 2, "createdAt": 111000000, "callbackStartedAt": 111500000, "callbackEndedAt": 112000000, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 5, "createdAt": 112500000, "callbackStartedAt": 113000000, "callbackEndedAt": 124000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:3:10"]},
+    {"id": 1, "frames": ["fetch @ worker.js:8:20", "handleRequest @ worker.js:5:3"]},
+    {"id": 2, "frames": ["processData @ worker.js:15:5"]},
+    {"id": 3, "frames": ["fetch @ worker.js:12:20", "handleRequest @ worker.js:5:3"]},
+    {"id": 4, "frames": ["fetch @ worker.js:16:20", "handleRequest @ worker.js:5:3"]},
+    {"id": 5, "frames": ["combineAndRespond @ worker.js:25:5", "handleRequest @ worker.js:5:3"]}
+  ],
+  "annotations": [
+    {"asyncId": 2, "key": "url", "value": "https://api.example.com/users"},
+    {"asyncId": 2, "key": "method", "value": "GET"},
+    {"asyncId": 4, "key": "url", "value": "https://api.example.com/products"},
+    {"asyncId": 4, "key": "method", "value": "GET"},
+    {"asyncId": 6, "key": "url", "value": "https://api.example.com/orders"},
+    {"asyncId": 6, "key": "method", "value": "GET"}
+  ]
+}

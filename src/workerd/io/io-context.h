@@ -32,6 +32,7 @@
 namespace workerd {
 class WorkerTracer;
 class BaseTracer;
+class AsyncTraceContext;
 }  // namespace workerd
 
 namespace workerd {
@@ -274,6 +275,19 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     if (incomingRequests.empty()) return kj::none;
     return getCurrentIncomingRequest().getWorkerTracer();
   }
+
+  // Get the async trace context for this request, if tracing is enabled.
+  // Returns nullptr if async tracing is not active.
+  AsyncTraceContext* getAsyncTrace() {
+    KJ_IF_SOME(trace, asyncTrace) {
+      return trace.get();
+    }
+    return nullptr;
+  }
+
+  // Enable async tracing for this request. Should be called early in request lifecycle.
+  // The private symbol for promise tracking is created lazily when needed.
+  void enableAsyncTrace();
 
   LimitEnforcer& getLimitEnforcer() {
     return *limitEnforcer;
@@ -1067,6 +1081,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
+
+  // Async trace context for bubbleprof-style visualization.
+  // Enabled per-request when async tracing is active.
+  kj::Maybe<kj::Own<AsyncTraceContext>> asyncTrace;
 
   class Runnable {
    public:

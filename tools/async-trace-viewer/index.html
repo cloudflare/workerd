@@ -1,0 +1,2084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Async Trace Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #16213e;
+      padding: 0.75rem 1.5rem;
+      border-bottom: 1px solid #0f3460;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    h1 { font-size: 1.1rem; color: #e94560; }
+
+    .tabs {
+      display: flex;
+      gap: 2px;
+      margin-left: 1rem;
+    }
+
+    .tab {
+      padding: 0.4rem 1rem;
+      background: #0f3460;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 0.8rem;
+      border-radius: 4px 4px 0 0;
+    }
+
+    .tab.active {
+      background: #1a1a2e;
+      color: #e94560;
+    }
+
+    .controls {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      margin-left: auto;
+    }
+
+    .controls input[type="file"] { display: none; }
+
+    .controls button, .controls .file-label, .controls select {
+      background: #0f3460;
+      color: white;
+      border: 1px solid #e94560;
+      padding: 0.35rem 0.6rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+
+    .controls button:hover, .controls .file-label:hover { background: #e94560; }
+
+    .main-container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .view-container {
+      flex: 1;
+      overflow: auto;
+      padding: 1rem;
+      display: none;
+    }
+
+    .view-container.active { display: block; }
+
+    /* Waterfall styles */
+    .waterfall { position: relative; min-height: 100%; }
+
+    .time-axis {
+      position: sticky;
+      top: 0;
+      background: #1a1a2e;
+      z-index: 100;
+      height: 28px;
+      border-bottom: 1px solid #333;
+      margin-bottom: 4px;
+    }
+
+    .time-tick {
+      position: absolute;
+      font-size: 9px;
+      color: #666;
+      transform: translateX(-50%);
+    }
+
+    .time-tick::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 14px;
+      width: 1px;
+      height: 6px;
+      background: #444;
+    }
+
+    .resource-row {
+      display: flex;
+      align-items: center;
+      height: 22px;
+      margin: 1px 0;
+    }
+
+    .resource-row:hover { background: rgba(233, 69, 96, 0.1); }
+    .resource-row.selected { background: rgba(233, 69, 96, 0.2); }
+    .resource-row.highlighted { background: rgba(126, 200, 227, 0.15); }
+    .resource-row.internal { opacity: 0.4; }
+    .resource-row.internal:hover { opacity: 0.7; }
+
+    .resource-label {
+      width: 180px;
+      min-width: 180px;
+      padding-right: 8px;
+      font-size: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .resource-label .indent {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-left: 1px solid #444;
+      border-bottom: 1px solid #444;
+    }
+
+    .type-badge {
+      padding: 1px 3px;
+      border-radius: 2px;
+      font-size: 8px;
+      font-weight: bold;
+    }
+
+    .resource-timeline {
+      flex: 1;
+      position: relative;
+      height: 100%;
+    }
+
+    .resource-bar {
+      position: absolute;
+      height: 14px;
+      top: 4px;
+      border-radius: 2px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      font-size: 8px;
+      color: white;
+      overflow: hidden;
+    }
+
+    .resource-bar .async-wait {
+      height: 100%;
+      opacity: 0.4;
+    }
+
+    .resource-bar .sync-time { height: 100%; }
+
+    .resource-bar .bar-label {
+      position: absolute;
+      left: 3px;
+      z-index: 1;
+      text-shadow: 0 0 2px rgba(0,0,0,0.9);
+    }
+
+    /* Bubble view styles */
+    #bubble-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .tooltip {
+      position: fixed;
+      background: rgba(22, 33, 62, 0.95);
+      border: 1px solid #e94560;
+      border-radius: 4px;
+      padding: 0.5rem;
+      font-size: 0.75rem;
+      pointer-events: none;
+      z-index: 1000;
+      max-width: 280px;
+    }
+
+    .tooltip-title {
+      font-weight: bold;
+      color: #e94560;
+      margin-bottom: 0.3rem;
+    }
+
+    /* Sidebar styles */
+    .sidebar {
+      width: 300px;
+      background: #16213e;
+      border-left: 1px solid #0f3460;
+      overflow-y: auto;
+      padding: 0.75rem;
+      font-size: 0.8rem;
+    }
+
+    .sidebar h2 { font-size: 0.9rem; margin-bottom: 0.5rem; color: #e94560; }
+    .sidebar h3 { font-size: 0.8rem; margin: 0.75rem 0 0.4rem; color: #aaa; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .stat-item {
+      background: #0f3460;
+      padding: 0.4rem;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .stat-value { font-size: 1.1rem; color: #e94560; font-weight: bold; }
+    .stat-label { font-size: 0.65rem; color: #aaa; }
+
+    .detail-item {
+      padding: 0.3rem 0.4rem;
+      background: #0f3460;
+      border-radius: 3px;
+      margin-bottom: 0.3rem;
+      font-size: 0.75rem;
+    }
+
+    .detail-item strong { color: #e94560; }
+
+    .stack-trace-container {
+      max-height: 150px;
+      overflow-y: auto;
+      background: #0a1628;
+      border-radius: 4px;
+      padding: 0.4rem;
+    }
+
+    .stack-frame {
+      font-family: monospace;
+      font-size: 0.7rem;
+      color: #7ec8e3;
+      padding: 0.2rem 0;
+      border-bottom: 1px solid #1a1a2e;
+      word-break: break-all;
+    }
+
+    .stack-frame:last-child {
+      border-bottom: none;
+    }
+
+    .stack-empty {
+      color: #666;
+      font-style: italic;
+      font-size: 0.7rem;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.65rem;
+    }
+
+    .legend-color {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+    }
+
+    .chain-nav {
+      display: flex;
+      gap: 0.4rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .chain-nav button {
+      flex: 1;
+      padding: 0.3rem;
+      background: #0f3460;
+      border: 1px solid #e94560;
+      color: white;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 0.7rem;
+    }
+
+    .chain-nav button:hover { background: #e94560; }
+    .chain-nav button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .timing-bar {
+      height: 18px;
+      display: flex;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 0.25rem;
+    }
+
+    .timing-bar .segment {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      color: white;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #666;
+    }
+
+    .textarea-container {
+      padding: 0.75rem;
+      display: none;
+      background: #16213e;
+    }
+
+    .textarea-container.show { display: block; }
+
+    .textarea-container textarea {
+      width: 100%;
+      height: 120px;
+      background: #0f3460;
+      color: white;
+      border: 1px solid #e94560;
+      border-radius: 4px;
+      padding: 0.5rem;
+      font-family: monospace;
+      font-size: 0.75rem;
+    }
+
+    /* Modal styles */
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 2000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-content {
+      background: #16213e;
+      border: 1px solid #e94560;
+      border-radius: 8px;
+      max-width: 800px;
+      max-height: 85vh;
+      width: 90%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #0f3460;
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 1.2rem;
+      color: #e94560;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 1.5rem;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .modal-close:hover { color: #e94560; }
+
+    .modal-body {
+      padding: 1.5rem;
+      overflow-y: auto;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+
+    .guide-section {
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #0f3460;
+    }
+
+    .guide-section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+    }
+
+    .guide-section h3 {
+      color: #7ec8e3;
+      margin: 0 0 0.5rem 0;
+      font-size: 1rem;
+    }
+
+    .guide-section p { margin: 0.4rem 0; }
+    .guide-section ul, .guide-section ol {
+      margin: 0.5rem 0;
+      padding-left: 1.5rem;
+    }
+    .guide-section li { margin: 0.25rem 0; }
+    .guide-section code {
+      background: #0f3460;
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      font-size: 0.8rem;
+    }
+
+    .guide-example {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin: 0.75rem 0;
+    }
+
+    .guide-bad, .guide-good {
+      padding: 0.5rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+
+    .guide-bad {
+      background: rgba(233, 69, 96, 0.15);
+      border: 1px solid rgba(233, 69, 96, 0.3);
+    }
+
+    .guide-good {
+      background: rgba(80, 200, 120, 0.15);
+      border: 1px solid rgba(80, 200, 120, 0.3);
+    }
+
+    .guide-bad pre, .guide-good pre {
+      margin: 0.5rem 0 0 0;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      color: #ccc;
+    }
+
+    .guide-tip {
+      background: rgba(255, 215, 0, 0.1);
+      border-left: 3px solid #ffd700;
+      padding: 0.4rem 0.6rem;
+      margin: 0.5rem 0;
+      font-size: 0.8rem;
+    }
+
+    .guide-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.5rem 0;
+      font-size: 0.8rem;
+    }
+
+    .guide-table th, .guide-table td {
+      padding: 0.4rem 0.6rem;
+      text-align: left;
+      border: 1px solid #0f3460;
+    }
+
+    .guide-table th {
+      background: #0f3460;
+      color: #7ec8e3;
+    }
+
+    .guide-table tr:nth-child(even) {
+      background: rgba(15, 52, 96, 0.3);
+    }
+
+    @media (max-width: 600px) {
+      .guide-example {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🔬 Async Trace Viewer</h1>
+    <div class="tabs">
+      <button class="tab active" data-view="waterfall">Waterfall</button>
+      <button class="tab" data-view="bubble">Bubble</button>
+    </div>
+    <div class="controls">
+      <label class="file-label" for="file-input">📁 Load</label>
+      <input type="file" id="file-input" accept=".json">
+      <button id="paste-btn">📋 Paste</button>
+      <select id="demo-select">
+        <option value="">Demo...</option>
+        <option value="timer">Timer</option>
+        <option value="async-patterns">Async Patterns</option>
+        <option value="chat-room">Chat Room</option>
+        <option value="good-parallel">Good: Parallel Fetches</option>
+        <option value="bad-sequential">Bad: Sequential Fetches</option>
+        <option value="bad-duplicates">Bad: Duplicate Fetches</option>
+        <option value="streams-pipeline">Streams Pipeline</option>
+      </select>
+      <select id="sort-mode">
+        <option value="tree">Tree</option>
+        <option value="creation">Time</option>
+        <option value="duration">Duration</option>
+      </select>
+      <select id="filter-mode">
+        <option value="all">All</option>
+        <option value="user">User Only</option>
+        <option value="typed">Typed Only</option>
+      </select>
+      <button id="tutorial-btn" style="background: #e94560;">❓ Guide</button>
+      <button id="ai-analyze-btn" style="background: #50c878;">🤖 Analyze</button>
+    </div>
+  </header>
+
+  <div class="textarea-container" id="paste-container">
+    <textarea id="json-input" placeholder="Paste async trace JSON..."></textarea>
+    <button id="load-json-btn" style="margin-top: 0.4rem;">Load</button>
+  </div>
+
+  <div class="main-container">
+    <div class="view-container active" id="waterfall-view">
+      <div class="empty-state" id="waterfall-empty">
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">📊</div>
+        <div>Load a trace to visualize</div>
+      </div>
+      <div class="waterfall" id="waterfall" style="display: none;"></div>
+    </div>
+
+    <div class="view-container" id="bubble-view">
+      <canvas id="bubble-canvas"></canvas>
+    </div>
+
+    <div class="sidebar">
+      <h2>Overview</h2>
+      <div class="stats">
+        <div class="stat-item">
+          <div class="stat-value" id="stat-duration">-</div>
+          <div class="stat-label">Duration (ms)</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="stat-resources">-</div>
+          <div class="stat-label">Resources</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="stat-sync">-</div>
+          <div class="stat-label">Sync (ms)</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="stat-async">-</div>
+          <div class="stat-label">Async (ms)</div>
+        </div>
+      </div>
+
+      <h3>Activity Timeline</h3>
+      <canvas id="timeline-chart" height="40" style="width: 100%; background: #0f3460; border-radius: 4px;"></canvas>
+
+      <h3>Type Distribution</h3>
+      <canvas id="type-chart" height="80" style="width: 100%; background: #0f3460; border-radius: 4px; margin-bottom: 0.5rem;"></canvas>
+      <div id="type-breakdown" style="font-size: 0.7rem;"></div>
+
+      <h3>Time Breakdown</h3>
+      <canvas id="time-chart" height="24" style="width: 100%; border-radius: 4px;"></canvas>
+      <div id="time-breakdown" style="font-size: 0.7rem; margin-top: 0.25rem;"></div>
+
+      <h3>Legend</h3>
+      <div class="legend" id="legend"></div>
+
+      <h3>Selected</h3>
+      <div class="chain-nav">
+        <button id="nav-parent" disabled>↑ Parent</button>
+        <button id="nav-children" disabled>↓ Children</button>
+      </div>
+      <div id="selected-details">
+        <div class="detail-item" style="color: #666;">Click a resource</div>
+      </div>
+
+      <h3>Timing</h3>
+      <div id="timing-breakdown">
+        <div class="detail-item" style="color: #666;">Select a resource</div>
+      </div>
+
+      <h3>Stack Trace</h3>
+      <div id="stack-trace" class="stack-trace-container">
+        <div class="stack-empty">Click a resource to see its stack</div>
+      </div>
+
+      <h3>Annotations</h3>
+      <div id="annotations">
+        <div class="detail-item" style="color: #666;">-</div>
+      </div>
+
+      <h3>How to Read</h3>
+      <div id="help-hints">
+        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+          <strong>Resource Classifications:</strong><br>
+          • <span style="color: #50c878;">Typed</span> = API calls (fetch, timer, cache)<br>
+          • <span style="color: #7ec8e3;">User</span> = Promises from your code<br>
+          • <span style="color: #888;">Internal</span> = Runtime machinery<br>
+          <em style="color: #666;">Internal resources appear dimmed</em>
+        </div>
+        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+          <strong>Filter Modes:</strong><br>
+          • All = Show everything (internal dimmed)<br>
+          • User Only = Hide internal runtime<br>
+          • Typed Only = Just API operations
+        </div>
+        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+          <strong>Bubble View:</strong><br>
+          • Tree flows top→down (root at top)<br>
+          • Bubble size = sync execution time<br>
+          • Edge labels = async wait latency<br>
+          • <span style="color: #ffd700;">Gold</span> labels = latency &gt;1ms<br>
+          • Scroll to zoom, Shift+drag to pan
+        </div>
+        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+          <strong>Waterfall View:</strong><br>
+          • Bars show resource lifetime<br>
+          • Faded portion = async wait<br>
+          • Solid portion = sync execution<br>
+          • Tree mode shows causality hierarchy
+        </div>
+        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+          <strong>What to Look For:</strong><br>
+          • Long edges = async bottlenecks<br>
+          • Large bubbles = CPU-heavy ops<br>
+          • Sequential chains = serialization<br>
+          • Wide trees = good parallelism
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tooltip" class="tooltip" style="display: none;"></div>
+
+  <!-- AI Analysis Modal -->
+  <div id="ai-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 900px;">
+      <div class="modal-header">
+        <h2>🤖 AI Performance Analysis</h2>
+        <button class="modal-close" id="ai-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom: 1rem;">Copy the analysis prompt below and paste it into Claude, ChatGPT, or your preferred AI assistant:</p>
+
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+          <button id="ai-copy-btn" style="background: #0f3460; border: 1px solid #e94560; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;">📋 Copy to Clipboard</button>
+          <a id="ai-claude-link" href="#" target="_blank" style="background: #e94560; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; display: inline-block;">Open in Claude →</a>
+        </div>
+
+        <textarea id="ai-prompt" readonly style="width: 100%; height: 400px; background: #0a1628; color: #7ec8e3; border: 1px solid #0f3460; border-radius: 4px; padding: 1rem; font-family: monospace; font-size: 0.75rem; resize: vertical;"></textarea>
+
+        <div id="ai-copy-status" style="margin-top: 0.5rem; color: #50c878; display: none;">✓ Copied to clipboard!</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tutorial Modal -->
+  <div id="tutorial-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>🔬 Async Trace Optimization Guide</h2>
+        <button class="modal-close" id="tutorial-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="guide-section">
+          <h3>1. Identify Serialization Bottlenecks</h3>
+          <p><strong>Pattern:</strong> Long vertical chains in bubble view (sequential operations)</p>
+          <div class="guide-example">
+            <div class="guide-bad">
+              <strong>❌ Bad: Sequential</strong>
+              <pre>const a = await fetch('/api/a');
+const b = await fetch('/api/b');
+const c = await fetch('/api/c');</pre>
+            </div>
+            <div class="guide-good">
+              <strong>✓ Good: Parallel</strong>
+              <pre>const [a, b, c] = await Promise.all([
+  fetch('/api/a'),
+  fetch('/api/b'),
+  fetch('/api/c')
+]);</pre>
+            </div>
+          </div>
+          <p class="guide-tip">💡 Sequential = tall narrow tree. Parallel = wide branching.</p>
+        </div>
+
+        <div class="guide-section">
+          <h3>2. Find Async Bottlenecks (Long Waits)</h3>
+          <p><strong>Pattern:</strong> <span style="color: #ffd700;">Gold-colored edge labels</span> (>1ms latency)</p>
+          <p><strong>Questions to ask:</strong></p>
+          <ul>
+            <li>Can this fetch response be cached?</li>
+            <li>Is this KV/D1/DO call necessary?</li>
+            <li>Can non-critical work use <code>ctx.waitUntil()</code>?</li>
+          </ul>
+        </div>
+
+        <div class="guide-section">
+          <h3>3. Analyze CPU vs I/O Balance</h3>
+          <p>Check the <strong>Time Breakdown</strong> chart in sidebar:</p>
+          <table class="guide-table">
+            <tr><th>Ratio</th><th>Meaning</th><th>Action</th></tr>
+            <tr><td>90% async</td><td>I/O bound (typical)</td><td>Optimize fetch/cache</td></tr>
+            <tr><td>50/50</td><td>Mixed workload</td><td>Profile both paths</td></tr>
+            <tr><td>90% sync</td><td>CPU bound</td><td>Optimize JS, use streams</td></tr>
+          </table>
+        </div>
+
+        <div class="guide-section">
+          <h3>4. Reduce Runtime Overhead</h3>
+          <p><strong>Pattern:</strong> Many dimmed (internal) promises</p>
+          <p>Use <strong>"User Only"</strong> filter to focus on your code.</p>
+          <ul>
+            <li>Deeply nested <code>.then()</code> chains create overhead</li>
+            <li>Flatten with <code>async/await</code></li>
+            <li>Reduce intermediate transformations</li>
+          </ul>
+        </div>
+
+        <div class="guide-section">
+          <h3>5. Find Redundant Operations</h3>
+          <p><strong>Pattern:</strong> Multiple fetch/cache with same URL annotation</p>
+          <div class="guide-example">
+            <div class="guide-bad">
+              <strong>❌ Duplicate fetches</strong>
+              <pre>const userA = await fetch('/user/123');
+// later...
+const userB = await fetch('/user/123');</pre>
+            </div>
+            <div class="guide-good">
+              <strong>✓ Cache in variable</strong>
+              <pre>const user = await fetch('/user/123');
+// reuse `user` throughout</pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-section">
+          <h3>6. Find Critical Path</h3>
+          <p>The critical path determines total request time.</p>
+          <ol>
+            <li>Find resource with latest <code>callbackEndedAt</code></li>
+            <li>Navigate up to root using ↑ button</li>
+            <li>Sum of edge latencies = minimum request time</li>
+          </ol>
+          <p class="guide-tip">💡 Only optimizing the critical path improves latency.</p>
+        </div>
+
+        <div class="guide-section">
+          <h3>Quick Reference</h3>
+          <table class="guide-table">
+            <tr><th>Visual Pattern</th><th>Meaning</th><th>Fix</th></tr>
+            <tr><td>Tall narrow tree</td><td>Sequential ops</td><td>Promise.all</td></tr>
+            <tr><td style="color: #ffd700;">Gold edges</td><td>High latency</td><td>Cache/batch</td></tr>
+            <tr><td>Many small bubbles</td><td>Overhead</td><td>Simplify chains</td></tr>
+            <tr><td>Wide shallow tree</td><td>Parallelism ✓</td><td>Already good</td></tr>
+            <tr><td>Large bubbles</td><td>CPU heavy</td><td>Optimize algo</td></tr>
+          </table>
+        </div>
+
+        <div class="guide-section">
+          <h3>Optimization Workflow</h3>
+          <ol>
+            <li><strong>Load trace</strong> → Review summary charts</li>
+            <li><strong>Filter "User Only"</strong> → Focus on your code</li>
+            <li><strong>Find longest chain</strong> → Identify critical path</li>
+            <li><strong>Check gold edges</strong> → Find wait bottlenecks</li>
+            <li><strong>Look for width</strong> → Verify parallelism</li>
+            <li><strong>Check annotations</strong> → Spot duplicates</li>
+            <li><strong>Implement fix</strong> → Re-trace and compare</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TYPE_COLORS = {
+      'root': '#e94560',
+      'js-promise': '#7ec8e3',
+      'kj-promise': '#50c878',
+      'fetch': '#ff6347',
+      'cache-get': '#00ced1',
+      'cache-put': '#20b2aa',
+      'timer': '#ffd700',
+      'stream-read': '#87ceeb',
+      'stream-write': '#4682b4',
+      'websocket': '#dc143c',
+      'other': '#808080'
+    };
+
+    let traceData = null;
+    let selectedResource = null;
+    let highlightedChain = new Set();
+    let currentView = 'waterfall';
+    let bubbles = [];
+    let cachedBubbleLayout = null;  // Cache layout to prevent re-rendering on selection
+    let canvas, ctx;
+
+    // Pan and zoom state for bubble view
+    let panX = 0, panY = 0;
+    let zoom = 1;
+    let isPanning = false;
+    let lastMouseX = 0, lastMouseY = 0;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      canvas = document.getElementById('bubble-canvas');
+      ctx = canvas.getContext('2d');
+
+      // Tab switching
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          currentView = tab.dataset.view;
+          document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+          document.getElementById(currentView + '-view').classList.add('active');
+          if (traceData) render();
+        });
+      });
+
+      document.getElementById('file-input').addEventListener('change', handleFileInput);
+      document.getElementById('paste-btn').addEventListener('click', () => {
+        document.getElementById('paste-container').classList.toggle('show');
+      });
+      document.getElementById('load-json-btn').addEventListener('click', loadFromTextarea);
+      document.getElementById('demo-select').addEventListener('change', loadDemoData);
+      document.getElementById('sort-mode').addEventListener('change', render);
+      document.getElementById('filter-mode').addEventListener('change', () => {
+        cachedBubbleLayout = null;  // Re-layout when filter changes
+        render();
+      });
+      document.getElementById('nav-parent').addEventListener('click', navigateToParent);
+      document.getElementById('nav-children').addEventListener('click', navigateToChildren);
+
+      // Tutorial modal
+      document.getElementById('tutorial-btn').addEventListener('click', () => {
+        document.getElementById('tutorial-modal').style.display = 'flex';
+      });
+      document.getElementById('tutorial-close').addEventListener('click', () => {
+        document.getElementById('tutorial-modal').style.display = 'none';
+      });
+      document.getElementById('tutorial-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'tutorial-modal') {
+          document.getElementById('tutorial-modal').style.display = 'none';
+        }
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          document.getElementById('tutorial-modal').style.display = 'none';
+          document.getElementById('ai-modal').style.display = 'none';
+        }
+      });
+
+      // AI Analysis modal
+      document.getElementById('ai-analyze-btn').addEventListener('click', openAIAnalysis);
+      document.getElementById('ai-close').addEventListener('click', () => {
+        document.getElementById('ai-modal').style.display = 'none';
+      });
+      document.getElementById('ai-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'ai-modal') {
+          document.getElementById('ai-modal').style.display = 'none';
+        }
+      });
+      document.getElementById('ai-copy-btn').addEventListener('click', () => {
+        const prompt = document.getElementById('ai-prompt').value;
+        navigator.clipboard.writeText(prompt).then(() => {
+          const status = document.getElementById('ai-copy-status');
+          status.style.display = 'block';
+          setTimeout(() => status.style.display = 'none', 2000);
+        });
+      });
+
+      canvas.addEventListener('mousemove', handleBubbleMouseMove);
+      canvas.addEventListener('click', handleBubbleClick);
+      canvas.addEventListener('mouseleave', () => {
+        document.getElementById('tooltip').style.display = 'none';
+        isPanning = false;
+      });
+
+      // Pan with middle mouse or shift+left drag
+      canvas.addEventListener('mousedown', (e) => {
+        if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+          isPanning = true;
+          lastMouseX = e.clientX;
+          lastMouseY = e.clientY;
+          canvas.style.cursor = 'grabbing';
+          e.preventDefault();
+        }
+      });
+
+      canvas.addEventListener('mouseup', () => {
+        isPanning = false;
+        canvas.style.cursor = 'default';
+      });
+
+      canvas.addEventListener('mousemove', (e) => {
+        if (isPanning) {
+          panX += e.clientX - lastMouseX;
+          panY += e.clientY - lastMouseY;
+          lastMouseX = e.clientX;
+          lastMouseY = e.clientY;
+          renderBubble();
+        }
+      });
+
+      // Zoom with scroll wheel
+      canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const oldZoom = zoom;
+        const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
+        zoom = Math.max(0.25, Math.min(3, zoom * zoomDelta));
+
+        // Adjust pan to zoom toward mouse position
+        panX = mouseX - (mouseX - panX) * (zoom / oldZoom);
+        panY = mouseY - (mouseY - panY) * (zoom / oldZoom);
+
+        renderBubble();
+      });
+
+      window.addEventListener('resize', () => {
+        if (traceData && currentView === 'bubble') {
+          cachedBubbleLayout = null;  // Invalidate cache on resize
+          renderBubble();
+        }
+      });
+    });
+
+    function handleFileInput(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          traceData = JSON.parse(e.target.result);
+          processAndRender();
+        } catch (err) {
+          alert('Invalid JSON: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function loadFromTextarea() {
+      try {
+        traceData = JSON.parse(document.getElementById('json-input').value);
+        processAndRender();
+        document.getElementById('paste-container').classList.remove('show');
+      } catch (err) {
+        alert('Invalid JSON: ' + err.message);
+      }
+    }
+
+    async function loadDemoData() {
+      const demo = document.getElementById('demo-select').value;
+      if (!demo) return;
+      const files = {
+          'timer': 'sample-trace.json',
+          'async-patterns': 'sample-async-patterns.json',
+          'chat-room': 'sample-chat-room.json',
+          'good-parallel': 'sample-good-parallel.json',
+          'bad-sequential': 'sample-bad-sequential.json',
+          'bad-duplicates': 'sample-bad-duplicates.json',
+          'streams-pipeline': 'sample-streams-pipeline.json'
+        };
+      try {
+        const response = await fetch(files[demo]);
+        traceData = await response.json();
+        processAndRender();
+      } catch (err) {
+        alert('Failed to load: ' + err.message);
+      }
+    }
+
+    // Classify a resource as 'typed', 'user', or 'internal'
+    function classifyResource(r) {
+      // Typed resources are explicit API operations (not js-promise)
+      if (r.type !== 'js-promise') {
+        return 'typed';
+      }
+      // JS promises with stack traces pointing to user code = user
+      const st = traceData.stackTraceMap.get(r.stackTraceId);
+      if (st && st.frames && st.frames.length > 0) {
+        // Check if any frame is in user code (not empty, not internal)
+        const hasUserFrame = st.frames.some(f =>
+          f && !f.startsWith('node:') && !f.startsWith('cloudflare:'));
+        if (hasUserFrame) return 'user';
+      }
+      // JS promises with empty stack traces = internal runtime machinery
+      return 'internal';
+    }
+
+    function shouldShowResource(r) {
+      const filterMode = document.getElementById('filter-mode').value;
+      if (filterMode === 'all') return true;
+
+      const classification = r._classification || classifyResource(r);
+      if (filterMode === 'user') {
+        return classification === 'typed' || classification === 'user';
+      }
+      if (filterMode === 'typed') {
+        return classification === 'typed';
+      }
+      return true;
+    }
+
+    function processAndRender() {
+      cachedBubbleLayout = null;  // Invalidate layout cache when loading new data
+      panX = 0; panY = 0; zoom = 1;  // Reset pan/zoom
+
+      traceData.resourceMap = new Map();
+      traceData.resources.forEach(r => traceData.resourceMap.set(r.asyncId, r));
+
+      traceData.stackTraceMap = new Map();
+      traceData.stackTraces.forEach(st => traceData.stackTraceMap.set(st.id, st));
+
+      traceData.annotationMap = new Map();
+      traceData.annotations.forEach(a => {
+        if (!traceData.annotationMap.has(a.asyncId)) traceData.annotationMap.set(a.asyncId, []);
+        traceData.annotationMap.get(a.asyncId).push(a);
+      });
+
+      // Classify each resource
+      traceData.resources.forEach(r => {
+        r._classification = classifyResource(r);
+      });
+
+      traceData.childrenMap = new Map();
+      traceData.resources.forEach(r => {
+        if (r.triggerId !== 0) {
+          if (!traceData.childrenMap.has(r.triggerId)) traceData.childrenMap.set(r.triggerId, []);
+          traceData.childrenMap.get(r.triggerId).push(r.asyncId);
+        }
+      });
+
+      traceData.depthMap = new Map();
+      function calcDepth(id, depth) {
+        traceData.depthMap.set(id, depth);
+        (traceData.childrenMap.get(id) || []).forEach(cid => calcDepth(cid, depth + 1));
+      }
+      const root = traceData.resources.find(r => r.type === 'root');
+      if (root) calcDepth(root.asyncId, 0);
+
+      updateStats();
+      updateLegend();
+      render();
+    }
+
+    function updateStats() {
+      let totalSync = 0, totalAsync = 0;
+      traceData.resources.forEach(r => {
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          totalSync += r.callbackEndedAt - r.callbackStartedAt;
+        }
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          totalAsync += r.callbackStartedAt - r.createdAt;
+        }
+      });
+      document.getElementById('stat-duration').textContent = (traceData.requestDurationNs / 1e6).toFixed(1);
+      document.getElementById('stat-resources').textContent = traceData.resources.length;
+      document.getElementById('stat-sync').textContent = (totalSync / 1e6).toFixed(1);
+      document.getElementById('stat-async').textContent = (totalAsync / 1e6).toFixed(1);
+
+      // Render summary charts
+      renderTimelineChart();
+      renderTypeChart();
+      renderTimeBreakdownChart(totalSync, totalAsync);
+    }
+
+    function renderTimelineChart() {
+      const canvas = document.getElementById('timeline-chart');
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = 40 * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+      const width = rect.width;
+      const height = 40;
+      const duration = traceData.requestDurationNs;
+      const bucketCount = Math.floor(width / 3);
+      const buckets = new Array(bucketCount).fill(0);
+      const syncBuckets = new Array(bucketCount).fill(0);
+
+      // Count activity per time bucket
+      traceData.resources.forEach(r => {
+        const start = r.createdAt;
+        const end = r.callbackEndedAt > 0 ? r.callbackEndedAt : (r.destroyedAt > 0 ? r.destroyedAt : duration);
+        const startBucket = Math.floor((start / duration) * bucketCount);
+        const endBucket = Math.min(bucketCount - 1, Math.floor((end / duration) * bucketCount));
+
+        for (let i = startBucket; i <= endBucket; i++) {
+          if (i >= 0 && i < bucketCount) buckets[i]++;
+        }
+
+        // Track sync time separately
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          const syncStart = Math.floor((r.callbackStartedAt / duration) * bucketCount);
+          const syncEnd = Math.min(bucketCount - 1, Math.floor((r.callbackEndedAt / duration) * bucketCount));
+          for (let i = syncStart; i <= syncEnd; i++) {
+            if (i >= 0 && i < bucketCount) syncBuckets[i]++;
+          }
+        }
+      });
+
+      const maxCount = Math.max(...buckets, 1);
+      const barWidth = width / bucketCount;
+
+      ctx.fillStyle = '#0f3460';
+      ctx.fillRect(0, 0, width, height);
+
+      // Draw async activity (all resources active)
+      ctx.fillStyle = 'rgba(126, 200, 227, 0.4)';
+      buckets.forEach((count, i) => {
+        const barHeight = (count / maxCount) * (height - 4);
+        ctx.fillRect(i * barWidth, height - 2 - barHeight, barWidth - 1, barHeight);
+      });
+
+      // Draw sync activity overlay
+      ctx.fillStyle = 'rgba(233, 69, 96, 0.8)';
+      syncBuckets.forEach((count, i) => {
+        const barHeight = (count / maxCount) * (height - 4);
+        ctx.fillRect(i * barWidth, height - 2 - barHeight, barWidth - 1, barHeight);
+      });
+
+      // Draw time markers
+      ctx.fillStyle = '#666';
+      ctx.font = '8px sans-serif';
+      ctx.textAlign = 'center';
+      for (let i = 0; i <= 4; i++) {
+        const x = (i / 4) * width;
+        const time = (i / 4) * duration / 1e6;
+        ctx.fillText(time.toFixed(0) + 'ms', x, 10);
+      }
+    }
+
+    function renderTypeChart() {
+      const canvas = document.getElementById('type-chart');
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = 80 * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+      const width = rect.width;
+      const height = 80;
+
+      // Count by type and calculate sync time per type
+      const typeCounts = new Map();
+      const typeSyncTime = new Map();
+      traceData.resources.forEach(r => {
+        typeCounts.set(r.type, (typeCounts.get(r.type) || 0) + 1);
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          typeSyncTime.set(r.type, (typeSyncTime.get(r.type) || 0) + (r.callbackEndedAt - r.callbackStartedAt));
+        }
+      });
+
+      const types = Array.from(typeCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6);
+
+      const maxCount = Math.max(...types.map(t => t[1]), 1);
+      const barHeight = (height - 20) / types.length;
+
+      ctx.fillStyle = '#0f3460';
+      ctx.fillRect(0, 0, width, height);
+
+      // Draw horizontal bars
+      types.forEach(([type, count], i) => {
+        const y = 4 + i * barHeight;
+        const barWidth = ((count / maxCount) * (width - 60));
+
+        ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+        ctx.globalAlpha = 0.8;
+        ctx.fillRect(55, y + 2, barWidth, barHeight - 4);
+        ctx.globalAlpha = 1;
+
+        // Type label
+        ctx.fillStyle = '#aaa';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(type.replace('js-', '').substring(0, 7), 52, y + barHeight / 2 + 3);
+
+        // Count label
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'left';
+        ctx.fillText(count.toString(), barWidth + 58, y + barHeight / 2 + 3);
+      });
+
+      // Update breakdown text
+      const breakdown = document.getElementById('type-breakdown');
+      const totalSyncTime = Array.from(typeSyncTime.values()).reduce((a, b) => a + b, 0);
+      breakdown.innerHTML = types.map(([type, count]) => {
+        const syncTime = typeSyncTime.get(type) || 0;
+        const pct = totalSyncTime > 0 ? ((syncTime / totalSyncTime) * 100).toFixed(0) : 0;
+        return `<span style="color: ${TYPE_COLORS[type] || '#808080'}">●</span> ${type}: ${count} (${pct}% CPU)`;
+      }).join('<br>');
+    }
+
+    function renderTimeBreakdownChart(totalSync, totalAsync) {
+      const canvas = document.getElementById('time-chart');
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = 24 * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+      const width = rect.width;
+      const height = 24;
+      const total = totalSync + totalAsync;
+
+      if (total === 0) return;
+
+      const syncWidth = (totalSync / total) * width;
+      const asyncWidth = (totalAsync / total) * width;
+
+      // Async portion (waiting)
+      ctx.fillStyle = 'rgba(126, 200, 227, 0.6)';
+      ctx.fillRect(0, 0, asyncWidth, height);
+
+      // Sync portion (executing)
+      ctx.fillStyle = '#e94560';
+      ctx.fillRect(asyncWidth, 0, syncWidth, height);
+
+      // Labels
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+
+      if (asyncWidth > 50) {
+        ctx.fillText(`Async ${(totalAsync / 1e6).toFixed(1)}ms`, asyncWidth / 2, height / 2 + 4);
+      }
+      if (syncWidth > 50) {
+        ctx.fillText(`Sync ${(totalSync / 1e6).toFixed(1)}ms`, asyncWidth + syncWidth / 2, height / 2 + 4);
+      }
+
+      // Update breakdown text
+      const syncPct = ((totalSync / total) * 100).toFixed(0);
+      const asyncPct = ((totalAsync / total) * 100).toFixed(0);
+      document.getElementById('time-breakdown').innerHTML =
+        `<span style="color: #7ec8e3;">■</span> Async wait: ${asyncPct}% | ` +
+        `<span style="color: #e94560;">■</span> Sync exec: ${syncPct}%`;
+    }
+
+    function updateLegend() {
+      const types = new Set(traceData.resources.map(r => r.type));
+      const legend = document.getElementById('legend');
+      legend.innerHTML = '';
+      types.forEach(type => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `<div class="legend-color" style="background: ${TYPE_COLORS[type] || '#808080'}"></div><span>${type}</span>`;
+        legend.appendChild(item);
+      });
+    }
+
+    function render() {
+      if (currentView === 'waterfall') {
+        renderWaterfall();
+      } else {
+        renderBubble();
+      }
+    }
+
+    // ==================== WATERFALL VIEW ====================
+    function renderWaterfall() {
+      document.getElementById('waterfall-empty').style.display = 'none';
+      document.getElementById('waterfall').style.display = 'block';
+
+      const container = document.getElementById('waterfall');
+      container.innerHTML = '';
+
+      const sortMode = document.getElementById('sort-mode').value;
+      let sorted = [...traceData.resources];
+
+      if (sortMode === 'creation') {
+        sorted.sort((a, b) => a.createdAt - b.createdAt);
+      } else if (sortMode === 'duration') {
+        sorted.sort((a, b) => {
+          const durA = (a.callbackEndedAt || a.destroyedAt || traceData.requestDurationNs) - a.createdAt;
+          const durB = (b.callbackEndedAt || b.destroyedAt || traceData.requestDurationNs) - b.createdAt;
+          return durB - durA;
+        });
+      } else {
+        sorted = [];
+        function addToTree(id) {
+          const r = traceData.resourceMap.get(id);
+          if (r) {
+            sorted.push(r);
+            const children = (traceData.childrenMap.get(id) || []).slice().sort((a, b) => {
+              return traceData.resourceMap.get(a).createdAt - traceData.resourceMap.get(b).createdAt;
+            });
+            children.forEach(addToTree);
+          }
+        }
+        const root = traceData.resources.find(r => r.type === 'root');
+        if (root) addToTree(root.asyncId);
+        traceData.resources.forEach(r => { if (!sorted.includes(r)) sorted.push(r); });
+      }
+
+      const duration = traceData.requestDurationNs;
+      const timelineWidth = Math.max(600, container.clientWidth - 200);
+
+      // Time axis
+      const axis = document.createElement('div');
+      axis.className = 'time-axis';
+      axis.style.width = (180 + timelineWidth) + 'px';
+      for (let i = 0; i <= 10; i++) {
+        const tick = document.createElement('div');
+        tick.className = 'time-tick';
+        tick.style.left = (180 + (i / 10) * timelineWidth) + 'px';
+        tick.textContent = ((i / 10) * duration / 1e6).toFixed(1) + 'ms';
+        axis.appendChild(tick);
+      }
+      container.appendChild(axis);
+
+      // Rows
+      sorted.forEach(r => {
+        if (!shouldShowResource(r)) return;
+
+        const row = document.createElement('div');
+        row.className = 'resource-row';
+        if (selectedResource && selectedResource.asyncId === r.asyncId) row.classList.add('selected');
+        if (highlightedChain.has(r.asyncId)) row.classList.add('highlighted');
+        if (r._classification === 'internal') row.classList.add('internal');
+
+        const label = document.createElement('div');
+        label.className = 'resource-label';
+
+        const depth = traceData.depthMap.get(r.asyncId) || 0;
+        if (sortMode === 'tree' && depth > 0) {
+          for (let i = 0; i < depth; i++) {
+            const indent = document.createElement('span');
+            indent.className = 'indent';
+            label.appendChild(indent);
+          }
+        }
+
+        const badge = document.createElement('span');
+        badge.className = 'type-badge';
+        badge.style.background = TYPE_COLORS[r.type] || '#808080';
+        badge.textContent = r.type.replace('js-', '').substring(0, 5);
+        label.appendChild(badge);
+
+        const idSpan = document.createElement('span');
+        idSpan.textContent = ` #${r.asyncId}`;
+        idSpan.style.color = '#888';
+        label.appendChild(idSpan);
+
+        row.appendChild(label);
+
+        const timeline = document.createElement('div');
+        timeline.className = 'resource-timeline';
+        timeline.style.width = timelineWidth + 'px';
+
+        const bar = document.createElement('div');
+        bar.className = 'resource-bar';
+
+        const startTime = r.createdAt;
+        const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt : (r.destroyedAt > 0 ? r.destroyedAt : duration);
+        const left = (startTime / duration) * timelineWidth;
+        const width = Math.max(2, ((endTime - startTime) / duration) * timelineWidth);
+
+        bar.style.left = left + 'px';
+        bar.style.width = width + 'px';
+        bar.style.background = TYPE_COLORS[r.type] || '#808080';
+
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          const asyncWait = r.callbackStartedAt - r.createdAt;
+          const syncTime = r.callbackEndedAt - r.callbackStartedAt;
+          const total = endTime - startTime;
+
+          if (asyncWait > 0 && total > 0) {
+            const asyncDiv = document.createElement('div');
+            asyncDiv.className = 'async-wait';
+            asyncDiv.style.width = ((asyncWait / total) * 100) + '%';
+            asyncDiv.style.background = TYPE_COLORS[r.type] || '#808080';
+            bar.appendChild(asyncDiv);
+          }
+
+          if (syncTime > 0 && total > 0) {
+            const syncDiv = document.createElement('div');
+            syncDiv.className = 'sync-time';
+            syncDiv.style.width = ((syncTime / total) * 100) + '%';
+            syncDiv.style.background = TYPE_COLORS[r.type] || '#808080';
+            bar.appendChild(syncDiv);
+          }
+        }
+
+        const totalMs = (endTime - startTime) / 1e6;
+        if (totalMs >= 0.5 && width > 30) {
+          const barLabel = document.createElement('span');
+          barLabel.className = 'bar-label';
+          barLabel.textContent = totalMs.toFixed(1) + 'ms';
+          bar.appendChild(barLabel);
+        }
+
+        bar.addEventListener('click', () => selectResource(r));
+        timeline.appendChild(bar);
+        row.appendChild(timeline);
+        container.appendChild(row);
+      });
+    }
+
+    // ==================== BUBBLE VIEW ====================
+    function computeBubbleLayout() {
+      const container = document.getElementById('bubble-view');
+      const canvasWidth = container.clientWidth;
+      const canvasHeight = container.clientHeight;
+
+      const padding = 50;
+      const width = canvasWidth - padding * 2;
+      const height = canvasHeight - padding * 2;
+
+      // Filter resources based on current filter mode
+      const filteredResources = traceData.resources.filter(shouldShowResource);
+
+      // Build tree structure with individual resources (not grouped)
+      const nodes = new Map();
+      const root = filteredResources.find(r => r.type === 'root');
+      if (!root) return null;
+
+      // Calculate max sync time for sizing
+      const maxSyncTime = Math.max(...filteredResources.map(r =>
+        (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0
+      ), 1);
+
+      // Create nodes for each resource
+      filteredResources.forEach(r => {
+        const syncTime = (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0;
+        const isInternal = r._classification === 'internal';
+        nodes.set(r.asyncId, {
+          resource: r,
+          children: [],
+          depth: 0,
+          x: 0,
+          y: 0,
+          radius: Math.max(12, Math.min(35, Math.sqrt(syncTime / maxSyncTime) * 40 + 12)),
+          color: TYPE_COLORS[r.type] || '#808080',
+          subtreeWidth: 0,
+          isInternal
+        });
+      });
+
+      // Build parent-child relationships (only for filtered resources)
+      filteredResources.forEach(r => {
+        if (r.triggerId !== 0 && nodes.has(r.triggerId) && nodes.has(r.asyncId)) {
+          nodes.get(r.triggerId).children.push(nodes.get(r.asyncId));
+        }
+      });
+
+      // Sort children by creation time to ensure consistent ordering
+      nodes.forEach(node => {
+        node.children.sort((a, b) => a.resource.createdAt - b.resource.createdAt);
+      });
+
+      // Calculate depths (BFS from root)
+      const rootNode = nodes.get(root.asyncId);
+      if (!rootNode) return null;
+
+      let maxDepth = 0;
+      const queue = [[rootNode, 0]];
+      while (queue.length > 0) {
+        const [node, depth] = queue.shift();
+        node.depth = depth;
+        maxDepth = Math.max(maxDepth, depth);
+        node.children.forEach(child => queue.push([child, depth + 1]));
+      }
+
+      // Calculate subtree widths (post-order traversal)
+      const nodeSpacing = 50;
+      function calcSubtreeWidth(node) {
+        if (node.children.length === 0) {
+          node.subtreeWidth = node.radius * 2 + nodeSpacing;
+          return node.subtreeWidth;
+        }
+        let totalWidth = 0;
+        node.children.forEach(child => {
+          totalWidth += calcSubtreeWidth(child);
+        });
+        node.subtreeWidth = Math.max(node.radius * 2 + nodeSpacing, totalWidth);
+        return node.subtreeWidth;
+      }
+      calcSubtreeWidth(rootNode);
+
+      // Position nodes (top-down tree layout)
+      const levelHeight = Math.min(80, (height - 40) / (maxDepth + 1));
+
+      function positionNode(node, leftBound, rightBound) {
+        node.x = (leftBound + rightBound) / 2;
+        node.y = padding + 30 + node.depth * levelHeight;
+
+        if (node.children.length > 0) {
+          const totalChildWidth = node.children.reduce((sum, c) => sum + c.subtreeWidth, 0);
+          let currentLeft = node.x - totalChildWidth / 2;
+
+          node.children.forEach(child => {
+            const childRight = currentLeft + child.subtreeWidth;
+            positionNode(child, currentLeft, childRight);
+            currentLeft = childRight;
+          });
+        }
+      }
+
+      // Start positioning from root centered at top
+      positionNode(rootNode, padding, canvasWidth - padding);
+
+      // Collect all positioned nodes for rendering
+      const allNodes = [];
+      function collectNodes(node) {
+        allNodes.push(node);
+        node.children.forEach(collectNodes);
+      }
+      collectNodes(rootNode);
+
+      // Also add orphan nodes (not connected to root)
+      const positionedIds = new Set(allNodes.map(n => n.resource.asyncId));
+      let orphanX = padding + 30;
+      nodes.forEach((node, id) => {
+        if (!positionedIds.has(id)) {
+          node.x = orphanX;
+          node.y = canvasHeight - padding - 30;
+          orphanX += node.radius * 2 + 20;
+          allNodes.push(node);
+        }
+      });
+
+      return {
+        nodes,
+        allNodes,
+        maxDepth,
+        levelHeight,
+        padding,
+        canvasWidth,
+        canvasHeight
+      };
+    }
+
+    function renderBubble() {
+      const container = document.getElementById('bubble-view');
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (!traceData) return;
+
+      // Compute layout only if not cached or dimensions changed
+      if (!cachedBubbleLayout ||
+          cachedBubbleLayout.canvasWidth !== canvas.width ||
+          cachedBubbleLayout.canvasHeight !== canvas.height) {
+        cachedBubbleLayout = computeBubbleLayout();
+      }
+
+      if (!cachedBubbleLayout) return;
+
+      const { nodes, allNodes, maxDepth, levelHeight, padding } = cachedBubbleLayout;
+
+      bubbles = [];
+
+      // Apply pan and zoom transform
+      ctx.save();
+      ctx.translate(panX, panY);
+      ctx.scale(zoom, zoom);
+
+      // Draw edges with latency labels
+      allNodes.forEach(node => {
+        if (node.resource.triggerId !== 0) {
+          const parentNode = nodes.get(node.resource.triggerId);
+          if (parentNode) {
+            // Calculate latency (time from parent callback end or creation to child creation)
+            const parentEnd = parentNode.resource.callbackEndedAt > 0 ? parentNode.resource.callbackEndedAt : parentNode.resource.createdAt;
+            const childStart = node.resource.createdAt;
+            const latencyNs = childStart - parentEnd;
+            const latencyMs = latencyNs / 1e6;
+
+            // Draw edge line
+            const isInChain = highlightedChain.has(node.resource.asyncId) && highlightedChain.has(parentNode.resource.asyncId);
+            ctx.strokeStyle = isInChain ? 'rgba(233, 69, 96, 0.8)' : 'rgba(126, 200, 227, 0.4)';
+            ctx.lineWidth = isInChain ? 2 : 1;
+
+            ctx.beginPath();
+            ctx.moveTo(parentNode.x, parentNode.y + parentNode.radius);
+            ctx.lineTo(node.x, node.y - node.radius);
+            ctx.stroke();
+
+            // Draw arrowhead
+            const angle = Math.atan2(node.y - node.radius - (parentNode.y + parentNode.radius), node.x - parentNode.x);
+            const arrowSize = 6;
+            const arrowX = node.x;
+            const arrowY = node.y - node.radius;
+            ctx.beginPath();
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(arrowX - arrowSize * Math.cos(angle - Math.PI/6), arrowY - arrowSize * Math.sin(angle - Math.PI/6));
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(arrowX - arrowSize * Math.cos(angle + Math.PI/6), arrowY - arrowSize * Math.sin(angle + Math.PI/6));
+            ctx.stroke();
+
+            // Draw latency label on edge
+            if (Math.abs(latencyMs) >= 0.01) {
+              const midX = (parentNode.x + node.x) / 2;
+              const midY = (parentNode.y + parentNode.radius + node.y - node.radius) / 2;
+
+              const labelText = latencyMs >= 1 ? `${latencyMs.toFixed(1)}ms` : `${(latencyMs * 1000).toFixed(0)}µs`;
+              ctx.font = '9px sans-serif';
+              const textWidth = ctx.measureText(labelText).width;
+
+              // Background for readability
+              ctx.fillStyle = 'rgba(26, 26, 46, 0.9)';
+              ctx.fillRect(midX - textWidth/2 - 2, midY - 6, textWidth + 4, 12);
+
+              // Label text
+              ctx.fillStyle = latencyMs > 1 ? '#ffd700' : '#888';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(labelText, midX, midY);
+            }
+          }
+        }
+      });
+
+      // Draw bubbles
+      allNodes.forEach(node => {
+        const r = node.resource;
+        const isHighlighted = highlightedChain.has(r.asyncId);
+        const isSelected = selectedResource && r.asyncId === selectedResource.asyncId;
+        const isInternal = node.isInternal;
+
+        // Glow effect (dimmer for internal)
+        const grad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, node.radius);
+        grad.addColorStop(0, node.color);
+        grad.addColorStop(0.7, node.color);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.globalAlpha = isInternal ? 0.15 : 0.3;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Inner circle (dimmer for internal)
+        ctx.fillStyle = node.color;
+        const baseAlpha = isInternal ? 0.35 : 0.7;
+        ctx.globalAlpha = isSelected ? 1 : (isHighlighted ? 0.9 : baseAlpha);
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius * 0.75, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Selection ring
+        if (isSelected) {
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius * 0.75, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // Label inside bubble
+        const typeLabel = r.type.replace('js-', '').replace('cache-', '').substring(0, 5);
+        ctx.fillStyle = 'white';
+        ctx.font = `${Math.min(9, node.radius / 3)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(typeLabel, node.x, node.y);
+
+        // Store for hit detection
+        bubbles.push({
+          x: node.x,
+          y: node.y,
+          radius: node.radius,
+          group: { resources: [r] }
+        });
+      });
+
+      // Draw depth labels on left side
+      ctx.fillStyle = '#555';
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'right';
+      for (let d = 0; d <= maxDepth; d++) {
+        const y = padding + 30 + d * levelHeight;
+        ctx.fillText(`L${d}`, padding - 10, y);
+      }
+
+      ctx.restore();  // Restore transform
+
+      // Draw zoom/pan hint in corner (not transformed)
+      ctx.fillStyle = '#444';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Scroll: zoom | Shift+drag: pan | Zoom: ${(zoom * 100).toFixed(0)}%`, 10, canvas.height - 10);
+    }
+
+    function screenToWorld(screenX, screenY) {
+      return {
+        x: (screenX - panX) / zoom,
+        y: (screenY - panY) / zoom
+      };
+    }
+
+    function handleBubbleMouseMove(e) {
+      if (isPanning) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const screenX = e.clientX - rect.left, screenY = e.clientY - rect.top;
+      const { x, y } = screenToWorld(screenX, screenY);
+
+      const hovered = bubbles.find(b => {
+        const dx = x - b.x, dy = y - b.y;
+        return Math.sqrt(dx * dx + dy * dy) <= b.radius;
+      });
+
+      if (hovered) {
+        const r = hovered.group.resources[0];
+        const tooltip = document.getElementById('tooltip');
+        const st = traceData.stackTraceMap.get(r.stackTraceId);
+        const stackPreview = (st && st.frames.length > 0)
+          ? `<div style="margin-top: 0.3rem; font-family: monospace; font-size: 0.65rem; color: #7ec8e3;">
+               ${st.frames.slice(0, 3).map(f => `<div>→ ${f}</div>`).join('')}
+               ${st.frames.length > 3 ? `<div style="color: #666;">...${st.frames.length - 3} more</div>` : ''}
+             </div>`
+          : '<div style="color: #666; font-size: 0.65rem; margin-top: 0.3rem;">No stack (internal)</div>';
+        const classLabel = r._classification === 'typed' ? 'API' : (r._classification === 'user' ? 'User' : 'Internal');
+        tooltip.innerHTML = `
+          <div class="tooltip-title">${r.type} #${r.asyncId} <span style="color: #888; font-size: 0.7rem;">(${classLabel})</span></div>
+          <div>Created: ${(r.createdAt / 1e6).toFixed(2)}ms</div>
+          ${r.callbackStartedAt > 0 ? `<div>Callback: ${(r.callbackStartedAt / 1e6).toFixed(2)}ms</div>` : ''}
+          ${stackPreview}
+        `;
+        tooltip.style.display = 'block';
+        tooltip.style.left = (e.clientX + 10) + 'px';
+        tooltip.style.top = (e.clientY + 10) + 'px';
+        canvas.style.cursor = 'pointer';
+      } else {
+        document.getElementById('tooltip').style.display = 'none';
+        canvas.style.cursor = 'default';
+      }
+    }
+
+    function handleBubbleClick(e) {
+      if (e.shiftKey) return;  // Shift+click is for panning
+
+      const rect = canvas.getBoundingClientRect();
+      const screenX = e.clientX - rect.left, screenY = e.clientY - rect.top;
+      const { x, y } = screenToWorld(screenX, screenY);
+
+      const clicked = bubbles.find(b => {
+        const dx = x - b.x, dy = y - b.y;
+        return Math.sqrt(dx * dx + dy * dy) <= b.radius;
+      });
+
+      if (clicked) {
+        selectResource(clicked.group.resources[0]);
+      }
+    }
+
+    // ==================== SELECTION ====================
+    function selectResource(r) {
+      selectedResource = r;
+      highlightedChain.clear();
+
+      let current = r;
+      while (current) {
+        highlightedChain.add(current.asyncId);
+        if (current.triggerId === 0) break;
+        current = traceData.resourceMap.get(current.triggerId);
+      }
+
+      (traceData.childrenMap.get(r.asyncId) || []).forEach(id => highlightedChain.add(id));
+
+      render();
+      updateSelectedDetails();
+    }
+
+    function updateSelectedDetails() {
+      const r = selectedResource;
+      if (!r) return;
+
+      document.getElementById('nav-parent').disabled = r.triggerId === 0;
+      const children = traceData.childrenMap.get(r.asyncId) || [];
+      document.getElementById('nav-children').disabled = children.length === 0;
+
+      const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt : (r.destroyedAt > 0 ? r.destroyedAt : traceData.requestDurationNs);
+      const totalDuration = endTime - r.createdAt;
+      const asyncWait = r.callbackStartedAt > 0 ? r.callbackStartedAt - r.createdAt : 0;
+      const syncTime = (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0;
+
+      const classColors = { typed: '#50c878', user: '#7ec8e3', internal: '#888' };
+      const classLabels = { typed: 'API call', user: 'User code', internal: 'Runtime' };
+
+      document.getElementById('selected-details').innerHTML = `
+        <div class="detail-item"><strong>ID:</strong> #${r.asyncId} → #${r.triggerId || 'root'}</div>
+        <div class="detail-item"><strong>Type:</strong> ${r.type} <span style="color: ${classColors[r._classification]}; font-size: 0.7rem;">(${classLabels[r._classification]})</span></div>
+        <div class="detail-item"><strong>Created:</strong> ${(r.createdAt / 1e6).toFixed(3)}ms</div>
+        ${r.callbackStartedAt > 0 ? `<div class="detail-item"><strong>Callback:</strong> ${(r.callbackStartedAt / 1e6).toFixed(3)} → ${(r.callbackEndedAt / 1e6).toFixed(3)}ms</div>` : ''}
+        ${children.length > 0 ? `<div class="detail-item"><strong>Children:</strong> ${children.length}</div>` : ''}
+      `;
+
+      const breakdownDiv = document.getElementById('timing-breakdown');
+      if (asyncWait > 0 || syncTime > 0) {
+        const total = asyncWait + syncTime;
+        const asyncPct = total > 0 ? (asyncWait / total) * 100 : 0;
+        const syncPct = total > 0 ? (syncTime / total) * 100 : 0;
+        breakdownDiv.innerHTML = `
+          <div class="timing-bar">
+            ${asyncWait > 0 ? `<div class="segment" style="width: ${asyncPct}%; background: rgba(233,69,96,0.4);">⏳${(asyncWait/1e6).toFixed(1)}</div>` : ''}
+            ${syncTime > 0 ? `<div class="segment" style="width: ${syncPct}%; background: ${TYPE_COLORS[r.type]};">⚡${(syncTime/1e6).toFixed(1)}</div>` : ''}
+          </div>
+          <div class="detail-item"><strong>Wait:</strong> ${(asyncWait / 1e6).toFixed(3)}ms (${asyncPct.toFixed(0)}%)</div>
+          <div class="detail-item"><strong>Sync:</strong> ${(syncTime / 1e6).toFixed(3)}ms (${syncPct.toFixed(0)}%)</div>
+        `;
+      } else {
+        breakdownDiv.innerHTML = `<div class="detail-item"><strong>Total:</strong> ${(totalDuration / 1e6).toFixed(3)}ms</div>`;
+      }
+
+      const st = traceData.stackTraceMap.get(r.stackTraceId);
+      document.getElementById('stack-trace').innerHTML = (st && st.frames.length > 0) ?
+        st.frames.map((f, i) => `<div class="stack-frame">${i === 0 ? '→ ' : '  '}${f}</div>`).join('') :
+        '<div class="stack-empty">No stack trace (internal runtime)</div>';
+
+      const anns = traceData.annotationMap.get(r.asyncId);
+      document.getElementById('annotations').innerHTML = (anns && anns.length > 0) ?
+        anns.map(a => `<div class="detail-item"><strong>${a.key}:</strong> ${a.value}</div>`).join('') :
+        '<div class="detail-item" style="color: #666;">-</div>';
+    }
+
+    function navigateToParent() {
+      if (!selectedResource || selectedResource.triggerId === 0) return;
+      const parent = traceData.resourceMap.get(selectedResource.triggerId);
+      if (parent) selectResource(parent);
+    }
+
+    function navigateToChildren() {
+      if (!selectedResource) return;
+      const children = traceData.childrenMap.get(selectedResource.asyncId) || [];
+      if (children.length > 0) {
+        const child = traceData.resourceMap.get(children[0]);
+        if (child) selectResource(child);
+      }
+    }
+
+    function openAIAnalysis() {
+      if (!traceData) {
+        alert('Please load a trace first');
+        return;
+      }
+
+      const prompt = generateAnalysisPrompt();
+      document.getElementById('ai-prompt').value = prompt;
+
+      // Generate Claude link (URL-encoded prompt)
+      const claudeUrl = 'https://claude.ai/new?q=' + encodeURIComponent(prompt.substring(0, 8000));
+      document.getElementById('ai-claude-link').href = claudeUrl;
+
+      document.getElementById('ai-modal').style.display = 'flex';
+    }
+
+    function generateAnalysisPrompt() {
+      const duration = traceData.requestDurationNs / 1e6;
+      const resourceCount = traceData.resources.length;
+
+      // Calculate timing stats
+      let totalSync = 0, totalAsync = 0;
+      traceData.resources.forEach(r => {
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          totalSync += r.callbackEndedAt - r.callbackStartedAt;
+        }
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          totalAsync += r.callbackStartedAt - r.createdAt;
+        }
+      });
+
+      // Count by type and classification
+      const typeCounts = {};
+      const classCounts = { typed: 0, user: 0, internal: 0 };
+      traceData.resources.forEach(r => {
+        typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+        classCounts[r._classification]++;
+      });
+
+      // Find critical path (longest chain)
+      let maxDepth = 0;
+      let deepestResource = null;
+      traceData.resources.forEach(r => {
+        const depth = traceData.depthMap.get(r.asyncId) || 0;
+        if (depth > maxDepth) {
+          maxDepth = depth;
+          deepestResource = r;
+        }
+      });
+
+      // Build critical path
+      const criticalPath = [];
+      let current = deepestResource;
+      while (current) {
+        criticalPath.unshift(current);
+        if (current.triggerId === 0) break;
+        current = traceData.resourceMap.get(current.triggerId);
+      }
+
+      // Find high-latency edges (>1ms)
+      const highLatencyEdges = [];
+      traceData.resources.forEach(r => {
+        if (r.triggerId !== 0) {
+          const parent = traceData.resourceMap.get(r.triggerId);
+          if (parent) {
+            const parentEnd = parent.callbackEndedAt > 0 ? parent.callbackEndedAt : parent.createdAt;
+            const latency = (r.createdAt - parentEnd) / 1e6;
+            if (latency > 1) {
+              highLatencyEdges.push({
+                from: parent,
+                to: r,
+                latencyMs: latency
+              });
+            }
+          }
+        }
+      });
+      highLatencyEdges.sort((a, b) => b.latencyMs - a.latencyMs);
+
+      // Get annotations summary
+      const annotationsSummary = [];
+      const seenUrls = new Set();
+      traceData.annotations.forEach(a => {
+        if (a.key === 'url' && !seenUrls.has(a.value)) {
+          seenUrls.add(a.value);
+          annotationsSummary.push(`  - ${a.value}`);
+        }
+      });
+
+      // Get unique stack traces with counts
+      const stackCounts = {};
+      traceData.resources.forEach(r => {
+        const st = traceData.stackTraceMap.get(r.stackTraceId);
+        if (st && st.frames.length > 0) {
+          const key = st.frames[0];
+          stackCounts[key] = (stackCounts[key] || 0) + 1;
+        }
+      });
+      const topStacks = Object.entries(stackCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+
+      // Generate the prompt
+      let prompt = `Please analyze this Cloudflare Worker async trace and provide specific optimization recommendations.
+
+## Trace Summary
+
+- **Total Duration:** ${duration.toFixed(2)}ms
+- **Resources:** ${resourceCount} total
+  - Typed (API calls): ${classCounts.typed}
+  - User code promises: ${classCounts.user}
+  - Internal runtime: ${classCounts.internal}
+- **Sync Time:** ${(totalSync / 1e6).toFixed(2)}ms (${((totalSync / (totalSync + totalAsync)) * 100 || 0).toFixed(0)}%)
+- **Async Wait:** ${(totalAsync / 1e6).toFixed(2)}ms (${((totalAsync / (totalSync + totalAsync)) * 100 || 0).toFixed(0)}%)
+- **Max Depth:** ${maxDepth} levels
+
+## Resource Types
+
+`;
+      Object.entries(typeCounts)
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([type, count]) => {
+          prompt += `- ${type}: ${count}\n`;
+        });
+
+      prompt += `
+## Critical Path (${criticalPath.length} resources, depth ${maxDepth})
+
+`;
+      criticalPath.forEach((r, i) => {
+        const st = traceData.stackTraceMap.get(r.stackTraceId);
+        const frame = st && st.frames.length > 0 ? st.frames[0] : '(no stack)';
+        const latency = i > 0 ? ((r.createdAt - criticalPath[i-1].createdAt) / 1e6).toFixed(2) : '0.00';
+        prompt += `${i + 1}. [${r.type}] ${frame} (+${latency}ms)\n`;
+      });
+
+      if (highLatencyEdges.length > 0) {
+        prompt += `
+## High Latency Edges (>1ms)
+
+`;
+        highLatencyEdges.slice(0, 10).forEach(edge => {
+          const fromSt = traceData.stackTraceMap.get(edge.from.stackTraceId);
+          const toSt = traceData.stackTraceMap.get(edge.to.stackTraceId);
+          const fromFrame = fromSt && fromSt.frames.length > 0 ? fromSt.frames[0] : edge.from.type;
+          const toFrame = toSt && toSt.frames.length > 0 ? toSt.frames[0] : edge.to.type;
+          prompt += `- ${edge.latencyMs.toFixed(2)}ms: ${fromFrame} → ${toFrame}\n`;
+        });
+      }
+
+      if (annotationsSummary.length > 0) {
+        prompt += `
+## URLs/Endpoints Referenced
+
+${annotationsSummary.slice(0, 15).join('\n')}
+`;
+      }
+
+      if (topStacks.length > 0) {
+        prompt += `
+## Top Stack Locations (by frequency)
+
+`;
+        topStacks.forEach(([stack, count]) => {
+          prompt += `- ${count}x: ${stack}\n`;
+        });
+      }
+
+      prompt += `
+## Analysis Request
+
+Based on this trace data, please:
+
+1. **Identify the primary bottleneck** - What is causing the most latency?
+
+2. **Check for serialization issues** - Are there operations that could run in parallel but are running sequentially?
+
+3. **Evaluate the async/sync ratio** - Is this worker I/O bound or CPU bound? Is the ratio healthy?
+
+4. **Look for redundant operations** - Are there duplicate fetches or unnecessary API calls?
+
+5. **Assess the critical path** - What operations are on the critical path? Which could be optimized or moved off the critical path?
+
+6. **Provide specific code recommendations** - Give concrete code examples showing how to improve the most impactful issues.
+
+7. **Estimate potential improvement** - If your recommendations are implemented, roughly how much latency reduction might be achieved?
+
+Please be specific and actionable in your recommendations.`;
+
+      return prompt;
+    }
+  </script>
+</body>
+</html>

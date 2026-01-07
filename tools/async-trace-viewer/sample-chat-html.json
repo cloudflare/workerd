@@ -1,0 +1,23 @@
+{
+  "requestDurationNs": 5871972,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 5850934, "destroyedAt": 5851082},
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 0, "createdAt": 1814808, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 2769503, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 1, "type": "js-promise", "stackTraceId": 2, "createdAt": 3524507, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 3, "createdAt": 4645501, "callbackStartedAt": 5226574, "callbackEndedAt": 5267443, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 3, "type": "js-promise", "stackTraceId": 4, "createdAt": 4816587, "callbackStartedAt": 5275548, "callbackEndedAt": 5292688, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 1, "type": "js-promise", "stackTraceId": 5, "createdAt": 4926802, "callbackStartedAt": 5298249, "callbackEndedAt": 5328522, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 5, "createdAt": 5045258, "callbackStartedAt": 5334321, "callbackEndedAt": 5522679, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 8, "type": "js-promise", "stackTraceId": 5, "createdAt": 5135936, "callbackStartedAt": 5529358, "callbackEndedAt": 5555557, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ chat.js:99:14"]},
+    {"id": 1, "frames": ["handleErrors @ chat.js:71:28", "fetch @ chat.js:100:18"]},
+    {"id": 2, "frames": ["<anonymous> @ chat.js:100:40", "handleErrors @ chat.js:73:18", "fetch @ chat.js:100:18"]},
+    {"id": 3, "frames": ["handleErrors @ chat.js:73:18", "fetch @ chat.js:100:18"]},
+    {"id": 4, "frames": ["fetch @ chat.js:100:18"]},
+    {"id": 5, "frames": []}
+  ],
+  "annotations": []
+}

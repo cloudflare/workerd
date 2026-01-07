@@ -18,6 +18,7 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/util.h>
+#include <workerd/io/async-trace.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -834,13 +835,24 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(jsg::Lock& js,
     jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
     jsg::Optional<double> msDelay,
     jsg::Arguments<jsg::Value> args) {
+  auto& context = IoContext::current();
+
+  // Create async trace resource for this timer
+  AsyncTraceContext::AsyncId asyncTraceId = AsyncTraceContext::INVALID_ID;
+  if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+    asyncTraceId =
+        asyncTrace->createResource(AsyncTraceContext::ResourceType::kTimer, js.v8Isolate);
+    asyncTrace->annotate(asyncTraceId, "delay"_kj, kj::str(msDelay.orDefault(0)));
+    asyncTrace->annotate(asyncTraceId, "type"_kj, "setTimeout"_kj);
+  }
+
   function.setReceiver(js.v8Ref<v8::Value>(js.v8Context()->Global()));
   auto fn = [function = kj::mv(function), args = kj::mv(args),
-                context = jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
-    jsg::AsyncContextFrame::Scope scope(js, context);
+                asyncContextFrame = jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
+    jsg::AsyncContextFrame::Scope scope(js, asyncContextFrame);
     function(js, kj::mv(args));
   };
-  auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
+  auto timeoutId = context.setTimeoutImpl(timeoutIdGenerator,
       /* repeat */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
       msDelay.orDefault(0));
   return timeoutId.toNumber();
@@ -860,15 +872,26 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(jsg::Lock& js,
     jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
     jsg::Optional<double> msDelay,
     jsg::Arguments<jsg::Value> args) {
+  auto& context = IoContext::current();
+
+  // Create async trace resource for this timer
+  AsyncTraceContext::AsyncId asyncTraceId = AsyncTraceContext::INVALID_ID;
+  if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+    asyncTraceId =
+        asyncTrace->createResource(AsyncTraceContext::ResourceType::kTimer, js.v8Isolate);
+    asyncTrace->annotate(asyncTraceId, "delay"_kj, kj::str(msDelay.orDefault(0)));
+    asyncTrace->annotate(asyncTraceId, "type"_kj, "setInterval"_kj);
+  }
+
   function.setReceiver(js.v8Ref<v8::Value>(js.v8Context()->Global()));
   auto fn = [function = kj::mv(function), args = kj::mv(args),
-                context = jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
-    jsg::AsyncContextFrame::Scope scope(js, context);
+                asyncContextFrame = jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
+    jsg::AsyncContextFrame::Scope scope(js, asyncContextFrame);
     // Because the fn is called multiple times, we will clone the args on each call.
     auto argv = KJ_MAP(i, args) { return i.addRef(js); };
     function(js, jsg::Arguments(kj::mv(argv)));
   };
-  auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
+  auto timeoutId = context.setTimeoutImpl(timeoutIdGenerator,
       /* repeat */ true, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
       msDelay.orDefault(0));
   return timeoutId.toNumber();

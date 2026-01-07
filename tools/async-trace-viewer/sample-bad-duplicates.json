@@ -1,0 +1,31 @@
+{
+  "requestDurationNs": 95000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 94500000, "destroyedAt": 94800000},
+    {"asyncId": 2, "triggerId": 1, "type": "fetch", "stackTraceId": 1, "createdAt": 500000, "callbackStartedAt": 25000000, "callbackEndedAt": 25500000, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 2, "type": "js-promise", "stackTraceId": 2, "createdAt": 26000000, "callbackStartedAt": 26500000, "callbackEndedAt": 28000000, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 3, "type": "fetch", "stackTraceId": 3, "createdAt": 28500000, "callbackStartedAt": 50000000, "callbackEndedAt": 50500000, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 4, "createdAt": 51000000, "callbackStartedAt": 51500000, "callbackEndedAt": 53000000, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 5, "type": "fetch", "stackTraceId": 5, "createdAt": 53500000, "callbackStartedAt": 75000000, "callbackEndedAt": 75500000, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 6, "type": "js-promise", "stackTraceId": 6, "createdAt": 76000000, "callbackStartedAt": 76500000, "callbackEndedAt": 78000000, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 7, "createdAt": 78500000, "callbackStartedAt": 79000000, "callbackEndedAt": 94000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:3:10"]},
+    {"id": 1, "frames": ["fetch @ worker.js:10:20", "getUser @ worker.js:8:3"]},
+    {"id": 2, "frames": ["processUser @ worker.js:15:5"]},
+    {"id": 3, "frames": ["fetch @ worker.js:20:20", "getUser @ worker.js:18:3"]},
+    {"id": 4, "frames": ["validateUser @ worker.js:25:5"]},
+    {"id": 5, "frames": ["fetch @ worker.js:30:20", "getUser @ worker.js:28:3"]},
+    {"id": 6, "frames": ["formatUser @ worker.js:35:5"]},
+    {"id": 7, "frames": ["buildResponse @ worker.js:40:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 2, "key": "url", "value": "https://api.example.com/users/123"},
+    {"asyncId": 2, "key": "method", "value": "GET"},
+    {"asyncId": 4, "key": "url", "value": "https://api.example.com/users/123"},
+    {"asyncId": 4, "key": "method", "value": "GET"},
+    {"asyncId": 6, "key": "url", "value": "https://api.example.com/users/123"},
+    {"asyncId": 6, "key": "method", "value": "GET"}
+  ]
+}
