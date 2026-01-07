@@ -48,6 +48,16 @@ Local local_new_object(Isolate* isolate) {
   return to_ffi(kj::mv(object));
 }
 
+Local local_new_null(Isolate* isolate) {
+  v8::Local<v8::Primitive> null = v8::Null(isolate);
+  return to_ffi(kj::mv(null));
+}
+
+Local local_new_undefined(Isolate* isolate) {
+  v8::Local<v8::Primitive> undefined = v8::Undefined(isolate);
+  return to_ffi(kj::mv(undefined));
+}
+
 bool local_eq(const Local& lhs, const Local& rhs) {
   return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
 }
@@ -82,6 +92,10 @@ bool local_is_null_or_undefined(const Local& val) {
 
 bool local_is_object(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsObject();
+}
+
+bool local_is_native_error(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNativeError();
 }
 
 ::rust::String local_type_of(Isolate* isolate, const Local& val) {
@@ -313,10 +327,10 @@ Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::S
       return to_ffi(v8::Exception::SyntaxError(message));
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
-    case ExceptionType::Error:
-      return to_ffi(v8::Exception::Error(message));
     default:
-      KJ_UNREACHABLE;
+      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
+      // TODO(soon): Use js.domException() to create proper DOMException objects.
+      return to_ffi(v8::Exception::Error(message));
   }
 }
 

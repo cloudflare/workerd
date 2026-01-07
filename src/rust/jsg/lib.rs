@@ -11,9 +11,11 @@ use kj_rs::KjMaybe;
 
 pub mod modules;
 pub mod v8;
-pub use v8::ffi::ExceptionType;
+mod wrappable;
 
-use crate::v8::ToLocalValue;
+pub use v8::ffi::ExceptionType;
+pub use wrappable::FromJS;
+pub use wrappable::ToJS;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 mod ffi {
@@ -140,18 +142,117 @@ pub fn unwrap_resource<'a, R: Resource>(
     unsafe { &mut *ptr }
 }
 
+impl From<&str> for ExceptionType {
+    fn from(value: &str) -> Self {
+        match value {
+            "OperationError" => Self::OperationError,
+            "DataError" => Self::DataError,
+            "DataCloneError" => Self::DataCloneError,
+            "InvalidAccessError" => Self::InvalidAccessError,
+            "InvalidStateError" => Self::InvalidStateError,
+            "InvalidCharacterError" => Self::InvalidCharacterError,
+            "NotSupportedError" => Self::NotSupportedError,
+            "SyntaxError" => Self::SyntaxError,
+            "TimeoutError" => Self::TimeoutError,
+            "TypeMismatchError" => Self::TypeMismatchError,
+            "AbortError" => Self::AbortError,
+            "NotFoundError" => Self::NotFoundError,
+            "TypeError" => Self::TypeError,
+            "RangeError" => Self::RangeError,
+            "ReferenceError" => Self::ReferenceError,
+            _ => Self::Error,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Error {
-    pub name: v8::ffi::ExceptionType,
+    pub name: ExceptionType,
     pub message: String,
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.name, self.message)
+    }
+}
+
+/// Generates constructor methods for each `ExceptionType` variant.
+/// e.g., `new_type_error("message")` creates an Error with `ExceptionType::TypeError`
+macro_rules! impl_error_constructors {
+    ($($variant:ident => $fn_name:ident),* $(,)?) => {
+        impl Error {
+            $(
+                pub fn $fn_name(message: impl Into<String>) -> Self {
+                    Self {
+                        name: ExceptionType::$variant,
+                        message: message.into(),
+                    }
+                }
+            )*
+        }
+    };
+}
+
+impl_error_constructors! {
+    OperationError => new_operation_error,
+    DataError => new_data_error,
+    DataCloneError => new_data_clone_error,
+    InvalidAccessError => new_invalid_access_error,
+    InvalidStateError => new_invalid_state_error,
+    InvalidCharacterError => new_invalid_character_error,
+    NotSupportedError => new_not_supported_error,
+    SyntaxError => new_syntax_error,
+    TimeoutError => new_timeout_error,
+    TypeMismatchError => new_type_mismatch_error,
+    AbortError => new_abort_error,
+    NotFoundError => new_not_found_error,
+    TypeError => new_type_error,
+    Error => new_error,
+    RangeError => new_range_error,
+    ReferenceError => new_reference_error,
+}
+
+impl FromJS for Error {
+    type ResultType = Self;
+
+    /// Creates an Error from a V8 value (typically an exception).
+    ///
+    /// If the value is a native error, extracts the name and message properties.
+    /// Otherwise, converts the value to a string for the message.
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        if value.is_native_error() {
+            let obj: v8::Local<v8::Object> = value.into();
+
+            let name = obj
+                .get(lock, "name")
+                .and_then(|v| String::from_js(lock, v).ok());
+
+            let message = obj
+                .get(lock, "message")
+                .and_then(|v| String::from_js(lock, v).ok())
+                .unwrap_or_else(|| "Unknown error".to_owned());
+
+            Ok(Self {
+                name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
+                message,
+            })
+        } else {
+            Err(Self::new_type_error("Unknown error"))
+        }
+    }
+}
+
 impl Error {
-    pub fn new(name: v8::ffi::ExceptionType, message: String) -> Self {
-        Self { name, message }
+    pub fn new(name: &str, message: &str) -> Self {
+        Self {
+            name: ExceptionType::from(name),
+            message: message.to_owned(),
+        }
     }
 
     /// Creates a V8 exception from this error.
-    pub fn as_exception<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
+    pub fn to_local<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
         unsafe {
             v8::Local::from_ffi(
                 isolate,
@@ -161,21 +262,9 @@ impl Error {
     }
 }
 
-impl Default for Error {
-    fn default() -> Self {
-        Self {
-            name: v8::ffi::ExceptionType::Error,
-            message: "An unknown error occurred".to_owned(),
-        }
-    }
-}
-
 impl From<ParseIntError> for Error {
     fn from(err: ParseIntError) -> Self {
-        Self::new(
-            v8::ffi::ExceptionType::TypeError,
-            format!("Failed to parse integer: {err}"),
-        )
+        Self::new_range_error(format!("Failed to parse integer: {err}"))
     }
 }
 
@@ -220,53 +309,126 @@ impl From<ParseIntError> for Error {
 /// input accordingly to avoid being a source of user confusion. Only use `NonCoercible` if
 /// you have a good reason to disable coercion.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NonCoercible<T: Type> {
+pub struct NonCoercible<T> {
     value: T,
 }
 
-impl<T: Type> NonCoercible<T> {
+impl<T> NonCoercible<T> {
     /// Creates a new `NonCoercible` wrapper around the given value.
     pub fn new(value: T) -> Self {
         Self { value }
     }
 
-    /// Unwraps a V8 value into `NonCoercible<T>`, throwing a JavaScript error if the value
-    /// is not exactly the expected type.
-    ///
-    /// Returns `Some(NonCoercible<T>)` if the value is the exact type, or `None` if an error
-    /// was thrown (in which case the caller should return early).
-    ///
-    /// # Safety
-    /// The caller must ensure `lock` is valid and `value` is a valid V8 local handle.
-    pub unsafe fn unwrap(lock: &mut Lock, value: v8::Local<v8::Value>) -> Option<Self> {
-        if !T::is_exact(&value) {
-            let type_name = T::class_name();
-            let error_msg = format!("Expected a {} value but got {}", type_name, value.type_of());
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &error_msg) };
-            return None;
-        }
-        let inner = T::unwrap(lock.isolate(), value);
-        Some(Self::new(inner))
+    /// Consumes the wrapper and returns the inner value.
+    pub fn into_inner(self) -> T {
+        self.value
     }
 }
 
-impl<T: Type> From<T> for NonCoercible<T> {
+impl<T> From<T> for NonCoercible<T> {
     fn from(value: T) -> Self {
         Self::new(value)
     }
 }
 
-impl<T: Type> AsRef<T> for NonCoercible<T> {
+impl<T> AsRef<T> for NonCoercible<T> {
     fn as_ref(&self) -> &T {
         &self.value
     }
 }
 
-impl<T: Type> Deref for NonCoercible<T> {
+impl<T> Deref for NonCoercible<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+
+/// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
+///
+/// `Nullable<T>` is similar to `Option<T>` but also accepts `undefined` as a null-ish value.
+/// This is useful for JavaScript APIs where both `null` and `undefined` represent
+/// the absence of a value.
+///
+/// # Behavior
+///
+/// - `null` → `Nullable::Null`
+/// - `undefined` → `Nullable::Undefined`
+/// - `T` → `Nullable::Some(T)`
+///
+/// # Example
+///
+/// ```ignore
+/// use jsg::Nullable;
+///
+/// #[jsg_method]
+/// pub fn process(&self, value: Nullable<String>) -> Result<(), Error> {
+///     match value {
+///         Nullable::Some(s) => println!("Got value: {}", s),
+///         Nullable::Null => println!("Got null"),
+///         Nullable::Undefined => println!("Got undefined"),
+///     }
+///     Ok(())
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Nullable<T> {
+    Some(T),
+    Null,
+    Undefined,
+}
+
+impl<T> Nullable<T> {
+    /// Returns `true` if the nullable contains a value.
+    pub fn is_some(&self) -> bool {
+        matches!(self, Self::Some(_))
+    }
+
+    /// Returns `true` if the nullable is `Null`.
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    /// Returns `true` if the nullable is `Undefined`.
+    pub fn is_undefined(&self) -> bool {
+        matches!(self, Self::Undefined)
+    }
+
+    /// Returns `true` if the nullable is `Null` or `Undefined`.
+    pub fn is_null_or_undefined(&self) -> bool {
+        matches!(self, Self::Null | Self::Undefined)
+    }
+
+    /// Converts from `Nullable<T>` to `Option<T>`.
+    pub fn into_option(self) -> Option<T> {
+        match self {
+            Self::Some(v) => Some(v),
+            Self::Null | Self::Undefined => None,
+        }
+    }
+
+    /// Returns a reference to the contained value, or `None` if null or undefined.
+    pub fn as_ref(&self) -> Option<&T> {
+        match self {
+            Self::Some(v) => Some(v),
+            Self::Null | Self::Undefined => None,
+        }
+    }
+}
+
+impl<T> From<Option<T>> for Nullable<T> {
+    fn from(opt: Option<T>) -> Self {
+        match opt {
+            Some(v) => Self::Some(v),
+            None => Self::Null,
+        }
+    }
+}
+
+impl<T> From<Nullable<T>> for Option<T> {
+    fn from(nullable: Nullable<T>) -> Self {
+        nullable.into_option()
     }
 }
 
@@ -320,6 +482,16 @@ impl Lock {
 
     fn realm(&mut self) -> &mut Realm {
         unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
+    }
+
+    /// Throws an error as a V8 exception.
+    pub fn throw_exception(&mut self, err: &Error) {
+        unsafe {
+            v8::ffi::isolate_throw_exception(
+                self.isolate().as_ffi(),
+                err.to_local(self.isolate()).into_ffi(),
+            );
+        }
     }
 }
 
@@ -384,32 +556,30 @@ impl<T: Resource> Clone for Ref<T> {
     }
 }
 
+/// Provides metadata about Rust types exposed to JavaScript.
+///
+/// This trait provides type information used for error messages, memory tracking,
+/// and type validation (for `NonCoercible<T>`). The actual conversion logic is in
+/// `ToJS` (Rust → JS) and `FromJS` (JS → Rust).
+///
 /// TODO: Implement `memory_info(jsg::MemoryTracker)`
 pub trait Type: Sized {
-    /// The input type for [`wrap()`](Self::wrap). For primitive types this is typically `Self`,
-    /// but resource types may use `Ref<Self>` or other wrapper types.
-    type This;
-
+    /// The JavaScript class name for this type (used in error messages).
     fn class_name() -> &'static str;
+
     /// Same as jsgGetMemoryName
     fn memory_name() -> &'static str {
         std::any::type_name::<Self>()
     }
+
     /// Same as jsgGetMemorySelfSize
     fn memory_self_size() -> usize {
         std::mem::size_of::<Self>()
     }
-    /// Wraps this struct as a JavaScript value by deep-copying its fields.
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a;
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
     fn is_exact(value: &v8::Local<v8::Value>) -> bool;
-
-    /// Unwraps a V8 value into this type without coercion.
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self;
 }
 
 pub enum Member {
@@ -610,92 +780,4 @@ impl Drop for Realm {
 #[expect(clippy::unnecessary_box_returns)]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
     unsafe { Box::new(Realm::from_isolate(v8::IsolatePtr::from_ffi(isolate))) }
-}
-
-/// Handles a result by setting the return value or throwing an error.
-///
-/// # Safety
-/// The caller must ensure V8 operations are performed within the correct isolate/context.
-pub unsafe fn handle_result<T: Type<This = T>, E: std::fmt::Display>(
-    lock: &mut Lock,
-    args: &mut v8::FunctionCallbackInfo,
-    result: Result<T, E>,
-) {
-    match result {
-        Ok(result) => args.set_return_value(T::wrap(result, lock)),
-        Err(err) => {
-            // TODO(soon): Make sure to use jsg::Error trait here and dynamically call proper method to throw the error.
-            let description = err.to_string();
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &description) };
-        }
-    }
-}
-
-impl Type for String {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "string"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_string()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_string(isolate.as_ffi(), value.into_ffi()) }
-    }
-}
-
-impl Type for bool {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "boolean"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_boolean()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_boolean(isolate.as_ffi(), value.into_ffi()) }
-    }
-}
-
-impl Type for f64 {
-    type This = Self;
-
-    fn class_name() -> &'static str {
-        "number"
-    }
-
-    fn wrap<'a, 'b>(this: Self::This, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        this.to_local(lock)
-    }
-
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
-        value.is_number()
-    }
-
-    fn unwrap(isolate: v8::IsolatePtr, value: v8::Local<v8::Value>) -> Self {
-        unsafe { v8::ffi::unwrap_number(isolate.as_ffi(), value.into_ffi()) }
-    }
 }
