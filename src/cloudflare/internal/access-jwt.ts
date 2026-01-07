@@ -15,6 +15,13 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const RETRY_DELAY_MS = 5000;
 const MAX_RETRIES = 3;
 
+declare global {
+  // eslint-disable-next-line no-var
+  var scheduler: {
+    wait: (delay: number, options?: { signal?: AbortSignal }) => Promise<void>;
+  };
+}
+
 export type AccessJwtErrorCode =
   | 'ERR_JWT_MISSING'
   | 'ERR_JWT_MALFORMED'
