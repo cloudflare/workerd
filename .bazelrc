@@ -305,8 +305,7 @@ build:windows --enable_runfiles
 # used by some KJ macros, and understands the `.c++` extension by default.
 # As of bazel 7, toolchain resolution is enabled by default, so we need to define a platform for
 # the clang-cl build.
-build:windows --extra_toolchains=@local_config_cc//:cc-toolchain-x64_windows-clang-cl
-build:windows --extra_execution_platforms=//:x64_windows-clang-cl
+build:windows --compiler=clang-cl
 
 # The Windows fastbuild bazel configuration is broken in that it necessarily generates PDB debug
 # information while the Linux and macOS toolchains only compile with debug information in the dbg
