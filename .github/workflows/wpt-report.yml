@@ -15,7 +15,6 @@ jobs:
   test:
     uses: ./.github/workflows/_bazel.yml
     with:
-      image: ubuntu-22.04
       os_name: linux
       suffix: ''
       extra_bazel_args: '--config=ci-test'
