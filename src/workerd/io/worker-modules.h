@@ -75,21 +75,6 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 }
 }  // namespace modules::capnp
 
-// ===========================================================================================
-// Python module support
-
-namespace modules::python {
-kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
-    const Worker::Script::ModulesSource& source,
-    api::pyodide::IsWorkerd isWorkerd,
-    api::pyodide::IsTracing isTracing,
-    api::pyodide::SnapshotToDisk snapshotToDisk,
-    api::pyodide::CreateBaselineSnapshot createBaselineSnapshot,
-    PythonSnapshotRelease::Reader pythonRelease,
-    kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
-    CompatibilityFlags::Reader featureFlags);
-}  // namespace modules::python
-
 // Creates an instance of the (new) ModuleRegistry. This method provides the
 // initialization logic that is agnostic to the Worker::Api implementation,
 // but accepts a callback parameter to handle the Worker::Api-specific details.
@@ -437,5 +422,110 @@ kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock&
 }
 
 }  // namespace modules::legacy
+
+// ===========================================================================================
+// Python module support
+
+namespace modules::python {
+kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
+    const Worker::Script::ModulesSource& source,
+    api::pyodide::IsWorkerd isWorkerd,
+    api::pyodide::IsTracing isTracing,
+    api::pyodide::SnapshotToDisk snapshotToDisk,
+    api::pyodide::CreateBaselineSnapshot createBaselineSnapshot,
+    PythonSnapshotRelease::Reader pythonRelease,
+    kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
+    CompatibilityFlags::Reader featureFlags);
+
+jsg::Bundle::Reader retrievePyodideBundle(
+    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
+
+template <typename JsgIsolate, class Registry>
+void registerPyodideModules(jsg::Lock& lockParam,
+    Registry& modules,
+    CompatibilityFlags::Reader featureFlags,
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    const api::pyodide::PythonConfig& pythonConfig,
+    const workerd::WorkerSource::ModulesSource& source) {
+  KJ_REQUIRE(featureFlags.getPythonWorkers(),
+      "The python_workers compatibility flag is required to use Python.");
+
+  // We add `pyodide:` packages here including python-entrypoint-helper.js.
+  modules.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
+
+  auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+  auto version = getPythonBundleName(pythonRelease);
+  auto bundle = retrievePyodideBundle(pythonConfig, version);
+
+  // Inject SetupEmscripten module
+  {
+    auto emscriptenRuntime = api::pyodide::EmscriptenRuntime::initialize(lockParam, true, bundle);
+    modules.addBuiltinModule("internal:setup-emscripten",
+        lockParam.alloc<api::pyodide::SetupEmscripten>(kj::mv(emscriptenRuntime)),
+        workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
+
+  // Inject Pyodide bundle
+  modules.addBuiltinBundle(bundle, kj::none);
+
+  // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
+  {
+    Worker::Script::Module module{
+      .name = source.mainModule, .content = Worker::Script::EsModule{PYTHON_ENTRYPOINT}};
+
+    auto info = modules::legacy::tryCompileLegacyModule<JsgIsolate>(
+        lockParam, module.name, module.content, modules.getObserver(), featureFlags);
+
+    auto path = kj::Path::parse(source.mainModule);
+    modules.add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
+  }
+
+  // Inject metadata that the entrypoint module will read.
+  api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(pythonConfig.createBaselineSnapshot);
+  api::pyodide::SnapshotToDisk snapshotToDisk(
+      pythonConfig.createSnapshot || createBaselineSnapshot);
+  kj::Maybe<kj::Array<kj::byte>> snapshot = kj::none;
+  KJ_IF_SOME(snapshotName, pythonConfig.loadSnapshotFromDisk) {
+    auto& root = KJ_REQUIRE_NONNULL(pythonConfig.snapshotDirectory);
+    kj::Path path(snapshotName);
+    auto maybeFile = root->tryOpenFile(path);
+    if (maybeFile == kj::none) {
+      KJ_FAIL_REQUIRE("Expected to find", snapshotName, "in the package cache directory");
+    }
+    snapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
+  }
+  modules.addBuiltinModule("pyodide-internal:runtime-generated/metadata",
+      lockParam.alloc<api::pyodide::PyodideMetadataReader>(
+          workerd::modules::python::createPyodideMetadataState(source, api::pyodide::IsWorkerd::YES,
+              api::pyodide::IsTracing::NO, snapshotToDisk, createBaselineSnapshot, pythonRelease,
+              kj::mv(snapshot), featureFlags)),
+      jsg::ModuleRegistry::Type::INTERNAL);
+
+  // Inject packages tar file
+  modules.addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
+      workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
+
+  // Inject artifact bundler.
+  modules.addBuiltinModule("pyodide-internal:artifacts",
+      lockParam.alloc<api::pyodide::ArtifactBundler>(kj::mv(artifacts).orDefault(
+          []() { return api::pyodide::ArtifactBundler::makeDisabledBundler(); })),
+      jsg::ModuleRegistry::Type::INTERNAL);
+
+  // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
+  modules.addBuiltinModule("pyodide-internal:internalJaeger",
+      api::pyodide::DisabledInternalJaeger::create(lockParam), jsg::ModuleRegistry::Type::INTERNAL);
+
+  // Inject disk cache module
+  modules.addBuiltinModule("pyodide-internal:disk_cache",
+      lockParam.alloc<api::pyodide::DiskCache>(
+          pythonConfig.packageDiskCacheRoot, pythonConfig.snapshotDirectory),
+      jsg::ModuleRegistry::Type::INTERNAL);
+
+  // Inject a (disabled) SimplePythonLimiter
+  modules.addBuiltinModule("pyodide-internal:limiter",
+      api::pyodide::SimplePythonLimiter::makeDisabled(lockParam),
+      jsg::ModuleRegistry::Type::INTERNAL);
+}
+}  // namespace modules::python
 
 }  // namespace workerd
