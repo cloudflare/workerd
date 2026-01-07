@@ -337,14 +337,14 @@ void DrainingReader::detach() {
   KJ_UNREACHABLE;
 }
 
-jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js) {
+jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxRead) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this reader was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
       auto& controller = stream->getController();
-      KJ_IF_SOME(result, controller.drainingRead(js)) {
+      KJ_IF_SOME(result, controller.drainingRead(js, maxRead)) {
         return kj::mv(result);
       }
       return js.rejectedPromise<DrainingReadResult>(

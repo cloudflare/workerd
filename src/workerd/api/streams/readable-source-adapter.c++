@@ -1090,29 +1090,27 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
 
   // First, if the active state is in the Readable state, we need to drain the
   // left over data before starting the main read loop.
+  // This is unlikely to occur in the typical case, but we need to handle it
+  // nonetheless.
   KJ_IF_SOME(readable, active->state.tryGetUnsafe<Active::Readable>()) {
     co_await output.write(readable.view);
     active->state.transitionTo<Active::Idle>();
   }
 
-  // We hold the DrainingReader and stream as raw pointers during the pump.
-  // The pointers remain valid because:
-  // - The stream is held by a jsg::Ref in the lambda closures during JS operations
-  // - The reader is created and owned during the pump loop lifetime
+  // We hold the DrainingReader during the pump. The pointer remains valid because
+  // the reader is created and owned during the pump loop lifetime.
   kj::Maybe<kj::Own<DrainingReader>> maybeReader;
-  kj::Maybe<jsg::Ref<ReadableStream>> maybeStream;
 
   // Initialize the pump by releasing the default reader and creating a DrainingReader.
   // This requires the isolate lock.
   co_await active->ioContext.run(
-      [&active, &maybeReader, &maybeStream](jsg::Lock& js) mutable -> kj::Promise<void> {
+      [&active, &maybeReader](jsg::Lock& js) mutable -> kj::Promise<void> {
     // Release the existing reader's lock so we can create a DrainingReader.
     active->reader->releaseLock(js);
 
     // Create the DrainingReader for the stream.
     maybeReader = KJ_ASSERT_NONNULL(DrainingReader::create(js, *active->stream),
         "Failed to create DrainingReader - stream should not be locked");
-    maybeStream = active->stream.addRef();
     return kj::READY_NOW;
   });
 
@@ -1124,11 +1122,20 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
       // Perform a draining read to get all synchronously available data.
       // Pass raw pointer to reader into the lambda - safe because we own it
       // and keep it alive for the duration of the pump.
+      // The draining reader grabs all data currently available in the stream's
+      // queue, then tries to read more data up to a limit as long as the data
+      // can be provided synchronously. The idea is to drain off as much data
+      // from the stream as possible each time we are holding the isolate lock
+      // to minimize the number of times we need to re-enter the lock.
       DrainingReader* readerPtr = reader.get();
       DrainingReadResult result =
           co_await active->ioContext.run([readerPtr](jsg::Lock& js) mutable {
         auto& ioContext = IoContext::current();
-        return ioContext.awaitJs(js, readerPtr->read(js));
+        // Use a 256KB limit to allow periodic yielding to the event loop,
+        // preventing a fast producer from monopolizing the thread. This limit
+        // only affects subsequent pump iterations after the initial buffer drain.
+        constexpr size_t kMaxReadPerCycle = 256 * 1024;
+        return ioContext.awaitJs(js, readerPtr->read(js, kMaxReadPerCycle));
       });
 
       // Write all the chunks we received using vectored write for efficiency.

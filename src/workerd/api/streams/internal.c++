@@ -678,7 +678,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
 }
 
 kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::drainingRead(
-    jsg::Lock& js) {
+    jsg::Lock& js, size_t maxRead) {
   // TODO(later): Implement proper drainingRead for internal controller.
   // For now, return a rejected promise as a placeholder.
   return js.rejectedPromise<DrainingReadResult>(

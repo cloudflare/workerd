@@ -710,7 +710,8 @@ class ValueQueue final {
     // other types will error the stream.
     // Rejects if there are pending regular reads (mutual exclusion).
     // Regular read() will reject if there is a pending draining read.
-    jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js);
+    // The maxRead parameter is a soft limit - see ReadableStreamController::drainingRead.
+    jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead = kj::maxValue);
 
     void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
@@ -940,7 +941,8 @@ class ByteQueue final {
     // Returns bytes directly without conversion (data is already bytes).
     // Rejects if there are pending regular reads (mutual exclusion).
     // Regular read() will reject if there is a pending draining read.
-    jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js);
+    // The maxRead parameter is a soft limit - see ReadableStreamController::drainingRead.
+    jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead = kj::maxValue);
 
     void push(jsg::Lock& js, kj::Rc<Entry> entry);
 

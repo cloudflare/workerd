@@ -515,7 +515,15 @@ class ReadableStreamController {
   //
   // This is a C++ only API (not exposed to JavaScript) intended for optimized pipe operations.
   // Returns kj::none if the stream is locked in a way that prevents the read.
-  virtual kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(jsg::Lock& js) = 0;
+  //
+  // The maxRead parameter provides a soft limit on how much data to read. It only applies to
+  // subsequent synchronous pump attempts after draining the currently buffered data. That is,
+  // drainingRead will first drain all currently buffered data (potentially exceeding maxRead),
+  // then will only proceed with additional synchronous reads if the total bytes read so far
+  // is less than maxRead. This prevents runaway reads from neverending or slow streams while
+  // still allowing efficient batch reads for normal streams.
+  virtual kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
+      jsg::Lock& js, size_t maxRead = kj::maxValue) = 0;
 
   // The pipeTo implementation fully consumes the stream by directing all of its data at the
   // destination. Controllers should try to be as efficient as possible here. For instance, if

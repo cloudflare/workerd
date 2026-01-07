@@ -731,7 +731,8 @@ class ReadableStreamJsController final: public ReadableStreamController {
   kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override;
 
-  kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(jsg::Lock& js) override;
+  kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
+      jsg::Lock& js, size_t maxRead = kj::maxValue) override;
 
   // See the comment for releaseReader in common.h for details on the use of maybeJs
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
@@ -1787,9 +1788,9 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     return js.resolvedPromise(ReadResult{.done = true});
   }
 
-  jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js) {
+  jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
     KJ_IF_SOME(s, state) {
-      return s.consumer->drainingRead(js);
+      return s.consumer->drainingRead(js, maxRead);
     }
 
     // We are canceled! Return done with empty chunks.
@@ -1993,9 +1994,9 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
-  jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js) {
+  jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
     KJ_IF_SOME(s, state) {
-      return s.consumer->drainingRead(js);
+      return s.consumer->drainingRead(js, maxRead);
     }
 
     // We are canceled! Return done with empty chunks.
@@ -2659,7 +2660,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
 }
 
 kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::drainingRead(
-    jsg::Lock& js) {
+    jsg::Lock& js, size_t maxRead) {
   disturbed = true;
 
   KJ_IF_SOME(pendingState, maybePendingState) {
@@ -2689,10 +2690,10 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
       // drainingRead has its own mutual exclusion handling, so we don't need
       // the deferControllerStateChange wrapper used by regular reads.
-      return consumer->drainingRead(js);
+      return consumer->drainingRead(js, maxRead);
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      return consumer->drainingRead(js);
+      return consumer->drainingRead(js, maxRead);
     }
   }
   KJ_UNREACHABLE;

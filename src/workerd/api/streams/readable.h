@@ -201,7 +201,8 @@ class DrainingReader: public ReadableStreamController::Reader {
   virtual ~DrainingReader() noexcept(false);
 
   // Performs a draining read, returning all synchronously available data as bytes.
-  jsg::Promise<DrainingReadResult> read(jsg::Lock& js);
+  // The maxRead parameter is a soft limit - see ReadableStreamController::drainingRead.
+  jsg::Promise<DrainingReadResult> read(jsg::Lock& js, size_t maxRead = kj::maxValue);
 
   // Cancels the stream.
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);

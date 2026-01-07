@@ -144,7 +144,7 @@ kj::Maybe<kj::Array<kj::byte>> valueToBytes(jsg::Lock& js, jsg::Value& value) {
 }
 }  // namespace
 
-jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& js) {
+jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& js, size_t maxRead) {
   // If there are pending regular reads, reject - mutual exclusion.
   if (hasReadRequests()) {
     return js.rejectedPromise<DrainingReadResult>(
@@ -170,8 +170,10 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   // Collect all buffered data, converting values to bytes.
   kj::Vector<kj::Array<kj::byte>> chunks;
   bool isClosing = false;
+  size_t totalRead = 0;
 
-  // Drain the buffer.
+  // Drain the buffer. Note: the initial buffer drain ignores maxRead - it always
+  // drains all currently buffered data. maxRead only gates subsequent pump attempts.
   while (!ready.buffer.empty()) {
     auto& item = ready.buffer.front();
     KJ_SWITCH_ONEOF(item) {
@@ -182,6 +184,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       KJ_CASE_ONEOF(entry, QueueEntry) {
         auto value = entry.entry->getValue(js);
         KJ_IF_SOME(bytes, valueToBytes(js, value)) {
+          totalRead += bytes.size();
           chunks.add(kj::mv(bytes));
           ready.queueTotalSize -= entry.entry->getSize();
           ready.buffer.pop_front();
@@ -198,8 +201,9 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   }
 
   // Pump the controller for more synchronously available data.
+  // maxRead is checked here: we only proceed with pumping if we haven't exceeded it.
   KJ_IF_SOME(listener, impl.stateListener) {
-    while (!isClosing) {
+    while (!isClosing && totalRead < maxRead) {
       size_t prevChunkCount = chunks.size();
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
@@ -214,6 +218,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
           KJ_CASE_ONEOF(entry, QueueEntry) {
             auto value = entry.entry->getValue(js);
             KJ_IF_SOME(bytes, valueToBytes(js, value)) {
+              totalRead += bytes.size();
               chunks.add(kj::mv(bytes));
               ready.queueTotalSize -= entry.entry->getSize();
               ready.buffer.pop_front();
@@ -578,7 +583,7 @@ bool ByteQueue::Consumer::hasPendingDrainingRead() {
       [](const ConsumerImpl::Ready& ready) { return ready.hasPendingDrainingRead; }, false);
 }
 
-jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js) {
+jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js, size_t maxRead) {
   // If there are pending regular reads, reject - mutual exclusion.
   if (hasReadRequests()) {
     return js.rejectedPromise<DrainingReadResult>(
@@ -604,8 +609,10 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   // Collect all buffered data (already bytes for ByteQueue).
   kj::Vector<kj::Array<kj::byte>> chunks;
   bool isClosing = false;
+  size_t totalRead = 0;
 
-  // Drain the buffer.
+  // Drain the buffer. Note: the initial buffer drain ignores maxRead - it always
+  // drains all currently buffered data. maxRead only gates subsequent pump attempts.
   while (!ready.buffer.empty()) {
     auto& item = ready.buffer.front();
     KJ_SWITCH_ONEOF(item) {
@@ -617,6 +624,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
         auto ptr = entry.entry->toArrayPtr();
         auto offset = entry.offset;
         auto size = ptr.size() - offset;
+        totalRead += size;
         chunks.add(kj::heapArray(ptr.slice(offset, offset + size)));
         ready.queueTotalSize -= size;
         ready.buffer.pop_front();
@@ -626,8 +634,9 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   }
 
   // Pump the controller for more synchronously available data.
+  // maxRead is checked here: we only proceed with pumping if we haven't exceeded it.
   KJ_IF_SOME(listener, impl.stateListener) {
-    while (!isClosing) {
+    while (!isClosing && totalRead < maxRead) {
       size_t prevChunkCount = chunks.size();
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
@@ -643,6 +652,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
             auto ptr = entry.entry->toArrayPtr();
             auto offset = entry.offset;
             auto size = ptr.size() - offset;
+            totalRead += size;
             chunks.add(kj::heapArray(ptr.slice(offset, offset + size)));
             ready.queueTotalSize -= size;
             ready.buffer.pop_front();

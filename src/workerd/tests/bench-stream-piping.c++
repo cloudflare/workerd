@@ -962,5 +962,214 @@ WD_BENCHMARK(Existing_Small_Timed1ms);
 WD_BENCHMARK(New_Medium_Timed100us);
 WD_BENCHMARK(Existing_Medium_Timed100us);
 
+// =============================================================================
+// maxRead limit benchmarks - tests maxRead guard effectiveness
+// =============================================================================
+
+// These benchmarks test the maxRead limit with large finite streams.
+// They demonstrate that maxRead properly limits how much data is read in a single
+// draining read operation, even when more data is synchronously available.
+//
+// The benchmarks compare different maxRead limits to show:
+// 1. How maxRead affects batching behavior and write coalescing
+// 2. Whether smaller maxRead values add overhead
+// 3. The trade-off between limiting reads vs throughput
+
+// Configuration for streams with more chunks than we want to read
+static constexpr size_t LARGE_STREAM_CHUNKS = 10000;    // 10K chunks available
+static constexpr size_t LARGE_STREAM_CHUNK_SIZE = 256;  // 256 bytes per chunk = 2.56MB total
+
+// Stream config for a large finite value stream
+static const StreamConfig LARGE_VALUE_STREAM{
+  .type = StreamType::VALUE,
+  .autoAllocateChunkSize = kj::none,
+  .highWaterMark = 0,
+};
+
+// Benchmark using ReadableSourceKjAdapter::pumpTo with large streams (unlimited maxRead).
+static void New_LargeStream_Value(benchmark::State& state) {
+  benchNewApproachPumpTo(state, LARGE_STREAM_CHUNK_SIZE, LARGE_STREAM_CHUNKS, LARGE_VALUE_STREAM);
+}
+static void Existing_LargeStream_Value(benchmark::State& state) {
+  benchExistingApproachPumpTo(
+      state, LARGE_STREAM_CHUNK_SIZE, LARGE_STREAM_CHUNKS, LARGE_VALUE_STREAM);
+}
+
+// =============================================================================
+// DrainingReader maxRead limit benchmarks
+// =============================================================================
+
+// These benchmarks directly test DrainingReader::read with different maxRead limits.
+// Each iteration performs multiple reads until the stream is exhausted, allowing us
+// to measure the overhead of different maxRead limits.
+
+static void benchDrainingReaderMaxRead(benchmark::State& state,
+    size_t chunkSize,
+    size_t numChunks,
+    size_t maxReadLimit,
+    bool byteStream) {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+
+  size_t totalBytes = chunkSize * numChunks;
+  size_t readCount = 0;
+
+  for (auto _: state) {
+    benchChunkCounterStatic = 0;
+    size_t bytesRead = 0;
+    readCount = 0;
+
+    fixture.runInIoContext([&](const TestFixture::Environment& env) {
+      auto stream = byteStream
+          ? createByteStream(env.js, chunkSize, numChunks, kj::none, 0, &benchChunkCounterStatic)
+          : createValueStream(env.js, chunkSize, numChunks, 0, &benchChunkCounterStatic);
+
+      auto maybeReader = DrainingReader::create(env.js, *stream);
+      KJ_ASSERT(maybeReader != kj::none, "Failed to create DrainingReader");
+      auto& reader = KJ_ASSERT_NONNULL(maybeReader);
+
+      // Read in chunks limited by maxReadLimit until stream is done
+      bool done = false;
+      while (!done) {
+        auto jsPromise = reader->read(env.js, maxReadLimit)
+                             .then(env.js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+          for (auto& chunk: result.chunks) {
+            bytesRead += chunk.size();
+          }
+          done = result.done;
+          readCount++;
+        });
+        // Run the promise synchronously
+        env.js.runMicrotasks();
+      }
+
+      reader->releaseLock(env.js);
+      return kj::READY_NOW;
+    });
+
+    KJ_ASSERT(bytesRead == totalBytes, "Expected", totalBytes, "bytes but got", bytesRead);
+  }
+
+  state.SetBytesProcessed(state.iterations() * static_cast<int64_t>(totalBytes));
+  state.counters["ReadCalls"] = benchmark::Counter(readCount, benchmark::Counter::kAvgIterations);
+  state.counters["BytesPerRead"] =
+      benchmark::Counter(totalBytes / readCount, benchmark::Counter::kAvgIterations);
+}
+
+// Value stream benchmarks with different maxRead limits
+// Using 1000 chunks of 1KB each = 1MB total data
+
+// maxRead = 16KB (small limit, many read calls)
+static void DrainingRead_Value_MaxRead_16KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, 16 * 1024, false);
+}
+
+// maxRead = 64KB
+static void DrainingRead_Value_MaxRead_64KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, 64 * 1024, false);
+}
+
+// maxRead = 256KB
+static void DrainingRead_Value_MaxRead_256KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, 256 * 1024, false);
+}
+
+// maxRead = 1MB (equals total data size)
+static void DrainingRead_Value_MaxRead_1MB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, 1024 * 1024, false);
+}
+
+// maxRead = unlimited (default behavior)
+static void DrainingRead_Value_MaxRead_Unlimited(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, kj::maxValue, false);
+}
+
+// Byte stream benchmarks with different maxRead limits
+static void DrainingRead_Byte_MaxRead_16KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, 16 * 1024, true);
+}
+
+static void DrainingRead_Byte_MaxRead_64KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, 64 * 1024, true);
+}
+
+static void DrainingRead_Byte_MaxRead_256KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, 256 * 1024, true);
+}
+
+static void DrainingRead_Byte_MaxRead_1MB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, 1024 * 1024, true);
+}
+
+static void DrainingRead_Byte_MaxRead_Unlimited(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 1000, kj::maxValue, true);
+}
+
+// Small chunk benchmarks (64 bytes) - tests overhead with many small chunks
+// 16000 chunks of 64 bytes = 1MB total
+static void DrainingRead_SmallChunks_MaxRead_16KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 64, 16000, 16 * 1024, false);
+}
+
+static void DrainingRead_SmallChunks_MaxRead_64KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 64, 16000, 64 * 1024, false);
+}
+
+static void DrainingRead_SmallChunks_MaxRead_Unlimited(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 64, 16000, kj::maxValue, false);
+}
+
+// =============================================================================
+// Large stream benchmarks - 10MB total to better exercise maxRead limits
+// =============================================================================
+
+// 10000 chunks of 1KB = 10MB total
+static void DrainingRead_Large_MaxRead_64KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 10000, 64 * 1024, false);
+}
+
+static void DrainingRead_Large_MaxRead_256KB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 10000, 256 * 1024, false);
+}
+
+static void DrainingRead_Large_MaxRead_1MB(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 10000, 1024 * 1024, false);
+}
+
+static void DrainingRead_Large_MaxRead_Unlimited(benchmark::State& state) {
+  benchDrainingReaderMaxRead(state, 1024, 10000, kj::maxValue, false);
+}
+
+// Register large stream benchmarks
+WD_BENCHMARK(New_LargeStream_Value);
+WD_BENCHMARK(Existing_LargeStream_Value);
+
+// Register maxRead limit benchmarks - value streams (1MB total, sync)
+WD_BENCHMARK(DrainingRead_Value_MaxRead_16KB);
+WD_BENCHMARK(DrainingRead_Value_MaxRead_64KB);
+WD_BENCHMARK(DrainingRead_Value_MaxRead_256KB);
+WD_BENCHMARK(DrainingRead_Value_MaxRead_1MB);
+WD_BENCHMARK(DrainingRead_Value_MaxRead_Unlimited);
+
+// Register maxRead limit benchmarks - byte streams (1MB total, sync)
+WD_BENCHMARK(DrainingRead_Byte_MaxRead_16KB);
+WD_BENCHMARK(DrainingRead_Byte_MaxRead_64KB);
+WD_BENCHMARK(DrainingRead_Byte_MaxRead_256KB);
+WD_BENCHMARK(DrainingRead_Byte_MaxRead_1MB);
+WD_BENCHMARK(DrainingRead_Byte_MaxRead_Unlimited);
+
+// Register small chunk benchmarks (1MB total, 64-byte chunks, sync)
+WD_BENCHMARK(DrainingRead_SmallChunks_MaxRead_16KB);
+WD_BENCHMARK(DrainingRead_SmallChunks_MaxRead_64KB);
+WD_BENCHMARK(DrainingRead_SmallChunks_MaxRead_Unlimited);
+
+// Register large stream benchmarks (10MB total, sync)
+WD_BENCHMARK(DrainingRead_Large_MaxRead_64KB);
+WD_BENCHMARK(DrainingRead_Large_MaxRead_256KB);
+WD_BENCHMARK(DrainingRead_Large_MaxRead_1MB);
+WD_BENCHMARK(DrainingRead_Large_MaxRead_Unlimited);
+
 }  // namespace
 }  // namespace workerd::api::streams
