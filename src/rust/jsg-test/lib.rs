@@ -1,5 +1,6 @@
 use std::pin::Pin;
 
+use jsg::FromJS;
 use jsg::v8;
 use kj_rs::KjOwn;
 
@@ -47,9 +48,33 @@ pub struct EvalContext<'a> {
     isolate: v8::IsolatePtr,
 }
 
+#[derive(Debug)]
+pub enum EvalError<'a> {
+    UncoercibleResult {
+        value: v8::Local<'a, v8::Value>,
+        message: String,
+    },
+    Exception(v8::Local<'a, v8::Value>),
+    EvalFailed,
+}
+
+impl EvalError<'_> {
+    /// Extracts a `jsg::Error` from an `EvalError::Exception` variant.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not `EvalError::Exception`, or if the value cannot be converted to a
+    /// `jsg::Error`.
+    pub fn unwrap_jsg_err(&self, lock: &mut jsg::Lock) -> jsg::Error {
+        match self {
+            EvalError::Exception(value) => jsg::Error::from_js(lock, value.clone())
+                .expect("Failed to convert exception to jsg::Error"),
+            _ => panic!("Unexpected error"),
+        }
+    }
+}
 impl EvalContext<'_> {
-    // TODO(soon): There is no way to distinguish a throw versus an error as a return value.
-    pub fn eval<T>(&self, lock: &mut jsg::Lock, code: &str) -> Result<T, jsg::Error>
+    pub fn eval<T>(&self, lock: &mut jsg::Lock, code: &str) -> Result<T, EvalError<'_>>
     where
         T: jsg::FromJS<ResultType = T>,
     {
@@ -59,20 +84,24 @@ impl EvalContext<'_> {
         if result.success {
             match opt_local {
                 Some(local) => {
-                    T::from_js(lock, unsafe { v8::Local::from_ffi(self.isolate, local) })
+                    let local = unsafe { v8::Local::from_ffi(self.isolate, local) };
+                    match T::from_js(lock, local.clone()) {
+                        Err(e) => Err(EvalError::UncoercibleResult {
+                            value: local,
+                            message: e.to_string(),
+                        }),
+                        Ok(value) => Ok(value),
+                    }
                 }
-                None => Err(jsg::Error::new(
-                    "Error",
-                    "eval returned empty result".to_owned(),
-                )),
+                None => unreachable!(),
             }
         } else {
             match opt_local {
                 Some(local) => {
                     let value = unsafe { v8::Local::from_ffi(self.isolate, local) };
-                    Err(jsg::Error::from_value(lock, value))
+                    Err(EvalError::Exception(value))
                 }
-                None => Err(jsg::Error::new("Error", "eval failed".to_owned())),
+                None => Err(EvalError::EvalFailed),
             }
         }
     }

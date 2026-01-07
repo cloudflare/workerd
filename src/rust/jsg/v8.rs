@@ -1,7 +1,9 @@
 use core::ffi::c_void;
+use std::fmt::Display;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+use crate::FromJS;
 use crate::Lock;
 
 #[expect(clippy::missing_safety_doc)]
@@ -17,13 +19,24 @@ pub mod ffi {
         ptr: usize,
     }
 
-    #[derive(Debug)]
-    enum ExceptionType {
-        RangeError,
-        ReferenceError,
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ExceptionType {
+        OperationError,
+        DataError,
+        DataCloneError,
+        InvalidAccessError,
+        InvalidStateError,
+        InvalidCharacterError,
+        NotSupportedError,
         SyntaxError,
+        TimeoutError,
+        TypeMismatchError,
+        AbortError,
+        NotFoundError,
         TypeError,
         Error,
+        RangeError,
+        ReferenceError,
     }
 
     /// Module visibility level, corresponds to `workerd::jsg::ModuleType` from modules.capnp.
@@ -177,12 +190,22 @@ pub mod ffi {
 impl std::fmt::Display for ffi::ExceptionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match *self {
+            Self::OperationError => "OperationError",
+            Self::DataError => "DataError",
+            Self::DataCloneError => "DataCloneError",
+            Self::InvalidAccessError => "InvalidAccessError",
+            Self::InvalidStateError => "InvalidStateError",
+            Self::InvalidCharacterError => "InvalidCharacterError",
+            Self::NotSupportedError => "NotSupportedError",
+            Self::SyntaxError => "SyntaxError",
+            Self::TimeoutError => "TimeoutError",
+            Self::TypeMismatchError => "TypeMismatchError",
+            Self::AbortError => "AbortError",
+            Self::NotFoundError => "NotFoundError",
+            Self::TypeError => "TypeError",
             Self::RangeError => "RangeError",
             Self::ReferenceError => "ReferenceError",
-            Self::SyntaxError => "SyntaxError",
-            Self::TypeError => "TypeError",
-            Self::Error => "Error",
-            _ => unreachable!(),
+            _ => "Error",
         };
         write!(f, "{name}")
     }
@@ -191,6 +214,16 @@ impl std::fmt::Display for ffi::ExceptionType {
 // Marker types for Local<T>
 #[derive(Debug)]
 pub struct Value;
+
+impl Display for Local<'_, Value> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut lock = unsafe { Lock::from_isolate_ptr(self.isolate.as_ffi()) };
+        match String::from_js(&mut lock, self.clone()) {
+            Ok(value) => write!(f, "{value}"),
+            Err(e) => write!(f, "{e:?}"),
+        }
+    }
+}
 #[derive(Debug)]
 pub struct Object;
 pub struct FunctionTemplate;

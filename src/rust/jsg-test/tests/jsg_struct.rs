@@ -157,12 +157,8 @@ fn nested_object_properties() {
 
 #[test]
 fn error_creation_and_display() {
-    let error = Error::default();
-    assert_eq!(error.name, "Error");
-    assert_eq!(error.message, "An unknown error occurred");
-
-    let type_error = Error::new("TypeError", "Invalid type".to_owned());
-    assert_eq!(type_error.name, "TypeError");
+    let type_error = Error::new_type_error("Invalid type");
+    assert_eq!(type_error.name, ExceptionType::TypeError);
     assert_eq!(type_error.message, "Invalid type");
 
     // Test Display for all exception types
@@ -178,7 +174,7 @@ fn error_creation_and_display() {
 fn error_from_parse_int_error() {
     let parse_result: Result<i32, _> = "not_a_number".parse();
     let error: Error = parse_result.unwrap_err().into();
-    assert_eq!(error.name, "TypeError");
+    assert_eq!(error.name, ExceptionType::RangeError);
     assert!(error.message.contains("Failed to parse integer"));
 }
 

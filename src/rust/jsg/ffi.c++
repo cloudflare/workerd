@@ -327,10 +327,10 @@ Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::S
       return to_ffi(v8::Exception::SyntaxError(message));
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
-    case ExceptionType::Error:
-      return to_ffi(v8::Exception::Error(message));
     default:
-      KJ_UNREACHABLE;
+      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
+      // TODO(soon): Use js.domException() to create proper DOMException objects.
+      return to_ffi(v8::Exception::Error(message));
   }
 }
 

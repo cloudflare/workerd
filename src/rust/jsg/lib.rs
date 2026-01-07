@@ -142,9 +142,32 @@ pub fn unwrap_resource<'a, R: Resource>(
     unsafe { &mut *ptr }
 }
 
-#[derive(Debug)]
+impl From<&str> for ExceptionType {
+    fn from(value: &str) -> Self {
+        match value {
+            "OperationError" => Self::OperationError,
+            "DataError" => Self::DataError,
+            "DataCloneError" => Self::DataCloneError,
+            "InvalidAccessError" => Self::InvalidAccessError,
+            "InvalidStateError" => Self::InvalidStateError,
+            "InvalidCharacterError" => Self::InvalidCharacterError,
+            "NotSupportedError" => Self::NotSupportedError,
+            "SyntaxError" => Self::SyntaxError,
+            "TimeoutError" => Self::TimeoutError,
+            "TypeMismatchError" => Self::TypeMismatchError,
+            "AbortError" => Self::AbortError,
+            "NotFoundError" => Self::NotFoundError,
+            "TypeError" => Self::TypeError,
+            "RangeError" => Self::RangeError,
+            "ReferenceError" => Self::ReferenceError,
+            _ => Self::Error,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Error {
-    pub name: String,
+    pub name: ExceptionType,
     pub message: String,
 }
 
@@ -154,73 +177,94 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl Error {
-    pub fn new(name: impl Into<String>, message: String) -> Self {
-        Self {
-            name: name.into(),
-            message,
+/// Generates constructor methods for each `ExceptionType` variant.
+/// e.g., `new_type_error("message")` creates an Error with `ExceptionType::TypeError`
+macro_rules! impl_error_constructors {
+    ($($variant:ident => $fn_name:ident),* $(,)?) => {
+        impl Error {
+            $(
+                pub fn $fn_name(message: impl Into<String>) -> Self {
+                    Self {
+                        name: ExceptionType::$variant,
+                        message: message.into(),
+                    }
+                }
+            )*
         }
-    }
+    };
+}
+
+impl_error_constructors! {
+    OperationError => new_operation_error,
+    DataError => new_data_error,
+    DataCloneError => new_data_clone_error,
+    InvalidAccessError => new_invalid_access_error,
+    InvalidStateError => new_invalid_state_error,
+    InvalidCharacterError => new_invalid_character_error,
+    NotSupportedError => new_not_supported_error,
+    SyntaxError => new_syntax_error,
+    TimeoutError => new_timeout_error,
+    TypeMismatchError => new_type_mismatch_error,
+    AbortError => new_abort_error,
+    NotFoundError => new_not_found_error,
+    TypeError => new_type_error,
+    Error => new_error,
+    RangeError => new_range_error,
+    ReferenceError => new_reference_error,
+}
+
+impl FromJS for Error {
+    type ResultType = Self;
 
     /// Creates an Error from a V8 value (typically an exception).
     ///
     /// If the value is a native error, extracts the name and message properties.
     /// Otherwise, converts the value to a string for the message.
-    pub fn from_value(lock: &mut Lock, value: v8::Local<v8::Value>) -> Self {
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         if value.is_native_error() {
             let obj: v8::Local<v8::Object> = value.into();
 
             let name = obj
                 .get(lock, "name")
-                .and_then(|v| String::from_js(lock, v).ok())
-                .unwrap_or_else(|| "Error".to_owned());
+                .and_then(|v| String::from_js(lock, v).ok());
 
             let message = obj
                 .get(lock, "message")
                 .and_then(|v| String::from_js(lock, v).ok())
                 .unwrap_or_else(|| "Unknown error".to_owned());
 
-            Self { name, message }
-        } else {
-            let message =
-                String::from_js(lock, value).unwrap_or_else(|_| "Unknown error".to_owned());
-            Self {
-                name: "Error".to_owned(),
+            Ok(Self {
+                name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
                 message,
-            }
+            })
+        } else {
+            Err(Self::new_type_error("Unknown error"))
+        }
+    }
+}
+
+impl Error {
+    pub fn new(name: &str, message: &str) -> Self {
+        Self {
+            name: ExceptionType::from(name),
+            message: message.to_owned(),
         }
     }
 
     /// Creates a V8 exception from this error.
     pub fn to_local<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
-        let exception_type = match self.name.as_str() {
-            "TypeError" => v8::ffi::ExceptionType::TypeError,
-            "RangeError" => v8::ffi::ExceptionType::RangeError,
-            "ReferenceError" => v8::ffi::ExceptionType::ReferenceError,
-            "SyntaxError" => v8::ffi::ExceptionType::SyntaxError,
-            _ => v8::ffi::ExceptionType::Error,
-        };
         unsafe {
             v8::Local::from_ffi(
                 isolate,
-                v8::ffi::exception_create(isolate.as_ffi(), exception_type, &self.message),
+                v8::ffi::exception_create(isolate.as_ffi(), self.name, &self.message),
             )
-        }
-    }
-}
-
-impl Default for Error {
-    fn default() -> Self {
-        Self {
-            name: "Error".to_owned(),
-            message: "An unknown error occurred".to_owned(),
         }
     }
 }
 
 impl From<ParseIntError> for Error {
     fn from(err: ParseIntError) -> Self {
-        Self::new("TypeError", format!("Failed to parse integer: {err}"))
+        Self::new_range_error(format!("Failed to parse integer: {err}"))
     }
 }
 
@@ -438,6 +482,16 @@ impl Lock {
 
     fn realm(&mut self) -> &mut Realm {
         unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
+    }
+
+    /// Throws an error as a V8 exception.
+    pub fn throw_exception(&mut self, err: &Error) {
+        unsafe {
+            v8::ffi::isolate_throw_exception(
+                self.isolate().as_ffi(),
+                err.to_local(self.isolate()).into_ffi(),
+            );
+        }
     }
 }
 

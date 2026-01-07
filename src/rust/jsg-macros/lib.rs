@@ -111,7 +111,13 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|(i, ty)| {
             let arg = syn::Ident::new(&format!("arg{i}"), fn_name.span());
             let unwrap = quote! {
-                let Ok(#arg) = <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#i)) else { return; };
+                let #arg = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#i)) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        lock.throw_exception(&err);
+                        return;
+                    }
+                };
             };
             // For reference types (like &str), FromJS returns an owned type (String),
             // so we need to borrow it when passing to the function.
@@ -125,6 +131,22 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .unzip();
 
+    // Check if return type is Result<T, E>
+    let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
+
+    let result_handling = if is_result {
+        quote! {
+            match result {
+                Ok(value) => args.set_return_value(jsg::ToJS::to_js(value, &mut lock)),
+                Err(err) => lock.throw_exception(&err.into()),
+            }
+        }
+    } else {
+        quote! {
+            args.set_return_value(jsg::ToJS::to_js(result, &mut lock));
+        }
+    };
+
     quote! {
         #fn_vis #fn_sig { #fn_block }
 
@@ -136,7 +158,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let this = args.this();
             let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
             let result = self_.#fn_name(#(#arg_exprs),*);
-            args.set_return_value(jsg::ToJS::to_js(result, &mut lock));
+            #result_handling
         }
     }
     .into()
@@ -313,4 +335,14 @@ fn snake_to_camel(s: &str) -> String {
         }
     }
     result
+}
+
+/// Checks if a type is `Result<T, E>`.
+fn is_result_type(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        return segment.ident == "Result";
+    }
+    false
 }

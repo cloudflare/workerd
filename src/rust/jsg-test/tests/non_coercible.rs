@@ -1,3 +1,4 @@
+use jsg::ExceptionType;
 use jsg::NonCoercible;
 use jsg::ResourceState;
 use jsg::ResourceTemplate;
@@ -13,17 +14,17 @@ struct MyResource {
 #[expect(clippy::unnecessary_wraps)]
 impl MyResource {
     #[jsg_method]
-    pub fn string(&self, nc: NonCoercible<String>) -> Result<String, String> {
+    pub fn string(&self, nc: NonCoercible<String>) -> Result<String, jsg::Error> {
         Ok(nc.as_ref().clone())
     }
 
     #[jsg_method]
-    pub fn boolean(&self, nc: NonCoercible<bool>) -> Result<bool, String> {
+    pub fn boolean(&self, nc: NonCoercible<bool>) -> Result<bool, jsg::Error> {
         Ok(*nc.as_ref())
     }
 
     #[jsg_method]
-    pub fn number(&self, nc: NonCoercible<f64>) -> Result<f64, String> {
+    pub fn number(&self, nc: NonCoercible<f64>) -> Result<f64, jsg::Error> {
         Ok(*nc.as_ref())
     }
 }
@@ -132,36 +133,39 @@ fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
         ctx.set_global("resource", wrapped);
 
         // String method accepts string
-        let result: String = ctx.eval(lock, "resource.string('hello')")?;
+        let result: String = ctx.eval(lock, "resource.string('hello')").unwrap();
         assert_eq!(result, "hello");
 
         // String method rejects number
-        let result: Result<String, jsg::Error> = ctx.eval(lock, "resource.string(123)");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.name, "TypeError");
+        let err = ctx
+            .eval::<String>(lock, "resource.string(123)")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::TypeError);
         assert!(err.message.contains("string"));
 
         // Boolean method accepts boolean
-        let result: bool = ctx.eval(lock, "resource.boolean(true)")?;
+        let result: bool = ctx.eval(lock, "resource.boolean(true)").unwrap();
         assert!(result);
 
         // Boolean method rejects string
-        let result: Result<bool, jsg::Error> = ctx.eval(lock, "resource.boolean('true')");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.name, "TypeError");
-        assert!(err.message.contains("boolean"));
+        let err = ctx
+            .eval::<bool>(lock, "resource.boolean('true')")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert!(err.message.contains("bool"));
 
         // Number method accepts number
-        let result: f64 = ctx.eval(lock, "resource.number(42.5)")?;
+        let result: f64 = ctx.eval(lock, "resource.number(42.5)").unwrap();
         assert!((result - 42.5).abs() < f64::EPSILON);
 
         // Number method rejects string
-        let result: Result<f64, jsg::Error> = ctx.eval(lock, "resource.number('42')");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.name, "TypeError");
+        let err = ctx
+            .eval::<f64>(lock, "resource.number('42')")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::TypeError);
         assert!(err.message.contains("number"));
         Ok(())
     });

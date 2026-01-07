@@ -19,8 +19,6 @@
 //! | `NonCoercible<T>` | `T` (strict type checking) |
 //! | `T: Struct` | `object` |
 
-use std::fmt::Display;
-
 use crate::Error;
 use crate::Lock;
 use crate::NonCoercible;
@@ -132,23 +130,6 @@ impl ToJS for () {
     }
 }
 
-impl<T: ToJS, E: Display> ToJS for Result<T, E> {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        match self {
-            Ok(value) => value.to_js(lock),
-            Err(err) => {
-                // TODO(soon): Use Error trait to dynamically call proper method to throw the error.
-                let description = err.to_string();
-                unsafe { v8::ffi::isolate_throw_error(lock.isolate().as_ffi(), &description) };
-                v8::Local::<v8::Value>::undefined(lock)
-            }
-        }
-    }
-}
-
 impl<T: ToJS> ToJS for Option<T> {
     fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
     where
@@ -188,17 +169,8 @@ impl<T: Type + FromJS> FromJS for Option<T> {
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         if value.is_null() {
-            let error_msg = format!("Expected {} or undefined but got null", T::class_name());
-            // TODO(soon): Throw errors in the correct place. This function should return
-            // a result and the caller should handle the error.
-            let err = Error::new("TypeError", error_msg);
-            unsafe {
-                v8::ffi::isolate_throw_exception(
-                    lock.isolate().as_ffi(),
-                    err.to_local(lock.isolate()).into_ffi(),
-                );
-            }
-            Err(err)
+            let msg = format!("Expected {} or undefined but got null", T::class_name());
+            Err(Error::new_type_error(msg))
         } else if value.is_undefined() {
             Ok(None)
         } else {
@@ -217,16 +189,7 @@ impl<T: Type + FromJS> FromJS for NonCoercible<T> {
                 T::class_name(),
                 value.type_of()
             );
-            // TODO(soon): Throw errors in the correct place. This function should return
-            // a result and the caller should handle the error.
-            let err = Error::new("TypeError", error_msg);
-            unsafe {
-                v8::ffi::isolate_throw_exception(
-                    lock.isolate().as_ffi(),
-                    err.to_local(lock.isolate()).into_ffi(),
-                );
-            }
-            return Err(err);
+            return Err(Error::new_type_error(error_msg));
         }
         Ok(<Self::ResultType>::new(T::from_js(lock, value)?))
     }

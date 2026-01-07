@@ -20,10 +20,10 @@ impl From<DnsParserError> for jsg::Error {
     fn from(val: DnsParserError) -> Self {
         match val {
             DnsParserError::InvalidHexString(msg) | DnsParserError::InvalidDnsResponse(msg) => {
-                Self::new("Error", msg)
+                Self::new_error(&msg)
             }
-            DnsParserError::ParseIntError(msg) => Self::new("RangeError", msg.to_string()),
-            DnsParserError::Unknown => Self::new("Error", "Unknown dns parser error".to_owned()),
+            DnsParserError::ParseIntError(msg) => Self::new_range_error(msg.to_string()),
+            DnsParserError::Unknown => Self::new_error("Unknown dns parser error"),
         }
     }
 }

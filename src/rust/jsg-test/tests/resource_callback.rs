@@ -23,7 +23,7 @@ struct EchoResource {
 #[expect(clippy::unnecessary_wraps)]
 impl EchoResource {
     #[jsg_method]
-    pub fn echo(&self, message: String) -> Result<String, String> {
+    pub fn echo(&self, message: String) -> Result<String, jsg::Error> {
         Ok(format!("{}{}", self.prefix, message))
     }
 
@@ -84,7 +84,7 @@ fn resource_method_callback_receives_correct_self() {
         ctx.set_global("echoResource", wrapped);
 
         // Call the method from JavaScript
-        let result: String = ctx.eval(lock, "echoResource.echo('World!')")?;
+        let result: String = ctx.eval(lock, "echoResource.echo('World!')").unwrap();
         assert_eq!(result, "Hello, World!");
         Ok(())
     });
@@ -104,11 +104,11 @@ fn resource_method_can_be_called_multiple_times() {
         ctx.set_global("echo", wrapped);
 
         // First call
-        let result: String = ctx.eval(lock, "echo.echo('first')")?;
+        let result: String = ctx.eval(lock, "echo.echo('first')").unwrap();
         assert_eq!(result, ">> first");
 
         // Second call
-        let result: String = ctx.eval(lock, "echo.echo('second')")?;
+        let result: String = ctx.eval(lock, "echo.echo('second')").unwrap();
         assert_eq!(result, ">> second");
         Ok(())
     });
@@ -127,7 +127,7 @@ fn resource_method_accepts_str_ref_parameter() {
         let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
         ctx.set_global("echo", wrapped);
 
-        let result: String = ctx.eval(lock, "echo.greet('World')")?;
+        let result: String = ctx.eval(lock, "echo.greet('World')").unwrap();
         assert_eq!(result, "Hello, World!");
         Ok(())
     });
@@ -149,23 +149,23 @@ fn resource_method_returns_non_result_values() {
         ctx.set_global("resource", wrapped);
 
         // Test getString returns string
-        let result: String = ctx.eval(lock, "resource.getName()")?;
+        let result: String = ctx.eval(lock, "resource.getName()").unwrap();
         assert_eq!(result, "TestResource");
 
         // Test isValid returns boolean
-        let result: bool = ctx.eval(lock, "resource.isValid()")?;
+        let result: bool = ctx.eval(lock, "resource.isValid()").unwrap();
         assert!(result);
 
         // Test getCounter returns number
-        let result: f64 = ctx.eval(lock, "resource.getCounter()")?;
+        let result: f64 = ctx.eval(lock, "resource.getCounter()").unwrap();
         assert!((result - 42.0).abs() < f64::EPSILON);
 
         // Test incrementCounter returns undefined (we just check it doesn't error)
-        let _: Option<bool> = ctx.eval(lock, "resource.incrementCounter()")?;
+        let _: Option<bool> = ctx.eval(lock, "resource.incrementCounter()").unwrap();
         assert_eq!(counter.get(), 43);
 
         // Test maybeName returns string for Some
-        let result: String = ctx.eval(lock, "resource.maybeName()")?;
+        let result: String = ctx.eval(lock, "resource.maybeName()").unwrap();
         assert_eq!(result, "TestResource");
         Ok(())
     });
@@ -185,7 +185,7 @@ fn resource_method_returns_null_for_none() {
         let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
         ctx.set_global("resource", wrapped);
 
-        let result: Option<String> = ctx.eval(lock, "resource.maybeName()")?;
+        let result: Option<String> = ctx.eval(lock, "resource.maybeName()").unwrap();
         assert!(result.is_none());
         Ok(())
     });
