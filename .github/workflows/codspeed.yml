@@ -24,7 +24,7 @@ permissions:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     env:
       BAZEL_ARGS: --config=benchmark --@google_benchmark//:codspeed_mode=instrumentation --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
     steps:

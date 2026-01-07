@@ -77,31 +77,31 @@ jobs:
         include:
           - title: linux
             os-name: Linux
-            image: ubuntu-22.04
+            image: ubuntu-22.04-16core
             bazel-config: release_linux
             target-arch: X64
           - title: linux-arm64
             os-name: Linux
-            image: ubuntu-22.04-arm
+            image: ubuntu-22.04-arm-16core
             bazel-config: release_linux
             target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
-          # release binaries on the macos-15 runner.
+          # release binaries on the macos-15-xlarge runner.
           - title: macOS-x64
             os-name: macOS
-            # This configuration is used for cross-compiling – macos-15 is Apple Silicon-based but
+            # This configuration is used for cross-compiling – macos-15-xlarge is Apple Silicon-based but
             # we use it to compile the x64 release.
-            image: macos-15
+            image: macos-15-xlarge
             bazel-config: release_macos_cross_x86_64
             target-arch: X64
           - title: macOS-arm64
             os-name: macOS
-            image: macos-15
+            image: macos-15-xlarge
             bazel-config: release_macos
             target-arch: ARM64
           - title: windows
             os-name: Windows
-            image: windows-2025
+            image: windows-2025-16core
             bazel-config: release_windows
             target-arch: X64
     name: build (${{ matrix.title }})
@@ -237,7 +237,7 @@ jobs:
   publish-wrapper:
     name: Publish `workerd` to NPM
     needs: [version, upload-artifacts]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -294,7 +294,7 @@ jobs:
       - run: cd npm/workerd && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
 
   build-and-publish-types:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     needs: [version, upload-artifacts]
     steps:
       - uses: actions/checkout@v4
