@@ -1568,6 +1568,101 @@ const userB = await fetch('/user/123');</pre>
       hotCallback: 5         // Hot callback threshold (children count)
     };
 
+    // Settings persistence
+    const SETTINGS_KEY = 'async-trace-viewer-settings';
+
+    function saveSettings() {
+      const settings = {
+        currentView,
+        showCriticalPath,
+        showBottlenecks,
+        showPatterns,
+        clickToFilterEnabled,
+        stackTraceGrouping,
+        showTemporalEdges,
+        accessibilityMode,
+        patternThresholds
+      };
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+
+    function loadSettings() {
+      try {
+        const saved = localStorage.getItem(SETTINGS_KEY);
+        if (!saved) return;
+        const settings = JSON.parse(saved);
+
+        // Restore view
+        if (settings.currentView) {
+          currentView = settings.currentView;
+          document.getElementById('view-select').value = currentView;
+          document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+          document.getElementById(currentView + '-view').classList.add('active');
+        }
+
+        // Restore analysis toggles
+        if (settings.showCriticalPath !== undefined) {
+          showCriticalPath = settings.showCriticalPath;
+          document.getElementById('critical-path-check').checked = showCriticalPath;
+        }
+        if (settings.showBottlenecks !== undefined) {
+          showBottlenecks = settings.showBottlenecks;
+          document.getElementById('bottleneck-check').checked = showBottlenecks;
+        }
+        if (settings.showPatterns !== undefined) {
+          showPatterns = settings.showPatterns;
+          document.getElementById('pattern-check').checked = showPatterns;
+        }
+        if (settings.clickToFilterEnabled !== undefined) {
+          clickToFilterEnabled = settings.clickToFilterEnabled;
+          document.getElementById('click-filter-check').checked = clickToFilterEnabled;
+        }
+        if (settings.stackTraceGrouping !== undefined) {
+          stackTraceGrouping = settings.stackTraceGrouping;
+          document.getElementById('stack-group-check').checked = stackTraceGrouping;
+        }
+        if (settings.showTemporalEdges !== undefined) {
+          showTemporalEdges = settings.showTemporalEdges;
+          document.getElementById('temporal-edges-check').checked = showTemporalEdges;
+        }
+        if (settings.accessibilityMode !== undefined) {
+          accessibilityMode = settings.accessibilityMode;
+          document.getElementById('accessibility-check').checked = accessibilityMode;
+        }
+
+        // Restore pattern thresholds
+        if (settings.patternThresholds) {
+          Object.assign(patternThresholds, settings.patternThresholds);
+          // Update slider UI (IDs must match setupThresholdSlider calls)
+          const sliders = [
+            ['threshold-sync', 'syncBlockMs', 'ms'],
+            ['threshold-gap', 'longGapMs', 'ms'],
+            ['threshold-promise', 'promiseFlood', ''],
+            ['threshold-callback', 'callbackStorm', ''],
+            ['threshold-unbatched', 'unbatchedOps', ''],
+            ['threshold-fetch', 'fetchFlood', '']
+          ];
+          sliders.forEach(([id, key, suffix]) => {
+            const slider = document.getElementById(id);
+            const valueSpan = document.getElementById(id + '-val');
+            if (slider && patternThresholds[key] !== undefined) {
+              slider.value = patternThresholds[key];
+              if (valueSpan) valueSpan.textContent = patternThresholds[key] + suffix;
+            }
+          });
+        }
+
+        updateControlStates();
+        updateAnalysisButtonState();
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+
     // Pattern cache for accessibility mode
     const patternCache = new Map();
 
@@ -1680,6 +1775,9 @@ const userB = await fetch('/user/123');</pre>
       canvas = document.getElementById('bubble-canvas');
       ctx = canvas.getContext('2d');
 
+      // Load saved settings before setting up event handlers
+      loadSettings();
+
       // View switching
       document.getElementById('view-select').addEventListener('change', (e) => {
         currentView = e.target.value;
@@ -1687,6 +1785,7 @@ const userB = await fetch('/user/123');</pre>
         document.getElementById(currentView + '-view').classList.add('active');
         updateViewHelp();
         updateControlStates();
+        saveSettings();
         if (traceData) render();
       });
 
@@ -1749,6 +1848,7 @@ const userB = await fetch('/user/123');</pre>
         slider.addEventListener('input', () => {
           patternThresholds[key] = parseInt(slider.value);
           valueSpan.textContent = slider.value + suffix;
+          saveSettings();
           if (showPatterns && traceData) {
             detectPatterns();
             render();
@@ -2461,6 +2561,7 @@ const userB = await fetch('/user/123');</pre>
       }
       updateCriticalPathInfo();
       updateAnalysisButtonState();
+      saveSettings();
       render();
     }
 
@@ -2475,6 +2576,7 @@ const userB = await fetch('/user/123');</pre>
       clearPatternCache();
       document.body.classList.toggle('accessibility-mode', accessibilityMode);
       updateAnalysisButtonState();
+      saveSettings();
       if (traceData) render();
     }
 
@@ -2590,6 +2692,7 @@ const userB = await fetch('/user/123');</pre>
         showBottlenecks = checkbox.checked;
       }
       updateAnalysisButtonState();
+      saveSettings();
       if (traceData) {
         detectBottlenecks();
         updateAnalysisInfo();
@@ -2629,6 +2732,7 @@ const userB = await fetch('/user/123');</pre>
         showPatterns = checkbox.checked;
       }
       updateAnalysisButtonState();
+      saveSettings();
       if (traceData) {
         detectPatterns();
         updateAnalysisInfo();
@@ -3100,6 +3204,7 @@ const userB = await fetch('/user/123');</pre>
       dagNodes = [];
       updateAnalysisInfo();
       updateAnalysisButtonState();
+      saveSettings();
       if (traceData) render();
     }
 
@@ -3155,6 +3260,7 @@ const userB = await fetch('/user/123');</pre>
         stackTraceGrouping = checkbox.checked;
       }
       updateAnalysisButtonState();
+      saveSettings();
       if (traceData) render();
     }
 
@@ -3202,6 +3308,7 @@ const userB = await fetch('/user/123');</pre>
         showTemporalEdges = checkbox.checked;
       }
       updateAnalysisButtonState();
+      saveSettings();
       if (traceData) {
         computeTemporalEdges();
         render();
