@@ -5749,6 +5749,19 @@ const userB = await fetch('/user/123');</pre>
           ctx.globalAlpha = 1;
         }
 
+        // Critical path highlight - draw first so it's behind the circle
+        const isOnCriticalPath = showCriticalPath && criticalPathSet.has(r.asyncId);
+        if (isOnCriticalPath && isActive) {
+          ctx.beginPath();
+          ctx.arc(x, y, radius + 6, 0, Math.PI * 2);
+          ctx.strokeStyle = '#ff6432';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#ff6432';
+          ctx.shadowBlur = 15;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+
         // Draw resource circle
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
