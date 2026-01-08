@@ -401,6 +401,12 @@ static void benchNewApproachPumpTo(
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
+  // Always enable spec-compliant autoAllocateChunkSize behavior for the "New" approach.
+  // This is the behavior we're adopting going forward. When enabled, byte streams without
+  // explicit autoAllocateChunkSize will use DEFAULT reads (16KB buffer, no ByobRequest)
+  // instead of the legacy BYOB reads (4KB buffer, ByobRequest available).
+  // The "Existing" benchmarks keep the legacy behavior for comparison.
+  flags.setNoAutoAllocateChunkSize(true);
   // Enable real timers for streams that need actual timer functionality (e.g., TIMED_VALUE).
   bool needsRealTimers = config.type == StreamType::TIMED_VALUE;
   TestFixture fixture({.featureFlags = flags.asReader(), .useRealTimers = needsRealTimers});
@@ -439,6 +445,10 @@ static void benchExistingApproachPumpTo(
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
+  // Keep legacy autoAllocateChunkSize behavior for "Existing" benchmarks.
+  // This uses 4KB BYOB reads with ByobRequest available, which is the original workerd behavior.
+  // The "New" benchmarks use spec-compliant behavior for comparison.
+  flags.setNoAutoAllocateChunkSize(false);
   // Enable real timers for streams that need actual timer functionality (e.g., TIMED_VALUE).
   bool needsRealTimers = config.type == StreamType::TIMED_VALUE;
   TestFixture fixture({.featureFlags = flags.asReader(), .useRealTimers = needsRealTimers});
@@ -1011,6 +1021,8 @@ static void benchDrainingReaderMaxRead(benchmark::State& state,
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
+  // Use spec-compliant autoAllocateChunkSize behavior for DrainingReader benchmarks.
+  flags.setNoAutoAllocateChunkSize(true);
   TestFixture fixture({.featureFlags = flags.asReader()});
 
   size_t totalBytes = chunkSize * numChunks;

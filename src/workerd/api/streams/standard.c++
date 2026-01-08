@@ -1900,7 +1900,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
 
   using State = ReadableState<ByobController, ByteQueue>;
   kj::Maybe<State> state;
-  int autoAllocateChunkSize;
+  kj::Maybe<int> autoAllocateChunkSize;
 
   JSG_MEMORY_INFO(ByteReadable) {
     KJ_IF_SOME(s, state) {
@@ -1915,8 +1915,9 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
-  ByteReadable(
-      ByobController controller, ReadableStreamJsController& owner, int autoAllocateChunkSize)
+  ByteReadable(ByobController controller,
+      ReadableStreamJsController& owner,
+      kj::Maybe<int> autoAllocateChunkSize)
       : state(State(kj::mv(controller), *this, owner)),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
@@ -1960,8 +1961,10 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
                   .atLeast = atLeast,
                   .type = ByteQueue::ReadRequest::Type::BYOB,
                 }));
-      } else {
-        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, autoAllocateChunkSize)) {
+      } else KJ_IF_SOME(chunkSize, autoAllocateChunkSize) {
+        // autoAllocateChunkSize is set, so we allocate a buffer and do a BYOB read.
+        // This makes the buffer available to the underlying source via controller.byobRequest.
+        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, chunkSize)) {
           // Ensure that the handle is created here so that the size of the buffer
           // is accounted for in the isolate memory tracking.
           s.consumer->read(js,
@@ -1969,6 +1972,21 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
                   {
                     .store = kj::mv(store),
                     .type = ByteQueue::ReadRequest::Type::BYOB,
+                  }));
+        } else {
+          prp.resolver.reject(js, js.v8Error("Failed to allocate buffer for read."));
+        }
+      } else {
+        // autoAllocateChunkSize is not set. Per spec, we do a DEFAULT read which means
+        // the underlying source's pull method won't get a byobRequest. It must use
+        // controller.enqueue() to provide data instead.
+        constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
+        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, kDefaultReadSize)) {
+          s.consumer->read(js,
+              ByteQueue::ReadRequest(kj::mv(prp.resolver),
+                  {
+                    .store = kj::mv(store),
+                    .type = ByteQueue::ReadRequest::Type::DEFAULT,
                   }));
         } else {
           prp.resolver.reject(js, js.v8Error("Failed to allocate buffer for read."));
@@ -2785,14 +2803,34 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
   expectedLength = underlyingSource.expectedLength;
 
   if (type == "bytes") {
-    auto autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(
-        UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE);
+    // Per spec, autoAllocateChunkSize should only be set if the user explicitly provides it.
+    // If not set, the underlying source's pull method won't receive a byobRequest for
+    // non-BYOB reads and must use controller.enqueue() instead.
+    //
+    // However, our original implementation always defaulted to 4096, so we need a compat flag
+    // to control this behavior. Default to legacy behavior if flags aren't available.
+    bool useSpecCompliantBehavior = false;
+    KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+      useSpecCompliantBehavior = flags.getNoAutoAllocateChunkSize();
+    }
+
+    kj::Maybe<int> autoAllocateChunkSize;
+    if (useSpecCompliantBehavior) {
+      // Spec-compliant: only set if user explicitly provides it
+      autoAllocateChunkSize =
+          underlyingSource.autoAllocateChunkSize.map([](int size) { return size; });
+    } else {
+      // Legacy behavior: default to 4096 if not provided
+      autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(
+          UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE);
+    }
 
     auto controller =
         js.alloc<ReadableByteStreamController>(kj::mv(underlyingSource), kj::mv(queuingStrategy));
 
-    JSG_REQUIRE(
-        autoAllocateChunkSize > 0, TypeError, "The autoAllocateChunkSize option cannot be zero.");
+    KJ_IF_SOME(chunkSize, autoAllocateChunkSize) {
+      JSG_REQUIRE(chunkSize > 0, TypeError, "The autoAllocateChunkSize option cannot be zero.");
+    }
 
     // We account for the memory usage of the ByteReadable and its controller together because
     // their lifetimes are identical (in practice) and memory accounting itself has a memory
