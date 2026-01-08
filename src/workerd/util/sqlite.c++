@@ -692,7 +692,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
   currentParseContext = parseContext;
 
   KJ_ASSERT(currentRegulator == kj::none,
-      "can't prepare statements inside executeWithRegulator() callback");
+      "cannot execute SQL queries recursively, such as in a user-defined function");
   KJ_DEFER(currentRegulator = kj::none);
   currentRegulator = regulator;
 
