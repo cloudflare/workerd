@@ -5868,6 +5868,44 @@ const userB = await fetch('/user/123');</pre>
           ctx.fillText('🔥', flameX, flameY);
           ctx.globalAlpha = 1;
         }
+
+        // Unresolved promise indicator (shown when replay is complete or near end)
+        const isUnresolved = r.type === 'js-promise' &&
+                            r.createdAt > 0 &&
+                            r.callbackStartedAt === 0 &&
+                            r.destroyedAt === 0;
+        if (isUnresolved && replayTime >= duration * 0.9) {
+          // Draw a subtle "?" badge in the lower-right
+          const badgeX = x + radius - 6;
+          const badgeY = y + radius - 6;
+
+          ctx.beginPath();
+          ctx.arc(badgeX, badgeY, 8, 0, Math.PI * 2);
+          ctx.fillStyle = '#9966cc';
+          ctx.globalAlpha = 0.8;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = '#1a1a2e';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          ctx.fillStyle = 'white';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('?', badgeX, badgeY);
+
+          // Also draw a dashed border around the node
+          ctx.beginPath();
+          ctx.arc(x, y, radius + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = '#9966cc';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 4]);
+          ctx.globalAlpha = 0.6;
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+        }
       });
 
       // Stats overlay
