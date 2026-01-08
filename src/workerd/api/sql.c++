@@ -138,6 +138,12 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
   return dbSize;
 }
 
+void SqlStorage::createFunction(jsg::Lock& js,
+    kj::String name,
+    jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)> callback) {
+  JSG_FAIL_REQUIRE(Error, "createFunction is not yet implemented");
+}
+
 bool SqlStorage::isAllowedName(kj::StringPtr name) const {
   return !name.startsWith("_cf_");
 }

@@ -37,6 +37,15 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 
   double getDatabaseSize(jsg::Lock& js);
 
+  // Register a user-defined SQL function. The callback will be invoked for each row
+  // when the function is called in a SQL query.
+  //
+  // For scalar functions, pass a single callback function.
+  // For aggregate functions, pass an options object with step/final callbacks.
+  void createFunction(jsg::Lock& js,
+      kj::String name,
+      jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)> callback);
+
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
 
@@ -49,6 +58,9 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
       JSG_METHOD(ingest);
 
       JSG_METHOD(setMaxPageCountForTest);
+
+      // User-defined functions are experimental
+      JSG_METHOD(createFunction);
     }
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);
