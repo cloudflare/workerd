@@ -32,14 +32,14 @@ filegroup(
 
 # Workspace Member Dependencies
 alias(
-    name = "ada-url-3.3.0",
-    actual = "@crates_vendor__ada-url-3.3.0//:ada_url",
+    name = "ada-url-3.4.1",
+    actual = "@crates_vendor__ada-url-3.4.1//:ada_url",
     tags = ["manual"],
 )
 
 alias(
     name = "ada-url",
-    actual = "@crates_vendor__ada-url-3.3.0//:ada_url",
+    actual = "@crates_vendor__ada-url-3.4.1//:ada_url",
     tags = ["manual"],
 )
 

@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "ada-url"
-version = "3.3.0"
+version = "3.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f524cc76f401382457ce5b571771222be8e1f9511854f0f6ab864b5fbe4af359"
+checksum = "35b34e6f292116801f2e5a326013a95f295105505faf5107e07ad652e4b54528"
 dependencies = [
  "cc",
  "link_args",
