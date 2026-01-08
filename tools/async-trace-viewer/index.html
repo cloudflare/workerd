@@ -2027,10 +2027,12 @@ const userB = await fetch('/user/123');</pre>
             const r = hovered.resource;
             const tooltip = document.getElementById('tooltip');
             const patternHTML = getPatternTooltipHTML(r.asyncId);
+            const criticalPathHTML = getCriticalPathTooltipHTML(r.asyncId);
             tooltip.innerHTML = `
               <div class="tooltip-title">${r.type} #${r.asyncId}</div>
               <div>Trigger: #${r.triggerId || 'root'}</div>
               <div>Children: ${(traceData.childrenMap.get(r.asyncId) || []).length}</div>
+              ${criticalPathHTML}
               ${patternHTML}
             `;
             tooltip.style.display = 'block';
@@ -3036,6 +3038,23 @@ const userB = await fetch('/user/123');</pre>
       return `<div style="margin-top: 0.4rem; border-top: 1px solid #333; padding-top: 0.3rem;">
         <div style="font-weight: bold; font-size: 0.7rem; color: #e94560;">Detected Patterns:</div>
         ${patternItems}
+      </div>`;
+    }
+
+    function getCriticalPathTooltipHTML(asyncId) {
+      if (!showCriticalPath || !criticalPathSet.has(asyncId)) return '';
+      if (!criticalPathInfo || !criticalPathInfo.path) return '';
+
+      // Find position in critical path
+      const path = criticalPathInfo.path;
+      const pathIndex = path.findIndex(id => id === asyncId);
+      const positionText = pathIndex >= 0
+        ? `Step ${pathIndex + 1} of ${path.length}`
+        : 'On critical path';
+
+      return `<div style="margin-top: 0.4rem; border-top: 1px solid #333; padding-top: 0.3rem;">
+        <div style="font-weight: bold; font-size: 0.7rem; color: #ff6432;">🔥 Critical Path</div>
+        <div style="font-size: 0.65rem; color: #ff8c5a;">${positionText}</div>
       </div>`;
     }
 
@@ -4107,11 +4126,13 @@ const userB = await fetch('/user/123');</pre>
           : '<div style="color: #666; font-size: 0.65rem; margin-top: 0.3rem;">No stack (internal)</div>';
         const classLabel = r._classification === 'typed' ? 'API' : (r._classification === 'user' ? 'User' : 'Internal');
         const patternHTML = getPatternTooltipHTML(r.asyncId);
+        const criticalPathHTML = getCriticalPathTooltipHTML(r.asyncId);
         tooltip.innerHTML = `
           <div class="tooltip-title">${r.type} #${r.asyncId} <span style="color: #888; font-size: 0.7rem;">(${classLabel})</span></div>
           <div>Created: ${(r.createdAt / 1e6).toFixed(2)}ms</div>
           ${r.callbackStartedAt > 0 ? `<div>Callback: ${(r.callbackStartedAt / 1e6).toFixed(2)}ms</div>` : ''}
           ${stackPreview}
+          ${criticalPathHTML}
           ${patternHTML}
         `;
         tooltip.style.display = 'block';
