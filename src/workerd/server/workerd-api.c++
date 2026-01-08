@@ -547,7 +547,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     api::registerModules(*modules, featureFlags);
 
     if (source.isPython) {
-      modules::python::registerPyodideModules<JsgWorkerdIsolate>(
+      modules::python::registerPythonWorkerdModules<JsgWorkerdIsolate>(
           lockParam, *modules, featureFlags, kj::mv(artifacts), impl->pythonConfig, source);
     }
 

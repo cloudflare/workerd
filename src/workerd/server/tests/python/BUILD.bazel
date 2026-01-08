@@ -5,8 +5,6 @@ python_test_setup()
 
 py_wd_test("hello")
 
-py_wd_test("node_compat_v2")
-
 py_wd_test("env-param")
 
 py_wd_test(
@@ -79,3 +77,5 @@ py_wd_test(
 )
 
 py_wd_test("python-compat-flag")
+
+py_wd_test("node_compat_v2")
