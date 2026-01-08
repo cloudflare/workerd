@@ -412,6 +412,36 @@ The prompt asks the AI to:
 8. Provide specific code recommendations
 9. Estimate potential improvement
 
+### Sidebar Panels
+
+The left sidebar displays key metrics and analysis results:
+
+| Panel | Description |
+|-------|-------------|
+| **Stats** | Resource count, total sync/async time, request duration |
+| **Time Distribution** | Bar chart showing sync vs async time allocation |
+| **Runtime Overhead** | Visual breakdown of user code vs runtime overhead time |
+| **Critical Path** | Details about the longest dependency chain (when enabled) |
+| **Detected Patterns** | List of anti-patterns found (when enabled) |
+| **Analysis** | Detailed trace analysis with recommendations |
+
+**Runtime Overhead Calculation:**
+
+The Runtime Overhead panel estimates what percentage of async activity is dominated by runtime machinery vs user code:
+
+- **User time** (green): Operations with identifiable user intent
+  - Typed API calls (fetch, cache, KV, etc.)
+  - User promises (resources with stack traces pointing to user code)
+- **Runtime time** (orange): Internal runtime overhead
+  - Internal promises and bridges with no user stack
+  - KJ↔JS bridging overhead
+  - Runtime scheduling and bookkeeping
+
+The breakdown shows:
+- Visual bar chart with percentages
+- Operation counts for each category
+- Detailed breakdown: API calls | User promises | Internal ops
+
 ### Usage
 1. Start a local HTTP server: `python3 -m http.server 8888` from the `tools/async-trace-viewer` directory
 2. Open `http://localhost:8888` in a browser

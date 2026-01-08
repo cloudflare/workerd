@@ -980,6 +980,16 @@
       </div>
 
       <div class="sidebar-section">
+        <h3>Runtime Overhead</h3>
+        <div class="section-content">
+          <canvas id="overhead-chart" height="24" style="width: 100%; border-radius: 4px;"></canvas>
+          <div id="overhead-breakdown" style="font-size: 0.7rem; margin-top: 0.25rem;">
+            <div style="color: #666;">Load a trace to analyze</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
         <h3>Critical Path</h3>
         <div class="section-content">
           <div id="critical-path-info" style="font-size: 0.7rem;">
@@ -2306,6 +2316,7 @@ const userB = await fetch('/user/123');</pre>
 
       updateStats();
       updateLegend();
+      renderRuntimeOverheadChart();
       computeCriticalPath();
       updateCriticalPathInfo();
       // Run detection if enabled
@@ -3388,6 +3399,98 @@ const userB = await fetch('/user/123');</pre>
       document.getElementById('time-breakdown').innerHTML =
         `<span style="color: #7ec8e3;">■</span> Async wait: ${asyncPct}% | ` +
         `<span style="color: #e94560;">■</span> Sync exec: ${syncPct}%`;
+    }
+
+    function renderRuntimeOverheadChart() {
+      if (!traceData) return;
+
+      // Calculate time by classification
+      // 'typed' = API calls (fetch, cache, etc.) - user-initiated
+      // 'user' = User code promises (have stack traces)
+      // 'internal' = Runtime overhead (no stack, internal machinery)
+      const timeByClass = {
+        typed: { sync: 0, async: 0, count: 0 },
+        user: { sync: 0, async: 0, count: 0 },
+        internal: { sync: 0, async: 0, count: 0 }
+      };
+
+      traceData.resources.forEach(r => {
+        const cls = r._classification || 'internal';
+        if (!timeByClass[cls]) return;
+
+        timeByClass[cls].count++;
+
+        // Sync time (callback execution)
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          timeByClass[cls].sync += r.callbackEndedAt - r.callbackStartedAt;
+        }
+
+        // Async time (waiting for callback)
+        if (r.createdAt > 0 && r.callbackStartedAt > 0) {
+          timeByClass[cls].async += r.callbackStartedAt - r.createdAt;
+        }
+      });
+
+      // Calculate totals
+      const userTime = timeByClass.typed.sync + timeByClass.typed.async +
+                       timeByClass.user.sync + timeByClass.user.async;
+      const runtimeTime = timeByClass.internal.sync + timeByClass.internal.async;
+      const totalTime = userTime + runtimeTime;
+
+      // Render chart
+      const canvas = document.getElementById('overhead-chart');
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = 24 * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+      const width = rect.width;
+      const height = 24;
+
+      if (totalTime === 0) {
+        ctx.fillStyle = '#333';
+        ctx.fillRect(0, 0, width, height);
+        document.getElementById('overhead-breakdown').innerHTML =
+          '<div style="color: #666;">No timing data available</div>';
+        return;
+      }
+
+      const userWidth = (userTime / totalTime) * width;
+      const runtimeWidth = (runtimeTime / totalTime) * width;
+
+      // User code portion (green)
+      ctx.fillStyle = '#50c878';
+      ctx.fillRect(0, 0, userWidth, height);
+
+      // Runtime overhead portion (orange)
+      ctx.fillStyle = '#ff8c00';
+      ctx.fillRect(userWidth, 0, runtimeWidth, height);
+
+      // Labels
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+
+      if (userWidth > 50) {
+        ctx.fillText(`User ${(userTime / 1e6).toFixed(1)}ms`, userWidth / 2, height / 2 + 4);
+      }
+      if (runtimeWidth > 40) {
+        ctx.fillText(`Runtime ${(runtimeTime / 1e6).toFixed(1)}ms`, userWidth + runtimeWidth / 2, height / 2 + 4);
+      }
+
+      // Update breakdown text with detailed stats
+      const userPct = ((userTime / totalTime) * 100).toFixed(0);
+      const runtimePct = ((runtimeTime / totalTime) * 100).toFixed(0);
+      const userCount = timeByClass.typed.count + timeByClass.user.count;
+      const runtimeCount = timeByClass.internal.count;
+
+      document.getElementById('overhead-breakdown').innerHTML =
+        `<span style="color: #50c878;">■</span> User: ${userPct}% (${userCount} ops)<br>` +
+        `<span style="color: #ff8c00;">■</span> Runtime: ${runtimePct}% (${runtimeCount} ops)` +
+        `<div style="margin-top: 0.25rem; font-size: 0.6rem; color: #888;">` +
+        `API: ${timeByClass.typed.count} | User promises: ${timeByClass.user.count} | Internal: ${timeByClass.internal.count}` +
+        `</div>`;
     }
 
     function updateLegend() {
