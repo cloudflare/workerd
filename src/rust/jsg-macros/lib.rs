@@ -7,8 +7,8 @@ use syn::Fields;
 use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
+use syn::Type;
 use syn::parse_macro_input;
-use syn::spanned::Spanned;
 
 /// Generates `jsg::Struct` and `jsg::Type` implementations for data structures.
 ///
@@ -188,7 +188,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
             #(#unwraps)*
             let this = args.this();
-            let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
+            let self_ = <Self as jsg::Resource>::unwrap(&mut lock, this);
             let result = self_.#fn_name(#(#arg_exprs),*);
             #result_handling
         }
@@ -200,6 +200,13 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// On structs: generates `jsg::Type` and `ResourceTemplate`.
 /// On impl blocks: generates `Resource` trait with method registrations.
+///
+/// The generated `GarbageCollected` implementation automatically traces fields that
+/// need GC integration:
+/// - `Ref<T>` fields - traces the underlying resource
+/// - `TracedReference<T>` fields - traces the JavaScript handle
+/// - `Option<T>` where T is traceable - conditionally traces
+/// - `RefCell<Option<Ref<T>>>` - supports cyclic references through interior mutability
 #[proc_macro_attribute]
 pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     if let Ok(impl_block) = syn::parse::<ItemImpl>(item.clone()) {
@@ -207,16 +214,56 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let input = parse_macro_input!(item as DeriveInput);
-    let name = &input.ident;
-    let class_name = extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string());
-    let template_name = syn::Ident::new(&format!("{name}Template"), name.span());
+    let name: &syn::Ident = &input.ident;
 
-    if !matches!(&input.data, Data::Struct(_)) {
-        return error(
-            &input,
-            "#[jsg_resource] can only be applied to structs or impl blocks",
-        );
-    }
+    let class_name = if attr.is_empty() {
+        name.to_string()
+    } else {
+        extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string())
+    };
+
+    let template_name = template_name(name);
+
+    // Extract fields for trace generation
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => &fields.named,
+            _ => {
+                return syn::Error::new_spanned(
+                    &input,
+                    "#[jsg::resource] only supports structs with named fields",
+                )
+                .to_compile_error()
+                .into();
+            }
+        },
+        _ => {
+            return syn::Error::new_spanned(
+                &input,
+                "#[jsg::resource] can only be applied to structs or impl blocks",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    // Generate trace statements for traceable fields
+    let trace_statements = generate_trace_statements(fields);
+    let gc_impl = if trace_statements.is_empty() {
+        quote! {
+            #[automatically_derived]
+            impl jsg::GarbageCollected for #name {}
+        }
+    } else {
+        quote! {
+            #[automatically_derived]
+            impl jsg::GarbageCollected for #name {
+                fn trace(&self, visitor: &mut jsg::GcVisitor) {
+                    #(#trace_statements)*
+                }
+            }
+        }
+    };
 
     quote! {
         #input
@@ -249,6 +296,8 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
+        #gc_impl
+
         #[automatically_derived]
         pub struct #template_name {
             pub constructor: jsg::v8::Global<jsg::v8::FunctionTemplate>,
@@ -268,66 +317,227 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TraceableType {
+    /// `Ref<T>` - trace via `GarbageCollected` trait on the inner type
+    Ref,
+    /// `WeakRef<T>` - weak reference, no tracing needed (doesn't keep alive)
+    WeakRef,
+    /// `TracedReference<T>` - trace via `visitor.trace()`
+    TracedReference,
+    /// Not a traceable type
+    None,
+}
+
+/// Checks if a type path matches a known traceable type.
+/// Supports both unqualified (`Ref<T>`) and qualified (`jsg::Ref<T>`) paths.
+fn get_traceable_type(ty: &Type) -> TraceableType {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        match segment.ident.to_string().as_str() {
+            "Ref" => return TraceableType::Ref,
+            "WeakRef" => return TraceableType::WeakRef,
+            "TracedReference" => return TraceableType::TracedReference,
+            _ => {}
+        }
+    }
+    TraceableType::None
+}
+
+/// Extracts the inner type from `Option<T>` or `std::option::Option<T>` if present.
+fn extract_option_inner(ty: &Type) -> Option<&Type> {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && segment.ident == "Option"
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+    {
+        return Some(inner);
+    }
+    None
+}
+
+/// Extracts the inner type from `RefCell<T>` or `std::cell::RefCell<T>` if present.
+fn extract_refcell_inner(ty: &Type) -> Option<&Type> {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && segment.ident == "RefCell"
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+    {
+        return Some(inner);
+    }
+    None
+}
+
+/// Generates trace statements for all traceable fields in a struct.
+fn generate_trace_statements(
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> Vec<quote::__private::TokenStream> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let field_name = field.ident.as_ref()?;
+            let ty = &field.ty;
+
+            // Check if it's RefCell<...> wrapping a traceable type
+            if let Some(refcell_inner) = extract_refcell_inner(ty) {
+                // RefCell<Option<Traceable>>
+                if let Some(option_inner) = extract_option_inner(refcell_inner) {
+                    match get_traceable_type(option_inner) {
+                        TraceableType::Ref => {
+                            return Some(quote! {
+                                if let Some(ref inner) = *self.#field_name.borrow() {
+                                    visitor.visit_ref(inner);
+                                }
+                            });
+                        }
+                        TraceableType::WeakRef => {
+                            return Some(quote! {
+                                if let Some(ref inner) = *self.#field_name.borrow() {
+                                    inner.trace(visitor);
+                                }
+                            });
+                        }
+                        TraceableType::TracedReference => {
+                            return Some(quote! {
+                                if let Some(ref inner) = *self.#field_name.borrow() {
+                                    visitor.trace(inner);
+                                }
+                            });
+                        }
+                        TraceableType::None => {}
+                    }
+                }
+
+                // RefCell<Traceable> (without Option)
+                match get_traceable_type(refcell_inner) {
+                    TraceableType::Ref => {
+                        return Some(quote! {
+                            visitor.visit_ref(&*self.#field_name.borrow());
+                        });
+                    }
+                    TraceableType::WeakRef => {
+                        return Some(quote! {
+                            self.#field_name.borrow().trace(visitor);
+                        });
+                    }
+                    TraceableType::TracedReference => {
+                        return Some(quote! {
+                            visitor.trace(&*self.#field_name.borrow());
+                        });
+                    }
+                    TraceableType::None => {}
+                }
+            }
+
+            // Check if it's Option<Traceable>
+            if let Some(inner_ty) = extract_option_inner(ty) {
+                match get_traceable_type(inner_ty) {
+                    TraceableType::Ref => {
+                        return Some(quote! {
+                            if let Some(ref inner) = self.#field_name {
+                                visitor.visit_ref(inner);
+                            }
+                        });
+                    }
+                    TraceableType::WeakRef => {
+                        return Some(quote! {
+                            if let Some(ref inner) = self.#field_name {
+                                inner.trace(visitor);
+                            }
+                        });
+                    }
+                    TraceableType::TracedReference => {
+                        return Some(quote! {
+                            if let Some(ref inner) = self.#field_name {
+                                visitor.trace(inner);
+                            }
+                        });
+                    }
+                    TraceableType::None => {}
+                }
+            }
+
+            match get_traceable_type(ty) {
+                TraceableType::Ref => Some(quote! {
+                    visitor.visit_ref(&self.#field_name);
+                }),
+                TraceableType::WeakRef => Some(quote! {
+                    self.#field_name.trace(visitor);
+                }),
+                TraceableType::TracedReference => Some(quote! {
+                    visitor.trace(&self.#field_name);
+                }),
+                TraceableType::None => None,
+            }
+        })
+        .collect()
+}
+
+fn template_name(name: &syn::Ident) -> syn::Ident {
+    syn::Ident::new(&format!("{name}Template"), name.span())
+}
+
 fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
     let self_ty = &impl_block.self_ty;
+    let mut method_registrations = Vec::new();
 
-    let method_registrations: Vec<_> = impl_block
-        .items
-        .iter()
-        .filter_map(|item| {
-            let syn::ImplItem::Fn(method) = item else {
-                return None;
-            };
-            let attr = method.attrs.iter().find(|a| {
-                a.path().is_ident("jsg")
-                    || a.path()
-                        .segments
-                        .last()
-                        .is_some_and(|s| s.ident == "jsg_method")
-            })?;
+    for item in &impl_block.items {
+        if let syn::ImplItem::Fn(method) = item {
+            for attr in &method.attrs {
+                if attr.path().is_ident("jsg")
+                    || (attr.path().segments.len() == 1
+                        && attr.path().segments[0].ident == "jsg_method")
+                {
+                    let rust_method_name = &method.sig.ident;
 
-            let rust_name = &method.sig.ident;
-            let js_name = extract_name_attribute(&attr.meta.to_token_stream().to_string())
-                .unwrap_or_else(|| snake_to_camel(&rust_name.to_string()));
-            let callback = syn::Ident::new(&format!("{rust_name}_callback"), rust_name.span());
+                    let js_name = extract_name_attribute(&attr.meta.to_token_stream().to_string())
+                        .unwrap_or_else(|| snake_to_camel(&rust_method_name.to_string()));
+                    let callback_name = syn::Ident::new(
+                        &format!("{rust_method_name}_callback"),
+                        rust_method_name.span(),
+                    );
 
-            Some(quote! {
-                jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback }
-            })
-        })
-        .collect();
+                    method_registrations.push(quote! {
+                        jsg::Member::Method {
+                            name: #js_name.to_owned(),
+                            callback: Self::#callback_name,
+                        }
+                    });
+                }
+            }
+        }
+    }
 
     let type_name = match &**self_ty {
-        syn::Type::Path(p) => p
-            .path
-            .segments
-            .last()
-            .map_or("Unknown", |s| s.ident.to_string().leak()),
-        _ => "Unknown",
+        syn::Type::Path(type_path) => {
+            &type_path
+                .path
+                .segments
+                .last()
+                .expect("Type path must have at least one segment")
+                .ident
+        }
+        _ => todo!(),
     };
-    let drop_fn = syn::Ident::new(&format!("drop_{type_name}"), self_ty.span());
+    let template_name = template_name(type_name);
 
     quote! {
         #impl_block
 
-        #[allow(non_snake_case)]
-        #[automatically_derived]
-        unsafe extern "C" fn #drop_fn(isolate: *mut jsg::v8::ffi::Isolate, this: *mut std::os::raw::c_void) {
-            jsg::drop_resource::<#self_ty>(isolate, this);
-        }
-
         #[automatically_derived]
         impl jsg::Resource for #self_ty {
-            fn members() -> Vec<jsg::Member> where Self: Sized {
-                vec![#(#method_registrations,)*]
-            }
+            type Template = #template_name;
 
-            fn get_drop_fn(&self) -> unsafe extern "C" fn(*mut jsg::v8::ffi::Isolate, *mut std::os::raw::c_void) {
-                #drop_fn
-            }
-
-            fn get_state(&mut self) -> &mut jsg::ResourceState {
-                &mut self._state
+            fn members() -> Vec<jsg::Member>
+            where
+                Self: Sized,
+            {
+                vec![
+                    #(#method_registrations,)*
+                ]
             }
         }
     }

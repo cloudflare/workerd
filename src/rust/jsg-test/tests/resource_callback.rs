@@ -9,14 +9,12 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use jsg::Number;
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::Resource;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
 #[jsg_resource]
 struct EchoResource {
-    _state: ResourceState,
     prefix: String,
 }
 
@@ -36,7 +34,6 @@ impl EchoResource {
 
 #[jsg_resource]
 struct DirectReturnResource {
-    _state: ResourceState,
     name: String,
     counter: Rc<Cell<u32>>,
 }
@@ -76,12 +73,13 @@ impl DirectReturnResource {
 fn resource_method_callback_receives_correct_self() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EchoResource {
-            _state: ResourceState::default(),
-            prefix: "Hello, ".to_owned(),
-        });
-        let mut template = EchoResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EchoResource::alloc(
+            lock,
+            EchoResource {
+                prefix: "Hello, ".to_owned(),
+            },
+        );
+        let wrapped = EchoResource::wrap(resource, lock);
         ctx.set_global("echoResource", wrapped);
 
         // Call the method from JavaScript
@@ -96,12 +94,13 @@ fn resource_method_callback_receives_correct_self() {
 fn resource_method_can_be_called_multiple_times() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EchoResource {
-            _state: ResourceState::default(),
-            prefix: ">> ".to_owned(),
-        });
-        let mut template = EchoResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EchoResource::alloc(
+            lock,
+            EchoResource {
+                prefix: ">> ".to_owned(),
+            },
+        );
+        let wrapped = EchoResource::wrap(resource, lock);
         ctx.set_global("echo", wrapped);
 
         // First call
@@ -120,12 +119,13 @@ fn resource_method_can_be_called_multiple_times() {
 fn resource_method_accepts_str_ref_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EchoResource {
-            _state: ResourceState::default(),
-            prefix: "Hello, ".to_owned(),
-        });
-        let mut template = EchoResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EchoResource::alloc(
+            lock,
+            EchoResource {
+                prefix: "Hello, ".to_owned(),
+            },
+        );
+        let wrapped = EchoResource::wrap(resource, lock);
         ctx.set_global("echo", wrapped);
 
         let result: String = ctx.eval(lock, "echo.greet('World')").unwrap();
@@ -140,13 +140,14 @@ fn resource_method_returns_non_result_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let counter = Rc::new(Cell::new(42));
-        let resource = jsg::Ref::new(DirectReturnResource {
-            _state: ResourceState::default(),
-            name: "TestResource".to_owned(),
-            counter: counter.clone(),
-        });
-        let mut template = DirectReturnResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = DirectReturnResource::alloc(
+            lock,
+            DirectReturnResource {
+                name: "TestResource".to_owned(),
+                counter: counter.clone(),
+            },
+        );
+        let wrapped = DirectReturnResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         // Test getString returns string
@@ -177,13 +178,14 @@ fn resource_method_returns_non_result_values() {
 fn resource_method_returns_null_for_none() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(DirectReturnResource {
-            _state: ResourceState::default(),
-            name: String::new(),
-            counter: Rc::new(Cell::new(0)),
-        });
-        let mut template = DirectReturnResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = DirectReturnResource::alloc(
+            lock,
+            DirectReturnResource {
+                name: String::new(),
+                counter: Rc::new(Cell::new(0)),
+            },
+        );
+        let wrapped = DirectReturnResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         let result: Option<String> = ctx.eval(lock, "resource.maybeName()").unwrap();
