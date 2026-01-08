@@ -96,6 +96,8 @@ enum class ResourceType : uint16_t {
 - [x] Analysis sidebar updates correctly when switching demos
 - [x] Real trace capture from workerd samples (6 traces captured)
 - [x] KJ↔JS bridge tracking (`kj-to-js` and `js-to-kj` resource types)
+- [x] Temporal edges feature for timing-based causality
+- [x] AI analysis prompt with comprehensive trace context
 
 ### Not Yet Done
 - [ ] Unit tests for AsyncTraceContext
@@ -350,6 +352,44 @@ Intended behavior:
 - `I`: Open AI analysis prompt
 - `Space`: Play/pause (Replay view)
 - `R`: Reset animation (Replay view)
+
+### AI Analysis Prompt
+
+The `I` hotkey opens an AI analysis modal that generates a detailed prompt for Claude or other AI assistants. The prompt includes:
+
+**Trace Summary:**
+- Total duration, resource count, sync/async time ratio
+- Resource type breakdown with classification (typed API calls, user code, internal)
+
+**Analysis Context:**
+- Critical path (longest dependency chain with timing)
+- High latency edges (>1ms gaps between operations)
+- URLs/endpoints referenced
+- Top stack locations by frequency
+
+**Detected Anti-Patterns:**
+- Sequential awaits (Promise.all opportunities)
+- Duplicate fetches
+- Waterfall fetches (chained dependencies)
+- Deep promise chains
+
+**Runtime-Specific Data:**
+- Stream operations (stream-read, stream-write, stream-pipe-to, stream-pipe-through)
+- KJ↔JS bridge transitions (cross-boundary calls between JS and C++ I/O layer)
+- Temporal execution patterns (callbacks spawning other callbacks)
+- Top bottlenecks with sync execution and async wait breakdown
+
+**Analysis Request:**
+The prompt asks the AI to:
+1. Identify the primary bottleneck
+2. Check for serialization issues
+3. Evaluate async/sync ratio
+4. Look for redundant operations
+5. Assess the critical path
+6. Analyze stream operations
+7. Review KJ↔JS transitions
+8. Provide specific code recommendations
+9. Estimate potential improvement
 
 ### Usage
 1. Start a local HTTP server: `python3 -m http.server 8888` from the `tools/async-trace-viewer` directory

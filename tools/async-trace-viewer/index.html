@@ -2280,7 +2280,7 @@ const userB = await fetch('/user/123');</pre>
       }
 
       if (!showBottlenecks && !showPatterns && !showTemporalEdges) {
-        html = '<div class="detail-item" style="color: #666;">Enable 🐢 or 🔍 toggles</div>';
+        html = '<div class="detail-item" style="color: #666;">Enable 🐢, 🔍, or ⏱️ toggles</div>';
       } else if (html === '') {
         html = '<div class="detail-item" style="color: #50c878;">No issues detected!</div>';
       }
@@ -5725,26 +5725,176 @@ ${annotationsSummary.slice(0, 15).join('\n')}
         });
       }
 
+      // Add detected patterns (from pattern detection analysis)
+      // We need to run pattern detection first
+      const savedShowPatterns = showPatterns;
+      showPatterns = true;
+      detectPatterns();
+      showPatterns = savedShowPatterns;
+
+      if (detectedPatterns.length > 0) {
+        prompt += `
+## Detected Anti-Patterns
+
+`;
+        // Group patterns by type
+        const patternsByType = {};
+        detectedPatterns.forEach(p => {
+          if (!patternsByType[p.type]) patternsByType[p.type] = [];
+          patternsByType[p.type].push(p);
+        });
+
+        if (patternsByType['sequential-await']) {
+          prompt += `### Sequential Awaits (Promise.all opportunities)\n`;
+          patternsByType['sequential-await'].forEach(p => {
+            prompt += `- ${p.message}\n`;
+          });
+        }
+
+        if (patternsByType['duplicate-fetch']) {
+          prompt += `### Duplicate Fetches\n`;
+          patternsByType['duplicate-fetch'].forEach(p => {
+            prompt += `- ${p.message}\n`;
+          });
+        }
+
+        if (patternsByType['waterfall-fetch']) {
+          const waterfalls = patternsByType['waterfall-fetch'];
+          prompt += `### Waterfall Fetches (${waterfalls.length} dependencies)\n`;
+          prompt += `- Fetches are chained sequentially - each waits for the previous to complete\n`;
+        }
+
+        if (patternsByType['deep-chain']) {
+          prompt += `### Deep Promise Chains\n`;
+          patternsByType['deep-chain'].forEach(p => {
+            prompt += `- ${p.message}\n`;
+          });
+        }
+      }
+
+      // Add stream operations summary
+      const streamTypes = ['stream-read', 'stream-write', 'stream-pipe-to', 'stream-pipe-through'];
+      const streamCounts = {};
+      streamTypes.forEach(type => {
+        const count = typeCounts[type] || 0;
+        if (count > 0) streamCounts[type] = count;
+      });
+
+      if (Object.keys(streamCounts).length > 0) {
+        prompt += `
+## Stream Operations
+
+`;
+        Object.entries(streamCounts).forEach(([type, count]) => {
+          prompt += `- ${type}: ${count}\n`;
+        });
+      }
+
+      // Add KJ↔JS bridge analysis
+      const kjToJsCount = typeCounts['kj-to-js'] || 0;
+      const jsToKjCount = typeCounts['js-to-kj'] || 0;
+
+      if (kjToJsCount > 0 || jsToKjCount > 0) {
+        prompt += `
+## KJ↔JS Bridge Transitions
+
+`;
+        if (kjToJsCount > 0) prompt += `- KJ→JS transitions: ${kjToJsCount} (KJ promises resolving to JS)\n`;
+        if (jsToKjCount > 0) prompt += `- JS→KJ transitions: ${jsToKjCount} (JS promises awaiting KJ)\n`;
+        prompt += `\nThese represent cross-boundary calls between the JavaScript runtime and the C++ I/O layer.\n`;
+      }
+
+      // Add temporal edges analysis
+      const savedShowTemporalEdges = showTemporalEdges;
+      showTemporalEdges = true;
+      computeTemporalEdges();
+      showTemporalEdges = savedShowTemporalEdges;
+
+      if (temporalEdges.length > 0) {
+        // Find resources that spawn many temporal children
+        const temporalParents = {};
+        temporalEdges.forEach(edge => {
+          temporalParents[edge.from] = (temporalParents[edge.from] || 0) + 1;
+        });
+
+        const topTemporalParents = Object.entries(temporalParents)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5);
+
+        if (topTemporalParents.some(([_, count]) => count > 2)) {
+          prompt += `
+## Temporal Execution Patterns
+
+`;
+          prompt += `Found ${temporalEdges.length} timing-based relationships (callbacks starting during other callbacks).\n\n`;
+          prompt += `Top spawning callbacks:\n`;
+          topTemporalParents.forEach(([id, count]) => {
+            if (count > 1) {
+              const r = traceData.resourceMap.get(parseInt(id));
+              if (r) {
+                const st = traceData.stackTraceMap.get(r.stackTraceId);
+                const frame = st && st.frames.length > 0 ? st.frames[0] : '(no stack)';
+                prompt += `- [${r.type}] ${frame}: spawns ${count} callbacks\n`;
+              }
+            }
+          });
+        }
+      }
+
+      // Add bottleneck details
+      const savedShowBottlenecks = showBottlenecks;
+      showBottlenecks = true;
+      detectBottlenecks();
+      showBottlenecks = savedShowBottlenecks;
+
+      if (detectedBottlenecks.length > 0) {
+        prompt += `
+## Top Bottlenecks (by time)
+
+`;
+        detectedBottlenecks.forEach((id, i) => {
+          const r = traceData.resourceMap.get(id);
+          if (r) {
+            const st = traceData.stackTraceMap.get(r.stackTraceId);
+            const frame = st && st.frames.length > 0 ? st.frames[0] : '(no stack)';
+            let syncTime = 0, asyncWait = 0;
+            if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+              syncTime = (r.callbackEndedAt - r.callbackStartedAt) / 1e6;
+            }
+            if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+              asyncWait = (r.callbackStartedAt - r.createdAt) / 1e6;
+            }
+            prompt += `${i + 1}. [${r.type}] ${frame}\n`;
+            prompt += `   - Sync execution: ${syncTime.toFixed(2)}ms\n`;
+            prompt += `   - Async wait: ${asyncWait.toFixed(2)}ms\n`;
+          }
+        });
+      }
+
       prompt += `
 ## Analysis Request
 
 Based on this trace data, please:
 
-1. **Identify the primary bottleneck** - What is causing the most latency?
+1. **Identify the primary bottleneck** - What is causing the most latency? Reference specific operations from the bottleneck list.
 
-2. **Check for serialization issues** - Are there operations that could run in parallel but are running sequentially?
+2. **Check for serialization issues** - Are there operations that could run in parallel but are running sequentially? Pay special attention to any detected sequential-await or waterfall patterns.
 
 3. **Evaluate the async/sync ratio** - Is this worker I/O bound or CPU bound? Is the ratio healthy?
 
-4. **Look for redundant operations** - Are there duplicate fetches or unnecessary API calls?
+4. **Look for redundant operations** - Are there duplicate fetches or unnecessary API calls? Check the detected patterns section for duplicates.
 
 5. **Assess the critical path** - What operations are on the critical path? Which could be optimized or moved off the critical path?
 
-6. **Provide specific code recommendations** - Give concrete code examples showing how to improve the most impactful issues.
+6. **Analyze stream operations** - If streams are involved, are they being used efficiently? Are there opportunities to pipeline or parallelize stream processing?
 
-7. **Estimate potential improvement** - If your recommendations are implemented, roughly how much latency reduction might be achieved?
+7. **Review KJ↔JS transitions** - Are there excessive bridge transitions that could indicate inefficient async patterns?
 
-Please be specific and actionable in your recommendations.`;
+8. **Provide specific code recommendations** - Give concrete code examples showing how to improve the most impactful issues.
+
+9. **Estimate potential improvement** - If your recommendations are implemented, roughly how much latency reduction might be achieved?
+
+Please be specific and actionable in your recommendations. Reference specific resource types, stack locations, and timing data from the trace.`;
 
       return prompt;
     }
