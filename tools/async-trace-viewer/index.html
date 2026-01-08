@@ -1534,6 +1534,7 @@ const userB = await fetch('/user/123');</pre>
     // Replay sidebar section collapse state
     let replaySidebarCollapsed = {
       metrics: false,
+      overhead: false,
       criticalPath: false,
       alerts: false,
       eventFeed: false
@@ -6095,6 +6096,32 @@ const userB = await fetch('/user/123');</pre>
       // Count promises alive
       const promisesAlive = activeResources.filter(r => r.type === 'js-promise').length;
 
+      // Calculate accumulated user vs runtime time for overhead indicator
+      let accUserTime = 0, accRuntimeTime = 0;
+      visibleResources.forEach(r => {
+        const cls = r._classification || 'internal';
+        // Sync time contribution
+        if (r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime) {
+          const syncEnd = Math.min(r.callbackEndedAt > 0 ? r.callbackEndedAt : replayTime, replayTime);
+          const syncContrib = Math.max(0, syncEnd - r.callbackStartedAt);
+          if (cls === 'typed' || cls === 'user') {
+            accUserTime += syncContrib;
+          } else {
+            accRuntimeTime += syncContrib;
+          }
+        }
+        // Async time contribution
+        if (r.createdAt > 0 && r.createdAt <= replayTime) {
+          const asyncEnd = r.callbackStartedAt > 0 ? Math.min(r.callbackStartedAt, replayTime) : replayTime;
+          const asyncContrib = Math.max(0, asyncEnd - r.createdAt);
+          if (cls === 'typed' || cls === 'user') {
+            accUserTime += asyncContrib;
+          } else {
+            accRuntimeTime += asyncContrib;
+          }
+        }
+      });
+
       // Track events as replay progresses
       if (replayTime > replayLastEventTime) {
         traceData.resources.forEach(r => {
@@ -6334,6 +6361,57 @@ const userB = await fetch('/user/123');</pre>
         drawStatLine('Sync', `${(accumulatedSync / 1e6).toFixed(1)}ms`);
         drawStatLine('Async', `${(accumulatedAsync / 1e6).toFixed(1)}ms`);
         drawStatLine('Promises', promisesAlive, promisesAlive > 10 ? '#ffd700' : '#aaa');
+      }
+      drawSectionEnd();
+
+      // ----- Runtime Overhead Section -----
+      if (drawSectionHeader('User vs Runtime', 'overhead')) {
+        const accTotalTime = accUserTime + accRuntimeTime;
+        if (accTotalTime > 0) {
+          // Draw horizontal bar chart
+          const barWidth = sbContentWidth;
+          const barHeight = 12;
+          const userPct = accUserTime / accTotalTime;
+          const runtimePct = accRuntimeTime / accTotalTime;
+          const userBarWidth = barWidth * userPct;
+          const runtimeBarWidth = barWidth * runtimePct;
+
+          // User portion (green)
+          ctx.fillStyle = '#50c878';
+          ctx.fillRect(sbPadding, sbY, userBarWidth, barHeight);
+
+          // Runtime portion (orange)
+          ctx.fillStyle = '#ff8c00';
+          ctx.fillRect(sbPadding + userBarWidth, sbY, runtimeBarWidth, barHeight);
+
+          // Border
+          ctx.strokeStyle = '#333';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(sbPadding, sbY, barWidth, barHeight);
+
+          sbY += barHeight + 6;
+
+          // Percentage labels
+          ctx.font = '9px sans-serif';
+          ctx.fillStyle = '#50c878';
+          ctx.fillText(`User ${(userPct * 100).toFixed(0)}%`, sbPadding, sbY);
+          ctx.fillStyle = '#ff8c00';
+          ctx.textAlign = 'right';
+          ctx.fillText(`${(runtimePct * 100).toFixed(0)}% Runtime`, sbPadding + barWidth, sbY);
+          ctx.textAlign = 'left';
+          sbY += 12;
+
+          // Time values
+          ctx.fillStyle = '#666';
+          ctx.font = '8px sans-serif';
+          ctx.fillText(`${(accUserTime / 1e6).toFixed(1)}ms / ${(accRuntimeTime / 1e6).toFixed(1)}ms`, sbPadding, sbY);
+          sbY += 4;
+        } else {
+          ctx.fillStyle = '#666';
+          ctx.font = '9px sans-serif';
+          ctx.fillText('No timing data yet', sbPadding, sbY);
+          sbY += 14;
+        }
       }
       drawSectionEnd();
 
