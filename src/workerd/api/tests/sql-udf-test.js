@@ -92,6 +92,106 @@ export class UdfTestDO extends DurableObject {
     const result = sql.exec('SELECT get_null() AS val').one();
     assert.strictEqual(result.val, null);
   }
+
+  async testUdfThrowsError() {
+    const sql = this.state.storage.sql;
+
+    // Register a function that throws an error
+    sql.createFunction('throw_error', () => {
+      throw new Error('UDF error message');
+    });
+
+    // Test that the error propagates when the function is called
+    assert.throws(
+      () => sql.exec('SELECT throw_error() AS val').one(),
+      (err) => {
+        // The error should contain our message
+        return err.message.includes('UDF error message');
+      }
+    );
+  }
+
+  async testUdfThrowsTypeError() {
+    const sql = this.state.storage.sql;
+
+    // Register a function that throws a TypeError
+    sql.createFunction('throw_type_error', () => {
+      throw new TypeError('Invalid type in UDF');
+    });
+
+    // Test that the error propagates
+    assert.throws(
+      () => sql.exec('SELECT throw_type_error() AS val').one(),
+      (err) => {
+        return err.message.includes('Invalid type in UDF');
+      }
+    );
+  }
+
+  async testUdfReturnsUndefined() {
+    const sql = this.state.storage.sql;
+
+    // Register a function that returns undefined (no return statement)
+    sql.createFunction('get_undefined', () => {});
+
+    // Undefined should be treated as null
+    const result = sql.exec('SELECT get_undefined() AS val').one();
+    assert.strictEqual(result.val, null);
+  }
+
+  async testUdfWithBlobInput() {
+    const sql = this.state.storage.sql;
+
+    // Create a table with a blob column
+    sql.exec('CREATE TABLE IF NOT EXISTS blob_test (data BLOB)');
+    const testBlob = new Uint8Array([1, 2, 3, 4, 5]);
+    sql.exec('INSERT INTO blob_test VALUES (?)', testBlob);
+
+    // Register a function that computes length of a blob
+    // Blobs come in as ArrayBuffer, so we need to handle both
+    sql.createFunction('blob_len', (blob) => {
+      if (blob instanceof Uint8Array) {
+        return blob.length;
+      } else if (blob instanceof ArrayBuffer) {
+        return blob.byteLength;
+      } else if (ArrayBuffer.isView(blob)) {
+        return blob.byteLength;
+      }
+      return -1;
+    });
+
+    // Test using the function with blob data
+    const result = sql
+      .exec('SELECT blob_len(data) AS len FROM blob_test')
+      .one();
+    assert.strictEqual(result.len, 5);
+
+    // Cleanup
+    sql.exec('DROP TABLE blob_test');
+  }
+
+  async testUdfWithBlobOutput() {
+    const sql = this.state.storage.sql;
+
+    // Register a function that returns a blob
+    sql.createFunction('make_blob', (size) => {
+      const arr = new Uint8Array(size);
+      for (let i = 0; i < size; i++) {
+        arr[i] = i % 256;
+      }
+      return arr;
+    });
+
+    // Test using the function
+    const result = sql.exec('SELECT make_blob(5) AS blob').one();
+    assert.ok(
+      result.blob instanceof Uint8Array || result.blob instanceof ArrayBuffer
+    );
+    const view = new Uint8Array(result.blob);
+    assert.strictEqual(view.length, 5);
+    assert.strictEqual(view[0], 0);
+    assert.strictEqual(view[4], 4);
+  }
 }
 
 // =============================================================================
@@ -109,5 +209,10 @@ export default {
     await stub.testUdfWithMultipleArgs();
     await stub.testUdfWithStringResult();
     await stub.testUdfReturnsNull();
+    await stub.testUdfThrowsError();
+    await stub.testUdfThrowsTypeError();
+    await stub.testUdfReturnsUndefined();
+    await stub.testUdfWithBlobInput();
+    await stub.testUdfWithBlobOutput();
   },
 };
