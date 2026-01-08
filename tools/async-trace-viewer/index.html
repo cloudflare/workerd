@@ -156,6 +156,55 @@
       margin: 0.25rem 0;
     }
 
+    .threshold-section {
+      padding: 0.5rem;
+    }
+
+    .threshold-header {
+      font-size: 0.7rem;
+      font-weight: bold;
+      color: #e94560;
+      margin-bottom: 0.4rem;
+      text-transform: uppercase;
+    }
+
+    .threshold-item {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.7rem;
+      color: #aaa;
+      margin-bottom: 0.3rem;
+    }
+
+    .threshold-item span:first-child {
+      flex: 0 0 90px;
+    }
+
+    .threshold-item input[type="range"] {
+      flex: 1;
+      height: 4px;
+      -webkit-appearance: none;
+      background: #0f3460;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+
+    .threshold-item input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: #e94560;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .threshold-item span:last-child {
+      flex: 0 0 40px;
+      text-align: right;
+      color: #7ec8e3;
+    }
+
     .main-container {
       display: flex;
       flex: 1;
@@ -236,6 +285,28 @@
     }
     .resource-row.pattern-match .resource-bar {
       box-shadow: 0 0 8px rgba(200, 100, 255, 0.6);
+    }
+    /* Severity-based pattern highlighting */
+    .resource-row.pattern-high {
+      background: rgba(255, 0, 255, 0.3);
+      border-left: 4px solid #ff00ff;
+    }
+    .resource-row.pattern-high .resource-bar {
+      box-shadow: 0 0 12px rgba(255, 0, 255, 0.8);
+    }
+    .resource-row.pattern-medium {
+      background: rgba(204, 102, 255, 0.25);
+      border-left: 3px solid #cc66ff;
+    }
+    .resource-row.pattern-medium .resource-bar {
+      box-shadow: 0 0 8px rgba(204, 102, 255, 0.6);
+    }
+    .resource-row.pattern-low {
+      background: rgba(153, 102, 204, 0.15);
+      border-left: 2px solid #9966cc;
+    }
+    .resource-row.pattern-low .resource-bar {
+      box-shadow: 0 0 5px rgba(153, 102, 204, 0.4);
     }
 
     #critical-path-btn.active {
@@ -773,6 +844,40 @@
           <label class="dropdown-item" id="accessibility-item">
             <input type="checkbox" id="accessibility-check"> ♿ High Contrast <span class="hotkey">A</span>
           </label>
+          <div class="dropdown-divider"></div>
+          <div class="threshold-section">
+            <div class="threshold-header">Pattern Thresholds</div>
+            <div class="threshold-item">
+              <span>Sync block:</span>
+              <input type="range" id="threshold-sync" min="10" max="200" value="50">
+              <span id="threshold-sync-val">50ms</span>
+            </div>
+            <div class="threshold-item">
+              <span>Long gap:</span>
+              <input type="range" id="threshold-gap" min="100" max="2000" step="50" value="500">
+              <span id="threshold-gap-val">500ms</span>
+            </div>
+            <div class="threshold-item">
+              <span>Promise flood:</span>
+              <input type="range" id="threshold-promise" min="5" max="50" value="20">
+              <span id="threshold-promise-val">20</span>
+            </div>
+            <div class="threshold-item">
+              <span>Callback storm:</span>
+              <input type="range" id="threshold-callback" min="3" max="30" value="10">
+              <span id="threshold-callback-val">10</span>
+            </div>
+            <div class="threshold-item">
+              <span>Unbatched ops:</span>
+              <input type="range" id="threshold-unbatched" min="2" max="10" value="3">
+              <span id="threshold-unbatched-val">3</span>
+            </div>
+            <div class="threshold-item">
+              <span>Fetch concurrency:</span>
+              <input type="range" id="threshold-fetch" min="3" max="20" value="6">
+              <span id="threshold-fetch-val">6</span>
+            </div>
+          </div>
         </div>
       </div>
       <button id="tutorial-btn" style="background: #e94560;">❓ Guide</button>
@@ -1395,6 +1500,17 @@ const userB = await fetch('/user/123');</pre>
     let gapsData = [];  // Computed gaps from last render
     let gapsRenderParams = null;  // Rendering parameters for hit detection
 
+    // Pattern detection thresholds (configurable via UI)
+    let patternThresholds = {
+      syncBlockMs: 50,       // Event loop blocking threshold (ms)
+      longGapMs: 500,        // Long async gap threshold (ms)
+      promiseFlood: 20,      // Promise accumulation threshold (count per ms)
+      callbackStorm: 10,     // Callback storm threshold (count per ms)
+      unbatchedOps: 3,       // Unbatched operations threshold (count)
+      fetchFlood: 6,         // Concurrent fetch risk threshold (count)
+      hotCallback: 5         // Hot callback threshold (children count)
+    };
+
     // Pattern cache for accessibility mode
     const patternCache = new Map();
 
@@ -1568,6 +1684,26 @@ const userB = await fetch('/user/123');</pre>
       document.getElementById('stack-group-check').addEventListener('change', toggleStackGrouping);
       document.getElementById('temporal-edges-check').addEventListener('change', toggleTemporalEdges);
       document.getElementById('accessibility-check').addEventListener('change', toggleAccessibility);
+
+      // Threshold slider handlers
+      function setupThresholdSlider(id, key, suffix = '') {
+        const slider = document.getElementById(id);
+        const valueSpan = document.getElementById(id + '-val');
+        slider.addEventListener('input', () => {
+          patternThresholds[key] = parseInt(slider.value);
+          valueSpan.textContent = slider.value + suffix;
+          if (showPatterns && traceData) {
+            detectPatterns();
+            render();
+          }
+        });
+      }
+      setupThresholdSlider('threshold-sync', 'syncBlockMs', 'ms');
+      setupThresholdSlider('threshold-gap', 'longGapMs', 'ms');
+      setupThresholdSlider('threshold-promise', 'promiseFlood', '');
+      setupThresholdSlider('threshold-callback', 'callbackStorm', '');
+      setupThresholdSlider('threshold-unbatched', 'unbatchedOps', '');
+      setupThresholdSlider('threshold-fetch', 'fetchFlood', '');
 
       // Tutorial modal
       document.getElementById('tutorial-btn').addEventListener('click', () => {
@@ -2483,7 +2619,8 @@ const userB = await fetch('/user/123');</pre>
               detectedPatterns.push({
                 type: 'sequential-await',
                 message: `${sequentialGroup.length} sequential fetch operations could use Promise.all()`,
-                resources: sequentialGroup.map(s => s.asyncId)
+                resources: sequentialGroup.map(s => s.asyncId),
+                severity: 'high'
               });
             }
             sequentialGroup = [curr];
@@ -2494,7 +2631,8 @@ const userB = await fetch('/user/123');</pre>
           detectedPatterns.push({
             type: 'sequential-await',
             message: `${sequentialGroup.length} sequential fetch operations could use Promise.all()`,
-            resources: sequentialGroup.map(s => s.asyncId)
+            resources: sequentialGroup.map(s => s.asyncId),
+            severity: 'high'
           });
         }
       }
@@ -2521,7 +2659,8 @@ const userB = await fetch('/user/123');</pre>
           detectedPatterns.push({
             type: 'duplicate-fetch',
             message: `Duplicate fetch to ${url.substring(0, 40)}...`,
-            resources: ids
+            resources: ids,
+            severity: 'medium'
           });
         }
       });
@@ -2550,7 +2689,8 @@ const userB = await fetch('/user/123');</pre>
         detectedPatterns.push({
           type: 'deep-chain',
           message: `Deep async chain (depth ${maxDepth}) - consider flattening`,
-          resources: deepResources
+          resources: deepResources,
+          severity: 'medium'
         });
       }
 
@@ -2569,7 +2709,8 @@ const userB = await fetch('/user/123');</pre>
             detectedPatterns.push({
               type: 'waterfall-fetch',
               message: `Waterfall: fetch #${fetch.asyncId} depends on fetch #${parent.asyncId}`,
-              resources: [fetch.asyncId, parent.asyncId]
+              resources: [fetch.asyncId, parent.asyncId],
+              severity: 'medium'
             });
             break;
           }
@@ -2589,12 +2730,13 @@ const userB = await fetch('/user/123');</pre>
         detectedPatterns.push({
           type: 'unresolved-promise',
           message: `${unresolvedPromises.length} promise(s) never resolved`,
-          resources: unresolvedPromises.map(r => r.asyncId)
+          resources: unresolvedPromises.map(r => r.asyncId),
+          severity: 'low'
         });
       }
 
-      // Pattern 6: Long async gaps (waiting >500ms before callback)
-      const longGapThreshold = 500 * 1e6; // 500ms in nanoseconds
+      // Pattern 6: Long async gaps (waiting >threshold before callback)
+      const longGapThreshold = patternThresholds.longGapMs * 1e6; // Convert ms to ns
       traceData.resources.forEach(r => {
         if (r.createdAt > 0 && r.callbackStartedAt > 0) {
           const waitTime = r.callbackStartedAt - r.createdAt;
@@ -2603,7 +2745,8 @@ const userB = await fetch('/user/123');</pre>
             detectedPatterns.push({
               type: 'long-async-gap',
               message: `${r.type} #${r.asyncId} waited ${waitMs}ms before executing`,
-              resources: [r.asyncId]
+              resources: [r.asyncId],
+              severity: 'medium'
             });
           }
         }
@@ -2629,7 +2772,8 @@ const userB = await fetch('/user/123');</pre>
             detectedPatterns.push({
               type: 'redundant-timers',
               message: `${group.length} timers with similar delay created together`,
-              resources: group.map(t => t.asyncId)
+              resources: group.map(t => t.asyncId),
+              severity: 'low'
             });
           }
         });
@@ -2646,7 +2790,148 @@ const userB = await fetch('/user/123');</pre>
             detectedPatterns.push({
               type: 'cache-miss',
               message: `Cache miss: ${waitMs}ms wait suggests origin fetch`,
-              resources: [cg.asyncId]
+              resources: [cg.asyncId],
+              severity: 'low'
+            });
+          }
+        }
+      });
+
+      // ==================== NEW PATTERNS ====================
+
+      // Pattern 9: Event loop blocking (sync execution > threshold)
+      const syncBlockThreshold = patternThresholds.syncBlockMs * 1e6;
+      traceData.resources.forEach(r => {
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          const syncTime = r.callbackEndedAt - r.callbackStartedAt;
+          if (syncTime > syncBlockThreshold) {
+            detectedPatterns.push({
+              type: 'sync-flood',
+              message: `Event loop blocked: ${r.type} #${r.asyncId} ran ${(syncTime/1e6).toFixed(0)}ms sync`,
+              resources: [r.asyncId],
+              severity: 'high'
+            });
+          }
+        }
+      });
+
+      // Pattern 10: Promise accumulation (many promises in short window)
+      const promiseBuckets = new Map();
+      traceData.resources.filter(r => r.type === 'js-promise').forEach(r => {
+        const bucket = Math.floor(r.createdAt / 1e6); // 1ms buckets
+        if (!promiseBuckets.has(bucket)) promiseBuckets.set(bucket, []);
+        promiseBuckets.get(bucket).push(r.asyncId);
+      });
+      promiseBuckets.forEach((ids, bucket) => {
+        if (ids.length >= patternThresholds.promiseFlood) {
+          detectedPatterns.push({
+            type: 'promise-flood',
+            message: `Promise accumulation: ${ids.length} promises created within 1ms`,
+            resources: ids,
+            severity: 'medium'
+          });
+        }
+      });
+
+      // Pattern 11: Callback storm (many callbacks starting in short window)
+      const callbackBuckets = new Map();
+      traceData.resources.filter(r => r.callbackStartedAt > 0).forEach(r => {
+        const bucket = Math.floor(r.callbackStartedAt / 1e6);
+        if (!callbackBuckets.has(bucket)) callbackBuckets.set(bucket, []);
+        callbackBuckets.get(bucket).push(r.asyncId);
+      });
+      callbackBuckets.forEach((ids, bucket) => {
+        if (ids.length >= patternThresholds.callbackStorm) {
+          detectedPatterns.push({
+            type: 'callback-storm',
+            message: `Callback storm: ${ids.length} callbacks fired within 1ms`,
+            resources: ids,
+            severity: 'medium'
+          });
+        }
+      });
+
+      // Pattern 12: Unbatched KV/DO operations
+      const batchableTypes = ['kv-get', 'kv-put', 'kv-delete', 'do-get', 'do-put', 'do-delete'];
+      batchableTypes.forEach(opType => {
+        const ops = traceData.resources.filter(r => r.type === opType);
+        if (ops.length < patternThresholds.unbatchedOps) return;
+
+        // Group by creation time proximity (5ms window)
+        const groups = [];
+        let currentGroup = [];
+        ops.sort((a, b) => a.createdAt - b.createdAt).forEach(op => {
+          if (currentGroup.length === 0 || op.createdAt - currentGroup[0].createdAt < 5e6) {
+            currentGroup.push(op);
+          } else {
+            if (currentGroup.length >= patternThresholds.unbatchedOps) groups.push([...currentGroup]);
+            currentGroup = [op];
+          }
+        });
+        if (currentGroup.length >= patternThresholds.unbatchedOps) groups.push(currentGroup);
+
+        groups.forEach(group => {
+          detectedPatterns.push({
+            type: 'unbatched-ops',
+            message: `Unbatched: ${group.length} ${opType} operations could be batched`,
+            resources: group.map(r => r.asyncId),
+            severity: 'high'
+          });
+        });
+      });
+
+      // Pattern 13: Concurrent fetch risk (too many parallel fetches)
+      const fetchEvents = [];
+      traceData.resources.filter(r => r.type === 'fetch').forEach(f => {
+        if (f.createdAt > 0) fetchEvents.push({ time: f.createdAt, delta: 1, id: f.asyncId });
+        const endTime = f.callbackEndedAt > 0 ? f.callbackEndedAt :
+                        (f.destroyedAt > 0 ? f.destroyedAt : traceData.requestDurationNs);
+        fetchEvents.push({ time: endTime, delta: -1, id: f.asyncId });
+      });
+      if (fetchEvents.length > 0) {
+        fetchEvents.sort((a, b) => a.time - b.time);
+        let concurrent = 0;
+        let maxConcurrent = 0;
+        let maxConcurrentFetches = [];
+        let activeFetches = [];
+        fetchEvents.forEach(e => {
+          if (e.delta > 0) {
+            activeFetches.push(e.id);
+          } else {
+            activeFetches = activeFetches.filter(id => id !== e.id);
+          }
+          concurrent += e.delta;
+          if (concurrent > maxConcurrent) {
+            maxConcurrent = concurrent;
+            maxConcurrentFetches = [...activeFetches];
+          }
+        });
+        if (maxConcurrent >= patternThresholds.fetchFlood) {
+          detectedPatterns.push({
+            type: 'fetch-flood',
+            message: `High fetch concurrency: ${maxConcurrent} parallel fetches (connection limit risk)`,
+            resources: maxConcurrentFetches,
+            severity: 'medium'
+          });
+        }
+      }
+
+      // Pattern 14: Hot callback (single callback spawning many children)
+      const childCounts = new Map();
+      traceData.resources.forEach(r => {
+        if (r.triggerId !== 0) {
+          childCounts.set(r.triggerId, (childCounts.get(r.triggerId) || 0) + 1);
+        }
+      });
+      childCounts.forEach((count, parentId) => {
+        if (count > patternThresholds.hotCallback) {
+          const parent = traceData.resourceMap.get(parentId);
+          if (parent) {
+            detectedPatterns.push({
+              type: 'hot-callback',
+              message: `Hot callback: ${parent.type} #${parentId} spawned ${count} children`,
+              resources: [parentId],
+              severity: 'low'
             });
           }
         }
@@ -2660,6 +2945,28 @@ const userB = await fetch('/user/123');</pre>
         seen.add(key);
         return true;
       });
+    }
+
+    // Get severity-based pattern style for a resource
+    function getPatternSeverity(asyncId) {
+      if (!showPatterns) return null;
+      const pattern = detectedPatterns.find(p => p.resources.includes(asyncId));
+      if (!pattern) return null;
+      return pattern.severity || 'medium';
+    }
+
+    // Get severity-based styling colors and sizes
+    function getPatternStyle(severity) {
+      switch (severity) {
+        case 'high':
+          return { color: '#ff00ff', glow: 15, lineWidth: 3, alpha: 0.9 };
+        case 'medium':
+          return { color: '#cc66ff', glow: 10, lineWidth: 2, alpha: 0.7 };
+        case 'low':
+          return { color: '#9966cc', glow: 6, lineWidth: 1.5, alpha: 0.5 };
+        default:
+          return { color: '#cc66ff', glow: 10, lineWidth: 2, alpha: 0.7 };
+      }
     }
 
     // ==================== CLICK-TO-FILTER ====================
@@ -3148,10 +3455,13 @@ const userB = await fetch('/user/123');</pre>
         if (r._classification === 'internal') row.classList.add('internal');
         // Bottleneck highlighting
         if (showBottlenecks && detectedBottlenecks.includes(r.asyncId)) row.classList.add('bottleneck');
-        // Pattern highlighting
+        // Pattern highlighting (severity-based)
         if (showPatterns) {
           const patternMatch = detectedPatterns.find(p => p.resources.includes(r.asyncId));
-          if (patternMatch) row.classList.add('pattern-match');
+          if (patternMatch) {
+            row.classList.add('pattern-match');
+            row.classList.add(`pattern-${patternMatch.severity || 'medium'}`);
+          }
         }
 
         const label = document.createElement('div');
@@ -3498,7 +3808,8 @@ const userB = await fetch('/user/123');</pre>
         const isSelected = selectedResource && r.asyncId === selectedResource.asyncId;
         const isOnCriticalPath = showCriticalPath && criticalPathSet.has(r.asyncId);
         const isBottleneck = showBottlenecks && detectedBottlenecks.includes(r.asyncId);
-        const isPatternMatch = showPatterns && detectedPatterns.some(p => p.resources.includes(r.asyncId));
+        const patternSeverity = getPatternSeverity(r.asyncId);
+        const isPatternMatch = patternSeverity !== null;
         const isInternal = node.isInternal;
 
         // Glow effect (dimmer for internal)
@@ -3546,12 +3857,13 @@ const userB = await fetch('/user/123');</pre>
           ctx.shadowBlur = 0;
         }
 
-        // Pattern match ring (purple glow)
+        // Pattern match ring (severity-based purple glow)
         if (isPatternMatch && !isOnCriticalPath && !isBottleneck) {
-          ctx.strokeStyle = '#c864ff';
-          ctx.lineWidth = 3;
-          ctx.shadowColor = '#c864ff';
-          ctx.shadowBlur = 10;
+          const pStyle = getPatternStyle(patternSeverity);
+          ctx.strokeStyle = pStyle.color;
+          ctx.lineWidth = pStyle.lineWidth;
+          ctx.shadowColor = pStyle.color;
+          ctx.shadowBlur = pStyle.glow;
           ctx.beginPath();
           ctx.arc(node.x, node.y, node.radius * 0.85, 0, Math.PI * 2);
           ctx.stroke();
@@ -3908,7 +4220,8 @@ const userB = await fetch('/user/123');</pre>
         const isHighlighted = highlightedChain.has(r.asyncId);
         const isOnCriticalPath = showCriticalPath && criticalPathSet.has(r.asyncId);
         const isBottleneck = showBottlenecks && detectedBottlenecks.includes(r.asyncId);
-        const isPatternMatch = showPatterns && detectedPatterns.some(p => p.resources.includes(r.asyncId));
+        const patternSeverity = getPatternSeverity(r.asyncId);
+        const isPatternMatch = patternSeverity !== null;
         const isInternal = r._classification === 'internal';
 
         // Node circle
@@ -3937,12 +4250,13 @@ const userB = await fetch('/user/123');</pre>
           ctx.stroke();
           ctx.shadowBlur = 0;
         }
-        // Pattern match glow (purple)
+        // Pattern match glow (severity-based purple)
         else if (isPatternMatch) {
-          ctx.strokeStyle = '#c864ff';
-          ctx.lineWidth = 3;
-          ctx.shadowColor = '#c864ff';
-          ctx.shadowBlur = 10;
+          const pStyle = getPatternStyle(patternSeverity);
+          ctx.strokeStyle = pStyle.color;
+          ctx.lineWidth = pStyle.lineWidth;
+          ctx.shadowColor = pStyle.color;
+          ctx.shadowBlur = pStyle.glow;
           ctx.stroke();
           ctx.shadowBlur = 0;
         }
@@ -5841,42 +6155,56 @@ ${annotationsSummary.slice(0, 15).join('\n')}
 
       if (detectedPatterns.length > 0) {
         prompt += `
-## Detected Anti-Patterns
+## Detected Issues (by severity)
 
 `;
-        // Group patterns by type
-        const patternsByType = {};
+        // Group patterns by severity
+        const bySeverity = { high: [], medium: [], low: [] };
         detectedPatterns.forEach(p => {
-          if (!patternsByType[p.type]) patternsByType[p.type] = [];
-          patternsByType[p.type].push(p);
+          bySeverity[p.severity || 'medium'].push(p);
         });
 
-        if (patternsByType['sequential-await']) {
-          prompt += `### Sequential Awaits (Promise.all opportunities)\n`;
-          patternsByType['sequential-await'].forEach(p => {
-            prompt += `- ${p.message}\n`;
+        if (bySeverity.high.length > 0) {
+          prompt += `### 🔴 High Severity (${bySeverity.high.length})\n`;
+          bySeverity.high.forEach(p => {
+            prompt += `- **[${p.type}]** ${p.message}\n`;
           });
+          prompt += `\n`;
         }
 
-        if (patternsByType['duplicate-fetch']) {
-          prompt += `### Duplicate Fetches\n`;
-          patternsByType['duplicate-fetch'].forEach(p => {
-            prompt += `- ${p.message}\n`;
+        if (bySeverity.medium.length > 0) {
+          prompt += `### 🟡 Medium Severity (${bySeverity.medium.length})\n`;
+          bySeverity.medium.forEach(p => {
+            prompt += `- **[${p.type}]** ${p.message}\n`;
           });
+          prompt += `\n`;
         }
 
-        if (patternsByType['waterfall-fetch']) {
-          const waterfalls = patternsByType['waterfall-fetch'];
-          prompt += `### Waterfall Fetches (${waterfalls.length} dependencies)\n`;
-          prompt += `- Fetches are chained sequentially - each waits for the previous to complete\n`;
+        if (bySeverity.low.length > 0) {
+          prompt += `### 🟢 Low Severity (${bySeverity.low.length})\n`;
+          bySeverity.low.forEach(p => {
+            prompt += `- **[${p.type}]** ${p.message}\n`;
+          });
+          prompt += `\n`;
         }
 
-        if (patternsByType['deep-chain']) {
-          prompt += `### Deep Promise Chains\n`;
-          patternsByType['deep-chain'].forEach(p => {
-            prompt += `- ${p.message}\n`;
-          });
-        }
+        // Pattern type legend
+        prompt += `**Pattern Types:**
+- \`sequential-await\`: Fetches that could use Promise.all()
+- \`duplicate-fetch\`: Same URL fetched multiple times
+- \`waterfall-fetch\`: Fetches chained in sequence
+- \`deep-chain\`: Deeply nested promise chains
+- \`unresolved-promise\`: Promises never resolved
+- \`long-async-gap\`: Operations waiting too long
+- \`redundant-timers\`: Duplicate timers
+- \`cache-miss\`: Slow cache operations (likely misses)
+- \`sync-flood\`: Long sync execution blocking event loop
+- \`promise-flood\`: Many promises created in short window
+- \`callback-storm\`: Many callbacks firing simultaneously
+- \`unbatched-ops\`: KV/DO operations that could be batched
+- \`fetch-flood\`: Too many concurrent fetches
+- \`hot-callback\`: Single callback spawning many children
+`;
       }
 
       // Add stream operations summary
@@ -5981,27 +6309,32 @@ ${annotationsSummary.slice(0, 15).join('\n')}
       prompt += `
 ## Analysis Request
 
-Based on this trace data, please:
+Based on this trace data, please analyze starting with **high severity issues first**:
 
-1. **Identify the primary bottleneck** - What is causing the most latency? Reference specific operations from the bottleneck list.
+1. **Address high severity issues first** - Focus on patterns marked with 🔴. These have the biggest impact:
+   - \`sync-flood\`: Event loop blockers preventing other callbacks from running
+   - \`sequential-await\`: Opportunities to use Promise.all()
+   - \`unbatched-ops\`: KV/DO operations that could use batch APIs
 
 2. **Check for serialization issues** - Are there operations that could run in parallel but are running sequentially? Pay special attention to any detected sequential-await or waterfall patterns.
 
-3. **Evaluate the async/sync ratio** - Is this worker I/O bound or CPU bound? Is the ratio healthy?
+3. **Evaluate event loop health** - Is sync execution blocking the event loop? Are there operations that should be async but are running synchronously?
 
-4. **Look for redundant operations** - Are there duplicate fetches or unnecessary API calls? Check the detected patterns section for duplicates.
+4. **Check for memory pressure risks** - Are there promise-flood or callback-storm patterns that could cause memory issues under load?
 
-5. **Assess the critical path** - What operations are on the critical path? Which could be optimized or moved off the critical path?
+5. **Look for redundant operations** - Are there duplicate fetches or unnecessary API calls? Check the detected patterns section for duplicates.
 
-6. **Analyze stream operations** - If streams are involved, are they being used efficiently? Are there opportunities to pipeline or parallelize stream processing?
+6. **Assess fetch concurrency** - If fetch-flood is detected, could this hit connection limits? Consider request coalescing or batching.
 
-7. **Review KJ↔JS transitions** - Are there excessive bridge transitions that could indicate inefficient async patterns?
+7. **Analyze stream operations** - If streams are involved, are they being used efficiently? Are there opportunities to pipeline or parallelize stream processing?
 
-8. **Provide specific code recommendations** - Give concrete code examples showing how to improve the most impactful issues.
+8. **Review KJ↔JS transitions** - Are there excessive bridge transitions that could indicate inefficient async patterns?
 
-9. **Estimate potential improvement** - If your recommendations are implemented, roughly how much latency reduction might be achieved?
+9. **Provide specific code recommendations** - Give concrete code examples showing how to improve the most impactful issues. Prioritize high severity patterns.
 
-Please be specific and actionable in your recommendations. Reference specific resource types, stack locations, and timing data from the trace.`;
+10. **Estimate potential improvement** - If your recommendations are implemented, roughly how much latency reduction might be achieved?
+
+Please be specific and actionable in your recommendations. Address issues in severity order (high → medium → low). Reference specific resource types, stack locations, and timing data from the trace.`;
 
       return prompt;
     }

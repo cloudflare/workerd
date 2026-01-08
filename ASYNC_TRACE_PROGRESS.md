@@ -251,20 +251,44 @@ The Temporal Edges feature (`E` hotkey) shows relationships based on callback ti
 
 ### Pattern Detection
 
-The pattern detector identifies common anti-patterns. Detected patterns are highlighted with a purple glow in Waterfall, Bubble, and DAG views, and listed in the Analysis sidebar.
+The pattern detector identifies common anti-patterns based on concepts from "Broken Promises" and similar async performance knowledge. Detected patterns are highlighted with severity-based purple glow in Waterfall, Bubble, and DAG views, and listed in the Analysis sidebar.
 
-**Currently Implemented Patterns:**
+**Pattern Severity Levels:**
+- 🔴 **High**: Significant performance impact, should be fixed first
+- 🟡 **Medium**: Moderate impact, worth investigating
+- 🟢 **Low**: Minor issues or informational
 
-| Pattern | Type ID | Description |
-|---------|---------|-------------|
-| **Sequential Fetches** | `sequential-await` | Fetches created after previous fetch's callback started, indicating `await` chains that could use `Promise.all()` |
-| **Duplicate Fetches** | `duplicate-fetch` | Multiple fetches to the same URL that could be deduplicated or cached |
-| **Deep Promise Chains** | `deep-chain` | Promise nesting exceeds 10 levels, may indicate callback hell |
-| **Waterfall Fetches** | `waterfall-fetch` | Fetch triggered by another fetch's result (dependency chain includes another fetch) |
-| **Unresolved Promises** | `unresolved-promise` | Promises created but never resolved by end of request |
-| **Long Async Gaps** | `long-async-gap` | Resources waiting >500ms before callback executes |
-| **Redundant Timers** | `redundant-timers` | Multiple timers with similar delays created at the same time |
-| **Cache Misses** | `cache-miss` | Cache-get operations with >50ms wait, suggesting origin fetch |
+**Currently Implemented Patterns (14 total):**
+
+| Pattern | Type ID | Severity | Description |
+|---------|---------|----------|-------------|
+| **Sequential Fetches** | `sequential-await` | High | Fetches created after previous fetch's callback started, indicating `await` chains that could use `Promise.all()` |
+| **Event Loop Blocking** | `sync-flood` | High | Callback execution >50ms, blocking other work from running |
+| **Unbatched Operations** | `unbatched-ops` | High | Multiple KV/DO operations of same type within 5ms that could be batched |
+| **Duplicate Fetches** | `duplicate-fetch` | Medium | Multiple fetches to the same URL that could be deduplicated or cached |
+| **Deep Promise Chains** | `deep-chain` | Medium | Promise nesting exceeds 10 levels, may indicate callback hell |
+| **Waterfall Fetches** | `waterfall-fetch` | Medium | Fetch triggered by another fetch's result (dependency chain includes another fetch) |
+| **Long Async Gaps** | `long-async-gap` | Medium | Resources waiting >threshold before callback executes |
+| **Promise Accumulation** | `promise-flood` | Medium | >20 promises created within 1ms, potential memory pressure |
+| **Callback Storm** | `callback-storm` | Medium | >10 callbacks firing within 1ms |
+| **Fetch Concurrency Risk** | `fetch-flood` | Medium | >6 parallel fetches, may hit connection limits |
+| **Unresolved Promises** | `unresolved-promise` | Low | Promises created but never resolved by end of request |
+| **Redundant Timers** | `redundant-timers` | Low | Multiple timers with similar delays created at the same time |
+| **Cache Misses** | `cache-miss` | Low | Cache-get operations with >50ms wait, suggesting origin fetch |
+| **Hot Callback** | `hot-callback` | Low | Single callback spawning >5 child resources |
+
+### Configurable Thresholds
+
+Pattern detection thresholds are configurable via sliders in the Analysis dropdown menu:
+
+| Threshold | Default | Description |
+|-----------|---------|-------------|
+| Sync block | 50ms | Event loop blocking detection threshold |
+| Long gap | 500ms | Long async gap detection threshold |
+| Promise flood | 20 | Promises created per 1ms window |
+| Callback storm | 10 | Callbacks per 1ms window |
+| Unbatched ops | 3 | Operations to trigger unbatched detection |
+| Fetch concurrency | 6 | Parallel fetches to trigger warning |
 
 ### Extending Pattern Detection
 
@@ -282,7 +306,8 @@ function detectPatterns() {
         detectedPatterns.push({
           type: 'slow-operation',           // Unique type identifier
           message: `Slow ${r.type}: ${duration.toFixed(0)}ms`, // Shown in sidebar
-          resources: [r.asyncId]            // Resources to highlight
+          resources: [r.asyncId],           // Resources to highlight
+          severity: 'high'                  // 'high', 'medium', or 'low'
         });
       }
     }
@@ -295,13 +320,8 @@ function detectPatterns() {
 |-------|-------------|
 | `type` | Unique string identifier (e.g., `'sequential-await'`, `'duplicate-fetch'`) |
 | `message` | Human-readable description shown in the Analysis sidebar |
-| `resources` | Array of `asyncId` values to highlight with purple glow |
-
-**Ideas for additional patterns:**
-- **Slow operations**: Individual operations taking >100ms
-- **Promise.race opportunities**: Multiple fetches where only first result is used
-- **Blocking operations**: Long sync execution blocking the event loop
-- **Retry storms**: Same operation retried multiple times in quick succession
+| `resources` | Array of `asyncId` values to highlight |
+| `severity` | Severity level: `'high'`, `'medium'`, or `'low'` (affects highlight intensity)
 
 ### Click-to-Filter
 
