@@ -8,6 +8,9 @@
 
 #include <workerd/io/io-context.h>
 
+#include <cmath>
+#include <limits>
+
 namespace workerd::api {
 
 // Maximum total size of all cached statements (measured in size of the SQL code). If cached
@@ -145,8 +148,83 @@ void SqlStorage::createFunction(jsg::Lock& js,
   JSG_REQUIRE(name.size() > 0, TypeError, "Function name cannot be empty.");
   JSG_REQUIRE(name.size() <= 255, TypeError, "Function name is too long (max 255 bytes).");
 
-  // TODO: Implement UDF registration
-  JSG_FAIL_REQUIRE(Error, "createFunction is not yet implemented");
+  // Store the JS callback by creating the structure with a proper constructor
+  auto jsFunc = kj::heap<RegisteredJsFunction>(kj::str(name), kj::mv(callback));
+
+  // Get a raw pointer before moving into the map (we need it for the C++ callback)
+  auto* jsFuncPtr = jsFunc.get();
+
+  // Store in our map (takes ownership)
+  registeredJsFunctions.insert(jsFuncPtr->name.asPtr(), kj::mv(jsFunc));
+
+  // Create a C++ callback that wraps the JS function
+  auto& db = getDb(js);
+  db.registerScalarFunction(jsFuncPtr->name.asPtr(), -1,  // -1 = variadic
+      [jsFuncPtr](
+          kj::ArrayPtr<const SqliteDatabase::UdfArgValue> args) -> SqliteDatabase::UdfResultValue {
+    // Get the current jsg::Lock from the IoContext
+    // This is safe because SQL queries are always executed while holding the JS lock
+    auto& workerLock = IoContext::current().getCurrentLock();
+    jsg::Lock& js = workerLock;
+
+    // Convert SQLite args to JS values
+    auto jsArgsBuilder = kj::heapArrayBuilder<jsg::Value>(args.size());
+    for (const auto& arg: args) {
+      KJ_SWITCH_ONEOF(arg) {
+        KJ_CASE_ONEOF(intVal, int64_t) {
+          jsArgsBuilder.add(
+              jsg::Value(js.v8Isolate, v8::Number::New(js.v8Isolate, static_cast<double>(intVal))));
+        }
+        KJ_CASE_ONEOF(doubleVal, double) {
+          jsArgsBuilder.add(jsg::Value(js.v8Isolate, v8::Number::New(js.v8Isolate, doubleVal)));
+        }
+        KJ_CASE_ONEOF(strVal, kj::StringPtr) {
+          jsArgsBuilder.add(jsg::Value(js.v8Isolate, jsg::v8Str(js.v8Isolate, strVal)));
+        }
+        KJ_CASE_ONEOF(blobVal, kj::ArrayPtr<const kj::byte>) {
+          auto copy = kj::heapArray<kj::byte>(blobVal.size());
+          memcpy(copy.begin(), blobVal.begin(), blobVal.size());
+          jsArgsBuilder.add(jsg::Value(js.v8Isolate, js.wrapBytes(kj::mv(copy))));
+        }
+        KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
+          jsArgsBuilder.add(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate)));
+        }
+      }
+    }
+
+    // Call the JS function with the arguments
+    jsg::Arguments<jsg::Value> jsgArgs(jsArgsBuilder.finish());
+    auto result = jsFuncPtr->callback(js, kj::mv(jsgArgs));
+
+    // Convert JS result back to SQLite UdfResultValue (owning)
+    auto handle = result.getHandle(js);
+    if (handle->IsNull() || handle->IsUndefined()) {
+      return nullptr;
+    } else if (handle->IsNumber()) {
+      double num = handle.As<v8::Number>()->Value();
+      // Check if it's an integer - use a simpler check
+      double intPart;
+      if (std::modf(num, &intPart) == 0.0 &&
+          num >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
+          num <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+        return static_cast<int64_t>(num);
+      }
+      return num;
+    } else if (handle->IsString()) {
+      // Return owning kj::String
+      return kj::str(js.toString(jsg::JsValue(handle)));
+    } else if (handle->IsArrayBuffer() || handle->IsArrayBufferView()) {
+      // Return owning kj::Array<byte>
+      jsg::BufferSource buffer(js, handle);
+      auto data = buffer.asArrayPtr();
+      auto copy = kj::heapArray<kj::byte>(data.size());
+      memcpy(copy.begin(), data.begin(), data.size());
+      return kj::mv(copy);
+    } else {
+      // For other types, convert to string (owning)
+      return kj::str(js.toString(jsg::JsValue(handle)));
+    }
+  });
 }
 
 bool SqlStorage::isAllowedName(kj::StringPtr name) const {

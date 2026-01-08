@@ -28,6 +28,7 @@
 #include <kj/vector.h>
 
 #include <atomic>
+#include <exception>
 
 #if _WIN32
 #define strncasecmp _strnicmp
@@ -1151,6 +1152,14 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     case SQLITE_FUNCTION: /* NULL            Function Name   */
     {
+      kj::StringPtr funcName = KJ_ASSERT_NONNULL(param2);
+
+      // Check if it's a registered user-defined function
+      if (registeredUdfs.find(funcName) != kj::none) {
+        return true;
+      }
+
+      // Check if it's an allowed built-in function
       static const kj::HashSet<kj::StringPtr> allowSet = []() {
         kj::HashSet<kj::StringPtr> result;
         for (const kj::StringPtr& func: ALLOWED_SQLITE_FUNCTIONS) {
@@ -1158,7 +1167,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         }
         return result;
       }();
-      return allowSet.contains(KJ_ASSERT_NONNULL(param2));
+      return allowSet.contains(funcName);
     }
 
       // ---------------------------------------------------------------
@@ -2539,5 +2548,112 @@ kj::Maybe<kj::Path> SqliteDatabase::Vfs::tryAppend(kj::PathPtr suffix) const {
 #endif
 
 // =======================================================================================
+// UDF Implementation
+// =======================================================================================
+
+// Define the RegisteredUdf structure here in the implementation file.
+struct SqliteDatabase::RegisteredUdf {
+  kj::String name;
+  ScalarUdfCallback callback;
+};
+
+// Helper to convert sqlite3_value to UdfArgValue (non-owning)
+static SqliteDatabase::UdfArgValue sqliteValueToUdfArgValue(sqlite3_value* value) {
+  switch (sqlite3_value_type(value)) {
+    case SQLITE_INTEGER:
+      return static_cast<int64_t>(sqlite3_value_int64(value));
+    case SQLITE_FLOAT:
+      return sqlite3_value_double(value);
+    case SQLITE_TEXT: {
+      const unsigned char* text = sqlite3_value_text(value);
+      if (text == nullptr) {
+        return kj::StringPtr("");
+      }
+      return kj::StringPtr(reinterpret_cast<const char*>(text));
+    }
+    case SQLITE_BLOB: {
+      const void* blob = sqlite3_value_blob(value);
+      int size = sqlite3_value_bytes(value);
+      if (blob == nullptr || size == 0) {
+        return kj::ArrayPtr<const byte>(static_cast<const byte*>(nullptr), static_cast<size_t>(0));
+      }
+      return kj::ArrayPtr<const byte>(static_cast<const byte*>(blob), static_cast<size_t>(size));
+    }
+    case SQLITE_NULL:
+    default:
+      return nullptr;
+  }
+}
+
+// Helper to set the result from a UdfResultValue (owning)
+static void setResultFromUdfResultValue(
+    sqlite3_context* ctx, const SqliteDatabase::UdfResultValue& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(intVal, int64_t) {
+      sqlite3_result_int64(ctx, intVal);
+    }
+    KJ_CASE_ONEOF(doubleVal, double) {
+      sqlite3_result_double(ctx, doubleVal);
+    }
+    KJ_CASE_ONEOF(strVal, kj::String) {
+      sqlite3_result_text(ctx, strVal.cStr(), strVal.size(), SQLITE_TRANSIENT);
+    }
+    KJ_CASE_ONEOF(blobVal, kj::Array<byte>) {
+      sqlite3_result_blob(ctx, blobVal.begin(), blobVal.size(), SQLITE_TRANSIENT);
+    }
+    KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
+      sqlite3_result_null(ctx);
+    }
+  }
+}
+
+// Static callback that SQLite calls when a UDF is invoked.
+// The user_data parameter points to a RegisteredUdf structure.
+static void udfCallback(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
+  auto* udf = static_cast<SqliteDatabase::RegisteredUdf*>(sqlite3_user_data(ctx));
+
+  // Convert arguments to UdfArgValue array (non-owning pointers to SQLite-managed memory)
+  auto args = kj::heapArray<SqliteDatabase::UdfArgValue>(argc);
+  for (int i = 0; i < argc; i++) {
+    args[i] = sqliteValueToUdfArgValue(argv[i]);
+  }
+
+  // Call the user's callback
+  try {
+    auto result = udf->callback(args);
+    setResultFromUdfResultValue(ctx, result);
+  } catch (kj::Exception& e) {
+    // Convert KJ exception to SQLite error
+    sqlite3_result_error(ctx, e.getDescription().cStr(), e.getDescription().size());
+  } catch (std::exception& e) {
+    sqlite3_result_error(ctx, e.what(), -1);
+  } catch (...) {
+    sqlite3_result_error(ctx, "Unknown error in UDF", -1);
+  }
+}
+
+void SqliteDatabase::registerScalarFunction(
+    kj::StringPtr name, int argCount, ScalarUdfCallback callback) {
+  sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "database not open");
+
+  // Create the RegisteredUdf structure to hold the callback
+  auto udf = kj::heap<RegisteredUdf>();
+  udf->name = kj::str(name);
+  udf->callback = kj::mv(callback);
+
+  // Register with SQLite
+  int rc = sqlite3_create_function_v2(db, udf->name.cStr(), argCount, SQLITE_UTF8,
+      udf.get(),  // user_data
+      udfCallback,
+      nullptr,  // xStep (for aggregate functions)
+      nullptr,  // xFinal (for aggregate functions)
+      nullptr   // xDestroy (we manage lifetime ourselves)
+  );
+
+  KJ_REQUIRE(rc == SQLITE_OK, "Failed to register UDF", name, sqlite3_errmsg(db));
+
+  // Store the UDF so it stays alive
+  registeredUdfs.insert(udf->name.asPtr(), kj::mv(udf));
+}
 
 }  // namespace workerd
