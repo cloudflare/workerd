@@ -131,6 +131,12 @@ wd_test(
 )
 
 wd_test(
+    src = "sql-udf-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-udf-test.js"],
+)
+
+wd_test(
     src = "sync-kv-test.wd-test",
     args = ["--experimental"],
     data = [
