@@ -722,8 +722,20 @@
         <option value="good-parallel">Good: Parallel Fetches</option>
         <option value="bad-sequential">Bad: Sequential Fetches</option>
         <option value="bad-duplicates">Bad: Duplicate Fetches</option>
+        <option value="waterfall-fetches">Bad: Waterfall Fetches</option>
+        <option value="unresolved-promises">Bad: Unresolved Promises</option>
+        <option value="long-async-gaps">Bad: Long Async Gaps</option>
+        <option value="redundant-timers">Bad: Redundant Timers</option>
+        <option value="cache-misses">Bad: Cache Misses</option>
         <option value="streams-pipeline">Streams Pipeline</option>
         <option value="pathological">💀 Pathological Streams</option>
+        <option disabled>──────────</option>
+        <option value="real-helloworld">Real: Hello World (ESM)</option>
+        <option value="real-helloworld-sw">Real: Hello World (SW)</option>
+        <option value="real-async-context">Real: Async Context</option>
+        <option value="real-durable-objects">Real: Durable Objects</option>
+        <option value="real-nodejs-compat-fs">Real: Node.js FS</option>
+        <option value="real-nodejs-compat-streams">Real: Node.js Streams</option>
       </select>
       <select id="sort-mode">
         <option value="tree">Tree</option>
@@ -1936,8 +1948,20 @@ const userB = await fetch('/user/123');</pre>
           'good-parallel': 'sample-good-parallel.json',
           'bad-sequential': 'sample-bad-sequential.json',
           'bad-duplicates': 'sample-bad-duplicates.json',
+          'waterfall-fetches': 'sample-waterfall-fetches.json',
+          'unresolved-promises': 'sample-unresolved-promises.json',
+          'long-async-gaps': 'sample-long-async-gaps.json',
+          'redundant-timers': 'sample-redundant-timers.json',
+          'cache-misses': 'sample-cache-misses.json',
           'streams-pipeline': 'sample-streams-pipeline.json',
-          'pathological': 'sample-pathological-streams.json'
+          'pathological': 'sample-pathological-streams.json',
+          // Real traces captured from workerd samples
+          'real-helloworld': 'sample-real-helloworld.json',
+          'real-helloworld-sw': 'sample-real-helloworld-sw.json',
+          'real-async-context': 'sample-real-async-context.json',
+          'real-durable-objects': 'sample-real-durable-objects.json',
+          'real-nodejs-compat-fs': 'sample-real-nodejs-compat-fs.json',
+          'real-nodejs-compat-streams': 'sample-real-nodejs-compat-streams.json'
         };
       try {
         const response = await fetch(files[demo]);
@@ -2421,6 +2445,104 @@ const userB = await fetch('/user/123');</pre>
           resources: deepResources
         });
       }
+
+      // Pattern 4: Waterfall fetches (fetch triggered by another fetch's result)
+      // These are fetches whose trigger chain includes another fetch
+      const allFetches = traceData.resources.filter(r => r.type === 'fetch');
+      const fetchIds = new Set(allFetches.map(f => f.asyncId));
+
+      allFetches.forEach(fetch => {
+        // Walk up the trigger chain to see if we hit another fetch
+        let current = fetch;
+        let depth = 0;
+        while (current && current.triggerId !== 0 && depth < 20) {
+          const parent = traceData.resources.find(r => r.asyncId === current.triggerId);
+          if (parent && fetchIds.has(parent.asyncId)) {
+            detectedPatterns.push({
+              type: 'waterfall-fetch',
+              message: `Waterfall: fetch #${fetch.asyncId} depends on fetch #${parent.asyncId}`,
+              resources: [fetch.asyncId, parent.asyncId]
+            });
+            break;
+          }
+          current = parent;
+          depth++;
+        }
+      });
+
+      // Pattern 5: Unresolved promises (created but callback never started)
+      const unresolvedPromises = traceData.resources.filter(r =>
+        r.type === 'js-promise' &&
+        r.createdAt > 0 &&
+        r.callbackStartedAt === 0 &&
+        r.destroyedAt === 0  // Still alive at end of request
+      );
+      if (unresolvedPromises.length > 0) {
+        detectedPatterns.push({
+          type: 'unresolved-promise',
+          message: `${unresolvedPromises.length} promise(s) never resolved`,
+          resources: unresolvedPromises.map(r => r.asyncId)
+        });
+      }
+
+      // Pattern 6: Long async gaps (waiting >500ms before callback)
+      const longGapThreshold = 500 * 1e6; // 500ms in nanoseconds
+      traceData.resources.forEach(r => {
+        if (r.createdAt > 0 && r.callbackStartedAt > 0) {
+          const waitTime = r.callbackStartedAt - r.createdAt;
+          if (waitTime > longGapThreshold) {
+            const waitMs = (waitTime / 1e6).toFixed(0);
+            detectedPatterns.push({
+              type: 'long-async-gap',
+              message: `${r.type} #${r.asyncId} waited ${waitMs}ms before executing`,
+              resources: [r.asyncId]
+            });
+          }
+        }
+      });
+
+      // Pattern 7: Redundant timers (multiple timers with similar delays created together)
+      const timers = traceData.resources.filter(r => r.type === 'timer');
+      if (timers.length >= 2) {
+        // Group timers by approximate delay (within 10ms) and creation time (within 5ms)
+        const timerGroups = new Map();
+        timers.forEach(t => {
+          // Estimate delay from creation to callback
+          const delay = t.callbackStartedAt > 0 ? t.callbackStartedAt - t.createdAt : 0;
+          const delayBucket = Math.round(delay / 10e6) * 10; // Round to 10ms
+          const createBucket = Math.round(t.createdAt / 5e6) * 5; // Round to 5ms
+          const key = `${delayBucket}-${createBucket}`;
+          if (!timerGroups.has(key)) timerGroups.set(key, []);
+          timerGroups.get(key).push(t);
+        });
+
+        timerGroups.forEach((group, key) => {
+          if (group.length >= 2) {
+            detectedPatterns.push({
+              type: 'redundant-timers',
+              message: `${group.length} timers with similar delay created together`,
+              resources: group.map(t => t.asyncId)
+            });
+          }
+        });
+      }
+
+      // Pattern 8: Cache misses (cache-get with long wait, suggesting network fetch)
+      const cacheGets = traceData.resources.filter(r => r.type === 'cache-get');
+      const cacheMissThreshold = 50 * 1e6; // 50ms suggests a miss (hit would be faster)
+      cacheGets.forEach(cg => {
+        if (cg.callbackStartedAt > 0 && cg.createdAt > 0) {
+          const waitTime = cg.callbackStartedAt - cg.createdAt;
+          if (waitTime > cacheMissThreshold) {
+            const waitMs = (waitTime / 1e6).toFixed(0);
+            detectedPatterns.push({
+              type: 'cache-miss',
+              message: `Cache miss: ${waitMs}ms wait suggests origin fetch`,
+              resources: [cg.asyncId]
+            });
+          }
+        }
+      });
 
       // Deduplicate patterns by resource set
       const seen = new Set();

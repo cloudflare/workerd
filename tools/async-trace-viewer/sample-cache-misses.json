@@ -1,0 +1,40 @@
+{
+  "requestDurationNs": 250000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 249000000, "destroyedAt": 250000000},
+    {"asyncId": 2, "triggerId": 1, "type": "cache-get", "stackTraceId": 1, "createdAt": 1000000, "callbackStartedAt": 2000000, "callbackEndedAt": 2500000, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 2, "type": "js-promise", "stackTraceId": 2, "createdAt": 3000000, "callbackStartedAt": 3500000, "callbackEndedAt": 4000000, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 1, "type": "cache-get", "stackTraceId": 3, "createdAt": 5000000, "callbackStartedAt": 80000000, "callbackEndedAt": 80500000, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 2, "createdAt": 81000000, "callbackStartedAt": 81500000, "callbackEndedAt": 82000000, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 5, "type": "fetch", "stackTraceId": 4, "createdAt": 82500000, "callbackStartedAt": 140000000, "callbackEndedAt": 141000000, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 6, "type": "cache-put", "stackTraceId": 5, "createdAt": 141500000, "callbackStartedAt": 145000000, "callbackEndedAt": 145500000, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 1, "type": "cache-get", "stackTraceId": 6, "createdAt": 10000000, "callbackStartedAt": 120000000, "callbackEndedAt": 120500000, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 8, "type": "js-promise", "stackTraceId": 2, "createdAt": 121000000, "callbackStartedAt": 121500000, "callbackEndedAt": 122000000, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 9, "type": "fetch", "stackTraceId": 7, "createdAt": 122500000, "callbackStartedAt": 200000000, "callbackEndedAt": 201000000, "destroyedAt": 0},
+    {"asyncId": 11, "triggerId": 10, "type": "cache-put", "stackTraceId": 5, "createdAt": 201500000, "callbackStartedAt": 205000000, "callbackEndedAt": 205500000, "destroyedAt": 0},
+    {"asyncId": 12, "triggerId": 7, "type": "js-promise", "stackTraceId": 8, "createdAt": 206000000, "callbackStartedAt": 206500000, "callbackEndedAt": 248000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:5:10"]},
+    {"id": 1, "frames": ["caches.match @ worker.js:15:20", "getCachedConfig @ worker.js:12:3"]},
+    {"id": 2, "frames": ["processResult @ worker.js:25:5"]},
+    {"id": 3, "frames": ["caches.match @ worker.js:35:20", "getCachedUserData @ worker.js:32:3"]},
+    {"id": 4, "frames": ["fetch @ worker.js:45:20", "fetchFromOrigin @ worker.js:42:3"]},
+    {"id": 5, "frames": ["cache.put @ worker.js:55:20", "cacheResponse @ worker.js:52:3"]},
+    {"id": 6, "frames": ["caches.match @ worker.js:65:20", "getCachedProduct @ worker.js:62:3"]},
+    {"id": 7, "frames": ["fetch @ worker.js:75:20", "fetchProduct @ worker.js:72:3"]},
+    {"id": 8, "frames": ["combineResults @ worker.js:85:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 2, "key": "url", "value": "https://example.com/config.json"},
+    {"asyncId": 2, "key": "result", "value": "HIT"},
+    {"asyncId": 4, "key": "url", "value": "https://example.com/user/123"},
+    {"asyncId": 4, "key": "result", "value": "MISS"},
+    {"asyncId": 6, "key": "url", "value": "https://api.example.com/user/123"},
+    {"asyncId": 6, "key": "method", "value": "GET"},
+    {"asyncId": 8, "key": "url", "value": "https://example.com/product/456"},
+    {"asyncId": 8, "key": "result", "value": "MISS"},
+    {"asyncId": 10, "key": "url", "value": "https://api.example.com/product/456"},
+    {"asyncId": 10, "key": "method", "value": "GET"}
+  ]
+}

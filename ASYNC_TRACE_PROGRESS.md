@@ -94,6 +94,7 @@ enum class ResourceType : uint16_t {
 - [x] Bottleneck/pattern highlighting in Waterfall, Bubble, and DAG views
 - [x] Sequential fetch detection using creation time vs callback time comparison
 - [x] Analysis sidebar updates correctly when switching demos
+- [x] Real trace capture from workerd samples (6 traces captured)
 
 ### Not Yet Done
 - [ ] Unit tests for AsyncTraceContext
@@ -208,7 +209,7 @@ All analysis features are accessible via the **🔬 Analysis** dropdown menu in 
 | C | **Critical Path** | Highlights the minimum-latency dependency chain (red glow in all views) |
 | B | **Bottlenecks** | Identifies top 5 resources consuming the most time (yellow glow) |
 | T | **Patterns** | Detects anti-patterns (purple glow) - see Pattern Detection below |
-| F | **Click Filter** | Click any resource to filter view to its ancestors/descendants |
+| F | **Click Filter** | Click any resource to filter view to its ancestors/descendants (see below) |
 | G | **Stack Group** | Groups resources by creation stack trace |
 | A | **High Contrast** | Accessibility mode with patterns instead of color-only |
 
@@ -216,13 +217,85 @@ Highlighting for Critical Path, Bottlenecks, and Patterns appears in Waterfall, 
 
 ### Pattern Detection
 
-The pattern detector identifies common anti-patterns:
+The pattern detector identifies common anti-patterns. Detected patterns are highlighted with a purple glow in Waterfall, Bubble, and DAG views, and listed in the Analysis sidebar.
 
-1. **Sequential Fetches**: Detects fetch operations that were created after a previous fetch's callback started, indicating `await fetch()` chains that could use `Promise.all()`. The detection compares creation time vs callback start time to distinguish sequential from parallel execution.
+**Currently Implemented Patterns:**
 
-2. **Duplicate Fetches**: Identifies multiple fetches to the same URL that could be deduplicated or cached.
+| Pattern | Type ID | Description |
+|---------|---------|-------------|
+| **Sequential Fetches** | `sequential-await` | Fetches created after previous fetch's callback started, indicating `await` chains that could use `Promise.all()` |
+| **Duplicate Fetches** | `duplicate-fetch` | Multiple fetches to the same URL that could be deduplicated or cached |
+| **Deep Promise Chains** | `deep-chain` | Promise nesting exceeds 10 levels, may indicate callback hell |
+| **Waterfall Fetches** | `waterfall-fetch` | Fetch triggered by another fetch's result (dependency chain includes another fetch) |
+| **Unresolved Promises** | `unresolved-promise` | Promises created but never resolved by end of request |
+| **Long Async Gaps** | `long-async-gap` | Resources waiting >500ms before callback executes |
+| **Redundant Timers** | `redundant-timers` | Multiple timers with similar delays created at the same time |
+| **Cache Misses** | `cache-miss` | Cache-get operations with >50ms wait, suggesting origin fetch |
 
-3. **Deep Promise Chains**: Warns when promise nesting exceeds 10 levels, which may indicate callback hell patterns.
+### Extending Pattern Detection
+
+To add new anti-pattern detection, edit the `detectPatterns()` function in `tools/async-trace-viewer/index.html`:
+
+```javascript
+function detectPatterns() {
+  // ... existing patterns ...
+
+  // Example: Detect slow individual operations (>100ms)
+  traceData.resources.forEach(r => {
+    if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+      const duration = (r.callbackEndedAt - r.callbackStartedAt) / 1e6; // ms
+      if (duration > 100) {
+        detectedPatterns.push({
+          type: 'slow-operation',           // Unique type identifier
+          message: `Slow ${r.type}: ${duration.toFixed(0)}ms`, // Shown in sidebar
+          resources: [r.asyncId]            // Resources to highlight
+        });
+      }
+    }
+  });
+}
+```
+
+**Pattern object structure:**
+| Field | Description |
+|-------|-------------|
+| `type` | Unique string identifier (e.g., `'sequential-await'`, `'duplicate-fetch'`) |
+| `message` | Human-readable description shown in the Analysis sidebar |
+| `resources` | Array of `asyncId` values to highlight with purple glow |
+
+**Ideas for additional patterns:**
+- **Slow operations**: Individual operations taking >100ms
+- **Promise.race opportunities**: Multiple fetches where only first result is used
+- **Blocking operations**: Long sync execution blocking the event loop
+- **Retry storms**: Same operation retried multiple times in quick succession
+
+### Click-to-Filter
+
+When enabled (`F` hotkey), clicking any resource filters the view to show only:
+- The clicked resource itself
+- Its **ancestors** (the chain of resources that triggered it)
+- Its **descendants** (all resources it triggered, recursively)
+
+This is useful for isolating a specific async operation and understanding its full dependency chain without noise from unrelated concurrent operations.
+
+**Per-view behavior:**
+| View | Effect |
+|------|--------|
+| Waterfall | Hides rows for non-matching resources |
+| Bubble | Recomputes layout with only matching resources |
+| DAG | Recomputes layout with only matching resources |
+| Heatmap | Shows only matching resource types |
+
+To clear the filter, either click a different resource or disable click-to-filter mode.
+
+### Stack Trace Grouping (Partial Implementation)
+
+The `G` hotkey toggles stack trace grouping. The `getStackGroups()` function groups resources by their creation stack trace, but **visual rendering is not yet implemented**.
+
+Intended behavior:
+- **Waterfall**: Group rows by stack trace with collapsible section headers
+- **Bubble**: Merge resources from same call site into larger bubbles (like clinicjs/bubbleprof)
+- **DAG**: Collapse nodes with same stack trace into group nodes
 
 ### Keyboard Shortcuts
 
@@ -261,15 +334,61 @@ AsyncTrace completed; toJson() = {...}
 ```
 Copy the JSON portion and load it into the visualization tool.
 
+### Capturing Real Traces
+
+To capture traces from workerd samples:
+
+```bash
+# Build workerd
+bazel build //src/workerd/server:workerd
+
+# Start a sample with tracing enabled
+bazel-bin/src/workerd/server/workerd serve \
+    --verbose \
+    --perfetto-trace=/tmp/trace.perfetto=workerd \
+    samples/helloworld_esm/config.capnp 2>&1 &
+
+# Send a request
+curl http://localhost:8080/
+
+# Stop workerd - trace JSON is output on shutdown
+pkill workerd
+```
+
+The trace JSON appears in stderr output at WARNING level. Some samples require `--experimental` flag for experimental features.
+
+**Note:** Trace output was changed from `KJ_LOG(INFO, ...)` to `KJ_LOG(WARNING, ...)` because INFO level is only enabled for `workerd test`, not `workerd serve`.
+
 ### Available Sample Traces
+
+**Basic Examples:**
 - `sample-trace.json` - Simple timer test (11 resources)
 - `sample-async-patterns.json` - Complex async patterns (61 resources)
 - `sample-chat-room.json` - Durable Objects chat room (18 resources)
-- `sample-good-parallel.json` - Best practice: parallel fetches
-- `sample-bad-sequential.json` - Anti-pattern: sequential fetches
-- `sample-bad-duplicates.json` - Anti-pattern: duplicate fetches
+
+**Best Practices:**
+- `sample-good-parallel.json` - Parallel fetches with Promise.all()
+
+**Anti-Pattern Examples (for pattern detection testing):**
+- `sample-bad-sequential.json` - Sequential fetches (triggers: `sequential-await`)
+- `sample-bad-duplicates.json` - Duplicate fetches (triggers: `duplicate-fetch`)
+- `sample-waterfall-fetches.json` - Fetch chains (triggers: `waterfall-fetch`)
+- `sample-unresolved-promises.json` - Abandoned promises (triggers: `unresolved-promise`)
+- `sample-long-async-gaps.json` - Slow operations (triggers: `long-async-gap`)
+- `sample-redundant-timers.json` - Duplicate timers (triggers: `redundant-timers`)
+- `sample-cache-misses.json` - Cache misses (triggers: `cache-miss`)
+
+**Streams Examples:**
 - `sample-streams-pipeline.json` - Streams processing pipeline
 - `sample-pathological-streams.json` - Stress test with many stream operations
+
+**Real Traces (captured from actual workerd samples):**
+- `sample-real-helloworld.json` - ESM hello world (5 resources, 6.8ms)
+- `sample-real-helloworld-sw.json` - Service Worker hello world (5 resources, 4.0ms)
+- `sample-real-async-context.json` - Async context with timers (17 resources, 43.3ms)
+- `sample-real-durable-objects.json` - Durable Objects chat (9 resources, 8.6ms)
+- `sample-real-nodejs-compat-fs.json` - Node.js fs compat (5 resources, 14.2ms)
+- `sample-real-nodejs-compat-streams.json` - Node.js streams pipeline (15 resources, 72.5ms)
 
 ## Reference: clinicjs/bubbleprof
 

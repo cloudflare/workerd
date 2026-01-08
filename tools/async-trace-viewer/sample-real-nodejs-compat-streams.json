@@ -1,0 +1,32 @@
+{
+  "requestDurationNs": 72484564,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 72468621, "destroyedAt": 72468768},
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 0, "createdAt": 1320510, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 14870850, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 3, "type": "js-promise", "stackTraceId": 2, "createdAt": 32289489, "callbackStartedAt": 65630358, "callbackEndedAt": 69814249, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 1, "type": "js-promise", "stackTraceId": 3, "createdAt": 32431661, "callbackStartedAt": 72109965, "callbackEndedAt": 72138488, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 5, "type": "js-promise", "stackTraceId": 3, "createdAt": 32525683, "callbackStartedAt": 72144062, "callbackEndedAt": 72252044, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 6, "type": "js-promise", "stackTraceId": 3, "createdAt": 32596497, "callbackStartedAt": 72257738, "callbackEndedAt": 72301542, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 4, "type": "js-promise", "stackTraceId": 4, "createdAt": 65924337, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 67748567, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 9, "type": "js-promise", "stackTraceId": 6, "createdAt": 68520670, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 11, "triggerId": 10, "type": "js-promise", "stackTraceId": 6, "createdAt": 69574679, "callbackStartedAt": 70891239, "callbackEndedAt": 70929271, "destroyedAt": 0},
+    {"asyncId": 12, "triggerId": 9, "type": "js-promise", "stackTraceId": 5, "createdAt": 69690340, "callbackStartedAt": 71144034, "callbackEndedAt": 71855009, "destroyedAt": 0},
+    {"asyncId": 13, "triggerId": 8, "type": "js-promise", "stackTraceId": 7, "createdAt": 69760984, "callbackStartedAt": 71960632, "callbackEndedAt": 72103788, "destroyedAt": 0},
+    {"asyncId": 14, "triggerId": 12, "type": "js-promise", "stackTraceId": 8, "createdAt": 71161112, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 15, "triggerId": 14, "type": "js-promise", "stackTraceId": 8, "createdAt": 71766172, "callbackStartedAt": 71861648, "callbackEndedAt": 71954645, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker:29:14"]},
+    {"id": 1, "frames": ["pipeline @ node-internal:streams_promises:30:12", "fetch @ worker:54:11"]},
+    {"id": 2, "frames": ["fetch @ worker:54:11"]},
+    {"id": 3, "frames": []},
+    {"id": 4, "frames": ["text @ node:stream/consumers:41:27", "fetch @ worker:56:31"]},
+    {"id": 5, "frames": ["text @ node:stream/consumers:44:20", "fetch @ worker:56:31"]},
+    {"id": 6, "frames": ["createAsyncIterator @ node-internal:streams_readable:1380:9", "text @ node:stream/consumers:44:20", "fetch @ worker:56:31"]},
+    {"id": 7, "frames": ["fetch @ worker:56:31"]},
+    {"id": 8, "frames": ["text @ node:stream/consumers:44:20"]}
+  ],
+  "annotations": []
+}

@@ -94,8 +94,9 @@ AsyncTraceContext::~AsyncTraceContext() noexcept(false) {
       nowNs());
 #endif
 
-  // Log trace JSON at INFO level (useful for debugging)
-  KJ_LOG(INFO, "AsyncTrace completed", toJson());
+  // Log trace JSON at WARNING level so it appears in serve mode output
+  // (INFO level is only enabled for workerd test, not serve)
+  KJ_LOG(WARNING, "AsyncTrace completed", toJson());
 }
 
 uint64_t AsyncTraceContext::nowNs() const {
