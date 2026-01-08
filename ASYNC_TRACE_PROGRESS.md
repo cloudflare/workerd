@@ -442,6 +442,29 @@ The breakdown shows:
 - Operation counts for each category
 - Detailed breakdown: API calls | User promises | Internal ops
 
+**Proposed Future Metrics:**
+
+The following metrics could provide additional insights:
+
+| Category | Metric | Description |
+|----------|--------|-------------|
+| **Concurrency** | Peak Parallelism | Maximum concurrent operations at any point |
+| | Serialization Ratio | Sequential chain time vs potential parallel time (lower = better) |
+| | Parallelism Efficiency | Actual vs theoretical maximum parallelism |
+| **I/O vs Compute** | I/O Wait Breakdown | Time by category: network (fetch) vs storage (KV/DO/R2) vs timers |
+| | Compute vs I/O Ratio | Sync execution time vs async waiting time |
+| | Blocking Time | Total event loop blocking from long sync operations |
+| **Network** | Fetch Statistics | Count, parallel vs sequential ratio, duplicates detected |
+| | Connection Utilization | Estimate of connection pool usage (6 concurrent = saturated) |
+| | Body Consumption | Fetches where response body was/wasn't read (dangling fetch) |
+| **Promise Health** | Promise Lifetime | Average/max time from creation to resolution |
+| | Unresolved Count | Promises never resolved (potential leaks) |
+| | Peak Concurrent | Maximum promises alive simultaneously (memory pressure) |
+| **Critical Path** | Critical Path Ratio | Critical path time / total time (1.0 = fully serialized) |
+| | Optimization Potential | Estimated savings if sequential patterns parallelized |
+| **Workers-Specific** | Bridge Overhead | Total time in KJ↔JS transitions |
+| | Batchable Operations | Count of operations that could use batch APIs |
+
 ### Usage
 1. Start a local HTTP server: `python3 -m http.server 8888` from the `tools/async-trace-viewer` directory
 2. Open `http://localhost:8888` in a browser
