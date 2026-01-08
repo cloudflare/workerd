@@ -1182,6 +1182,13 @@
             • <span style="color: #9966cc;">Purple ?</span> = unresolved promise
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Panels:</strong><br>
+            • <span style="color: #e94560;">Live Metrics</span> = parallelism, sync/async time<br>
+            • <span style="color: #e94560;">Event Feed</span> = scrolling event log<br>
+            • <span style="color: #ff6432;">Critical Path</span> = progress (when C enabled)<br>
+            • <span style="color: #ffd700;">Alerts</span> = bottlenecks (B) & patterns (T)
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
             <strong>Controls:</strong><br>
             • Play/Pause to control animation<br>
             • Click progress bar to seek<br>
@@ -1519,6 +1526,11 @@ const userB = await fetch('/user/123');</pre>
     let replayPlaying = false;
     let replaySpeed = 1;
     let replayAnimationId = null;
+    let replayPeakParallelism = 0;
+    let replayEventLog = [];  // Array of { time, type, message, color }
+    let replayLastEventTime = 0;  // Track last processed event time
+    let replayLiveAlerts = [];  // Array of { message, color, expireTime }
+    let replayAlertedPatterns = new Set();  // Track patterns already alerted
 
     // Accessibility mode - uses patterns instead of colors
     let accessibilityMode = false;
@@ -5506,6 +5518,11 @@ const userB = await fetch('/user/123');</pre>
       }
       replayPlaying = false;
       replayTime = 0;
+      replayPeakParallelism = 0;
+      replayEventLog = [];
+      replayLastEventTime = 0;
+      replayLiveAlerts = [];
+      replayAlertedPatterns = new Set();
       renderReplayFrame();
     }
 
@@ -5560,12 +5577,31 @@ const userB = await fetch('/user/123');</pre>
 
       const width = canvas.width;
       const height = canvas.height;
-      const padding = { top: 80, right: 30, bottom: 50, left: 30 };
-      const chartWidth = width - padding.left - padding.right;
+
+      // Sidebar dimensions
+      const sidebarWidth = 210;
+      const sidebarX = 0;
+
+      // Main area dimensions (to the right of sidebar)
+      const mainX = sidebarWidth;
+      const mainWidth = width - sidebarWidth;
+      const padding = { top: 80, right: 30, bottom: 50, left: 10 };
+      const chartWidth = mainWidth - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
 
+      // Background
       ctx.fillStyle = '#1a1a2e';
       ctx.fillRect(0, 0, width, height);
+
+      // Sidebar background
+      ctx.fillStyle = 'rgba(15, 52, 96, 0.5)';
+      ctx.fillRect(sidebarX, 0, sidebarWidth, height);
+      ctx.strokeStyle = '#0f3460';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sidebarWidth, 0);
+      ctx.lineTo(sidebarWidth, height);
+      ctx.stroke();
 
       if (!traceData) return;
 
@@ -5574,26 +5610,26 @@ const userB = await fetch('/user/123');</pre>
       const durationMs = duration / 1e6;
       const progress = replayTime / duration;
 
-      // Draw title
+      // Draw title (centered in main area)
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Request Replay - Watch Async Operations Unfold', width / 2, 25);
+      ctx.fillText('Request Replay', mainX + mainWidth / 2, 25);
 
       // Draw playback controls area
       const controlsY = 45;
       ctx.fillStyle = '#888';
       ctx.font = '11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`Time: ${currentTimeMs.toFixed(2)}ms / ${durationMs.toFixed(2)}ms`, width / 2, controlsY);
+      ctx.fillText(`Time: ${currentTimeMs.toFixed(2)}ms / ${durationMs.toFixed(2)}ms`, mainX + mainWidth / 2, controlsY);
 
-      // Draw control buttons
+      // Draw control buttons (centered in main area)
       const btnY = controlsY + 8;
       const btnWidth = 60;
       const btnHeight = 22;
       const btnSpacing = 10;
       const totalBtnWidth = btnWidth * 4 + btnSpacing * 3;
-      let btnX = (width - totalBtnWidth) / 2;
+      let btnX = mainX + (mainWidth - totalBtnWidth) / 2;
 
       // Play/Pause button
       ctx.fillStyle = replayPlaying ? '#ff6432' : '#50c878';
@@ -5625,17 +5661,18 @@ const userB = await fetch('/user/123');</pre>
         btnX += 40 + 5;
       });
 
-      // Progress bar
+      // Progress bar (in main area)
       const progressY = btnY + btnHeight + 10;
+      const progressX = mainX + padding.left;
       ctx.fillStyle = '#0f3460';
-      ctx.fillRect(padding.left, progressY, chartWidth, 8);
+      ctx.fillRect(progressX, progressY, chartWidth, 8);
       ctx.fillStyle = '#e94560';
-      ctx.fillRect(padding.left, progressY, chartWidth * progress, 8);
+      ctx.fillRect(progressX, progressY, chartWidth * progress, 8);
 
       // Playhead
       ctx.fillStyle = 'white';
       ctx.beginPath();
-      ctx.arc(padding.left + chartWidth * progress, progressY + 4, 6, 0, Math.PI * 2);
+      ctx.arc(progressX + chartWidth * progress, progressY + 4, 6, 0, Math.PI * 2);
       ctx.fill();
 
       // Draw resources that exist at current time
@@ -5646,9 +5683,10 @@ const userB = await fetch('/user/123');</pre>
         return endTime >= replayTime;
       });
 
-      // Layout resources in a grid
+      // Layout resources in a grid (in main area)
       const resourceAreaTop = progressY + 25;
       const resourceAreaHeight = height - resourceAreaTop - padding.bottom;
+      const resourceAreaLeft = mainX + padding.left;
       const maxCols = Math.floor(chartWidth / 100);
       const maxRows = Math.floor(resourceAreaHeight / 80);
       const cellWidth = chartWidth / Math.max(maxCols, 1);
@@ -5663,7 +5701,7 @@ const userB = await fetch('/user/123');</pre>
         if (idx >= maxCols * maxRows) return;
         const col = idx % maxCols;
         const row = Math.floor(idx / maxCols);
-        const x = padding.left + col * cellWidth + cellWidth / 2;
+        const x = resourceAreaLeft + col * cellWidth + cellWidth / 2;
         const y = resourceAreaTop + row * cellHeight + cellHeight / 2;
         positionMap.set(r.asyncId, { x, y, resource: r });
       });
@@ -5914,34 +5952,352 @@ const userB = await fetch('/user/123');</pre>
         }
       });
 
-      // Stats overlay
-      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
-      ctx.fillRect(width - 160, resourceAreaTop, 150, 80);
-      ctx.strokeStyle = '#0f3460';
-      ctx.strokeRect(width - 160, resourceAreaTop, 150, 80);
-
-      ctx.fillStyle = '#e94560';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText('Live Stats', width - 150, resourceAreaTop + 15);
-
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = '#aaa';
-      ctx.fillText(`Created: ${visibleResources.length}`, width - 150, resourceAreaTop + 32);
-      ctx.fillText(`Active: ${activeResources.length}`, width - 150, resourceAreaTop + 46);
-
+      // Calculate live metrics
       const executing = activeResources.filter(r =>
         r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime &&
         r.callbackEndedAt > 0 && r.callbackEndedAt >= replayTime
       ).length;
-      ctx.fillStyle = executing > 0 ? '#50c878' : '#888';
-      ctx.fillText(`Executing: ${executing}`, width - 150, resourceAreaTop + 60);
-
       const waiting = activeResources.filter(r =>
         r.callbackStartedAt === 0 || r.callbackStartedAt > replayTime
       ).length;
-      ctx.fillStyle = waiting > 0 ? '#ffd700' : '#888';
-      ctx.fillText(`Waiting: ${waiting}`, width - 150, resourceAreaTop + 74);
+      const currentParallelism = executing + waiting;
+      if (currentParallelism > replayPeakParallelism) {
+        replayPeakParallelism = currentParallelism;
+      }
+
+      // Calculate accumulated times
+      let accumulatedSync = 0, accumulatedAsync = 0;
+      visibleResources.forEach(r => {
+        if (r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime) {
+          const syncEnd = Math.min(r.callbackEndedAt > 0 ? r.callbackEndedAt : replayTime, replayTime);
+          accumulatedSync += Math.max(0, syncEnd - r.callbackStartedAt);
+        }
+        if (r.createdAt > 0 && r.createdAt <= replayTime) {
+          const asyncEnd = r.callbackStartedAt > 0 ? Math.min(r.callbackStartedAt, replayTime) : replayTime;
+          accumulatedAsync += Math.max(0, asyncEnd - r.createdAt);
+        }
+      });
+
+      // Count promises alive
+      const promisesAlive = activeResources.filter(r => r.type === 'js-promise').length;
+
+      // Track events as replay progresses
+      if (replayTime > replayLastEventTime) {
+        traceData.resources.forEach(r => {
+          // Created events
+          if (r.createdAt > replayLastEventTime && r.createdAt <= replayTime) {
+            replayEventLog.push({
+              time: r.createdAt,
+              type: 'created',
+              message: `${r.type} #${r.asyncId} created`,
+              color: TYPE_COLORS[r.type] || '#808080'
+            });
+          }
+          // Callback started events
+          if (r.callbackStartedAt > replayLastEventTime && r.callbackStartedAt <= replayTime) {
+            replayEventLog.push({
+              time: r.callbackStartedAt,
+              type: 'started',
+              message: `${r.type} #${r.asyncId} executing`,
+              color: '#50c878'
+            });
+          }
+          // Callback ended events
+          if (r.callbackEndedAt > replayLastEventTime && r.callbackEndedAt <= replayTime) {
+            replayEventLog.push({
+              time: r.callbackEndedAt,
+              type: 'completed',
+              message: `${r.type} #${r.asyncId} completed`,
+              color: '#7ec8e3'
+            });
+          }
+        });
+        // Keep only last 50 events
+        if (replayEventLog.length > 50) {
+          replayEventLog = replayEventLog.slice(-50);
+        }
+        replayLastEventTime = replayTime;
+      }
+
+      // Bottleneck alert (when parallelism = 1 and we have waiting resources)
+      if (showBottlenecks && currentParallelism === 1 && executing === 1 && waiting === 0 && activeResources.length > 0) {
+        const blockingResource = activeResources.find(r =>
+          r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime &&
+          r.callbackEndedAt > 0 && r.callbackEndedAt >= replayTime
+        );
+        if (blockingResource) {
+          const existingAlert = replayLiveAlerts.find(a => a.type === 'bottleneck');
+          if (!existingAlert) {
+            replayLiveAlerts.push({
+              type: 'bottleneck',
+              message: `⚠️ Serialization: ${blockingResource.type} #${blockingResource.asyncId}`,
+              color: '#ffd700',
+              expireTime: replayTime + duration * 0.05
+            });
+          }
+        }
+      }
+
+      // Live pattern detection (when patterns enabled)
+      if (showPatterns) {
+        // Detection window - alert when resource is first "seen" in replay
+        const alertWindow = duration * 0.2;  // 20% of duration for detection window
+
+        // Check for sequential fetch pattern - fetches created during another fetch's callback
+        traceData.resources.forEach(r => {
+          if (r.type !== 'fetch' || r.createdAt <= 0) return;
+          if (r.createdAt > replayTime) return;  // Not created yet
+
+          const patternKey = `seq-fetch-${r.asyncId}`;
+          if (replayAlertedPatterns.has(patternKey)) return;  // Already alerted
+
+          // Check if recently became visible (within detection window)
+          if (r.createdAt < replayTime - alertWindow) return;
+
+          // Check if parent is a fetch and this was created during parent's callback
+          const trigger = traceData.resourceMap.get(r.triggerId);
+          if (trigger && trigger.type === 'fetch' &&
+              trigger.callbackStartedAt > 0 &&
+              r.createdAt >= trigger.callbackStartedAt) {
+            replayAlertedPatterns.add(patternKey);
+            replayLiveAlerts.push({
+              type: 'sequential-fetch',
+              resourceId: r.asyncId,
+              message: `🔍 Sequential fetch #${r.asyncId} (await chain)`,
+              color: '#cc66ff',
+              expireTime: replayTime + duration * 0.2
+            });
+          }
+        });
+
+        // Check for duplicate fetches to same URL
+        const fetchUrls = new Map();
+        visibleResources.filter(r => r.type === 'fetch').forEach(f => {
+          const urlAnnotation = traceData.annotations.find(a => a.asyncId === f.asyncId && a.key === 'url');
+          if (urlAnnotation) {
+            const url = urlAnnotation.value;
+            if (!fetchUrls.has(url)) fetchUrls.set(url, []);
+            fetchUrls.get(url).push(f);
+          }
+        });
+        fetchUrls.forEach((fetches, url) => {
+          if (fetches.length > 1) {
+            const patternKey = `dup-fetch-${url}`;
+            if (replayAlertedPatterns.has(patternKey)) return;
+
+            // Alert when second fetch becomes visible
+            const secondFetch = fetches[1];
+            if (secondFetch.createdAt <= replayTime &&
+                secondFetch.createdAt > replayTime - alertWindow) {
+              replayAlertedPatterns.add(patternKey);
+              const shortUrl = url.length > 25 ? url.substring(0, 25) + '…' : url;
+              replayLiveAlerts.push({
+                type: 'duplicate-fetch',
+                url: url,
+                message: `🔍 Duplicate: ${shortUrl}`,
+                color: '#cc66ff',
+                expireTime: replayTime + duration * 0.2
+              });
+            }
+          }
+        });
+
+        // Check for promise flood - many promises created in a short window
+        const promiseWindow = 1e6;  // 1ms in nanoseconds
+        const recentPromises = traceData.resources.filter(r =>
+          r.type === 'js-promise' &&
+          r.createdAt > replayTime - promiseWindow &&
+          r.createdAt <= replayTime
+        );
+        if (recentPromises.length >= 8) {
+          // Use time bucket as pattern key to allow re-alerting for different bursts
+          const bucket = Math.floor(replayTime / promiseWindow);
+          const patternKey = `promise-flood-${bucket}`;
+          if (!replayAlertedPatterns.has(patternKey)) {
+            replayAlertedPatterns.add(patternKey);
+            replayLiveAlerts.push({
+              type: 'promise-flood',
+              message: `🔍 Promise burst: ${recentPromises.length} in 1ms`,
+              color: '#cc66ff',
+              expireTime: replayTime + duration * 0.2
+            });
+          }
+        }
+
+        // Check for long sync execution (event loop blocking)
+        visibleResources.forEach(r => {
+          if (r.callbackStartedAt <= 0 || r.callbackEndedAt <= 0) return;
+          if (r.callbackEndedAt > replayTime) return;  // Not finished yet
+
+          const syncTime = r.callbackEndedAt - r.callbackStartedAt;
+          if (syncTime > 50e6) {  // > 50ms
+            const patternKey = `long-sync-${r.asyncId}`;
+            if (replayAlertedPatterns.has(patternKey)) return;
+
+            // Alert when callback ends
+            if (r.callbackEndedAt > replayTime - alertWindow) {
+              replayAlertedPatterns.add(patternKey);
+              replayLiveAlerts.push({
+                type: 'long-sync',
+                message: `⚠️ Long sync: ${r.type} took ${(syncTime/1e6).toFixed(0)}ms`,
+                color: '#ffd700',
+                expireTime: replayTime + duration * 0.2
+              });
+            }
+          }
+        });
+      }
+
+      // Expire old alerts
+      replayLiveAlerts = replayLiveAlerts.filter(a => a.expireTime > replayTime);
+
+      // ===== SIDEBAR PANELS =====
+      const sbPadding = 8;
+      const sbContentWidth = sidebarWidth - sbPadding * 2;
+      let sbY = 10;
+
+      // Helper to draw section header
+      const drawSectionHeader = (title, color = '#e94560') => {
+        ctx.fillStyle = color;
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(title, sbPadding, sbY);
+        sbY += 14;
+      };
+
+      // Helper to draw stat line
+      const drawStatLine = (label, value, color = '#aaa') => {
+        ctx.fillStyle = color;
+        ctx.font = '10px sans-serif';
+        ctx.fillText(`${label}: ${value}`, sbPadding, sbY);
+        sbY += 14;
+      };
+
+      // ----- Live Metrics Section -----
+      drawSectionHeader('Live Metrics');
+      drawStatLine('Created', visibleResources.length);
+      drawStatLine('Parallelism', currentParallelism,
+        currentParallelism > 1 ? '#50c878' : (currentParallelism === 1 ? '#ffd700' : '#888'));
+      drawStatLine('Peak', replayPeakParallelism, '#7ec8e3');
+      drawStatLine('Sync', `${(accumulatedSync / 1e6).toFixed(1)}ms`);
+      drawStatLine('Async', `${(accumulatedAsync / 1e6).toFixed(1)}ms`);
+      drawStatLine('Promises', promisesAlive, promisesAlive > 10 ? '#ffd700' : '#aaa');
+
+      // Separator
+      sbY += 6;
+      ctx.strokeStyle = '#0f3460';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sbPadding, sbY);
+      ctx.lineTo(sidebarWidth - sbPadding, sbY);
+      ctx.stroke();
+      sbY += 10;
+
+      // ----- Critical Path Section -----
+      if (showCriticalPath && criticalPathInfo && criticalPathInfo.path.length > 0) {
+        drawSectionHeader('Critical Path', '#ff6432');
+
+        // Find current position on critical path
+        let cpCompleted = 0;
+        criticalPathInfo.path.forEach(r => {
+          const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                         (r.destroyedAt > 0 ? r.destroyedAt : 0);
+          if (endTime > 0 && endTime <= replayTime) {
+            cpCompleted++;
+          } else if (r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime) {
+            cpCompleted += 0.5;
+          } else if (r.createdAt > 0 && r.createdAt <= replayTime && r.callbackStartedAt === 0) {
+            cpCompleted += 0.1;
+          }
+        });
+        cpCompleted = Math.floor(cpCompleted);
+
+        ctx.fillStyle = '#ff8c5a';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(`Step ${cpCompleted} of ${criticalPathInfo.path.length}`, sbPadding, sbY);
+        sbY += 12;
+
+        // Progress bar
+        const cpProgress = cpCompleted / criticalPathInfo.path.length;
+        ctx.fillStyle = '#333';
+        ctx.fillRect(sbPadding, sbY, sbContentWidth, 6);
+        ctx.fillStyle = '#ff6432';
+        ctx.fillRect(sbPadding, sbY, sbContentWidth * cpProgress, 6);
+        sbY += 12;
+
+        // Separator
+        sbY += 4;
+        ctx.strokeStyle = '#0f3460';
+        ctx.beginPath();
+        ctx.moveTo(sbPadding, sbY);
+        ctx.lineTo(sidebarWidth - sbPadding, sbY);
+        ctx.stroke();
+        sbY += 10;
+      }
+
+      // ----- Pattern Alerts Section -----
+      if (replayLiveAlerts.length > 0) {
+        drawSectionHeader('Alerts', '#cc66ff');
+
+        replayLiveAlerts.slice(0, 4).forEach(alert => {
+          const remaining = (alert.expireTime - replayTime) / (duration * 0.15);
+          ctx.globalAlpha = Math.min(1, Math.max(0.3, remaining));
+          ctx.fillStyle = alert.color;
+          ctx.font = '9px sans-serif';
+          // Wrap long messages to multiple lines
+          const maxChars = 28;
+          const msg = alert.message;
+          if (msg.length <= maxChars) {
+            ctx.fillText(msg, sbPadding, sbY);
+            sbY += 13;
+          } else {
+            // Split into two lines
+            const line1 = msg.substring(0, maxChars);
+            const line2 = msg.substring(maxChars, maxChars * 2);
+            ctx.fillText(line1, sbPadding, sbY);
+            sbY += 11;
+            ctx.fillText(line2 + (msg.length > maxChars * 2 ? '…' : ''), sbPadding, sbY);
+            sbY += 13;
+          }
+        });
+        ctx.globalAlpha = 1;
+
+        // Separator
+        sbY += 4;
+        ctx.strokeStyle = '#0f3460';
+        ctx.beginPath();
+        ctx.moveTo(sbPadding, sbY);
+        ctx.lineTo(sidebarWidth - sbPadding, sbY);
+        ctx.stroke();
+        sbY += 10;
+      }
+
+      // ----- Event Feed Section -----
+      drawSectionHeader('Event Feed');
+
+      if (replayEventLog.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '9px sans-serif';
+        ctx.fillText('Press Play to start', sbPadding, sbY);
+        sbY += 14;
+      } else {
+        // Show recent events (newest at top)
+        const maxEvents = Math.min(8, Math.floor((height - sbY - 10) / 13));
+        const recentEvents = replayEventLog.slice(-maxEvents).reverse();
+        ctx.font = '9px monospace';
+        recentEvents.forEach((event, idx) => {
+          const alpha = 1 - (idx * 0.08);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = event.color;
+          const timeStr = (event.time / 1e6).toFixed(1).padStart(5);
+          const msgTrunc = event.message.length > 15 ? event.message.substring(0, 15) + '…' : event.message;
+          ctx.fillText(`${timeStr} ${msgTrunc}`, sbPadding, sbY);
+          sbY += 13;
+        });
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.textAlign = 'left';  // Reset
 
       // Handle click events for controls
       canvas.onclick = (e) => {
@@ -5949,8 +6305,8 @@ const userB = await fetch('/user/123');</pre>
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
-        // Check play/pause button
-        const playBtnX = (width - totalBtnWidth) / 2;
+        // Check play/pause button (centered in main area)
+        const playBtnX = mainX + (mainWidth - totalBtnWidth) / 2;
         if (clickX >= playBtnX && clickX <= playBtnX + btnWidth &&
             clickY >= btnY && clickY <= btnY + btnHeight) {
           if (replayPlaying) {
@@ -5969,6 +6325,11 @@ const userB = await fetch('/user/123');</pre>
             clickY >= btnY && clickY <= btnY + btnHeight) {
           stopReplayAnimation();
           replayTime = 0;
+          replayPeakParallelism = 0;
+          replayEventLog = [];
+          replayLastEventTime = 0;
+          replayLiveAlerts = [];
+          replayAlertedPatterns = new Set();
           renderReplayFrame();
           return;
         }
@@ -5984,10 +6345,10 @@ const userB = await fetch('/user/123');</pre>
           speedBtnX += 45;
         });
 
-        // Check progress bar click
+        // Check progress bar click (in main area)
         if (clickY >= progressY && clickY <= progressY + 8 &&
-            clickX >= padding.left && clickX <= padding.left + chartWidth) {
-          const clickProgress = (clickX - padding.left) / chartWidth;
+            clickX >= progressX && clickX <= progressX + chartWidth) {
+          const clickProgress = (clickX - progressX) / chartWidth;
           replayTime = clickProgress * duration;
           renderReplayFrame();
         }
