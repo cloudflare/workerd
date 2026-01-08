@@ -44,12 +44,53 @@ export class UdfTestDO extends DurableObject {
       message: 'Function name is too long (max 255 bytes).',
     });
 
-    // Name at exactly 255 bytes should be accepted (will fail at "not yet implemented")
+    // Name at exactly 255 bytes should be accepted (no error)
     const maxName = 'x'.repeat(255);
-    assert.throws(() => sql.createFunction(maxName, () => 42), {
-      name: 'Error',
-      message: 'createFunction is not yet implemented',
-    });
+    sql.createFunction(maxName, () => 42);
+  }
+
+  async testSimpleScalarUdf() {
+    const sql = this.state.storage.sql;
+
+    // Register a simple function that doubles its argument
+    sql.createFunction('my_double', (x) => x * 2);
+
+    // Test using the function in a query
+    const result = sql.exec('SELECT my_double(21) AS answer').one();
+    assert.strictEqual(result.answer, 42);
+  }
+
+  async testUdfWithMultipleArgs() {
+    const sql = this.state.storage.sql;
+
+    // Register a function that adds two numbers
+    sql.createFunction('my_add', (a, b) => a + b);
+
+    // Test using the function
+    const result = sql.exec('SELECT my_add(10, 32) AS answer').one();
+    assert.strictEqual(result.answer, 42);
+  }
+
+  async testUdfWithStringResult() {
+    const sql = this.state.storage.sql;
+
+    // Register a function that returns a greeting
+    sql.createFunction('greet', (name) => `Hello, ${name}!`);
+
+    // Test using the function
+    const result = sql.exec("SELECT greet('World') AS greeting").one();
+    assert.strictEqual(result.greeting, 'Hello, World!');
+  }
+
+  async testUdfReturnsNull() {
+    const sql = this.state.storage.sql;
+
+    // Register a function that returns null
+    sql.createFunction('get_null', () => null);
+
+    // Test using the function
+    const result = sql.exec('SELECT get_null() AS val').one();
+    assert.strictEqual(result.val, null);
   }
 }
 
@@ -64,5 +105,9 @@ export default {
     await stub.testSanityCheck();
     await stub.testCreateFunctionExists();
     await stub.testCreateFunctionValidatesName();
+    await stub.testSimpleScalarUdf();
+    await stub.testUdfWithMultipleArgs();
+    await stub.testUdfWithStringResult();
+    await stub.testUdfReturnsNull();
   },
 };

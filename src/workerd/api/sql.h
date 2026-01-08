@@ -78,6 +78,9 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
  private:
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(storage);
+    for (auto& entry: registeredJsFunctions) {
+      visitor.visit(entry.value->callback);
+    }
   }
 
   bool isAllowedName(kj::StringPtr name) const override;
@@ -95,6 +98,19 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   kj::Maybe<uint> pageSize;
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaPageCount;
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaGetMaxPageCount;
+
+  // Storage for user-defined functions.
+  // We store the JS callback here so it stays alive and can be called from the UDF callback.
+  struct RegisteredJsFunction {
+    kj::String name;
+    jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)> callback;
+
+    RegisteredJsFunction(
+        kj::String name, jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)> callback)
+        : name(kj::mv(name)),
+          callback(kj::mv(callback)) {}
+  };
+  kj::HashMap<kj::StringPtr, kj::Own<RegisteredJsFunction>> registeredJsFunctions;
 
   // A statement in the statement cache.
   struct CachedStatement: public kj::Refcounted {
