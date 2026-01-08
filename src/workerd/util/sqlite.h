@@ -328,6 +328,16 @@ class SqliteDatabase {
   // To report an error, throw a kj::Exception.
   using ScalarUdfCallback = kj::Function<UdfResultValue(kj::ArrayPtr<const UdfArgValue> args)>;
 
+  // Signature for aggregate UDF step callback.
+  // Takes current state (may be null on first call) and argument values.
+  // Returns new state value.
+  using AggregateStepCallback = kj::Function<UdfResultValue(
+      kj::Maybe<UdfResultValue&> state, kj::ArrayPtr<const UdfArgValue> args)>;
+
+  // Signature for aggregate UDF final callback.
+  // Takes final state (may be null if no rows) and returns the aggregate result.
+  using AggregateFinalCallback = kj::Function<UdfResultValue(kj::Maybe<UdfResultValue&> state)>;
+
   // Register a user-defined scalar function with SQLite.
   //
   // `name` - The SQL function name. Must not conflict with built-in functions.
@@ -336,6 +346,28 @@ class SqliteDatabase {
   //
   // The callback is invoked synchronously during SQL query execution.
   void registerScalarFunction(kj::StringPtr name, int argCount, ScalarUdfCallback callback);
+
+  // Register a user-defined aggregate function with SQLite.
+  //
+  // `name` - The SQL function name. Must not conflict with built-in functions.
+  // `argCount` - Number of arguments, or -1 for variadic functions.
+  // `stepCallback` - Function called for each row to accumulate state.
+  // `finalCallback` - Function called after all rows to produce final result.
+  //
+  // The callbacks are invoked synchronously during SQL query execution.
+  void registerAggregateFunction(kj::StringPtr name,
+      int argCount,
+      AggregateStepCallback stepCallback,
+      AggregateFinalCallback finalCallback);
+
+  // Store an exception that occurred in a UDF callback.
+  // This is called by the UDF callback when an exception is thrown, so that
+  // the exception can be rethrown after sqlite3_step() returns. This allows
+  // us to preserve the full exception (including tunneled JS exceptions with
+  // their stack traces) instead of losing it when converting to a SQLite error.
+  void setPendingUdfException(kj::Exception&& exception) {
+    pendingUdfException = kj::mv(exception);
+  }
 
  private:
   const Vfs& vfs;
@@ -386,14 +418,22 @@ class SqliteDatabase {
   // Storage for registered user-defined functions.
   // The callback must be stored as a raw pointer inside SQLite's user_data,
   // so we keep ownership here in a HashMap.
-  // Note: RegisteredUdf is defined in sqlite.c++ because its definition uses ScalarUdfCallback,
-  // which can't be completed here. We forward-declare it as public so the udfCallback function
-  // can access it.
+  // Note: RegisteredUdf and RegisteredAggregateUdf are defined in sqlite.c++ because their
+  // definitions use callback types that can't be completed here. We forward-declare them as
+  // public so the callback functions can access them.
  public:
   struct RegisteredUdf;
+  struct RegisteredAggregateUdf;
 
  private:
   kj::HashMap<kj::StringPtr, kj::Own<RegisteredUdf>> registeredUdfs;
+  kj::HashMap<kj::StringPtr, kj::Own<RegisteredAggregateUdf>> registeredAggregateUdfs;
+
+  // Exception thrown by a UDF callback, stored here so it can be rethrown after
+  // sqlite3_step() returns. This allows us to preserve the original exception
+  // (including stack traces for JavaScript exceptions) instead of losing it
+  // when converting to a SQLite error string.
+  kj::Maybe<kj::Exception> pendingUdfException;
 
   void init(kj::Maybe<kj::WriteMode> maybeMode);
 
