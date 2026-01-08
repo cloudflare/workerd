@@ -90,6 +90,10 @@ enum class ResourceType : uint16_t {
 - [x] JSON output validation - correct structure and timing
 - [x] Perfetto trace file generation
 - [x] HTML visualization tool created
+- [x] Analysis dropdown with 6 toggleable features
+- [x] Bottleneck/pattern highlighting in Waterfall, Bubble, and DAG views
+- [x] Sequential fetch detection using creation time vs callback time comparison
+- [x] Analysis sidebar updates correctly when switching demos
 
 ### Not Yet Done
 - [ ] Unit tests for AsyncTraceContext
@@ -181,18 +185,74 @@ The AsyncTraceContext outputs JSON with this structure:
 A bubbleprof-style HTML visualization tool is available at:
 `tools/async-trace-viewer/index.html`
 
-### Features
-- **Bubble View**: Groups resources by stack trace, sizes by sync time, shows causality links
-- **Flame Graph**: Timeline view showing resource lifetimes and callback execution
-- **Tree View**: Hierarchical view of resource causality chains
+### Visualization Views (9 total)
+
+| Key | View | Description |
+|-----|------|-------------|
+| 1 | **Waterfall** | Timeline view showing resource lifetimes, async wait vs sync execution |
+| 2 | **Bubble** | Groups resources by type, sizes by sync time, shows causality links |
+| 3 | **DAG** | Directed acyclic graph of resource dependencies (force-directed layout) |
+| 4 | **Parallelism** | Shows concurrent resource count over time |
+| 5 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
+| 6 | **Latency** | Histogram of async wait times by resource type |
+| 7 | **Gaps** | Highlights idle periods and sync activity bursts |
+| 8 | **Replay** | Animated playback of request execution |
+| 9 | **Heatmap** | Activity intensity over time by resource type |
+
+### Analysis Features
+
+All analysis features are accessible via the **🔬 Analysis** dropdown menu in the header. The button shows a count of active features (e.g., "Analysis (3)").
+
+| Key | Feature | Description |
+|-----|---------|-------------|
+| C | **Critical Path** | Highlights the minimum-latency dependency chain (red glow in all views) |
+| B | **Bottlenecks** | Identifies top 5 resources consuming the most time (yellow glow) |
+| T | **Patterns** | Detects anti-patterns (purple glow) - see Pattern Detection below |
+| F | **Click Filter** | Click any resource to filter view to its ancestors/descendants |
+| G | **Stack Group** | Groups resources by creation stack trace |
+| A | **High Contrast** | Accessibility mode with patterns instead of color-only |
+
+Highlighting for Critical Path, Bottlenecks, and Patterns appears in Waterfall, Bubble, and DAG views.
+
+### Pattern Detection
+
+The pattern detector identifies common anti-patterns:
+
+1. **Sequential Fetches**: Detects fetch operations that were created after a previous fetch's callback started, indicating `await fetch()` chains that could use `Promise.all()`. The detection compares creation time vs callback start time to distinguish sequential from parallel execution.
+
+2. **Duplicate Fetches**: Identifies multiple fetches to the same URL that could be deduplicated or cached.
+
+3. **Deep Promise Chains**: Warns when promise nesting exceeds 10 levels, which may indicate callback hell patterns.
+
+### Keyboard Shortcuts
+
+**Navigation:**
+- `1`-`9`: Switch views (Waterfall, Bubble, DAG, Parallelism, Breakdown, Latency, Gaps, Replay, Heatmap)
+- `?`/`H`: Show help guide
+- `O`/`L`: Load file
+- `P`/`V`: Toggle paste area
+- `Escape`: Close modals/dropdowns
+
+**Analysis (via dropdown):**
+- `C`: Critical path highlight
+- `B`: Bottleneck detection
+- `T`: Pattern detection
+- `F`: Click-to-filter mode
+- `G`: Stack trace grouping
+- `A`: High contrast / accessibility mode
+
+**Other:**
+- `I`: Open AI analysis prompt
+- `Space`: Play/pause (Replay view)
+- `R`: Reset animation (Replay view)
 
 ### Usage
 1. Start a local HTTP server: `python3 -m http.server 8888` from the `tools/async-trace-viewer` directory
 2. Open `http://localhost:8888` in a browser
 3. Either:
-   - Click "Load Demo" to see sample trace data
-   - Click "Load JSON File" to load a trace JSON file
-   - Click "Paste JSON" and paste trace JSON directly
+   - Select a demo from the dropdown
+   - Click "Load" to load a trace JSON file
+   - Click "Paste" and paste trace JSON directly
 
 ### Extracting Trace JSON
 When running workerd with `--verbose --perfetto-trace=...`, the trace JSON is logged to stderr with prefix:
@@ -203,8 +263,13 @@ Copy the JSON portion and load it into the visualization tool.
 
 ### Available Sample Traces
 - `sample-trace.json` - Simple timer test (11 resources)
-- `sample-async-patterns.json` - Complex async patterns (61 resources) showing sequential, parallel, race, nested, and iteration patterns
-- `sample-chat-room.json` - Durable Objects chat room (18 resources) with internal fetch
+- `sample-async-patterns.json` - Complex async patterns (61 resources)
+- `sample-chat-room.json` - Durable Objects chat room (18 resources)
+- `sample-good-parallel.json` - Best practice: parallel fetches
+- `sample-bad-sequential.json` - Anti-pattern: sequential fetches
+- `sample-bad-duplicates.json` - Anti-pattern: duplicate fetches
+- `sample-streams-pipeline.json` - Streams processing pipeline
+- `sample-pathological-streams.json` - Stress test with many stream operations
 
 ## Reference: clinicjs/bubbleprof
 

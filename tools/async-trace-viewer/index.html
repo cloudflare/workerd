@@ -83,6 +83,79 @@
 
     .controls button:hover, .controls .file-label:hover { background: #e94560; }
 
+    /* Analysis dropdown menu */
+    .dropdown {
+      position: relative;
+      display: inline-block;
+    }
+
+    .dropdown-btn {
+      background: #0f3460;
+      color: white;
+      border: 1px solid #e94560;
+      padding: 0.35rem 0.6rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+
+    .dropdown-btn:hover, .dropdown-btn.active {
+      background: #e94560;
+    }
+
+    .dropdown-content {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      background: #16213e;
+      border: 1px solid #0f3460;
+      border-radius: 4px;
+      min-width: 200px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      z-index: 1001;
+      padding: 0.25rem 0;
+    }
+
+    .dropdown-content.show {
+      display: block;
+    }
+
+    .dropdown-item {
+      display: flex;
+      align-items: center;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: #ccc;
+      gap: 0.5rem;
+    }
+
+    .dropdown-item:hover {
+      background: rgba(233, 69, 96, 0.2);
+    }
+
+    .dropdown-item input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      accent-color: #e94560;
+    }
+
+    .dropdown-item .hotkey {
+      margin-left: auto;
+      background: #0f3460;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.65rem;
+      color: #888;
+    }
+
+    .dropdown-divider {
+      height: 1px;
+      background: #0f3460;
+      margin: 0.25rem 0;
+    }
+
     .main-container {
       display: flex;
       flex: 1;
@@ -150,6 +223,20 @@
     }
     .resource-row.internal { opacity: 0.4; }
     .resource-row.internal:hover { opacity: 0.7; }
+    .resource-row.bottleneck {
+      background: rgba(255, 200, 50, 0.25);
+      border-left: 3px solid #ffc832;
+    }
+    .resource-row.bottleneck .resource-bar {
+      box-shadow: 0 0 8px rgba(255, 200, 50, 0.6);
+    }
+    .resource-row.pattern-match {
+      background: rgba(200, 100, 255, 0.25);
+      border-left: 3px solid #c864ff;
+    }
+    .resource-row.pattern-match .resource-bar {
+      box-shadow: 0 0 8px rgba(200, 100, 255, 0.6);
+    }
 
     #critical-path-btn.active {
       background: #ff6432 !important;
@@ -235,7 +322,7 @@
     }
 
     /* Bubble view styles */
-    #bubble-canvas, #parallelism-canvas, #dag-canvas, #breakdown-canvas, #latency-canvas, #gaps-canvas, #replay-canvas {
+    #bubble-canvas, #parallelism-canvas, #dag-canvas, #breakdown-canvas, #latency-canvas, #gaps-canvas, #replay-canvas, #heatmap-canvas {
       display: block;
       width: 100%;
       height: 100%;
@@ -621,6 +708,7 @@
       <option value="latency">6: Latency</option>
       <option value="gaps">7: Gaps</option>
       <option value="replay">8: Replay</option>
+      <option value="heatmap">9: Heatmap</option>
     </select>
     <div class="controls">
       <label class="file-label" for="file-input">📁 Load</label>
@@ -647,10 +735,32 @@
         <option value="user">User Only</option>
         <option value="typed">Typed Only</option>
       </select>
-      <button id="critical-path-btn" title="Highlight the critical path">🔥 Critical Path</button>
+      <div class="dropdown" id="analysis-dropdown">
+        <button class="dropdown-btn" id="analysis-btn">🔬 Analysis ▾</button>
+        <div class="dropdown-content" id="analysis-menu">
+          <label class="dropdown-item" id="critical-path-item">
+            <input type="checkbox" id="critical-path-check"> 🔥 Critical Path <span class="hotkey">C</span>
+          </label>
+          <label class="dropdown-item" id="bottleneck-item">
+            <input type="checkbox" id="bottleneck-check"> 🐢 Bottlenecks <span class="hotkey">B</span>
+          </label>
+          <label class="dropdown-item" id="pattern-item">
+            <input type="checkbox" id="pattern-check"> 🔍 Patterns <span class="hotkey">T</span>
+          </label>
+          <label class="dropdown-item" id="click-filter-item">
+            <input type="checkbox" id="click-filter-check"> 🎯 Click Filter <span class="hotkey">F</span>
+          </label>
+          <label class="dropdown-item" id="stack-group-item">
+            <input type="checkbox" id="stack-group-check"> 📚 Stack Group <span class="hotkey">G</span>
+          </label>
+          <div class="dropdown-divider"></div>
+          <label class="dropdown-item" id="accessibility-item">
+            <input type="checkbox" id="accessibility-check"> ♿ High Contrast <span class="hotkey">A</span>
+          </label>
+        </div>
+      </div>
       <button id="tutorial-btn" style="background: #e94560;">❓ Guide</button>
       <button id="ai-analyze-btn" style="background: #50c878;">🤖 Analyze</button>
-      <button id="accessibility-btn" title="Toggle high contrast mode with patterns">♿ High Contrast</button>
     </div>
   </header>
 
@@ -694,6 +804,10 @@
 
     <div class="view-container" id="replay-view" style="overflow: hidden; padding: 0;">
       <canvas id="replay-canvas"></canvas>
+    </div>
+
+    <div class="view-container" id="heatmap-view" style="overflow: hidden; padding: 0;">
+      <canvas id="heatmap-canvas"></canvas>
     </div>
 
     <div class="sidebar">
@@ -749,6 +863,21 @@
         <div class="section-content">
           <div id="critical-path-info" style="font-size: 0.7rem;">
             <div class="detail-item" style="color: #666;">Click 🔥 to show</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Analysis</h3>
+        <div class="section-content">
+          <div id="analysis-info" style="font-size: 0.7rem;">
+            <div class="detail-item" style="color: #666;">Enable 🐢 or 🔍 toggles</div>
+          </div>
+          <div id="click-filter-status" style="display: none; margin-top: 0.5rem;">
+            <div class="detail-item" style="color: #e94560;">
+              <strong>🎯 Filtered to resource</strong>
+              <button id="clear-filter-btn" style="margin-left: 0.5rem; padding: 2px 6px; font-size: 0.65rem;">Clear</button>
+            </div>
           </div>
         </div>
       </div>
@@ -922,6 +1051,21 @@
             • Adjust speed: 0.5x, 1x, 2x
           </div>
         </div>
+        <div class="view-help" data-view="heatmap">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>Heatmap View:</strong><br>
+            • Shows activity intensity over time<br>
+            • Each row = one resource type<br>
+            • Brighter cells = more activity<br>
+            • Hover for exact counts
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Look For:</strong><br>
+            • Hot spots = busy periods<br>
+            • Diagonal patterns = cascading ops<br>
+            • Gaps = idle time
+          </div>
+        </div>
             <div class="view-help" data-view="all">
               <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
                 <strong>Resource Types:</strong><br>
@@ -972,16 +1116,23 @@
           <h3>Keyboard Shortcuts</h3>
           <table class="guide-table">
             <tr><th>Key</th><th>Action</th></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Navigation</td></tr>
+            <tr><td><code>1</code>-<code>9</code></td><td>Switch views (Waterfall, Bubble, DAG, Parallelism, Breakdown, Latency, Gaps, Replay, Heatmap)</td></tr>
             <tr><td><code>?</code> or <code>H</code></td><td>Show this help guide</td></tr>
             <tr><td><code>O</code> or <code>L</code></td><td>Open file dialog to load trace</td></tr>
             <tr><td><code>P</code> or <code>V</code></td><td>Toggle paste JSON area</td></tr>
-            <tr><td><code>1</code>-<code>8</code></td><td>Switch views (Waterfall, Bubble, DAG, Parallelism, Breakdown, Latency, Gaps, Replay)</td></tr>
+            <tr><td><code>Esc</code></td><td>Close modals / dropdowns</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Analysis (via dropdown)</td></tr>
             <tr><td><code>C</code></td><td>Toggle critical path highlight</td></tr>
-            <tr><td><code>I</code></td><td>Open AI analysis prompt</td></tr>
+            <tr><td><code>B</code></td><td>Toggle bottleneck detection</td></tr>
+            <tr><td><code>T</code></td><td>Toggle pattern detection</td></tr>
+            <tr><td><code>F</code></td><td>Toggle click-to-filter mode</td></tr>
+            <tr><td><code>G</code></td><td>Toggle stack trace grouping</td></tr>
             <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Other</td></tr>
+            <tr><td><code>I</code></td><td>Open AI analysis prompt</td></tr>
             <tr><td><code>Space</code></td><td>Play/Pause (Replay view)</td></tr>
             <tr><td><code>R</code></td><td>Reset animation (Replay view)</td></tr>
-            <tr><td><code>Esc</code></td><td>Close modals / paste area</td></tr>
           </table>
         </div>
 
@@ -997,6 +1148,7 @@
             <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
             <tr><td><strong>7: Gaps</strong></td><td>Idle time analysis</td><td>Orange gaps = nothing running, waiters during gaps</td></tr>
             <tr><td><strong>8: Replay</strong></td><td>Understanding flow</td><td>Watch operations unfold, dependency arrows, state changes</td></tr>
+            <tr><td><strong>9: Heatmap</strong></td><td>Activity density</td><td>Hot spots = high activity, rows = resource types, intensity = count</td></tr>
           </table>
         </div>
 
@@ -1211,6 +1363,15 @@ const userB = await fetch('/user/123');</pre>
     // Accessibility mode - uses patterns instead of colors
     let accessibilityMode = false;
 
+    // Analysis toggles
+    let showBottlenecks = false;
+    let showPatterns = false;
+    let clickToFilterEnabled = false;
+    let stackTraceGrouping = false;
+    let clickFilterResourceId = null;  // Currently filtered resource
+    let detectedBottlenecks = [];  // Top N slowest resources
+    let detectedPatterns = [];  // Detected anti-patterns
+
     // Pattern cache for accessibility mode
     const patternCache = new Map();
 
@@ -1358,7 +1519,31 @@ const userB = await fetch('/user/123');</pre>
       });
       document.getElementById('nav-parent').addEventListener('click', navigateToParent);
       document.getElementById('nav-children').addEventListener('click', navigateToChildren);
-      document.getElementById('critical-path-btn').addEventListener('click', toggleCriticalPath);
+
+      // Analysis dropdown toggle
+      document.getElementById('analysis-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById('analysis-menu');
+        const btn = document.getElementById('analysis-btn');
+        menu.classList.toggle('show');
+        btn.classList.toggle('active', menu.classList.contains('show'));
+      });
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#analysis-dropdown')) {
+          document.getElementById('analysis-menu').classList.remove('show');
+          document.getElementById('analysis-btn').classList.remove('active');
+        }
+      });
+
+      // Analysis checkbox handlers
+      document.getElementById('critical-path-check').addEventListener('change', toggleCriticalPath);
+      document.getElementById('bottleneck-check').addEventListener('change', toggleBottlenecks);
+      document.getElementById('pattern-check').addEventListener('change', togglePatterns);
+      document.getElementById('click-filter-check').addEventListener('change', toggleClickFilter);
+      document.getElementById('stack-group-check').addEventListener('change', toggleStackGrouping);
+      document.getElementById('accessibility-check').addEventListener('change', toggleAccessibility);
 
       // Tutorial modal
       document.getElementById('tutorial-btn').addEventListener('click', () => {
@@ -1380,6 +1565,8 @@ const userB = await fetch('/user/123');</pre>
           document.getElementById('tutorial-modal').style.display = 'none';
           document.getElementById('ai-modal').style.display = 'none';
           document.getElementById('paste-container').classList.remove('show');
+          document.getElementById('analysis-menu').classList.remove('show');
+          document.getElementById('analysis-btn').classList.remove('active');
           return;
         }
 
@@ -1406,7 +1593,7 @@ const userB = await fetch('/user/123');</pre>
 
         // Critical path hotkey: C
         if (e.key === 'c' || e.key === 'C') {
-          toggleCriticalPath();
+          toggleCriticalPath(true);
           return;
         }
 
@@ -1416,7 +1603,7 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
-        // View hotkeys: 1-8 for different views
+        // View hotkeys: 1-9 for different views
         const viewKeys = {
           '1': 'waterfall',
           '2': 'bubble',
@@ -1425,7 +1612,8 @@ const userB = await fetch('/user/123');</pre>
           '5': 'breakdown',
           '6': 'latency',
           '7': 'gaps',
-          '8': 'replay'
+          '8': 'replay',
+          '9': 'heatmap'
         };
 
         if (viewKeys[e.key]) {
@@ -1442,13 +1630,31 @@ const userB = await fetch('/user/123');</pre>
 
         // Accessibility mode toggle: A
         if (e.key === 'a' || e.key === 'A') {
-          accessibilityMode = !accessibilityMode;
-          clearPatternCache();
-          document.body.classList.toggle('accessibility-mode', accessibilityMode);
-          const btn = document.getElementById('accessibility-btn');
-          btn.style.background = accessibilityMode ? '#e94560' : '';
-          btn.textContent = accessibilityMode ? '♿ High Contrast ON' : '♿ High Contrast';
-          if (traceData) render();
+          toggleAccessibility(true);
+          return;
+        }
+
+        // Bottleneck detection toggle: B
+        if (e.key === 'b' || e.key === 'B') {
+          toggleBottlenecks(true);
+          return;
+        }
+
+        // Pattern detection toggle: T
+        if (e.key === 't' || e.key === 'T') {
+          togglePatterns(true);
+          return;
+        }
+
+        // Click-to-filter toggle: F
+        if (e.key === 'f' || e.key === 'F') {
+          toggleClickFilter(true);
+          return;
+        }
+
+        // Stack trace grouping toggle: G
+        if (e.key === 'g' || e.key === 'G') {
+          toggleStackGrouping(true);
           return;
         }
 
@@ -1490,14 +1696,13 @@ const userB = await fetch('/user/123');</pre>
         });
       });
 
-      // Accessibility mode toggle
-      document.getElementById('accessibility-btn').addEventListener('click', () => {
-        accessibilityMode = !accessibilityMode;
-        clearPatternCache();
-        document.body.classList.toggle('accessibility-mode', accessibilityMode);
-        const btn = document.getElementById('accessibility-btn');
-        btn.style.background = accessibilityMode ? '#e94560' : '';
-        btn.textContent = accessibilityMode ? '♿ High Contrast ON' : '♿ High Contrast';
+      // Clear filter button
+      document.getElementById('clear-filter-btn').addEventListener('click', () => {
+        clickFilterResourceId = null;
+        document.getElementById('click-filter-check').checked = false;
+        clickToFilterEnabled = false;
+        updateAnalysisInfo();
+        updateAnalysisButtonState();
         if (traceData) render();
       });
 
@@ -1642,6 +1847,10 @@ const userB = await fetch('/user/123');</pre>
 
         if (clicked) {
           selectResource(clicked.resource);
+          // Handle click-to-filter
+          if (clickToFilterEnabled) {
+            applyClickFilter(clicked.resource.asyncId);
+          }
         }
       });
 
@@ -1773,6 +1982,8 @@ const userB = await fetch('/user/123');</pre>
 
     function processAndRender() {
       cachedBubbleLayout = null;  // Invalidate layout cache when loading new data
+      dagNodes = [];  // Invalidate DAG layout when loading new data
+      dagPanX = 0; dagPanY = 0; dagZoom = 1;  // Reset DAG pan/zoom
       panX = 0; panY = 0; zoom = 1;  // Reset pan/zoom
 
       traceData.resourceMap = new Map();
@@ -1812,6 +2023,13 @@ const userB = await fetch('/user/123');</pre>
       updateLegend();
       computeCriticalPath();
       updateCriticalPathInfo();
+      // Run detection if enabled
+      if (showBottlenecks) detectBottlenecks();
+      if (showPatterns) detectPatterns();
+      // Reset click filter on new data
+      clickFilterResourceId = null;
+      // Update analysis sidebar with new data
+      updateAnalysisInfo();
       render();
     }
 
@@ -1909,13 +2127,43 @@ const userB = await fetch('/user/123');</pre>
         `sync=${(totalSyncTime/1e6).toFixed(2)}ms`);
     }
 
-    function toggleCriticalPath() {
-      showCriticalPath = !showCriticalPath;
-      const btn = document.getElementById('critical-path-btn');
-      btn.classList.toggle('active', showCriticalPath);
-      btn.textContent = showCriticalPath ? '🔥 Critical Path ON' : '🔥 Critical Path';
+    function toggleCriticalPath(fromHotkey = false) {
+      const checkbox = document.getElementById('critical-path-check');
+      if (fromHotkey) {
+        showCriticalPath = !showCriticalPath;
+        checkbox.checked = showCriticalPath;
+      } else {
+        showCriticalPath = checkbox.checked;
+      }
       updateCriticalPathInfo();
+      updateAnalysisButtonState();
       render();
+    }
+
+    function toggleAccessibility(fromHotkey = false) {
+      const checkbox = document.getElementById('accessibility-check');
+      if (fromHotkey) {
+        accessibilityMode = !accessibilityMode;
+        checkbox.checked = accessibilityMode;
+      } else {
+        accessibilityMode = checkbox.checked;
+      }
+      clearPatternCache();
+      document.body.classList.toggle('accessibility-mode', accessibilityMode);
+      updateAnalysisButtonState();
+      if (traceData) render();
+    }
+
+    function updateAnalysisButtonState() {
+      const activeCount = [showCriticalPath, showBottlenecks, showPatterns, clickToFilterEnabled, stackTraceGrouping, accessibilityMode].filter(x => x).length;
+      const btn = document.getElementById('analysis-btn');
+      if (activeCount > 0) {
+        btn.textContent = `🔬 Analysis (${activeCount}) ▾`;
+        btn.classList.add('active');
+      } else {
+        btn.textContent = '🔬 Analysis ▾';
+        btn.classList.remove('active');
+      }
     }
 
     function updateCriticalPathInfo() {
@@ -1950,6 +2198,345 @@ const userB = await fetch('/user/123');</pre>
           Only optimizing this path reduces total time.
         </div>
       `;
+    }
+
+    // ==================== ANALYSIS INFO UPDATE ====================
+    function updateAnalysisInfo() {
+      const container = document.getElementById('analysis-info');
+      const filterStatus = document.getElementById('click-filter-status');
+
+      let html = '';
+
+      // Show bottlenecks info
+      if (showBottlenecks && detectedBottlenecks.length > 0) {
+        html += `<div class="detail-item" style="color: #ffc832;"><strong>🐢 Top ${detectedBottlenecks.length} Bottlenecks</strong></div>`;
+        detectedBottlenecks.slice(0, 3).forEach(id => {
+          const r = traceData?.resourceMap?.get(id);
+          if (r) {
+            let time = 0;
+            if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+              time += r.callbackEndedAt - r.callbackStartedAt;
+            }
+            if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+              time += r.callbackStartedAt - r.createdAt;
+            }
+            html += `<div class="detail-item" style="padding-left: 0.5rem; word-wrap: break-word;">#${id} ${r.type} (${(time/1e6).toFixed(1)}ms)</div>`;
+          }
+        });
+      }
+
+      // Show patterns info
+      if (showPatterns && detectedPatterns.length > 0) {
+        html += `<div class="detail-item" style="color: #c864ff; margin-top: 0.3rem;"><strong>🔍 ${detectedPatterns.length} Pattern(s) Found</strong></div>`;
+        detectedPatterns.slice(0, 3).forEach(p => {
+          const icon = p.type === 'sequential-await' ? '⚡' : p.type === 'duplicate-fetch' ? '🔄' : '📚';
+          html += `<div class="detail-item" style="padding-left: 0.5rem; word-wrap: break-word; line-height: 1.3;">${icon} ${p.message}</div>`;
+        });
+      }
+
+      if (!showBottlenecks && !showPatterns) {
+        html = '<div class="detail-item" style="color: #666;">Enable 🐢 or 🔍 toggles</div>';
+      } else if (html === '') {
+        html = '<div class="detail-item" style="color: #50c878;">No issues detected!</div>';
+      }
+
+      container.innerHTML = html;
+
+      // Update filter status
+      if (clickToFilterEnabled && clickFilterResourceId !== null) {
+        filterStatus.style.display = 'block';
+      } else {
+        filterStatus.style.display = 'none';
+      }
+    }
+
+    // ==================== BOTTLENECK DETECTION ====================
+    function toggleBottlenecks(fromHotkey = false) {
+      const checkbox = document.getElementById('bottleneck-check');
+      if (fromHotkey) {
+        showBottlenecks = !showBottlenecks;
+        checkbox.checked = showBottlenecks;
+      } else {
+        showBottlenecks = checkbox.checked;
+      }
+      updateAnalysisButtonState();
+      if (traceData) {
+        detectBottlenecks();
+        updateAnalysisInfo();
+        render();
+      }
+    }
+
+    function detectBottlenecks() {
+      if (!traceData) {
+        detectedBottlenecks = [];
+        return;
+      }
+
+      // Find top 5 resources by total time (sync + async wait)
+      const resourceTimes = traceData.resources.map(r => {
+        let totalTime = 0;
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          totalTime += r.callbackEndedAt - r.callbackStartedAt;  // sync
+        }
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          totalTime += r.callbackStartedAt - r.createdAt;  // async wait
+        }
+        return { resource: r, totalTime };
+      }).filter(rt => rt.totalTime > 0);
+
+      resourceTimes.sort((a, b) => b.totalTime - a.totalTime);
+      detectedBottlenecks = resourceTimes.slice(0, 5).map(rt => rt.resource.asyncId);
+    }
+
+    // ==================== PATTERN DETECTION ====================
+    function togglePatterns(fromHotkey = false) {
+      const checkbox = document.getElementById('pattern-check');
+      if (fromHotkey) {
+        showPatterns = !showPatterns;
+        checkbox.checked = showPatterns;
+      } else {
+        showPatterns = checkbox.checked;
+      }
+      updateAnalysisButtonState();
+      if (traceData) {
+        detectPatterns();
+        updateAnalysisInfo();
+        render();
+      }
+    }
+
+    function detectPatterns() {
+      if (!traceData) {
+        detectedPatterns = [];
+        return;
+      }
+
+      detectedPatterns = [];
+
+      // Build parent -> children map
+      const childrenMap = new Map();
+      traceData.resources.forEach(r => {
+        if (!childrenMap.has(r.triggerId)) {
+          childrenMap.set(r.triggerId, []);
+        }
+        childrenMap.get(r.triggerId).push(r);
+      });
+
+      // Pattern 1: Sequential fetches that could be parallel (Promise.all opportunity)
+      // Look for fetch operations that execute one after another in time
+      const fetches = traceData.resources.filter(r =>
+        r.type === 'fetch' && r.callbackStartedAt > 0 && r.callbackEndedAt > 0
+      );
+
+      if (fetches.length >= 2) {
+        // Sort by callback start time
+        fetches.sort((a, b) => a.callbackStartedAt - b.callbackStartedAt);
+
+        // Find sequential groups (each fetch starts after previous ends)
+        let sequentialGroup = [fetches[0]];
+        for (let i = 1; i < fetches.length; i++) {
+          const prev = fetches[i - 1];
+          const curr = fetches[i];
+          // Check if current started after previous ended (with small tolerance)
+          // Also check if current was CREATED after previous callback ended,
+          // which indicates await pattern (not parallel)
+          if (curr.createdAt > prev.callbackStartedAt) {
+            // This fetch was created after the previous one started executing,
+            // suggesting sequential await pattern
+            sequentialGroup.push(curr);
+          } else {
+            // Parallel execution detected, check if previous group was sequential
+            if (sequentialGroup.length >= 2) {
+              detectedPatterns.push({
+                type: 'sequential-await',
+                message: `${sequentialGroup.length} sequential fetch operations could use Promise.all()`,
+                resources: sequentialGroup.map(s => s.asyncId)
+              });
+            }
+            sequentialGroup = [curr];
+          }
+        }
+        // Check final group
+        if (sequentialGroup.length >= 2) {
+          detectedPatterns.push({
+            type: 'sequential-await',
+            message: `${sequentialGroup.length} sequential fetch operations could use Promise.all()`,
+            resources: sequentialGroup.map(s => s.asyncId)
+          });
+        }
+      }
+
+      // Pattern 2: Duplicate fetches (same URL)
+      const fetchUrls = new Map();
+      traceData.resources.forEach(r => {
+        if (r.type === 'fetch') {
+          const urlAnnotation = (traceData.annotations || []).find(a =>
+            a.asyncId === r.asyncId && a.key === 'url'
+          );
+          if (urlAnnotation) {
+            const url = urlAnnotation.value;
+            if (!fetchUrls.has(url)) {
+              fetchUrls.set(url, []);
+            }
+            fetchUrls.get(url).push(r.asyncId);
+          }
+        }
+      });
+
+      fetchUrls.forEach((ids, url) => {
+        if (ids.length > 1) {
+          detectedPatterns.push({
+            type: 'duplicate-fetch',
+            message: `Duplicate fetch to ${url.substring(0, 40)}...`,
+            resources: ids
+          });
+        }
+      });
+
+      // Pattern 3: Long promise chains (deep nesting)
+      const depths = new Map();
+      function getDepth(asyncId) {
+        if (depths.has(asyncId)) return depths.get(asyncId);
+        const r = traceData.resources.find(res => res.asyncId === asyncId);
+        if (!r || r.triggerId === 0) {
+          depths.set(asyncId, 0);
+          return 0;
+        }
+        const depth = 1 + getDepth(r.triggerId);
+        depths.set(asyncId, depth);
+        return depth;
+      }
+
+      traceData.resources.forEach(r => getDepth(r.asyncId));
+
+      const maxDepth = Math.max(...depths.values());
+      if (maxDepth > 10) {
+        const deepResources = traceData.resources
+          .filter(r => depths.get(r.asyncId) > 8)
+          .map(r => r.asyncId);
+        detectedPatterns.push({
+          type: 'deep-chain',
+          message: `Deep async chain (depth ${maxDepth}) - consider flattening`,
+          resources: deepResources
+        });
+      }
+
+      // Deduplicate patterns by resource set
+      const seen = new Set();
+      detectedPatterns = detectedPatterns.filter(p => {
+        const key = p.resources.sort().join(',');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    // ==================== CLICK-TO-FILTER ====================
+    function toggleClickFilter(fromHotkey = false) {
+      const checkbox = document.getElementById('click-filter-check');
+      if (fromHotkey) {
+        clickToFilterEnabled = !clickToFilterEnabled;
+        checkbox.checked = clickToFilterEnabled;
+      } else {
+        clickToFilterEnabled = checkbox.checked;
+      }
+      if (!clickToFilterEnabled) {
+        clickFilterResourceId = null;
+      }
+      // Invalidate layout caches when filter changes
+      cachedBubbleLayout = null;
+      dagNodes = [];
+      updateAnalysisInfo();
+      updateAnalysisButtonState();
+      if (traceData) render();
+    }
+
+    function applyClickFilter(asyncId) {
+      clickFilterResourceId = asyncId;
+      // Invalidate layout caches when filter changes
+      cachedBubbleLayout = null;
+      dagNodes = [];
+      updateAnalysisInfo();
+      render();
+    }
+
+    function getAncestors(asyncId) {
+      const ancestors = new Set();
+      let current = traceData.resources.find(r => r.asyncId === asyncId);
+      while (current && current.triggerId !== 0) {
+        ancestors.add(current.triggerId);
+        current = traceData.resources.find(r => r.asyncId === current.triggerId);
+      }
+      return ancestors;
+    }
+
+    function getDescendants(asyncId) {
+      const descendants = new Set();
+      const queue = [asyncId];
+      while (queue.length > 0) {
+        const id = queue.shift();
+        traceData.resources.forEach(r => {
+          if (r.triggerId === id && !descendants.has(r.asyncId)) {
+            descendants.add(r.asyncId);
+            queue.push(r.asyncId);
+          }
+        });
+      }
+      return descendants;
+    }
+
+    function isResourceVisible(asyncId) {
+      if (!clickToFilterEnabled || clickFilterResourceId === null) return true;
+      if (asyncId === clickFilterResourceId) return true;
+      const ancestors = getAncestors(clickFilterResourceId);
+      const descendants = getDescendants(clickFilterResourceId);
+      return ancestors.has(asyncId) || descendants.has(asyncId);
+    }
+
+    // ==================== STACK TRACE GROUPING ====================
+    function toggleStackGrouping(fromHotkey = false) {
+      const checkbox = document.getElementById('stack-group-check');
+      if (fromHotkey) {
+        stackTraceGrouping = !stackTraceGrouping;
+        checkbox.checked = stackTraceGrouping;
+      } else {
+        stackTraceGrouping = checkbox.checked;
+      }
+      updateAnalysisButtonState();
+      if (traceData) render();
+    }
+
+    function getStackGroups() {
+      if (!traceData || !traceData.stackTraces) return new Map();
+
+      const groups = new Map();
+      traceData.resources.forEach(r => {
+        const stackId = r.stackTraceId || 0;
+        if (!groups.has(stackId)) {
+          const stack = traceData.stackTraces.find(s => s.id === stackId);
+          groups.set(stackId, {
+            stackId,
+            frames: stack ? stack.frames : [],
+            resources: [],
+            totalTime: 0
+          });
+        }
+        const group = groups.get(stackId);
+        group.resources.push(r);
+
+        // Calculate time
+        let time = 0;
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          time += r.callbackEndedAt - r.callbackStartedAt;
+        }
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          time += r.callbackStartedAt - r.createdAt;
+        }
+        group.totalTime += time;
+      });
+
+      return groups;
     }
 
     function updateStats() {
@@ -2177,6 +2764,8 @@ const userB = await fetch('/user/123');</pre>
         renderGaps();
       } else if (currentView === 'replay') {
         renderReplay();
+      } else if (currentView === 'heatmap') {
+        renderHeatmap();
       }
     }
 
@@ -2195,9 +2784,9 @@ const userB = await fetch('/user/123');</pre>
       sortMode.style.opacity = isWaterfall ? '1' : '0.4';
       sortMode.style.cursor = isWaterfall ? 'pointer' : 'not-allowed';
 
-      // Filter mode only works in Waterfall, Bubble, and DAG views
+      // Filter mode only works in certain views
       const filterMode = document.getElementById('filter-mode');
-      const filterViews = ['waterfall', 'bubble', 'dag'];
+      const filterViews = ['waterfall', 'bubble', 'dag', 'heatmap'];
       const filterEnabled = filterViews.includes(currentView);
       filterMode.disabled = !filterEnabled;
       filterMode.style.opacity = filterEnabled ? '1' : '0.4';
@@ -2259,6 +2848,8 @@ const userB = await fetch('/user/123');</pre>
       // Rows
       sorted.forEach(r => {
         if (!shouldShowResource(r)) return;
+        // Apply click-to-filter visibility
+        if (clickToFilterEnabled && clickFilterResourceId !== null && !isResourceVisible(r.asyncId)) return;
 
         const row = document.createElement('div');
         row.className = 'resource-row';
@@ -2266,6 +2857,13 @@ const userB = await fetch('/user/123');</pre>
         if (highlightedChain.has(r.asyncId)) row.classList.add('highlighted');
         if (showCriticalPath && criticalPathSet.has(r.asyncId)) row.classList.add('critical-path');
         if (r._classification === 'internal') row.classList.add('internal');
+        // Bottleneck highlighting
+        if (showBottlenecks && detectedBottlenecks.includes(r.asyncId)) row.classList.add('bottleneck');
+        // Pattern highlighting
+        if (showPatterns) {
+          const patternMatch = detectedPatterns.find(p => p.resources.includes(r.asyncId));
+          if (patternMatch) row.classList.add('pattern-match');
+        }
 
         const label = document.createElement('div');
         label.className = 'resource-label';
@@ -2338,7 +2936,13 @@ const userB = await fetch('/user/123');</pre>
           bar.appendChild(barLabel);
         }
 
-        bar.addEventListener('click', () => selectResource(r));
+        bar.addEventListener('click', () => {
+          selectResource(r);
+          // Handle click-to-filter
+          if (clickToFilterEnabled) {
+            applyClickFilter(r.asyncId);
+          }
+        });
         timeline.appendChild(bar);
         row.appendChild(timeline);
         container.appendChild(row);
@@ -2355,8 +2959,10 @@ const userB = await fetch('/user/123');</pre>
       const width = canvasWidth - padding * 2;
       const height = canvasHeight - padding * 2;
 
-      // Filter resources based on current filter mode
-      const filteredResources = traceData.resources.filter(shouldShowResource);
+      // Filter resources based on current filter mode and click filter
+      const filteredResources = traceData.resources.filter(r =>
+        shouldShowResource(r) && isResourceVisible(r.asyncId)
+      );
 
       // Build tree structure with individual resources (not grouped)
       const nodes = new Map();
@@ -2569,6 +3175,8 @@ const userB = await fetch('/user/123');</pre>
         const isHighlighted = highlightedChain.has(r.asyncId);
         const isSelected = selectedResource && r.asyncId === selectedResource.asyncId;
         const isOnCriticalPath = showCriticalPath && criticalPathSet.has(r.asyncId);
+        const isBottleneck = showBottlenecks && detectedBottlenecks.includes(r.asyncId);
+        const isPatternMatch = showPatterns && detectedPatterns.some(p => p.resources.includes(r.asyncId));
         const isInternal = node.isInternal;
 
         // Glow effect (dimmer for internal)
@@ -2597,6 +3205,30 @@ const userB = await fetch('/user/123');</pre>
           ctx.strokeStyle = '#ff6432';
           ctx.lineWidth = 3;
           ctx.shadowColor = '#ff6432';
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius * 0.85, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+
+        // Bottleneck ring (yellow glow)
+        if (isBottleneck && !isOnCriticalPath) {
+          ctx.strokeStyle = '#ffc832';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#ffc832';
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius * 0.85, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+
+        // Pattern match ring (purple glow)
+        if (isPatternMatch && !isOnCriticalPath && !isBottleneck) {
+          ctx.strokeStyle = '#c864ff';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#c864ff';
           ctx.shadowBlur = 10;
           ctx.beginPath();
           ctx.arc(node.x, node.y, node.radius * 0.85, 0, Math.PI * 2);
@@ -2707,7 +3339,12 @@ const userB = await fetch('/user/123');</pre>
       });
 
       if (clicked) {
-        selectResource(clicked.group.resources[0]);
+        const resource = clicked.group.resources[0];
+        selectResource(resource);
+        // Handle click-to-filter
+        if (clickToFilterEnabled) {
+          applyClickFilter(resource.asyncId);
+        }
       }
     }
 
@@ -2719,8 +3356,10 @@ const userB = await fetch('/user/123');</pre>
       const width = container.clientWidth;
       const height = container.clientHeight;
 
-      // Filter based on current filter mode
-      const filteredResources = traceData.resources.filter(shouldShowResource);
+      // Filter based on current filter mode and click filter
+      const filteredResources = traceData.resources.filter(r =>
+        shouldShowResource(r) && isResourceVisible(r.asyncId)
+      );
 
       // Create nodes with initial positions based on depth
       dagNodes = [];
@@ -2913,6 +3552,8 @@ const userB = await fetch('/user/123');</pre>
         const isSelected = selectedResource && r.asyncId === selectedResource.asyncId;
         const isHighlighted = highlightedChain.has(r.asyncId);
         const isOnCriticalPath = showCriticalPath && criticalPathSet.has(r.asyncId);
+        const isBottleneck = showBottlenecks && detectedBottlenecks.includes(r.asyncId);
+        const isPatternMatch = showPatterns && detectedPatterns.some(p => p.resources.includes(r.asyncId));
         const isInternal = r._classification === 'internal';
 
         // Node circle
@@ -2932,13 +3573,31 @@ const userB = await fetch('/user/123');</pre>
           ctx.stroke();
           ctx.shadowBlur = 0;
         }
+        // Bottleneck glow (yellow)
+        else if (isBottleneck) {
+          ctx.strokeStyle = '#ffc832';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#ffc832';
+          ctx.shadowBlur = 10;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+        // Pattern match glow (purple)
+        else if (isPatternMatch) {
+          ctx.strokeStyle = '#c864ff';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#c864ff';
+          ctx.shadowBlur = 10;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
 
         // Selection ring
         if (isSelected) {
           ctx.strokeStyle = '#fff';
           ctx.lineWidth = 3;
           ctx.stroke();
-        } else if (isHighlighted) {
+        } else if (isHighlighted && !isOnCriticalPath && !isBottleneck && !isPatternMatch) {
           ctx.strokeStyle = '#e94560';
           ctx.lineWidth = 2;
           ctx.stroke();
@@ -4347,6 +5006,202 @@ const userB = await fetch('/user/123');</pre>
           renderReplayFrame();
         }
       };
+    }
+
+    // ==================== HEATMAP VIEW ====================
+    function renderHeatmap() {
+      const container = document.getElementById('heatmap-view');
+      const canvas = document.getElementById('heatmap-canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 60, right: 30, bottom: 60, left: 120 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, width, height);
+
+      if (!traceData) return;
+
+      // Get filtered resources
+      const filterMode = document.getElementById('filter-mode').value;
+      let resources = traceData.resources.filter(r => {
+        if (filterMode === 'user') return r._classification === 'user' || r._classification === 'typed';
+        if (filterMode === 'typed') return r._classification === 'typed';
+        return true;
+      });
+
+      // Apply click-to-filter
+      if (clickToFilterEnabled && clickFilterResourceId !== null) {
+        resources = resources.filter(r => isResourceVisible(r.asyncId));
+      }
+
+      const duration = traceData.requestDurationNs;
+
+      // Get unique resource types
+      const types = Array.from(new Set(resources.map(r => r.type)));
+      if (types.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No resources to display', width / 2, height / 2);
+        return;
+      }
+
+      // Sort types by total activity
+      const typeActivity = new Map();
+      types.forEach(t => typeActivity.set(t, 0));
+      resources.forEach(r => {
+        let time = 0;
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          time += r.callbackEndedAt - r.callbackStartedAt;
+        }
+        typeActivity.set(r.type, typeActivity.get(r.type) + time);
+      });
+      types.sort((a, b) => typeActivity.get(b) - typeActivity.get(a));
+
+      // Define time buckets
+      const numBuckets = Math.min(80, Math.floor(chartWidth / 8));
+      const bucketWidth = duration / numBuckets;
+      const rowHeight = Math.min(30, chartHeight / types.length);
+
+      // Build heatmap data: [type][bucket] = intensity
+      const heatmapData = new Map();
+      types.forEach(type => {
+        heatmapData.set(type, new Array(numBuckets).fill(0));
+      });
+
+      // Fill heatmap with activity
+      resources.forEach(r => {
+        const typeData = heatmapData.get(r.type);
+        if (!typeData) return;
+
+        // Add activity during callback execution
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          const startBucket = Math.floor(r.callbackStartedAt / bucketWidth);
+          const endBucket = Math.floor(r.callbackEndedAt / bucketWidth);
+          for (let b = Math.max(0, startBucket); b <= Math.min(numBuckets - 1, endBucket); b++) {
+            typeData[b] += 1;
+          }
+        }
+        // Also mark async waiting time (lighter)
+        else if (r.createdAt > 0) {
+          const startBucket = Math.floor(r.createdAt / bucketWidth);
+          const endBucket = r.callbackStartedAt > 0
+            ? Math.floor(r.callbackStartedAt / bucketWidth)
+            : Math.floor((r.destroyedAt > 0 ? r.destroyedAt : duration) / bucketWidth);
+          for (let b = Math.max(0, startBucket); b <= Math.min(numBuckets - 1, endBucket); b++) {
+            typeData[b] += 0.3;  // Lower weight for waiting
+          }
+        }
+      });
+
+      // Find max intensity for normalization
+      let maxIntensity = 0;
+      heatmapData.forEach(typeData => {
+        typeData.forEach(v => { if (v > maxIntensity) maxIntensity = v; });
+      });
+      if (maxIntensity === 0) maxIntensity = 1;
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Activity Heatmap (Time × Resource Type)', width / 2, 25);
+
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('Brighter = more activity in that time window', width / 2, 42);
+
+      // Draw heatmap cells
+      const cellWidth = chartWidth / numBuckets;
+      types.forEach((type, typeIdx) => {
+        const y = padding.top + typeIdx * rowHeight;
+        const typeData = heatmapData.get(type);
+        const baseColor = TYPE_COLORS[type] || '#808080';
+
+        // Parse base color to RGB
+        const hex = baseColor.replace('#', '');
+        const r = parseInt(hex.substr(0, 2), 16);
+        const g = parseInt(hex.substr(2, 2), 16);
+        const b = parseInt(hex.substr(4, 2), 16);
+
+        typeData.forEach((intensity, bucket) => {
+          const x = padding.left + bucket * cellWidth;
+          const normalizedIntensity = intensity / maxIntensity;
+
+          // Interpolate from dark to color based on intensity
+          const alpha = Math.min(1, normalizedIntensity * 1.5);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.9})`;
+          ctx.fillRect(x, y, cellWidth + 0.5, rowHeight - 1);
+
+          // Add brighter highlight for high intensity
+          if (normalizedIntensity > 0.7) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${(normalizedIntensity - 0.7) * 0.5})`;
+            ctx.fillRect(x, y, cellWidth + 0.5, rowHeight - 1);
+          }
+        });
+
+        // Type label
+        ctx.fillStyle = TYPE_COLORS[type] || '#888';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        const label = type.replace('js-', '').replace('cache-', 'c:');
+        ctx.fillText(label, padding.left - 8, y + rowHeight / 2);
+      });
+
+      // Draw time axis
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top + types.length * rowHeight);
+      ctx.lineTo(padding.left + chartWidth, padding.top + types.length * rowHeight);
+      ctx.stroke();
+
+      // Time labels
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const numLabels = Math.min(10, numBuckets);
+      for (let i = 0; i <= numLabels; i++) {
+        const x = padding.left + (i / numLabels) * chartWidth;
+        const time = (i / numLabels) * duration / 1e6;
+        ctx.fillText(`${time.toFixed(1)}ms`, x, padding.top + types.length * rowHeight + 5);
+
+        // Grid line
+        if (i > 0 && i < numLabels) {
+          ctx.strokeStyle = 'rgba(68, 68, 68, 0.3)';
+          ctx.beginPath();
+          ctx.moveTo(x, padding.top);
+          ctx.lineTo(x, padding.top + types.length * rowHeight);
+          ctx.stroke();
+        }
+      }
+
+      // Legend
+      const legendY = height - 30;
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Intensity:', padding.left, legendY);
+
+      const gradientWidth = 100;
+      const gradientX = padding.left + 60;
+      for (let i = 0; i < gradientWidth; i++) {
+        const intensity = i / gradientWidth;
+        ctx.fillStyle = `rgba(233, 69, 96, ${intensity})`;
+        ctx.fillRect(gradientX + i, legendY - 5, 1, 10);
+      }
+      ctx.fillStyle = '#888';
+      ctx.fillText('Low', gradientX - 25, legendY);
+      ctx.fillText('High', gradientX + gradientWidth + 5, legendY);
     }
 
     // ==================== SELECTION ====================
