@@ -5662,6 +5662,25 @@ const userB = await fetch('/user/123');</pre>
         positionMap.set(r.asyncId, { x, y, resource: r });
       });
 
+      // Calculate waiting counts - how many resources are waiting on each resource
+      // A resource is "waiting on" another if it's created, callback not started, and is a descendant
+      const waitingOnCount = new Map();
+      visibleResources.forEach(r => {
+        const isWaiting = r.createdAt <= replayTime &&
+                         (r.callbackStartedAt === 0 || r.callbackStartedAt > replayTime);
+        if (isWaiting && r.triggerId !== 0) {
+          // Walk up the trigger chain and increment counts
+          let currentId = r.triggerId;
+          const visited = new Set();
+          while (currentId !== 0 && !visited.has(currentId)) {
+            visited.add(currentId);
+            waitingOnCount.set(currentId, (waitingOnCount.get(currentId) || 0) + 1);
+            const parent = traceData.resourceMap.get(currentId);
+            currentId = parent ? parent.triggerId : 0;
+          }
+        }
+      });
+
       // Draw dependency lines first (behind circles)
       ctx.lineWidth = 1.5;
       sortedVisible.forEach((r, idx) => {
@@ -5813,6 +5832,42 @@ const userB = await fetch('/user/123');</pre>
         ctx.textBaseline = 'middle';
         const label = r.type.replace('js-', '').substring(0, 6);
         ctx.fillText(label, x, y);
+
+        // Waiting count badge
+        const waitCount = waitingOnCount.get(r.asyncId) || 0;
+        if (waitCount > 0 && isActive) {
+          const badgeX = x + radius - 5;
+          const badgeY = y - radius + 5;
+          const badgeRadius = waitCount > 9 ? 10 : 8;
+
+          // Badge background
+          ctx.beginPath();
+          ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+          ctx.fillStyle = '#ff6432';
+          ctx.fill();
+          ctx.strokeStyle = '#1a1a2e';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Badge text
+          ctx.fillStyle = 'white';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(waitCount > 99 ? '99+' : waitCount.toString(), badgeX, badgeY);
+        }
+
+        // Critical path flame icon (shown for all critical path nodes, subtle when inactive)
+        if (isOnCriticalPath) {
+          const flameX = x - radius + 8;
+          const flameY = y + radius - 8;
+          ctx.font = isActive ? '14px sans-serif' : '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.globalAlpha = isActive ? 1.0 : 0.6;
+          ctx.fillText('🔥', flameX, flameY);
+          ctx.globalAlpha = 1;
+        }
       });
 
       // Stats overlay
