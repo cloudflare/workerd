@@ -80,11 +80,26 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     // In theory we could try to cache multiple copies of the statement, but as this is probably
     // exceedingly rare, it is not worth the added code complexity.
     SqliteDatabase::Regulator& regulator = *this;
-    return js.alloc<Cursor>(
-        js, kj::mv(doneCallback), db, regulator, js.toString(querySql), kj::mv(bindings));
+    try {
+      return js.alloc<Cursor>(
+          js, kj::mv(doneCallback), db, regulator, js.toString(querySql), kj::mv(bindings));
+    } catch (kj::Exception& e) {
+      // Rethrow with trusted=true and allowNonObjects=true to preserve the original
+      // thrown value from UDF exceptions, matching native JS semantics.
+      // trusted=true preserves stack traces, allowNonObjects=true allows non-Error
+      // values (strings, numbers, objects) to pass through unchanged.
+      js.throwException(kj::mv(e), {.trusted = true, .allowNonObjects = true});
+    }
   }
 
-  auto result = js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings));
+  auto result = [&]() {
+    try {
+      return js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings));
+    } catch (kj::Exception& e) {
+      // Rethrow with trusted=true and allowNonObjects=true to match native JS semantics.
+      js.throwException(kj::mv(e), {.trusted = true, .allowNonObjects = true});
+    }
+  }();
 
   // If the statement cache grew too big, drop the least-recently-used entry.
   while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
@@ -141,116 +156,244 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
   return dbSize;
 }
 
-void SqlStorage::createFunction(jsg::Lock& js,
-    kj::String name,
-    jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)> callback) {
-  // Validate function name
-  JSG_REQUIRE(name.size() > 0, TypeError, "Function name cannot be empty.");
-  JSG_REQUIRE(name.size() <= 255, TypeError, "Function name is too long (max 255 bytes).");
+// Helper function to convert SQLite args to a JS array
+static v8::Local<v8::Array> sqliteArgsToJsArray(
+    jsg::Lock& js, kj::ArrayPtr<const SqliteDatabase::UdfArgValue> args) {
+  auto array = v8::Array::New(js.v8Isolate, args.size());
+  for (size_t i = 0; i < args.size(); i++) {
+    v8::Local<v8::Value> jsVal;
+    KJ_SWITCH_ONEOF(args[i]) {
+      KJ_CASE_ONEOF(intVal, int64_t) {
+        jsVal = v8::Number::New(js.v8Isolate, static_cast<double>(intVal));
+      }
+      KJ_CASE_ONEOF(doubleVal, double) {
+        jsVal = v8::Number::New(js.v8Isolate, doubleVal);
+      }
+      KJ_CASE_ONEOF(strVal, kj::StringPtr) {
+        jsVal = jsg::v8Str(js.v8Isolate, strVal);
+      }
+      KJ_CASE_ONEOF(blobVal, kj::ArrayPtr<const kj::byte>) {
+        auto copy = kj::heapArray<kj::byte>(blobVal.size());
+        memcpy(copy.begin(), blobVal.begin(), blobVal.size());
+        jsVal = js.wrapBytes(kj::mv(copy));
+      }
+      KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
+        jsVal = v8::Null(js.v8Isolate);
+      }
+    }
+    jsg::check(array->Set(js.v8Context(), i, jsVal));
+  }
+  return array;
+}
 
-  // Store the JS callback by creating the structure with a proper constructor
-  auto jsFunc = kj::heap<RegisteredJsFunction>(kj::str(name), kj::mv(callback));
+// Helper function to convert JS result back to SQLite UdfResultValue
+static SqliteDatabase::UdfResultValue jsResultToSqlite(jsg::Lock& js, v8::Local<v8::Value> handle) {
+  if (handle->IsNull() || handle->IsUndefined()) {
+    return nullptr;
+  } else if (handle->IsNumber()) {
+    double num = handle.As<v8::Number>()->Value();
+    double intPart;
+    if (std::modf(num, &intPart) == 0.0 &&
+        num >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
+        num <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+      return static_cast<int64_t>(num);
+    }
+    return num;
+  } else if (handle->IsString()) {
+    return kj::str(js.toString(jsg::JsValue(handle)));
+  } else if (handle->IsArrayBuffer() || handle->IsArrayBufferView()) {
+    jsg::BufferSource buffer(js, handle);
+    auto data = buffer.asArrayPtr();
+    auto copy = kj::heapArray<kj::byte>(data.size());
+    memcpy(copy.begin(), data.begin(), data.size());
+    return kj::mv(copy);
+  } else {
+    return kj::str(js.toString(jsg::JsValue(handle)));
+  }
+}
 
-  // Get a raw pointer before moving into the map (we need it for the C++ callback)
+// Helper function to convert UdfResultValue to JS value
+static v8::Local<v8::Value> sqliteResultToJs(jsg::Lock& js, SqliteDatabase::UdfResultValue& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(intVal, int64_t) {
+      return v8::Number::New(js.v8Isolate, static_cast<double>(intVal));
+    }
+    KJ_CASE_ONEOF(doubleVal, double) {
+      return v8::Number::New(js.v8Isolate, doubleVal);
+    }
+    KJ_CASE_ONEOF(strVal, kj::String) {
+      return jsg::v8Str(js.v8Isolate, strVal);
+    }
+    KJ_CASE_ONEOF(blobVal, kj::Array<kj::byte>) {
+      auto copy = kj::heapArray<kj::byte>(blobVal.size());
+      memcpy(copy.begin(), blobVal.begin(), blobVal.size());
+      return js.wrapBytes(kj::mv(copy));
+    }
+    KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
+      return v8::Null(js.v8Isolate);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+// Helper to call a JS function with exception handling
+static v8::Local<v8::Value> callJsFunction(jsg::Lock& js,
+    v8::Local<v8::Function> func,
+    v8::Local<v8::Value> recv,
+    int argc,
+    v8::Local<v8::Value>* argv) {
+  v8::TryCatch tryCatch(js.v8Isolate);
+  auto maybeResult = func->Call(js.v8Context(), recv, argc, argv);
+  if (tryCatch.HasCaught()) {
+    jsg::throwTunneledException(js.v8Isolate, tryCatch.Exception());
+  }
+  return maybeResult.ToLocalChecked();
+}
+
+void SqlStorage::createScalarFunction(
+    jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> callback) {
+  auto jsFunc = kj::heap<RegisteredScalarFunction>(kj::str(name), kj::mv(callback));
   auto* jsFuncPtr = jsFunc.get();
+  // Erase any existing entry first, then insert. We can't use upsert because the HashMap
+  // key is a StringPtr pointing to the value's name field - upsert would keep the old key
+  // pointer which becomes dangling when the old value is destroyed.
+  registeredScalarFunctions.erase(jsFuncPtr->name.asPtr());
+  registeredScalarFunctions.insert(jsFuncPtr->name.asPtr(), kj::mv(jsFunc));
 
-  // Store in our map (takes ownership)
-  registeredJsFunctions.insert(jsFuncPtr->name.asPtr(), kj::mv(jsFunc));
-
-  // Create a C++ callback that wraps the JS function
   auto& db = getDb(js);
   db.registerScalarFunction(jsFuncPtr->name.asPtr(), -1,  // -1 = variadic
       [jsFuncPtr](
           kj::ArrayPtr<const SqliteDatabase::UdfArgValue> args) -> SqliteDatabase::UdfResultValue {
-    // Get the current jsg::Lock from the IoContext
-    // This is safe because SQL queries are always executed while holding the JS lock
     auto& workerLock = IoContext::current().getCurrentLock();
     jsg::Lock& js = workerLock;
 
-    // Convert SQLite args to JS values
-    auto jsArgsBuilder = kj::heapArrayBuilder<jsg::Value>(args.size());
-    for (const auto& arg: args) {
-      KJ_SWITCH_ONEOF(arg) {
-        KJ_CASE_ONEOF(intVal, int64_t) {
-          jsArgsBuilder.add(
-              jsg::Value(js.v8Isolate, v8::Number::New(js.v8Isolate, static_cast<double>(intVal))));
-        }
-        KJ_CASE_ONEOF(doubleVal, double) {
-          jsArgsBuilder.add(jsg::Value(js.v8Isolate, v8::Number::New(js.v8Isolate, doubleVal)));
-        }
-        KJ_CASE_ONEOF(strVal, kj::StringPtr) {
-          jsArgsBuilder.add(jsg::Value(js.v8Isolate, jsg::v8Str(js.v8Isolate, strVal)));
-        }
-        KJ_CASE_ONEOF(blobVal, kj::ArrayPtr<const kj::byte>) {
-          auto copy = kj::heapArray<kj::byte>(blobVal.size());
-          memcpy(copy.begin(), blobVal.begin(), blobVal.size());
-          jsArgsBuilder.add(jsg::Value(js.v8Isolate, js.wrapBytes(kj::mv(copy))));
-        }
-        KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
-          jsArgsBuilder.add(jsg::Value(js.v8Isolate, v8::Null(js.v8Isolate)));
-        }
-      }
+    auto jsArgsArray = sqliteArgsToJsArray(js, args);
+
+    // Get the callback function
+    v8::Local<v8::Value> funcHandle = jsFuncPtr->callback.getHandle(js);
+    JSG_REQUIRE(funcHandle->IsFunction(), TypeError, "UDF callback must be a function");
+    auto func = funcHandle.As<v8::Function>();
+
+    // Convert array to individual args
+    auto argc = jsArgsArray->Length();
+    auto argv = kj::heapArray<v8::Local<v8::Value>>(argc);
+    for (uint32_t i = 0; i < argc; i++) {
+      argv[i] = jsg::check(jsArgsArray->Get(js.v8Context(), i));
     }
 
-    // Call the JS function with the arguments, catching any exceptions
-    jsg::Arguments<jsg::Value> jsgArgs(jsArgsBuilder.finish());
+    auto resultVal = callJsFunction(js, func, v8::Undefined(js.v8Isolate), argc, argv.begin());
 
-    // Use v8::TryCatch to capture JavaScript exceptions with their message
-    v8::TryCatch tryCatch(js.v8Isolate);
-    jsg::Value result(js.v8Isolate, v8::Undefined(js.v8Isolate));
-    try {
-      result = jsFuncPtr->callback(js, kj::mv(jsgArgs));
-    } catch (jsg::JsExceptionThrown&) {
-      // The JS exception is in the TryCatch - extract the message and rethrow as kj::Exception
-      if (tryCatch.HasCaught()) {
-        v8::Local<v8::Value> exception = tryCatch.Exception();
-        v8::Local<v8::String> message;
-        if (exception->IsObject()) {
-          auto obj = exception.As<v8::Object>();
-          auto context = js.v8Context();
-          auto msgValue = obj->Get(context, jsg::v8StrIntern(js.v8Isolate, "message"));
-          if (!msgValue.IsEmpty() && msgValue.ToLocalChecked()->IsString()) {
-            message = msgValue.ToLocalChecked().As<v8::String>();
-          }
-        }
-        if (message.IsEmpty()) {
-          message = exception->ToString(js.v8Context()).ToLocalChecked();
-        }
-        v8::String::Utf8Value utf8(js.v8Isolate, message);
-        kj::throwFatalException(KJ_EXCEPTION(FAILED, kj::str(*utf8)));
-      }
-      throw;  // Re-throw if we couldn't extract the message
-    }
-
-    // Convert JS result back to SQLite UdfResultValue (owning)
-    auto handle = result.getHandle(js);
-    if (handle->IsNull() || handle->IsUndefined()) {
-      return nullptr;
-    } else if (handle->IsNumber()) {
-      double num = handle.As<v8::Number>()->Value();
-      // Check if it's an integer - use a simpler check
-      double intPart;
-      if (std::modf(num, &intPart) == 0.0 &&
-          num >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
-          num <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
-        return static_cast<int64_t>(num);
-      }
-      return num;
-    } else if (handle->IsString()) {
-      // Return owning kj::String
-      return kj::str(js.toString(jsg::JsValue(handle)));
-    } else if (handle->IsArrayBuffer() || handle->IsArrayBufferView()) {
-      // Return owning kj::Array<byte>
-      jsg::BufferSource buffer(js, handle);
-      auto data = buffer.asArrayPtr();
-      auto copy = kj::heapArray<kj::byte>(data.size());
-      memcpy(copy.begin(), data.begin(), data.size());
-      return kj::mv(copy);
-    } else {
-      // For other types, convert to string (owning)
-      return kj::str(js.toString(jsg::JsValue(handle)));
-    }
+    return jsResultToSqlite(js, resultVal);
   });
+}
+
+void SqlStorage::createAggregateFunction(
+    jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> step, jsg::JsRef<jsg::JsValue> final) {
+  auto jsFunc = kj::heap<RegisteredAggregateFunction>(kj::str(name), kj::mv(step), kj::mv(final));
+  auto* jsFuncPtr = jsFunc.get();
+  // Erase any existing entry first, then insert. We can't use upsert because the HashMap
+  // key is a StringPtr pointing to the value's name field - upsert would keep the old key
+  // pointer which becomes dangling when the old value is destroyed.
+  registeredAggregateFunctions.erase(jsFuncPtr->name.asPtr());
+  registeredAggregateFunctions.insert(jsFuncPtr->name.asPtr(), kj::mv(jsFunc));
+
+  auto& db = getDb(js);
+
+  // Step callback
+  auto stepCb =
+      [jsFuncPtr](kj::Maybe<SqliteDatabase::UdfResultValue&> state,
+          kj::ArrayPtr<const SqliteDatabase::UdfArgValue> args) -> SqliteDatabase::UdfResultValue {
+    auto& workerLock = IoContext::current().getCurrentLock();
+    jsg::Lock& js = workerLock;
+
+    auto jsArgsArray = sqliteArgsToJsArray(js, args);
+
+    // Get the step function
+    v8::Local<v8::Value> funcHandle = jsFuncPtr->stepCallback.getHandle(js);
+    JSG_REQUIRE(funcHandle->IsFunction(), TypeError, "Aggregate step must be a function");
+    auto func = funcHandle.As<v8::Function>();
+
+    // Build arguments: state (or undefined), then spread the SQL args
+    auto argc = jsArgsArray->Length() + 1;
+    auto argv = kj::heapArray<v8::Local<v8::Value>>(argc);
+
+    // First arg is state
+    KJ_IF_SOME(s, state) {
+      argv[0] = sqliteResultToJs(js, s);
+    } else {
+      argv[0] = v8::Undefined(js.v8Isolate);
+    }
+
+    // Rest are the SQL arguments
+    for (uint32_t i = 0; i < jsArgsArray->Length(); i++) {
+      argv[i + 1] = jsg::check(jsArgsArray->Get(js.v8Context(), i));
+    }
+
+    auto resultVal = callJsFunction(js, func, v8::Undefined(js.v8Isolate), argc, argv.begin());
+
+    return jsResultToSqlite(js, resultVal);
+  };
+
+  // Final callback
+  auto finalCb =
+      [jsFuncPtr](
+          kj::Maybe<SqliteDatabase::UdfResultValue&> state) -> SqliteDatabase::UdfResultValue {
+    auto& workerLock = IoContext::current().getCurrentLock();
+    jsg::Lock& js = workerLock;
+
+    // Get the final function
+    v8::Local<v8::Value> funcHandle = jsFuncPtr->finalCallback.getHandle(js);
+    JSG_REQUIRE(funcHandle->IsFunction(), TypeError, "Aggregate final must be a function");
+    auto func = funcHandle.As<v8::Function>();
+
+    // Single arg: state (or undefined)
+    v8::Local<v8::Value> argv[1];
+    KJ_IF_SOME(s, state) {
+      argv[0] = sqliteResultToJs(js, s);
+    } else {
+      argv[0] = v8::Undefined(js.v8Isolate);
+    }
+
+    auto resultVal = callJsFunction(js, func, v8::Undefined(js.v8Isolate), 1, argv);
+
+    return jsResultToSqlite(js, resultVal);
+  };
+
+  db.registerAggregateFunction(jsFuncPtr->name.asPtr(), -1, kj::mv(stepCb), kj::mv(finalCb));
+}
+
+void SqlStorage::createFunction(jsg::Lock& js, kj::String name, jsg::JsValue callbackOrOptions) {
+  // Validate function name
+  JSG_REQUIRE(name.size() > 0, TypeError, "Function name cannot be empty.");
+  JSG_REQUIRE(name.size() <= 255, TypeError, "Function name is too long (max 255 bytes).");
+
+  // JsValue implicitly converts to v8::Local<v8::Value>
+  v8::Local<v8::Value> handle = callbackOrOptions;
+
+  if (handle->IsFunction()) {
+    // Scalar function - just a callback
+    createScalarFunction(js, kj::mv(name), jsg::JsRef<jsg::JsValue>(js, callbackOrOptions));
+  } else if (handle->IsObject()) {
+    // Aggregate function - object with step/final
+    auto obj = handle.As<v8::Object>();
+
+    auto stepKey = jsg::v8StrIntern(js.v8Isolate, "step"_kj);
+    auto finalKey = jsg::v8StrIntern(js.v8Isolate, "final"_kj);
+
+    auto stepVal = jsg::check(obj->Get(js.v8Context(), stepKey));
+    auto finalVal = jsg::check(obj->Get(js.v8Context(), finalKey));
+
+    JSG_REQUIRE(
+        stepVal->IsFunction(), TypeError, "Aggregate function options must have a 'step' function");
+    JSG_REQUIRE(finalVal->IsFunction(), TypeError,
+        "Aggregate function options must have a 'final' function");
+
+    createAggregateFunction(js, kj::mv(name), jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(stepVal)),
+        jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(finalVal)));
+  } else {
+    JSG_FAIL_REQUIRE(
+        TypeError, "createFunction expects a function or an object with step/final functions");
+  }
 }
 
 bool SqlStorage::isAllowedName(kj::StringPtr name) const {
@@ -498,7 +641,13 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
   // Unfortunately, this does not help with the case where the application stops iterating with
   // results still available from the cursor. There's not much we can do about that case since
   // there's no way to know if the app might come back and try to use the cursor again later.
-  query.nextRow();
+  try {
+    query.nextRow();
+  } catch (kj::Exception& e) {
+    // Rethrow with trusted=true and allowNonObjects=true to preserve the original
+    // thrown value from UDF exceptions, matching native JS semantics.
+    js.throwException(kj::mv(e), {.trusted = true, .allowNonObjects = true});
+  }
   if (query.isDone()) {
     obj->endQuery(state);
   }
