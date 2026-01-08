@@ -1390,6 +1390,10 @@ const userB = await fetch('/user/123');</pre>
     let detectedPatterns = [];  // Detected anti-patterns
     let temporalEdges = [];  // Edges based on callback timing
 
+    // Gaps view state for hover interaction
+    let gapsData = [];  // Computed gaps from last render
+    let gapsRenderParams = null;  // Rendering parameters for hit detection
+
     // Pattern cache for accessibility mode
     const patternCache = new Map();
 
@@ -1902,6 +1906,69 @@ const userB = await fetch('/user/123');</pre>
           dagDragNode.fixed = false;
           dagDragNode = null;
         }
+      });
+
+      // Gaps canvas event handlers
+      const gapsCanvas = document.getElementById('gaps-canvas');
+
+      gapsCanvas.addEventListener('mousemove', (e) => {
+        if (!gapsRenderParams || !gapsData.length) return;
+
+        const rect = gapsCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const { padding, barWidth, numBuckets } = gapsRenderParams;
+
+        // Check if we're in the chart area
+        if (x < padding.left || x > gapsCanvas.width - padding.right ||
+            y < padding.top || y > gapsCanvas.height - padding.bottom) {
+          document.getElementById('tooltip').style.display = 'none';
+          gapsCanvas.style.cursor = 'default';
+          return;
+        }
+
+        // Find which gap (if any) we're hovering over
+        const hoveredGap = gapsData.find(gap => {
+          const gapX = padding.left + gap.startBucket * barWidth;
+          const gapWidth = (gap.endBucket - gap.startBucket) * barWidth;
+          return x >= gapX && x <= gapX + gapWidth;
+        });
+
+        if (hoveredGap) {
+          gapsCanvas.style.cursor = 'pointer';
+          const tooltip = document.getElementById('tooltip');
+
+          // Build waiting resources summary
+          const waitingByType = {};
+          hoveredGap.waitingResources.forEach(r => {
+            waitingByType[r.type] = (waitingByType[r.type] || 0) + 1;
+          });
+          const waitingSummary = Object.entries(waitingByType)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([type, count]) => `<div style="color: #7ec8e3; font-size: 0.7rem;">• ${type}: ${count}</div>`)
+            .join('');
+
+          tooltip.innerHTML = `
+            <div class="tooltip-title">Idle Gap</div>
+            <div>Duration: ${hoveredGap.durationMs.toFixed(2)}ms</div>
+            <div>Time: ${(hoveredGap.startNs / 1e6).toFixed(2)}ms - ${(hoveredGap.endNs / 1e6).toFixed(2)}ms</div>
+            <div style="margin-top: 0.3rem; font-weight: bold; color: #ff6432;">${hoveredGap.waitingResources.length} operations waiting:</div>
+            ${waitingSummary || '<div style="color: #666; font-size: 0.7rem;">No async operations waiting</div>'}
+            ${Object.keys(waitingByType).length > 5 ? `<div style="color: #888; font-size: 0.65rem;">...and ${Object.keys(waitingByType).length - 5} more types</div>` : ''}
+          `;
+          tooltip.style.display = 'block';
+          tooltip.style.left = (e.clientX + 10) + 'px';
+          tooltip.style.top = (e.clientY + 10) + 'px';
+        } else {
+          document.getElementById('tooltip').style.display = 'none';
+          gapsCanvas.style.cursor = 'default';
+        }
+      });
+
+      gapsCanvas.addEventListener('mouseleave', () => {
+        document.getElementById('tooltip').style.display = 'none';
       });
 
       window.addEventListener('resize', () => {
@@ -4714,6 +4781,23 @@ const userB = await fetch('/user/123');</pre>
       // Sort gaps by duration
       gaps.sort((a, b) => b.durationNs - a.durationNs);
 
+      // For each gap, find the resources that are waiting during it
+      gaps.forEach(gap => {
+        gap.waitingResources = traceData.resources.filter(r => {
+          if (r.createdAt <= 0) return false;
+          // Resource must be created before the gap ends
+          if (r.createdAt > gap.endNs) return false;
+          // Resource must not have completed before the gap starts
+          const waitEnd = r.callbackStartedAt > 0 ? r.callbackStartedAt :
+                         (r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                         (r.destroyedAt > 0 ? r.destroyedAt : duration));
+          return waitEnd > gap.startNs;
+        });
+      });
+
+      // Store gaps for hover detection (barWidth stored after it's computed below)
+      gapsData = gaps;
+
       const totalGapTime = gaps.reduce((s, g) => s + g.durationNs, 0);
       const gapPercent = (totalGapTime / duration * 100).toFixed(1);
 
@@ -4735,6 +4819,9 @@ const userB = await fetch('/user/123');</pre>
       // Draw activity timeline
       const maxActivity = Math.max(...activityBuckets, 1);
       const barWidth = chartWidth / numBuckets;
+
+      // Store render params for hover detection
+      gapsRenderParams = { padding, chartWidth, chartHeight, barWidth, numBuckets, bucketSize, duration };
 
       // Background showing async waiters (light)
       for (let i = 0; i < numBuckets; i++) {
