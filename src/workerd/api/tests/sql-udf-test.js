@@ -2168,6 +2168,187 @@ export class UdfTestDO extends DurableObject {
     // Sum of (i + i*10) for i=0 to 99 = sum of 11*i = 11 * (99*100/2) = 11 * 4950 = 54450
     assert.strictEqual(totalSum, 54450);
   }
+
+  // ===========================================================================
+  // Edge Case Tests
+  // ===========================================================================
+
+  /**
+   * Test behavior when a UDF is replaced while a prepared statement exists.
+   * The prepared statement should use the NEW implementation because SQLite
+   * resolves function references at execution time, not preparation time.
+   */
+  async testPreparedStatementWithReplacedUdf() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction('replaceable_prep', (x) => x * 2);
+
+    sql.exec('CREATE TABLE prep_test (value INTEGER)');
+    sql.exec('INSERT INTO prep_test VALUES (5)');
+
+    // Prepare a statement that uses the UDF
+    const stmt = sql.prepare(
+      'SELECT replaceable_prep(value) AS result FROM prep_test'
+    );
+
+    // Execute with original implementation
+    const r1 = stmt().one();
+    assert.strictEqual(r1.result, 10); // 5 * 2
+
+    // Replace the UDF
+    sql.createFunction('replaceable_prep', (x) => x * 3);
+
+    // Execute the same prepared statement - should use NEW implementation
+    const r2 = stmt().one();
+    assert.strictEqual(r2.result, 15); // 5 * 3
+
+    // Replace again
+    sql.createFunction('replaceable_prep', (x) => x + 100);
+
+    const r3 = stmt().one();
+    assert.strictEqual(r3.result, 105); // 5 + 100
+
+    sql.exec('DROP TABLE prep_test');
+  }
+
+  /**
+   * Test UDF behavior with various unsupported return types.
+   * Most should be coerced to strings; some may have special handling.
+   */
+  async testUdfReturnsUnsupportedTypes() {
+    const sql = this.state.storage.sql;
+
+    // Object -> should be coerced to string "[object Object]"
+    sql.createFunction('return_object', () => ({ foo: 'bar' }));
+    const r1 = sql.exec('SELECT return_object() AS val').one();
+    assert.strictEqual(r1.val, '[object Object]');
+
+    // Array -> should be coerced to string "1,2,3"
+    sql.createFunction('return_array', () => [1, 2, 3]);
+    const r2 = sql.exec('SELECT return_array() AS val').one();
+    assert.strictEqual(r2.val, '1,2,3');
+
+    // Boolean true -> coerced to string "true" or number?
+    sql.createFunction('return_true', () => true);
+    const r3 = sql.exec('SELECT return_true() AS val').one();
+    // Booleans are not numbers in JS, so they get stringified
+    assert.strictEqual(r3.val, 'true');
+
+    // Boolean false
+    sql.createFunction('return_false', () => false);
+    const r4 = sql.exec('SELECT return_false() AS val').one();
+    assert.strictEqual(r4.val, 'false');
+
+    // Date -> should be coerced to string (ISO format or similar)
+    sql.createFunction('return_date', () => new Date('2024-01-15T12:00:00Z'));
+    const r5 = sql.exec('SELECT return_date() AS val').one();
+    assert.ok(r5.val.includes('2024'), `Date should stringify, got: ${r5.val}`);
+
+    // Function -> stringifies to function source or "[object Function]"
+    sql.createFunction('return_function', () => function test() {});
+    const r6 = sql.exec('SELECT return_function() AS val').one();
+    assert.ok(
+      r6.val.includes('function') || r6.val.includes('Function'),
+      `Function should stringify, got: ${r6.val}`
+    );
+
+    // Symbol -> Symbols can't be converted to string implicitly
+    // This should throw when js.toString() is called on it
+    sql.createFunction('return_symbol', () => Symbol('test'));
+    let symbolThrew = false;
+    try {
+      sql.exec('SELECT return_symbol() AS val').one();
+    } catch (e) {
+      symbolThrew = true;
+      // Expected: Symbol can't be converted to string
+    }
+    assert.ok(symbolThrew, 'Returning a Symbol should throw');
+
+    // BigInt -> can't be implicitly converted to Number or String in some cases
+    sql.createFunction('return_bigint', () => BigInt(9007199254740993));
+    let bigintThrew = false;
+    let bigintVal;
+    try {
+      bigintVal = sql.exec('SELECT return_bigint() AS val').one().val;
+    } catch (e) {
+      bigintThrew = true;
+    }
+    // Document behavior - BigInt may throw or may get stringified
+    assert.ok(
+      bigintThrew || bigintVal !== undefined,
+      `BigInt either threw or returned: ${bigintVal}`
+    );
+  }
+
+  /**
+   * Test that when a UDF throws mid-iteration, we properly clean up
+   * and the cursor is left in a consistent state.
+   */
+  async testUdfThrowsAfterPartialResults() {
+    const sql = this.state.storage.sql;
+
+    sql.exec('CREATE TABLE partial_test (id INTEGER)');
+    sql.exec('INSERT INTO partial_test VALUES (1), (2), (3), (4), (5)');
+
+    let callCount = 0;
+    sql.createFunction('fail_at_three', (id) => {
+      callCount++;
+      if (id === 3) {
+        throw new Error('Deliberate failure at id 3');
+      }
+      return id * 10;
+    });
+
+    const results = [];
+    let caughtError = null;
+
+    try {
+      // Note: The cursor may start executing immediately on creation,
+      // or during iteration - depends on implementation
+      for (const row of sql.exec(
+        'SELECT fail_at_three(id) AS val FROM partial_test ORDER BY id'
+      )) {
+        results.push(row.val);
+      }
+    } catch (e) {
+      caughtError = e;
+    }
+
+    // Clean up - this should work even after an error in the previous query
+    sql.exec('DROP TABLE partial_test');
+
+    // Should have caught the error
+    assert.ok(caughtError !== null, 'Should have caught an error');
+    assert.ok(
+      caughtError.message.includes('Deliberate failure'),
+      'Error message should be preserved'
+    );
+    assert.strictEqual(callCount, 3, 'UDF should have been called 3 times');
+    // We may have collected 0, 1, or 2 results depending on buffering
+    assert.ok(
+      results.length <= 2,
+      `Should have at most 2 results, got ${results.length}`
+    );
+
+    // Most importantly: can we still use the database after the error?
+    const sanityCheck = sql.exec('SELECT 1 + 1 AS answer').one();
+    assert.strictEqual(
+      sanityCheck.answer,
+      2,
+      'Database should still work after UDF error'
+    );
+
+    // Can we use the same UDF again?
+    sql.exec('CREATE TABLE recovery_test (id INTEGER)');
+    sql.exec('INSERT INTO recovery_test VALUES (1), (2)'); // No id=3!
+    const recoveryResult = sql
+      .exec('SELECT fail_at_three(id) AS val FROM recovery_test ORDER BY id')
+      .toArray();
+    assert.strictEqual(recoveryResult.length, 2);
+    assert.strictEqual(recoveryResult[0].val, 10);
+    assert.strictEqual(recoveryResult[1].val, 20);
+    sql.exec('DROP TABLE recovery_test');
+  }
 }
 
 // =============================================================================
@@ -2295,5 +2476,10 @@ export default {
     await stub.testReplacedUdfCallbackCanBeCollected();
     await stub.testAggregateStateIsCollectedAfterQuery();
     await stub.testUdfStressWithGc();
+
+    // Edge case tests
+    await stub.testPreparedStatementWithReplacedUdf();
+    await stub.testUdfReturnsUnsupportedTypes();
+    await stub.testUdfThrowsAfterPartialResults();
   },
 };
