@@ -215,7 +215,7 @@ A bubbleprof-style HTML visualization tool is available at:
 | 4 | **Parallelism** | Shows concurrent resource count over time |
 | 5 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
 | 6 | **Latency** | Histogram of async wait times by resource type |
-| 7 | **Gaps** | Highlights idle periods and sync activity bursts |
+| 7 | **Gaps** | Highlights idle periods and sync activity bursts; hover over gaps to see waiting operations |
 | 8 | **Replay** | Animated playback of request execution |
 | 9 | **Heatmap** | Activity intensity over time by resource type |
 
@@ -350,6 +350,7 @@ Intended behavior:
 
 **Other:**
 - `I`: Open AI analysis prompt
+- `Shift+R`: Refresh/reset current view (resets pan/zoom, clears cached layout)
 - `Space`: Play/pause (Replay view)
 - `R`: Reset animation (Replay view)
 

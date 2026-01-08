@@ -1147,6 +1147,7 @@
             <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Other</td></tr>
             <tr><td><code>I</code></td><td>Open AI analysis prompt</td></tr>
+            <tr><td><code>Shift+R</code></td><td>Refresh/reset current view</td></tr>
             <tr><td><code>Space</code></td><td>Play/Pause (Replay view)</td></tr>
             <tr><td><code>R</code></td><td>Reset animation (Replay view)</td></tr>
           </table>
@@ -1684,6 +1685,25 @@ const userB = await fetch('/user/123');</pre>
         // Temporal edges toggle: E
         if (e.key === 'e' || e.key === 'E') {
           toggleTemporalEdges(true);
+          return;
+        }
+
+        // Refresh/Reset current view: Shift+R
+        if (e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+          if (traceData) {
+            // Reset view-specific state
+            if (currentView === 'bubble') {
+              panX = 0; panY = 0; zoom = 1;
+              cachedBubbleLayout = null;
+            } else if (currentView === 'dag') {
+              dagPanX = 0; dagPanY = 0; dagZoom = 1;
+              dagNodes = [];
+            } else if (currentView === 'replay') {
+              stopReplayAnimation();
+              replayTime = 0;
+            }
+            render();
+          }
           return;
         }
 
