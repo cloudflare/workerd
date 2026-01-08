@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "async-trace.h"
 #include "io-own.h"
 #include "worker.h"
 
@@ -1342,6 +1343,14 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
   // promise. `Func` transforms from `T` to `Result`.
   using Result = jsg::ReturnType<Func, T, true>;
 
+  // Create async trace resource for KJ→JS bridge if tracing is enabled.
+  // This tracks the time spent waiting for the KJ promise to complete.
+  AsyncTraceContext::AsyncId kjBridgeId = AsyncTraceContext::INVALID_ID;
+  if (auto* trace = getAsyncTrace()) {
+    kjBridgeId =
+        trace->createResource(AsyncTraceContext::ResourceType::kKjToJsBridge, js.v8Isolate);
+  }
+
   // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
   // and pass it into the then(). If the promise is rejected, and there is no rejection
   // handler attached to it, an unhandledrejection event will be scheduled, and scheduling
@@ -1357,7 +1366,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 
   addTask(promiseExceptionOrT.then(
       [this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
-          maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js),
+          maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js), kjBridgeId,
           // Reminder: It's important that `func` gets attached to the promise before the whole
           // thing is passed to `addTask()`, so that it's impossible for `func` to be destroyed
           // before the inner promise.
@@ -1372,9 +1381,25 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
     return run(
         [resolver = kj::mv(resolver),
             funcResultPair = FuncResultPair{kj::fwd<Func>(func), kj::mv(exceptionOrT)},
-            maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+            maybeAsyncContext = kj::mv(maybeAsyncContext), kjBridgeId](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
       jsg::Lock& js = lock;
+
+      // Enter async trace callback scope for KJ→JS bridge.
+      // This marks the transition from KJ promise completion to JS execution.
+      if (kjBridgeId != AsyncTraceContext::INVALID_ID) {
+        if (auto* trace = IoContext::current().getAsyncTrace()) {
+          trace->enterCallback(kjBridgeId);
+        }
+      }
+      KJ_DEFER({
+        // Exit async trace callback scope when done with JS execution.
+        if (kjBridgeId != AsyncTraceContext::INVALID_ID) {
+          if (auto* trace = IoContext::current().getAsyncTrace()) {
+            trace->exitCallback();
+          }
+        }
+      });
 
       if constexpr (jsg::isVoid<T>()) {
         KJ_IF_SOME(e, funcResultPair.exceptionOrT) {
@@ -1447,6 +1472,14 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 
 template <typename T>
 kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
+  // Create async trace resource for JS→KJ bridge if tracing is enabled.
+  // This tracks the time spent waiting for the JS promise to resolve.
+  AsyncTraceContext::AsyncId jsBridgeId = AsyncTraceContext::INVALID_ID;
+  if (auto* trace = getAsyncTrace()) {
+    jsBridgeId =
+        trace->createResource(AsyncTraceContext::ResourceType::kJsToKjBridge, js.v8Isolate);
+  }
+
   auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
   struct RefcountedFulfiller: public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
@@ -1486,12 +1519,26 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
   auto& isolate = Worker::Isolate::from(js);
   auto fulfiller = kj::refcounted<RefcountedFulfiller>(isolate.getWeakRef(), kj::mv(paf.fulfiller));
 
-  auto errorHandler = [fulfiller = addObject(kj::addRef(*fulfiller))](
+  auto errorHandler = [fulfiller = addObject(kj::addRef(*fulfiller)), jsBridgeId](
                           jsg::Lock& js, jsg::Value jsExceptionRef) mutable {
     // Note: `context` can possibly be different than the one that started the wait, if the
     // promise resolved from a different context. In that case the use of `fulfiller` will
     // throw later on. But it's OK to use the wrong context up until that point.
     auto& context = IoContext::current();
+
+    // Enter async trace callback scope for JS→KJ bridge (error path).
+    if (jsBridgeId != AsyncTraceContext::INVALID_ID) {
+      if (auto* trace = context.getAsyncTrace()) {
+        trace->enterCallback(jsBridgeId);
+      }
+    }
+    KJ_DEFER({
+      if (jsBridgeId != AsyncTraceContext::INVALID_ID) {
+        if (auto* trace = IoContext::current().getAsyncTrace()) {
+          trace->exitCallback();
+        }
+      }
+    });
 
     auto isolate = context.getCurrentLock().getIsolate();
     auto jsException = jsExceptionRef.getHandle(js);
@@ -1511,12 +1558,39 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
   };
 
   if constexpr (jsg::isVoid<T>()) {
-    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock&) mutable {
+    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller)), jsBridgeId](jsg::Lock&) mutable {
+      // Enter async trace callback scope for JS→KJ bridge.
+      if (jsBridgeId != AsyncTraceContext::INVALID_ID) {
+        if (auto* trace = IoContext::current().getAsyncTrace()) {
+          trace->enterCallback(jsBridgeId);
+        }
+      }
+      KJ_DEFER({
+        if (jsBridgeId != AsyncTraceContext::INVALID_ID) {
+          if (auto* trace = IoContext::current().getAsyncTrace()) {
+            trace->exitCallback();
+          }
+        }
+      });
       fulfiller->fulfiller->fulfill();
       fulfiller->isDone = true;
     }, kj::mv(errorHandler));
   } else {
-    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock&, T&& result) mutable {
+    jsPromise.then(
+        js, [fulfiller = addObject(kj::mv(fulfiller)), jsBridgeId](jsg::Lock&, T&& result) mutable {
+      // Enter async trace callback scope for JS→KJ bridge.
+      if (jsBridgeId != AsyncTraceContext::INVALID_ID) {
+        if (auto* trace = IoContext::current().getAsyncTrace()) {
+          trace->enterCallback(jsBridgeId);
+        }
+      }
+      KJ_DEFER({
+        if (jsBridgeId != AsyncTraceContext::INVALID_ID) {
+          if (auto* trace = IoContext::current().getAsyncTrace()) {
+            trace->exitCallback();
+          }
+        }
+      });
       if constexpr (isIoOwn<T>()) {
         fulfiller->fulfiller->fulfill(kj::mv(*result));
       } else {

@@ -736,6 +736,7 @@
         <option value="real-durable-objects">Real: Durable Objects</option>
         <option value="real-nodejs-compat-fs">Real: Node.js FS</option>
         <option value="real-nodejs-compat-streams">Real: Node.js Streams</option>
+        <option value="real-tcp">Real: TCP Socket (Gopher)</option>
       </select>
       <select id="sort-mode">
         <option value="tree">Tree</option>
@@ -764,6 +765,9 @@
           </label>
           <label class="dropdown-item" id="stack-group-item">
             <input type="checkbox" id="stack-group-check"> 📚 Stack Group <span class="hotkey">G</span>
+          </label>
+          <label class="dropdown-item" id="temporal-edges-item">
+            <input type="checkbox" id="temporal-edges-check"> ⏱️ Temporal Edges <span class="hotkey">E</span>
           </label>
           <div class="dropdown-divider"></div>
           <label class="dropdown-item" id="accessibility-item">
@@ -1380,9 +1384,11 @@ const userB = await fetch('/user/123');</pre>
     let showPatterns = false;
     let clickToFilterEnabled = false;
     let stackTraceGrouping = false;
+    let showTemporalEdges = false;
     let clickFilterResourceId = null;  // Currently filtered resource
     let detectedBottlenecks = [];  // Top N slowest resources
     let detectedPatterns = [];  // Detected anti-patterns
+    let temporalEdges = [];  // Edges based on callback timing
 
     // Pattern cache for accessibility mode
     const patternCache = new Map();
@@ -1555,6 +1561,7 @@ const userB = await fetch('/user/123');</pre>
       document.getElementById('pattern-check').addEventListener('change', togglePatterns);
       document.getElementById('click-filter-check').addEventListener('change', toggleClickFilter);
       document.getElementById('stack-group-check').addEventListener('change', toggleStackGrouping);
+      document.getElementById('temporal-edges-check').addEventListener('change', toggleTemporalEdges);
       document.getElementById('accessibility-check').addEventListener('change', toggleAccessibility);
 
       // Tutorial modal
@@ -1667,6 +1674,12 @@ const userB = await fetch('/user/123');</pre>
         // Stack trace grouping toggle: G
         if (e.key === 'g' || e.key === 'G') {
           toggleStackGrouping(true);
+          return;
+        }
+
+        // Temporal edges toggle: E
+        if (e.key === 'e' || e.key === 'E') {
+          toggleTemporalEdges(true);
           return;
         }
 
@@ -1961,7 +1974,8 @@ const userB = await fetch('/user/123');</pre>
           'real-async-context': 'sample-real-async-context.json',
           'real-durable-objects': 'sample-real-durable-objects.json',
           'real-nodejs-compat-fs': 'sample-real-nodejs-compat-fs.json',
-          'real-nodejs-compat-streams': 'sample-real-nodejs-compat-streams.json'
+          'real-nodejs-compat-streams': 'sample-real-nodejs-compat-streams.json',
+          'real-tcp': 'sample-real-tcp.json'
         };
       try {
         const response = await fetch(files[demo]);
@@ -2050,6 +2064,7 @@ const userB = await fetch('/user/123');</pre>
       // Run detection if enabled
       if (showBottlenecks) detectBottlenecks();
       if (showPatterns) detectPatterns();
+      if (showTemporalEdges) computeTemporalEdges();
       // Reset click filter on new data
       clickFilterResourceId = null;
       // Update analysis sidebar with new data
@@ -2179,7 +2194,7 @@ const userB = await fetch('/user/123');</pre>
     }
 
     function updateAnalysisButtonState() {
-      const activeCount = [showCriticalPath, showBottlenecks, showPatterns, clickToFilterEnabled, stackTraceGrouping, accessibilityMode].filter(x => x).length;
+      const activeCount = [showCriticalPath, showBottlenecks, showPatterns, clickToFilterEnabled, stackTraceGrouping, showTemporalEdges, accessibilityMode].filter(x => x).length;
       const btn = document.getElementById('analysis-btn');
       if (activeCount > 0) {
         btn.textContent = `🔬 Analysis (${activeCount}) ▾`;
@@ -2258,7 +2273,13 @@ const userB = await fetch('/user/123');</pre>
         });
       }
 
-      if (!showBottlenecks && !showPatterns) {
+      // Show temporal edges info
+      if (showTemporalEdges && temporalEdges.length > 0) {
+        html += `<div class="detail-item" style="color: #50c878; margin-top: 0.3rem;"><strong>⏱️ ${temporalEdges.length} Temporal Edge(s)</strong></div>`;
+        html += `<div class="detail-item" style="padding-left: 0.5rem; color: #888;">Callbacks that start during another callback</div>`;
+      }
+
+      if (!showBottlenecks && !showPatterns && !showTemporalEdges) {
         html = '<div class="detail-item" style="color: #666;">Enable 🐢 or 🔍 toggles</div>';
       } else if (html === '') {
         html = '<div class="detail-item" style="color: #50c878;">No issues detected!</div>';
@@ -2659,6 +2680,65 @@ const userB = await fetch('/user/123');</pre>
       });
 
       return groups;
+    }
+
+    // ==================== TEMPORAL EDGES ====================
+    // Show edges based on callback timing: if resource B's callback starts
+    // during resource A's callback, draw an edge from A to B.
+    function toggleTemporalEdges(fromHotkey = false) {
+      const checkbox = document.getElementById('temporal-edges-check');
+      if (fromHotkey) {
+        showTemporalEdges = !showTemporalEdges;
+        checkbox.checked = showTemporalEdges;
+      } else {
+        showTemporalEdges = checkbox.checked;
+      }
+      updateAnalysisButtonState();
+      if (traceData) {
+        computeTemporalEdges();
+        render();
+      }
+    }
+
+    function computeTemporalEdges() {
+      if (!traceData) {
+        temporalEdges = [];
+        return;
+      }
+
+      temporalEdges = [];
+
+      // Find resources with callback timing
+      const withCallbacks = traceData.resources.filter(r =>
+        r.callbackStartedAt > 0 && r.callbackEndedAt > 0
+      );
+
+      // For each resource with a callback, find other resources whose callbacks
+      // START during this resource's callback window
+      withCallbacks.forEach(parent => {
+        withCallbacks.forEach(child => {
+          if (parent.asyncId === child.asyncId) return;
+          // Skip if there's already a triggerId relationship
+          if (child.triggerId === parent.asyncId) return;
+
+          // Check if child's callback starts during parent's callback
+          if (child.callbackStartedAt >= parent.callbackStartedAt &&
+              child.callbackStartedAt < parent.callbackEndedAt) {
+            temporalEdges.push({
+              from: parent.asyncId,
+              to: child.asyncId,
+              // Delay from parent callback start to child callback start
+              delay: child.callbackStartedAt - parent.callbackStartedAt
+            });
+          }
+        });
+      });
+
+      // Sort by from, then by delay for consistent rendering
+      temporalEdges.sort((a, b) => {
+        if (a.from !== b.from) return a.from - b.from;
+        return a.delay - b.delay;
+      });
     }
 
     function updateStats() {
@@ -3291,6 +3371,39 @@ const userB = await fetch('/user/123');</pre>
         }
       });
 
+      // Draw temporal edges (dashed, green) if enabled
+      if (showTemporalEdges && temporalEdges.length > 0) {
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = 'rgba(80, 200, 120, 0.6)';
+        ctx.lineWidth = 1.5;
+
+        temporalEdges.forEach(edge => {
+          const fromNode = nodes.get(edge.from);
+          const toNode = nodes.get(edge.to);
+          if (fromNode && toNode) {
+            ctx.beginPath();
+            ctx.moveTo(fromNode.x + fromNode.radius * 0.7, fromNode.y);
+            ctx.lineTo(toNode.x - toNode.radius * 0.7, toNode.y);
+            ctx.stroke();
+
+            // Small arrowhead
+            const angle = Math.atan2(toNode.y - fromNode.y, toNode.x - fromNode.x);
+            const arrowX = toNode.x - toNode.radius * 0.7;
+            const arrowY = toNode.y;
+            const arrowSize = 5;
+            ctx.beginPath();
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(arrowX - arrowSize * Math.cos(angle - Math.PI/6), arrowY - arrowSize * Math.sin(angle - Math.PI/6));
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(arrowX - arrowSize * Math.cos(angle + Math.PI/6), arrowY - arrowSize * Math.sin(angle + Math.PI/6));
+            ctx.stroke();
+          }
+        });
+
+        ctx.restore();
+      }
+
       // Draw bubbles
       allNodes.forEach(node => {
         const r = node.resource;
@@ -3667,6 +3780,39 @@ const userB = await fetch('/user/123');</pre>
           }
         }
       });
+
+      // Draw temporal edges (dashed, green) if enabled
+      if (showTemporalEdges && temporalEdges.length > 0) {
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = 'rgba(80, 200, 120, 0.6)';
+        ctx.lineWidth = 1.5;
+
+        temporalEdges.forEach(edge => {
+          const fromNode = nodeMap.get(edge.from);
+          const toNode = nodeMap.get(edge.to);
+          if (fromNode && toNode) {
+            ctx.beginPath();
+            ctx.moveTo(fromNode.x, fromNode.y);
+            ctx.lineTo(toNode.x, toNode.y);
+            ctx.stroke();
+
+            // Small arrowhead
+            const angle = Math.atan2(toNode.y - fromNode.y, toNode.x - fromNode.x);
+            const arrowX = toNode.x - toNode.radius * Math.cos(angle);
+            const arrowY = toNode.y - toNode.radius * Math.sin(angle);
+            const arrowSize = 5;
+            ctx.beginPath();
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(arrowX - arrowSize * Math.cos(angle - 0.4), arrowY - arrowSize * Math.sin(angle - 0.4));
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(arrowX - arrowSize * Math.cos(angle + 0.4), arrowY - arrowSize * Math.sin(angle + 0.4));
+            ctx.stroke();
+          }
+        });
+
+        ctx.restore();
+      }
 
       // Draw nodes
       dagNodes.forEach(node => {

@@ -95,6 +95,7 @@ enum class ResourceType : uint16_t {
 - [x] Sequential fetch detection using creation time vs callback time comparison
 - [x] Analysis sidebar updates correctly when switching demos
 - [x] Real trace capture from workerd samples (6 traces captured)
+- [x] KJ↔JS bridge tracking (`kj-to-js` and `js-to-kj` resource types)
 
 ### Not Yet Done
 - [ ] Unit tests for AsyncTraceContext
@@ -111,12 +112,16 @@ enum class ResourceType : uint16_t {
 - [ ] Crypto async operations
 - [ ] AI inference operations
 
-### TODO - KJ Promise Tracking
-The current implementation only tracks JS promises via V8 hooks. For complete causality tracking, we also need to track KJ promises, especially:
-- [ ] KJ-to-JS promise bridging (when C++ async results are awaited in JS)
-- [ ] JS-to-KJ promise bridging (when JS promises are awaited in C++)
+### KJ Promise Tracking (Completed)
+KJ↔JS bridge tracking is now implemented in `io-context.h`:
+- [x] KJ-to-JS promise bridging (`awaitIo()` → `kKjToJsBridge` / `kj-to-js`)
+- [x] JS-to-KJ promise bridging (`awaitJs()` → `kJsToKjBridge` / `js-to-kj`)
 
-This would involve instrumenting `awaitIo()`, `awaitJs()`, and related methods in IoContext.
+**Implementation details:**
+- `awaitIoImpl()` creates a `kKjToJsBridge` resource when called, enters callback when KJ promise completes
+- `awaitJs()` creates a `kJsToKjBridge` resource when called, enters callback when JS promise resolves
+- Both use `KJ_DEFER` for exception-safe callback exit
+- Bridge resources capture the full async wait time between creation and callback
 
 ### TODO - Output/Visualization
 - [ ] Define output format for bubbleprof-compatible visualization
@@ -211,9 +216,24 @@ All analysis features are accessible via the **🔬 Analysis** dropdown menu in 
 | T | **Patterns** | Detects anti-patterns (purple glow) - see Pattern Detection below |
 | F | **Click Filter** | Click any resource to filter view to its ancestors/descendants (see below) |
 | G | **Stack Group** | Groups resources by creation stack trace |
+| E | **Temporal Edges** | Shows timing-based causality (green dashed lines in Bubble/DAG) - see below |
 | A | **High Contrast** | Accessibility mode with patterns instead of color-only |
 
 Highlighting for Critical Path, Bottlenecks, and Patterns appears in Waterfall, Bubble, and DAG views.
+
+### Temporal Edges
+
+The Temporal Edges feature (`E` hotkey) shows relationships based on callback timing rather than creation-time `triggerId`. This is especially useful for visualizing what happens after KJ↔JS bridge callbacks complete.
+
+**How it works:**
+- For each resource with a callback, finds other resources whose callbacks START during this resource's callback window
+- Draws green dashed edges from the "parent" callback to the "child" callback in Bubble and DAG views
+- Complements the solid triggerId edges which show creation-time causality
+
+**Use cases:**
+- Understanding execution flow through bridge resources (kj-to-js, js-to-kj)
+- Visualizing concurrent callback execution
+- Debugging callback ordering issues
 
 ### Pattern Detection
 
@@ -389,6 +409,7 @@ The trace JSON appears in stderr output at WARNING level. Some samples require `
 - `sample-real-durable-objects.json` - Durable Objects chat (9 resources, 8.6ms)
 - `sample-real-nodejs-compat-fs.json` - Node.js fs compat (5 resources, 14.2ms)
 - `sample-real-nodejs-compat-streams.json` - Node.js streams pipeline (15 resources, 72.5ms)
+- `sample-real-tcp.json` - TCP socket to gopher server (149 resources, 764ms)
 
 ## Reference: clinicjs/bubbleprof
 

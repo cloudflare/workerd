@@ -42,14 +42,21 @@ void AsyncTracePromiseHook::onInit(v8::Isolate* isolate,
     v8::Local<v8::Promise> promise,
     v8::Local<v8::Value> parent) {
 
-  // Determine the trigger ID
+  // Determine the trigger ID based on the current execution context.
+  // The current() ID represents which resource's callback we're inside.
   AsyncTraceContext::AsyncId triggerId = trace.current();
 
-  // If there's a parent promise, use its async ID as the trigger
-  if (!parent.IsEmpty() && parent->IsPromise()) {
-    auto parentPromise = parent.As<v8::Promise>();
-    if (trace.hasPromiseAsyncId(isolate, parentPromise)) {
-      triggerId = trace.getPromiseAsyncId(isolate, parentPromise);
+  // Only use the V8 parent promise as trigger if we're in the root context.
+  // When we're inside a callback (bridge, promise, etc.), we want to preserve
+  // that context as the trigger so the visualization shows what triggered
+  // the new promise creation from the caller's perspective.
+  if (triggerId == AsyncTraceContext::ROOT_ID) {
+    // We're not inside any callback, so use parent promise if available
+    if (!parent.IsEmpty() && parent->IsPromise()) {
+      auto parentPromise = parent.As<v8::Promise>();
+      if (trace.hasPromiseAsyncId(isolate, parentPromise)) {
+        triggerId = trace.getPromiseAsyncId(isolate, parentPromise);
+      }
     }
   }
 
