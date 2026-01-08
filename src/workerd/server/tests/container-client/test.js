@@ -100,7 +100,7 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
-  async testSetInactivityTimeout() {
+  async testSetInactivityTimeout(timeout) {
     const container = this.ctx.container;
     if (container.running) {
       let monitor = container.monitor().catch((_err) => {});
@@ -126,7 +126,18 @@ export class DurableObjectExample extends DurableObject {
       );
     }
 
-    await container.setInactivityTimeout(1000);
+    if (timeout > 0) {
+      await container.setInactivityTimeout(timeout);
+    }
+  }
+
+  async start() {
+    assert.strictEqual(this.ctx.container.running, false);
+    this.ctx.container.start();
+    assert.strictEqual(this.ctx.container.running, true);
+
+    // Wait for container to be running
+    await scheduler.wait(500);
   }
 
   // Assert that the container is running
@@ -333,18 +344,47 @@ export const testAlarm = {
   },
 };
 
+export const testContainerShutdown = {
+  async test(_, env) {
+    {
+      const stub = env.MY_CONTAINER.getByName('testContainerShutdown');
+      await stub.start();
+      await assert.rejects(() => stub.abort(), {
+        name: 'Error',
+        message: 'Application called abort() to reset Durable Object.',
+      });
+    }
+
+    // Wait for the container to be shutdown after the DO aborts
+    await scheduler.wait(500);
+
+    {
+      const stub = env.MY_CONTAINER.getByName('testContainerShutdown');
+
+      // Container should not be running after DO exited
+      await stub.expectRunning(false);
+    }
+  },
+};
+
 export const testSetInactivityTimeout = {
   async test(_ctrl, env) {
     {
       const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
 
-      await stub.testSetInactivityTimeout();
+      await stub.testSetInactivityTimeout(3000);
 
       await assert.rejects(() => stub.abort(), {
         name: 'Error',
         message: 'Application called abort() to reset Durable Object.',
       });
     }
+
+    // Here we wait to ensure that if setInactivityTimeout *doesn't* work, the
+    // container has enough time to shutdown after the DO is aborted. If we
+    // don't wait then ctx.container.running will always be true, even without
+    // setInactivityTimeout, because the container won't have stoped yet.
+    await scheduler.wait(500);
 
     {
       const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
