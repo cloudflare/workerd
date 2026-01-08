@@ -1531,6 +1531,13 @@ const userB = await fetch('/user/123');</pre>
     let replayLastEventTime = 0;  // Track last processed event time
     let replayLiveAlerts = [];  // Array of { message, color, expireTime }
     let replayAlertedPatterns = new Set();  // Track patterns already alerted
+    // Replay sidebar section collapse state
+    let replaySidebarCollapsed = {
+      metrics: false,
+      criticalPath: false,
+      alerts: false,
+      eventFeed: false
+    };
 
     // Accessibility mode - uses patterns instead of colors
     let accessibilityMode = false;
@@ -6154,15 +6161,48 @@ const userB = await fetch('/user/123');</pre>
       // ===== SIDEBAR PANELS =====
       const sbPadding = 8;
       const sbContentWidth = sidebarWidth - sbPadding * 2;
-      let sbY = 10;
+      let sbY = 18;  // Top padding for sidebar content
 
-      // Helper to draw section header
-      const drawSectionHeader = (title, color = '#e94560') => {
+      // Track section header hit areas for click handling
+      const sectionHeaders = [];
+
+      // Helper to draw collapsible section header (styled like main sidebar)
+      const drawSectionHeader = (title, sectionKey, color = '#aaa') => {
+        const headerY = sbY;
+        const isCollapsed = replaySidebarCollapsed[sectionKey];
+
+        // Draw header text
         ctx.fillStyle = color;
         ctx.font = 'bold 10px sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(title, sbPadding, sbY);
-        sbY += 14;
+
+        // Draw collapse arrow
+        ctx.font = '8px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#666';
+        ctx.fillText(isCollapsed ? '▶' : '▼', sidebarWidth - sbPadding, sbY);
+        ctx.textAlign = 'left';
+
+        // Store hit area for click handling
+        sectionHeaders.push({
+          key: sectionKey,
+          y: headerY - 10,
+          height: 14
+        });
+
+        sbY += 4;
+
+        // Draw separator line under header
+        ctx.strokeStyle = '#0f3460';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(sbPadding, sbY);
+        ctx.lineTo(sidebarWidth - sbPadding, sbY);
+        ctx.stroke();
+        sbY += 8;
+
+        return !isCollapsed;  // Return true if section should show content
       };
 
       // Helper to draw stat line
@@ -6173,129 +6213,113 @@ const userB = await fetch('/user/123');</pre>
         sbY += 14;
       };
 
-      // ----- Live Metrics Section -----
-      drawSectionHeader('Live Metrics');
-      drawStatLine('Created', visibleResources.length);
-      drawStatLine('Parallelism', currentParallelism,
-        currentParallelism > 1 ? '#50c878' : (currentParallelism === 1 ? '#ffd700' : '#888'));
-      drawStatLine('Peak', replayPeakParallelism, '#7ec8e3');
-      drawStatLine('Sync', `${(accumulatedSync / 1e6).toFixed(1)}ms`);
-      drawStatLine('Async', `${(accumulatedAsync / 1e6).toFixed(1)}ms`);
-      drawStatLine('Promises', promisesAlive, promisesAlive > 10 ? '#ffd700' : '#aaa');
+      // Helper to draw section bottom margin
+      const drawSectionEnd = () => {
+        sbY += 8;
+      };
 
-      // Separator
-      sbY += 6;
-      ctx.strokeStyle = '#0f3460';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sbPadding, sbY);
-      ctx.lineTo(sidebarWidth - sbPadding, sbY);
-      ctx.stroke();
-      sbY += 10;
+      // ----- Live Metrics Section -----
+      if (drawSectionHeader('Live Metrics', 'metrics')) {
+        drawStatLine('Created', visibleResources.length);
+        drawStatLine('Parallelism', currentParallelism,
+          currentParallelism > 1 ? '#50c878' : (currentParallelism === 1 ? '#ffd700' : '#888'));
+        drawStatLine('Peak', replayPeakParallelism, '#7ec8e3');
+        drawStatLine('Sync', `${(accumulatedSync / 1e6).toFixed(1)}ms`);
+        drawStatLine('Async', `${(accumulatedAsync / 1e6).toFixed(1)}ms`);
+        drawStatLine('Promises', promisesAlive, promisesAlive > 10 ? '#ffd700' : '#aaa');
+      }
+      drawSectionEnd();
 
       // ----- Critical Path Section -----
       if (showCriticalPath && criticalPathInfo && criticalPathInfo.path.length > 0) {
-        drawSectionHeader('Critical Path', '#ff6432');
+        if (drawSectionHeader('Critical Path', 'criticalPath', '#ff6432')) {
+          // Find current position on critical path
+          let cpCompleted = 0;
+          criticalPathInfo.path.forEach(r => {
+            const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                           (r.destroyedAt > 0 ? r.destroyedAt : 0);
+            if (endTime > 0 && endTime <= replayTime) {
+              cpCompleted++;
+            } else if (r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime) {
+              cpCompleted += 0.5;
+            } else if (r.createdAt > 0 && r.createdAt <= replayTime && r.callbackStartedAt === 0) {
+              cpCompleted += 0.1;
+            }
+          });
+          cpCompleted = Math.floor(cpCompleted);
 
-        // Find current position on critical path
-        let cpCompleted = 0;
-        criticalPathInfo.path.forEach(r => {
-          const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
-                         (r.destroyedAt > 0 ? r.destroyedAt : 0);
-          if (endTime > 0 && endTime <= replayTime) {
-            cpCompleted++;
-          } else if (r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime) {
-            cpCompleted += 0.5;
-          } else if (r.createdAt > 0 && r.createdAt <= replayTime && r.callbackStartedAt === 0) {
-            cpCompleted += 0.1;
-          }
-        });
-        cpCompleted = Math.floor(cpCompleted);
+          ctx.fillStyle = '#ff8c5a';
+          ctx.font = '10px sans-serif';
+          ctx.fillText(`Step ${cpCompleted} of ${criticalPathInfo.path.length}`, sbPadding, sbY);
+          sbY += 12;
 
-        ctx.fillStyle = '#ff8c5a';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(`Step ${cpCompleted} of ${criticalPathInfo.path.length}`, sbPadding, sbY);
-        sbY += 12;
-
-        // Progress bar
-        const cpProgress = cpCompleted / criticalPathInfo.path.length;
-        ctx.fillStyle = '#333';
-        ctx.fillRect(sbPadding, sbY, sbContentWidth, 6);
-        ctx.fillStyle = '#ff6432';
-        ctx.fillRect(sbPadding, sbY, sbContentWidth * cpProgress, 6);
-        sbY += 12;
-
-        // Separator
-        sbY += 4;
-        ctx.strokeStyle = '#0f3460';
-        ctx.beginPath();
-        ctx.moveTo(sbPadding, sbY);
-        ctx.lineTo(sidebarWidth - sbPadding, sbY);
-        ctx.stroke();
-        sbY += 10;
+          // Progress bar
+          const cpProgress = cpCompleted / criticalPathInfo.path.length;
+          ctx.fillStyle = '#333';
+          ctx.fillRect(sbPadding, sbY, sbContentWidth, 6);
+          ctx.fillStyle = '#ff6432';
+          ctx.fillRect(sbPadding, sbY, sbContentWidth * cpProgress, 6);
+          sbY += 10;
+        }
+        drawSectionEnd();
       }
 
       // ----- Pattern Alerts Section -----
       if (replayLiveAlerts.length > 0) {
-        drawSectionHeader('Alerts', '#cc66ff');
-
-        replayLiveAlerts.slice(0, 4).forEach(alert => {
-          const remaining = (alert.expireTime - replayTime) / (duration * 0.15);
-          ctx.globalAlpha = Math.min(1, Math.max(0.3, remaining));
-          ctx.fillStyle = alert.color;
-          ctx.font = '9px sans-serif';
-          // Wrap long messages to multiple lines
-          const maxChars = 28;
-          const msg = alert.message;
-          if (msg.length <= maxChars) {
-            ctx.fillText(msg, sbPadding, sbY);
-            sbY += 13;
-          } else {
-            // Split into two lines
-            const line1 = msg.substring(0, maxChars);
-            const line2 = msg.substring(maxChars, maxChars * 2);
-            ctx.fillText(line1, sbPadding, sbY);
-            sbY += 11;
-            ctx.fillText(line2 + (msg.length > maxChars * 2 ? '…' : ''), sbPadding, sbY);
-            sbY += 13;
-          }
-        });
-        ctx.globalAlpha = 1;
-
-        // Separator
-        sbY += 4;
-        ctx.strokeStyle = '#0f3460';
-        ctx.beginPath();
-        ctx.moveTo(sbPadding, sbY);
-        ctx.lineTo(sidebarWidth - sbPadding, sbY);
-        ctx.stroke();
-        sbY += 10;
+        if (drawSectionHeader('Alerts', 'alerts', '#cc66ff')) {
+          replayLiveAlerts.slice(0, 4).forEach(alert => {
+            const remaining = (alert.expireTime - replayTime) / (duration * 0.15);
+            ctx.globalAlpha = Math.min(1, Math.max(0.3, remaining));
+            ctx.fillStyle = alert.color;
+            ctx.font = '9px sans-serif';
+            // Wrap long messages to multiple lines
+            const maxChars = 28;
+            const msg = alert.message;
+            if (msg.length <= maxChars) {
+              ctx.fillText(msg, sbPadding, sbY);
+              sbY += 13;
+            } else {
+              // Split into two lines
+              const line1 = msg.substring(0, maxChars);
+              const line2 = msg.substring(maxChars, maxChars * 2);
+              ctx.fillText(line1, sbPadding, sbY);
+              sbY += 11;
+              ctx.fillText(line2 + (msg.length > maxChars * 2 ? '…' : ''), sbPadding, sbY);
+              sbY += 13;
+            }
+          });
+          ctx.globalAlpha = 1;
+        }
+        drawSectionEnd();
       }
 
       // ----- Event Feed Section -----
-      drawSectionHeader('Event Feed');
-
-      if (replayEventLog.length === 0) {
-        ctx.fillStyle = '#666';
-        ctx.font = '9px sans-serif';
-        ctx.fillText('Press Play to start', sbPadding, sbY);
-        sbY += 14;
-      } else {
-        // Show recent events (newest at top)
-        const maxEvents = Math.min(8, Math.floor((height - sbY - 10) / 13));
-        const recentEvents = replayEventLog.slice(-maxEvents).reverse();
-        ctx.font = '9px monospace';
-        recentEvents.forEach((event, idx) => {
-          const alpha = 1 - (idx * 0.08);
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = event.color;
-          const timeStr = (event.time / 1e6).toFixed(1).padStart(5);
-          const msgTrunc = event.message.length > 15 ? event.message.substring(0, 15) + '…' : event.message;
-          ctx.fillText(`${timeStr} ${msgTrunc}`, sbPadding, sbY);
-          sbY += 13;
-        });
-        ctx.globalAlpha = 1;
+      if (drawSectionHeader('Event Feed', 'eventFeed')) {
+        if (replayEventLog.length === 0) {
+          ctx.fillStyle = '#666';
+          ctx.font = '9px sans-serif';
+          ctx.fillText('Press Play to start', sbPadding, sbY);
+          sbY += 14;
+        } else {
+          // Show recent events (newest at top)
+          const maxEvents = Math.min(8, Math.floor((height - sbY - 10) / 13));
+          const recentEvents = replayEventLog.slice(-maxEvents).reverse();
+          ctx.font = '9px monospace';
+          recentEvents.forEach((event, idx) => {
+            const alpha = 1 - (idx * 0.08);
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = event.color;
+            const timeStr = (event.time / 1e6).toFixed(1).padStart(5);
+            const msgTrunc = event.message.length > 15 ? event.message.substring(0, 15) + '…' : event.message;
+            ctx.fillText(`${timeStr} ${msgTrunc}`, sbPadding, sbY);
+            sbY += 13;
+          });
+          ctx.globalAlpha = 1;
+        }
       }
+
+      // Store section headers for click handling
+      canvas._sidebarHeaders = sectionHeaders;
 
       ctx.textAlign = 'left';  // Reset
 
@@ -6304,6 +6328,17 @@ const userB = await fetch('/user/123');</pre>
         const rect = canvas.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
+
+        // Check sidebar section header clicks
+        if (clickX >= 0 && clickX <= sidebarWidth && canvas._sidebarHeaders) {
+          for (const header of canvas._sidebarHeaders) {
+            if (clickY >= header.y && clickY <= header.y + header.height) {
+              replaySidebarCollapsed[header.key] = !replaySidebarCollapsed[header.key];
+              renderReplayFrame();
+              return;
+            }
+          }
+        }
 
         // Check play/pause button (centered in main area)
         const playBtnX = mainX + (mainWidth - totalBtnWidth) / 2;
@@ -6352,6 +6387,36 @@ const userB = await fetch('/user/123');</pre>
           replayTime = clickProgress * duration;
           renderReplayFrame();
         }
+      };
+
+      // Show pointer cursor over clickable elements
+      canvas.onmousemove = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Check if over sidebar section header
+        if (mouseX >= 0 && mouseX <= sidebarWidth && canvas._sidebarHeaders) {
+          for (const header of canvas._sidebarHeaders) {
+            if (mouseY >= header.y && mouseY <= header.y + header.height) {
+              canvas.style.cursor = 'pointer';
+              return;
+            }
+          }
+        }
+
+        // Check if over control buttons or progress bar
+        if (mouseY >= btnY && mouseY <= btnY + btnHeight) {
+          canvas.style.cursor = 'pointer';
+          return;
+        }
+        if (mouseY >= progressY && mouseY <= progressY + 8 &&
+            mouseX >= progressX && mouseX <= progressX + chartWidth) {
+          canvas.style.cursor = 'pointer';
+          return;
+        }
+
+        canvas.style.cursor = 'default';
       };
     }
 
