@@ -5,11 +5,14 @@ const config :Workerd.Config = (
     (name = "main", worker = .mainWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),
   ],
+  # "--expose-gc" is needed for GC tests
+  v8Flags = ["--expose-gc"],
 );
 
 const mainWorker :Workerd.Worker = (
   # "experimental" flag is needed to test sql.createFunction().
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  # "enable_weak_ref" is needed for FinalizationRegistry in GC tests.
+  compatibilityFlags = ["experimental", "nodejs_compat", "enable_weak_ref"],
 
   modules = [
     (name = "worker", esModule = embed "sql-udf-test.js"),
