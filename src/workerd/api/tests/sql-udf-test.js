@@ -22,11 +22,11 @@ export class UdfTestDO extends DurableObject {
     assert.strictEqual(result.answer, 42);
   }
 
-  // Placeholder for future UDF tests - will be added as we implement the feature
-  // async testCreateFunctionExists() {
-  //   const sql = this.state.storage.sql;
-  //   assert.strictEqual(typeof sql.createFunction, 'function');
-  // }
+  async testCreateFunctionExists() {
+    // Verify createFunction method exists on the sql object
+    const sql = this.state.storage.sql;
+    assert.strictEqual(typeof sql.createFunction, 'function');
+  }
 }
 
 // =============================================================================
@@ -38,5 +38,6 @@ export default {
     const id = env.ns.idFromName('udf-test');
     const stub = env.ns.get(id);
     await stub.testSanityCheck();
+    await stub.testCreateFunctionExists();
   },
 };
