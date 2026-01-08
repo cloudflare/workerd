@@ -6,6 +6,7 @@
 
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/async-trace.h>
 #include <workerd/io/features.h>
 
 namespace workerd::api {
@@ -184,6 +185,12 @@ jsg::Promise<void> WritableStreamDefaultWriter::write(
       KJ_FAIL_ASSERT("this writer was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
+      // Create async trace resource for stream write if tracing is enabled
+      KJ_IF_SOME(ctx, ioContext) {
+        if (auto* asyncTrace = ctx.getAsyncTrace(); asyncTrace != nullptr) {
+          asyncTrace->createResource(AsyncTraceContext::ResourceType::kStreamWrite, js.v8Isolate);
+        }
+      }
       return stream->getController().write(js, kj::mv(chunk));
     }
     KJ_CASE_ONEOF(r, Released) {

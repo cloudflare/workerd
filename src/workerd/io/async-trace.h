@@ -67,6 +67,8 @@ class AsyncTraceContext {
     kTimer,                // setTimeout/setInterval
     kStreamRead,           // ReadableStream read
     kStreamWrite,          // WritableStream write
+    kStreamPipeTo,         // ReadableStream.pipeTo()
+    kStreamPipeThrough,    // ReadableStream.pipeThrough()
     kWebSocket,            // WebSocket operation
     kCrypto,               // Crypto operation (async)
     kAiInference,          // AI inference
@@ -292,6 +294,10 @@ inline kj::StringPtr AsyncTraceContext::resourceTypeName(ResourceType type) {
       return "stream-read"_kj;
     case ResourceType::kStreamWrite:
       return "stream-write"_kj;
+    case ResourceType::kStreamPipeTo:
+      return "stream-pipe-to"_kj;
+    case ResourceType::kStreamPipeThrough:
+      return "stream-pipe-through"_kj;
     case ResourceType::kWebSocket:
       return "websocket"_kj;
     case ResourceType::kCrypto:

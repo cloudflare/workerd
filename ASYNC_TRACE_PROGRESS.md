@@ -108,9 +108,21 @@ enum class ResourceType : uint16_t {
 - [ ] D1 queries
 - [ ] Queue operations
 - [ ] WebSocket operations
-- [ ] Stream read/write operations
+- [x] Stream read/write operations (see below)
 - [ ] Crypto async operations
 - [ ] AI inference operations
+
+### Stream Operations (Completed)
+Stream operations are now instrumented in `src/workerd/api/streams/`:
+- [x] `ReaderImpl::read()` → `kStreamRead` / `stream-read`
+- [x] `WritableStreamDefaultWriter::write()` → `kStreamWrite` / `stream-write`
+- [x] `ReadableStream::pipeTo()` → `kStreamPipeTo` / `stream-pipe-to`
+- [x] `ReadableStream::pipeThrough()` → `kStreamPipeThrough` / `stream-pipe-through`
+
+**Files modified:**
+- `src/workerd/api/streams/readable.c++` - read, pipeTo, pipeThrough instrumentation
+- `src/workerd/api/streams/writable.c++` - write instrumentation
+- `src/workerd/io/async-trace.h` - added kStreamPipeTo, kStreamPipeThrough resource types
 
 ### KJ Promise Tracking (Completed)
 KJ↔JS bridge tracking is now implemented in `io-context.h`:
@@ -409,7 +421,7 @@ The trace JSON appears in stderr output at WARNING level. Some samples require `
 - `sample-real-durable-objects.json` - Durable Objects chat (9 resources, 8.6ms)
 - `sample-real-nodejs-compat-fs.json` - Node.js fs compat (5 resources, 14.2ms)
 - `sample-real-nodejs-compat-streams.json` - Node.js streams pipeline (15 resources, 72.5ms)
-- `sample-real-tcp.json` - TCP socket to gopher server (149 resources, 764ms)
+- `sample-real-tcp.json` - TCP socket to gopher server (120 resources, 819ms) - includes stream-read/write operations
 
 ## Reference: clinicjs/bubbleprof
 
