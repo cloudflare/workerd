@@ -17,6 +17,11 @@
     }
 
     header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
       background: #16213e;
       padding: 0.75rem 1.5rem;
       border-bottom: 1px solid #0f3460;
@@ -27,25 +32,34 @@
 
     h1 { font-size: 1.1rem; color: #e94560; }
 
-    .tabs {
-      display: flex;
-      gap: 2px;
+    .view-select {
       margin-left: 1rem;
-    }
-
-    .tab {
-      padding: 0.4rem 1rem;
+      padding: 0.4rem 0.8rem;
       background: #0f3460;
-      border: none;
-      color: #888;
+      color: #e94560;
+      border: 1px solid #e94560;
+      border-radius: 4px;
+      font-size: 0.85rem;
       cursor: pointer;
-      font-size: 0.8rem;
-      border-radius: 4px 4px 0 0;
+      min-width: 120px;
     }
 
-    .tab.active {
-      background: #1a1a2e;
-      color: #e94560;
+    .view-select:focus {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(233, 69, 96, 0.3);
+    }
+
+    .view-select option {
+      background: #16213e;
+      color: #eee;
+    }
+
+    .view-help {
+      display: none;
+    }
+
+    .view-help.active {
+      display: block;
     }
 
     .controls {
@@ -73,13 +87,16 @@
       display: flex;
       flex: 1;
       overflow: hidden;
+      margin-top: 52px; /* Account for fixed header */
+      height: calc(100vh - 52px);
     }
 
     .view-container {
-      flex: 1;
+      flex: 1 1 0;
       overflow: auto;
       padding: 1rem;
       display: none;
+      min-height: 0; /* Allow flex shrinking */
     }
 
     .view-container.active { display: block; }
@@ -188,10 +205,27 @@
 
     .resource-bar .async-wait {
       height: 100%;
-      opacity: 0.4;
+      opacity: 0.5;
     }
 
     .resource-bar .sync-time { height: 100%; }
+
+    /* Accessibility mode styles */
+    body.accessibility-mode .resource-bar .async-wait {
+      opacity: 0.6;
+      background-image: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 3px,
+        rgba(255,255,255,0.3) 3px,
+        rgba(255,255,255,0.3) 6px
+      ) !important;
+    }
+
+    body.accessibility-mode .resource-bar .sync-time {
+      border: 2px solid rgba(255,255,255,0.5);
+      box-sizing: border-box;
+    }
 
     .resource-bar .bar-label {
       position: absolute;
@@ -201,7 +235,7 @@
     }
 
     /* Bubble view styles */
-    #bubble-canvas {
+    #bubble-canvas, #parallelism-canvas, #dag-canvas, #breakdown-canvas, #latency-canvas, #gaps-canvas, #replay-canvas {
       display: block;
       width: 100%;
       height: 100%;
@@ -228,6 +262,7 @@
     /* Sidebar styles */
     .sidebar {
       width: 300px;
+      flex-shrink: 0;
       background: #16213e;
       border-left: 1px solid #0f3460;
       overflow-y: auto;
@@ -236,7 +271,49 @@
     }
 
     .sidebar h2 { font-size: 0.9rem; margin-bottom: 0.5rem; color: #e94560; }
-    .sidebar h3 { font-size: 0.8rem; margin: 0.75rem 0 0.4rem; color: #aaa; }
+
+    .sidebar-section {
+      margin-bottom: 0.5rem;
+      border-bottom: 1px solid #0f3460;
+      padding-bottom: 0.5rem;
+    }
+
+    .sidebar-section:last-child {
+      border-bottom: none;
+    }
+
+    .sidebar-section h3 {
+      font-size: 0.8rem;
+      margin: 0.4rem 0;
+      color: #aaa;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+    }
+
+    .sidebar-section h3:hover {
+      color: #e94560;
+    }
+
+    .sidebar-section h3::after {
+      content: '▼';
+      font-size: 0.6rem;
+      transition: transform 0.2s;
+    }
+
+    .sidebar-section.collapsed h3::after {
+      transform: rotate(-90deg);
+    }
+
+    .sidebar-section.collapsed .section-content {
+      display: none;
+    }
+
+    .section-content {
+      margin-top: 0.4rem;
+    }
 
     .stats {
       display: grid;
@@ -535,10 +612,16 @@
 <body>
   <header>
     <h1>🔬 Async Trace Viewer</h1>
-    <div class="tabs">
-      <button class="tab active" data-view="waterfall">Waterfall</button>
-      <button class="tab" data-view="bubble">Bubble</button>
-    </div>
+    <select id="view-select" class="view-select">
+      <option value="waterfall">1: Waterfall</option>
+      <option value="bubble">2: Bubble</option>
+      <option value="dag">3: DAG</option>
+      <option value="parallelism">4: Parallelism</option>
+      <option value="breakdown">5: Breakdown</option>
+      <option value="latency">6: Latency</option>
+      <option value="gaps">7: Gaps</option>
+      <option value="replay">8: Replay</option>
+    </select>
     <div class="controls">
       <label class="file-label" for="file-input">📁 Load</label>
       <input type="file" id="file-input" accept=".json">
@@ -567,6 +650,7 @@
       <button id="critical-path-btn" title="Highlight the critical path">🔥 Critical Path</button>
       <button id="tutorial-btn" style="background: #e94560;">❓ Guide</button>
       <button id="ai-analyze-btn" style="background: #50c878;">🤖 Analyze</button>
+      <button id="accessibility-btn" title="Toggle high contrast mode with patterns">♿ High Contrast</button>
     </div>
   </header>
 
@@ -584,110 +668,269 @@
       <div class="waterfall" id="waterfall" style="display: none;"></div>
     </div>
 
-    <div class="view-container" id="bubble-view">
+    <div class="view-container" id="bubble-view" style="overflow: hidden; padding: 0;">
       <canvas id="bubble-canvas"></canvas>
     </div>
 
+    <div class="view-container" id="dag-view" style="overflow: hidden; padding: 0;">
+      <canvas id="dag-canvas"></canvas>
+    </div>
+
+    <div class="view-container" id="parallelism-view" style="overflow: hidden; padding: 0;">
+      <canvas id="parallelism-canvas"></canvas>
+    </div>
+
+    <div class="view-container" id="breakdown-view" style="overflow: hidden; padding: 0;">
+      <canvas id="breakdown-canvas"></canvas>
+    </div>
+
+    <div class="view-container" id="latency-view" style="overflow: hidden; padding: 0;">
+      <canvas id="latency-canvas"></canvas>
+    </div>
+
+    <div class="view-container" id="gaps-view" style="overflow: hidden; padding: 0;">
+      <canvas id="gaps-canvas"></canvas>
+    </div>
+
+    <div class="view-container" id="replay-view" style="overflow: hidden; padding: 0;">
+      <canvas id="replay-canvas"></canvas>
+    </div>
+
     <div class="sidebar">
-      <h2>Overview</h2>
-      <div class="stats">
-        <div class="stat-item">
-          <div class="stat-value" id="stat-duration">-</div>
-          <div class="stat-label">Duration (ms)</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value" id="stat-resources">-</div>
-          <div class="stat-label">Resources</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value" id="stat-sync">-</div>
-          <div class="stat-label">Sync (ms)</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value" id="stat-async">-</div>
-          <div class="stat-label">Async (ms)</div>
+      <div class="sidebar-section">
+        <h3>Overview</h3>
+        <div class="section-content">
+          <div class="stats">
+            <div class="stat-item">
+              <div class="stat-value" id="stat-duration">-</div>
+              <div class="stat-label">Duration (ms)</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value" id="stat-resources">-</div>
+              <div class="stat-label">Resources</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value" id="stat-sync">-</div>
+              <div class="stat-label">Sync (ms)</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value" id="stat-async">-</div>
+              <div class="stat-label">Async (ms)</div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <h3>Activity Timeline</h3>
-      <canvas id="timeline-chart" height="40" style="width: 100%; background: #0f3460; border-radius: 4px;"></canvas>
-
-      <h3>Type Distribution</h3>
-      <canvas id="type-chart" height="80" style="width: 100%; background: #0f3460; border-radius: 4px; margin-bottom: 0.5rem;"></canvas>
-      <div id="type-breakdown" style="font-size: 0.7rem;"></div>
-
-      <h3>Time Breakdown</h3>
-      <canvas id="time-chart" height="24" style="width: 100%; border-radius: 4px;"></canvas>
-      <div id="time-breakdown" style="font-size: 0.7rem; margin-top: 0.25rem;"></div>
-
-      <h3>Critical Path</h3>
-      <div id="critical-path-info" style="font-size: 0.7rem;">
-        <div class="detail-item" style="color: #666;">Click 🔥 to show</div>
-      </div>
-
-      <h3>Legend</h3>
-      <div class="legend" id="legend"></div>
-
-      <h3>Selected</h3>
-      <div class="chain-nav">
-        <button id="nav-parent" disabled>↑ Parent</button>
-        <button id="nav-children" disabled>↓ Children</button>
-      </div>
-      <div id="selected-details">
-        <div class="detail-item" style="color: #666;">Click a resource</div>
-      </div>
-
-      <h3>Timing</h3>
-      <div id="timing-breakdown">
-        <div class="detail-item" style="color: #666;">Select a resource</div>
-      </div>
-
-      <h3>Stack Trace</h3>
-      <div id="stack-trace" class="stack-trace-container">
-        <div class="stack-empty">Click a resource to see its stack</div>
-      </div>
-
-      <h3>Annotations</h3>
-      <div id="annotations">
-        <div class="detail-item" style="color: #666;">-</div>
-      </div>
-
-      <h3>How to Read</h3>
-      <div id="help-hints">
-        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
-          <strong>Resource Classifications:</strong><br>
-          • <span style="color: #50c878;">Typed</span> = API calls (fetch, timer, cache)<br>
-          • <span style="color: #7ec8e3;">User</span> = Promises from your code<br>
-          • <span style="color: #888;">Internal</span> = Runtime machinery<br>
-          <em style="color: #666;">Internal resources appear dimmed</em>
+      <div class="sidebar-section">
+        <h3>Activity Timeline</h3>
+        <div class="section-content">
+          <canvas id="timeline-chart" height="40" style="width: 100%; background: #0f3460; border-radius: 4px;"></canvas>
         </div>
-        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-          <strong>Filter Modes:</strong><br>
-          • All = Show everything (internal dimmed)<br>
-          • User Only = Hide internal runtime<br>
-          • Typed Only = Just API operations
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Type Distribution</h3>
+        <div class="section-content">
+          <canvas id="type-chart" height="80" style="width: 100%; background: #0f3460; border-radius: 4px; margin-bottom: 0.5rem;"></canvas>
+          <div id="type-breakdown" style="font-size: 0.7rem;"></div>
         </div>
-        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-          <strong>Bubble View:</strong><br>
-          • Tree flows top→down (root at top)<br>
-          • Bubble size = sync execution time<br>
-          • Edge labels = async wait latency<br>
-          • <span style="color: #ffd700;">Gold</span> labels = latency &gt;1ms<br>
-          • Scroll to zoom, Shift+drag to pan
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Time Breakdown</h3>
+        <div class="section-content">
+          <canvas id="time-chart" height="24" style="width: 100%; border-radius: 4px;"></canvas>
+          <div id="time-breakdown" style="font-size: 0.7rem; margin-top: 0.25rem;"></div>
         </div>
-        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-          <strong>Waterfall View:</strong><br>
-          • Bars show resource lifetime<br>
-          • Faded portion = async wait<br>
-          • Solid portion = sync execution<br>
-          • Tree mode shows causality hierarchy
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Critical Path</h3>
+        <div class="section-content">
+          <div id="critical-path-info" style="font-size: 0.7rem;">
+            <div class="detail-item" style="color: #666;">Click 🔥 to show</div>
+          </div>
         </div>
-        <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-          <strong>What to Look For:</strong><br>
-          • Long edges = async bottlenecks<br>
-          • Large bubbles = CPU-heavy ops<br>
-          • Sequential chains = serialization<br>
-          • Wide trees = good parallelism
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Legend</h3>
+        <div class="section-content">
+          <div class="legend" id="legend"></div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Selected</h3>
+        <div class="section-content">
+          <div class="chain-nav">
+            <button id="nav-parent" disabled>↑ Parent</button>
+            <button id="nav-children" disabled>↓ Children</button>
+          </div>
+          <div id="selected-details">
+            <div class="detail-item" style="color: #666;">Click a resource</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Timing</h3>
+        <div class="section-content">
+          <div id="timing-breakdown">
+            <div class="detail-item" style="color: #666;">Select a resource</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Stack Trace</h3>
+        <div class="section-content">
+          <div id="stack-trace" class="stack-trace-container">
+            <div class="stack-empty">Click a resource to see its stack</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Annotations</h3>
+        <div class="section-content">
+          <div id="annotations">
+            <div class="detail-item" style="color: #666;">-</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>How to Read</h3>
+        <div class="section-content">
+          <div id="help-hints">
+            <div class="view-help" data-view="waterfall">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>Waterfall View:</strong><br>
+            • Bars show resource lifetime<br>
+            • Faded portion = async wait<br>
+            • Solid portion = sync execution<br>
+            • Tree mode shows causality hierarchy<br>
+            • Click bar to select resource
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Sort Modes:</strong><br>
+            • Tree = causality hierarchy<br>
+            • Time = creation order<br>
+            • Duration = longest first
+          </div>
+        </div>
+        <div class="view-help" data-view="bubble">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>Bubble View:</strong><br>
+            • Tree flows top→down (root at top)<br>
+            • Bubble size = sync execution time<br>
+            • Edge labels = async wait latency<br>
+            • <span style="color: #ffd700;">Gold</span> labels = latency &gt;1ms
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Controls:</strong><br>
+            • Scroll to zoom<br>
+            • Shift+drag to pan<br>
+            • Click bubble to select
+          </div>
+        </div>
+        <div class="view-help" data-view="dag">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>DAG View:</strong><br>
+            • Force-directed dependency graph<br>
+            • Arrows show trigger relationships<br>
+            • Good for exploring complex deps
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Controls:</strong><br>
+            • Drag nodes to rearrange<br>
+            • Shift+drag to pan<br>
+            • Scroll to zoom<br>
+            • Click node to select
+          </div>
+        </div>
+        <div class="view-help" data-view="parallelism">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>Parallelism View:</strong><br>
+            • Stacked chart = concurrent ops over time<br>
+            • <span style="color: #ff6432;">Orange line</span> = serialization threshold (=1)<br>
+            • <span style="color: #ff6432;">Orange bars</span> = bottleneck moments
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Interpretation:</strong><br>
+            • High peaks = good parallelism<br>
+            • Flat at 1 = sequential execution<br>
+            • Colors show resource type mix
+          </div>
+        </div>
+        <div class="view-help" data-view="breakdown">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>Breakdown View:</strong><br>
+            • Treemap = area proportional to time<br>
+            • <span style="opacity: 0.9;">Solid</span> = sync execution time<br>
+            • <span style="opacity: 0.4;">Faded</span> = async wait time<br>
+            • Quickly see where time goes by type
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Interpretation:</strong><br>
+            • Large boxes = time-consuming types<br>
+            • High sync % = CPU-bound<br>
+            • High async % = I/O-bound
+          </div>
+        </div>
+        <div class="view-help" data-view="latency">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>Latency View:</strong><br>
+            • Histogram of async wait times<br>
+            • <span style="color: #50c878;">p50</span> / <span style="color: #ffd700;">p90</span> / <span style="color: #ff6347;">p99</span> percentile lines<br>
+            • Log scale for wide ranges
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Interpretation:</strong><br>
+            • Right tail = outliers to investigate<br>
+            • Wide spread = inconsistent latency<br>
+            • Tight cluster = predictable timing
+          </div>
+        </div>
+        <div class="view-help" data-view="gaps">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>Gaps View:</strong><br>
+            • <span style="color: #50c878;">Green</span> = sync execution<br>
+            • <span style="color: #ff6432;">Orange</span> = idle gaps (no work)<br>
+            • Shows ops waiting during gaps
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Interpretation:</strong><br>
+            • Gaps with waiters = blocking ops<br>
+            • Many small gaps = fragmented work<br>
+            • Large gaps = optimization opportunity
+          </div>
+        </div>
+        <div class="view-help" data-view="replay">
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
+            <strong>Replay View:</strong><br>
+            • Watch request unfold in real-time<br>
+            • <span style="color: #50c878;">Glowing</span> = executing now<br>
+            • <span style="opacity: 0.5;">Dashed</span> = waiting for I/O<br>
+            • <span style="opacity: 0.3;">Faded</span> = completed
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Controls:</strong><br>
+            • Play/Pause to control animation<br>
+            • Click progress bar to seek<br>
+            • Adjust speed: 0.5x, 1x, 2x
+          </div>
+        </div>
+            <div class="view-help" data-view="all">
+              <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+                <strong>Resource Types:</strong><br>
+                • <span style="color: #50c878;">Typed</span> = API calls (fetch, timer, cache)<br>
+                • <span style="color: #7ec8e3;">User</span> = Promises from your code<br>
+                • <span style="color: #888;">Internal</span> = Runtime machinery
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -719,15 +962,48 @@
 
   <!-- Tutorial Modal -->
   <div id="tutorial-modal" class="modal" style="display: none;">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width: 900px;">
       <div class="modal-header">
         <h2>🔬 Async Trace Optimization Guide</h2>
         <button class="modal-close" id="tutorial-close">✕</button>
       </div>
       <div class="modal-body">
         <div class="guide-section">
+          <h3>Keyboard Shortcuts</h3>
+          <table class="guide-table">
+            <tr><th>Key</th><th>Action</th></tr>
+            <tr><td><code>?</code> or <code>H</code></td><td>Show this help guide</td></tr>
+            <tr><td><code>O</code> or <code>L</code></td><td>Open file dialog to load trace</td></tr>
+            <tr><td><code>P</code> or <code>V</code></td><td>Toggle paste JSON area</td></tr>
+            <tr><td><code>1</code>-<code>8</code></td><td>Switch views (Waterfall, Bubble, DAG, Parallelism, Breakdown, Latency, Gaps, Replay)</td></tr>
+            <tr><td><code>C</code></td><td>Toggle critical path highlight</td></tr>
+            <tr><td><code>I</code></td><td>Open AI analysis prompt</td></tr>
+            <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
+            <tr><td><code>Space</code></td><td>Play/Pause (Replay view)</td></tr>
+            <tr><td><code>R</code></td><td>Reset animation (Replay view)</td></tr>
+            <tr><td><code>Esc</code></td><td>Close modals / paste area</td></tr>
+          </table>
+        </div>
+
+        <div class="guide-section">
+          <h3>Visualization Views</h3>
+          <table class="guide-table">
+            <tr><th>View</th><th>Best For</th><th>What to Look For</th></tr>
+            <tr><td><strong>1: Waterfall</strong></td><td>Timeline overview</td><td>Overall duration, resource lifetimes, sort by tree/time/duration</td></tr>
+            <tr><td><strong>2: Bubble</strong></td><td>Causality analysis</td><td>Tall chains (sequential), wide trees (parallel), gold edges (>1ms)</td></tr>
+            <tr><td><strong>3: DAG</strong></td><td>Complex dependencies</td><td>Drag to explore, find unexpected connections</td></tr>
+            <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Orange bars = serialization, stacked height = parallelism</td></tr>
+            <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Large boxes = time hogs, solid = CPU, faded = I/O</td></tr>
+            <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
+            <tr><td><strong>7: Gaps</strong></td><td>Idle time analysis</td><td>Orange gaps = nothing running, waiters during gaps</td></tr>
+            <tr><td><strong>8: Replay</strong></td><td>Understanding flow</td><td>Watch operations unfold, dependency arrows, state changes</td></tr>
+          </table>
+        </div>
+
+        <div class="guide-section">
           <h3>1. Identify Serialization Bottlenecks</h3>
-          <p><strong>Pattern:</strong> Long vertical chains in bubble view (sequential operations)</p>
+          <p><strong>Views:</strong> Bubble (2), Parallelism (4)</p>
+          <p><strong>Pattern:</strong> Long vertical chains or parallelism = 1</p>
           <div class="guide-example">
             <div class="guide-bad">
               <strong>❌ Bad: Sequential</strong>
@@ -744,33 +1020,48 @@ const c = await fetch('/api/c');</pre>
 ]);</pre>
             </div>
           </div>
-          <p class="guide-tip">💡 Sequential = tall narrow tree. Parallel = wide branching.</p>
+          <p class="guide-tip">💡 In Parallelism view, orange bars highlight when only 1 operation is active - these are serialization points.</p>
         </div>
 
         <div class="guide-section">
           <h3>2. Find Async Bottlenecks (Long Waits)</h3>
-          <p><strong>Pattern:</strong> <span style="color: #ffd700;">Gold-colored edge labels</span> (>1ms latency)</p>
+          <p><strong>Views:</strong> Bubble (2), Latency (6)</p>
+          <p><strong>Pattern:</strong> <span style="color: #ffd700;">Gold edge labels</span> (>1ms) or right-tail outliers in histogram</p>
           <p><strong>Questions to ask:</strong></p>
           <ul>
             <li>Can this fetch response be cached?</li>
             <li>Is this KV/D1/DO call necessary?</li>
             <li>Can non-critical work use <code>ctx.waitUntil()</code>?</li>
           </ul>
+          <p class="guide-tip">💡 The Latency histogram shows p50/p90/p99 lines - focus on outliers beyond p99.</p>
         </div>
 
         <div class="guide-section">
           <h3>3. Analyze CPU vs I/O Balance</h3>
-          <p>Check the <strong>Time Breakdown</strong> chart in sidebar:</p>
+          <p><strong>Views:</strong> Breakdown (5), sidebar Time Breakdown</p>
           <table class="guide-table">
             <tr><th>Ratio</th><th>Meaning</th><th>Action</th></tr>
-            <tr><td>90% async</td><td>I/O bound (typical)</td><td>Optimize fetch/cache</td></tr>
+            <tr><td>90% async (faded)</td><td>I/O bound (typical)</td><td>Optimize fetch/cache</td></tr>
             <tr><td>50/50</td><td>Mixed workload</td><td>Profile both paths</td></tr>
-            <tr><td>90% sync</td><td>CPU bound</td><td>Optimize JS, use streams</td></tr>
+            <tr><td>90% sync (solid)</td><td>CPU bound</td><td>Optimize JS, use streams</td></tr>
           </table>
+          <p class="guide-tip">💡 In Breakdown treemap, solid portions = sync execution, faded = async waiting.</p>
         </div>
 
         <div class="guide-section">
-          <h3>4. Reduce Runtime Overhead</h3>
+          <h3>4. Find Idle Gaps</h3>
+          <p><strong>View:</strong> Gaps (7)</p>
+          <p><strong>Pattern:</strong> <span style="color: #ff6432;">Orange sections</span> where no work is happening</p>
+          <ul>
+            <li><strong>Gaps with waiters</strong> = blocking operation, check what's pending</li>
+            <li><strong>Large gaps</strong> = optimization opportunity</li>
+            <li><strong>Many small gaps</strong> = fragmented execution, consider batching</li>
+          </ul>
+          <p class="guide-tip">💡 Hover over gaps to see which operations were waiting during that time.</p>
+        </div>
+
+        <div class="guide-section">
+          <h3>5. Reduce Runtime Overhead</h3>
           <p><strong>Pattern:</strong> Many dimmed (internal) promises</p>
           <p>Use <strong>"User Only"</strong> filter to focus on your code.</p>
           <ul>
@@ -781,7 +1072,7 @@ const c = await fetch('/api/c');</pre>
         </div>
 
         <div class="guide-section">
-          <h3>5. Find Redundant Operations</h3>
+          <h3>6. Find Redundant Operations</h3>
           <p><strong>Pattern:</strong> Multiple fetch/cache with same URL annotation</p>
           <div class="guide-example">
             <div class="guide-bad">
@@ -799,37 +1090,70 @@ const userB = await fetch('/user/123');</pre>
         </div>
 
         <div class="guide-section">
-          <h3>6. Find Critical Path</h3>
+          <h3>7. Find Critical Path</h3>
+          <p><strong>View:</strong> Waterfall (1) with 🔥 button, Bubble (2)</p>
           <p>The critical path determines total request time.</p>
           <ol>
-            <li>Find resource with latest <code>callbackEndedAt</code></li>
+            <li>Click 🔥 in toolbar to highlight critical path</li>
+            <li>Or: Find resource with latest <code>callbackEndedAt</code></li>
             <li>Navigate up to root using ↑ button</li>
             <li>Sum of edge latencies = minimum request time</li>
           </ol>
-          <p class="guide-tip">💡 Only optimizing the critical path improves latency.</p>
+          <p class="guide-tip">💡 Only optimizing operations on the critical path improves overall latency.</p>
         </div>
 
         <div class="guide-section">
-          <h3>Quick Reference</h3>
+          <h3>8. Watch Request Flow</h3>
+          <p><strong>View:</strong> Replay (8)</p>
+          <p>Use replay to understand how your request executes:</p>
+          <ul>
+            <li><strong>Glowing circles</strong> = currently executing</li>
+            <li><strong>Dashed outline</strong> = waiting for I/O</li>
+            <li><strong>Faded circles</strong> = completed</li>
+            <li><strong>Arrows</strong> = causality (parent triggered child)</li>
+          </ul>
+          <p class="guide-tip">💡 Use 0.5x speed to carefully observe the sequence of operations.</p>
+        </div>
+
+        <div class="guide-section">
+          <h3>Visual Patterns Quick Reference</h3>
           <table class="guide-table">
-            <tr><th>Visual Pattern</th><th>Meaning</th><th>Fix</th></tr>
-            <tr><td>Tall narrow tree</td><td>Sequential ops</td><td>Promise.all</td></tr>
-            <tr><td style="color: #ffd700;">Gold edges</td><td>High latency</td><td>Cache/batch</td></tr>
-            <tr><td>Many small bubbles</td><td>Overhead</td><td>Simplify chains</td></tr>
-            <tr><td>Wide shallow tree</td><td>Parallelism ✓</td><td>Already good</td></tr>
-            <tr><td>Large bubbles</td><td>CPU heavy</td><td>Optimize algo</td></tr>
+            <tr><th>Visual Pattern</th><th>Where</th><th>Meaning</th><th>Fix</th></tr>
+            <tr><td>Tall narrow tree</td><td>Bubble</td><td>Sequential ops</td><td>Promise.all</td></tr>
+            <tr><td style="color: #ffd700;">Gold edges</td><td>Bubble</td><td>High latency</td><td>Cache/batch</td></tr>
+            <tr><td style="color: #ff6432;">Orange bars</td><td>Parallelism</td><td>Serialization</td><td>Parallelize</td></tr>
+            <tr><td style="color: #ff6432;">Orange gaps</td><td>Gaps</td><td>Idle time</td><td>Start work earlier</td></tr>
+            <tr><td>Right tail</td><td>Latency</td><td>Outliers</td><td>Investigate slow ops</td></tr>
+            <tr><td>Large solid boxes</td><td>Breakdown</td><td>CPU heavy</td><td>Optimize algorithm</td></tr>
+            <tr><td>Large faded boxes</td><td>Breakdown</td><td>I/O heavy</td><td>Cache/parallelize</td></tr>
+            <tr><td>Wide shallow tree</td><td>Bubble</td><td>Parallelism ✓</td><td>Already good</td></tr>
           </table>
         </div>
 
         <div class="guide-section">
-          <h3>Optimization Workflow</h3>
+          <h3>Accessibility Mode</h3>
+          <p>Press <code>A</code> or click the <strong>♿ High Contrast</strong> button to enable accessibility mode.</p>
+          <p>In this mode:</p>
+          <ul>
+            <li><strong>Patterns</strong> - Different resource types get distinct patterns (dots, stripes, crosshatch) in addition to colors</li>
+            <li><strong>Higher contrast</strong> - Faded portions are more visible with diagonal stripes</li>
+            <li><strong>Sync/Async dividers</strong> - Clear white lines separate sync and async portions in Breakdown view</li>
+            <li><strong>Bordered sync regions</strong> - Sync execution shown with white borders in Waterfall</li>
+          </ul>
+          <p class="guide-tip">💡 Accessibility mode helps users who have difficulty distinguishing colors.</p>
+        </div>
+
+        <div class="guide-section">
+          <h3>Recommended Workflow</h3>
           <ol>
-            <li><strong>Load trace</strong> → Review summary charts</li>
-            <li><strong>Filter "User Only"</strong> → Focus on your code</li>
-            <li><strong>Find longest chain</strong> → Identify critical path</li>
-            <li><strong>Check gold edges</strong> → Find wait bottlenecks</li>
-            <li><strong>Look for width</strong> → Verify parallelism</li>
-            <li><strong>Check annotations</strong> → Spot duplicates</li>
+            <li><strong>Overview</strong> → Start with Waterfall (1) to see timeline</li>
+            <li><strong>Parallelism check</strong> → Switch to Parallelism (4), look for orange serialization</li>
+            <li><strong>Time allocation</strong> → Check Breakdown (5) for where time goes</li>
+            <li><strong>Causality</strong> → Use Bubble (2) to understand dependencies</li>
+            <li><strong>Critical path</strong> → Click 🔥 to highlight what matters</li>
+            <li><strong>Latency outliers</strong> → Check Latency (6) histogram for anomalies</li>
+            <li><strong>Idle time</strong> → Review Gaps (7) for wasted time</li>
+            <li><strong>Understand flow</strong> → Use Replay (8) to watch execution</li>
             <li><strong>Implement fix</strong> → Re-trace and compare</li>
           </ol>
         </div>
@@ -863,25 +1187,160 @@ const userB = await fetch('/user/123');</pre>
     let cachedBubbleLayout = null;  // Cache layout to prevent re-rendering on selection
     let canvas, ctx;
 
+    // DAG view state
+    let dagNodes = [];
+    let dagSimulationRunning = false;
+    let dagDragNode = null;
+    let dagPanX = 0, dagPanY = 0;
+    let dagZoom = 1;
+    let dagIsPanning = false;
+    let dagLastMouseX = 0, dagLastMouseY = 0;
+
     // Pan and zoom state for bubble view
     let panX = 0, panY = 0;
     let zoom = 1;
     let isPanning = false;
     let lastMouseX = 0, lastMouseY = 0;
 
+    // Replay state
+    let replayTime = 0;
+    let replayPlaying = false;
+    let replaySpeed = 1;
+    let replayAnimationId = null;
+
+    // Accessibility mode - uses patterns instead of colors
+    let accessibilityMode = false;
+
+    // Pattern cache for accessibility mode
+    const patternCache = new Map();
+
+    function getPattern(ctx, type, color) {
+      const key = `${type}-${color}-${accessibilityMode}`;
+      if (patternCache.has(key)) return patternCache.get(key);
+
+      const patternCanvas = document.createElement('canvas');
+      const pctx = patternCanvas.getContext('2d');
+      patternCanvas.width = 12;
+      patternCanvas.height = 12;
+
+      // Different patterns for different resource types
+      const patterns = {
+        'root': 'solid',
+        'js-promise': 'dots',
+        'fetch': 'diagonal',
+        'timer': 'horizontal',
+        'cache-get': 'vertical',
+        'cache-put': 'crosshatch',
+        'kv-get': 'zigzag',
+        'kv-put': 'diamond',
+      };
+
+      const patternType = patterns[type] || 'dots';
+
+      pctx.fillStyle = color;
+      pctx.fillRect(0, 0, 12, 12);
+
+      if (accessibilityMode) {
+        pctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        pctx.lineWidth = 1.5;
+
+        switch (patternType) {
+          case 'dots':
+            pctx.fillStyle = 'rgba(255,255,255,0.5)';
+            pctx.beginPath();
+            pctx.arc(3, 3, 1.5, 0, Math.PI * 2);
+            pctx.arc(9, 9, 1.5, 0, Math.PI * 2);
+            pctx.fill();
+            break;
+          case 'diagonal':
+            pctx.beginPath();
+            pctx.moveTo(0, 12);
+            pctx.lineTo(12, 0);
+            pctx.stroke();
+            break;
+          case 'horizontal':
+            pctx.beginPath();
+            pctx.moveTo(0, 6);
+            pctx.lineTo(12, 6);
+            pctx.stroke();
+            break;
+          case 'vertical':
+            pctx.beginPath();
+            pctx.moveTo(6, 0);
+            pctx.lineTo(6, 12);
+            pctx.stroke();
+            break;
+          case 'crosshatch':
+            pctx.beginPath();
+            pctx.moveTo(0, 6);
+            pctx.lineTo(12, 6);
+            pctx.moveTo(6, 0);
+            pctx.lineTo(6, 12);
+            pctx.stroke();
+            break;
+          case 'zigzag':
+            pctx.beginPath();
+            pctx.moveTo(0, 6);
+            pctx.lineTo(4, 2);
+            pctx.lineTo(8, 10);
+            pctx.lineTo(12, 6);
+            pctx.stroke();
+            break;
+          case 'diamond':
+            pctx.beginPath();
+            pctx.moveTo(6, 1);
+            pctx.lineTo(11, 6);
+            pctx.lineTo(6, 11);
+            pctx.lineTo(1, 6);
+            pctx.closePath();
+            pctx.stroke();
+            break;
+        }
+      }
+
+      const pattern = ctx.createPattern(patternCanvas, 'repeat');
+      patternCache.set(key, pattern);
+      return pattern;
+    }
+
+    function clearPatternCache() {
+      patternCache.clear();
+    }
+
+    // Check if a hex color is light (for choosing text color)
+    function isLightColor(hexColor) {
+      // Handle hex colors like #7ec8e3
+      const hex = hexColor.replace('#', '');
+      const r = parseInt(hex.substr(0, 2), 16);
+      const g = parseInt(hex.substr(2, 2), 16);
+      const b = parseInt(hex.substr(4, 2), 16);
+      // Calculate relative luminance (per WCAG)
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return luminance > 0.5;
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       canvas = document.getElementById('bubble-canvas');
       ctx = canvas.getContext('2d');
 
-      // Tab switching
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-          tab.classList.add('active');
-          currentView = tab.dataset.view;
-          document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
-          document.getElementById(currentView + '-view').classList.add('active');
-          if (traceData) render();
+      // View switching
+      document.getElementById('view-select').addEventListener('change', (e) => {
+        currentView = e.target.value;
+        document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+        document.getElementById(currentView + '-view').classList.add('active');
+        updateViewHelp();
+        updateControlStates();
+        if (traceData) render();
+      });
+
+      // Initialize help visibility
+      updateViewHelp();
+      updateControlStates();
+
+      // Collapsible sidebar sections
+      document.querySelectorAll('.sidebar-section h3').forEach(header => {
+        header.addEventListener('click', () => {
+          header.parentElement.classList.toggle('collapsed');
         });
       });
 
@@ -894,6 +1353,7 @@ const userB = await fetch('/user/123');</pre>
       document.getElementById('sort-mode').addEventListener('change', render);
       document.getElementById('filter-mode').addEventListener('change', () => {
         cachedBubbleLayout = null;  // Re-layout when filter changes
+        dagNodes = [];  // Re-initialize DAG when filter changes
         render();
       });
       document.getElementById('nav-parent').addEventListener('click', navigateToParent);
@@ -913,9 +1373,101 @@ const userB = await fetch('/user/123');</pre>
         }
       });
       document.addEventListener('keydown', (e) => {
+        // Don't handle hotkeys when typing in input fields
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
         if (e.key === 'Escape') {
           document.getElementById('tutorial-modal').style.display = 'none';
           document.getElementById('ai-modal').style.display = 'none';
+          document.getElementById('paste-container').classList.remove('show');
+          return;
+        }
+
+        // Help hotkey: ? or H
+        if (e.key === '?' || e.key === 'h' || e.key === 'H') {
+          document.getElementById('tutorial-modal').style.display = 'flex';
+          return;
+        }
+
+        // Load hotkey: O (Open) or L (Load)
+        if (e.key === 'o' || e.key === 'O' || e.key === 'l' || e.key === 'L') {
+          document.getElementById('file-input').click();
+          return;
+        }
+
+        // Paste hotkey: P or V
+        if (e.key === 'p' || e.key === 'P' || e.key === 'v' || e.key === 'V') {
+          document.getElementById('paste-container').classList.toggle('show');
+          if (document.getElementById('paste-container').classList.contains('show')) {
+            document.getElementById('json-input').focus();
+          }
+          return;
+        }
+
+        // Critical path hotkey: C
+        if (e.key === 'c' || e.key === 'C') {
+          toggleCriticalPath();
+          return;
+        }
+
+        // AI Analyze hotkey: I
+        if (e.key === 'i' || e.key === 'I') {
+          openAIAnalysis();
+          return;
+        }
+
+        // View hotkeys: 1-8 for different views
+        const viewKeys = {
+          '1': 'waterfall',
+          '2': 'bubble',
+          '3': 'dag',
+          '4': 'parallelism',
+          '5': 'breakdown',
+          '6': 'latency',
+          '7': 'gaps',
+          '8': 'replay'
+        };
+
+        if (viewKeys[e.key]) {
+          const newView = viewKeys[e.key];
+          currentView = newView;
+          document.getElementById('view-select').value = newView;
+          document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+          document.getElementById(newView + '-view').classList.add('active');
+          updateViewHelp();
+          updateControlStates();
+          if (traceData) render();
+          return;
+        }
+
+        // Accessibility mode toggle: A
+        if (e.key === 'a' || e.key === 'A') {
+          accessibilityMode = !accessibilityMode;
+          clearPatternCache();
+          document.body.classList.toggle('accessibility-mode', accessibilityMode);
+          const btn = document.getElementById('accessibility-btn');
+          btn.style.background = accessibilityMode ? '#e94560' : '';
+          btn.textContent = accessibilityMode ? '♿ High Contrast ON' : '♿ High Contrast';
+          if (traceData) render();
+          return;
+        }
+
+        // Replay controls: Space = play/pause, R = reset
+        if (currentView === 'replay' && traceData) {
+          if (e.key === ' ' || e.key === 'Space') {
+            e.preventDefault();
+            if (replayPlaying) {
+              stopReplayAnimation();
+            } else {
+              if (replayTime >= traceData.requestDurationNs) replayTime = 0;
+              startReplayAnimation();
+            }
+            renderReplayFrame();
+          } else if (e.key === 'r' || e.key === 'R') {
+            stopReplayAnimation();
+            replayTime = 0;
+            renderReplayFrame();
+          }
         }
       });
 
@@ -936,6 +1488,17 @@ const userB = await fetch('/user/123');</pre>
           status.style.display = 'block';
           setTimeout(() => status.style.display = 'none', 2000);
         });
+      });
+
+      // Accessibility mode toggle
+      document.getElementById('accessibility-btn').addEventListener('click', () => {
+        accessibilityMode = !accessibilityMode;
+        clearPatternCache();
+        document.body.classList.toggle('accessibility-mode', accessibilityMode);
+        const btn = document.getElementById('accessibility-btn');
+        btn.style.background = accessibilityMode ? '#e94560' : '';
+        btn.textContent = accessibilityMode ? '♿ High Contrast ON' : '♿ High Contrast';
+        if (traceData) render();
       });
 
       canvas.addEventListener('mousemove', handleBubbleMouseMove);
@@ -989,10 +1552,142 @@ const userB = await fetch('/user/123');</pre>
         renderBubble();
       });
 
+      // DAG canvas event handlers
+      const dagCanvas = document.getElementById('dag-canvas');
+
+      dagCanvas.addEventListener('mousedown', (e) => {
+        const rect = dagCanvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - dagPanX) / dagZoom;
+        const y = (e.clientY - rect.top - dagPanY) / dagZoom;
+
+        // Check if clicking on a node
+        const clickedNode = dagNodes.find(n => {
+          const dx = x - n.x, dy = y - n.y;
+          return Math.sqrt(dx*dx + dy*dy) <= n.radius;
+        });
+
+        if (clickedNode && !e.shiftKey) {
+          dagDragNode = clickedNode;
+          clickedNode.fixed = true;
+          dagCanvas.style.cursor = 'grabbing';
+        } else if (e.shiftKey || e.button === 1) {
+          dagIsPanning = true;
+          dagLastMouseX = e.clientX;
+          dagLastMouseY = e.clientY;
+          dagCanvas.style.cursor = 'grabbing';
+        }
+      });
+
+      dagCanvas.addEventListener('mousemove', (e) => {
+        const rect = dagCanvas.getBoundingClientRect();
+
+        if (dagDragNode) {
+          dagDragNode.x = (e.clientX - rect.left - dagPanX) / dagZoom;
+          dagDragNode.y = (e.clientY - rect.top - dagPanY) / dagZoom;
+          renderDAG();
+        } else if (dagIsPanning) {
+          dagPanX += e.clientX - dagLastMouseX;
+          dagPanY += e.clientY - dagLastMouseY;
+          dagLastMouseX = e.clientX;
+          dagLastMouseY = e.clientY;
+          renderDAG();
+        } else {
+          // Hover detection
+          const x = (e.clientX - rect.left - dagPanX) / dagZoom;
+          const y = (e.clientY - rect.top - dagPanY) / dagZoom;
+          const hovered = dagNodes.find(n => {
+            const dx = x - n.x, dy = y - n.y;
+            return Math.sqrt(dx*dx + dy*dy) <= n.radius;
+          });
+
+          if (hovered) {
+            dagCanvas.style.cursor = 'pointer';
+            const r = hovered.resource;
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = `
+              <div class="tooltip-title">${r.type} #${r.asyncId}</div>
+              <div>Trigger: #${r.triggerId || 'root'}</div>
+              <div>Children: ${(traceData.childrenMap.get(r.asyncId) || []).length}</div>
+            `;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX + 10) + 'px';
+            tooltip.style.top = (e.clientY + 10) + 'px';
+          } else {
+            dagCanvas.style.cursor = 'default';
+            document.getElementById('tooltip').style.display = 'none';
+          }
+        }
+      });
+
+      dagCanvas.addEventListener('mouseup', (e) => {
+        if (dagDragNode) {
+          dagDragNode.fixed = false;
+          dagDragNode = null;
+        }
+        dagIsPanning = false;
+        dagCanvas.style.cursor = 'default';
+      });
+
+      dagCanvas.addEventListener('click', (e) => {
+        if (dagDragNode) return;  // Was dragging, not clicking
+
+        const rect = dagCanvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left - dagPanX) / dagZoom;
+        const y = (e.clientY - rect.top - dagPanY) / dagZoom;
+
+        const clicked = dagNodes.find(n => {
+          const dx = x - n.x, dy = y - n.y;
+          return Math.sqrt(dx*dx + dy*dy) <= n.radius;
+        });
+
+        if (clicked) {
+          selectResource(clicked.resource);
+        }
+      });
+
+      dagCanvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = dagCanvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const oldZoom = dagZoom;
+        const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
+        dagZoom = Math.max(0.1, Math.min(5, dagZoom * zoomDelta));
+
+        dagPanX = mouseX - (mouseX - dagPanX) * (dagZoom / oldZoom);
+        dagPanY = mouseY - (mouseY - dagPanY) * (dagZoom / oldZoom);
+
+        renderDAG();
+      });
+
+      dagCanvas.addEventListener('mouseleave', () => {
+        document.getElementById('tooltip').style.display = 'none';
+        dagIsPanning = false;
+        if (dagDragNode) {
+          dagDragNode.fixed = false;
+          dagDragNode = null;
+        }
+      });
+
       window.addEventListener('resize', () => {
-        if (traceData && currentView === 'bubble') {
-          cachedBubbleLayout = null;  // Invalidate cache on resize
-          renderBubble();
+        if (traceData) {
+          if (currentView === 'bubble') {
+            cachedBubbleLayout = null;  // Invalidate cache on resize
+            renderBubble();
+          } else if (currentView === 'dag') {
+            renderDAG();
+          } else if (currentView === 'parallelism') {
+            renderParallelism();
+          } else if (currentView === 'breakdown') {
+            renderBreakdown();
+          } else if (currentView === 'latency') {
+            renderLatency();
+          } else if (currentView === 'gaps') {
+            renderGaps();
+          } else if (currentView === 'replay') {
+            renderReplayFrame();
+          }
         }
       });
     });
@@ -1218,6 +1913,7 @@ const userB = await fetch('/user/123');</pre>
       showCriticalPath = !showCriticalPath;
       const btn = document.getElementById('critical-path-btn');
       btn.classList.toggle('active', showCriticalPath);
+      btn.textContent = showCriticalPath ? '🔥 Critical Path ON' : '🔥 Critical Path';
       updateCriticalPathInfo();
       render();
     }
@@ -1467,9 +2163,45 @@ const userB = await fetch('/user/123');</pre>
     function render() {
       if (currentView === 'waterfall') {
         renderWaterfall();
-      } else {
+      } else if (currentView === 'bubble') {
         renderBubble();
+      } else if (currentView === 'dag') {
+        renderDAG();
+      } else if (currentView === 'parallelism') {
+        renderParallelism();
+      } else if (currentView === 'breakdown') {
+        renderBreakdown();
+      } else if (currentView === 'latency') {
+        renderLatency();
+      } else if (currentView === 'gaps') {
+        renderGaps();
+      } else if (currentView === 'replay') {
+        renderReplay();
       }
+    }
+
+    function updateViewHelp() {
+      document.querySelectorAll('.view-help').forEach(el => {
+        const view = el.dataset.view;
+        el.classList.toggle('active', view === currentView || view === 'all');
+      });
+    }
+
+    function updateControlStates() {
+      // Sort mode only works in Waterfall view
+      const sortMode = document.getElementById('sort-mode');
+      const isWaterfall = currentView === 'waterfall';
+      sortMode.disabled = !isWaterfall;
+      sortMode.style.opacity = isWaterfall ? '1' : '0.4';
+      sortMode.style.cursor = isWaterfall ? 'pointer' : 'not-allowed';
+
+      // Filter mode only works in Waterfall, Bubble, and DAG views
+      const filterMode = document.getElementById('filter-mode');
+      const filterViews = ['waterfall', 'bubble', 'dag'];
+      const filterEnabled = filterViews.includes(currentView);
+      filterMode.disabled = !filterEnabled;
+      filterMode.style.opacity = filterEnabled ? '1' : '0.4';
+      filterMode.style.cursor = filterEnabled ? 'pointer' : 'not-allowed';
     }
 
     // ==================== WATERFALL VIEW ====================
@@ -1977,6 +2709,1644 @@ const userB = await fetch('/user/123');</pre>
       if (clicked) {
         selectResource(clicked.group.resources[0]);
       }
+    }
+
+    // ==================== DAG VIEW ====================
+    function initDAGNodes() {
+      if (!traceData) return;
+
+      const container = document.getElementById('dag-view');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      // Filter based on current filter mode
+      const filteredResources = traceData.resources.filter(shouldShowResource);
+
+      // Create nodes with initial positions based on depth
+      dagNodes = [];
+      const nodeMap = new Map();
+
+      // Group by depth for initial layout
+      const depthGroups = new Map();
+      filteredResources.forEach(r => {
+        const depth = traceData.depthMap.get(r.asyncId) || 0;
+        if (!depthGroups.has(depth)) depthGroups.set(depth, []);
+        depthGroups.get(depth).push(r);
+      });
+
+      const maxDepth = Math.max(...depthGroups.keys(), 0);
+      const levelHeight = height / (maxDepth + 2);
+
+      depthGroups.forEach((resources, depth) => {
+        const levelWidth = width / (resources.length + 1);
+        resources.forEach((r, i) => {
+          const node = {
+            resource: r,
+            x: levelWidth * (i + 1),
+            y: levelHeight * (depth + 1),
+            vx: 0,
+            vy: 0,
+            radius: 15,
+            color: TYPE_COLORS[r.type] || '#808080',
+            fixed: false
+          };
+          dagNodes.push(node);
+          nodeMap.set(r.asyncId, node);
+        });
+      });
+
+      // Reset pan/zoom
+      dagPanX = 0;
+      dagPanY = 0;
+      dagZoom = 1;
+
+      // Start force simulation
+      startDAGSimulation();
+    }
+
+    function startDAGSimulation() {
+      if (dagSimulationRunning) return;
+      dagSimulationRunning = true;
+
+      const container = document.getElementById('dag-view');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      const centerX = width / 2;
+      const centerY = height / 2;
+
+      let iterations = 0;
+      const maxIterations = 150;
+
+      function simulate() {
+        if (!dagSimulationRunning || iterations >= maxIterations) {
+          dagSimulationRunning = false;
+          return;
+        }
+
+        const alpha = 1 - iterations / maxIterations;  // Cooling factor
+
+        // Apply forces
+        dagNodes.forEach(node => {
+          if (node.fixed) return;
+
+          let fx = 0, fy = 0;
+
+          // Repulsion from other nodes
+          dagNodes.forEach(other => {
+            if (other === node) return;
+            const dx = node.x - other.x;
+            const dy = node.y - other.y;
+            const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+            const minDist = 60;
+            if (dist < minDist * 3) {
+              const force = (minDist * minDist) / (dist * dist) * 2;
+              fx += (dx / dist) * force;
+              fy += (dy / dist) * force;
+            }
+          });
+
+          // Attraction to parent
+          const r = node.resource;
+          if (r.triggerId !== 0) {
+            const parent = dagNodes.find(n => n.resource.asyncId === r.triggerId);
+            if (parent) {
+              const dx = parent.x - node.x;
+              const dy = parent.y - node.y;
+              const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+              const idealDist = 80;
+              const force = (dist - idealDist) * 0.05;
+              fx += (dx / dist) * force;
+              fy += (dy / dist) * force;
+
+              // Also prefer to be below parent
+              fy += 0.5;
+            }
+          }
+
+          // Weak centering force
+          fx += (centerX - node.x) * 0.001;
+          fy += (centerY - node.y) * 0.001;
+
+          // Apply velocity with damping
+          node.vx = (node.vx + fx * alpha) * 0.8;
+          node.vy = (node.vy + fy * alpha) * 0.8;
+
+          node.x += node.vx;
+          node.y += node.vy;
+
+          // Keep in bounds
+          node.x = Math.max(50, Math.min(width - 50, node.x));
+          node.y = Math.max(50, Math.min(height - 50, node.y));
+        });
+
+        iterations++;
+        renderDAG();
+        requestAnimationFrame(simulate);
+      }
+
+      simulate();
+    }
+
+    function renderDAG() {
+      const container = document.getElementById('dag-view');
+      const canvas = document.getElementById('dag-canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (!traceData || dagNodes.length === 0) {
+        // Initialize nodes on first render
+        initDAGNodes();
+        return;
+      }
+
+      ctx.save();
+      ctx.translate(dagPanX, dagPanY);
+      ctx.scale(dagZoom, dagZoom);
+
+      // Build node lookup for edge drawing
+      const nodeMap = new Map();
+      dagNodes.forEach(n => nodeMap.set(n.resource.asyncId, n));
+
+      // Draw edges
+      dagNodes.forEach(node => {
+        const r = node.resource;
+        if (r.triggerId !== 0) {
+          const parent = nodeMap.get(r.triggerId);
+          if (parent) {
+            const isHighlighted = highlightedChain.has(r.asyncId) && highlightedChain.has(r.triggerId);
+            const isOnCriticalPath = showCriticalPath &&
+              criticalPathSet.has(r.asyncId) && criticalPathSet.has(r.triggerId);
+
+            ctx.strokeStyle = isOnCriticalPath ? '#ff6432' :
+                             isHighlighted ? '#e94560' : 'rgba(126, 200, 227, 0.3)';
+            ctx.lineWidth = isOnCriticalPath ? 3 : (isHighlighted ? 2 : 1);
+
+            ctx.beginPath();
+            ctx.moveTo(parent.x, parent.y);
+            ctx.lineTo(node.x, node.y);
+            ctx.stroke();
+
+            // Arrowhead
+            const angle = Math.atan2(node.y - parent.y, node.x - parent.x);
+            const arrowX = node.x - node.radius * Math.cos(angle);
+            const arrowY = node.y - node.radius * Math.sin(angle);
+            const arrowSize = 8;
+
+            ctx.beginPath();
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(arrowX - arrowSize * Math.cos(angle - 0.4), arrowY - arrowSize * Math.sin(angle - 0.4));
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(arrowX - arrowSize * Math.cos(angle + 0.4), arrowY - arrowSize * Math.sin(angle + 0.4));
+            ctx.stroke();
+          }
+        }
+      });
+
+      // Draw nodes
+      dagNodes.forEach(node => {
+        const r = node.resource;
+        const isSelected = selectedResource && r.asyncId === selectedResource.asyncId;
+        const isHighlighted = highlightedChain.has(r.asyncId);
+        const isOnCriticalPath = showCriticalPath && criticalPathSet.has(r.asyncId);
+        const isInternal = r._classification === 'internal';
+
+        // Node circle
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+        ctx.fillStyle = node.color;
+        ctx.globalAlpha = isInternal ? 0.4 : (isHighlighted ? 1 : 0.8);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Critical path glow
+        if (isOnCriticalPath) {
+          ctx.strokeStyle = '#ff6432';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#ff6432';
+          ctx.shadowBlur = 10;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+
+        // Selection ring
+        if (isSelected) {
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        } else if (isHighlighted) {
+          ctx.strokeStyle = '#e94560';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+
+        // Label
+        ctx.fillStyle = 'white';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const label = r.type.replace('js-', '').substring(0, 4);
+        ctx.fillText(label, node.x, node.y);
+      });
+
+      ctx.restore();
+
+      // Instructions
+      ctx.fillStyle = '#444';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Drag nodes | Shift+drag: pan | Scroll: zoom', 10, canvas.height - 10);
+    }
+
+    // ==================== PARALLELISM VIEW ====================
+    function renderParallelism() {
+      const container = document.getElementById('parallelism-view');
+      const canvas = document.getElementById('parallelism-canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 40, right: 20, bottom: 50, left: 60 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, width, height);
+
+      if (!traceData) return;
+
+      const duration = traceData.requestDurationNs;
+      const numBuckets = Math.min(500, Math.floor(chartWidth / 2));
+      const bucketSize = duration / numBuckets;
+
+      // Count concurrent operations per bucket, separated by type
+      const typeBuckets = new Map();  // type -> array of counts
+      const allTypes = new Set();
+
+      traceData.resources.forEach(r => {
+        allTypes.add(r.type);
+        if (!typeBuckets.has(r.type)) {
+          typeBuckets.set(r.type, new Array(numBuckets).fill(0));
+        }
+
+        const start = r.createdAt;
+        const end = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                    (r.destroyedAt > 0 ? r.destroyedAt : duration);
+
+        const startBucket = Math.max(0, Math.floor(start / bucketSize));
+        const endBucket = Math.min(numBuckets - 1, Math.floor(end / bucketSize));
+
+        const buckets = typeBuckets.get(r.type);
+        for (let i = startBucket; i <= endBucket; i++) {
+          buckets[i]++;
+        }
+      });
+
+      // Calculate total per bucket and find max
+      const totalBuckets = new Array(numBuckets).fill(0);
+      typeBuckets.forEach(buckets => {
+        buckets.forEach((count, i) => totalBuckets[i] += count);
+      });
+      const maxConcurrent = Math.max(...totalBuckets, 1);
+
+      // Sort types by total count for consistent stacking
+      const sortedTypes = Array.from(allTypes).sort((a, b) => {
+        const sumA = typeBuckets.get(a).reduce((s, v) => s + v, 0);
+        const sumB = typeBuckets.get(b).reduce((s, v) => s + v, 0);
+        return sumB - sumA;
+      });
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Concurrent Operations Over Time', width / 2, 20);
+
+      // Draw axes
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, height - padding.bottom);
+      ctx.lineTo(width - padding.right, height - padding.bottom);
+      ctx.stroke();
+
+      // Y-axis labels
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 5; i++) {
+        const y = padding.top + (1 - i / 5) * chartHeight;
+        const value = Math.round((i / 5) * maxConcurrent);
+        ctx.fillText(value.toString(), padding.left - 8, y + 3);
+
+        // Grid line
+        ctx.strokeStyle = '#333';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+      }
+
+      // X-axis labels
+      ctx.textAlign = 'center';
+      for (let i = 0; i <= 5; i++) {
+        const x = padding.left + (i / 5) * chartWidth;
+        const time = (i / 5) * duration / 1e6;
+        ctx.fillText(time.toFixed(1) + 'ms', x, height - padding.bottom + 15);
+      }
+
+      // Draw stacked area chart
+      const barWidth = chartWidth / numBuckets;
+
+      for (let i = 0; i < numBuckets; i++) {
+        let y = height - padding.bottom;
+        const x = padding.left + i * barWidth;
+
+        sortedTypes.forEach(type => {
+          const count = typeBuckets.get(type)[i];
+          if (count > 0) {
+            const barHeight = (count / maxConcurrent) * chartHeight;
+            ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+            ctx.globalAlpha = 0.8;
+            ctx.fillRect(x, y - barHeight, barWidth + 0.5, barHeight);
+            y -= barHeight;
+          }
+        });
+      }
+      ctx.globalAlpha = 1;
+
+      // Draw "parallelism = 1" danger line
+      const oneLineY = height - padding.bottom - (1 / maxConcurrent) * chartHeight;
+      if (maxConcurrent > 1) {
+        ctx.strokeStyle = '#ff6432';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(padding.left, oneLineY);
+        ctx.lineTo(width - padding.right, oneLineY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#ff6432';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('← serialization (=1)', width - padding.right - 100, oneLineY - 5);
+      }
+
+      // Find and highlight serialization points (where concurrency drops to 1)
+      let serializationPoints = [];
+      for (let i = 1; i < numBuckets - 1; i++) {
+        if (totalBuckets[i] === 1 && (totalBuckets[i-1] > 1 || totalBuckets[i+1] > 1)) {
+          serializationPoints.push(i);
+        }
+      }
+
+      // Draw serialization markers
+      ctx.fillStyle = 'rgba(255, 100, 50, 0.3)';
+      serializationPoints.forEach(i => {
+        const x = padding.left + i * barWidth;
+        ctx.fillRect(x - 2, padding.top, 4, chartHeight);
+      });
+
+      // Draw legend
+      const legendY = height - 25;
+      let legendX = padding.left;
+      ctx.font = '10px sans-serif';
+
+      sortedTypes.slice(0, 8).forEach(type => {
+        ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+        ctx.fillRect(legendX, legendY, 12, 12);
+        ctx.fillStyle = '#aaa';
+        ctx.textAlign = 'left';
+        const label = type.replace('js-', '').substring(0, 8);
+        ctx.fillText(label, legendX + 16, legendY + 10);
+        legendX += ctx.measureText(label).width + 30;
+      });
+
+      // Stats overlay
+      const avgConcurrency = totalBuckets.reduce((s, v) => s + v, 0) / numBuckets;
+      const serializationPct = (totalBuckets.filter(v => v <= 1).length / numBuckets * 100).toFixed(0);
+
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.9)';
+      ctx.fillRect(width - 180, padding.top, 170, 70);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(width - 180, padding.top, 170, 70);
+
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Statistics', width - 170, padding.top + 15);
+
+      ctx.fillStyle = '#aaa';
+      ctx.font = '10px sans-serif';
+      ctx.fillText(`Peak: ${maxConcurrent} concurrent`, width - 170, padding.top + 32);
+      ctx.fillText(`Avg: ${avgConcurrency.toFixed(1)} concurrent`, width - 170, padding.top + 46);
+      ctx.fillText(`Serialized: ${serializationPct}% of time`, width - 170, padding.top + 60);
+    }
+
+    // ==================== BREAKDOWN VIEW ====================
+    function renderBreakdown() {
+      const container = document.getElementById('breakdown-view');
+      const canvas = document.getElementById('breakdown-canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 50, right: 20, bottom: 30, left: 20 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, width, height);
+
+      if (!traceData) return;
+
+      // Gather time data by type
+      const typeData = new Map();
+
+      traceData.resources.forEach(r => {
+        if (!typeData.has(r.type)) {
+          typeData.set(r.type, { type: r.type, syncTime: 0, asyncTime: 0, count: 0 });
+        }
+        const data = typeData.get(r.type);
+        data.count++;
+
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          data.syncTime += r.callbackEndedAt - r.callbackStartedAt;
+        }
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          data.asyncTime += r.callbackStartedAt - r.createdAt;
+        }
+      });
+
+      // Convert to array and calculate total time per type
+      const types = Array.from(typeData.values())
+        .map(d => ({ ...d, totalTime: d.syncTime + d.asyncTime }))
+        .filter(d => d.totalTime > 0)
+        .sort((a, b) => b.totalTime - a.totalTime);
+
+      if (types.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No timing data available', width / 2, height / 2);
+        return;
+      }
+
+      const totalTime = types.reduce((sum, t) => sum + t.totalTime, 0);
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Time Breakdown by Resource Type (Treemap)', width / 2, 25);
+
+      // Treemap layout using squarified algorithm
+      function squarify(items, x, y, w, h) {
+        if (items.length === 0) return [];
+
+        const result = [];
+        const total = items.reduce((sum, item) => sum + item.totalTime, 0);
+
+        // Base case: single item fills the whole space
+        if (items.length === 1) {
+          result.push({ ...items[0], x, y, w, h });
+          return result;
+        }
+
+        // Find best row (squarified algorithm)
+        const scale = (w * h) / total;
+        const isVertical = w >= h;
+        const side = isVertical ? h : w;
+
+        let rowItems = [];
+        let rowArea = 0;
+        let bestWorst = Infinity;
+
+        for (let i = 0; i < items.length; i++) {
+          const testRow = [...rowItems, items[i]];
+          const testArea = rowArea + items[i].totalTime;
+
+          // Calculate worst aspect ratio in this row
+          const rowSide = testArea * scale / side;
+          let worst = 0;
+          testRow.forEach(item => {
+            const itemSide = (item.totalTime * scale) / rowSide;
+            const aspect = Math.max(rowSide / itemSide, itemSide / rowSide);
+            worst = Math.max(worst, aspect);
+          });
+
+          if (worst <= bestWorst || rowItems.length === 0) {
+            rowItems = testRow;
+            rowArea = testArea;
+            bestWorst = worst;
+          } else {
+            break;
+          }
+        }
+
+        // Layout the row
+        const rowSize = rowArea * scale / side;
+        let pos = 0;
+
+        rowItems.forEach(item => {
+          const itemSize = item.totalTime * scale / rowSize;
+          if (isVertical) {
+            result.push({ ...item, x: x, y: y + pos, w: rowSize, h: itemSize });
+          } else {
+            result.push({ ...item, x: x + pos, y: y, w: itemSize, h: rowSize });
+          }
+          pos += itemSize;
+        });
+
+        // Recursively layout remaining items
+        const remaining = items.slice(rowItems.length);
+        if (remaining.length > 0) {
+          if (isVertical) {
+            result.push(...squarify(remaining, x + rowSize, y, w - rowSize, h));
+          } else {
+            result.push(...squarify(remaining, x, y + rowSize, w, h - rowSize));
+          }
+        }
+
+        return result;
+      }
+
+      const rects = squarify(types, padding.left, padding.top, chartWidth, chartHeight);
+
+      // Draw treemap rectangles
+      rects.forEach(rect => {
+        const color = TYPE_COLORS[rect.type] || '#808080';
+
+        // Split rectangle to show sync vs async
+        if (rect.syncTime > 0 || rect.asyncTime > 0) {
+          const syncRatio = rect.syncTime / rect.totalTime;
+          const asyncRatio = 1 - syncRatio;
+
+          // Draw async portion (top) - higher contrast now
+          if (asyncRatio > 0) {
+            const asyncHeight = (rect.h - 2) * asyncRatio;
+            if (accessibilityMode) {
+              // In accessibility mode, use diagonal stripes for async
+              ctx.fillStyle = color;
+              ctx.globalAlpha = 0.5;
+              ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, asyncHeight);
+              // Draw stripe pattern
+              ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              for (let i = -asyncHeight; i < rect.w; i += 6) {
+                ctx.moveTo(rect.x + 1 + i, rect.y + 1 + asyncHeight);
+                ctx.lineTo(rect.x + 1 + i + asyncHeight, rect.y + 1);
+              }
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+            } else {
+              ctx.fillStyle = color;
+              ctx.globalAlpha = 0.55;  // Increased from 0.4 for better visibility
+              ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, asyncHeight);
+              ctx.globalAlpha = 1;
+            }
+          }
+
+          // Draw sync portion (solid) at bottom
+          if (syncRatio > 0) {
+            const syncHeight = (rect.h - 2) * syncRatio;
+            if (accessibilityMode) {
+              ctx.fillStyle = getPattern(ctx, rect.type, color);
+            } else {
+              ctx.fillStyle = color;
+            }
+            ctx.globalAlpha = 0.95;
+            ctx.fillRect(rect.x + 1, rect.y + rect.h - 1 - syncHeight, rect.w - 2, syncHeight);
+            ctx.globalAlpha = 1;
+          }
+
+          // Draw dividing line between sync and async in accessibility mode
+          if (accessibilityMode && syncRatio > 0 && asyncRatio > 0) {
+            const dividerY = rect.y + rect.h - 1 - (rect.h - 2) * syncRatio;
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(rect.x + 1, dividerY);
+            ctx.lineTo(rect.x + rect.w - 1, dividerY);
+            ctx.stroke();
+          }
+        } else {
+          // No timing data - just fill solid
+          ctx.fillStyle = accessibilityMode ? getPattern(ctx, rect.type, color) : color;
+          ctx.globalAlpha = 0.85;
+          ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+          ctx.globalAlpha = 1;
+        }
+
+        // Border
+        ctx.strokeStyle = '#1a1a2e';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+
+        // Label (only if rectangle is big enough)
+        if (rect.w > 50 && rect.h > 40) {
+          // Determine if we need dark text based on background color luminance
+          const isLightBg = isLightColor(color);
+          ctx.fillStyle = isLightBg ? '#1a1a2e' : 'white';
+          ctx.font = 'bold 14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          const label = rect.type.replace('js-', '').replace('cache-', 'c:');
+          const timeMs = (rect.totalTime / 1e6).toFixed(1);
+          const pct = ((rect.totalTime / totalTime) * 100).toFixed(0);
+
+          ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 - 14);
+
+          ctx.font = '12px sans-serif';
+          ctx.fillText(`${timeMs}ms`, rect.x + rect.w / 2, rect.y + rect.h / 2 + 4);
+          ctx.fillText(`(${pct}%)`, rect.x + rect.w / 2, rect.y + rect.h / 2 + 20);
+
+          // Sync/async breakdown if big enough
+          if (rect.h > 80) {
+            const syncPct = ((rect.syncTime / rect.totalTime) * 100).toFixed(0);
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = isLightBg ? 'rgba(26,26,46,0.7)' : 'rgba(255,255,255,0.7)';
+            ctx.fillText(`sync: ${syncPct}%`, rect.x + rect.w / 2, rect.y + rect.h / 2 + 38);
+          }
+        } else if (rect.w > 25 && rect.h > 20) {
+          // Abbreviated label
+          const isLightBg = isLightColor(color);
+          ctx.fillStyle = isLightBg ? '#1a1a2e' : 'white';
+          ctx.font = '11px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const shortLabel = rect.type.substring(0, 3);
+          ctx.fillText(shortLabel, rect.x + rect.w / 2, rect.y + rect.h / 2);
+        }
+      });
+
+      // Legend for sync/async
+      const legendY = height - 20;
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'left';
+
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = '#666';
+      ctx.fillRect(padding.left, legendY - 8, 12, 12);
+      ctx.globalAlpha = 0.4;
+      ctx.fillRect(padding.left + 80, legendY - 8, 12, 12);
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = '#888';
+      ctx.fillText('= Sync time', padding.left + 16, legendY);
+      ctx.fillText('= Async wait', padding.left + 96, legendY);
+
+      // Stats overlay
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.9)';
+      ctx.fillRect(width - 200, padding.top, 190, 85);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(width - 200, padding.top, 190, 85);
+
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Top Time Consumers', width - 190, padding.top + 15);
+
+      ctx.fillStyle = '#aaa';
+      ctx.font = '10px sans-serif';
+      types.slice(0, 4).forEach((t, i) => {
+        const y = padding.top + 30 + i * 13;
+        const pct = ((t.totalTime / totalTime) * 100).toFixed(0);
+        const label = t.type.replace('js-', '');
+        ctx.fillStyle = TYPE_COLORS[t.type] || '#808080';
+        ctx.fillRect(width - 190, y - 8, 8, 8);
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(`${label}: ${pct}% (${t.count})`, width - 178, y);
+      });
+    }
+
+    // ==================== LATENCY VIEW ====================
+    function renderLatency() {
+      const container = document.getElementById('latency-view');
+      const canvas = document.getElementById('latency-canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 50, right: 30, bottom: 80, left: 70 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, width, height);
+
+      if (!traceData) return;
+
+      // Collect async wait times (latencies) for all resources
+      const latencies = [];
+      traceData.resources.forEach(r => {
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          const latencyNs = r.callbackStartedAt - r.createdAt;
+          if (latencyNs > 0) {
+            latencies.push({
+              latencyNs,
+              latencyMs: latencyNs / 1e6,
+              resource: r
+            });
+          }
+        }
+      });
+
+      if (latencies.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No latency data available', width / 2, height / 2);
+        return;
+      }
+
+      // Sort by latency for percentile calculations
+      latencies.sort((a, b) => a.latencyNs - b.latencyNs);
+
+      const minLatency = latencies[0].latencyMs;
+      const maxLatency = latencies[latencies.length - 1].latencyMs;
+      const p50 = latencies[Math.floor(latencies.length * 0.5)].latencyMs;
+      const p90 = latencies[Math.floor(latencies.length * 0.9)].latencyMs;
+      const p99 = latencies[Math.floor(latencies.length * 0.99)].latencyMs;
+      const avgLatency = latencies.reduce((s, l) => s + l.latencyMs, 0) / latencies.length;
+
+      // Create histogram buckets (logarithmic scale for wide range)
+      const numBuckets = Math.min(50, Math.floor(chartWidth / 15));
+      const useLogScale = maxLatency / Math.max(minLatency, 0.001) > 100;
+
+      let buckets;
+      if (useLogScale) {
+        // Logarithmic buckets for wide range
+        const logMin = Math.log10(Math.max(minLatency, 0.001));
+        const logMax = Math.log10(maxLatency);
+        const logStep = (logMax - logMin) / numBuckets;
+        buckets = Array.from({ length: numBuckets }, (_, i) => ({
+          min: Math.pow(10, logMin + i * logStep),
+          max: Math.pow(10, logMin + (i + 1) * logStep),
+          count: 0,
+          byType: new Map()
+        }));
+      } else {
+        // Linear buckets for narrow range
+        const step = (maxLatency - minLatency) / numBuckets || 1;
+        buckets = Array.from({ length: numBuckets }, (_, i) => ({
+          min: minLatency + i * step,
+          max: minLatency + (i + 1) * step,
+          count: 0,
+          byType: new Map()
+        }));
+      }
+
+      // Fill buckets
+      latencies.forEach(l => {
+        for (let i = 0; i < buckets.length; i++) {
+          if (l.latencyMs >= buckets[i].min && (l.latencyMs < buckets[i].max || i === buckets.length - 1)) {
+            buckets[i].count++;
+            const type = l.resource.type;
+            buckets[i].byType.set(type, (buckets[i].byType.get(type) || 0) + 1);
+            break;
+          }
+        }
+      });
+
+      const maxCount = Math.max(...buckets.map(b => b.count), 1);
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Async Wait Time Distribution (Histogram)', width / 2, 25);
+
+      // Draw axes
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, height - padding.bottom);
+      ctx.lineTo(width - padding.right, height - padding.bottom);
+      ctx.stroke();
+
+      // Y-axis labels (count)
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 5; i++) {
+        const y = padding.top + (1 - i / 5) * chartHeight;
+        const value = Math.round((i / 5) * maxCount);
+        ctx.fillText(value.toString(), padding.left - 8, y + 3);
+
+        // Grid line
+        ctx.strokeStyle = '#333';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+      }
+
+      // Y-axis title
+      ctx.save();
+      ctx.translate(15, height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Count', 0, 0);
+      ctx.restore();
+
+      // Draw histogram bars (stacked by type)
+      const barWidth = chartWidth / buckets.length;
+      const allTypes = new Set();
+      buckets.forEach(b => b.byType.forEach((_, type) => allTypes.add(type)));
+      const sortedTypes = Array.from(allTypes).sort((a, b) => {
+        const countA = buckets.reduce((s, b) => s + (b.byType.get(a) || 0), 0);
+        const countB = buckets.reduce((s, b) => s + (b.byType.get(b) || 0), 0);
+        return countB - countA;
+      });
+
+      buckets.forEach((bucket, i) => {
+        const x = padding.left + i * barWidth;
+        let y = height - padding.bottom;
+
+        sortedTypes.forEach(type => {
+          const count = bucket.byType.get(type) || 0;
+          if (count > 0) {
+            const barHeight = (count / maxCount) * chartHeight;
+            ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+            ctx.globalAlpha = 0.85;
+            ctx.fillRect(x + 1, y - barHeight, barWidth - 2, barHeight);
+            y -= barHeight;
+          }
+        });
+      });
+      ctx.globalAlpha = 1;
+
+      // X-axis labels
+      ctx.fillStyle = '#888';
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'center';
+      const labelInterval = Math.ceil(buckets.length / 8);
+      buckets.forEach((bucket, i) => {
+        if (i % labelInterval === 0 || i === buckets.length - 1) {
+          const x = padding.left + (i + 0.5) * barWidth;
+          const label = bucket.min < 1 ? `${(bucket.min * 1000).toFixed(0)}µs` : `${bucket.min.toFixed(1)}ms`;
+          ctx.fillText(label, x, height - padding.bottom + 15);
+        }
+      });
+
+      // X-axis title
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('Async Wait Time' + (useLogScale ? ' (log scale)' : ''), width / 2, height - padding.bottom + 35);
+
+      // Draw percentile lines
+      function drawPercentileLine(value, label, color) {
+        let x;
+        if (useLogScale) {
+          const logMin = Math.log10(Math.max(minLatency, 0.001));
+          const logMax = Math.log10(maxLatency);
+          const logVal = Math.log10(Math.max(value, 0.001));
+          x = padding.left + ((logVal - logMin) / (logMax - logMin)) * chartWidth;
+        } else {
+          x = padding.left + ((value - minLatency) / (maxLatency - minLatency)) * chartWidth;
+        }
+
+        if (x >= padding.left && x <= width - padding.right) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(x, padding.top);
+          ctx.lineTo(x, height - padding.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = color;
+          ctx.font = '9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(label, x, padding.top - 5);
+        }
+      }
+
+      drawPercentileLine(p50, 'p50', '#50c878');
+      drawPercentileLine(p90, 'p90', '#ffd700');
+      drawPercentileLine(p99, 'p99', '#ff6347');
+
+      // Stats overlay
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(width - 180, padding.top, 170, 115);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(width - 180, padding.top, 170, 115);
+
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Latency Statistics', width - 170, padding.top + 15);
+
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(`Count: ${latencies.length} resources`, width - 170, padding.top + 32);
+      ctx.fillText(`Min: ${minLatency < 1 ? (minLatency * 1000).toFixed(0) + 'µs' : minLatency.toFixed(2) + 'ms'}`, width - 170, padding.top + 46);
+      ctx.fillText(`Avg: ${avgLatency.toFixed(2)}ms`, width - 170, padding.top + 60);
+
+      ctx.fillStyle = '#50c878';
+      ctx.fillText(`p50: ${p50.toFixed(2)}ms`, width - 170, padding.top + 74);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText(`p90: ${p90.toFixed(2)}ms`, width - 170, padding.top + 88);
+      ctx.fillStyle = '#ff6347';
+      ctx.fillText(`p99: ${p99.toFixed(2)}ms`, width - 170, padding.top + 102);
+
+      // Legend at bottom
+      const legendY = height - 25;
+      let legendX = padding.left;
+      ctx.font = '10px sans-serif';
+
+      sortedTypes.slice(0, 6).forEach(type => {
+        ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+        ctx.fillRect(legendX, legendY - 8, 12, 12);
+        ctx.fillStyle = '#aaa';
+        ctx.textAlign = 'left';
+        const label = type.replace('js-', '').substring(0, 8);
+        ctx.fillText(label, legendX + 16, legendY);
+        legendX += ctx.measureText(label).width + 30;
+      });
+    }
+
+    // ==================== GAPS VIEW ====================
+    function renderGaps() {
+      const container = document.getElementById('gaps-view');
+      const canvas = document.getElementById('gaps-canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 50, right: 30, bottom: 60, left: 70 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, width, height);
+
+      if (!traceData) return;
+
+      const duration = traceData.requestDurationNs;
+
+      // Build timeline of activity - track when sync work is happening
+      const numBuckets = Math.min(1000, Math.floor(chartWidth));
+      const bucketSize = duration / numBuckets;
+      const activityBuckets = new Array(numBuckets).fill(0);  // Count of active sync operations
+      const asyncBuckets = new Array(numBuckets).fill(0);     // Count of resources in async wait
+
+      traceData.resources.forEach(r => {
+        // Track sync execution periods
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          const startBucket = Math.max(0, Math.floor(r.callbackStartedAt / bucketSize));
+          const endBucket = Math.min(numBuckets - 1, Math.floor(r.callbackEndedAt / bucketSize));
+          for (let i = startBucket; i <= endBucket; i++) {
+            activityBuckets[i]++;
+          }
+        }
+
+        // Track async wait periods
+        if (r.createdAt > 0) {
+          const waitEnd = r.callbackStartedAt > 0 ? r.callbackStartedAt :
+                         (r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                         (r.destroyedAt > 0 ? r.destroyedAt : duration));
+          const startBucket = Math.max(0, Math.floor(r.createdAt / bucketSize));
+          const endBucket = Math.min(numBuckets - 1, Math.floor(waitEnd / bucketSize));
+          for (let i = startBucket; i <= endBucket; i++) {
+            asyncBuckets[i]++;
+          }
+        }
+      });
+
+      // Find gaps: periods where nothing is executing (no sync activity)
+      // but there might be async waits happening
+      const gaps = [];
+      let gapStart = null;
+
+      for (let i = 0; i < numBuckets; i++) {
+        const isIdle = activityBuckets[i] === 0;
+        if (isIdle && gapStart === null) {
+          gapStart = i;
+        } else if (!isIdle && gapStart !== null) {
+          const gapEnd = i;
+          const gapDurationNs = (gapEnd - gapStart) * bucketSize;
+          if (gapDurationNs > duration * 0.005) {  // Only gaps > 0.5% of total
+            gaps.push({
+              startBucket: gapStart,
+              endBucket: gapEnd,
+              startNs: gapStart * bucketSize,
+              endNs: gapEnd * bucketSize,
+              durationNs: gapDurationNs,
+              durationMs: gapDurationNs / 1e6,
+              asyncWaiters: Math.max(...asyncBuckets.slice(gapStart, gapEnd + 1))
+            });
+          }
+          gapStart = null;
+        }
+      }
+
+      // Handle gap at end
+      if (gapStart !== null) {
+        const gapEnd = numBuckets;
+        const gapDurationNs = (gapEnd - gapStart) * bucketSize;
+        if (gapDurationNs > duration * 0.005) {
+          gaps.push({
+            startBucket: gapStart,
+            endBucket: gapEnd,
+            startNs: gapStart * bucketSize,
+            endNs: gapEnd * bucketSize,
+            durationNs: gapDurationNs,
+            durationMs: gapDurationNs / 1e6,
+            asyncWaiters: Math.max(...asyncBuckets.slice(gapStart, gapEnd))
+          });
+        }
+      }
+
+      // Sort gaps by duration
+      gaps.sort((a, b) => b.durationNs - a.durationNs);
+
+      const totalGapTime = gaps.reduce((s, g) => s + g.durationNs, 0);
+      const gapPercent = (totalGapTime / duration * 100).toFixed(1);
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Gap Analysis - Idle Periods (No Sync Execution)', width / 2, 25);
+
+      // Draw axes
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, height - padding.bottom);
+      ctx.lineTo(width - padding.right, height - padding.bottom);
+      ctx.stroke();
+
+      // Draw activity timeline
+      const maxActivity = Math.max(...activityBuckets, 1);
+      const barWidth = chartWidth / numBuckets;
+
+      // Background showing async waiters (light)
+      for (let i = 0; i < numBuckets; i++) {
+        if (asyncBuckets[i] > 0) {
+          const barHeight = (asyncBuckets[i] / Math.max(...asyncBuckets, 1)) * chartHeight * 0.3;
+          ctx.fillStyle = accessibilityMode ? 'rgba(126, 200, 227, 0.35)' : 'rgba(126, 200, 227, 0.2)';
+          ctx.fillRect(padding.left + i * barWidth, height - padding.bottom - barHeight, barWidth, barHeight);
+        }
+      }
+
+      // Draw sync activity bars
+      for (let i = 0; i < numBuckets; i++) {
+        if (activityBuckets[i] > 0) {
+          const barHeight = (activityBuckets[i] / maxActivity) * chartHeight * 0.6;
+          const x = padding.left + i * barWidth;
+          const y = height - padding.bottom - barHeight;
+          ctx.fillStyle = '#50c878';
+          ctx.globalAlpha = accessibilityMode ? 1.0 : 0.8;
+          ctx.fillRect(x, y, barWidth, barHeight);
+        }
+      }
+      ctx.globalAlpha = 1;
+
+      // In accessibility mode, draw a white border around the sync activity region
+      if (accessibilityMode) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, height - padding.bottom);
+        for (let i = 0; i < numBuckets; i++) {
+          const barHeight = (activityBuckets[i] / maxActivity) * chartHeight * 0.6;
+          ctx.lineTo(padding.left + i * barWidth, height - padding.bottom - barHeight);
+          ctx.lineTo(padding.left + (i + 1) * barWidth, height - padding.bottom - barHeight);
+        }
+        ctx.stroke();
+      }
+
+      // Highlight gaps with red overlay
+      gaps.forEach((gap, idx) => {
+        const x = padding.left + gap.startBucket * barWidth;
+        const gapWidth = (gap.endBucket - gap.startBucket) * barWidth;
+
+        // Red gap highlight - higher opacity in accessibility mode
+        const baseOpacity = idx < 3 ? 0.4 : 0.2;
+        const opacity = accessibilityMode ? baseOpacity + 0.15 : baseOpacity;
+        ctx.fillStyle = `rgba(255, 100, 50, ${opacity})`;
+        ctx.fillRect(x, padding.top, gapWidth, chartHeight);
+
+        // Gap border - thicker in accessibility mode
+        ctx.strokeStyle = '#ff6432';
+        ctx.lineWidth = accessibilityMode ? (idx < 3 ? 3 : 2) : (idx < 3 ? 2 : 1);
+        ctx.strokeRect(x, padding.top, gapWidth, chartHeight);
+
+        // Label for significant gaps
+        if (gap.durationMs >= 0.1 && gapWidth > 30) {
+          ctx.fillStyle = '#ff6432';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          const label = gap.durationMs >= 1 ? `${gap.durationMs.toFixed(1)}ms` : `${(gap.durationMs * 1000).toFixed(0)}µs`;
+          ctx.fillText(label, x + gapWidth / 2, padding.top + 15);
+
+          if (gap.asyncWaiters > 0 && gapWidth > 50) {
+            ctx.font = '9px sans-serif';
+            ctx.fillStyle = '#7ec8e3';
+            ctx.fillText(`${gap.asyncWaiters} waiting`, x + gapWidth / 2, padding.top + 28);
+          }
+        }
+      });
+
+      // X-axis labels
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      for (let i = 0; i <= 5; i++) {
+        const x = padding.left + (i / 5) * chartWidth;
+        const time = (i / 5) * duration / 1e6;
+        ctx.fillText(time.toFixed(1) + 'ms', x, height - padding.bottom + 15);
+      }
+
+      // X-axis title
+      ctx.fillText('Time', width / 2, height - padding.bottom + 35);
+
+      // Y-axis title
+      ctx.save();
+      ctx.translate(20, height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Activity Level', 0, 0);
+      ctx.restore();
+
+      // Legend
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'left';
+
+      // Sync execution legend
+      ctx.fillStyle = '#50c878';
+      ctx.fillRect(padding.left, height - 25, 12, 12);
+      if (accessibilityMode) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(padding.left, height - 25, 12, 12);
+      }
+      ctx.fillStyle = '#888';
+      ctx.fillText('Sync execution', padding.left + 16, height - 16);
+
+      // Async waiting legend
+      ctx.fillStyle = accessibilityMode ? 'rgba(126, 200, 227, 0.5)' : 'rgba(126, 200, 227, 0.5)';
+      ctx.fillRect(padding.left + 110, height - 25, 12, 12);
+      ctx.fillStyle = '#888';
+      ctx.fillText('Async waiting', padding.left + 126, height - 16);
+
+      // Idle gaps legend
+      ctx.fillStyle = accessibilityMode ? 'rgba(255, 100, 50, 0.55)' : 'rgba(255, 100, 50, 0.5)';
+      ctx.fillRect(padding.left + 220, height - 25, 12, 12);
+      ctx.strokeStyle = '#ff6432';
+      ctx.lineWidth = accessibilityMode ? 2 : 1;
+      ctx.strokeRect(padding.left + 220, height - 25, 12, 12);
+      ctx.fillStyle = '#888';
+      ctx.fillText('Idle gaps', padding.left + 236, height - 16);
+
+      // Stats overlay
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(width - 200, padding.top, 190, 100);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(width - 200, padding.top, 190, 100);
+
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Gap Statistics', width - 190, padding.top + 15);
+
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(`Gaps found: ${gaps.length}`, width - 190, padding.top + 32);
+      ctx.fillText(`Total idle: ${(totalGapTime / 1e6).toFixed(2)}ms (${gapPercent}%)`, width - 190, padding.top + 46);
+
+      if (gaps.length > 0) {
+        ctx.fillStyle = '#ff6432';
+        ctx.fillText(`Largest: ${gaps[0].durationMs.toFixed(2)}ms`, width - 190, padding.top + 60);
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(`  at ${(gaps[0].startNs / 1e6).toFixed(2)}ms`, width - 190, padding.top + 74);
+        if (gaps[0].asyncWaiters > 0) {
+          ctx.fillStyle = '#7ec8e3';
+          ctx.fillText(`  ${gaps[0].asyncWaiters} ops waiting`, width - 190, padding.top + 88);
+        }
+      }
+    }
+
+    // ==================== REPLAY VIEW ====================
+    function renderReplay() {
+      // Stop any existing animation
+      if (replayAnimationId) {
+        cancelAnimationFrame(replayAnimationId);
+        replayAnimationId = null;
+      }
+      replayPlaying = false;
+      replayTime = 0;
+      renderReplayFrame();
+    }
+
+    function startReplayAnimation() {
+      if (!traceData || replayPlaying) return;
+      replayPlaying = true;
+      let lastFrameTime = performance.now();
+
+      function animate(now) {
+        if (!replayPlaying || currentView !== 'replay') {
+          replayPlaying = false;
+          return;
+        }
+
+        const delta = (now - lastFrameTime) * replaySpeed;
+        lastFrameTime = now;
+
+        // Convert real-time delta to trace time (speed up playback)
+        const traceTimePerMs = traceData.requestDurationNs / 3000;  // 3 second playback
+        replayTime += delta * traceTimePerMs;
+
+        if (replayTime >= traceData.requestDurationNs) {
+          replayTime = traceData.requestDurationNs;
+          replayPlaying = false;
+        }
+
+        renderReplayFrame();
+
+        if (replayPlaying) {
+          replayAnimationId = requestAnimationFrame(animate);
+        }
+      }
+
+      replayAnimationId = requestAnimationFrame(animate);
+    }
+
+    function stopReplayAnimation() {
+      replayPlaying = false;
+      if (replayAnimationId) {
+        cancelAnimationFrame(replayAnimationId);
+        replayAnimationId = null;
+      }
+    }
+
+    function renderReplayFrame() {
+      const container = document.getElementById('replay-view');
+      const canvas = document.getElementById('replay-canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 80, right: 30, bottom: 50, left: 30 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, width, height);
+
+      if (!traceData) return;
+
+      const duration = traceData.requestDurationNs;
+      const currentTimeMs = replayTime / 1e6;
+      const durationMs = duration / 1e6;
+      const progress = replayTime / duration;
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Request Replay - Watch Async Operations Unfold', width / 2, 25);
+
+      // Draw playback controls area
+      const controlsY = 45;
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Time: ${currentTimeMs.toFixed(2)}ms / ${durationMs.toFixed(2)}ms`, width / 2, controlsY);
+
+      // Draw control buttons
+      const btnY = controlsY + 8;
+      const btnWidth = 60;
+      const btnHeight = 22;
+      const btnSpacing = 10;
+      const totalBtnWidth = btnWidth * 4 + btnSpacing * 3;
+      let btnX = (width - totalBtnWidth) / 2;
+
+      // Play/Pause button
+      ctx.fillStyle = replayPlaying ? '#ff6432' : '#50c878';
+      ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText(replayPlaying ? '⏸ Pause' : '▶ Play', btnX + btnWidth/2, btnY + 15);
+      btnX += btnWidth + btnSpacing;
+
+      // Reset button
+      ctx.fillStyle = '#0f3460';
+      ctx.strokeStyle = '#e94560';
+      ctx.lineWidth = 1;
+      ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
+      ctx.strokeRect(btnX, btnY, btnWidth, btnHeight);
+      ctx.fillStyle = '#e94560';
+      ctx.fillText('⏮ Reset', btnX + btnWidth/2, btnY + 15);
+      btnX += btnWidth + btnSpacing;
+
+      // Speed buttons
+      const speeds = [0.5, 1, 2];
+      speeds.forEach(speed => {
+        ctx.fillStyle = replaySpeed === speed ? '#e94560' : '#0f3460';
+        ctx.fillRect(btnX, btnY, 40, btnHeight);
+        ctx.strokeStyle = '#e94560';
+        ctx.strokeRect(btnX, btnY, 40, btnHeight);
+        ctx.fillStyle = replaySpeed === speed ? 'white' : '#e94560';
+        ctx.fillText(`${speed}x`, btnX + 20, btnY + 15);
+        btnX += 40 + 5;
+      });
+
+      // Progress bar
+      const progressY = btnY + btnHeight + 10;
+      ctx.fillStyle = '#0f3460';
+      ctx.fillRect(padding.left, progressY, chartWidth, 8);
+      ctx.fillStyle = '#e94560';
+      ctx.fillRect(padding.left, progressY, chartWidth * progress, 8);
+
+      // Playhead
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.arc(padding.left + chartWidth * progress, progressY + 4, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw resources that exist at current time
+      const visibleResources = traceData.resources.filter(r => r.createdAt <= replayTime);
+      const activeResources = visibleResources.filter(r => {
+        const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                       (r.destroyedAt > 0 ? r.destroyedAt : duration);
+        return endTime >= replayTime;
+      });
+
+      // Layout resources in a grid
+      const resourceAreaTop = progressY + 25;
+      const resourceAreaHeight = height - resourceAreaTop - padding.bottom;
+      const maxCols = Math.floor(chartWidth / 100);
+      const maxRows = Math.floor(resourceAreaHeight / 80);
+      const cellWidth = chartWidth / Math.max(maxCols, 1);
+      const cellHeight = resourceAreaHeight / Math.max(maxRows, 1);
+
+      // Sort by creation time for stable layout
+      const sortedVisible = [...visibleResources].sort((a, b) => a.createdAt - b.createdAt);
+
+      // Build position map for dependency lines
+      const positionMap = new Map();
+      sortedVisible.forEach((r, idx) => {
+        if (idx >= maxCols * maxRows) return;
+        const col = idx % maxCols;
+        const row = Math.floor(idx / maxCols);
+        const x = padding.left + col * cellWidth + cellWidth / 2;
+        const y = resourceAreaTop + row * cellHeight + cellHeight / 2;
+        positionMap.set(r.asyncId, { x, y, resource: r });
+      });
+
+      // Draw dependency lines first (behind circles)
+      ctx.lineWidth = 1.5;
+      sortedVisible.forEach((r, idx) => {
+        if (idx >= maxCols * maxRows) return;
+        const childPos = positionMap.get(r.asyncId);
+        const parentPos = positionMap.get(r.triggerId);
+        if (!childPos || !parentPos || r.triggerId === 0) return;
+
+        const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                       (r.destroyedAt > 0 ? r.destroyedAt : duration);
+        const isActive = endTime >= replayTime;
+        const parentEndTime = parentPos.resource.callbackEndedAt > 0 ? parentPos.resource.callbackEndedAt :
+                             (parentPos.resource.destroyedAt > 0 ? parentPos.resource.destroyedAt : duration);
+        const parentActive = parentEndTime >= replayTime;
+
+        // Draw line from parent to child
+        const dx = childPos.x - parentPos.x;
+        const dy = childPos.y - parentPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1) return;
+
+        const radius = 28;
+        const startX = parentPos.x + (dx / dist) * radius;
+        const startY = parentPos.y + (dy / dist) * radius;
+        const endX = childPos.x - (dx / dist) * radius;
+        const endY = childPos.y - (dy / dist) * radius;
+
+        // Color and style based on state
+        const parentColor = TYPE_COLORS[parentPos.resource.type] || '#808080';
+        if (isActive && parentActive) {
+          ctx.strokeStyle = parentColor;
+          ctx.globalAlpha = 0.6;
+        } else {
+          ctx.strokeStyle = '#444';
+          ctx.globalAlpha = 0.3;
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+
+        // Arrowhead
+        const arrowSize = 6;
+        const angle = Math.atan2(endY - startY, endX - startX);
+        ctx.beginPath();
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - arrowSize * Math.cos(angle - 0.4), endY - arrowSize * Math.sin(angle - 0.4));
+        ctx.lineTo(endX - arrowSize * Math.cos(angle + 0.4), endY - arrowSize * Math.sin(angle + 0.4));
+        ctx.closePath();
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+
+      // Draw resource circles
+      const radius = 28;
+      sortedVisible.forEach((r, idx) => {
+        if (idx >= maxCols * maxRows) return;
+
+        const pos = positionMap.get(r.asyncId);
+        if (!pos) return;
+        const { x, y } = pos;
+
+        const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                       (r.destroyedAt > 0 ? r.destroyedAt : duration);
+        const isActive = endTime >= replayTime;
+        const isExecuting = r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime &&
+                           r.callbackEndedAt > 0 && r.callbackEndedAt >= replayTime;
+        const isWaiting = r.createdAt <= replayTime &&
+                         (r.callbackStartedAt === 0 || r.callbackStartedAt > replayTime);
+
+        const color = TYPE_COLORS[r.type] || '#808080';
+
+        // Pulse effect for newly created
+        const age = replayTime - r.createdAt;
+        const isNew = age < duration * 0.02;  // 2% of duration
+
+        if (isNew && isActive) {
+          ctx.beginPath();
+          ctx.arc(x, y, radius + 12 * (1 - age / (duration * 0.02)), 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.3 * (1 - age / (duration * 0.02));
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+
+        // Draw resource circle
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+
+        if (!isActive) {
+          // Completed - faded
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.3;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        } else if (isExecuting) {
+          // Currently executing - bright with glow
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 20;
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          // Spinning indicator
+          const spinAngle = (replayTime / 1e6) * 10;
+          ctx.strokeStyle = 'white';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(x, y, radius - 6, spinAngle, spinAngle + Math.PI);
+          ctx.stroke();
+        } else if (isWaiting) {
+          // Waiting - pulsing outline
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.5;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else {
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.7;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+
+        // Label
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const label = r.type.replace('js-', '').substring(0, 6);
+        ctx.fillText(label, x, y);
+      });
+
+      // Stats overlay
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(width - 160, resourceAreaTop, 150, 80);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(width - 160, resourceAreaTop, 150, 80);
+
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Live Stats', width - 150, resourceAreaTop + 15);
+
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(`Created: ${visibleResources.length}`, width - 150, resourceAreaTop + 32);
+      ctx.fillText(`Active: ${activeResources.length}`, width - 150, resourceAreaTop + 46);
+
+      const executing = activeResources.filter(r =>
+        r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime &&
+        r.callbackEndedAt > 0 && r.callbackEndedAt >= replayTime
+      ).length;
+      ctx.fillStyle = executing > 0 ? '#50c878' : '#888';
+      ctx.fillText(`Executing: ${executing}`, width - 150, resourceAreaTop + 60);
+
+      const waiting = activeResources.filter(r =>
+        r.callbackStartedAt === 0 || r.callbackStartedAt > replayTime
+      ).length;
+      ctx.fillStyle = waiting > 0 ? '#ffd700' : '#888';
+      ctx.fillText(`Waiting: ${waiting}`, width - 150, resourceAreaTop + 74);
+
+      // Handle click events for controls
+      canvas.onclick = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+
+        // Check play/pause button
+        const playBtnX = (width - totalBtnWidth) / 2;
+        if (clickX >= playBtnX && clickX <= playBtnX + btnWidth &&
+            clickY >= btnY && clickY <= btnY + btnHeight) {
+          if (replayPlaying) {
+            stopReplayAnimation();
+          } else {
+            if (replayTime >= duration) replayTime = 0;
+            startReplayAnimation();
+          }
+          renderReplayFrame();
+          return;
+        }
+
+        // Check reset button
+        const resetBtnX = playBtnX + btnWidth + btnSpacing;
+        if (clickX >= resetBtnX && clickX <= resetBtnX + btnWidth &&
+            clickY >= btnY && clickY <= btnY + btnHeight) {
+          stopReplayAnimation();
+          replayTime = 0;
+          renderReplayFrame();
+          return;
+        }
+
+        // Check speed buttons
+        let speedBtnX = resetBtnX + btnWidth + btnSpacing;
+        speeds.forEach(speed => {
+          if (clickX >= speedBtnX && clickX <= speedBtnX + 40 &&
+              clickY >= btnY && clickY <= btnY + btnHeight) {
+            replaySpeed = speed;
+            renderReplayFrame();
+          }
+          speedBtnX += 45;
+        });
+
+        // Check progress bar click
+        if (clickY >= progressY && clickY <= progressY + 8 &&
+            clickX >= padding.left && clickX <= padding.left + chartWidth) {
+          const clickProgress = (clickX - padding.left) / chartWidth;
+          replayTime = clickProgress * duration;
+          renderReplayFrame();
+        }
+      };
     }
 
     // ==================== SELECTION ====================
