@@ -192,9 +192,35 @@ void SqlStorage::createFunction(jsg::Lock& js,
       }
     }
 
-    // Call the JS function with the arguments
+    // Call the JS function with the arguments, catching any exceptions
     jsg::Arguments<jsg::Value> jsgArgs(jsArgsBuilder.finish());
-    auto result = jsFuncPtr->callback(js, kj::mv(jsgArgs));
+
+    // Use v8::TryCatch to capture JavaScript exceptions with their message
+    v8::TryCatch tryCatch(js.v8Isolate);
+    jsg::Value result(js.v8Isolate, v8::Undefined(js.v8Isolate));
+    try {
+      result = jsFuncPtr->callback(js, kj::mv(jsgArgs));
+    } catch (jsg::JsExceptionThrown&) {
+      // The JS exception is in the TryCatch - extract the message and rethrow as kj::Exception
+      if (tryCatch.HasCaught()) {
+        v8::Local<v8::Value> exception = tryCatch.Exception();
+        v8::Local<v8::String> message;
+        if (exception->IsObject()) {
+          auto obj = exception.As<v8::Object>();
+          auto context = js.v8Context();
+          auto msgValue = obj->Get(context, jsg::v8StrIntern(js.v8Isolate, "message"));
+          if (!msgValue.IsEmpty() && msgValue.ToLocalChecked()->IsString()) {
+            message = msgValue.ToLocalChecked().As<v8::String>();
+          }
+        }
+        if (message.IsEmpty()) {
+          message = exception->ToString(js.v8Context()).ToLocalChecked();
+        }
+        v8::String::Utf8Value utf8(js.v8Isolate, message);
+        kj::throwFatalException(KJ_EXCEPTION(FAILED, kj::str(*utf8)));
+      }
+      throw;  // Re-throw if we couldn't extract the message
+    }
 
     // Convert JS result back to SQLite UdfResultValue (owning)
     auto handle = result.getHandle(js);
