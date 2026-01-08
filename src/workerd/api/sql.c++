@@ -141,6 +141,11 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
 void SqlStorage::createFunction(jsg::Lock& js,
     kj::String name,
     jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)> callback) {
+  // Validate function name
+  JSG_REQUIRE(name.size() > 0, TypeError, "Function name cannot be empty.");
+  JSG_REQUIRE(name.size() <= 255, TypeError, "Function name is too long (max 255 bytes).");
+
+  // TODO: Implement UDF registration
   JSG_FAIL_REQUIRE(Error, "createFunction is not yet implemented");
 }
 
