@@ -1418,6 +1418,28 @@ const userB = await fetch('/user/123');</pre>
         </div>
 
         <div class="guide-section">
+          <h3>Pattern Detection &amp; Thresholds</h3>
+          <p>Press <code>T</code> or enable <strong>🔍 Patterns</strong> to detect anti-patterns based on "Broken Promises" concepts.</p>
+          <p><strong>Severity Levels:</strong></p>
+          <ul>
+            <li><span style="color: #ff00ff;">🔴 High</span> - Significant impact: sequential-await, sync-flood, unbatched-ops</li>
+            <li><span style="color: #cc66ff;">🟡 Medium</span> - Worth investigating: waterfall-fetch, promise-flood, callback-storm, fetch-flood</li>
+            <li><span style="color: #9966cc;">🟢 Low</span> - Minor issues: unresolved-promise, redundant-timers, hot-callback</li>
+          </ul>
+          <p><strong>Configurable Thresholds</strong> (in Analysis dropdown):</p>
+          <table class="guide-table">
+            <tr><th>Threshold</th><th>Default</th><th>Detects</th></tr>
+            <tr><td>Sync block</td><td>50ms</td><td>Event loop blocking operations</td></tr>
+            <tr><td>Long gap</td><td>500ms</td><td>Operations waiting too long</td></tr>
+            <tr><td>Promise flood</td><td>20</td><td>Too many promises created in 1ms</td></tr>
+            <tr><td>Callback storm</td><td>10</td><td>Too many callbacks in 1ms</td></tr>
+            <tr><td>Unbatched ops</td><td>3</td><td>KV/DO ops that could be batched</td></tr>
+            <tr><td>Fetch concurrency</td><td>6</td><td>Parallel fetches (connection risk)</td></tr>
+          </table>
+          <p class="guide-tip">💡 Adjust thresholds based on your workload - lower values detect more issues, higher values reduce noise.</p>
+        </div>
+
+        <div class="guide-section">
           <h3>Recommended Workflow</h3>
           <ol>
             <li><strong>Overview</strong> → Start with Waterfall (1) to see timeline</li>
