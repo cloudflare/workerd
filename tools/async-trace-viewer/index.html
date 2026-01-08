@@ -124,8 +124,20 @@
     .resource-row:hover { background: rgba(233, 69, 96, 0.1); }
     .resource-row.selected { background: rgba(233, 69, 96, 0.2); }
     .resource-row.highlighted { background: rgba(126, 200, 227, 0.15); }
+    .resource-row.critical-path {
+      background: rgba(255, 100, 50, 0.25);
+      border-left: 3px solid #ff6432;
+    }
+    .resource-row.critical-path .resource-bar {
+      box-shadow: 0 0 8px rgba(255, 100, 50, 0.6);
+    }
     .resource-row.internal { opacity: 0.4; }
     .resource-row.internal:hover { opacity: 0.7; }
+
+    #critical-path-btn.active {
+      background: #ff6432 !important;
+      border-color: #ff6432 !important;
+    }
 
     .resource-label {
       width: 180px;
@@ -552,6 +564,7 @@
         <option value="user">User Only</option>
         <option value="typed">Typed Only</option>
       </select>
+      <button id="critical-path-btn" title="Highlight the critical path">🔥 Critical Path</button>
       <button id="tutorial-btn" style="background: #e94560;">❓ Guide</button>
       <button id="ai-analyze-btn" style="background: #50c878;">🤖 Analyze</button>
     </div>
@@ -606,6 +619,11 @@
       <h3>Time Breakdown</h3>
       <canvas id="time-chart" height="24" style="width: 100%; border-radius: 4px;"></canvas>
       <div id="time-breakdown" style="font-size: 0.7rem; margin-top: 0.25rem;"></div>
+
+      <h3>Critical Path</h3>
+      <div id="critical-path-info" style="font-size: 0.7rem;">
+        <div class="detail-item" style="color: #666;">Click 🔥 to show</div>
+      </div>
 
       <h3>Legend</h3>
       <div class="legend" id="legend"></div>
@@ -837,6 +855,9 @@ const userB = await fetch('/user/123');</pre>
     let traceData = null;
     let selectedResource = null;
     let highlightedChain = new Set();
+    let criticalPathSet = new Set();  // Resources on the critical path
+    let showCriticalPath = false;
+    let criticalPathInfo = null;  // { path: [], totalLatency: 0 }
     let currentView = 'waterfall';
     let bubbles = [];
     let cachedBubbleLayout = null;  // Cache layout to prevent re-rendering on selection
@@ -877,6 +898,7 @@ const userB = await fetch('/user/123');</pre>
       });
       document.getElementById('nav-parent').addEventListener('click', navigateToParent);
       document.getElementById('nav-children').addEventListener('click', navigateToChildren);
+      document.getElementById('critical-path-btn').addEventListener('click', toggleCriticalPath);
 
       // Tutorial modal
       document.getElementById('tutorial-btn').addEventListener('click', () => {
@@ -1093,7 +1115,145 @@ const userB = await fetch('/user/123');</pre>
 
       updateStats();
       updateLegend();
+      computeCriticalPath();
+      updateCriticalPathInfo();
       render();
+    }
+
+    // Compute the critical path - the chain of resources that determines minimum latency.
+    // The critical path is the longest sequential chain through the dependency graph,
+    // where "length" is measured by cumulative time (creation to callback end).
+    function computeCriticalPath() {
+      if (!traceData) return;
+
+      criticalPathSet.clear();
+      criticalPathInfo = null;
+
+      // For each resource, compute the longest path FROM ROOT ending at that resource.
+      // pathLength[id] = { length: cumulative time, predecessor: id that led here }
+      const pathInfo = new Map();
+
+      // Sort by creation time to process in roughly topological order
+      const sorted = [...traceData.resources].sort((a, b) => a.createdAt - b.createdAt);
+
+      sorted.forEach(r => {
+        // When does this resource's work complete?
+        const myEnd = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                      (r.destroyedAt > 0 ? r.destroyedAt : traceData.requestDurationNs);
+
+        // The "cost" of this resource (its contribution to latency)
+        const myCost = myEnd - r.createdAt;
+
+        // Find the best predecessor - the one that gives longest path to here
+        let bestPredecessor = null;
+        let bestPathLength = myCost;  // If no predecessor, path length is just my cost
+
+        if (r.triggerId !== 0 && pathInfo.has(r.triggerId)) {
+          const parentInfo = pathInfo.get(r.triggerId);
+          const pathThroughParent = parentInfo.length + myCost;
+          if (pathThroughParent > bestPathLength) {
+            bestPathLength = pathThroughParent;
+            bestPredecessor = r.triggerId;
+          }
+        }
+
+        // For root, or orphans, path length starts at myCost
+        pathInfo.set(r.asyncId, {
+          length: bestPathLength,
+          predecessor: bestPredecessor,
+          endTime: myEnd
+        });
+      });
+
+      // Find the resource with the longest path (this is the end of the critical path)
+      let maxPathLength = 0;
+      let lastResource = null;
+
+      pathInfo.forEach((info, asyncId) => {
+        if (info.length > maxPathLength) {
+          maxPathLength = info.length;
+          lastResource = traceData.resourceMap.get(asyncId);
+        }
+      });
+
+      if (!lastResource) return;
+
+      // Trace back to build the critical path
+      const path = [];
+      let current = lastResource;
+      while (current) {
+        path.unshift(current);
+        criticalPathSet.add(current.asyncId);
+        const info = pathInfo.get(current.asyncId);
+        if (!info || info.predecessor === null) break;
+        current = traceData.resourceMap.get(info.predecessor);
+      }
+
+      // Calculate timing breakdown on critical path
+      let totalAsyncWait = 0;
+      let totalSyncTime = 0;
+      path.forEach(r => {
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          totalAsyncWait += r.callbackStartedAt - r.createdAt;
+        }
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          totalSyncTime += r.callbackEndedAt - r.callbackStartedAt;
+        }
+      });
+
+      criticalPathInfo = {
+        path,
+        totalAsyncWait,
+        totalSyncTime,
+        totalTime: maxPathLength
+      };
+
+      console.log(`Critical path: ${path.length} resources, ` +
+        `total=${(maxPathLength/1e6).toFixed(2)}ms, ` +
+        `async=${(totalAsyncWait/1e6).toFixed(2)}ms, ` +
+        `sync=${(totalSyncTime/1e6).toFixed(2)}ms`);
+    }
+
+    function toggleCriticalPath() {
+      showCriticalPath = !showCriticalPath;
+      const btn = document.getElementById('critical-path-btn');
+      btn.classList.toggle('active', showCriticalPath);
+      updateCriticalPathInfo();
+      render();
+    }
+
+    function updateCriticalPathInfo() {
+      const container = document.getElementById('critical-path-info');
+
+      if (!criticalPathInfo || criticalPathInfo.path.length === 0) {
+        container.innerHTML = '<div class="detail-item" style="color: #666;">No path computed</div>';
+        return;
+      }
+
+      const info = criticalPathInfo;
+      const pathDesc = info.path.map(r => {
+        const typeName = r.type.replace('js-', '').substring(0, 6);
+        return `<span style="color: ${TYPE_COLORS[r.type] || '#808080'};">${typeName}</span>`;
+      }).join(' → ');
+
+      container.innerHTML = `
+        <div class="detail-item">
+          <strong style="color: #ff6432;">🔥 ${info.path.length} resources</strong>
+        </div>
+        <div class="detail-item">
+          <strong>Async wait:</strong> ${(info.totalAsyncWait / 1e6).toFixed(2)}ms
+        </div>
+        <div class="detail-item">
+          <strong>Sync time:</strong> ${(info.totalSyncTime / 1e6).toFixed(2)}ms
+        </div>
+        <div class="detail-item" style="word-break: break-all; line-height: 1.4;">
+          ${pathDesc}
+        </div>
+        <div class="detail-item" style="color: #888; font-size: 0.65rem;">
+          This is the minimum latency path.<br>
+          Only optimizing this path reduces total time.
+        </div>
+      `;
     }
 
     function updateStats() {
@@ -1372,6 +1532,7 @@ const userB = await fetch('/user/123');</pre>
         row.className = 'resource-row';
         if (selectedResource && selectedResource.asyncId === r.asyncId) row.classList.add('selected');
         if (highlightedChain.has(r.asyncId)) row.classList.add('highlighted');
+        if (showCriticalPath && criticalPathSet.has(r.asyncId)) row.classList.add('critical-path');
         if (r._classification === 'internal') row.classList.add('internal');
 
         const label = document.createElement('div');
@@ -1675,6 +1836,7 @@ const userB = await fetch('/user/123');</pre>
         const r = node.resource;
         const isHighlighted = highlightedChain.has(r.asyncId);
         const isSelected = selectedResource && r.asyncId === selectedResource.asyncId;
+        const isOnCriticalPath = showCriticalPath && criticalPathSet.has(r.asyncId);
         const isInternal = node.isInternal;
 
         // Glow effect (dimmer for internal)
@@ -1697,6 +1859,18 @@ const userB = await fetch('/user/123');</pre>
         ctx.arc(node.x, node.y, node.radius * 0.75, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
+
+        // Critical path ring (fire orange glow)
+        if (isOnCriticalPath) {
+          ctx.strokeStyle = '#ff6432';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#ff6432';
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius * 0.85, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
 
         // Selection ring
         if (isSelected) {
