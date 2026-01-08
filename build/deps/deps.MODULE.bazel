@@ -1,7 +1,7 @@
 """Bazel dependencies that were previously in WORKSPACE
 This file is included from the root MODULE.bazel"""
 
-bazel_dep(name = "ada-url", version = "3.3.0")
+bazel_dep(name = "ada-url", version = "3.4.1")
 bazel_dep(name = "brotli", version = "1.2.0")
 
 ########################################################

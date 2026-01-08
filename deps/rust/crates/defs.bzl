@@ -296,7 +296,7 @@ def aliases(
 _NORMAL_DEPENDENCIES = {
     "": {
         _COMMON_CONDITION: {
-            "ada-url": Label("@crates_vendor//:ada-url-3.3.0"),
+            "ada-url": Label("@crates_vendor//:ada-url-3.4.1"),
             "anyhow": Label("@crates_vendor//:anyhow-1.0.100"),
             "capnp": Label("@crates_vendor//:capnp-0.24.0"),
             "capnp-rpc": Label("@crates_vendor//:capnp-rpc-0.24.0"),
@@ -439,12 +439,12 @@ def crate_repositories():
     """
     maybe(
         http_archive,
-        name = "crates_vendor__ada-url-3.3.0",
-        sha256 = "f524cc76f401382457ce5b571771222be8e1f9511854f0f6ab864b5fbe4af359",
+        name = "crates_vendor__ada-url-3.4.1",
+        sha256 = "35b34e6f292116801f2e5a326013a95f295105505faf5107e07ad652e4b54528",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/ada-url/3.3.0/download"],
-        strip_prefix = "ada-url-3.3.0",
-        build_file = Label("//deps/rust/crates:BUILD.ada-url-3.3.0.bazel"),
+        urls = ["https://static.crates.io/crates/ada-url/3.4.1/download"],
+        strip_prefix = "ada-url-3.4.1",
+        build_file = Label("//deps/rust/crates:BUILD.ada-url-3.4.1.bazel"),
     )
 
     maybe(
@@ -2877,7 +2877,7 @@ def crate_repositories():
     )
 
     return [
-        struct(repo = "crates_vendor__ada-url-3.3.0", is_dev_dep = False),
+        struct(repo = "crates_vendor__ada-url-3.4.1", is_dev_dep = False),
         struct(repo = "crates_vendor__anyhow-1.0.100", is_dev_dep = False),
         struct(repo = "crates_vendor__async-trait-0.1.89", is_dev_dep = False),
         struct(repo = "crates_vendor__capnp-0.24.0", is_dev_dep = False),
