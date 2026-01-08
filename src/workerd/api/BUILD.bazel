@@ -418,6 +418,7 @@ wd_cc_library(
     srcs = ["util.c++"],
     hdrs = ["util.h"],
     implementation_deps = [
+        "//src/workerd/util:exception",
         "//src/workerd/util:mimetype",
         "//src/workerd/util:strings",
         "@simdutf",

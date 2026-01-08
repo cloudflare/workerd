@@ -6,6 +6,7 @@
 
 #include "simdutf.h"
 
+#include <workerd/util/exception.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/strings.h>
 
@@ -69,10 +70,10 @@ namespace {
 
 template <typename Func>
 auto translateTeeErrors(Func&& f) -> decltype(kj::fwd<Func>(f)()) {
-  try {
+  KJ_TRY {
     co_return co_await f();
-  } catch (...) {
-    auto exception = kj::getCaughtExceptionAsKj();
+  }
+  KJ_CATCH(kj::Exception & exception) {
     KJ_IF_SOME(e,
         translateKjException(exception,
             {

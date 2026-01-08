@@ -42,17 +42,18 @@ MessagePort::MessagePort()
 }
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
-  js.tryCatch([&] {
+  JSG_TRY_CATCH(getMessageException) try {
     auto message = js.alloc<MessageEvent>(js, kj::str("message"), value, kj::String(), JSG_THIS);
     dispatchEventImpl(js, kj::mv(message));
-  }, [&](jsg::Value exception) {
+  } catch (...) {
     // There was an error dispatching the message event.
     // We will dispatch a messageerror event instead.
+    jsg::Value exception = getMessageException();
     auto message = js.alloc<MessageEvent>(
         js, kj::str("message"), jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS);
     dispatchEventImpl(js, kj::mv(message));
     // Now, if this dispatchEventImpl throws, we just blow up. Don't try to catch it.
-  });
+  }
 }
 
 // Deliver the message to this port, buffering if necessary if the port

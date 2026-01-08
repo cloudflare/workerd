@@ -16,9 +16,12 @@ std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatt
         flags | static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
   }
 
-  return js.tryCatch([&]() -> std::optional<regex_type> {
+  JSG_TRY {
     return jsg::JsRef(js, js.regexp(kj::StringPtr(pattern.data(), pattern.size()), flags));
-  }, [&](auto reason) -> std::optional<regex_type> { return std::nullopt; });
+  }
+  catch (...) {
+    return std::nullopt;
+  }
 }
 
 bool URLPattern::URLPatternRegexEngine::regex_match(

@@ -13,16 +13,17 @@ namespace workerd::api {
 namespace {
 jsg::JsRef<jsg::JsRegExp> compileRegex(
     jsg::Lock& js, const jsg::UrlPattern::Component& component, bool ignoreCase) {
-  return js.tryCatch([&] {
+  JSG_TRY {
     jsg::Lock::RegExpFlags flags = jsg::Lock::RegExpFlags::kUNICODE;
     if (ignoreCase) {
       flags = static_cast<jsg::Lock::RegExpFlags>(
           flags | static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
     }
     return jsg::JsRef<jsg::JsRegExp>(js, js.regexp(component.getRegex(), flags));
-  }, [&](auto reason) -> jsg::JsRef<jsg::JsRegExp> {
+  }
+  catch (...) {
     JSG_FAIL_REQUIRE(TypeError, "Invalid regular expression syntax.");
-  });
+  }
 }
 
 jsg::Ref<URLPattern> create(jsg::Lock& js, jsg::UrlPattern pattern) {
