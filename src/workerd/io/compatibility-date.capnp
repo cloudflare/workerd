@@ -1320,7 +1320,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   requireReturnsDefaultExport @154 :Bool
     $compatEnableFlag("require_returns_default_export")
     $compatDisableFlag("require_returns_namespace")
-    $compatEnableDate("2026-01-22");
+    $experimental;
   # When enabled, require() will return the default export of a module if it exists.
   # If the default export does not exist, it falls back to returning the mutable
   # module namespace object. This matches the behavior that Node.js uses for
