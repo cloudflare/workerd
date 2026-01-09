@@ -924,14 +924,13 @@
     <h1>🔬 Async Trace Viewer</h1>
     <select id="view-select" class="view-select">
       <option value="waterfall">1: Waterfall</option>
-      <option value="bubble">2: Bubble</option>
-      <option value="dag">3: DAG</option>
-      <option value="parallelism">4: Parallelism</option>
-      <option value="breakdown">5: Breakdown</option>
-      <option value="latency">6: Latency</option>
-      <option value="gaps">7: Gaps</option>
-      <option value="replay">8: Replay</option>
-      <option value="heatmap">9: Heatmap</option>
+      <option value="dag">2: Graph</option>
+      <option value="parallelism">3: Parallelism</option>
+      <option value="breakdown">4: Breakdown</option>
+      <option value="latency">5: Latency</option>
+      <option value="gaps">6: Gaps</option>
+      <option value="replay">7: Replay</option>
+      <option value="heatmap">8: Heatmap</option>
     </select>
     <div class="controls">
       <label class="file-label" for="file-input">📁 Load</label>
@@ -1064,16 +1063,13 @@
       </div>
     </div>
 
-    <div class="view-container" id="bubble-view" style="overflow: hidden; padding: 0;">
-      <canvas id="bubble-canvas"></canvas>
-    </div>
-
     <div class="view-container" id="dag-view" style="overflow: hidden; padding: 0; position: relative;">
       <canvas id="dag-canvas"></canvas>
       <div class="dag-controls">
         <div class="dag-layout-toggle">
-          <button class="dag-layout-btn active" data-layout="force">Force</button>
+          <button class="dag-layout-btn active" data-layout="bubble">Bubble</button>
           <button class="dag-layout-btn" data-layout="hierarchical">Hierarchical</button>
+          <button class="dag-layout-btn" data-layout="force">Force</button>
         </div>
       </div>
     </div>
@@ -1257,34 +1253,20 @@
             • Click bar to select resource
           </div>
         </div>
-        <div class="view-help" data-view="bubble">
-          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
-            <strong>Bubble View:</strong><br>
-            • Tree flows top→down (root at top)<br>
-            • Bubble size = sync execution time<br>
-            • Edge labels = async wait latency<br>
-            • <span style="color: #ffd700;">Gold</span> labels = latency &gt;1ms
-          </div>
-          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Controls:</strong><br>
-            • Scroll to zoom<br>
-            • Shift+drag to pan<br>
-            • Click bubble to select
-          </div>
-        </div>
         <div class="view-help" data-view="dag">
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
-            <strong>DAG View:</strong><br>
+            <strong>Graph View:</strong><br>
             • Dependency graph with arrows<br>
             • <span style="color: #50c878;">Green</span> = hover path highlight<br>
             • Hover shows ancestors + descendants<br>
             • Non-path nodes dim automatically
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Layout Toggle:</strong><br>
-            • Force = physics simulation<br>
+            <strong>Layout Toggle (←/→ arrows):</strong><br>
+            • Bubble = variable size by sync time<br>
+            &nbsp;&nbsp;(shows latency labels on edges)<br>
             • Hierarchical = tree structure<br>
-            • ←/→ arrows switch layouts
+            • Force = physics simulation
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
             <strong>Controls:</strong><br>
@@ -1444,7 +1426,7 @@
           <table class="guide-table">
             <tr><th>Key</th><th>Action</th></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Navigation</td></tr>
-            <tr><td><code>1</code>-<code>9</code></td><td>Switch views (Waterfall, Bubble, DAG, Parallelism, Breakdown, Latency, Gaps, Replay, Heatmap)</td></tr>
+            <tr><td><code>1</code>-<code>8</code></td><td>Switch views (Waterfall, Graph, Parallelism, Breakdown, Latency, Gaps, Replay, Heatmap)</td></tr>
             <tr><td><code>?</code> or <code>H</code></td><td>Show this help guide</td></tr>
             <tr><td><code>O</code> or <code>L</code></td><td>Open file dialog to load trace</td></tr>
             <tr><td><code>P</code> or <code>V</code></td><td>Toggle paste JSON area</td></tr>
@@ -1457,7 +1439,7 @@
             <tr><td><code>G</code></td><td>Toggle stack trace grouping</td></tr>
             <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">View-Specific</td></tr>
-            <tr><td><code>←</code> / <code>→</code></td><td>Switch DAG layout: Force ↔ Hierarchical (DAG view only)</td></tr>
+            <tr><td><code>←</code> / <code>→</code></td><td>Switch Graph layout: Bubble → Hierarchical → Force (Graph view only)</td></tr>
             <tr><td><code>Space</code></td><td>Play/Pause (Replay view)</td></tr>
             <tr><td><code>R</code></td><td>Reset animation (Replay view)</td></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Other</td></tr>
@@ -1471,20 +1453,19 @@
           <table class="guide-table">
             <tr><th>View</th><th>Best For</th><th>What to Look For</th></tr>
             <tr><td><strong>1: Waterfall</strong></td><td>Timeline overview</td><td>Concurrency graph, stack traces (▶), type filters, hover for parent/child</td></tr>
-            <tr><td><strong>2: Bubble</strong></td><td>Causality analysis</td><td>Tall chains (sequential), wide trees (parallel), gold edges (>1ms)</td></tr>
-            <tr><td><strong>3: DAG</strong></td><td>Complex dependencies</td><td>Force/Hierarchical toggle, hover for path highlighting, ←/→ to switch</td></tr>
-            <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Orange bars = serialization, stacked height = parallelism</td></tr>
-            <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Large boxes = time hogs, solid = CPU, faded = I/O</td></tr>
-            <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
-            <tr><td><strong>7: Gaps</strong></td><td>Idle time analysis</td><td>Orange gaps = nothing running, waiters during gaps</td></tr>
-            <tr><td><strong>8: Replay</strong></td><td>Understanding flow</td><td>Watch operations unfold, dependency arrows, state changes</td></tr>
-            <tr><td><strong>9: Heatmap</strong></td><td>Activity density</td><td>Hot spots = high activity, rows = resource types, intensity = count</td></tr>
+            <tr><td><strong>2: Graph</strong></td><td>Causality & dependencies</td><td>3 layouts (Bubble/Force/Hierarchical), path highlight on hover, ←/→ to switch</td></tr>
+            <tr><td><strong>3: Parallelism</strong></td><td>Concurrency level</td><td>Orange bars = serialization, stacked height = parallelism</td></tr>
+            <tr><td><strong>4: Breakdown</strong></td><td>Time allocation</td><td>Large boxes = time hogs, solid = CPU, faded = I/O</td></tr>
+            <tr><td><strong>5: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
+            <tr><td><strong>6: Gaps</strong></td><td>Idle time analysis</td><td>Orange gaps = nothing running, waiters during gaps</td></tr>
+            <tr><td><strong>7: Replay</strong></td><td>Understanding flow</td><td>Watch operations unfold, dependency arrows, state changes</td></tr>
+            <tr><td><strong>8: Heatmap</strong></td><td>Activity density</td><td>Hot spots = high activity, rows = resource types, intensity = count</td></tr>
           </table>
         </div>
 
         <div class="guide-section">
           <h3>1. Identify Serialization Bottlenecks</h3>
-          <p><strong>Views:</strong> Bubble (2), Parallelism (4)</p>
+          <p><strong>Views:</strong> Graph (2) with Bubble layout, Parallelism (3)</p>
           <p><strong>Pattern:</strong> Long vertical chains or parallelism = 1</p>
           <div class="guide-example">
             <div class="guide-bad">
@@ -1507,7 +1488,7 @@ const c = await fetch('/api/c');</pre>
 
         <div class="guide-section">
           <h3>2. Find Async Bottlenecks (Long Waits)</h3>
-          <p><strong>Views:</strong> Bubble (2), Latency (6)</p>
+          <p><strong>Views:</strong> Graph (2) with Bubble layout, Latency (5)</p>
           <p><strong>Pattern:</strong> <span style="color: #ffd700;">Gold edge labels</span> (>1ms) or right-tail outliers in histogram</p>
           <p><strong>Questions to ask:</strong></p>
           <ul>
@@ -1520,7 +1501,7 @@ const c = await fetch('/api/c');</pre>
 
         <div class="guide-section">
           <h3>3. Analyze CPU vs I/O Balance</h3>
-          <p><strong>Views:</strong> Breakdown (5), sidebar Time Breakdown</p>
+          <p><strong>Views:</strong> Breakdown (4), sidebar Time Breakdown</p>
           <table class="guide-table">
             <tr><th>Ratio</th><th>Meaning</th><th>Action</th></tr>
             <tr><td>90% async (faded)</td><td>I/O bound (typical)</td><td>Optimize fetch/cache</td></tr>
@@ -1532,7 +1513,7 @@ const c = await fetch('/api/c');</pre>
 
         <div class="guide-section">
           <h3>4. Find Idle Gaps</h3>
-          <p><strong>View:</strong> Gaps (7)</p>
+          <p><strong>View:</strong> Gaps (6)</p>
           <p><strong>Pattern:</strong> <span style="color: #ff6432;">Orange sections</span> where no work is happening</p>
           <ul>
             <li><strong>Gaps with waiters</strong> = blocking operation, check what's pending</li>
@@ -1573,7 +1554,7 @@ const userB = await fetch('/user/123');</pre>
 
         <div class="guide-section">
           <h3>7. Find Critical Path</h3>
-          <p><strong>View:</strong> Waterfall (1) with 🔥 button, Bubble (2)</p>
+          <p><strong>View:</strong> Waterfall (1) with 🔥 button, Graph (2)</p>
           <p>The critical path determines total request time.</p>
           <ol>
             <li>Click 🔥 in toolbar to highlight critical path</li>
@@ -1687,9 +1668,6 @@ const userB = await fetch('/user/123');</pre>
     let showCriticalPath = false;
     let criticalPathInfo = null;  // { path: [], totalLatency: 0 }
     let currentView = 'waterfall';
-    let bubbles = [];
-    let cachedBubbleLayout = null;  // Cache layout to prevent re-rendering on selection
-    let canvas, ctx;
 
     // DAG view state
     let dagNodes = [];
@@ -1699,7 +1677,7 @@ const userB = await fetch('/user/123');</pre>
     let dagZoom = 1;
     let dagIsPanning = false;
     let dagLastMouseX = 0, dagLastMouseY = 0;
-    let dagLayoutMode = 'force';  // 'force' or 'hierarchical'
+    let dagLayoutMode = 'bubble';  // 'bubble', 'force', or 'hierarchical'
     let dagHoveredNode = null;  // Currently hovered node for path highlighting
     let dagPathNodes = new Set();  // Nodes in the path to/from hovered node
     let dagPathEdges = new Set();  // Edges in the path (stored as "fromId-toId")
@@ -1966,8 +1944,7 @@ const userB = await fetch('/user/123');</pre>
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      canvas = document.getElementById('bubble-canvas');
-      ctx = canvas.getContext('2d');
+      // Canvas and ctx are used by multiple views, will be set per-view as needed
 
       // Load saved settings before setting up event handlers
       loadSettings();
@@ -2009,7 +1986,6 @@ const userB = await fetch('/user/123');</pre>
       document.getElementById('demo-select').addEventListener('change', loadDemoData);
       document.getElementById('sort-mode').addEventListener('change', render);
       document.getElementById('filter-mode').addEventListener('change', () => {
-        cachedBubbleLayout = null;  // Re-layout when filter changes
         dagNodes = [];  // Re-initialize DAG when filter changes
         render();
       });
@@ -2142,17 +2118,16 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
-        // View hotkeys: 1-9 for different views
+        // View hotkeys: 1-8 for different views (Graph combines DAG layouts including Bubble)
         const viewKeys = {
           '1': 'waterfall',
-          '2': 'bubble',
-          '3': 'dag',
-          '4': 'parallelism',
-          '5': 'breakdown',
-          '6': 'latency',
-          '7': 'gaps',
-          '8': 'replay',
-          '9': 'heatmap'
+          '2': 'dag',
+          '3': 'parallelism',
+          '4': 'breakdown',
+          '5': 'latency',
+          '6': 'gaps',
+          '7': 'replay',
+          '8': 'heatmap'
         };
 
         if (viewKeys[e.key]) {
@@ -2176,7 +2151,15 @@ const userB = await fetch('/user/123');</pre>
 
         // DAG layout toggle: Left/Right arrows (only when DAG view is active)
         if (currentView === 'dag' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-          const newLayout = e.key === 'ArrowLeft' ? 'force' : 'hierarchical';
+          const layouts = ['bubble', 'hierarchical', 'force'];
+          const currentIndex = layouts.indexOf(dagLayoutMode);
+          let newIndex;
+          if (e.key === 'ArrowRight') {
+            newIndex = (currentIndex + 1) % layouts.length;
+          } else {
+            newIndex = (currentIndex - 1 + layouts.length) % layouts.length;
+          }
+          const newLayout = layouts[newIndex];
           if (newLayout !== dagLayoutMode) {
             dagLayoutMode = newLayout;
             document.querySelectorAll('.dag-layout-btn').forEach(b => {
@@ -2231,10 +2214,7 @@ const userB = await fetch('/user/123');</pre>
         if (e.shiftKey && (e.key === 'r' || e.key === 'R')) {
           if (traceData) {
             // Reset view-specific state
-            if (currentView === 'bubble') {
-              panX = 0; panY = 0; zoom = 1;
-              cachedBubbleLayout = null;
-            } else if (currentView === 'dag') {
+            if (currentView === 'dag') {
               dagPanX = 0; dagPanY = 0; dagZoom = 1;
               dagNodes = [];
             } else if (currentView === 'replay') {
@@ -2292,57 +2272,6 @@ const userB = await fetch('/user/123');</pre>
         updateAnalysisInfo();
         updateAnalysisButtonState();
         if (traceData) render();
-      });
-
-      canvas.addEventListener('mousemove', handleBubbleMouseMove);
-      canvas.addEventListener('click', handleBubbleClick);
-      canvas.addEventListener('mouseleave', () => {
-        document.getElementById('tooltip').style.display = 'none';
-        isPanning = false;
-      });
-
-      // Pan with middle mouse or shift+left drag
-      canvas.addEventListener('mousedown', (e) => {
-        if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
-          isPanning = true;
-          lastMouseX = e.clientX;
-          lastMouseY = e.clientY;
-          canvas.style.cursor = 'grabbing';
-          e.preventDefault();
-        }
-      });
-
-      canvas.addEventListener('mouseup', () => {
-        isPanning = false;
-        canvas.style.cursor = 'default';
-      });
-
-      canvas.addEventListener('mousemove', (e) => {
-        if (isPanning) {
-          panX += e.clientX - lastMouseX;
-          panY += e.clientY - lastMouseY;
-          lastMouseX = e.clientX;
-          lastMouseY = e.clientY;
-          renderBubble();
-        }
-      });
-
-      // Zoom with scroll wheel
-      canvas.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        const oldZoom = zoom;
-        const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
-        zoom = Math.max(0.25, Math.min(3, zoom * zoomDelta));
-
-        // Adjust pan to zoom toward mouse position
-        panX = mouseX - (mouseX - panX) * (zoom / oldZoom);
-        panY = mouseY - (mouseY - panY) * (zoom / oldZoom);
-
-        renderBubble();
       });
 
       // DAG layout toggle buttons
@@ -2418,10 +2347,33 @@ const userB = await fetch('/user/123');</pre>
             const tooltip = document.getElementById('tooltip');
             const patternHTML = getPatternTooltipHTML(r.asyncId);
             const criticalPathHTML = getCriticalPathTooltipHTML(r.asyncId);
+
+            // Stack trace preview
+            const st = traceData.stackTraceMap.get(r.stackTraceId);
+            const stackPreview = (st && st.frames.length > 0)
+              ? `<div style="margin-top: 0.3rem; font-family: monospace; font-size: 0.65rem; color: #7ec8e3;">
+                   ${st.frames.slice(0, 3).map(f => `<div>→ ${f}</div>`).join('')}
+                   ${st.frames.length > 3 ? `<div style="color: #666;">...${st.frames.length - 3} more</div>` : ''}
+                 </div>`
+              : '';
+
+            // Classification label
+            const classLabel = r._classification === 'typed' ? 'API' : (r._classification === 'user' ? 'User' : 'Internal');
+
+            // Timing info
+            const createdMs = (r.createdAt / 1e6).toFixed(2);
+            const callbackMs = r.callbackStartedAt > 0 ? (r.callbackStartedAt / 1e6).toFixed(2) : null;
+            const syncTimeMs = (r.callbackStartedAt > 0 && r.callbackEndedAt > 0)
+              ? ((r.callbackEndedAt - r.callbackStartedAt) / 1e6).toFixed(2)
+              : null;
+
             tooltip.innerHTML = `
-              <div class="tooltip-title">${r.type} #${r.asyncId}</div>
-              <div>Trigger: #${r.triggerId || 'root'}</div>
+              <div class="tooltip-title">${r.type} #${r.asyncId} <span style="color: #888; font-size: 0.7rem;">(${classLabel})</span></div>
+              <div>Created: ${createdMs}ms</div>
+              ${callbackMs ? `<div>Callback: ${callbackMs}ms</div>` : ''}
+              ${syncTimeMs ? `<div>Sync time: ${syncTimeMs}ms</div>` : ''}
               <div>Children: ${(traceData.childrenMap.get(r.asyncId) || []).length}</div>
+              ${stackPreview}
               ${criticalPathHTML}
               ${patternHTML}
             `;
@@ -2573,10 +2525,7 @@ const userB = await fetch('/user/123');</pre>
 
       window.addEventListener('resize', () => {
         if (traceData) {
-          if (currentView === 'bubble') {
-            cachedBubbleLayout = null;  // Invalidate cache on resize
-            renderBubble();
-          } else if (currentView === 'dag') {
+          if (currentView === 'dag') {
             renderDAG();
           } else if (currentView === 'parallelism') {
             renderParallelism();
@@ -2782,7 +2731,6 @@ const userB = await fetch('/user/123');</pre>
     }
 
     function processAndRender() {
-      cachedBubbleLayout = null;  // Invalidate layout cache when loading new data
       dagNodes = [];  // Invalidate DAG layout when loading new data
       dagPanX = 0; dagPanY = 0; dagZoom = 1;  // Reset DAG pan/zoom
       panX = 0; panY = 0; zoom = 1;  // Reset pan/zoom
@@ -3588,7 +3536,6 @@ const userB = await fetch('/user/123');</pre>
         clickFilterResourceId = null;
       }
       // Invalidate layout caches when filter changes
-      cachedBubbleLayout = null;
       dagNodes = [];
       updateAnalysisInfo();
       updateAnalysisButtonState();
@@ -3599,7 +3546,6 @@ const userB = await fetch('/user/123');</pre>
     function applyClickFilter(asyncId) {
       clickFilterResourceId = asyncId;
       // Invalidate layout caches when filter changes
-      cachedBubbleLayout = null;
       dagNodes = [];
       updateAnalysisInfo();
       render();
@@ -4058,8 +4004,6 @@ const userB = await fetch('/user/123');</pre>
     function render() {
       if (currentView === 'waterfall') {
         renderWaterfall();
-      } else if (currentView === 'bubble') {
-        renderBubble();
       } else if (currentView === 'dag') {
         renderDAG();
       } else if (currentView === 'parallelism') {
@@ -4094,7 +4038,7 @@ const userB = await fetch('/user/123');</pre>
 
       // Filter mode only works in certain views
       const filterMode = document.getElementById('filter-mode');
-      const filterViews = ['waterfall', 'bubble', 'dag', 'heatmap'];
+      const filterViews = ['waterfall', 'dag', 'heatmap'];
       const filterEnabled = filterViews.includes(currentView);
       filterMode.disabled = !filterEnabled;
       filterMode.style.opacity = filterEnabled ? '1' : '0.4';
@@ -4615,371 +4559,8 @@ const userB = await fetch('/user/123');</pre>
       });
     }
 
-    // ==================== BUBBLE VIEW ====================
-    function computeBubbleLayout() {
-      const container = document.getElementById('bubble-view');
-      const canvasWidth = container.clientWidth;
-      const canvasHeight = container.clientHeight;
-
-      const padding = 50;
-      const width = canvasWidth - padding * 2;
-      const height = canvasHeight - padding * 2;
-
-      // Filter resources based on current filter mode and click filter
-      const filteredResources = traceData.resources.filter(r =>
-        shouldShowResource(r) && isResourceVisible(r.asyncId)
-      );
-
-      // Build tree structure with individual resources (not grouped)
-      const nodes = new Map();
-      const root = filteredResources.find(r => r.type === 'root');
-      if (!root) return null;
-
-      // Calculate max sync time for sizing
-      const maxSyncTime = Math.max(...filteredResources.map(r =>
-        (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0
-      ), 1);
-
-      // Create nodes for each resource
-      filteredResources.forEach(r => {
-        const syncTime = (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0;
-        const isInternal = r._classification === 'internal';
-        nodes.set(r.asyncId, {
-          resource: r,
-          children: [],
-          depth: 0,
-          x: 0,
-          y: 0,
-          radius: Math.max(12, Math.min(35, Math.sqrt(syncTime / maxSyncTime) * 40 + 12)),
-          color: TYPE_COLORS[r.type] || '#808080',
-          subtreeWidth: 0,
-          isInternal
-        });
-      });
-
-      // Build parent-child relationships (only for filtered resources)
-      filteredResources.forEach(r => {
-        if (r.triggerId !== 0 && nodes.has(r.triggerId) && nodes.has(r.asyncId)) {
-          nodes.get(r.triggerId).children.push(nodes.get(r.asyncId));
-        }
-      });
-
-      // Sort children by creation time to ensure consistent ordering
-      nodes.forEach(node => {
-        node.children.sort((a, b) => a.resource.createdAt - b.resource.createdAt);
-      });
-
-      // Calculate depths (BFS from root)
-      const rootNode = nodes.get(root.asyncId);
-      if (!rootNode) return null;
-
-      let maxDepth = 0;
-      const queue = [[rootNode, 0]];
-      while (queue.length > 0) {
-        const [node, depth] = queue.shift();
-        node.depth = depth;
-        maxDepth = Math.max(maxDepth, depth);
-        node.children.forEach(child => queue.push([child, depth + 1]));
-      }
-
-      // Calculate subtree widths (post-order traversal)
-      const nodeSpacing = 50;
-      function calcSubtreeWidth(node) {
-        if (node.children.length === 0) {
-          node.subtreeWidth = node.radius * 2 + nodeSpacing;
-          return node.subtreeWidth;
-        }
-        let totalWidth = 0;
-        node.children.forEach(child => {
-          totalWidth += calcSubtreeWidth(child);
-        });
-        node.subtreeWidth = Math.max(node.radius * 2 + nodeSpacing, totalWidth);
-        return node.subtreeWidth;
-      }
-      calcSubtreeWidth(rootNode);
-
-      // Position nodes (top-down tree layout)
-      const levelHeight = Math.min(80, (height - 40) / (maxDepth + 1));
-
-      function positionNode(node, leftBound, rightBound) {
-        node.x = (leftBound + rightBound) / 2;
-        node.y = padding + 30 + node.depth * levelHeight;
-
-        if (node.children.length > 0) {
-          const totalChildWidth = node.children.reduce((sum, c) => sum + c.subtreeWidth, 0);
-          let currentLeft = node.x - totalChildWidth / 2;
-
-          node.children.forEach(child => {
-            const childRight = currentLeft + child.subtreeWidth;
-            positionNode(child, currentLeft, childRight);
-            currentLeft = childRight;
-          });
-        }
-      }
-
-      // Start positioning from root centered at top
-      positionNode(rootNode, padding, canvasWidth - padding);
-
-      // Collect all positioned nodes for rendering
-      const allNodes = [];
-      function collectNodes(node) {
-        allNodes.push(node);
-        node.children.forEach(collectNodes);
-      }
-      collectNodes(rootNode);
-
-      // Also add orphan nodes (not connected to root)
-      const positionedIds = new Set(allNodes.map(n => n.resource.asyncId));
-      let orphanX = padding + 30;
-      nodes.forEach((node, id) => {
-        if (!positionedIds.has(id)) {
-          node.x = orphanX;
-          node.y = canvasHeight - padding - 30;
-          orphanX += node.radius * 2 + 20;
-          allNodes.push(node);
-        }
-      });
-
-      return {
-        nodes,
-        allNodes,
-        maxDepth,
-        levelHeight,
-        padding,
-        canvasWidth,
-        canvasHeight
-      };
-    }
-
-    function renderBubble() {
-      const container = document.getElementById('bubble-view');
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
-
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      if (!traceData) return;
-
-      // Compute layout only if not cached or dimensions changed
-      if (!cachedBubbleLayout ||
-          cachedBubbleLayout.canvasWidth !== canvas.width ||
-          cachedBubbleLayout.canvasHeight !== canvas.height) {
-        cachedBubbleLayout = computeBubbleLayout();
-      }
-
-      if (!cachedBubbleLayout) return;
-
-      const { nodes, allNodes, maxDepth, levelHeight, padding } = cachedBubbleLayout;
-
-      bubbles = [];
-
-      // Apply pan and zoom transform
-      ctx.save();
-      ctx.translate(panX, panY);
-      ctx.scale(zoom, zoom);
-
-      // Draw edges with latency labels
-      allNodes.forEach(node => {
-        if (node.resource.triggerId !== 0) {
-          const parentNode = nodes.get(node.resource.triggerId);
-          if (parentNode) {
-            // Calculate latency (time from parent callback end or creation to child creation)
-            const parentEnd = parentNode.resource.callbackEndedAt > 0 ? parentNode.resource.callbackEndedAt : parentNode.resource.createdAt;
-            const childStart = node.resource.createdAt;
-            const latencyNs = childStart - parentEnd;
-            const latencyMs = latencyNs / 1e6;
-
-            // Draw edge line
-            const isInChain = highlightedChain.has(node.resource.asyncId) && highlightedChain.has(parentNode.resource.asyncId);
-            ctx.strokeStyle = isInChain ? 'rgba(233, 69, 96, 0.8)' : 'rgba(126, 200, 227, 0.4)';
-            ctx.lineWidth = isInChain ? 2 : 1;
-
-            ctx.beginPath();
-            ctx.moveTo(parentNode.x, parentNode.y + parentNode.radius);
-            ctx.lineTo(node.x, node.y - node.radius);
-            ctx.stroke();
-
-            // Draw arrowhead
-            const angle = Math.atan2(node.y - node.radius - (parentNode.y + parentNode.radius), node.x - parentNode.x);
-            const arrowSize = 6;
-            const arrowX = node.x;
-            const arrowY = node.y - node.radius;
-            ctx.beginPath();
-            ctx.moveTo(arrowX, arrowY);
-            ctx.lineTo(arrowX - arrowSize * Math.cos(angle - Math.PI/6), arrowY - arrowSize * Math.sin(angle - Math.PI/6));
-            ctx.moveTo(arrowX, arrowY);
-            ctx.lineTo(arrowX - arrowSize * Math.cos(angle + Math.PI/6), arrowY - arrowSize * Math.sin(angle + Math.PI/6));
-            ctx.stroke();
-
-            // Draw latency label on edge
-            if (Math.abs(latencyMs) >= 0.01) {
-              const midX = (parentNode.x + node.x) / 2;
-              const midY = (parentNode.y + parentNode.radius + node.y - node.radius) / 2;
-
-              const labelText = latencyMs >= 1 ? `${latencyMs.toFixed(1)}ms` : `${(latencyMs * 1000).toFixed(0)}µs`;
-              ctx.font = '9px sans-serif';
-              const textWidth = ctx.measureText(labelText).width;
-
-              // Background for readability
-              ctx.fillStyle = 'rgba(26, 26, 46, 0.9)';
-              ctx.fillRect(midX - textWidth/2 - 2, midY - 6, textWidth + 4, 12);
-
-              // Label text
-              ctx.fillStyle = latencyMs > 1 ? '#ffd700' : '#888';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(labelText, midX, midY);
-            }
-          }
-        }
-      });
-
-      // Draw temporal edges (dashed, green) if enabled
-      if (showTemporalEdges && temporalEdges.length > 0) {
-        ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = 'rgba(80, 200, 120, 0.6)';
-        ctx.lineWidth = 1.5;
-
-        temporalEdges.forEach(edge => {
-          const fromNode = nodes.get(edge.from);
-          const toNode = nodes.get(edge.to);
-          if (fromNode && toNode) {
-            ctx.beginPath();
-            ctx.moveTo(fromNode.x + fromNode.radius * 0.7, fromNode.y);
-            ctx.lineTo(toNode.x - toNode.radius * 0.7, toNode.y);
-            ctx.stroke();
-
-            // Small arrowhead
-            const angle = Math.atan2(toNode.y - fromNode.y, toNode.x - fromNode.x);
-            const arrowX = toNode.x - toNode.radius * 0.7;
-            const arrowY = toNode.y;
-            const arrowSize = 5;
-            ctx.beginPath();
-            ctx.moveTo(arrowX, arrowY);
-            ctx.lineTo(arrowX - arrowSize * Math.cos(angle - Math.PI/6), arrowY - arrowSize * Math.sin(angle - Math.PI/6));
-            ctx.moveTo(arrowX, arrowY);
-            ctx.lineTo(arrowX - arrowSize * Math.cos(angle + Math.PI/6), arrowY - arrowSize * Math.sin(angle + Math.PI/6));
-            ctx.stroke();
-          }
-        });
-
-        ctx.restore();
-      }
-
-      // Draw bubbles
-      allNodes.forEach(node => {
-        const r = node.resource;
-        const isHighlighted = highlightedChain.has(r.asyncId);
-        const isSelected = selectedResource && r.asyncId === selectedResource.asyncId;
-        const isOnCriticalPath = showCriticalPath && criticalPathSet.has(r.asyncId);
-        const isBottleneck = showBottlenecks && detectedBottlenecks.includes(r.asyncId);
-        const patternSeverity = getPatternSeverity(r.asyncId);
-        const isPatternMatch = patternSeverity !== null;
-        const isInternal = node.isInternal;
-
-        // Glow effect (dimmer for internal)
-        const grad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, node.radius);
-        grad.addColorStop(0, node.color);
-        grad.addColorStop(0.7, node.color);
-        grad.addColorStop(1, 'transparent');
-        ctx.fillStyle = grad;
-        ctx.globalAlpha = isInternal ? 0.15 : 0.3;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        // Inner circle (dimmer for internal)
-        ctx.fillStyle = node.color;
-        const baseAlpha = isInternal ? 0.35 : 0.7;
-        ctx.globalAlpha = isSelected ? 1 : (isHighlighted ? 0.9 : baseAlpha);
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius * 0.75, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        // Critical path ring (fire orange glow)
-        if (isOnCriticalPath) {
-          ctx.strokeStyle = '#ff6432';
-          ctx.lineWidth = 3;
-          ctx.shadowColor = '#ff6432';
-          ctx.shadowBlur = 10;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, node.radius * 0.85, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-        }
-
-        // Bottleneck ring (yellow glow)
-        if (isBottleneck && !isOnCriticalPath) {
-          ctx.strokeStyle = '#ffc832';
-          ctx.lineWidth = 3;
-          ctx.shadowColor = '#ffc832';
-          ctx.shadowBlur = 10;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, node.radius * 0.85, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-        }
-
-        // Pattern match ring (severity-based purple glow)
-        if (isPatternMatch && !isOnCriticalPath && !isBottleneck) {
-          const pStyle = getPatternStyle(patternSeverity);
-          ctx.strokeStyle = pStyle.color;
-          ctx.lineWidth = pStyle.lineWidth;
-          ctx.shadowColor = pStyle.color;
-          ctx.shadowBlur = pStyle.glow;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, node.radius * 0.85, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-        }
-
-        // Selection ring
-        if (isSelected) {
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, node.radius * 0.75, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-
-        // Label inside bubble
-        const typeLabel = r.type.replace('js-', '').replace('cache-', '').substring(0, 5);
-        ctx.fillStyle = 'white';
-        ctx.font = `${Math.min(9, node.radius / 3)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(typeLabel, node.x, node.y);
-
-        // Store for hit detection
-        bubbles.push({
-          x: node.x,
-          y: node.y,
-          radius: node.radius,
-          group: { resources: [r] }
-        });
-      });
-
-      // Draw depth labels on left side
-      ctx.fillStyle = '#555';
-      ctx.font = '9px sans-serif';
-      ctx.textAlign = 'right';
-      for (let d = 0; d <= maxDepth; d++) {
-        const y = padding + 30 + d * levelHeight;
-        ctx.fillText(`L${d}`, padding - 10, y);
-      }
-
-      ctx.restore();  // Restore transform
-
-      // Draw zoom/pan hint in corner (not transformed)
-      ctx.fillStyle = '#444';
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(`Scroll: zoom | Shift+drag: pan | Zoom: ${(zoom * 100).toFixed(0)}%`, 10, canvas.height - 10);
-    }
+    // Note: Old Bubble View code removed - bubble layout is now integrated into DAG view
+    // See computeBubbleLayoutForDAG() function below
 
     function screenToWorld(screenX, screenY) {
       return {
@@ -4988,72 +4569,8 @@ const userB = await fetch('/user/123');</pre>
       };
     }
 
-    function handleBubbleMouseMove(e) {
-      if (isPanning) return;
-
-      const rect = canvas.getBoundingClientRect();
-      const screenX = e.clientX - rect.left, screenY = e.clientY - rect.top;
-      const { x, y } = screenToWorld(screenX, screenY);
-
-      const hovered = bubbles.find(b => {
-        const dx = x - b.x, dy = y - b.y;
-        return Math.sqrt(dx * dx + dy * dy) <= b.radius;
-      });
-
-      if (hovered) {
-        const r = hovered.group.resources[0];
-        const tooltip = document.getElementById('tooltip');
-        const st = traceData.stackTraceMap.get(r.stackTraceId);
-        const stackPreview = (st && st.frames.length > 0)
-          ? `<div style="margin-top: 0.3rem; font-family: monospace; font-size: 0.65rem; color: #7ec8e3;">
-               ${st.frames.slice(0, 3).map(f => `<div>→ ${f}</div>`).join('')}
-               ${st.frames.length > 3 ? `<div style="color: #666;">...${st.frames.length - 3} more</div>` : ''}
-             </div>`
-          : '<div style="color: #666; font-size: 0.65rem; margin-top: 0.3rem;">No stack (internal)</div>';
-        const classLabel = r._classification === 'typed' ? 'API' : (r._classification === 'user' ? 'User' : 'Internal');
-        const patternHTML = getPatternTooltipHTML(r.asyncId);
-        const criticalPathHTML = getCriticalPathTooltipHTML(r.asyncId);
-        tooltip.innerHTML = `
-          <div class="tooltip-title">${r.type} #${r.asyncId} <span style="color: #888; font-size: 0.7rem;">(${classLabel})</span></div>
-          <div>Created: ${(r.createdAt / 1e6).toFixed(2)}ms</div>
-          ${r.callbackStartedAt > 0 ? `<div>Callback: ${(r.callbackStartedAt / 1e6).toFixed(2)}ms</div>` : ''}
-          ${stackPreview}
-          ${criticalPathHTML}
-          ${patternHTML}
-        `;
-        tooltip.style.display = 'block';
-        tooltip.style.left = (e.clientX + 10) + 'px';
-        tooltip.style.top = (e.clientY + 10) + 'px';
-        canvas.style.cursor = 'pointer';
-      } else {
-        document.getElementById('tooltip').style.display = 'none';
-        canvas.style.cursor = 'default';
-      }
-    }
-
-    function handleBubbleClick(e) {
-      if (e.shiftKey) return;  // Shift+click is for panning
-
-      const rect = canvas.getBoundingClientRect();
-      const screenX = e.clientX - rect.left, screenY = e.clientY - rect.top;
-      const { x, y } = screenToWorld(screenX, screenY);
-
-      const clicked = bubbles.find(b => {
-        const dx = x - b.x, dy = y - b.y;
-        return Math.sqrt(dx * dx + dy * dy) <= b.radius;
-      });
-
-      if (clicked) {
-        const resource = clicked.group.resources[0];
-        selectResource(resource);
-        // Handle click-to-filter
-        if (clickToFilterEnabled) {
-          applyClickFilter(resource.asyncId);
-        }
-      }
-    }
-
-    // ==================== DAG VIEW ====================
+    // ==================== GRAPH VIEW (with Force, Hierarchical, and Bubble layouts) ====================
+    // Note: The old separate Bubble View has been integrated as a third layout option
     function initDAGNodes() {
       if (!traceData) return;
 
@@ -5073,6 +4590,9 @@ const userB = await fetch('/user/123');</pre>
       if (dagLayoutMode === 'hierarchical') {
         // Hierarchical layout: proper tree structure with parent-centered children
         computeHierarchicalLayout(filteredResources, width, height, nodeMap);
+      } else if (dagLayoutMode === 'bubble') {
+        // Bubble layout: tree structure with variable-sized nodes based on sync time
+        computeBubbleLayoutForDAG(filteredResources, width, height, nodeMap);
       } else {
         // Force-directed layout: initial positions by depth, then simulate
         const depthGroups = new Map();
@@ -5205,6 +4725,148 @@ const userB = await fetch('/user/123');</pre>
 
       roots.forEach(r => {
         layoutSubtree(r, 0);
+      });
+    }
+
+    // Compute bubble layout for DAG - tree structure with variable-sized nodes based on sync time
+    function computeBubbleLayoutForDAG(resources, width, height, nodeMap) {
+      const padding = 50;
+
+      // Calculate max sync time for sizing
+      const maxSyncTime = Math.max(...resources.map(r =>
+        (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0
+      ), 1);
+
+      // Build adjacency for children
+      const childrenMap = new Map();
+      resources.forEach(r => {
+        if (!childrenMap.has(r.triggerId)) childrenMap.set(r.triggerId, []);
+        if (r.triggerId !== 0 || r.type === 'root') {
+          childrenMap.get(r.triggerId).push(r);
+        }
+      });
+
+      // Find roots
+      const resourceIds = new Set(resources.map(r => r.asyncId));
+      const roots = resources.filter(r => r.triggerId === 0 || !resourceIds.has(r.triggerId));
+
+      // Sort children by creation time
+      childrenMap.forEach((children, parentId) => {
+        children.sort((a, b) => a.createdAt - b.createdAt);
+      });
+
+      // Pre-compute node radii
+      const nodeRadii = new Map();
+      resources.forEach(r => {
+        const syncTime = (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0;
+        const radius = Math.max(12, Math.min(35, Math.sqrt(syncTime / maxSyncTime) * 40 + 12));
+        nodeRadii.set(r.asyncId, radius);
+      });
+
+      // Compute subtree widths (accounting for variable node sizes)
+      const subtreeWidths = new Map();
+      const nodeSpacing = 20;
+
+      function computeSubtreeWidth(asyncId) {
+        const children = childrenMap.get(asyncId) || [];
+        const myRadius = nodeRadii.get(asyncId) || 15;
+
+        if (children.length === 0) {
+          const w = myRadius * 2 + nodeSpacing;
+          subtreeWidths.set(asyncId, w);
+          return w;
+        }
+
+        let childrenTotalWidth = 0;
+        children.forEach(child => {
+          childrenTotalWidth += computeSubtreeWidth(child.asyncId);
+        });
+
+        const myWidth = Math.max(myRadius * 2 + nodeSpacing, childrenTotalWidth);
+        subtreeWidths.set(asyncId, myWidth);
+        return myWidth;
+      }
+
+      let totalWidth = 0;
+      roots.forEach(r => {
+        totalWidth += computeSubtreeWidth(r.asyncId);
+      });
+
+      // Calculate depth-based Y positions
+      const maxDepth = Math.max(...resources.map(r => traceData.depthMap.get(r.asyncId) || 0), 0);
+      const levelHeight = Math.min(80, (height - padding * 2) / (maxDepth + 1));
+
+      // Layout nodes
+      let currentX = padding;
+
+      function layoutSubtree(r, depth) {
+        const children = childrenMap.get(r.asyncId) || [];
+        const myWidth = subtreeWidths.get(r.asyncId) || 50;
+        const myRadius = nodeRadii.get(r.asyncId) || 15;
+
+        let x;
+        if (children.length === 0) {
+          x = currentX + myWidth / 2;
+          currentX += myWidth;
+        } else {
+          const startX = currentX;
+          children.forEach(child => {
+            layoutSubtree(child, depth + 1);
+          });
+          const endX = currentX;
+          x = (startX + endX) / 2;
+        }
+
+        const y = padding + 30 + depth * levelHeight;
+        const syncTime = (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0;
+
+        const node = {
+          resource: r,
+          x: x,
+          y: y,
+          vx: 0,
+          vy: 0,
+          radius: myRadius,
+          color: TYPE_COLORS[r.type] || '#808080',
+          fixed: true,
+          syncTime: syncTime  // Store for potential display
+        };
+        dagNodes.push(node);
+        nodeMap.set(r.asyncId, node);
+      }
+
+      roots.forEach(r => {
+        layoutSubtree(r, 0);
+      });
+
+      // Center the layout horizontally on the viewport
+      if (dagNodes.length > 0) {
+        const rootNode = dagNodes.find(n => n.resource.type === 'root') || dagNodes[0];
+        const centerX = width / 2;
+        const offsetX = centerX - rootNode.x;
+        dagNodes.forEach(n => n.x += offsetX);
+      }
+
+      // Handle orphans (nodes not connected to any root)
+      const positionedIds = new Set(dagNodes.map(n => n.resource.asyncId));
+      let orphanX = padding + 30;
+      resources.forEach(r => {
+        if (!positionedIds.has(r.asyncId)) {
+          const radius = nodeRadii.get(r.asyncId) || 15;
+          const node = {
+            resource: r,
+            x: orphanX,
+            y: height - padding - 30,
+            vx: 0,
+            vy: 0,
+            radius: radius,
+            color: TYPE_COLORS[r.type] || '#808080',
+            fixed: true
+          };
+          dagNodes.push(node);
+          nodeMap.set(r.asyncId, node);
+          orphanX += radius * 2 + 20;
+        }
       });
     }
 
@@ -5394,6 +5056,33 @@ const userB = await fetch('/user/123');</pre>
             ctx.moveTo(arrowX, arrowY);
             ctx.lineTo(arrowX - arrowSize * Math.cos(angle + 0.4), arrowY - arrowSize * Math.sin(angle + 0.4));
             ctx.stroke();
+
+            // Draw latency label on edge (in bubble mode or when paths aren't highlighted)
+            if (dagLayoutMode === 'bubble' && !dimmed) {
+              const parentEnd = parent.resource.callbackEndedAt > 0 ? parent.resource.callbackEndedAt : parent.resource.createdAt;
+              const childStart = r.createdAt;
+              const latencyNs = childStart - parentEnd;
+              const latencyMs = latencyNs / 1e6;
+
+              if (Math.abs(latencyMs) >= 0.01) {
+                const midX = (parent.x + node.x) / 2;
+                const midY = (parent.y + node.y) / 2;
+
+                const labelText = latencyMs >= 1 ? `${latencyMs.toFixed(1)}ms` : `${(latencyMs * 1000).toFixed(0)}µs`;
+                ctx.font = '9px sans-serif';
+                const textWidth = ctx.measureText(labelText).width;
+
+                // Background for readability
+                ctx.fillStyle = 'rgba(26, 26, 46, 0.9)';
+                ctx.fillRect(midX - textWidth/2 - 2, midY - 6, textWidth + 4, 12);
+
+                // Label text
+                ctx.fillStyle = latencyMs > 1 ? '#ffd700' : '#888';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(labelText, midX, midY);
+              }
+            }
           }
         }
       });
