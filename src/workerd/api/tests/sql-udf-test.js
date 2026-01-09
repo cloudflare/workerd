@@ -988,6 +988,233 @@ export class UdfTestDO extends DurableObject {
   }
 
   // ===========================================================================
+  // Array-Based Aggregate API (sql.aggregate helper)
+  //
+  // These tests verify the ergonomic array-based API for aggregate functions.
+  // This is sugar on top of the factory pattern - values are buffered and
+  // passed as an array to the callback.
+  // ===========================================================================
+
+  async testArrayAggregateSum() {
+    const sql = this.state.storage.sql;
+
+    // Using sql.aggregate() helper for a simple sum
+    sql.createFunction(
+      'arr_sum',
+      sql.aggregate((values) => values.reduce((a, b) => a + b, 0))
+    );
+
+    sql.exec('CREATE TABLE arr_sum_test (value INTEGER)');
+    sql.exec('INSERT INTO arr_sum_test VALUES (1), (2), (3), (4), (5)');
+
+    const result = sql
+      .exec('SELECT arr_sum(value) AS total FROM arr_sum_test')
+      .one();
+    sql.exec('DROP TABLE arr_sum_test');
+
+    assert.strictEqual(result.total, 15);
+  }
+
+  async testArrayAggregateMax() {
+    const sql = this.state.storage.sql;
+
+    // Using Math.max with spread - very natural JS
+    sql.createFunction(
+      'arr_max',
+      sql.aggregate((values) => Math.max(...values))
+    );
+
+    sql.exec('CREATE TABLE arr_max_test (value INTEGER)');
+    sql.exec(
+      'INSERT INTO arr_max_test VALUES (3), (1), (4), (1), (5), (9), (2), (6)'
+    );
+
+    const result = sql
+      .exec('SELECT arr_max(value) AS maximum FROM arr_max_test')
+      .one();
+    sql.exec('DROP TABLE arr_max_test');
+
+    assert.strictEqual(result.maximum, 9);
+  }
+
+  async testArrayAggregateMin() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction(
+      'arr_min',
+      sql.aggregate((values) => Math.min(...values))
+    );
+
+    sql.exec('CREATE TABLE arr_min_test (value INTEGER)');
+    sql.exec(
+      'INSERT INTO arr_min_test VALUES (3), (1), (4), (1), (5), (9), (2), (6)'
+    );
+
+    const result = sql
+      .exec('SELECT arr_min(value) AS minimum FROM arr_min_test')
+      .one();
+    sql.exec('DROP TABLE arr_min_test');
+
+    assert.strictEqual(result.minimum, 1);
+  }
+
+  async testArrayAggregateAvg() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction(
+      'arr_avg',
+      sql.aggregate(
+        (values) => values.reduce((a, b) => a + b, 0) / values.length
+      )
+    );
+
+    sql.exec('CREATE TABLE arr_avg_test (value INTEGER)');
+    sql.exec('INSERT INTO arr_avg_test VALUES (10), (20), (30), (40)');
+
+    const result = sql
+      .exec('SELECT arr_avg(value) AS average FROM arr_avg_test')
+      .one();
+    sql.exec('DROP TABLE arr_avg_test');
+
+    assert.strictEqual(result.average, 25);
+  }
+
+  async testArrayAggregateWithGroupBy() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction(
+      'arr_group_sum',
+      sql.aggregate((values) => values.reduce((a, b) => a + b, 0))
+    );
+
+    sql.exec('CREATE TABLE arr_group_test (category TEXT, value INTEGER)');
+    sql.exec(
+      "INSERT INTO arr_group_test VALUES ('a', 1), ('a', 2), ('b', 10), ('b', 20), ('b', 30)"
+    );
+
+    const results = sql
+      .exec(
+        'SELECT category, arr_group_sum(value) AS total FROM arr_group_test GROUP BY category ORDER BY category'
+      )
+      .toArray();
+    sql.exec('DROP TABLE arr_group_test');
+
+    assert.strictEqual(results.length, 2);
+    assert.strictEqual(results[0].category, 'a');
+    assert.strictEqual(results[0].total, 3);
+    assert.strictEqual(results[1].category, 'b');
+    assert.strictEqual(results[1].total, 60);
+  }
+
+  async testArrayAggregateWithEmptyTable() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction(
+      'arr_sum_empty',
+      sql.aggregate((values) =>
+        values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0)
+      )
+    );
+
+    sql.exec('CREATE TABLE arr_empty_test (value INTEGER)');
+
+    const result = sql
+      .exec('SELECT arr_sum_empty(value) AS total FROM arr_empty_test')
+      .one();
+    sql.exec('DROP TABLE arr_empty_test');
+
+    // With no rows, the array is empty
+    assert.strictEqual(result.total, 0);
+  }
+
+  async testArrayAggregateStringJoin() {
+    const sql = this.state.storage.sql;
+
+    // Array.join is a natural fit
+    sql.createFunction(
+      'arr_join',
+      sql.aggregate((values) => values.join(', '))
+    );
+
+    sql.exec('CREATE TABLE arr_join_test (name TEXT)');
+    sql.exec(
+      "INSERT INTO arr_join_test VALUES ('Alice'), ('Bob'), ('Charlie')"
+    );
+
+    const result = sql
+      .exec('SELECT arr_join(name) AS names FROM arr_join_test')
+      .one();
+    sql.exec('DROP TABLE arr_join_test');
+
+    assert.strictEqual(result.names, 'Alice, Bob, Charlie');
+  }
+
+  async testArrayAggregateWithFilter() {
+    const sql = this.state.storage.sql;
+
+    // Filter and sum in one go
+    sql.createFunction(
+      'arr_sum_positive',
+      sql.aggregate((values) =>
+        values.filter((v) => v > 0).reduce((a, b) => a + b, 0)
+      )
+    );
+
+    sql.exec('CREATE TABLE arr_filter_test (value INTEGER)');
+    sql.exec(
+      'INSERT INTO arr_filter_test VALUES (-5), (10), (-3), (20), (0), (5)'
+    );
+
+    const result = sql
+      .exec('SELECT arr_sum_positive(value) AS total FROM arr_filter_test')
+      .one();
+    sql.exec('DROP TABLE arr_filter_test');
+
+    // Only positive: 10 + 20 + 5 = 35
+    assert.strictEqual(result.total, 35);
+  }
+
+  async testArrayAggregateMultipleArgs() {
+    const sql = this.state.storage.sql;
+
+    // With multiple args, each row becomes an array [value, weight]
+    sql.createFunction(
+      'arr_weighted_sum',
+      sql.aggregate((rows) =>
+        rows.reduce((sum, [value, weight]) => sum + value * weight, 0)
+      )
+    );
+
+    sql.exec('CREATE TABLE arr_weighted_test (value INTEGER, weight INTEGER)');
+    sql.exec('INSERT INTO arr_weighted_test VALUES (10, 2), (20, 3), (30, 1)');
+
+    const result = sql
+      .exec(
+        'SELECT arr_weighted_sum(value, weight) AS total FROM arr_weighted_test'
+      )
+      .one();
+    sql.exec('DROP TABLE arr_weighted_test');
+
+    // 10*2 + 20*3 + 30*1 = 20 + 60 + 30 = 110
+    assert.strictEqual(result.total, 110);
+  }
+
+  async testAggregateHelperValidation() {
+    const sql = this.state.storage.sql;
+
+    // aggregate() should require a function
+    assert.throws(
+      () => sql.aggregate('not a function'),
+      (err) => err.message.includes('function')
+    );
+
+    assert.throws(
+      () => sql.aggregate(null),
+      (err) => err.message.includes('function')
+    );
+  }
+
+  // ===========================================================================
   // Transaction Interaction Tests
   //
   // These tests verify that UDFs work correctly within transactions and that
@@ -3776,7 +4003,7 @@ export default {
     await stub.testQueriesBetweenCursorIterationsAllowed();
     await stub.testSequentialQueriesAllowed();
 
-    // Aggregate function tests
+    // Aggregate function tests (factory pattern)
     await stub.testAggregateSum();
     await stub.testAggregateCount();
     await stub.testAggregateWithNoRows();
@@ -3787,6 +4014,18 @@ export default {
     await stub.testAggregateFinalError();
     await stub.testAggregateValidation();
     await stub.testAggregateMultipleArgs();
+
+    // Array-based aggregate tests (sql.aggregate helper)
+    await stub.testArrayAggregateSum();
+    await stub.testArrayAggregateMax();
+    await stub.testArrayAggregateMin();
+    await stub.testArrayAggregateAvg();
+    await stub.testArrayAggregateWithGroupBy();
+    await stub.testArrayAggregateWithEmptyTable();
+    await stub.testArrayAggregateStringJoin();
+    await stub.testArrayAggregateWithFilter();
+    await stub.testArrayAggregateMultipleArgs();
+    await stub.testAggregateHelperValidation();
 
     // Transaction interaction tests (async)
     await stub.testScalarUdfInTransaction();

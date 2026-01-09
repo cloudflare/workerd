@@ -54,6 +54,18 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   // The factory is called once per aggregation group. State lives in the closure.
   void createFunction(jsg::Lock& js, kj::String name, jsg::JsValue callbackOrOptions);
 
+  // Helper to create an aggregate function from a simple array-based callback.
+  // This is sugar over the factory pattern - it buffers all values and passes
+  // them as an array to the callback at the end.
+  //
+  // Example:
+  //   sql.createFunction('my_max', sql.aggregate((values) => Math.max(...values)));
+  //   sql.createFunction('my_sum', sql.aggregate((values) => values.reduce((a, b) => a + b, 0)));
+  //
+  // Note: This buffers all values in memory, so it's not suitable for very large
+  // aggregation groups. For large datasets, use the factory pattern directly.
+  jsg::JsValue aggregate(jsg::Lock& js, jsg::JsValue callback);
+
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
 
@@ -69,6 +81,7 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 
       // User-defined functions are experimental
       JSG_METHOD(createFunction);
+      JSG_METHOD(aggregate);
     }
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);
@@ -83,6 +96,10 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
         step: (...args: SqlStorageValue[]) => void;
         final: () => SqlStorageValue;
       }): void;
+      aggregate(callback: (values: SqlStorageValue[]) => SqlStorageValue): () => {
+        step: (...args: SqlStorageValue[]) => void;
+        final: () => SqlStorageValue;
+      };
     });
   }
 

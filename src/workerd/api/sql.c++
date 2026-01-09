@@ -506,6 +506,49 @@ void SqlStorage::createFunction(jsg::Lock& js, kj::String name, jsg::JsValue cal
   createScalarFunction(js, kj::mv(name), jsg::JsRef<jsg::JsValue>(js, callbackOrOptions));
 }
 
+jsg::JsValue SqlStorage::aggregate(jsg::Lock& js, jsg::JsValue callback) {
+  // Validate that callback is a function
+  v8::Local<v8::Value> callbackHandle = callback;
+  JSG_REQUIRE(callbackHandle->IsFunction(), TypeError,
+      "aggregate() expects a function that takes an array of values.");
+
+  // Create a factory function that wraps the callback in the {step, final} pattern.
+  // This is implemented in JavaScript for simplicity - we create a function that:
+  // 1. Creates an array to buffer values
+  // 2. Returns {step, final} where step pushes to array and final calls the callback
+  auto factoryCode = jsg::v8StrIntern(js.v8Isolate,
+      "(function(callback) {"
+      "  return function() {"
+      "    const values = [];"
+      "    return {"
+      "      step: function(...args) {"
+      "        if (args.length === 1) {"
+      "          values.push(args[0]);"
+      "        } else {"
+      "          values.push(args);"
+      "        }"
+      "      },"
+      "      final: function() {"
+      "        return callback(values);"
+      "      }"
+      "    };"
+      "  };"
+      "})"_kj);
+
+  // Compile and run the factory code
+  v8::Local<v8::Script> script = jsg::check(v8::Script::Compile(js.v8Context(), factoryCode));
+  v8::Local<v8::Value> factoryMaker = jsg::check(script->Run(js.v8Context()));
+
+  // Call the factory maker with the user's callback to get the actual factory
+  JSG_REQUIRE(factoryMaker->IsFunction(), Error, "Internal error creating aggregate wrapper");
+  auto factoryMakerFunc = factoryMaker.As<v8::Function>();
+  v8::Local<v8::Value> args[] = {callbackHandle};
+  v8::Local<v8::Value> factory =
+      jsg::check(factoryMakerFunc->Call(js.v8Context(), v8::Undefined(js.v8Isolate), 1, args));
+
+  return jsg::JsValue(factory);
+}
+
 bool SqlStorage::isAllowedName(kj::StringPtr name) const {
   return !name.startsWith("_cf_");
 }
