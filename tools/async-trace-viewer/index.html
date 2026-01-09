@@ -226,6 +226,7 @@
     }
 
     .view-container.active { display: block; }
+    #breakdown-view.active { display: flex; flex-direction: column; }
 
     /* Waterfall styles */
     .waterfall { position: relative; min-height: 100%; }
@@ -1087,7 +1088,22 @@
     </div>
 
     <div class="view-container" id="breakdown-view" style="overflow: hidden; padding: 0;">
-      <canvas id="breakdown-canvas"></canvas>
+      <div id="breakdown-controls" style="display: flex; gap: 10px; padding: 6px 10px; background: #16213e; border-bottom: 1px solid #0f3460; align-items: center; flex-shrink: 0;">
+        <label style="color: #aaa; font-size: 11px;">Group by:</label>
+        <select id="breakdown-group-select" style="font-size: 11px; padding: 2px 6px; background: #0f3460; color: #e0e0e0; border: 1px solid #1a1a2e; border-radius: 3px;">
+          <option value="type">Type</option>
+          <option value="classification">Classification</option>
+          <option value="trigger">Trigger Chain</option>
+          <option value="stack">Stack Location</option>
+        </select>
+        <label style="color: #aaa; font-size: 11px; margin-left: 10px;">View:</label>
+        <select id="breakdown-viz-select" style="font-size: 11px; padding: 2px 6px; background: #0f3460; color: #e0e0e0; border: 1px solid #1a1a2e; border-radius: 3px;">
+          <option value="treemap">Treemap</option>
+          <option value="sunburst">Sunburst</option>
+        </select>
+        <div id="breakdown-breadcrumb" style="margin-left: 15px; color: #7ec8e3; font-size: 11px; cursor: pointer;"></div>
+      </div>
+      <canvas id="breakdown-canvas" style="flex: 1;"></canvas>
     </div>
 
     <div class="view-container" id="latency-view" style="overflow: hidden; padding: 0;">
@@ -1301,16 +1317,16 @@
         <div class="view-help" data-view="breakdown">
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
             <strong>Breakdown View:</strong><br>
-            • Treemap = area proportional to time<br>
-            • <span style="opacity: 0.9;">Solid</span> = sync execution time<br>
-            • <span style="opacity: 0.4;">Faded</span> = async wait time<br>
-            • Quickly see where time goes by type
+            • Group by: Type, Classification, Trigger, Stack<br>
+            • Treemap or Sunburst visualization<br>
+            • ▶ indicator = click to drill down<br>
+            • Breadcrumb nav, Shift+R = reset drill-down
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Interpretation:</strong><br>
-            • Large boxes = time-consuming types<br>
-            • High sync % = CPU-bound<br>
-            • High async % = I/O-bound
+            <strong>Metrics:</strong><br>
+            • 🔥 = on critical path (when enabled)<br>
+            • ⚠ = bottleneck (when enabled)<br>
+            • Wall-clock = actual time contribution
           </div>
         </div>
         <div class="view-help" data-view="latency">
@@ -1472,8 +1488,8 @@
             <tr><td><strong>1: Waterfall</strong></td><td>Timeline overview</td><td>Concurrency graph, stack traces (▶), type filters, hover for parent/child</td></tr>
             <tr><td><strong>2: Graph</strong></td><td>Causality & dependencies</td><td>3 layouts (Bubble/Hierarchical/Force), path highlight on hover, ←/→ to switch</td></tr>
             <tr><td><strong>3: Replay</strong></td><td>Understanding flow</td><td>Animated playback, lifecycle badges (⏳⚡✓), loop (Shift+L), ghost (Shift+O) for state pulses</td></tr>
-            <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Orange bars = serialization, stacked height = parallelism</td></tr>
-            <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Large boxes = time hogs, solid = CPU, faded = I/O</td></tr>
+            <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Solid=executing, faded=waiting, cyan line=ideal, hover/click for details, sidebar efficiency metrics</td></tr>
+            <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Treemap/Sunburst, group by Type/Class/Trigger/Stack, click to drill down, ▶=can drill, Shift+R=reset</td></tr>
             <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
             <tr><td><strong>7: Gaps</strong></td><td>Idle time analysis</td><td>Orange gaps = nothing running, waiters during gaps</td></tr>
             <tr><td><strong>8: Heatmap</strong></td><td>Activity density</td><td>Hot spots = high activity, rows = resource types, intensity = count</td></tr>
@@ -1500,7 +1516,7 @@ const c = await fetch('/api/c');</pre>
 ]);</pre>
             </div>
           </div>
-          <p class="guide-tip">💡 In Parallelism view, orange bars highlight when only 1 operation is active - these are serialization points.</p>
+          <p class="guide-tip">💡 In Parallelism view, hover over any time bucket for details. The cyan dashed line shows ideal parallelism - compare to see utilization. Sidebar shows efficiency metrics and top bottlenecks.</p>
         </div>
 
         <div class="guide-section">
@@ -1525,7 +1541,7 @@ const c = await fetch('/api/c');</pre>
             <tr><td>50/50</td><td>Mixed workload</td><td>Profile both paths</td></tr>
             <tr><td>90% sync (solid)</td><td>CPU bound</td><td>Optimize JS, use streams</td></tr>
           </table>
-          <p class="guide-tip">💡 In Breakdown treemap, solid portions = sync execution, faded = async waiting.</p>
+          <p class="guide-tip">💡 In Breakdown view, use different grouping modes to find hotspots. Click items with ▶ to drill down into details. Toggle Sunburst for hierarchical view. Shift+R resets to top level.</p>
         </div>
 
         <div class="guide-section">
@@ -1754,6 +1770,14 @@ const userB = await fetch('/user/123');</pre>
     let cachedTotalSync = 0;  // Cached for sidebar re-renders
     let cachedTotalAsync = 0;
 
+    // Breakdown view state
+    let breakdownGroupBy = 'type';  // 'type', 'classification', 'trigger', 'stack'
+    let breakdownVizMode = 'treemap';  // 'treemap', 'sunburst'
+    let breakdownDrillPath = [];  // Stack of drill-down selections: [{groupBy, value, label}]
+    let breakdownHoverItem = null;  // Currently hovered item for tooltip
+    let breakdownData = null;  // Cached breakdown data for interaction
+    let breakdownTooltip = null;  // Tooltip element
+
     // Pattern detection thresholds (configurable via UI)
     const DEFAULT_PATTERN_THRESHOLDS = {
       syncBlockMs: 50,       // Event loop blocking threshold (ms)
@@ -1786,7 +1810,9 @@ const userB = await fetch('/user/123');</pre>
         sidebarCollapsed,
         replaySpeed,
         replayLoop,
-        replayGhostMode
+        replayGhostMode,
+        breakdownGroupBy,
+        breakdownVizMode
       };
       try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -1888,6 +1914,20 @@ const userB = await fetch('/user/123');</pre>
         // Restore replay ghost mode
         if (settings.replayGhostMode !== undefined) {
           replayGhostMode = settings.replayGhostMode;
+        }
+
+        // Restore breakdown view settings
+        if (settings.breakdownGroupBy !== undefined) {
+          const validGroups = ['type', 'classification', 'trigger', 'stack'];
+          if (validGroups.includes(settings.breakdownGroupBy)) {
+            breakdownGroupBy = settings.breakdownGroupBy;
+          }
+        }
+        if (settings.breakdownVizMode !== undefined) {
+          const validModes = ['treemap', 'sunburst'];
+          if (validModes.includes(settings.breakdownVizMode)) {
+            breakdownVizMode = settings.breakdownVizMode;
+          }
         }
 
         updateControlStates();
@@ -2019,9 +2059,11 @@ const userB = await fetch('/user/123');</pre>
         updateViewHelp();
         updateControlStates();
         saveSettings();
-        // Clean up parallelism tooltip when leaving parallelism view
+        // Clean up tooltips when switching views
         hideParallelismTooltip();
         parallelismHoverBucket = -1;
+        hideBreakdownTooltip();
+        breakdownHoverItem = null;
         if (traceData) {
           // Reset replay state when switching to replay view
           if (currentView === 'replay') {
@@ -2246,9 +2288,11 @@ const userB = await fetch('/user/123');</pre>
           document.getElementById(newView + '-view').classList.add('active');
           updateViewHelp();
           updateControlStates();
-          // Clean up parallelism tooltip when leaving parallelism view
+          // Clean up tooltips when switching views
           hideParallelismTooltip();
           parallelismHoverBucket = -1;
+          hideBreakdownTooltip();
+          breakdownHoverItem = null;
           if (traceData) {
             // Reset replay state when switching to replay view
             if (newView === 'replay') {
@@ -2441,6 +2485,9 @@ const userB = await fetch('/user/123');</pre>
             } else if (currentView === 'replay') {
               stopReplayAnimation();
               replayTime = 0;
+            } else if (currentView === 'breakdown') {
+              breakdownDrillPath = [];
+              breakdownData = null;
             }
             render();
           }
@@ -6159,12 +6206,16 @@ const userB = await fetch('/user/123');</pre>
       const canvas = document.getElementById('breakdown-canvas');
       const ctx = canvas.getContext('2d');
 
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
+      // Update control states
+      document.getElementById('breakdown-group-select').value = breakdownGroupBy;
+      document.getElementById('breakdown-viz-select').value = breakdownVizMode;
+
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
 
       const width = canvas.width;
       const height = canvas.height;
-      const padding = { top: 50, right: 20, bottom: 30, left: 20 };
+      const padding = { top: 20, right: 200, bottom: 30, left: 20 };
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
 
@@ -6173,31 +6224,13 @@ const userB = await fetch('/user/123');</pre>
 
       if (!traceData) return;
 
-      // Gather time data by type
-      const typeData = new Map();
+      // Update breadcrumb
+      updateBreakdownBreadcrumb();
 
-      traceData.resources.forEach(r => {
-        if (!typeData.has(r.type)) {
-          typeData.set(r.type, { type: r.type, syncTime: 0, asyncTime: 0, count: 0 });
-        }
-        const data = typeData.get(r.type);
-        data.count++;
+      // Gather data based on grouping mode and drill-down state
+      const groupedData = computeBreakdownData();
 
-        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
-          data.syncTime += r.callbackEndedAt - r.callbackStartedAt;
-        }
-        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
-          data.asyncTime += r.callbackStartedAt - r.createdAt;
-        }
-      });
-
-      // Convert to array and calculate total time per type
-      const types = Array.from(typeData.values())
-        .map(d => ({ ...d, totalTime: d.syncTime + d.asyncTime }))
-        .filter(d => d.totalTime > 0)
-        .sort((a, b) => b.totalTime - a.totalTime);
-
-      if (types.length === 0) {
+      if (groupedData.length === 0) {
         ctx.fillStyle = '#666';
         ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
@@ -6205,28 +6238,240 @@ const userB = await fetch('/user/123');</pre>
         return;
       }
 
-      const totalTime = types.reduce((sum, t) => sum + t.totalTime, 0);
+      const totalTime = groupedData.reduce((sum, d) => sum + d.totalTime, 0);
+      const duration = traceData.requestDurationNs;
 
-      // Draw title
-      ctx.fillStyle = '#e94560';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Time Breakdown by Resource Type (Treemap)', width / 2, 25);
+      // Store data for hover/click interaction
+      breakdownData = {
+        items: groupedData,
+        totalTime,
+        duration,
+        rects: [],
+        padding,
+        chartWidth,
+        chartHeight
+      };
 
+      // Draw based on visualization mode
+      if (breakdownVizMode === 'sunburst') {
+        renderBreakdownSunburst(ctx, groupedData, totalTime, width, height, padding);
+      } else {
+        renderBreakdownTreemap(ctx, groupedData, totalTime, width, height, padding, chartWidth, chartHeight);
+      }
+
+      // Draw sidebar with stats
+      renderBreakdownSidebar(ctx, groupedData, totalTime, duration, width, height, padding);
+
+      // Setup event handlers (once)
+      if (!canvas._breakdownHandlersSet) {
+        canvas._breakdownHandlersSet = true;
+        setupBreakdownEventHandlers(canvas);
+      }
+    }
+
+    function computeBreakdownData() {
+      if (!traceData) return [];
+
+      // Determine which resources to include based on drill-down
+      let resources = traceData.resources;
+
+      // Apply drill-down filter
+      if (breakdownDrillPath.length > 0) {
+        const lastDrill = breakdownDrillPath[breakdownDrillPath.length - 1];
+        if (lastDrill.filterFn) {
+          resources = resources.filter(lastDrill.filterFn);
+        }
+      }
+
+      // Check if we're at the individual resource level
+      const atResourceLevel = breakdownDrillPath.length > 0 &&
+        breakdownDrillPath[breakdownDrillPath.length - 1].isLeaf;
+
+      if (atResourceLevel) {
+        // Show individual resources
+        return resources.map(r => {
+          const syncTime = (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ?
+            r.callbackEndedAt - r.callbackStartedAt : 0;
+          const asyncTime = (r.callbackStartedAt > 0 && r.createdAt > 0) ?
+            r.callbackStartedAt - r.createdAt : 0;
+          const totalTime = syncTime + asyncTime;
+          // Wall-clock time for individual resource is its total active time
+          const start = r.createdAt;
+          const end = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                     (r.destroyedAt > 0 ? r.destroyedAt : traceData.requestDurationNs);
+          const wallClockTime = end - start;
+          return {
+            id: r.asyncId,
+            key: `resource-${r.asyncId}`,
+            label: `#${r.asyncId}`,
+            type: r.type,
+            resource: r,
+            syncTime,
+            asyncTime,
+            totalTime,
+            wallClockTime,
+            count: 1,
+            resources: [r],
+            isLeaf: true,
+            canDrillDown: false,
+            onCriticalPath: criticalPathSet.has(r.asyncId),
+            isBottleneck: false
+          };
+        }).filter(d => d.totalTime > 0).sort((a, b) => b.totalTime - a.totalTime);
+      }
+
+      // Group by the selected grouping mode
+      const grouped = new Map();
+
+      resources.forEach(r => {
+        let key, label;
+
+        switch (breakdownGroupBy) {
+          case 'classification':
+            key = r._classification || 'internal';
+            label = key.charAt(0).toUpperCase() + key.slice(1);
+            break;
+          case 'trigger':
+            // Group by root trigger (top of trigger chain)
+            let root = r;
+            while (root.triggerId !== 0) {
+              const parent = traceData.resourceMap.get(root.triggerId);
+              if (!parent) break;
+              root = parent;
+            }
+            key = `trigger-${root.asyncId}`;
+            label = `${root.type} #${root.asyncId}`;
+            break;
+          case 'stack':
+            // Group by first user frame in stack
+            const stack = traceData.stackTraces.find(s => s.id === r.stackTraceId);
+            if (stack && stack.frames.length > 0) {
+              // Find first non-internal frame
+              const frame = stack.frames.find(f => !f.includes('node:') && !f.includes('internal/')) || stack.frames[0];
+              const match = frame.match(/@ (.+):(\d+)/);
+              if (match) {
+                key = `${match[1]}:${match[2]}`;
+                label = key.length > 30 ? '...' + key.slice(-27) : key;
+              } else {
+                key = frame.substring(0, 40);
+                label = key;
+              }
+            } else {
+              key = 'unknown';
+              label = 'Unknown location';
+            }
+            break;
+          case 'type':
+          default:
+            key = r.type;
+            label = r.type;
+            break;
+        }
+
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            key,
+            label,
+            type: breakdownGroupBy === 'type' ? r.type : null,
+            syncTime: 0,
+            asyncTime: 0,
+            count: 0,
+            resources: [],
+            onCriticalPath: false,
+            isBottleneck: false,
+            wallClockTime: 0
+          });
+        }
+
+        const data = grouped.get(key);
+        data.count++;
+        data.resources.push(r);
+
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          data.syncTime += r.callbackEndedAt - r.callbackStartedAt;
+        }
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          data.asyncTime += r.callbackStartedAt - r.createdAt;
+        }
+
+        // Check if any resource in group is on critical path
+        if (criticalPathSet.has(r.asyncId)) {
+          data.onCriticalPath = true;
+        }
+      });
+
+      // Calculate wall-clock contribution and bottleneck status
+      const duration = traceData.requestDurationNs;
+      const numBuckets = 200;
+      const bucketSize = duration / numBuckets;
+
+      grouped.forEach(data => {
+        // Wall-clock contribution: time buckets where this group was active
+        let wallClockBuckets = 0;
+        let bottleneckBuckets = 0;
+
+        for (let i = 0; i < numBuckets; i++) {
+          const bucketStart = i * bucketSize;
+          const bucketEnd = (i + 1) * bucketSize;
+
+          // Check if any resource from this group is active in this bucket
+          const groupActive = data.resources.some(r => {
+            const start = r.createdAt;
+            const end = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                       (r.destroyedAt > 0 ? r.destroyedAt : duration);
+            return start < bucketEnd && end > bucketStart;
+          });
+
+          if (groupActive) {
+            // Wall-clock: count any bucket where this group is active
+            wallClockBuckets++;
+
+            // Bottleneck: check if this group is the ONLY thing active
+            const othersActive = traceData.resources.some(r => {
+              if (data.resources.includes(r)) return false;
+              const start = r.createdAt;
+              const end = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                         (r.destroyedAt > 0 ? r.destroyedAt : duration);
+              return start < bucketEnd && end > bucketStart;
+            });
+
+            if (!othersActive) {
+              bottleneckBuckets++;
+            }
+          }
+        }
+
+        data.wallClockTime = wallClockBuckets * bucketSize;
+        data.isBottleneck = bottleneckBuckets > numBuckets * 0.05;  // >5% of time as bottleneck
+      });
+
+      // Convert to array, compute canDrillDown, and sort
+      const results = Array.from(grouped.values())
+        .map(d => ({ ...d, totalTime: d.syncTime + d.asyncTime }))
+        .filter(d => d.totalTime > 0)
+        .sort((a, b) => b.totalTime - a.totalTime);
+
+      // Compute canDrillDown for each item
+      // Any group with more than 1 item can be drilled into (to see individual items or sub-groups)
+      results.forEach(d => {
+        d.canDrillDown = d.count > 1;
+      });
+
+      return results;
+    }
+
+    function renderBreakdownTreemap(ctx, items, totalTime, width, height, padding, chartWidth, chartHeight) {
       // Treemap layout using squarified algorithm
       function squarify(items, x, y, w, h) {
         if (items.length === 0) return [];
-
         const result = [];
         const total = items.reduce((sum, item) => sum + item.totalTime, 0);
 
-        // Base case: single item fills the whole space
         if (items.length === 1) {
           result.push({ ...items[0], x, y, w, h });
           return result;
         }
 
-        // Find best row (squarified algorithm)
         const scale = (w * h) / total;
         const isVertical = w >= h;
         const side = isVertical ? h : w;
@@ -6238,8 +6483,6 @@ const userB = await fetch('/user/123');</pre>
         for (let i = 0; i < items.length; i++) {
           const testRow = [...rowItems, items[i]];
           const testArea = rowArea + items[i].totalTime;
-
-          // Calculate worst aspect ratio in this row
           const rowSide = testArea * scale / side;
           let worst = 0;
           testRow.forEach(item => {
@@ -6257,7 +6500,6 @@ const userB = await fetch('/user/123');</pre>
           }
         }
 
-        // Layout the row
         const rowSize = rowArea * scale / side;
         let pos = 0;
 
@@ -6271,7 +6513,6 @@ const userB = await fetch('/user/123');</pre>
           pos += itemSize;
         });
 
-        // Recursively layout remaining items
         const remaining = items.slice(rowItems.length);
         if (remaining.length > 0) {
           if (isVertical) {
@@ -6280,160 +6521,648 @@ const userB = await fetch('/user/123');</pre>
             result.push(...squarify(remaining, x, y + rowSize, w, h - rowSize));
           }
         }
-
         return result;
       }
 
-      const rects = squarify(types, padding.left, padding.top, chartWidth, chartHeight);
+      const rects = squarify(items, padding.left, padding.top, chartWidth, chartHeight);
+      breakdownData.rects = rects;
 
-      // Draw treemap rectangles
+      // Draw rectangles
       rects.forEach(rect => {
-        const color = TYPE_COLORS[rect.type] || '#808080';
+        const color = rect.type ? (TYPE_COLORS[rect.type] || '#808080') :
+                     getGroupColor(rect.key);
 
-        // Split rectangle to show sync vs async
+        // Determine visual modifiers
+        const isHovered = breakdownHoverItem && breakdownHoverItem.key === rect.key;
+        const highlightCritical = showCriticalPath && rect.onCriticalPath;
+        const highlightBottleneck = showBottlenecks && rect.isBottleneck;
+
+        // Draw background
         if (rect.syncTime > 0 || rect.asyncTime > 0) {
           const syncRatio = rect.syncTime / rect.totalTime;
           const asyncRatio = 1 - syncRatio;
 
-          // Draw async portion (top) - higher contrast now
+          // Async portion (top)
           if (asyncRatio > 0) {
             const asyncHeight = (rect.h - 2) * asyncRatio;
-            if (accessibilityMode) {
-              // In accessibility mode, use diagonal stripes for async
-              ctx.fillStyle = color;
-              ctx.globalAlpha = 0.5;
-              ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, asyncHeight);
-              // Draw stripe pattern
-              ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-              ctx.lineWidth = 1;
-              ctx.beginPath();
-              for (let i = -asyncHeight; i < rect.w; i += 6) {
-                ctx.moveTo(rect.x + 1 + i, rect.y + 1 + asyncHeight);
-                ctx.lineTo(rect.x + 1 + i + asyncHeight, rect.y + 1);
-              }
-              ctx.stroke();
-              ctx.globalAlpha = 1;
-            } else {
-              ctx.fillStyle = color;
-              ctx.globalAlpha = 0.55;  // Increased from 0.4 for better visibility
-              ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, asyncHeight);
-              ctx.globalAlpha = 1;
-            }
-          }
-
-          // Draw sync portion (solid) at bottom
-          if (syncRatio > 0) {
-            const syncHeight = (rect.h - 2) * syncRatio;
-            if (accessibilityMode) {
-              ctx.fillStyle = getPattern(ctx, rect.type, color);
-            } else {
-              ctx.fillStyle = color;
-            }
-            ctx.globalAlpha = 0.95;
-            ctx.fillRect(rect.x + 1, rect.y + rect.h - 1 - syncHeight, rect.w - 2, syncHeight);
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.45;
+            ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, asyncHeight);
             ctx.globalAlpha = 1;
           }
 
-          // Draw dividing line between sync and async in accessibility mode
-          if (accessibilityMode && syncRatio > 0 && asyncRatio > 0) {
-            const dividerY = rect.y + rect.h - 1 - (rect.h - 2) * syncRatio;
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(rect.x + 1, dividerY);
-            ctx.lineTo(rect.x + rect.w - 1, dividerY);
-            ctx.stroke();
+          // Sync portion (bottom)
+          if (syncRatio > 0) {
+            const syncHeight = (rect.h - 2) * syncRatio;
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.9;
+            ctx.fillRect(rect.x + 1, rect.y + rect.h - 1 - syncHeight, rect.w - 2, syncHeight);
+            ctx.globalAlpha = 1;
           }
         } else {
-          // No timing data - just fill solid
-          ctx.fillStyle = accessibilityMode ? getPattern(ctx, rect.type, color) : color;
-          ctx.globalAlpha = 0.85;
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.7;
           ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
           ctx.globalAlpha = 1;
         }
 
-        // Border
-        ctx.strokeStyle = '#1a1a2e';
-        ctx.lineWidth = 2;
+        // Border - highlight if special
+        if (highlightCritical) {
+          ctx.strokeStyle = '#ff6600';
+          ctx.lineWidth = 3;
+        } else if (highlightBottleneck) {
+          ctx.strokeStyle = '#ffd700';
+          ctx.lineWidth = 3;
+        } else if (isHovered) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+        } else {
+          ctx.strokeStyle = '#1a1a2e';
+          ctx.lineWidth = 2;
+        }
         ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
 
-        // Label (only if rectangle is big enough)
+        // Critical path indicator
+        if (highlightCritical && rect.w > 30 && rect.h > 20) {
+          ctx.fillStyle = '#ff6600';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText('🔥', rect.x + 4, rect.y + 14);
+        }
+
+        // Bottleneck indicator
+        if (highlightBottleneck && rect.w > 30 && rect.h > 20) {
+          ctx.fillStyle = '#ffd700';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'right';
+          ctx.fillText('⚠', rect.x + rect.w - 4, rect.y + 14);
+        }
+
+        // Label
         if (rect.w > 50 && rect.h > 40) {
-          // Determine if we need dark text based on background color luminance
           const isLightBg = isLightColor(color);
           ctx.fillStyle = isLightBg ? '#1a1a2e' : 'white';
-          ctx.font = 'bold 14px sans-serif';
+          ctx.font = 'bold 12px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
-          const label = rect.type.replace('js-', '').replace('cache-', 'c:');
+          let label = rect.label || rect.key;
+          if (label.length > 15) label = label.substring(0, 12) + '...';
           const timeMs = (rect.totalTime / 1e6).toFixed(1);
           const pct = ((rect.totalTime / totalTime) * 100).toFixed(0);
 
-          ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 - 14);
+          ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 - 10);
+          ctx.font = '11px sans-serif';
+          ctx.fillText(`${timeMs}ms (${pct}%)`, rect.x + rect.w / 2, rect.y + rect.h / 2 + 6);
 
-          ctx.font = '12px sans-serif';
-          ctx.fillText(`${timeMs}ms`, rect.x + rect.w / 2, rect.y + rect.h / 2 + 4);
-          ctx.fillText(`(${pct}%)`, rect.x + rect.w / 2, rect.y + rect.h / 2 + 20);
-
-          // Sync/async breakdown if big enough
-          if (rect.h > 80) {
-            const syncPct = ((rect.syncTime / rect.totalTime) * 100).toFixed(0);
-            ctx.font = '11px sans-serif';
+          // Show count
+          if (rect.count > 1 && rect.h > 50) {
+            ctx.font = '10px sans-serif';
             ctx.fillStyle = isLightBg ? 'rgba(26,26,46,0.7)' : 'rgba(255,255,255,0.7)';
-            ctx.fillText(`sync: ${syncPct}%`, rect.x + rect.w / 2, rect.y + rect.h / 2 + 38);
+            ctx.fillText(`${rect.count} items`, rect.x + rect.w / 2, rect.y + rect.h / 2 + 22);
+          }
+
+          // Drill-down indicator in corner for drillable items
+          if (rect.canDrillDown && rect.w > 30 && rect.h > 30) {
+            ctx.fillStyle = isLightBg ? 'rgba(26,26,46,0.8)' : 'rgba(126,200,227,0.9)';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText('▶', rect.x + rect.w - 4, rect.y + rect.h - 4);
+            ctx.textBaseline = 'middle';  // Reset
           }
         } else if (rect.w > 25 && rect.h > 20) {
-          // Abbreviated label
           const isLightBg = isLightColor(color);
           ctx.fillStyle = isLightBg ? '#1a1a2e' : 'white';
-          ctx.font = '11px sans-serif';
+          ctx.font = '10px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          const shortLabel = rect.type.substring(0, 3);
+          const shortLabel = (rect.label || rect.key).substring(0, 4);
           ctx.fillText(shortLabel, rect.x + rect.w / 2, rect.y + rect.h / 2);
         }
       });
 
-      // Legend for sync/async
-      const legendY = height - 20;
-      ctx.fillStyle = '#888';
+      // Legend
+      const legendY = height - 18;
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'left';
 
       ctx.globalAlpha = 0.9;
       ctx.fillStyle = '#666';
-      ctx.fillRect(padding.left, legendY - 8, 12, 12);
-      ctx.globalAlpha = 0.4;
-      ctx.fillRect(padding.left + 80, legendY - 8, 12, 12);
+      ctx.fillRect(padding.left, legendY - 6, 10, 10);
+      ctx.globalAlpha = 0.45;
+      ctx.fillRect(padding.left + 75, legendY - 6, 10, 10);
       ctx.globalAlpha = 1;
 
       ctx.fillStyle = '#888';
-      ctx.fillText('= Sync time', padding.left + 16, legendY);
-      ctx.fillText('= Async wait', padding.left + 96, legendY);
+      ctx.fillText('= Sync', padding.left + 14, legendY + 2);
+      ctx.fillText('= Async', padding.left + 89, legendY + 2);
 
-      // Stats overlay
-      ctx.fillStyle = 'rgba(22, 33, 62, 0.9)';
-      ctx.fillRect(width - 200, padding.top, 190, 85);
-      ctx.strokeStyle = '#0f3460';
-      ctx.strokeRect(width - 200, padding.top, 190, 85);
+      // Drill-down hint
+      ctx.fillStyle = '#666';
+      ctx.fillText('▶ = click to drill down', padding.left + 160, legendY + 2);
+    }
 
-      ctx.fillStyle = '#e94560';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText('Top Time Consumers', width - 190, padding.top + 15);
+    function renderBreakdownSunburst(ctx, items, totalTime, width, height, padding) {
+      const centerX = padding.left + (width - padding.left - padding.right) / 2;
+      const centerY = padding.top + (height - padding.top - padding.bottom) / 2;
+      const maxRadius = Math.min(width - padding.left - padding.right, height - padding.top - padding.bottom) / 2 - 20;
+      const innerRadius = maxRadius * 0.2;
 
-      ctx.fillStyle = '#aaa';
-      ctx.font = '10px sans-serif';
-      types.slice(0, 4).forEach((t, i) => {
-        const y = padding.top + 30 + i * 13;
-        const pct = ((t.totalTime / totalTime) * 100).toFixed(0);
-        const label = t.type.replace('js-', '');
-        ctx.fillStyle = TYPE_COLORS[t.type] || '#808080';
-        ctx.fillRect(width - 190, y - 8, 8, 8);
-        ctx.fillStyle = '#aaa';
-        ctx.fillText(`${label}: ${pct}% (${t.count})`, width - 178, y);
+      // Store rects as arc segments for hit detection
+      breakdownData.rects = [];
+      breakdownData.sunburstCenter = { x: centerX, y: centerY };
+      breakdownData.sunburstInnerRadius = innerRadius;
+      breakdownData.sunburstOuterRadius = maxRadius;
+
+      let currentAngle = -Math.PI / 2;  // Start at top
+
+      items.forEach(item => {
+        const angleSize = (item.totalTime / totalTime) * Math.PI * 2;
+        const endAngle = currentAngle + angleSize;
+
+        const color = item.type ? (TYPE_COLORS[item.type] || '#808080') : getGroupColor(item.key);
+        const isHovered = breakdownHoverItem && breakdownHoverItem.key === item.key;
+        const highlightCritical = showCriticalPath && item.onCriticalPath;
+        const highlightBottleneck = showBottlenecks && item.isBottleneck;
+
+        // Calculate radii for sync/async split
+        const syncRatio = item.syncTime / item.totalTime;
+        const asyncRadius = innerRadius + (maxRadius - innerRadius) * (1 - syncRatio);
+
+        // Draw async portion (outer)
+        if (syncRatio < 1) {
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, maxRadius, currentAngle, endAngle);
+          ctx.arc(centerX, centerY, asyncRadius, endAngle, currentAngle, true);
+          ctx.closePath();
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.45;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+
+        // Draw sync portion (inner)
+        if (syncRatio > 0) {
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, asyncRadius, currentAngle, endAngle);
+          ctx.arc(centerX, centerY, innerRadius, endAngle, currentAngle, true);
+          ctx.closePath();
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.9;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+
+        // Border
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, maxRadius, currentAngle, endAngle);
+        ctx.arc(centerX, centerY, innerRadius, endAngle, currentAngle, true);
+        ctx.closePath();
+        if (highlightCritical) {
+          ctx.strokeStyle = '#ff6600';
+          ctx.lineWidth = 3;
+        } else if (highlightBottleneck) {
+          ctx.strokeStyle = '#ffd700';
+          ctx.lineWidth = 3;
+        } else if (isHovered) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+        } else {
+          ctx.strokeStyle = '#1a1a2e';
+          ctx.lineWidth = 1;
+        }
+        ctx.stroke();
+
+        // Store for hit detection
+        breakdownData.rects.push({
+          ...item,
+          startAngle: currentAngle,
+          endAngle: endAngle,
+          innerRadius,
+          outerRadius: maxRadius
+        });
+
+        // Label (if segment is big enough)
+        if (angleSize > 0.2) {
+          const midAngle = currentAngle + angleSize / 2;
+          const labelRadius = (innerRadius + maxRadius) / 2;
+          const labelX = centerX + Math.cos(midAngle) * labelRadius;
+          const labelY = centerY + Math.sin(midAngle) * labelRadius;
+
+          ctx.save();
+          ctx.translate(labelX, labelY);
+          if (midAngle > Math.PI / 2 && midAngle < 3 * Math.PI / 2) {
+            ctx.rotate(midAngle + Math.PI);
+          } else {
+            ctx.rotate(midAngle);
+          }
+
+          const isLightBg = isLightColor(color);
+          ctx.fillStyle = isLightBg ? '#1a1a2e' : 'white';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          let label = item.label || item.key;
+          if (label.length > 12) label = label.substring(0, 9) + '...';
+          ctx.fillText(label, 0, -6);
+
+          ctx.font = '10px sans-serif';
+          const pct = ((item.totalTime / totalTime) * 100).toFixed(0);
+          const drillIndicator = item.canDrillDown ? ' ▶' : '';
+          ctx.fillText(`${pct}%${drillIndicator}`, 0, 6);
+
+          ctx.restore();
+        }
+
+        currentAngle = endAngle;
       });
+
+      // Center hole
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fill();
+
+      // Center text
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Total', centerX, centerY - 8);
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText((totalTime / 1e6).toFixed(1) + 'ms', centerX, centerY + 8);
+
+      // Legend at bottom
+      const legendY = height - 18;
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#888';
+      ctx.fillText('Inner = Sync, Outer = Async | Click segment to drill down', padding.left, legendY + 2);
+    }
+
+    function renderBreakdownSidebar(ctx, items, totalTime, duration, width, height, padding) {
+      const sidebarX = width - padding.right + 10;
+      const sidebarWidth = padding.right - 20;
+      const sidebarY = padding.top;
+      const sidebarHeight = height - padding.top - padding.bottom;
+
+      // Background
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(sidebarX, sidebarY, sidebarWidth, sidebarHeight);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(sidebarX, sidebarY, sidebarWidth, sidebarHeight);
+
+      let y = sidebarY + 18;
+      const lineHeight = 15;
+
+      const drawHeader = (text, color = '#e94560') => {
+        ctx.fillStyle = color;
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(text, sidebarX + 8, y);
+        y += lineHeight + 2;
+      };
+
+      const drawStat = (label, value, color = '#aaa') => {
+        ctx.fillStyle = '#888';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(label + ':', sidebarX + 8, y);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'right';
+        ctx.fillText(String(value), sidebarX + sidebarWidth - 8, y);
+        ctx.textAlign = 'left';
+        y += lineHeight;
+      };
+
+      // Summary stats
+      drawHeader('Summary');
+      drawStat('Groups', items.length);
+      drawStat('Total time', (totalTime / 1e6).toFixed(1) + 'ms');
+
+      // Wall-clock attribution
+      const totalWallClock = items.reduce((sum, d) => sum + d.wallClockTime, 0);
+      const overlapTime = totalTime - totalWallClock;
+      drawStat('Wall-clock', (totalWallClock / 1e6).toFixed(1) + 'ms');
+      drawStat('Parallel gain', (overlapTime / 1e6).toFixed(1) + 'ms',
+        overlapTime > 0 ? '#50c878' : '#888');
+      y += 8;
+
+      // Top items
+      drawHeader('Top by Time');
+      items.slice(0, 5).forEach(item => {
+        const pct = ((item.totalTime / totalTime) * 100).toFixed(0);
+        let label = item.label || item.key;
+        if (label.length > 12) label = label.substring(0, 9) + '...';
+
+        const color = item.type ? (TYPE_COLORS[item.type] || '#808080') : getGroupColor(item.key);
+        ctx.fillStyle = color;
+        ctx.fillRect(sidebarX + 8, y - 8, 8, 8);
+
+        ctx.fillStyle = '#aaa';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(label, sidebarX + 20, y);
+        ctx.textAlign = 'right';
+
+        let suffix = '';
+        if (showCriticalPath && item.onCriticalPath) suffix = ' 🔥';
+        if (showBottlenecks && item.isBottleneck) suffix += ' ⚠';
+        ctx.fillText(pct + '%' + suffix, sidebarX + sidebarWidth - 8, y);
+        ctx.textAlign = 'left';
+        y += lineHeight;
+      });
+      y += 8;
+
+      // Critical path items (if enabled)
+      if (showCriticalPath) {
+        const cpItems = items.filter(d => d.onCriticalPath);
+        if (cpItems.length > 0) {
+          drawHeader('Critical Path', '#ff6600');
+          cpItems.slice(0, 3).forEach(item => {
+            let label = item.label || item.key;
+            if (label.length > 15) label = label.substring(0, 12) + '...';
+            ctx.fillStyle = '#ff6600';
+            ctx.font = '10px sans-serif';
+            ctx.fillText('🔥 ' + label, sidebarX + 8, y);
+            y += lineHeight;
+          });
+          y += 8;
+        }
+      }
+
+      // Bottleneck items (if enabled)
+      if (showBottlenecks) {
+        const bnItems = items.filter(d => d.isBottleneck);
+        if (bnItems.length > 0) {
+          drawHeader('Bottlenecks', '#ffd700');
+          bnItems.slice(0, 3).forEach(item => {
+            let label = item.label || item.key;
+            if (label.length > 15) label = label.substring(0, 12) + '...';
+            const wallPct = ((item.wallClockTime / duration) * 100).toFixed(0);
+            ctx.fillStyle = '#ffd700';
+            ctx.font = '10px sans-serif';
+            ctx.fillText('⚠ ' + label, sidebarX + 8, y);
+            ctx.textAlign = 'right';
+            ctx.fillText(wallPct + '% wall', sidebarX + sidebarWidth - 8, y);
+            ctx.textAlign = 'left';
+            y += lineHeight;
+          });
+        }
+      }
+    }
+
+    function getGroupColor(key) {
+      // Generate consistent color for non-type groups
+      const colors = ['#e94560', '#0f4c75', '#3282b8', '#bbe1fa', '#50c878',
+                      '#ffd700', '#ff6432', '#9966cc', '#00bcd4', '#ff9800'];
+      let hash = 0;
+      for (let i = 0; i < key.length; i++) {
+        hash = ((hash << 5) - hash) + key.charCodeAt(i);
+        hash |= 0;
+      }
+      return colors[Math.abs(hash) % colors.length];
+    }
+
+    function updateBreakdownBreadcrumb() {
+      const breadcrumb = document.getElementById('breakdown-breadcrumb');
+      if (!breadcrumb) return;
+
+      if (breakdownDrillPath.length === 0) {
+        breadcrumb.innerHTML = '';
+        return;
+      }
+
+      let html = '<span style="cursor: pointer; color: #7ec8e3;" onclick="breakdownNavigateToRoot()">All</span>';
+      breakdownDrillPath.forEach((crumb, i) => {
+        html += ' › ';
+        if (i === breakdownDrillPath.length - 1) {
+          html += `<span style="color: #e94560;">${crumb.label}</span>`;
+        } else {
+          html += `<span style="cursor: pointer; color: #7ec8e3;" onclick="breakdownNavigateTo(${i})">${crumb.label}</span>`;
+        }
+      });
+      breadcrumb.innerHTML = html;
+    }
+
+    // Global navigation functions for breadcrumb clicks
+    window.breakdownNavigateToRoot = function() {
+      breakdownDrillPath = [];
+      renderBreakdown();
+    };
+
+    window.breakdownNavigateTo = function(index) {
+      breakdownDrillPath = breakdownDrillPath.slice(0, index + 1);
+      renderBreakdown();
+    };
+
+    function setupBreakdownEventHandlers(canvas) {
+      // Group select handler
+      document.getElementById('breakdown-group-select').addEventListener('change', (e) => {
+        breakdownGroupBy = e.target.value;
+        breakdownDrillPath = [];  // Reset drill-down when changing grouping
+        saveSettings();
+        renderBreakdown();
+      });
+
+      // Viz select handler
+      document.getElementById('breakdown-viz-select').addEventListener('change', (e) => {
+        breakdownVizMode = e.target.value;
+        saveSettings();
+        renderBreakdown();
+      });
+
+      // Hover handler
+      canvas.addEventListener('mousemove', (e) => {
+        if (currentView !== 'breakdown' || !breakdownData) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const hitItem = findBreakdownHit(x, y);
+
+        // Update cursor based on drillability
+        canvas.style.cursor = (hitItem && hitItem.canDrillDown) ? 'pointer' : 'default';
+
+        if (hitItem !== breakdownHoverItem) {
+          breakdownHoverItem = hitItem;
+          renderBreakdown();
+          if (hitItem) {
+            showBreakdownTooltip(e, hitItem);
+          } else {
+            hideBreakdownTooltip();
+          }
+        } else if (hitItem) {
+          // Update tooltip position
+          updateBreakdownTooltipPosition(e);
+        }
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        if (breakdownHoverItem) {
+          breakdownHoverItem = null;
+          hideBreakdownTooltip();
+          if (currentView === 'breakdown') renderBreakdown();
+        }
+      });
+
+      // Click handler for drill-down
+      canvas.addEventListener('click', (e) => {
+        if (currentView !== 'breakdown' || !breakdownData) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const hitItem = findBreakdownHit(x, y);
+        if (hitItem && hitItem.canDrillDown && hitItem.resources && hitItem.resources.length > 1) {
+          // Check if drilling would result in same single group by computing unique keys
+          const uniqueKeys = new Set();
+          const resourceMap = new Map(traceData.resources.map(r => [r.asyncId, r]));
+
+          hitItem.resources.forEach(r => {
+            let key;
+            if (breakdownGroupBy === 'type') {
+              key = r.type;
+            } else if (breakdownGroupBy === 'classification') {
+              key = r._classification || 'internal';
+            } else if (breakdownGroupBy === 'trigger') {
+              // Must trace to root ancestor (same as grouping logic)
+              let root = r;
+              while (root.triggerId > 0) {
+                const parent = resourceMap.get(root.triggerId);
+                if (!parent) break;
+                root = parent;
+              }
+              key = `trigger-${root.asyncId}`;
+            } else if (breakdownGroupBy === 'stack') {
+              key = r.stackTraceId;
+            }
+            uniqueKeys.add(key);
+          });
+
+          const wouldBeSameGroup = uniqueKeys.size <= 1;
+
+          // Drill down into this item
+          breakdownDrillPath.push({
+            label: hitItem.label || hitItem.key,
+            key: hitItem.key,
+            filterFn: (r) => hitItem.resources.some(hr => hr.asyncId === r.asyncId),
+            // Show individual items if small group OR if drilling would just show same group
+            isLeaf: hitItem.count <= 10 || wouldBeSameGroup
+          });
+          hideBreakdownTooltip();
+          breakdownHoverItem = null;
+          renderBreakdown();
+        } else if (hitItem && hitItem.resource) {
+          // Individual resource - show in sidebar
+          selectResource(hitItem.resource.asyncId);
+        }
+      });
+    }
+
+    function findBreakdownHit(x, y) {
+      if (!breakdownData || !breakdownData.rects) return null;
+
+      if (breakdownVizMode === 'sunburst' && breakdownData.sunburstCenter) {
+        // Sunburst hit detection
+        const cx = breakdownData.sunburstCenter.x;
+        const cy = breakdownData.sunburstCenter.y;
+        const dx = x - cx;
+        const dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+
+        for (const item of breakdownData.rects) {
+          if (dist >= item.innerRadius && dist <= item.outerRadius) {
+            // Normalize angles for comparison
+            let a = angle;
+            let start = item.startAngle;
+            let end = item.endAngle;
+
+            // Handle angle wrap-around
+            while (a < start) a += Math.PI * 2;
+            while (end < start) end += Math.PI * 2;
+
+            if (a >= start && a <= end) {
+              return item;
+            }
+          }
+        }
+      } else {
+        // Treemap hit detection
+        for (const rect of breakdownData.rects) {
+          if (x >= rect.x && x <= rect.x + rect.w &&
+              y >= rect.y && y <= rect.y + rect.h) {
+            return rect;
+          }
+        }
+      }
+      return null;
+    }
+
+    function showBreakdownTooltip(e, item) {
+      let tooltip = document.getElementById('breakdown-tooltip');
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'breakdown-tooltip';
+        tooltip.style.cssText = `
+          position: fixed; background: rgba(22, 33, 62, 0.95); border: 1px solid #0f3460;
+          padding: 10px 14px; border-radius: 4px; font-size: 11px; color: #e0e0e0;
+          pointer-events: none; z-index: 1000; max-width: 300px;
+        `;
+        document.body.appendChild(tooltip);
+      }
+
+      const totalTime = breakdownData.totalTime;
+      const duration = breakdownData.duration;
+      const pct = ((item.totalTime / totalTime) * 100).toFixed(1);
+      const wallPct = ((item.wallClockTime / duration) * 100).toFixed(1);
+      const syncPct = item.totalTime > 0 ? ((item.syncTime / item.totalTime) * 100).toFixed(0) : 0;
+
+      // Show full key (untruncated) with word-wrap for long paths
+      const fullName = item.key || item.label || 'Unknown';
+      let html = `<div style="font-weight: bold; color: #e94560; margin-bottom: 6px; word-break: break-all;">${fullName}</div>`;
+      html += `<div style="display: grid; grid-template-columns: auto auto; gap: 2px 12px;">`;
+      html += `<span style="color: #888;">Count:</span><span>${item.count}</span>`;
+      html += `<span style="color: #888;">Total time:</span><span>${(item.totalTime / 1e6).toFixed(2)}ms (${pct}%)</span>`;
+      html += `<span style="color: #888;">Sync:</span><span>${(item.syncTime / 1e6).toFixed(2)}ms (${syncPct}%)</span>`;
+      html += `<span style="color: #888;">Async:</span><span>${(item.asyncTime / 1e6).toFixed(2)}ms</span>`;
+      html += `<span style="color: #888;">Wall-clock:</span><span>${(item.wallClockTime / 1e6).toFixed(2)}ms (${wallPct}%)</span>`;
+      html += `</div>`;
+
+      if (item.onCriticalPath) {
+        html += `<div style="color: #ff6600; margin-top: 6px;">🔥 On critical path</div>`;
+      }
+      if (item.isBottleneck) {
+        html += `<div style="color: #ffd700; margin-top: 4px;">⚠ Bottleneck - serializes execution</div>`;
+      }
+      if (item.canDrillDown) {
+        html += `<div style="color: #7ec8e3; margin-top: 6px; font-size: 10px;">▶ Click to drill down</div>`;
+      } else if (item.count === 1) {
+        html += `<div style="color: #666; margin-top: 6px; font-size: 10px;">Single item</div>`;
+      }
+
+      tooltip.innerHTML = html;
+      tooltip.style.left = (e.clientX + 15) + 'px';
+      tooltip.style.top = (e.clientY + 15) + 'px';
+      tooltip.style.display = 'block';
+    }
+
+    function updateBreakdownTooltipPosition(e) {
+      const tooltip = document.getElementById('breakdown-tooltip');
+      if (tooltip) {
+        tooltip.style.left = (e.clientX + 15) + 'px';
+        tooltip.style.top = (e.clientY + 15) + 'px';
+      }
+    }
+
+    function hideBreakdownTooltip() {
+      const tooltip = document.getElementById('breakdown-tooltip');
+      if (tooltip) tooltip.style.display = 'none';
     }
 
     // ==================== LATENCY VIEW ====================
