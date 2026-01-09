@@ -1300,32 +1300,25 @@ Outcome Outcome::clone() const {
   return Outcome(outcome, cpuTime, wallTime);
 }
 
-TailEvent::TailEvent(SpanContext context,
-    TraceId invocationId,
-    kj::Date timestamp,
-    kj::uint sequence,
-    Event&& event,
-    size_t sizeHint)
+TailEvent::TailEvent(
+    SpanContext context, TraceId invocationId, kj::Date timestamp, kj::uint sequence, Event&& event)
     : spanContext(kj::mv(context)),
       invocationId(invocationId),
       timestamp(timestamp),
       sequence(sequence),
-      event(kj::mv(event)),
-      sizeHint(sizeHint) {}
+      event(kj::mv(event)) {}
 
 TailEvent::TailEvent(TraceId traceId,
     TraceId invocationId,
     kj::Maybe<SpanId> spanId,
     kj::Date timestamp,
     kj::uint sequence,
-    Event&& event,
-    size_t sizeHint)
+    Event&& event)
     : spanContext(kj::mv(traceId), kj::mv(spanId)),
       invocationId(kj::mv(invocationId)),
       timestamp(timestamp),
       sequence(sequence),
-      event(kj::mv(event)),
-      sizeHint(sizeHint) {}
+      event(kj::mv(event)) {}
 
 namespace {
 TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& reader) {
@@ -1453,7 +1446,7 @@ TailEvent TailEvent::clone() const {
     KJ_UNREACHABLE;
   };
   return TailEvent(spanContext.getTraceId(), invocationId, spanContext.getSpanId(), timestamp,
-      sequence, cloneEvent(event), sizeHint);
+      sequence, cloneEvent(event));
 }
 
 void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {

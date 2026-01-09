@@ -113,7 +113,9 @@ class TailStreamWriter final {
   kj::TaskSet& waitUntilTasks;
 
   static kj::Promise<void> pump(kj::Own<Active> current);
-  bool reportImpl(TailEvent&& event);
+  // Report an event to the tail stream writer.
+  // sizeHint: The approximate size of the event, in bytes.
+  bool reportImpl(TailEvent&& event, size_t sizeHint);
 
   uint32_t sequence = 0;
   bool onsetSeen = false;

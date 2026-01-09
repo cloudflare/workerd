@@ -1001,7 +1001,7 @@ TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
     : inner(kj::mv(pending)),
       waitUntilTasks(waitUntilTasks) {}
 
-bool TailStreamWriter::reportImpl(TailEvent&& event) {
+bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   // In reportImpl, our inner state must be active.
   auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Vector<kj::Own<Active>>>());
 
@@ -1036,7 +1036,7 @@ bool TailStreamWriter::reportImpl(TailEvent&& event) {
         auto log = kj::str(
             "[\"Dropped ", active->droppedEvents, " tail events due to excessive queueing\"]");
         TailEvent droppedEventsLog(event.spanContext.clone(), event.invocationId, event.timestamp,
-            event.sequence, tracing::Log(event.timestamp, LogLevel::WARN, kj::mv(log)), 0);
+            event.sequence, tracing::Log(event.timestamp, LogLevel::WARN, kj::mv(log)));
         active->queue.push(kj::mv(droppedEventsLog));
         // Increment the outcome sequence number to keep things consistent.
         event.sequence++;
@@ -1052,7 +1052,7 @@ bool TailStreamWriter::reportImpl(TailEvent&& event) {
       // Adjust estimated queue size based on size hint and an arbitrary amount for serialization
       // overhead. As long as this estimate is reasonably accurate, we won't need to check the
       // size again when serializing the message.
-      active->queueSize += tailSerializationOverhead + event.sizeHint;
+      active->queueSize += tailSerializationOverhead + sizeHint;
     } else {
       active->droppedEvents++;
     }
@@ -1183,7 +1183,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context,
   // chance (see SpanId::fromEntropy()), so this should be safe.
   TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
       context.getSpanId() == SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()), timestamp,
-      sequence++, kj::mv(event), sizeHint);
+      sequence++, kj::mv(event));
 
   KJ_SWITCH_ONEOF(inner) {
     KJ_CASE_ONEOF(closed, Closed) {
@@ -1220,7 +1220,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context,
 
   // The state is determined to be closing when it receives a terminal event (tracing::Outcome),
   // or if there are no active tail workers left, we can close the internal state at that point.
-  if (reportImpl(kj::mv(tailEvent))) {
+  if (reportImpl(kj::mv(tailEvent), sizeHint)) {
     inner = Closed{};
   }
 }
