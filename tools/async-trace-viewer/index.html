@@ -1344,30 +1344,29 @@
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
             <strong>Replay View:</strong><br>
             • Watch request unfold in real-time<br>
-            • <span style="color: #50c878;">Glowing</span> = executing now<br>
-            • <span style="opacity: 0.5;">Dashed</span> = waiting for I/O<br>
-            • <span style="opacity: 0.3;">Faded</span> = completed
+            • ⏳ = waiting, ⚡ = executing, ✓ = done<br>
+            • <span style="color: #50c878;">Green dots</span> on bar = creation events<br>
+            • <span style="color: #e94560;">Red triangles</span> = callback starts
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Badges:</strong><br>
+            <strong>Badges & Effects:</strong><br>
             • <span style="color: #ff6432;">Orange #</span> = ops waiting on this<br>
             • 🔥 = critical path node<br>
-            • <span style="color: #9966cc;">Purple ?</span> = unresolved promise
+            • <span style="color: #9966cc;">Purple ?</span> = unresolved promise<br>
+            • Fading rings = execution trails
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Panels:</strong><br>
-            • <span style="color: #e94560;">Live Metrics</span> = parallelism, sync/async time<br>
-            • <span style="color: #e94560;">Event Feed</span> = scrolling event log<br>
-            • <span style="color: #ff6432;">Critical Path</span> = progress (when C enabled)<br>
-            • <span style="color: #ffd700;">Alerts</span> = bottlenecks (B) & patterns (T)
+            <strong>Toggle Buttons:</strong><br>
+            • 🔁 Loop (Shift+L) = restart when done<br>
+            • 👻 Ghost (Shift+O) = pulse on changes<br>
+            &nbsp;&nbsp;<span style="color:#50c878;">green</span>=new, <span style="color:#ffaa00;">orange</span>=exec, <span style="color:#e94560;">color</span>=end
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
             <strong>Controls:</strong><br>
-            • Play/Pause to control animation<br>
-            • Click progress bar to seek<br>
-            • ←/→ to step (1% increments)<br>
-            • Shift+←/→ to jump to events<br>
-            • Adjust speed: 0.5x, 1x, 2x
+            • Space = play/pause, R = reset<br>
+            • ←/→ step, Shift+←/→ to events<br>
+            • Ctrl+Shift+←/→ critical path only<br>
+            • -/+ speed (0.25x, 0.5x, 1x, 2x)
           </div>
         </div>
         <div class="view-help" data-view="heatmap">
@@ -1450,8 +1449,15 @@
             <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">View-Specific</td></tr>
             <tr><td><code>←</code> / <code>→</code></td><td>Switch Graph layout: Bubble → Hierarchical → Force (Graph view only)</td></tr>
-            <tr><td><code>Space</code></td><td>Play/Pause (Replay view)</td></tr>
-            <tr><td><code>R</code></td><td>Reset animation (Replay view)</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Replay View Controls</td></tr>
+            <tr><td><code>Space</code></td><td>Play/Pause animation</td></tr>
+            <tr><td><code>R</code></td><td>Reset animation to start</td></tr>
+            <tr><td><code>←</code> / <code>→</code></td><td>Step through timeline (1% increments)</td></tr>
+            <tr><td><code>Shift+←</code> / <code>→</code></td><td>Jump to next/previous significant event</td></tr>
+            <tr><td><code>Ctrl+Shift+←</code> / <code>→</code></td><td>Jump to next/previous critical path event</td></tr>
+            <tr><td><code>-</code> / <code>+</code></td><td>Decrease/increase speed (0.25x, 0.5x, 1x, 2x)</td></tr>
+            <tr><td><code>Shift+L</code></td><td>Toggle loop mode</td></tr>
+            <tr><td><code>Shift+O</code></td><td>Toggle ghost mode (state change pulses)</td></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Other</td></tr>
             <tr><td><code>I</code></td><td>Open AI analysis prompt</td></tr>
             <tr><td><code>Shift+R</code></td><td>Refresh/reset current view</td></tr>
@@ -1464,7 +1470,7 @@
             <tr><th>View</th><th>Best For</th><th>What to Look For</th></tr>
             <tr><td><strong>1: Waterfall</strong></td><td>Timeline overview</td><td>Concurrency graph, stack traces (▶), type filters, hover for parent/child</td></tr>
             <tr><td><strong>2: Graph</strong></td><td>Causality & dependencies</td><td>3 layouts (Bubble/Hierarchical/Force), path highlight on hover, ←/→ to switch</td></tr>
-            <tr><td><strong>3: Replay</strong></td><td>Understanding flow</td><td>Watch operations unfold, dependency arrows, state changes</td></tr>
+            <tr><td><strong>3: Replay</strong></td><td>Understanding flow</td><td>Animated playback, lifecycle badges (⏳⚡✓), loop (Shift+L), ghost (Shift+O) for state pulses</td></tr>
             <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Orange bars = serialization, stacked height = parallelism</td></tr>
             <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Large boxes = time hogs, solid = CPU, faded = I/O</td></tr>
             <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
@@ -1710,6 +1716,10 @@ const userB = await fetch('/user/123');</pre>
     let replayLastEventTime = 0;  // Track last processed event time
     let replayLiveAlerts = [];  // Array of { message, color, expireTime }
     let replayAlertedPatterns = new Set();  // Track patterns already alerted
+    let replayLoop = false;  // Loop mode - restart when complete
+    let replayLoopPauseUntil = 0;  // Timestamp when loop pause ends
+    let replayGhostMode = false;  // Ghost mode - show previous states
+    let replayTrail = [];  // Execution trail - { asyncId, fadeStart, x, y, color }
     // Replay sidebar section collapse state
     let replaySidebarCollapsed = {
       metrics: false,
@@ -1772,7 +1782,10 @@ const userB = await fetch('/user/123');</pre>
         showTemporalEdges,
         accessibilityMode,
         patternThresholds,
-        sidebarCollapsed
+        sidebarCollapsed,
+        replaySpeed,
+        replayLoop,
+        replayGhostMode
       };
       try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -1856,6 +1869,24 @@ const userB = await fetch('/user/123');</pre>
               header.parentElement.classList.add('collapsed');
             }
           });
+        }
+
+        // Restore replay speed
+        if (settings.replaySpeed !== undefined) {
+          const validSpeeds = [0.25, 0.5, 1, 2];
+          if (validSpeeds.includes(settings.replaySpeed)) {
+            replaySpeed = settings.replaySpeed;
+          }
+        }
+
+        // Restore replay loop
+        if (settings.replayLoop !== undefined) {
+          replayLoop = settings.replayLoop;
+        }
+
+        // Restore replay ghost mode
+        if (settings.replayGhostMode !== undefined) {
+          replayGhostMode = settings.replayGhostMode;
         }
 
         updateControlStates();
@@ -2164,8 +2195,8 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
-        // Load hotkey: O (Open) or L (Load)
-        if (e.key === 'o' || e.key === 'O' || e.key === 'l' || e.key === 'L') {
+        // Load hotkey: O (Open) or L (Load) - Shift versions used for Replay toggles
+        if ((e.key === 'o' || e.key === 'O' || e.key === 'l' || e.key === 'L') && !e.shiftKey) {
           document.getElementById('file-input').click();
           return;
         }
@@ -2251,7 +2282,34 @@ const userB = await fetch('/user/123');</pre>
         if (currentView === 'replay' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
           if (!traceData) return;
 
-          if (e.shiftKey) {
+          if (e.ctrlKey && e.shiftKey) {
+            // Ctrl+Shift+Arrow: Jump to critical path events only
+            if (criticalPathSet.size === 0) return; // No critical path calculated
+            const events = [];
+            traceData.resources.forEach(r => {
+              if (!criticalPathSet.has(r.asyncId)) return;
+              if (r.createdAt > 0) events.push(r.createdAt);
+              if (r.callbackStartedAt > 0) events.push(r.callbackStartedAt);
+              if (r.callbackEndedAt > 0) events.push(r.callbackEndedAt);
+            });
+            const uniqueEvents = [...new Set(events)].sort((a, b) => a - b);
+
+            if (e.key === 'ArrowRight') {
+              const nextEvent = uniqueEvents.find(t => t > replayTime);
+              if (nextEvent !== undefined) {
+                replayTime = nextEvent;
+              } else {
+                replayTime = traceData.requestDurationNs;
+              }
+            } else {
+              const prevEvents = uniqueEvents.filter(t => t < replayTime);
+              if (prevEvents.length > 0) {
+                replayTime = prevEvents[prevEvents.length - 1];
+              } else {
+                replayTime = 0;
+              }
+            }
+          } else if (e.shiftKey) {
             // Shift+Arrow: Jump to next/previous significant event
             // Collect all significant timestamps
             const events = [];
@@ -2294,6 +2352,38 @@ const userB = await fetch('/user/123');</pre>
           if (replayPlaying) {
             stopReplayAnimation();
           }
+          renderReplayFrame();
+          return;
+        }
+
+        // Replay speed toggle: -/+ keys (only when replay view is active)
+        if (currentView === 'replay' && (e.key === '-' || e.key === '+' || e.key === '=')) {
+          const speeds = [0.25, 0.5, 1, 2];
+          const currentIndex = speeds.indexOf(replaySpeed);
+          let newIndex;
+          if (e.key === '+' || e.key === '=') {
+            newIndex = Math.min(currentIndex + 1, speeds.length - 1);
+          } else {
+            newIndex = Math.max(currentIndex - 1, 0);
+          }
+          replaySpeed = speeds[newIndex];
+          saveSettings();
+          renderReplayFrame();
+          return;
+        }
+
+        // Replay loop toggle: Shift+L (only when replay view is active)
+        if (currentView === 'replay' && e.shiftKey && (e.key === 'l' || e.key === 'L')) {
+          replayLoop = !replayLoop;
+          saveSettings();
+          renderReplayFrame();
+          return;
+        }
+
+        // Replay ghost mode toggle: Shift+O (only when replay view is active)
+        if (currentView === 'replay' && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+          replayGhostMode = !replayGhostMode;
+          saveSettings();
           renderReplayFrame();
           return;
         }
@@ -2357,13 +2447,17 @@ const userB = await fetch('/user/123');</pre>
             if (replayPlaying) {
               stopReplayAnimation();
             } else {
-              if (replayTime >= traceData.requestDurationNs) replayTime = 0;
+              if (replayTime >= traceData.requestDurationNs) {
+                replayTime = 0;
+                replayTrail = [];
+              }
               startReplayAnimation();
             }
             renderReplayFrame();
           } else if (e.key === 'r' || e.key === 'R') {
             stopReplayAnimation();
             replayTime = 0;
+            replayTrail = [];
             renderReplayFrame();
           }
         }
@@ -6376,6 +6470,8 @@ const userB = await fetch('/user/123');</pre>
       replayLastEventTime = 0;
       replayLiveAlerts = [];
       replayAlertedPatterns = new Set();
+      replayTrail = [];
+      replayLoopPauseUntil = 0;
       renderReplayFrame();
     }
 
@@ -6398,8 +6494,27 @@ const userB = await fetch('/user/123');</pre>
         replayTime += delta * traceTimePerMs;
 
         if (replayTime >= traceData.requestDurationNs) {
-          replayTime = traceData.requestDurationNs;
-          replayPlaying = false;
+          if (replayLoop) {
+            // Loop mode - pause briefly at end, then reset
+            if (replayLoopPauseUntil === 0) {
+              // Start the pause (1 second)
+              replayLoopPauseUntil = now + 1000;
+              replayTime = traceData.requestDurationNs;  // Hold at end
+            } else if (now >= replayLoopPauseUntil) {
+              // Pause is over, reset and continue
+              replayLoopPauseUntil = 0;
+              replayTime = 0;
+              replayTrail = [];  // Clear trail on loop
+              replayEventLog = [];
+              replayLastEventTime = 0;
+              replayLiveAlerts = [];
+              replayAlertedPatterns.clear();
+            }
+            // During pause, just keep rendering at end position
+          } else {
+            replayTime = traceData.requestDurationNs;
+            replayPlaying = false;
+          }
         }
 
         renderReplayFrame();
@@ -6506,7 +6621,7 @@ const userB = await fetch('/user/123');</pre>
       btnX += btnWidth + btnSpacing;
 
       // Speed buttons
-      const speeds = [0.5, 1, 2];
+      const speeds = [0.25, 0.5, 1, 2];
       speeds.forEach(speed => {
         ctx.fillStyle = replaySpeed === speed ? '#e94560' : '#0f3460';
         ctx.fillRect(btnX, btnY, 40, btnHeight);
@@ -6517,13 +6632,58 @@ const userB = await fetch('/user/123');</pre>
         btnX += 40 + 5;
       });
 
+      // Loop button
+      btnX += 5;  // Extra spacing
+      ctx.fillStyle = replayLoop ? '#50c878' : '#0f3460';
+      ctx.fillRect(btnX, btnY, 45, btnHeight);
+      ctx.strokeStyle = replayLoop ? '#50c878' : '#e94560';
+      ctx.strokeRect(btnX, btnY, 45, btnHeight);
+      ctx.fillStyle = replayLoop ? 'white' : '#e94560';
+      ctx.fillText('🔁 Loop', btnX + 22.5, btnY + 15);
+      btnX += 50;
+
+      // Ghost button
+      ctx.fillStyle = replayGhostMode ? '#9966cc' : '#0f3460';
+      ctx.fillRect(btnX, btnY, 50, btnHeight);
+      ctx.strokeStyle = replayGhostMode ? '#9966cc' : '#e94560';
+      ctx.strokeRect(btnX, btnY, 50, btnHeight);
+      ctx.fillStyle = replayGhostMode ? 'white' : '#e94560';
+      ctx.fillText('👻 Ghost', btnX + 25, btnY + 15);
+
       // Progress bar (in main area)
       const progressY = btnY + btnHeight + 10;
       const progressX = mainX + padding.left;
       ctx.fillStyle = '#0f3460';
       ctx.fillRect(progressX, progressY, chartWidth, 8);
+
+      // Event markers on progress bar
+      traceData.resources.forEach(r => {
+        // Mark creation events
+        if (r.createdAt > 0) {
+          const x = progressX + (r.createdAt / duration) * chartWidth;
+          ctx.fillStyle = 'rgba(80, 200, 120, 0.6)';  // Green for creation
+          ctx.beginPath();
+          ctx.arc(x, progressY + 4, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Mark callback start events (more prominent)
+        if (r.callbackStartedAt > 0) {
+          const x = progressX + (r.callbackStartedAt / duration) * chartWidth;
+          ctx.fillStyle = 'rgba(233, 69, 96, 0.8)';  // Red for callback
+          ctx.beginPath();
+          ctx.moveTo(x, progressY - 2);
+          ctx.lineTo(x - 3, progressY + 10);
+          ctx.lineTo(x + 3, progressY + 10);
+          ctx.closePath();
+          ctx.fill();
+        }
+      });
+
+      // Progress fill (drawn on top of markers)
       ctx.fillStyle = '#e94560';
+      ctx.globalAlpha = 0.6;
       ctx.fillRect(progressX, progressY, chartWidth * progress, 8);
+      ctx.globalAlpha = 1;
 
       // Playhead
       ctx.fillStyle = 'white';
@@ -6584,6 +6744,123 @@ const userB = await fetch('/user/123');</pre>
           }
         }
       });
+
+      // Update and draw execution trails
+      // Track resources that just finished executing
+      const trailDuration = duration * 0.15;  // Trail fades over 15% of duration
+      sortedVisible.forEach(r => {
+        const pos = positionMap.get(r.asyncId);
+        if (!pos) return;
+
+        // Check if this resource just finished executing (callback ended)
+        if (r.callbackEndedAt > 0 && r.callbackEndedAt <= replayTime) {
+          const existingTrail = replayTrail.find(t => t.asyncId === r.asyncId);
+          if (!existingTrail) {
+            replayTrail.push({
+              asyncId: r.asyncId,
+              fadeStart: r.callbackEndedAt,
+              x: pos.x,
+              y: pos.y,
+              color: TYPE_COLORS[r.type] || '#808080'
+            });
+          }
+        }
+      });
+
+      // Draw fading trails and clean up expired ones
+      replayTrail = replayTrail.filter(trail => {
+        const age = replayTime - trail.fadeStart;
+        if (age < 0) return false;  // Remove trails from "future" (user navigated backwards)
+        if (age > trailDuration) return false;  // Remove expired trails
+
+        const fadeProgress = age / trailDuration;
+        const alpha = Math.max(0, 0.4 * (1 - fadeProgress));
+        const size = 28 + 15 * fadeProgress;  // Expand as it fades
+
+        ctx.beginPath();
+        ctx.arc(trail.x, trail.y, size, 0, Math.PI * 2);
+        ctx.fillStyle = trail.color;
+        ctx.globalAlpha = alpha;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        return true;  // Keep this trail
+      });
+
+      // Ghost mode - draw expanding rings showing recent state changes
+      if (replayGhostMode && replayTime > 0) {
+        const ghostTime = replayTime - (duration * 0.05);  // Look back 5% of duration
+        if (ghostTime > 0) {
+          sortedVisible.forEach((r, idx) => {
+            if (idx >= maxCols * maxRows) return;
+            const pos = positionMap.get(r.asyncId);
+            if (!pos) return;
+
+            const { x, y } = pos;
+            const color = TYPE_COLORS[r.type] || '#808080';
+
+            // Determine CURRENT state
+            const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                           (r.destroyedAt > 0 ? r.destroyedAt : duration);
+            const isActive = endTime >= replayTime;
+            const isExecuting = r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime &&
+                               r.callbackEndedAt > 0 && r.callbackEndedAt >= replayTime;
+            const isWaiting = r.createdAt <= replayTime &&
+                             (r.callbackStartedAt === 0 || r.callbackStartedAt > replayTime);
+
+            // Determine GHOST state (what it was before)
+            const wasCreated = r.createdAt <= ghostTime;
+            const ghostEndTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                                (r.destroyedAt > 0 ? r.destroyedAt : duration);
+            const wasActive = ghostEndTime >= ghostTime;
+            const wasExecuting = wasCreated && r.callbackStartedAt > 0 && r.callbackStartedAt <= ghostTime &&
+                                r.callbackEndedAt > 0 && r.callbackEndedAt >= ghostTime;
+            const wasWaiting = wasCreated &&
+                              (r.callbackStartedAt === 0 || r.callbackStartedAt > ghostTime);
+
+            // Draw ghost indicators for STATE CHANGES
+            // Resource was just created (didn't exist at ghost time)
+            if (!wasCreated && r.createdAt <= replayTime) {
+              // New resource - draw pulsing creation ring
+              const age = replayTime - r.createdAt;
+              const pulseProgress = Math.min(1, age / (duration * 0.05));
+              ctx.beginPath();
+              ctx.arc(x, y, 28 + 20 * pulseProgress, 0, Math.PI * 2);
+              ctx.strokeStyle = '#50c878';  // Green for new
+              ctx.lineWidth = 4 * (1 - pulseProgress);
+              ctx.globalAlpha = 0.8 * (1 - pulseProgress);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+            }
+
+            // Resource just started executing (was waiting, now executing)
+            if (wasWaiting && isExecuting) {
+              const age = replayTime - r.callbackStartedAt;
+              const pulseProgress = Math.min(1, age / (duration * 0.05));
+              ctx.beginPath();
+              ctx.arc(x, y, 28 + 25 * pulseProgress, 0, Math.PI * 2);
+              ctx.strokeStyle = '#ffaa00';  // Orange for execution start
+              ctx.lineWidth = 5 * (1 - pulseProgress);
+              ctx.globalAlpha = 0.9 * (1 - pulseProgress);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+            }
+
+            // Resource just finished executing (was executing, now done)
+            if (wasExecuting && !isExecuting && r.callbackEndedAt > ghostTime) {
+              const age = replayTime - r.callbackEndedAt;
+              const pulseProgress = Math.min(1, age / (duration * 0.05));
+              ctx.beginPath();
+              ctx.arc(x, y, 28 + 30 * pulseProgress, 0, Math.PI * 2);
+              ctx.strokeStyle = color;
+              ctx.lineWidth = 6 * (1 - pulseProgress);
+              ctx.globalAlpha = 0.7 * (1 - pulseProgress);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+            }
+          });
+        }
+      }
 
       // Draw dependency lines first (behind circles)
       ctx.lineWidth = 1.5;
@@ -6735,7 +7012,17 @@ const userB = await fetch('/user/123');</pre>
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         const label = r.type.replace('js-', '').substring(0, 6);
-        ctx.fillText(label, x, y);
+        ctx.fillText(label, x, y - 4);
+
+        // Lifecycle badge - ⏳ waiting, ⚡ executing, ✓ done
+        ctx.font = '10px sans-serif';
+        if (!isActive) {
+          ctx.fillText('✓', x, y + 10);
+        } else if (isExecuting) {
+          ctx.fillText('⚡', x, y + 10);
+        } else if (isWaiting) {
+          ctx.fillText('⏳', x, y + 10);
+        }
 
         // Waiting count badge
         const waitCount = waitingOnCount.get(r.asyncId) || 0;
@@ -7277,7 +7564,10 @@ const userB = await fetch('/user/123');</pre>
           if (replayPlaying) {
             stopReplayAnimation();
           } else {
-            if (replayTime >= duration) replayTime = 0;
+            if (replayTime >= duration) {
+              replayTime = 0;
+              replayTrail = [];
+            }
             startReplayAnimation();
           }
           renderReplayFrame();
@@ -7295,6 +7585,7 @@ const userB = await fetch('/user/123');</pre>
           replayLastEventTime = 0;
           replayLiveAlerts = [];
           replayAlertedPatterns = new Set();
+          replayTrail = [];
           renderReplayFrame();
           return;
         }
@@ -7305,10 +7596,31 @@ const userB = await fetch('/user/123');</pre>
           if (clickX >= speedBtnX && clickX <= speedBtnX + 40 &&
               clickY >= btnY && clickY <= btnY + btnHeight) {
             replaySpeed = speed;
+            saveSettings();
             renderReplayFrame();
           }
           speedBtnX += 45;
         });
+
+        // Check loop button
+        const loopBtnX = speedBtnX + 5;  // Extra spacing matches render code
+        if (clickX >= loopBtnX && clickX <= loopBtnX + 45 &&
+            clickY >= btnY && clickY <= btnY + btnHeight) {
+          replayLoop = !replayLoop;
+          saveSettings();
+          renderReplayFrame();
+          return;
+        }
+
+        // Check ghost button
+        const ghostBtnX = loopBtnX + 50;
+        if (clickX >= ghostBtnX && clickX <= ghostBtnX + 50 &&
+            clickY >= btnY && clickY <= btnY + btnHeight) {
+          replayGhostMode = !replayGhostMode;
+          saveSettings();
+          renderReplayFrame();
+          return;
+        }
 
         // Check progress bar click (in main area)
         if (clickY >= progressY && clickY <= progressY + 8 &&
