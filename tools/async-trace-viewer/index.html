@@ -227,6 +227,8 @@
 
     .view-container.active { display: block; }
     #breakdown-view.active { display: flex; flex-direction: column; }
+    #latency-view.active { display: flex; flex-direction: column; }
+    #gaps-view.active { display: flex; flex-direction: column; }
 
     /* Waterfall styles */
     .waterfall { position: relative; min-height: 100%; }
@@ -1107,11 +1109,41 @@
     </div>
 
     <div class="view-container" id="latency-view" style="overflow: hidden; padding: 0;">
-      <canvas id="latency-canvas"></canvas>
+      <div id="latency-controls" style="display: flex; gap: 10px; padding: 6px 10px; background: #16213e; border-bottom: 1px solid #0f3460; align-items: center; flex-shrink: 0;">
+        <label style="color: #aaa; font-size: 11px;">View:</label>
+        <select id="latency-mode-select" style="font-size: 11px; padding: 2px 6px; background: #0f3460; color: #e0e0e0; border: 1px solid #1a1a2e; border-radius: 3px;">
+          <option value="histogram">Histogram</option>
+          <option value="cdf">CDF (Cumulative)</option>
+        </select>
+        <label style="color: #aaa; font-size: 11px; margin-left: 10px;">
+          <input type="checkbox" id="latency-outliers-checkbox" checked style="margin-right: 4px;">
+          Highlight Outliers
+        </label>
+      </div>
+      <canvas id="latency-canvas" style="flex: 1;"></canvas>
     </div>
 
     <div class="view-container" id="gaps-view" style="overflow: hidden; padding: 0;">
-      <canvas id="gaps-canvas"></canvas>
+      <div id="gaps-controls" style="display: flex; gap: 12px; padding: 6px 10px; background: #16213e; border-bottom: 1px solid #0f3460; align-items: center; flex-shrink: 0; flex-wrap: wrap;">
+        <label style="color: #aaa; font-size: 11px;">
+          Min gap:
+          <input type="range" id="gaps-threshold-slider" min="0.1" max="5" step="0.1" value="0.5" style="width: 80px; vertical-align: middle;">
+          <span id="gaps-threshold-value" style="color: #e0e0e0;">0.5%</span>
+        </label>
+        <label style="color: #aaa; font-size: 11px;">
+          <input type="checkbox" id="gaps-show-minor" style="margin-right: 4px;">
+          Show minor gaps
+        </label>
+        <label style="color: #aaa; font-size: 11px;">
+          <input type="checkbox" id="gaps-show-classification" checked style="margin-right: 4px;">
+          Classify gaps
+        </label>
+        <label style="color: #aaa; font-size: 11px;">
+          <input type="checkbox" id="gaps-show-recommendations" checked style="margin-right: 4px;">
+          Show recommendations
+        </label>
+      </div>
+      <canvas id="gaps-canvas" style="flex: 1;"></canvas>
     </div>
 
     <div class="view-container" id="replay-view" style="overflow: hidden; padding: 0;">
@@ -1332,29 +1364,36 @@
         <div class="view-help" data-view="latency">
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
             <strong>Latency View:</strong><br>
-            • Histogram of async wait times<br>
+            • Histogram or CDF (toggle in controls)<br>
             • <span style="color: #50c878;">p50</span> / <span style="color: #ffd700;">p90</span> / <span style="color: #ff6347;">p99</span> percentile lines<br>
-            • Log scale for wide ranges
+            • Hover bars for details, click for resources
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Interpretation:</strong><br>
-            • Right tail = outliers to investigate<br>
-            • Wide spread = inconsistent latency<br>
-            • Tight cluster = predictable timing
+            <strong>Highlights:</strong><br>
+            • <span style="color: #ff6347;">Red border</span> = outliers (>3σ)<br>
+            • <span style="color: #ff6600;">Orange dash</span> = critical path<br>
+            • Sidebar shows stats & type breakdown
           </div>
         </div>
         <div class="view-help" data-view="gaps">
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
             <strong>Gaps View:</strong><br>
             • <span style="color: #50c878;">Green</span> = sync execution<br>
-            • <span style="color: #ff6432;">Orange</span> = idle gaps (no work)<br>
-            • Shows ops waiting during gaps
+            • Colored gaps = idle time by cause<br>
+            • Hover for details, click for breakdown
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Interpretation:</strong><br>
-            • Gaps with waiters = blocking ops<br>
-            • Many small gaps = fragmented work<br>
-            • Large gaps = optimization opportunity
+            <strong>Gap Classification:</strong><br>
+            • <span style="color: #e94560;">Red</span> = fetch wait<br>
+            • <span style="color: #ffd700;">Gold</span> = timer delay<br>
+            • <span style="color: #7ec8e3;">Blue</span> = storage I/O<br>
+            • <span style="color: #9966cc;">Purple</span> = promise wait
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Controls & Highlights:</strong><br>
+            • Threshold slider filters minor gaps<br>
+            • <span style="color: #ff6600;">Orange dash</span> = critical path gap<br>
+            • Sidebar shows top gaps + recommendations
           </div>
         </div>
         <div class="view-help" data-view="replay">
@@ -1490,8 +1529,8 @@
             <tr><td><strong>3: Replay</strong></td><td>Understanding flow</td><td>Animated playback, lifecycle badges (⏳⚡✓), loop (Shift+L), ghost (Shift+O) for state pulses</td></tr>
             <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Solid=executing, faded=waiting, cyan line=ideal, hover/click for details, sidebar efficiency metrics</td></tr>
             <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Treemap/Sunburst, group by Type/Class/Trigger/Stack, click to drill down, ▶=can drill, Shift+R=reset</td></tr>
-            <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
-            <tr><td><strong>7: Gaps</strong></td><td>Idle time analysis</td><td>Orange gaps = nothing running, waiters during gaps</td></tr>
+            <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Histogram/CDF toggle, hover/click bars, outlier detection (red), critical path (orange)</td></tr>
+            <tr><td><strong>7: Gaps</strong></td><td>Idle time analysis</td><td>Color-coded gaps by cause, hover/click for details, threshold slider, recommendations in sidebar</td></tr>
             <tr><td><strong>8: Heatmap</strong></td><td>Activity density</td><td>Hot spots = high activity, rows = resource types, intensity = count</td></tr>
           </table>
         </div>
@@ -1529,7 +1568,16 @@ const c = await fetch('/api/c');</pre>
             <li>Is this KV/D1/DO call necessary?</li>
             <li>Can non-critical work use <code>ctx.waitUntil()</code>?</li>
           </ul>
-          <p class="guide-tip">💡 The Latency histogram shows p50/p90/p99 lines - focus on outliers beyond p99.</p>
+          <p class="guide-tip">💡 Enable outlier detection to highlight >3σ items. Click histogram bars to see individual resources.</p>
+          <p style="margin-top: 0.5rem;"><strong>Reading the CDF (Cumulative Distribution):</strong></p>
+          <ul>
+            <li><strong>Y-axis</strong> = "% of operations completing within X time"</li>
+            <li><strong>Steep curve</strong> = most operations have similar latency (good)</li>
+            <li><strong>Long flat tail</strong> = some operations much slower (investigate)</li>
+            <li><strong>p50 at 1ms, p99 at 100ms</strong> = high variance, find outliers</li>
+            <li><strong>Orange line</strong> (when critical path on) = critical path latencies</li>
+          </ul>
+          <p class="guide-tip">💡 CDF is useful for SLO analysis: "What % of requests complete under 50ms?" Read the Y value at X=50ms.</p>
         </div>
 
         <div class="guide-section">
@@ -1769,6 +1817,11 @@ const userB = await fetch('/user/123');</pre>
     let gapsRenderParams = null;  // Rendering parameters for hit detection
     let cachedTotalSync = 0;  // Cached for sidebar re-renders
     let cachedTotalAsync = 0;
+    let gapsHoverIndex = -1;  // Currently hovered gap index
+    let gapsShowClassification = true;  // Show gap classification
+    let gapsShowRecommendations = true;  // Show optimization recommendations
+    let gapsThresholdPercent = 0.5;  // Minimum gap threshold (% of total duration)
+    let gapsShowMinor = false;  // Show minor gaps below threshold
 
     // Breakdown view state
     let breakdownGroupBy = 'type';  // 'type', 'classification', 'trigger', 'stack'
@@ -1777,6 +1830,13 @@ const userB = await fetch('/user/123');</pre>
     let breakdownHoverItem = null;  // Currently hovered item for tooltip
     let breakdownData = null;  // Cached breakdown data for interaction
     let breakdownTooltip = null;  // Tooltip element
+
+    // Latency view state
+    let latencyMode = 'histogram';  // 'histogram' or 'cdf'
+    let latencyShowOutliers = true;
+    let latencyBucketData = null;  // Cached bucket data for hit detection
+    let latencyHoverBucket = -1;
+    let latencyTooltip = null;
 
     // Pattern detection thresholds (configurable via UI)
     const DEFAULT_PATTERN_THRESHOLDS = {
@@ -7171,12 +7231,15 @@ const userB = await fetch('/user/123');</pre>
       const canvas = document.getElementById('latency-canvas');
       const ctx = canvas.getContext('2d');
 
+      // Account for controls height
+      const controls = document.getElementById('latency-controls');
+      const controlsHeight = controls ? controls.offsetHeight : 0;
       canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
+      canvas.height = container.clientHeight - controlsHeight;
 
       const width = canvas.width;
       const height = canvas.height;
-      const padding = { top: 50, right: 30, bottom: 80, left: 70 };
+      const padding = { top: 50, right: 200, bottom: 80, left: 70 };
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
 
@@ -7194,7 +7257,8 @@ const userB = await fetch('/user/123');</pre>
             latencies.push({
               latencyNs,
               latencyMs: latencyNs / 1e6,
-              resource: r
+              resource: r,
+              onCriticalPath: criticalPathSet.has(r.asyncId)
             });
           }
         }
@@ -7218,13 +7282,18 @@ const userB = await fetch('/user/123');</pre>
       const p99 = latencies[Math.floor(latencies.length * 0.99)].latencyMs;
       const avgLatency = latencies.reduce((s, l) => s + l.latencyMs, 0) / latencies.length;
 
+      // Calculate standard deviation for outlier detection
+      const variance = latencies.reduce((s, l) => s + Math.pow(l.latencyMs - avgLatency, 2), 0) / latencies.length;
+      const stdDev = Math.sqrt(variance);
+      const outlierThreshold = avgLatency + 3 * stdDev;
+      const outliers = latencies.filter(l => l.latencyMs > outlierThreshold);
+
       // Create histogram buckets (logarithmic scale for wide range)
       const numBuckets = Math.min(50, Math.floor(chartWidth / 15));
       const useLogScale = maxLatency / Math.max(minLatency, 0.001) > 100;
 
       let buckets;
       if (useLogScale) {
-        // Logarithmic buckets for wide range
         const logMin = Math.log10(Math.max(minLatency, 0.001));
         const logMax = Math.log10(maxLatency);
         const logStep = (logMax - logMin) / numBuckets;
@@ -7232,16 +7301,21 @@ const userB = await fetch('/user/123');</pre>
           min: Math.pow(10, logMin + i * logStep),
           max: Math.pow(10, logMin + (i + 1) * logStep),
           count: 0,
-          byType: new Map()
+          criticalCount: 0,
+          outlierCount: 0,
+          byType: new Map(),
+          resources: []
         }));
       } else {
-        // Linear buckets for narrow range
         const step = (maxLatency - minLatency) / numBuckets || 1;
         buckets = Array.from({ length: numBuckets }, (_, i) => ({
           min: minLatency + i * step,
           max: minLatency + (i + 1) * step,
           count: 0,
-          byType: new Map()
+          criticalCount: 0,
+          outlierCount: 0,
+          byType: new Map(),
+          resources: []
         }));
       }
 
@@ -7250,6 +7324,9 @@ const userB = await fetch('/user/123');</pre>
         for (let i = 0; i < buckets.length; i++) {
           if (l.latencyMs >= buckets[i].min && (l.latencyMs < buckets[i].max || i === buckets.length - 1)) {
             buckets[i].count++;
+            buckets[i].resources.push(l);
+            if (l.onCriticalPath) buckets[i].criticalCount++;
+            if (l.latencyMs > outlierThreshold) buckets[i].outlierCount++;
             const type = l.resource.type;
             buckets[i].byType.set(type, (buckets[i].byType.get(type) || 0) + 1);
             break;
@@ -7257,13 +7334,32 @@ const userB = await fetch('/user/123');</pre>
         }
       });
 
+      // Store bucket data for hit detection
+      const barWidth = chartWidth / buckets.length;
+      latencyBucketData = {
+        buckets,
+        barWidth,
+        padding,
+        chartHeight,
+        chartWidth,
+        height,
+        width,
+        useLogScale,
+        minLatency,
+        maxLatency,
+        latencies,
+        outlierThreshold,
+        p50, p90, p99, avgLatency, stdDev
+      };
+
       const maxCount = Math.max(...buckets.map(b => b.count), 1);
 
       // Draw title
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Async Wait Time Distribution (Histogram)', width / 2, 25);
+      const title = latencyMode === 'cdf' ? 'Async Wait Time CDF (Cumulative Distribution)' : 'Async Wait Time Distribution (Histogram)';
+      ctx.fillText(title, (width - padding.right + padding.left) / 2, 25);
 
       // Draw axes
       ctx.strokeStyle = '#444';
@@ -7274,16 +7370,16 @@ const userB = await fetch('/user/123');</pre>
       ctx.lineTo(width - padding.right, height - padding.bottom);
       ctx.stroke();
 
-      // Y-axis labels (count)
+      // Y-axis labels
       ctx.fillStyle = '#888';
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'right';
+      const yMax = latencyMode === 'cdf' ? 100 : maxCount;
       for (let i = 0; i <= 5; i++) {
         const y = padding.top + (1 - i / 5) * chartHeight;
-        const value = Math.round((i / 5) * maxCount);
-        ctx.fillText(value.toString(), padding.left - 8, y + 3);
+        const value = latencyMode === 'cdf' ? (i * 20) + '%' : Math.round((i / 5) * maxCount).toString();
+        ctx.fillText(value, padding.left - 8, y + 3);
 
-        // Grid line
         ctx.strokeStyle = '#333';
         ctx.beginPath();
         ctx.moveTo(padding.left, y);
@@ -7298,11 +7394,10 @@ const userB = await fetch('/user/123');</pre>
       ctx.fillStyle = '#888';
       ctx.font = '11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Count', 0, 0);
+      ctx.fillText(latencyMode === 'cdf' ? 'Cumulative %' : 'Count', 0, 0);
       ctx.restore();
 
-      // Draw histogram bars (stacked by type)
-      const barWidth = chartWidth / buckets.length;
+      // Get all types for legend
       const allTypes = new Set();
       buckets.forEach(b => b.byType.forEach((_, type) => allTypes.add(type)));
       const sortedTypes = Array.from(allTypes).sort((a, b) => {
@@ -7311,22 +7406,119 @@ const userB = await fetch('/user/123');</pre>
         return countB - countA;
       });
 
-      buckets.forEach((bucket, i) => {
-        const x = padding.left + i * barWidth;
-        let y = height - padding.bottom;
+      if (latencyMode === 'cdf') {
+        // Draw CDF curve
+        ctx.beginPath();
+        ctx.strokeStyle = '#7ec8e3';
+        ctx.lineWidth = 2.5;
+        let cumulative = 0;
+        const totalCount = latencies.length;
 
-        sortedTypes.forEach(type => {
-          const count = bucket.byType.get(type) || 0;
-          if (count > 0) {
-            const barHeight = (count / maxCount) * chartHeight;
-            ctx.fillStyle = TYPE_COLORS[type] || '#808080';
-            ctx.globalAlpha = 0.85;
-            ctx.fillRect(x + 1, y - barHeight, barWidth - 2, barHeight);
-            y -= barHeight;
+        latencies.forEach((l, i) => {
+          cumulative++;
+          const pct = (cumulative / totalCount) * 100;
+          let x;
+          if (useLogScale) {
+            const logMin = Math.log10(Math.max(minLatency, 0.001));
+            const logMax = Math.log10(maxLatency);
+            const logVal = Math.log10(Math.max(l.latencyMs, 0.001));
+            x = padding.left + ((logVal - logMin) / (logMax - logMin)) * chartWidth;
+          } else {
+            x = padding.left + ((l.latencyMs - minLatency) / (maxLatency - minLatency)) * chartWidth;
+          }
+          const y = padding.top + (1 - pct / 100) * chartHeight;
+
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
           }
         });
-      });
-      ctx.globalAlpha = 1;
+        ctx.stroke();
+
+        // Fill under curve
+        ctx.lineTo(width - padding.right, height - padding.bottom);
+        ctx.lineTo(padding.left, height - padding.bottom);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(126, 200, 227, 0.15)';
+        ctx.fill();
+
+        // Draw critical path CDF if enabled
+        if (showCriticalPath) {
+          const criticalLatencies = latencies.filter(l => l.onCriticalPath);
+          if (criticalLatencies.length > 0) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#ff6600';
+            ctx.lineWidth = 2;
+            let critCum = 0;
+            criticalLatencies.forEach((l, i) => {
+              critCum++;
+              const pct = (critCum / criticalLatencies.length) * 100;
+              let x;
+              if (useLogScale) {
+                const logMin = Math.log10(Math.max(minLatency, 0.001));
+                const logMax = Math.log10(maxLatency);
+                const logVal = Math.log10(Math.max(l.latencyMs, 0.001));
+                x = padding.left + ((logVal - logMin) / (logMax - logMin)) * chartWidth;
+              } else {
+                x = padding.left + ((l.latencyMs - minLatency) / (maxLatency - minLatency)) * chartWidth;
+              }
+              const y = padding.top + (1 - pct / 100) * chartHeight;
+              if (i === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+          }
+        }
+      } else {
+        // Draw histogram bars
+        buckets.forEach((bucket, i) => {
+          const x = padding.left + i * barWidth;
+          let y = height - padding.bottom;
+          const isHovered = latencyHoverBucket === i;
+          const hasOutliers = bucket.outlierCount > 0;
+          const hasCritical = showCriticalPath && bucket.criticalCount > 0;
+
+          // Draw stacked bars by type
+          sortedTypes.forEach(type => {
+            const count = bucket.byType.get(type) || 0;
+            if (count > 0) {
+              const barHeight = (count / maxCount) * chartHeight;
+              ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+              ctx.globalAlpha = isHovered ? 1 : 0.85;
+              ctx.fillRect(x + 1, y - barHeight, barWidth - 2, barHeight);
+              y -= barHeight;
+            }
+          });
+          ctx.globalAlpha = 1;
+
+          // Highlight outlier buckets
+          if (latencyShowOutliers && hasOutliers) {
+            const barHeight = (bucket.count / maxCount) * chartHeight;
+            ctx.strokeStyle = '#ff6347';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x + 1, height - padding.bottom - barHeight, barWidth - 2, barHeight);
+          }
+
+          // Highlight critical path buckets
+          if (hasCritical) {
+            const barHeight = (bucket.count / maxCount) * chartHeight;
+            ctx.strokeStyle = '#ff6600';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 3]);
+            ctx.strokeRect(x + 2, height - padding.bottom - barHeight + 1, barWidth - 4, barHeight - 2);
+            ctx.setLineDash([]);
+          }
+
+          // Hover highlight
+          if (isHovered) {
+            const barHeight = (bucket.count / maxCount) * chartHeight;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, height - padding.bottom - barHeight - 1, barWidth, barHeight + 2);
+          }
+        });
+      }
 
       // X-axis labels
       ctx.fillStyle = '#888';
@@ -7344,7 +7536,8 @@ const userB = await fetch('/user/123');</pre>
       // X-axis title
       ctx.fillStyle = '#888';
       ctx.font = '11px sans-serif';
-      ctx.fillText('Async Wait Time' + (useLogScale ? ' (log scale)' : ''), width / 2, height - padding.bottom + 35);
+      ctx.textAlign = 'center';
+      ctx.fillText('Async Wait Time' + (useLogScale ? ' (log scale)' : ''), (width - padding.right + padding.left) / 2, height - padding.bottom + 35);
 
       // Draw percentile lines
       function drawPercentileLine(value, label, color) {
@@ -7379,44 +7572,270 @@ const userB = await fetch('/user/123');</pre>
       drawPercentileLine(p90, 'p90', '#ffd700');
       drawPercentileLine(p99, 'p99', '#ff6347');
 
-      // Stats overlay
-      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
-      ctx.fillRect(width - 180, padding.top, 170, 115);
-      ctx.strokeStyle = '#0f3460';
-      ctx.strokeRect(width - 180, padding.top, 170, 115);
+      // Stats sidebar
+      const sbX = width - padding.right + 10;
+      const sbWidth = padding.right - 20;
 
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(sbX, padding.top, sbWidth, chartHeight);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(sbX, padding.top, sbWidth, chartHeight);
+
+      let sbY = padding.top + 15;
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('Latency Statistics', width - 170, padding.top + 15);
+      ctx.fillText('Statistics', sbX + 10, sbY);
+      sbY += 18;
 
       ctx.font = '10px sans-serif';
       ctx.fillStyle = '#aaa';
-      ctx.fillText(`Count: ${latencies.length} resources`, width - 170, padding.top + 32);
-      ctx.fillText(`Min: ${minLatency < 1 ? (minLatency * 1000).toFixed(0) + 'µs' : minLatency.toFixed(2) + 'ms'}`, width - 170, padding.top + 46);
-      ctx.fillText(`Avg: ${avgLatency.toFixed(2)}ms`, width - 170, padding.top + 60);
+      ctx.fillText(`Count: ${latencies.length}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Min: ${formatLatency(minLatency)}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Avg: ${formatLatency(avgLatency)}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Max: ${formatLatency(maxLatency)}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Std Dev: ${formatLatency(stdDev)}`, sbX + 10, sbY); sbY += 20;
 
-      ctx.fillStyle = '#50c878';
-      ctx.fillText(`p50: ${p50.toFixed(2)}ms`, width - 170, padding.top + 74);
-      ctx.fillStyle = '#ffd700';
-      ctx.fillText(`p90: ${p90.toFixed(2)}ms`, width - 170, padding.top + 88);
-      ctx.fillStyle = '#ff6347';
-      ctx.fillText(`p99: ${p99.toFixed(2)}ms`, width - 170, padding.top + 102);
-
-      // Legend at bottom
-      const legendY = height - 25;
-      let legendX = padding.left;
+      // Percentiles
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('Percentiles', sbX + 10, sbY); sbY += 14;
       ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#50c878';
+      ctx.fillText(`p50: ${formatLatency(p50)}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText(`p90: ${formatLatency(p90)}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillStyle = '#ff6347';
+      ctx.fillText(`p99: ${formatLatency(p99)}`, sbX + 10, sbY); sbY += 20;
 
-      sortedTypes.slice(0, 6).forEach(type => {
-        ctx.fillStyle = TYPE_COLORS[type] || '#808080';
-        ctx.fillRect(legendX, legendY - 8, 12, 12);
+      // Outliers
+      if (latencyShowOutliers && outliers.length > 0) {
+        ctx.fillStyle = '#e94560';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText('Outliers (>3σ)', sbX + 10, sbY); sbY += 14;
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = '#ff6347';
+        ctx.fillText(`Count: ${outliers.length}`, sbX + 10, sbY); sbY += 14;
         ctx.fillStyle = '#aaa';
-        ctx.textAlign = 'left';
-        const label = type.replace('js-', '').substring(0, 8);
-        ctx.fillText(label, legendX + 16, legendY);
-        legendX += ctx.measureText(label).width + 30;
+        ctx.fillText(`Threshold: ${formatLatency(outlierThreshold)}`, sbX + 10, sbY); sbY += 20;
+      }
+
+      // Critical path stats
+      if (showCriticalPath) {
+        const criticalLatencies = latencies.filter(l => l.onCriticalPath);
+        if (criticalLatencies.length > 0) {
+          ctx.fillStyle = '#ff6600';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.fillText('Critical Path', sbX + 10, sbY); sbY += 14;
+          ctx.font = '10px sans-serif';
+          ctx.fillStyle = '#aaa';
+          ctx.fillText(`Count: ${criticalLatencies.length}`, sbX + 10, sbY); sbY += 14;
+          const critAvg = criticalLatencies.reduce((s, l) => s + l.latencyMs, 0) / criticalLatencies.length;
+          ctx.fillText(`Avg: ${formatLatency(critAvg)}`, sbX + 10, sbY); sbY += 20;
+        }
+      }
+
+      // Legend
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('Types', sbX + 10, sbY); sbY += 14;
+      ctx.font = '9px sans-serif';
+      sortedTypes.slice(0, 8).forEach(type => {
+        ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+        ctx.fillRect(sbX + 10, sbY - 8, 10, 10);
+        ctx.fillStyle = '#aaa';
+        const label = type.length > 12 ? type.substring(0, 10) + '..' : type;
+        ctx.fillText(label, sbX + 24, sbY);
+        sbY += 13;
       });
+
+      // Setup event handlers (once)
+      if (!canvas._latencyHandlersSet) {
+        canvas._latencyHandlersSet = true;
+        setupLatencyEventHandlers(canvas);
+      }
+    }
+
+    function formatLatency(ms) {
+      if (ms < 0.001) return `${(ms * 1e6).toFixed(0)}ns`;
+      if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
+      return `${ms.toFixed(2)}ms`;
+    }
+
+    function setupLatencyEventHandlers(canvas) {
+      // Mode select handler
+      document.getElementById('latency-mode-select').addEventListener('change', (e) => {
+        latencyMode = e.target.value;
+        renderLatency();
+      });
+
+      // Outliers checkbox handler
+      document.getElementById('latency-outliers-checkbox').addEventListener('change', (e) => {
+        latencyShowOutliers = e.target.checked;
+        renderLatency();
+      });
+
+      // Hover handler
+      canvas.addEventListener('mousemove', (e) => {
+        if (currentView !== 'latency' || !latencyBucketData || latencyMode === 'cdf') {
+          canvas.style.cursor = 'default';
+          return;
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const { buckets, barWidth, padding, chartHeight, height } = latencyBucketData;
+
+        // Find which bucket is hovered
+        let hoveredBucket = -1;
+        if (x >= padding.left && x <= padding.left + buckets.length * barWidth &&
+            y >= padding.top && y <= height - padding.bottom) {
+          hoveredBucket = Math.floor((x - padding.left) / barWidth);
+          if (hoveredBucket >= buckets.length) hoveredBucket = buckets.length - 1;
+        }
+
+        canvas.style.cursor = hoveredBucket >= 0 ? 'pointer' : 'default';
+
+        if (hoveredBucket !== latencyHoverBucket) {
+          latencyHoverBucket = hoveredBucket;
+          renderLatency();
+          if (hoveredBucket >= 0) {
+            showLatencyTooltip(e, buckets[hoveredBucket]);
+          } else {
+            hideLatencyTooltip();
+          }
+        } else if (hoveredBucket >= 0) {
+          updateLatencyTooltipPosition(e);
+        }
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        if (latencyHoverBucket !== -1) {
+          latencyHoverBucket = -1;
+          hideLatencyTooltip();
+          if (currentView === 'latency') renderLatency();
+        }
+      });
+
+      // Click handler - show resources in sidebar
+      canvas.addEventListener('click', (e) => {
+        if (currentView !== 'latency' || !latencyBucketData || latencyMode === 'cdf') return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const { buckets, barWidth, padding } = latencyBucketData;
+
+        if (x >= padding.left && x <= padding.left + buckets.length * barWidth) {
+          const bucketIdx = Math.floor((x - padding.left) / barWidth);
+          if (bucketIdx >= 0 && bucketIdx < buckets.length) {
+            const bucket = buckets[bucketIdx];
+            if (bucket.resources.length > 0) {
+              showLatencyBucketDetails(bucket);
+            }
+          }
+        }
+      });
+    }
+
+    function showLatencyTooltip(e, bucket) {
+      let tooltip = document.getElementById('latency-tooltip');
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'latency-tooltip';
+        tooltip.style.cssText = `
+          position: fixed; background: rgba(22, 33, 62, 0.95); border: 1px solid #0f3460;
+          padding: 10px 14px; border-radius: 4px; font-size: 11px; color: #e0e0e0;
+          pointer-events: none; z-index: 1000; max-width: 280px;
+        `;
+        document.body.appendChild(tooltip);
+      }
+
+      const { outlierThreshold } = latencyBucketData;
+      const rangeLabel = `${formatLatency(bucket.min)} - ${formatLatency(bucket.max)}`;
+
+      let html = `<div style="font-weight: bold; color: #e94560; margin-bottom: 6px;">Latency: ${rangeLabel}</div>`;
+      html += `<div style="display: grid; grid-template-columns: auto auto; gap: 2px 12px;">`;
+      html += `<span style="color: #888;">Count:</span><span>${bucket.count}</span>`;
+
+      if (showCriticalPath && bucket.criticalCount > 0) {
+        html += `<span style="color: #ff6600;">On critical path:</span><span>${bucket.criticalCount}</span>`;
+      }
+      if (latencyShowOutliers && bucket.outlierCount > 0) {
+        html += `<span style="color: #ff6347;">Outliers:</span><span>${bucket.outlierCount}</span>`;
+      }
+      html += `</div>`;
+
+      // Type breakdown
+      if (bucket.byType.size > 0) {
+        html += `<div style="margin-top: 8px; font-weight: bold; color: #7ec8e3; font-size: 10px;">By Type:</div>`;
+        html += `<div style="font-size: 10px;">`;
+        Array.from(bucket.byType.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .forEach(([type, count]) => {
+            const color = TYPE_COLORS[type] || '#808080';
+            html += `<span style="color: ${color};">●</span> ${type}: ${count}<br>`;
+          });
+        html += `</div>`;
+      }
+
+      html += `<div style="color: #7ec8e3; margin-top: 6px; font-size: 10px;">Click for details</div>`;
+
+      tooltip.innerHTML = html;
+      tooltip.style.left = (e.clientX + 15) + 'px';
+      tooltip.style.top = (e.clientY + 15) + 'px';
+      tooltip.style.display = 'block';
+    }
+
+    function updateLatencyTooltipPosition(e) {
+      const tooltip = document.getElementById('latency-tooltip');
+      if (tooltip) {
+        tooltip.style.left = (e.clientX + 15) + 'px';
+        tooltip.style.top = (e.clientY + 15) + 'px';
+      }
+    }
+
+    function hideLatencyTooltip() {
+      const tooltip = document.getElementById('latency-tooltip');
+      if (tooltip) tooltip.style.display = 'none';
+    }
+
+    function showLatencyBucketDetails(bucket) {
+      const detailsEl = document.getElementById('selected-details');
+      if (!detailsEl) return;
+
+      let html = `<div style="font-weight: bold; color: #e94560; margin-bottom: 8px;">
+        Latency Range: ${formatLatency(bucket.min)} - ${formatLatency(bucket.max)}
+      </div>`;
+      html += `<div style="color: #aaa; margin-bottom: 8px;">${bucket.count} resources</div>`;
+
+      // List resources sorted by latency
+      html += `<div style="max-height: 300px; overflow-y: auto;">`;
+      bucket.resources
+        .sort((a, b) => b.latencyMs - a.latencyMs)
+        .slice(0, 20)
+        .forEach(l => {
+          const r = l.resource;
+          const color = TYPE_COLORS[r.type] || '#808080';
+          const criticalBadge = l.onCriticalPath ? ' <span style="color: #ff6600;">🔥</span>' : '';
+          const outlierBadge = l.latencyMs > latencyBucketData.outlierThreshold ? ' <span style="color: #ff6347;">⚠</span>' : '';
+          html += `<div class="detail-item" style="cursor: pointer; padding: 4px; border-radius: 3px;"
+                        onmouseover="this.style.background='rgba(233,69,96,0.2)'"
+                        onmouseout="this.style.background='transparent'"
+                        onclick="selectResource(${r.asyncId})">
+            <span style="color: ${color};">●</span>
+            <strong>${r.type}</strong> #${r.asyncId}${criticalBadge}${outlierBadge}
+            <span style="color: #888; float: right;">${formatLatency(l.latencyMs)}</span>
+          </div>`;
+        });
+      if (bucket.resources.length > 20) {
+        html += `<div style="color: #666; font-style: italic;">...and ${bucket.resources.length - 20} more</div>`;
+      }
+      html += `</div>`;
+
+      detailsEl.innerHTML = html;
     }
 
     // ==================== GAPS VIEW ====================
@@ -7425,12 +7844,15 @@ const userB = await fetch('/user/123');</pre>
       const canvas = document.getElementById('gaps-canvas');
       const ctx = canvas.getContext('2d');
 
+      // Account for controls height
+      const controls = document.getElementById('gaps-controls');
+      const controlsHeight = controls ? controls.offsetHeight : 0;
       canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
+      canvas.height = container.clientHeight - controlsHeight;
 
       const width = canvas.width;
       const height = canvas.height;
-      const padding = { top: 50, right: 30, bottom: 60, left: 70 };
+      const padding = { top: 50, right: 220, bottom: 60, left: 70 };
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
 
@@ -7444,11 +7866,10 @@ const userB = await fetch('/user/123');</pre>
       // Build timeline of activity - track when sync work is happening
       const numBuckets = Math.min(1000, Math.floor(chartWidth));
       const bucketSize = duration / numBuckets;
-      const activityBuckets = new Array(numBuckets).fill(0);  // Count of active sync operations
-      const asyncBuckets = new Array(numBuckets).fill(0);     // Count of resources in async wait
+      const activityBuckets = new Array(numBuckets).fill(0);
+      const asyncBuckets = new Array(numBuckets).fill(0);
 
       traceData.resources.forEach(r => {
-        // Track sync execution periods
         if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
           const startBucket = Math.max(0, Math.floor(r.callbackStartedAt / bucketSize));
           const endBucket = Math.min(numBuckets - 1, Math.floor(r.callbackEndedAt / bucketSize));
@@ -7457,7 +7878,6 @@ const userB = await fetch('/user/123');</pre>
           }
         }
 
-        // Track async wait periods
         if (r.createdAt > 0) {
           const waitEnd = r.callbackStartedAt > 0 ? r.callbackStartedAt :
                          (r.callbackEndedAt > 0 ? r.callbackEndedAt :
@@ -7470,9 +7890,8 @@ const userB = await fetch('/user/123');</pre>
         }
       });
 
-      // Find gaps: periods where nothing is executing (no sync activity)
-      // but there might be async waits happening
-      const gaps = [];
+      // Find gaps
+      const allGaps = [];
       let gapStart = null;
 
       for (let i = 0; i < numBuckets; i++) {
@@ -7482,66 +7901,75 @@ const userB = await fetch('/user/123');</pre>
         } else if (!isIdle && gapStart !== null) {
           const gapEnd = i;
           const gapDurationNs = (gapEnd - gapStart) * bucketSize;
-          if (gapDurationNs > duration * 0.005) {  // Only gaps > 0.5% of total
-            gaps.push({
-              startBucket: gapStart,
-              endBucket: gapEnd,
-              startNs: gapStart * bucketSize,
-              endNs: gapEnd * bucketSize,
-              durationNs: gapDurationNs,
-              durationMs: gapDurationNs / 1e6,
-              asyncWaiters: Math.max(...asyncBuckets.slice(gapStart, gapEnd + 1))
-            });
-          }
-          gapStart = null;
-        }
-      }
-
-      // Handle gap at end
-      if (gapStart !== null) {
-        const gapEnd = numBuckets;
-        const gapDurationNs = (gapEnd - gapStart) * bucketSize;
-        if (gapDurationNs > duration * 0.005) {
-          gaps.push({
+          allGaps.push({
             startBucket: gapStart,
             endBucket: gapEnd,
             startNs: gapStart * bucketSize,
             endNs: gapEnd * bucketSize,
             durationNs: gapDurationNs,
             durationMs: gapDurationNs / 1e6,
-            asyncWaiters: Math.max(...asyncBuckets.slice(gapStart, gapEnd))
+            asyncWaiters: Math.max(...asyncBuckets.slice(gapStart, gapEnd + 1))
           });
+          gapStart = null;
         }
       }
+
+      if (gapStart !== null) {
+        const gapEnd = numBuckets;
+        const gapDurationNs = (gapEnd - gapStart) * bucketSize;
+        allGaps.push({
+          startBucket: gapStart,
+          endBucket: gapEnd,
+          startNs: gapStart * bucketSize,
+          endNs: gapEnd * bucketSize,
+          durationNs: gapDurationNs,
+          durationMs: gapDurationNs / 1e6,
+          asyncWaiters: Math.max(...asyncBuckets.slice(gapStart, gapEnd))
+        });
+      }
+
+      // Filter gaps by threshold
+      const thresholdNs = duration * (gapsThresholdPercent / 100);
+      const gaps = gapsShowMinor ? allGaps : allGaps.filter(g => g.durationNs > thresholdNs);
+      const minorGapsCount = allGaps.length - gaps.filter(g => g.durationNs > thresholdNs).length;
 
       // Sort gaps by duration
       gaps.sort((a, b) => b.durationNs - a.durationNs);
 
-      // For each gap, find the resources that are waiting during it
+      // For each gap, find waiting resources and classify
       gaps.forEach(gap => {
         gap.waitingResources = traceData.resources.filter(r => {
           if (r.createdAt <= 0) return false;
-          // Resource must be created before the gap ends
           if (r.createdAt > gap.endNs) return false;
-          // Resource must not have completed before the gap starts
           const waitEnd = r.callbackStartedAt > 0 ? r.callbackStartedAt :
                          (r.callbackEndedAt > 0 ? r.callbackEndedAt :
                          (r.destroyedAt > 0 ? r.destroyedAt : duration));
           return waitEnd > gap.startNs;
         });
+
+        // Classify the gap
+        gap.classification = classifyGap(gap);
+        gap.recommendation = getGapRecommendation(gap);
+
+        // Check if gap is on critical path
+        gap.onCriticalPath = gap.waitingResources.some(r => criticalPathSet.has(r.asyncId));
+
+        // Mark as minor
+        gap.isMinor = gap.durationNs <= thresholdNs;
       });
 
-      // Store gaps for hover detection (barWidth stored after it's computed below)
+      // Store gaps for hover detection
       gapsData = gaps;
 
       const totalGapTime = gaps.reduce((s, g) => s + g.durationNs, 0);
       const gapPercent = (totalGapTime / duration * 100).toFixed(1);
+      const criticalGaps = gaps.filter(g => g.onCriticalPath);
 
       // Draw title
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Gap Analysis - Idle Periods (No Sync Execution)', width / 2, 25);
+      ctx.fillText('Gap Analysis - Idle Periods (No Sync Execution)', (width - padding.right + padding.left) / 2, 25);
 
       // Draw axes
       ctx.strokeStyle = '#444';
@@ -7552,17 +7980,17 @@ const userB = await fetch('/user/123');</pre>
       ctx.lineTo(width - padding.right, height - padding.bottom);
       ctx.stroke();
 
-      // Draw activity timeline
       const maxActivity = Math.max(...activityBuckets, 1);
       const barWidth = chartWidth / numBuckets;
 
       // Store render params for hover detection
-      gapsRenderParams = { padding, chartWidth, chartHeight, barWidth, numBuckets, bucketSize, duration };
+      gapsRenderParams = { padding, chartWidth, chartHeight, barWidth, numBuckets, bucketSize, duration, height };
 
-      // Background showing async waiters (light)
+      // Background showing async waiters
+      const maxAsync = Math.max(...asyncBuckets, 1);
       for (let i = 0; i < numBuckets; i++) {
         if (asyncBuckets[i] > 0) {
-          const barHeight = (asyncBuckets[i] / Math.max(...asyncBuckets, 1)) * chartHeight * 0.3;
+          const barHeight = (asyncBuckets[i] / maxAsync) * chartHeight * 0.3;
           ctx.fillStyle = accessibilityMode ? 'rgba(126, 200, 227, 0.35)' : 'rgba(126, 200, 227, 0.2)';
           ctx.fillRect(padding.left + i * barWidth, height - padding.bottom - barHeight, barWidth, barHeight);
         }
@@ -7581,48 +8009,68 @@ const userB = await fetch('/user/123');</pre>
       }
       ctx.globalAlpha = 1;
 
-      // In accessibility mode, draw a white border around the sync activity region
-      if (accessibilityMode) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(padding.left, height - padding.bottom);
-        for (let i = 0; i < numBuckets; i++) {
-          const barHeight = (activityBuckets[i] / maxActivity) * chartHeight * 0.6;
-          ctx.lineTo(padding.left + i * barWidth, height - padding.bottom - barHeight);
-          ctx.lineTo(padding.left + (i + 1) * barWidth, height - padding.bottom - barHeight);
-        }
-        ctx.stroke();
-      }
+      // Highlight gaps
+      const classColors = {
+        'fetch': '#e94560',
+        'timer': '#ffd700',
+        'io': '#7ec8e3',
+        'promise': '#9966cc',
+        'unknown': '#ff6432'
+      };
 
-      // Highlight gaps with red overlay
       gaps.forEach((gap, idx) => {
         const x = padding.left + gap.startBucket * barWidth;
         const gapWidth = (gap.endBucket - gap.startBucket) * barWidth;
+        const isHovered = gapsHoverIndex === idx;
 
-        // Red gap highlight - higher opacity in accessibility mode
-        const baseOpacity = idx < 3 ? 0.4 : 0.2;
-        const opacity = accessibilityMode ? baseOpacity + 0.15 : baseOpacity;
-        ctx.fillStyle = `rgba(255, 100, 50, ${opacity})`;
+        // Gap color based on classification
+        let gapColor = '#ff6432';
+        if (gapsShowClassification && gap.classification) {
+          gapColor = classColors[gap.classification.type] || '#ff6432';
+        }
+
+        // Gap fill
+        const baseOpacity = isHovered ? 0.5 : (idx < 3 ? 0.35 : 0.2);
+        const opacity = gap.isMinor ? baseOpacity * 0.5 : baseOpacity;
+        ctx.fillStyle = gapColor;
+        ctx.globalAlpha = opacity;
         ctx.fillRect(x, padding.top, gapWidth, chartHeight);
+        ctx.globalAlpha = 1;
 
-        // Gap border - thicker in accessibility mode
-        ctx.strokeStyle = '#ff6432';
-        ctx.lineWidth = accessibilityMode ? (idx < 3 ? 3 : 2) : (idx < 3 ? 2 : 1);
+        // Gap border
+        ctx.strokeStyle = gapColor;
+        ctx.lineWidth = isHovered ? 3 : (idx < 3 ? 2 : 1);
+        if (gap.isMinor) ctx.setLineDash([2, 2]);
         ctx.strokeRect(x, padding.top, gapWidth, chartHeight);
+        ctx.setLineDash([]);
 
-        // Label for significant gaps
-        if (gap.durationMs >= 0.1 && gapWidth > 30) {
-          ctx.fillStyle = '#ff6432';
+        // Critical path indicator
+        if (showCriticalPath && gap.onCriticalPath) {
+          ctx.strokeStyle = '#ff6600';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(x + 2, padding.top + 2, gapWidth - 4, chartHeight - 4);
+          ctx.setLineDash([]);
+        }
+
+        // Labels for significant gaps
+        if (gap.durationMs >= 0.1 && gapWidth > 30 && !gap.isMinor) {
+          ctx.fillStyle = gapColor;
           ctx.font = 'bold 10px sans-serif';
           ctx.textAlign = 'center';
           const label = gap.durationMs >= 1 ? `${gap.durationMs.toFixed(1)}ms` : `${(gap.durationMs * 1000).toFixed(0)}µs`;
           ctx.fillText(label, x + gapWidth / 2, padding.top + 15);
 
+          if (gapsShowClassification && gap.classification && gapWidth > 60) {
+            ctx.font = '9px sans-serif';
+            ctx.fillText(gap.classification.label, x + gapWidth / 2, padding.top + 28);
+          }
+
           if (gap.asyncWaiters > 0 && gapWidth > 50) {
             ctx.font = '9px sans-serif';
             ctx.fillStyle = '#7ec8e3';
-            ctx.fillText(`${gap.asyncWaiters} waiting`, x + gapWidth / 2, padding.top + 28);
+            const yOffset = gapsShowClassification && gap.classification && gapWidth > 60 ? 41 : 28;
+            ctx.fillText(`${gap.asyncWaiters} waiting`, x + gapWidth / 2, padding.top + yOffset);
           }
         }
       });
@@ -7637,8 +8085,7 @@ const userB = await fetch('/user/123');</pre>
         ctx.fillText(time.toFixed(1) + 'ms', x, height - padding.bottom + 15);
       }
 
-      // X-axis title
-      ctx.fillText('Time', width / 2, height - padding.bottom + 35);
+      ctx.fillText('Time', (width - padding.right + padding.left) / 2, height - padding.bottom + 35);
 
       // Y-axis title
       ctx.save();
@@ -7654,58 +8101,403 @@ const userB = await fetch('/user/123');</pre>
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'left';
 
-      // Sync execution legend
       ctx.fillStyle = '#50c878';
       ctx.fillRect(padding.left, height - 25, 12, 12);
-      if (accessibilityMode) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(padding.left, height - 25, 12, 12);
+      ctx.fillStyle = '#888';
+      ctx.fillText('Sync', padding.left + 16, height - 16);
+
+      ctx.fillStyle = 'rgba(126, 200, 227, 0.5)';
+      ctx.fillRect(padding.left + 60, height - 25, 12, 12);
+      ctx.fillStyle = '#888';
+      ctx.fillText('Async wait', padding.left + 76, height - 16);
+
+      if (gapsShowClassification) {
+        let legendX = padding.left + 150;
+        Object.entries(classColors).slice(0, 4).forEach(([type, color]) => {
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.5;
+          ctx.fillRect(legendX, height - 25, 12, 12);
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = color;
+          ctx.strokeRect(legendX, height - 25, 12, 12);
+          ctx.fillStyle = '#888';
+          ctx.fillText(type, legendX + 16, height - 16);
+          legendX += 70;
+        });
       }
-      ctx.fillStyle = '#888';
-      ctx.fillText('Sync execution', padding.left + 16, height - 16);
 
-      // Async waiting legend
-      ctx.fillStyle = accessibilityMode ? 'rgba(126, 200, 227, 0.5)' : 'rgba(126, 200, 227, 0.5)';
-      ctx.fillRect(padding.left + 110, height - 25, 12, 12);
-      ctx.fillStyle = '#888';
-      ctx.fillText('Async waiting', padding.left + 126, height - 16);
+      // Sidebar
+      const sbX = width - padding.right + 10;
+      const sbWidth = padding.right - 20;
 
-      // Idle gaps legend
-      ctx.fillStyle = accessibilityMode ? 'rgba(255, 100, 50, 0.55)' : 'rgba(255, 100, 50, 0.5)';
-      ctx.fillRect(padding.left + 220, height - 25, 12, 12);
-      ctx.strokeStyle = '#ff6432';
-      ctx.lineWidth = accessibilityMode ? 2 : 1;
-      ctx.strokeRect(padding.left + 220, height - 25, 12, 12);
-      ctx.fillStyle = '#888';
-      ctx.fillText('Idle gaps', padding.left + 236, height - 16);
-
-      // Stats overlay
       ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
-      ctx.fillRect(width - 200, padding.top, 190, 100);
+      ctx.fillRect(sbX, padding.top, sbWidth, chartHeight);
       ctx.strokeStyle = '#0f3460';
-      ctx.strokeRect(width - 200, padding.top, 190, 100);
+      ctx.strokeRect(sbX, padding.top, sbWidth, chartHeight);
 
+      let sbY = padding.top + 15;
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('Gap Statistics', width - 190, padding.top + 15);
+      ctx.fillText('Gap Statistics', sbX + 10, sbY);
+      sbY += 18;
 
       ctx.font = '10px sans-serif';
       ctx.fillStyle = '#aaa';
-      ctx.fillText(`Gaps found: ${gaps.length}`, width - 190, padding.top + 32);
-      ctx.fillText(`Total idle: ${(totalGapTime / 1e6).toFixed(2)}ms (${gapPercent}%)`, width - 190, padding.top + 46);
-
-      if (gaps.length > 0) {
-        ctx.fillStyle = '#ff6432';
-        ctx.fillText(`Largest: ${gaps[0].durationMs.toFixed(2)}ms`, width - 190, padding.top + 60);
-        ctx.fillStyle = '#aaa';
-        ctx.fillText(`  at ${(gaps[0].startNs / 1e6).toFixed(2)}ms`, width - 190, padding.top + 74);
-        if (gaps[0].asyncWaiters > 0) {
-          ctx.fillStyle = '#7ec8e3';
-          ctx.fillText(`  ${gaps[0].asyncWaiters} ops waiting`, width - 190, padding.top + 88);
-        }
+      ctx.fillText(`Gaps shown: ${gaps.length}`, sbX + 10, sbY); sbY += 14;
+      if (minorGapsCount > 0 && !gapsShowMinor) {
+        ctx.fillStyle = '#666';
+        ctx.fillText(`(${minorGapsCount} minor hidden)`, sbX + 10, sbY); sbY += 14;
       }
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(`Total idle: ${(totalGapTime / 1e6).toFixed(2)}ms`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Idle %: ${gapPercent}%`, sbX + 10, sbY); sbY += 18;
+
+      // Critical path gaps
+      if (showCriticalPath && criticalGaps.length > 0) {
+        ctx.fillStyle = '#ff6600';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText('Critical Path Gaps', sbX + 10, sbY); sbY += 14;
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = '#aaa';
+        const criticalTime = criticalGaps.reduce((s, g) => s + g.durationNs, 0);
+        ctx.fillText(`Count: ${criticalGaps.length}`, sbX + 10, sbY); sbY += 14;
+        ctx.fillText(`Time: ${(criticalTime / 1e6).toFixed(2)}ms`, sbX + 10, sbY); sbY += 18;
+      }
+
+      // Top gaps
+      if (gaps.length > 0) {
+        ctx.fillStyle = '#e94560';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText('Largest Gaps', sbX + 10, sbY); sbY += 14;
+
+        gaps.slice(0, 5).forEach((gap, i) => {
+          const color = gapsShowClassification && gap.classification ?
+            classColors[gap.classification.type] : '#ff6432';
+          ctx.fillStyle = color;
+          ctx.font = '10px sans-serif';
+          const timeLabel = gap.durationMs >= 1 ? `${gap.durationMs.toFixed(1)}ms` : `${(gap.durationMs * 1000).toFixed(0)}µs`;
+          const critBadge = gap.onCriticalPath ? ' 🔥' : '';
+          ctx.fillText(`${i + 1}. ${timeLabel}${critBadge}`, sbX + 10, sbY);
+          sbY += 12;
+          if (gapsShowClassification && gap.classification) {
+            ctx.fillStyle = '#888';
+            ctx.font = '9px sans-serif';
+            ctx.fillText(`   ${gap.classification.label}`, sbX + 10, sbY);
+            sbY += 12;
+          }
+        });
+        sbY += 6;
+      }
+
+      // Recommendations
+      if (gapsShowRecommendations && gaps.length > 0) {
+        ctx.fillStyle = '#e94560';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText('Recommendations', sbX + 10, sbY); sbY += 14;
+
+        // Get unique recommendations
+        const recommendations = new Map();
+        gaps.slice(0, 10).forEach(gap => {
+          if (gap.recommendation && !recommendations.has(gap.recommendation.type)) {
+            recommendations.set(gap.recommendation.type, gap.recommendation);
+          }
+        });
+
+        ctx.font = '9px sans-serif';
+        Array.from(recommendations.values()).slice(0, 3).forEach(rec => {
+          ctx.fillStyle = '#ffd700';
+          ctx.fillText(`• ${rec.short}`, sbX + 10, sbY);
+          sbY += 12;
+        });
+      }
+
+      // Setup event handlers (once)
+      if (!canvas._gapsHandlersSet) {
+        canvas._gapsHandlersSet = true;
+        setupGapsEventHandlers(canvas);
+      }
+    }
+
+    function classifyGap(gap) {
+      if (!gap.waitingResources || gap.waitingResources.length === 0) {
+        return { type: 'unknown', label: 'No waiters' };
+      }
+
+      // Count resource types
+      const typeCounts = {};
+      gap.waitingResources.forEach(r => {
+        typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+      });
+
+      // Determine primary cause
+      const types = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]);
+      const [primaryType] = types[0];
+
+      if (primaryType === 'fetch' || primaryType.includes('fetch')) {
+        return { type: 'fetch', label: 'Awaiting fetch' };
+      }
+      if (primaryType === 'timer') {
+        return { type: 'timer', label: 'Timer delay' };
+      }
+      if (primaryType.includes('kv') || primaryType.includes('do-') || primaryType.includes('r2') || primaryType.includes('d1')) {
+        return { type: 'io', label: 'Storage I/O' };
+      }
+      if (primaryType === 'js-promise' || primaryType === 'kj-promise') {
+        return { type: 'promise', label: 'Promise wait' };
+      }
+      if (primaryType.includes('stream')) {
+        return { type: 'io', label: 'Stream I/O' };
+      }
+
+      return { type: 'unknown', label: `Waiting: ${primaryType}` };
+    }
+
+    function getGapRecommendation(gap) {
+      if (!gap.classification) return null;
+
+      switch (gap.classification.type) {
+        case 'fetch':
+          return {
+            type: 'parallel-fetch',
+            short: 'Parallelize fetches',
+            detail: 'Use Promise.all() to run fetches concurrently'
+          };
+        case 'timer':
+          return {
+            type: 'remove-timer',
+            short: 'Review timer necessity',
+            detail: 'Consider if setTimeout/setInterval is needed'
+          };
+        case 'io':
+          return {
+            type: 'cache-io',
+            short: 'Cache or batch I/O',
+            detail: 'Consider caching results or batching operations'
+          };
+        case 'promise':
+          return {
+            type: 'check-await',
+            short: 'Check await placement',
+            detail: 'Ensure awaits are not unnecessarily sequential'
+          };
+        default:
+          return {
+            type: 'investigate',
+            short: 'Investigate gap cause',
+            detail: 'Review waiting resources for optimization'
+          };
+      }
+    }
+
+    function setupGapsEventHandlers(canvas) {
+      // Control handlers
+      document.getElementById('gaps-threshold-slider').addEventListener('input', (e) => {
+        gapsThresholdPercent = parseFloat(e.target.value);
+        document.getElementById('gaps-threshold-value').textContent = gapsThresholdPercent.toFixed(1) + '%';
+        renderGaps();
+      });
+
+      document.getElementById('gaps-show-minor').addEventListener('change', (e) => {
+        gapsShowMinor = e.target.checked;
+        renderGaps();
+      });
+
+      document.getElementById('gaps-show-classification').addEventListener('change', (e) => {
+        gapsShowClassification = e.target.checked;
+        renderGaps();
+      });
+
+      document.getElementById('gaps-show-recommendations').addEventListener('change', (e) => {
+        gapsShowRecommendations = e.target.checked;
+        renderGaps();
+      });
+
+      // Hover handler
+      canvas.addEventListener('mousemove', (e) => {
+        if (currentView !== 'gaps' || !gapsRenderParams || gapsData.length === 0) {
+          canvas.style.cursor = 'default';
+          return;
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const { padding, barWidth, chartHeight, height } = gapsRenderParams;
+
+        // Find hovered gap
+        let hoveredIdx = -1;
+        if (y >= padding.top && y <= height - padding.bottom) {
+          for (let i = 0; i < gapsData.length; i++) {
+            const gap = gapsData[i];
+            const gapX = padding.left + gap.startBucket * barWidth;
+            const gapWidth = (gap.endBucket - gap.startBucket) * barWidth;
+            if (x >= gapX && x <= gapX + gapWidth) {
+              hoveredIdx = i;
+              break;
+            }
+          }
+        }
+
+        canvas.style.cursor = hoveredIdx >= 0 ? 'pointer' : 'default';
+
+        if (hoveredIdx !== gapsHoverIndex) {
+          gapsHoverIndex = hoveredIdx;
+          renderGaps();
+          if (hoveredIdx >= 0) {
+            showGapsTooltip(e, gapsData[hoveredIdx]);
+          } else {
+            hideGapsTooltip();
+          }
+        } else if (hoveredIdx >= 0) {
+          updateGapsTooltipPosition(e);
+        }
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        if (gapsHoverIndex !== -1) {
+          gapsHoverIndex = -1;
+          hideGapsTooltip();
+          if (currentView === 'gaps') renderGaps();
+        }
+      });
+
+      // Click handler
+      canvas.addEventListener('click', (e) => {
+        if (currentView !== 'gaps' || gapsHoverIndex < 0 || gapsHoverIndex >= gapsData.length) return;
+        showGapDetails(gapsData[gapsHoverIndex]);
+      });
+    }
+
+    function showGapsTooltip(e, gap) {
+      let tooltip = document.getElementById('gaps-tooltip');
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'gaps-tooltip';
+        tooltip.style.cssText = `
+          position: fixed; background: rgba(22, 33, 62, 0.95); border: 1px solid #0f3460;
+          padding: 10px 14px; border-radius: 4px; font-size: 11px; color: #e0e0e0;
+          pointer-events: none; z-index: 1000; max-width: 300px;
+        `;
+        document.body.appendChild(tooltip);
+      }
+
+      const timeLabel = gap.durationMs >= 1 ? `${gap.durationMs.toFixed(2)}ms` : `${(gap.durationMs * 1000).toFixed(0)}µs`;
+      const startLabel = (gap.startNs / 1e6).toFixed(2);
+      const endLabel = (gap.endNs / 1e6).toFixed(2);
+
+      let html = `<div style="font-weight: bold; color: #e94560; margin-bottom: 6px;">Gap: ${timeLabel}</div>`;
+      html += `<div style="display: grid; grid-template-columns: auto auto; gap: 2px 12px;">`;
+      html += `<span style="color: #888;">Time range:</span><span>${startLabel}ms - ${endLabel}ms</span>`;
+      html += `<span style="color: #888;">Waiting ops:</span><span>${gap.asyncWaiters}</span>`;
+
+      if (gapsShowClassification && gap.classification) {
+        html += `<span style="color: #888;">Cause:</span><span>${gap.classification.label}</span>`;
+      }
+
+      if (showCriticalPath && gap.onCriticalPath) {
+        html += `<span style="color: #ff6600;">Critical path:</span><span>Yes 🔥</span>`;
+      }
+      html += `</div>`;
+
+      // Top waiting resources
+      if (gap.waitingResources && gap.waitingResources.length > 0) {
+        html += `<div style="margin-top: 8px; font-weight: bold; color: #7ec8e3; font-size: 10px;">Top Waiters:</div>`;
+        html += `<div style="font-size: 10px;">`;
+        const typeCounts = {};
+        gap.waitingResources.forEach(r => {
+          typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+        });
+        Object.entries(typeCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .forEach(([type, count]) => {
+            const color = TYPE_COLORS[type] || '#808080';
+            html += `<span style="color: ${color};">●</span> ${type}: ${count}<br>`;
+          });
+        html += `</div>`;
+      }
+
+      if (gapsShowRecommendations && gap.recommendation) {
+        html += `<div style="margin-top: 6px; color: #ffd700; font-size: 10px;">💡 ${gap.recommendation.short}</div>`;
+      }
+
+      html += `<div style="color: #7ec8e3; margin-top: 6px; font-size: 10px;">Click for details</div>`;
+
+      tooltip.innerHTML = html;
+      tooltip.style.left = (e.clientX + 15) + 'px';
+      tooltip.style.top = (e.clientY + 15) + 'px';
+      tooltip.style.display = 'block';
+    }
+
+    function updateGapsTooltipPosition(e) {
+      const tooltip = document.getElementById('gaps-tooltip');
+      if (tooltip) {
+        tooltip.style.left = (e.clientX + 15) + 'px';
+        tooltip.style.top = (e.clientY + 15) + 'px';
+      }
+    }
+
+    function hideGapsTooltip() {
+      const tooltip = document.getElementById('gaps-tooltip');
+      if (tooltip) tooltip.style.display = 'none';
+    }
+
+    function showGapDetails(gap) {
+      const detailsEl = document.getElementById('selected-details');
+      if (!detailsEl) return;
+
+      const timeLabel = gap.durationMs >= 1 ? `${gap.durationMs.toFixed(2)}ms` : `${(gap.durationMs * 1000).toFixed(0)}µs`;
+
+      let html = `<div style="font-weight: bold; color: #e94560; margin-bottom: 8px;">
+        Gap: ${timeLabel}
+        ${gap.onCriticalPath ? '<span style="color: #ff6600;">🔥</span>' : ''}
+      </div>`;
+      html += `<div style="color: #aaa; margin-bottom: 4px;">
+        ${(gap.startNs / 1e6).toFixed(2)}ms - ${(gap.endNs / 1e6).toFixed(2)}ms
+      </div>`;
+
+      if (gapsShowClassification && gap.classification) {
+        html += `<div style="color: #7ec8e3; margin-bottom: 8px;">Cause: ${gap.classification.label}</div>`;
+      }
+
+      if (gapsShowRecommendations && gap.recommendation) {
+        html += `<div style="background: rgba(255,215,0,0.1); padding: 6px; border-radius: 4px; margin-bottom: 8px;">
+          <div style="color: #ffd700; font-weight: bold; font-size: 10px;">💡 Recommendation</div>
+          <div style="color: #aaa; font-size: 10px;">${gap.recommendation.detail}</div>
+        </div>`;
+      }
+
+      html += `<div style="font-weight: bold; color: #7ec8e3; margin-bottom: 4px;">Waiting Resources (${gap.waitingResources.length})</div>`;
+      html += `<div style="max-height: 250px; overflow-y: auto;">`;
+
+      gap.waitingResources
+        .sort((a, b) => {
+          // Sort critical path resources first
+          const aOnCrit = criticalPathSet.has(a.asyncId) ? 0 : 1;
+          const bOnCrit = criticalPathSet.has(b.asyncId) ? 0 : 1;
+          return aOnCrit - bOnCrit;
+        })
+        .slice(0, 20)
+        .forEach(r => {
+          const color = TYPE_COLORS[r.type] || '#808080';
+          const critBadge = criticalPathSet.has(r.asyncId) ? ' <span style="color: #ff6600;">🔥</span>' : '';
+          html += `<div class="detail-item" style="cursor: pointer; padding: 4px; border-radius: 3px;"
+                        onmouseover="this.style.background='rgba(233,69,96,0.2)'"
+                        onmouseout="this.style.background='transparent'"
+                        onclick="selectResource(${r.asyncId})">
+            <span style="color: ${color};">●</span>
+            <strong>${r.type}</strong> #${r.asyncId}${critBadge}
+          </div>`;
+        });
+
+      if (gap.waitingResources.length > 20) {
+        html += `<div style="color: #666; font-style: italic;">...and ${gap.waitingResources.length - 20} more</div>`;
+      }
+      html += `</div>`;
+
+      detailsEl.innerHTML = html;
     }
 
     // ==================== REPLAY VIEW ====================
