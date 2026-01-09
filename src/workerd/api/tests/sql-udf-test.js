@@ -3596,26 +3596,54 @@ export class UdfTestDO extends DurableObject {
 
   /**
    * Test UDF with custom valueOf/toString objects as return values.
+   * Objects with custom toString() are allowed and use that string representation.
    */
   async testUdfWithCustomValueOf() {
     const sql = this.state.storage.sql;
 
-    // Object with custom valueOf - should be called during coercion
-    sql.createFunction('return_valueof', () => ({
+    // Object with custom toString - should use the custom string
+    sql.createFunction('return_custom_tostring', () => ({
       valueOf: () => 42,
       toString: () => 'custom string',
     }));
 
-    const result = sql.exec('SELECT return_valueof() AS val').one();
+    const result = sql.exec('SELECT return_custom_tostring() AS val').one();
 
-    // Document behavior: does it call valueOf, toString, or stringify the object?
-    // The coercion logic in jsResultToSqlite checks IsNumber/IsString first,
-    // so plain objects fall through to toString
-    assert.ok(
-      result.val === 42 ||
-        result.val === 'custom string' ||
-        result.val === '[object Object]',
-      `Custom valueOf object should be coerced somehow, got: ${result.val}`
+    // Objects are stringified, so toString() is called
+    // valueOf() is NOT used because we're not doing numeric coercion
+    assert.strictEqual(
+      result.val,
+      'custom string',
+      'Object with custom toString() should use that string'
+    );
+
+    // Class instances with toString() also work
+    class Money {
+      constructor(amount, currency) {
+        this.amount = amount;
+        this.currency = currency;
+      }
+      toString() {
+        return `${this.currency}${this.amount.toFixed(2)}`;
+      }
+    }
+
+    sql.createFunction('format_money', (amount) => new Money(amount, '$'));
+    const moneyResult = sql.exec('SELECT format_money(19.99) AS val').one();
+    assert.strictEqual(
+      moneyResult.val,
+      '$19.99',
+      'Class with toString() should work'
+    );
+
+    // Plain objects WITHOUT custom toString still throw
+    sql.createFunction('return_plain_object', () => ({ amount: 100 }));
+    assert.throws(
+      () => sql.exec('SELECT return_plain_object() AS val').one(),
+      (err) =>
+        err.message.includes('plain object') ||
+        err.message.includes('[object Object]'),
+      'Plain object should throw helpful error'
     );
   }
 
