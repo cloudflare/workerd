@@ -263,6 +263,10 @@
     .resource-row:hover { background: rgba(233, 69, 96, 0.1); }
     .resource-row.selected { background: rgba(233, 69, 96, 0.2); }
     .resource-row.highlighted { background: rgba(126, 200, 227, 0.15); }
+    .resource-row.hover-self { background: rgba(255, 255, 100, 0.25); }
+    .resource-row.hover-parent { background: rgba(100, 200, 255, 0.25); border-left: 3px solid #64c8ff; }
+    .resource-row.hover-child { background: rgba(100, 255, 150, 0.2); border-left: 3px solid #64ff96; }
+    .resource-row.time-cursor-active { background: rgba(255, 107, 107, 0.2); }
     .resource-row.critical-path {
       background: rgba(255, 100, 50, 0.25);
       border-left: 3px solid #ff6432;
@@ -896,7 +900,16 @@
         <div style="font-size: 2rem; margin-bottom: 0.5rem;">📊</div>
         <div>Load a trace to visualize</div>
       </div>
-      <div class="waterfall" id="waterfall" style="display: none;"></div>
+      <div id="waterfall-container" style="display: none; position: relative;">
+        <div id="concurrency-graph" style="height: 50px; margin-left: 180px; margin-bottom: 4px; position: relative; background: rgba(0,0,0,0.3); border-radius: 4px;">
+          <canvas id="concurrency-canvas" style="width: 100%; height: 100%;"></canvas>
+          <div id="time-cursor" style="position: absolute; top: 0; bottom: 0; width: 2px; background: #ff6b6b; pointer-events: none; display: none; z-index: 20;">
+            <div id="time-cursor-label" style="position: absolute; top: 50%; left: 8px; transform: translateY(-50%); font-size: 10px; color: #ff6b6b; white-space: nowrap; background: rgba(0,0,0,0.8); padding: 1px 4px; border-radius: 2px; z-index: 25;"></div>
+          </div>
+        </div>
+        <div class="waterfall" id="waterfall" style="position: relative;"></div>
+        <svg id="waterfall-arrows" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5;"></svg>
+      </div>
     </div>
 
     <div class="view-container" id="bubble-view" style="overflow: hidden; padding: 0;">
@@ -3734,12 +3747,18 @@ const userB = await fetch('/user/123');</pre>
     }
 
     // ==================== WATERFALL VIEW ====================
+    // Track row positions for dependency arrows
+    let waterfallRowPositions = new Map();
+    let waterfallTimelineWidth = 0;
+    let waterfallDuration = 0;
+
     function renderWaterfall() {
       document.getElementById('waterfall-empty').style.display = 'none';
-      document.getElementById('waterfall').style.display = 'block';
+      document.getElementById('waterfall-container').style.display = 'block';
 
       const container = document.getElementById('waterfall');
       container.innerHTML = '';
+      waterfallRowPositions.clear();
 
       const sortMode = document.getElementById('sort-mode').value;
       let sorted = [...traceData.resources];
@@ -3771,6 +3790,8 @@ const userB = await fetch('/user/123');</pre>
 
       const duration = traceData.requestDurationNs;
       const timelineWidth = Math.max(600, container.clientWidth - 200);
+      waterfallDuration = duration;
+      waterfallTimelineWidth = timelineWidth;
 
       // Time axis
       const axis = document.createElement('div');
@@ -3793,6 +3814,7 @@ const userB = await fetch('/user/123');</pre>
 
         const row = document.createElement('div');
         row.className = 'resource-row';
+        row.dataset.asyncId = r.asyncId;
         if (selectedResource && selectedResource.asyncId === r.asyncId) row.classList.add('selected');
         if (highlightedChain.has(r.asyncId)) row.classList.add('highlighted');
         if (showCriticalPath && criticalPathSet.has(r.asyncId)) row.classList.add('critical-path');
@@ -3807,6 +3829,10 @@ const userB = await fetch('/user/123');</pre>
             row.classList.add(`pattern-${patternMatch.severity || 'medium'}`);
           }
         }
+
+        // Hover highlighting for parent/children
+        row.addEventListener('mouseenter', () => highlightRelatedRows(r.asyncId));
+        row.addEventListener('mouseleave', () => clearRelatedHighlights());
 
         const label = document.createElement('div');
         label.className = 'resource-label';
@@ -3945,6 +3971,225 @@ const userB = await fetch('/user/123');</pre>
         timeline.appendChild(bar);
         row.appendChild(timeline);
         container.appendChild(row);
+
+        // Store bar position for dependency arrows (will be updated after layout)
+        waterfallRowPositions.set(r.asyncId, {
+          row,
+          bar,
+          resource: r,
+          barLeft: (startTime / duration) * timelineWidth,
+          barRight: ((endTime) / duration) * timelineWidth
+        });
+      });
+
+      // Render additional waterfall features after rows are laid out
+      requestAnimationFrame(() => {
+        renderConcurrencyGraph();
+        renderDependencyArrows();
+        setupTimeCursor();
+      });
+    }
+
+    // Highlight parent and children on hover
+    function highlightRelatedRows(asyncId) {
+      const resource = traceData.resourceMap.get(asyncId);
+      if (!resource) return;
+
+      // Highlight parent
+      if (resource.triggerId !== 0) {
+        const parentRow = document.querySelector(`.resource-row[data-async-id="${resource.triggerId}"]`);
+        if (parentRow) parentRow.classList.add('hover-parent');
+      }
+
+      // Highlight children
+      const childIds = traceData.childrenMap.get(asyncId) || [];
+      childIds.forEach(childId => {
+        const childRow = document.querySelector(`.resource-row[data-async-id="${childId}"]`);
+        if (childRow) childRow.classList.add('hover-child');
+      });
+
+      // Highlight self
+      const selfRow = document.querySelector(`.resource-row[data-async-id="${asyncId}"]`);
+      if (selfRow) selfRow.classList.add('hover-self');
+    }
+
+    function clearRelatedHighlights() {
+      document.querySelectorAll('.resource-row.hover-parent, .resource-row.hover-child, .resource-row.hover-self').forEach(row => {
+        row.classList.remove('hover-parent', 'hover-child', 'hover-self');
+      });
+    }
+
+    // Render concurrency graph above waterfall
+    function renderConcurrencyGraph() {
+      const canvas = document.getElementById('concurrency-canvas');
+      const graphContainer = document.getElementById('concurrency-graph');
+      if (!canvas || !traceData) return;
+
+      const rect = graphContainer.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = rect.height * window.devicePixelRatio;
+      canvas.style.width = rect.width + 'px';
+      canvas.style.height = rect.height + 'px';
+
+      const ctx = canvas.getContext('2d');
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      const duration = waterfallDuration;
+      if (duration <= 0) return;
+
+      // Calculate concurrency at each point in time
+      const events = [];
+      traceData.resources.forEach(r => {
+        if (r.createdAt >= 0) {
+          events.push({ time: r.createdAt, delta: 1 });
+          const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt : (r.destroyedAt > 0 ? r.destroyedAt : duration);
+          events.push({ time: endTime, delta: -1 });
+        }
+      });
+      events.sort((a, b) => a.time - b.time);
+
+      // Build concurrency data points
+      let concurrency = 0;
+      let maxConcurrency = 0;
+      const points = [];
+      events.forEach(e => {
+        if (points.length === 0 || points[points.length - 1].time !== e.time) {
+          points.push({ time: e.time, concurrency });
+        }
+        concurrency += e.delta;
+        maxConcurrency = Math.max(maxConcurrency, concurrency);
+        points.push({ time: e.time, concurrency });
+      });
+
+      if (maxConcurrency === 0) return;
+
+      // Draw filled area
+      ctx.beginPath();
+      ctx.moveTo(0, rect.height);
+      points.forEach(p => {
+        const x = (p.time / duration) * rect.width;
+        const y = rect.height - (p.concurrency / maxConcurrency) * (rect.height - 10);
+        ctx.lineTo(x, y);
+      });
+      ctx.lineTo(rect.width, rect.height);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.3)';
+      ctx.fill();
+
+      // Draw line
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        const x = (p.time / duration) * rect.width;
+        const y = rect.height - (p.concurrency / maxConcurrency) * (rect.height - 10);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = 'rgba(100, 180, 255, 0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Label
+      ctx.fillStyle = '#888';
+      ctx.font = '10px system-ui';
+      ctx.fillText(`Max: ${maxConcurrency} concurrent`, 5, 12);
+    }
+
+    // Render dependency arrows between parent and child rows
+    function renderDependencyArrows() {
+      const svg = document.getElementById('waterfall-arrows');
+      if (!svg || !traceData) return;
+
+      svg.innerHTML = '';
+      const container = document.getElementById('waterfall');
+      const containerRect = container.getBoundingClientRect();
+
+      // Only draw arrows in tree sort mode for clarity
+      const sortMode = document.getElementById('sort-mode').value;
+      if (sortMode !== 'tree') return;
+
+      waterfallRowPositions.forEach((pos, asyncId) => {
+        const resource = pos.resource;
+        if (resource.triggerId === 0) return;
+
+        const parentPos = waterfallRowPositions.get(resource.triggerId);
+        if (!parentPos) return;
+
+        const parentRect = parentPos.bar.getBoundingClientRect();
+        const childRect = pos.bar.getBoundingClientRect();
+
+        // Calculate positions relative to SVG
+        const parentX = parentRect.right - containerRect.left;
+        const parentY = parentRect.top + parentRect.height / 2 - containerRect.top + 54; // Account for concurrency graph
+        const childX = childRect.left - containerRect.left;
+        const childY = childRect.top + childRect.height / 2 - containerRect.top + 54;
+
+        // Create curved path
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const midX = (parentX + childX) / 2;
+        const d = `M ${parentX} ${parentY} C ${midX} ${parentY}, ${midX} ${childY}, ${childX} ${childY}`;
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'rgba(150, 150, 150, 0.3)');
+        path.setAttribute('stroke-width', '1');
+        svg.appendChild(path);
+
+        // Add arrowhead
+        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        const arrowSize = 4;
+        arrow.setAttribute('points', `${childX},${childY} ${childX - arrowSize},${childY - arrowSize} ${childX - arrowSize},${childY + arrowSize}`);
+        arrow.setAttribute('fill', 'rgba(150, 150, 150, 0.5)');
+        svg.appendChild(arrow);
+      });
+    }
+
+    // Setup time cursor interaction
+    function setupTimeCursor() {
+      const graphContainer = document.getElementById('concurrency-graph');
+      const cursor = document.getElementById('time-cursor');
+      const cursorLabel = document.getElementById('time-cursor-label');
+      const container = document.getElementById('waterfall');
+
+      if (!graphContainer || !cursor || !traceData) return;
+
+      graphContainer.addEventListener('mousemove', (e) => {
+        const rect = graphContainer.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const timeMs = (x / rect.width) * (waterfallDuration / 1e6);
+
+        cursor.style.display = 'block';
+        cursor.style.left = x + 'px';
+        cursorLabel.textContent = timeMs.toFixed(2) + 'ms';
+
+        // Count active resources at this time
+        const timeNs = timeMs * 1e6;
+        let activeCount = 0;
+        traceData.resources.forEach(r => {
+          const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt : (r.destroyedAt > 0 ? r.destroyedAt : waterfallDuration);
+          if (r.createdAt <= timeNs && endTime >= timeNs) activeCount++;
+        });
+        cursorLabel.textContent = `${timeMs.toFixed(2)}ms (${activeCount} active)`;
+
+        // Highlight active rows
+        document.querySelectorAll('.resource-row').forEach(row => {
+          const asyncId = parseInt(row.dataset.asyncId);
+          const r = traceData.resourceMap.get(asyncId);
+          if (r) {
+            const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt : (r.destroyedAt > 0 ? r.destroyedAt : waterfallDuration);
+            if (r.createdAt <= timeNs && endTime >= timeNs) {
+              row.classList.add('time-cursor-active');
+            } else {
+              row.classList.remove('time-cursor-active');
+            }
+          }
+        });
+      });
+
+      graphContainer.addEventListener('mouseleave', () => {
+        cursor.style.display = 'none';
+        document.querySelectorAll('.resource-row.time-cursor-active').forEach(row => {
+          row.classList.remove('time-cursor-active');
+        });
       });
     }
 
