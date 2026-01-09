@@ -211,11 +211,11 @@ A bubbleprof-style HTML visualization tool is available at:
 |-----|------|-------------|
 | 1 | **Waterfall** | Timeline view showing resource lifetimes, async wait vs sync execution |
 | 2 | **Graph** | Combined view with 3 layouts: Bubble (default), Hierarchical, Force; path highlighting on hover |
-| 3 | **Parallelism** | Shows concurrent resource count over time |
-| 4 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
-| 5 | **Latency** | Histogram of async wait times by resource type |
-| 6 | **Gaps** | Highlights idle periods and sync activity bursts; hover over gaps to see waiting operations |
-| 7 | **Replay** | Animated playback of request execution; click nodes to select |
+| 3 | **Replay** | Animated playback of request execution; click nodes to select |
+| 4 | **Parallelism** | Shows concurrent resource count over time |
+| 5 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
+| 6 | **Latency** | Histogram of async wait times by resource type |
+| 7 | **Gaps** | Highlights idle periods and sync activity bursts; hover over gaps to see waiting operations |
 | 8 | **Heatmap** | Activity intensity over time by resource type |
 
 ### Analysis Features
@@ -590,7 +590,7 @@ The Bubble and DAG views have been consolidated into a single "Graph" view (key 
 | **Arrow Key Navigation** | ←/→ hotkeys to cycle through all three layouts (Graph view only) |
 | **Enhanced Tooltips** | Detailed tooltips with stack trace preview, timing info, and classification |
 
-**View Renumbering:** Views are now 1-8 (Waterfall, Graph, Parallelism, Breakdown, Latency, Gaps, Replay, Heatmap)
+**View Renumbering:** Views are now 1-8 (Waterfall, Graph, Replay, Parallelism, Breakdown, Latency, Gaps, Heatmap)
 
 ## Reference: clinicjs/bubbleprof
 
