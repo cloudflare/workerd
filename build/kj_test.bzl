@@ -1,5 +1,4 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 def kj_test(
         src,
@@ -48,20 +47,99 @@ def kj_test(
         }),
     )
 
-    sh_test(
+    _kj_test_wrapper_test(
         name = test_name + "@",
         size = size,
-        srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias] + data,
-        args = ["$(location " + cross_alias + ")"],
+        binary = cross_alias,
+        data = data,
         tags = tags,
     )
-    sh_test(
+    _kj_test_wrapper_test(
         name = test_name + "@all-autogates",
         size = size,
-        env = {"WORKERD_ALL_AUTOGATES": "1"},
-        srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias] + data,
-        args = ["$(location " + cross_alias + ")"],
+        binary = cross_alias,
+        data = data,
         tags = tags,
+        env = {"WORKERD_ALL_AUTOGATES": "1"},
     )
+
+def _kj_test_impl(ctx):
+    is_windows = ctx.target_platform_has_constraint(ctx.attr._platforms_os_windows[platform_common.ConstraintValueInfo])
+    binary_file = ctx.attr.binary.files.to_list()[0]
+
+    # The test wrapper script sets up coverage environment and runs the binary
+    if is_windows:
+        executable = ctx.actions.declare_file("%s_kj_test.bat" % ctx.label.name)
+        content = """@echo off
+if defined COVERAGE_DIR (
+    set LLVM_PROFILE_FILE=%COVERAGE_DIR%\\coverage.profraw
+)
+{}
+""".format(binary_file.short_path)
+    else:
+        executable = ctx.outputs.executable
+        content = """#!/bin/sh
+if [ -n "$COVERAGE_DIR" ]; then
+    export LLVM_PROFILE_FILE="$COVERAGE_DIR/coverage.profraw"
+fi
+exec "{}"
+""".format(binary_file.short_path)
+
+    ctx.actions.write(
+        output = executable,
+        content = content,
+        is_executable = True,
+    )
+
+    runfiles = ctx.runfiles(files = [binary_file] + ctx.files.data)
+
+    # Merge runfiles from the binary
+    default_runfiles = ctx.attr.binary[DefaultInfo].default_runfiles
+    if default_runfiles:
+        runfiles = runfiles.merge(default_runfiles)
+
+    # Set up coverage instrumentation
+    instrumented_files_info = coverage_common.instrumented_files_info(
+        ctx,
+        dependency_attributes = ["binary"],
+        extensions = ["c++", "cc", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc"],
+    )
+
+    return [
+        DefaultInfo(
+            executable = executable,
+            runfiles = runfiles,
+        ),
+        RunEnvironmentInfo(
+            environment = ctx.attr.env,
+        ),
+        instrumented_files_info,
+    ]
+
+_kj_test_wrapper_test = rule(
+    implementation = _kj_test_impl,
+    test = True,
+    executable = True,
+    attrs = {
+        "binary": attr.label(
+            allow_single_file = True,
+            executable = True,
+            cfg = "target",
+            mandatory = True,
+        ),
+        "data": attr.label_list(allow_files = True),
+        "env": attr.string_dict(default = {}),
+        "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
+        # Coverage collection attributes
+        "_lcov_merger": attr.label(
+            default = configuration_field(fragment = "coverage", name = "output_generator"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_collect_cc_coverage": attr.label(
+            default = "@bazel_tools//tools/test:collect_cc_coverage",
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+)

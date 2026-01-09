@@ -142,8 +142,8 @@ eslint:
     //types:types_lib@eslint
 
 coverage path="//...":
-  bazel coverage {{path}}
-  genhtml --branch-coverage --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
+  bazel coverage {{path}} --combined_report=lcov --nocache_test_results
+  genhtml --branch-coverage --ignore-errors category --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
   open coverage/index.html
 
 profile path:
