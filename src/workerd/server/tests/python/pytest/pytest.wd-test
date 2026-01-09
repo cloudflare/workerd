@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "pytest-vendor-test",
+      worker = (
+        modules = [
+          (name = "main.py", pythonModule = embed "pytest/main.py"),
+          (name = "tests/test_env.py", pythonModule = embed "pytest/tests/test_env.py"),
+          (name = "tests/test_fs.py", pythonModule = embed "pytest/tests/test_fs.py"),
+          (name = "tests/test_import_from_javascript.py", pythonModule = embed "pytest/tests/test_import_from_javascript.py"),
+          %PYTHON_VENDORED_MODULES%
+        ],
+        compatibilityFlags = [
+          %PYTHON_FEATURE_FLAGS,
+          "python_no_global_handlers",
+          "unwrap_custom_thenables",
+        ],
+        bindings = [
+          (
+            name = "secret",
+            text = "thisisasecret"
+          ),
+          (name = "FOO", text = "BAR"),
+          (name = "TEST_VALUE", text = "TEST_STRING"),
+          (name = "CACHE", memoryCache = (
+            id = "abc123",
+            limits = (
+              maxKeys = 10,
+              maxValueSize = 1024,
+              maxTotalValueSize = 1024,
+            ),
+          )),
+        ],
+      ),
+    ),
+  ],
+);
