@@ -1239,16 +1239,22 @@
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
             <strong>Waterfall View:</strong><br>
             • Bars show resource lifetime<br>
-            • Faded portion = async wait<br>
-            • Solid portion = sync execution<br>
-            • Tree mode shows causality hierarchy<br>
-            • Click bar to select resource
+            • Faded = async wait, Solid = sync<br>
+            • Black markers = callback start/end<br>
+            • ▶ expands stack trace inline<br>
+            • Hover row to highlight parent/children
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Sort Modes:</strong><br>
-            • Tree = causality hierarchy<br>
-            • Time = creation order<br>
-            • Duration = longest first
+            <strong>Concurrency Graph:</strong><br>
+            • Graph above shows in-flight ops<br>
+            • Hover graph for time cursor<br>
+            • Shows active count at time point
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Controls:</strong><br>
+            • Types dropdown filters by type<br>
+            • Tree mode shows dependency arrows<br>
+            • Click bar to select resource
           </div>
         </div>
         <div class="view-help" data-view="bubble">
@@ -1269,15 +1275,21 @@
         <div class="view-help" data-view="dag">
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
             <strong>DAG View:</strong><br>
-            • Force-directed dependency graph<br>
-            • Arrows show trigger relationships<br>
-            • Good for exploring complex deps
+            • Dependency graph with arrows<br>
+            • <span style="color: #50c878;">Green</span> = hover path highlight<br>
+            • Hover shows ancestors + descendants<br>
+            • Non-path nodes dim automatically
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Layout Toggle:</strong><br>
+            • Force = physics simulation<br>
+            • Hierarchical = tree structure<br>
+            • ←/→ arrows switch layouts
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
             <strong>Controls:</strong><br>
             • Drag nodes to rearrange<br>
-            • Shift+drag to pan<br>
-            • Scroll to zoom<br>
+            • Shift+drag to pan, scroll to zoom<br>
             • Click node to select
           </div>
         </div>
@@ -1444,11 +1456,13 @@
             <tr><td><code>F</code></td><td>Toggle click-to-filter mode</td></tr>
             <tr><td><code>G</code></td><td>Toggle stack trace grouping</td></tr>
             <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">View-Specific</td></tr>
+            <tr><td><code>←</code> / <code>→</code></td><td>Switch DAG layout: Force ↔ Hierarchical (DAG view only)</td></tr>
+            <tr><td><code>Space</code></td><td>Play/Pause (Replay view)</td></tr>
+            <tr><td><code>R</code></td><td>Reset animation (Replay view)</td></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Other</td></tr>
             <tr><td><code>I</code></td><td>Open AI analysis prompt</td></tr>
             <tr><td><code>Shift+R</code></td><td>Refresh/reset current view</td></tr>
-            <tr><td><code>Space</code></td><td>Play/Pause (Replay view)</td></tr>
-            <tr><td><code>R</code></td><td>Reset animation (Replay view)</td></tr>
           </table>
         </div>
 
@@ -1456,9 +1470,9 @@
           <h3>Visualization Views</h3>
           <table class="guide-table">
             <tr><th>View</th><th>Best For</th><th>What to Look For</th></tr>
-            <tr><td><strong>1: Waterfall</strong></td><td>Timeline overview</td><td>Overall duration, resource lifetimes, sort by tree/time/duration</td></tr>
+            <tr><td><strong>1: Waterfall</strong></td><td>Timeline overview</td><td>Concurrency graph, stack traces (▶), type filters, hover for parent/child</td></tr>
             <tr><td><strong>2: Bubble</strong></td><td>Causality analysis</td><td>Tall chains (sequential), wide trees (parallel), gold edges (>1ms)</td></tr>
-            <tr><td><strong>3: DAG</strong></td><td>Complex dependencies</td><td>Drag to explore, find unexpected connections</td></tr>
+            <tr><td><strong>3: DAG</strong></td><td>Complex dependencies</td><td>Force/Hierarchical toggle, hover for path highlighting, ←/→ to switch</td></tr>
             <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Orange bars = serialization, stacked height = parallelism</td></tr>
             <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Large boxes = time hogs, solid = CPU, faded = I/O</td></tr>
             <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
