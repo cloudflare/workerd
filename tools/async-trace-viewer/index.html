@@ -253,11 +253,123 @@
       background: #444;
     }
 
+    /* Type filter dropdown */
+    #type-filter-dropdown.disabled .dropdown-btn {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    #type-filter-dropdown.disabled .dropdown-btn:hover {
+      background: #0f3460;
+    }
+
+    .type-filter-item {
+      display: flex;
+      align-items: center;
+      padding: 0.4rem 0.75rem;
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: #ccc;
+      gap: 0.5rem;
+    }
+
+    .type-filter-item:hover {
+      background: rgba(233, 69, 96, 0.2);
+    }
+
+    .type-filter-item input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      accent-color: #e94560;
+    }
+
+    .type-filter-item .type-color {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .type-filter-item .type-count {
+      margin-left: auto;
+      color: #666;
+      font-size: 0.7rem;
+    }
+
+    /* Stack trace expansion */
+    .resource-row-wrapper {
+      margin: 1px 0;
+    }
+
     .resource-row {
       display: flex;
       align-items: center;
       height: 22px;
-      margin: 1px 0;
+    }
+
+    .stack-trace-expand {
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #666;
+      font-size: 10px;
+      flex-shrink: 0;
+      margin-right: 2px;
+      border-radius: 2px;
+    }
+
+    .stack-trace-expand:hover {
+      background: rgba(233, 69, 96, 0.3);
+      color: #e94560;
+    }
+
+    .stack-trace-expand.expanded {
+      color: #e94560;
+    }
+
+    .stack-trace-expand.no-stack {
+      visibility: hidden;
+    }
+
+    .stack-trace-panel {
+      display: none;
+      margin-left: 180px;
+      padding: 6px 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border-left: 2px solid #e94560;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 11px;
+      color: #aaa;
+    }
+
+    .stack-trace-panel.show {
+      display: block;
+    }
+
+    .stack-trace-panel .stack-frame {
+      padding: 2px 0;
+      white-space: nowrap;
+    }
+
+    .stack-trace-panel .stack-frame:hover {
+      color: #fff;
+      background: rgba(233, 69, 96, 0.1);
+    }
+
+    .stack-trace-panel .stack-function {
+      color: #7ec8e3;
+    }
+
+    .stack-trace-panel .stack-location {
+      color: #888;
+    }
+
+    .stack-trace-panel .no-stack-msg {
+      color: #666;
+      font-style: italic;
     }
 
     .resource-row:hover { background: rgba(233, 69, 96, 0.1); }
@@ -823,6 +935,10 @@
         <option value="user">User Only</option>
         <option value="typed">Typed Only</option>
       </select>
+      <div class="dropdown" id="type-filter-dropdown">
+        <button class="dropdown-btn" id="type-filter-btn">🏷️ Types ▾</button>
+        <div class="dropdown-content" id="type-filter-menu"></div>
+      </div>
       <div class="dropdown" id="analysis-dropdown">
         <button class="dropdown-btn" id="analysis-btn">🔬 Analysis ▾</button>
         <div class="dropdown-content" id="analysis-menu">
@@ -1567,6 +1683,10 @@ const userB = await fetch('/user/123');</pre>
     let detectedPatterns = [];  // Detected anti-patterns
     let temporalEdges = [];  // Edges based on callback timing
 
+    // Type filter state - which resource types are visible
+    let typeFilters = {};  // { 'js-promise': true, 'fetch': true, ... }
+    let expandedStackTraces = new Set();  // asyncIds with expanded stack traces
+
     // Gaps view state for hover interaction
     let gapsData = [];  // Computed gaps from last render
     let gapsRenderParams = null;  // Rendering parameters for hit detection
@@ -1843,13 +1963,34 @@ const userB = await fetch('/user/123');</pre>
         const btn = document.getElementById('analysis-btn');
         menu.classList.toggle('show');
         btn.classList.toggle('active', menu.classList.contains('show'));
+        // Close type filter dropdown
+        document.getElementById('type-filter-menu').classList.remove('show');
+        document.getElementById('type-filter-btn').classList.remove('active');
       });
 
-      // Close dropdown when clicking outside
+      // Type filter dropdown toggle
+      document.getElementById('type-filter-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dropdown = document.getElementById('type-filter-dropdown');
+        if (dropdown.classList.contains('disabled')) return;
+        const menu = document.getElementById('type-filter-menu');
+        const btn = document.getElementById('type-filter-btn');
+        menu.classList.toggle('show');
+        btn.classList.toggle('active', menu.classList.contains('show'));
+        // Close analysis dropdown
+        document.getElementById('analysis-menu').classList.remove('show');
+        document.getElementById('analysis-btn').classList.remove('active');
+      });
+
+      // Close dropdowns when clicking outside
       document.addEventListener('click', (e) => {
         if (!e.target.closest('#analysis-dropdown')) {
           document.getElementById('analysis-menu').classList.remove('show');
           document.getElementById('analysis-btn').classList.remove('active');
+        }
+        if (!e.target.closest('#type-filter-dropdown')) {
+          document.getElementById('type-filter-menu').classList.remove('show');
+          document.getElementById('type-filter-btn').classList.remove('active');
         }
       });
 
@@ -2417,6 +2558,9 @@ const userB = await fetch('/user/123');</pre>
     }
 
     function shouldShowResource(r) {
+      // Check type filter first
+      if (typeFilters[r.type] === false) return false;
+
       const filterMode = document.getElementById('filter-mode').value;
       if (filterMode === 'all') return true;
 
@@ -2428,6 +2572,99 @@ const userB = await fetch('/user/123');</pre>
         return classification === 'typed';
       }
       return true;
+    }
+
+    // Initialize type filter dropdown based on trace data
+    function initTypeFilters() {
+      const menu = document.getElementById('type-filter-menu');
+      menu.innerHTML = '';
+      typeFilters = {};
+
+      if (!traceData) return;
+
+      // Get unique types from trace data
+      const typeCounts = new Map();
+      traceData.resources.forEach(r => {
+        typeCounts.set(r.type, (typeCounts.get(r.type) || 0) + 1);
+      });
+
+      // Sort by count descending
+      const sortedTypes = [...typeCounts.entries()].sort((a, b) => b[1] - a[1]);
+
+      // Add "Enable All" shortcut at the top
+      const enableAllItem = document.createElement('div');
+      enableAllItem.className = 'type-filter-item';
+      enableAllItem.style.borderBottom = '1px solid #333';
+      enableAllItem.style.marginBottom = '4px';
+      enableAllItem.style.paddingBottom = '8px';
+      enableAllItem.innerHTML = '<span style="color: #e94560;">✓ Enable All</span>';
+      enableAllItem.addEventListener('click', () => {
+        Object.keys(typeFilters).forEach(type => {
+          typeFilters[type] = true;
+        });
+        menu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          cb.checked = true;
+        });
+        updateTypeFilterButton();
+        render();
+      });
+      menu.appendChild(enableAllItem);
+
+      sortedTypes.forEach(([type, count]) => {
+        typeFilters[type] = true;  // All enabled by default
+
+        const item = document.createElement('label');
+        item.className = 'type-filter-item';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.dataset.type = type;
+
+        const colorBox = document.createElement('span');
+        colorBox.className = 'type-color';
+        colorBox.style.background = TYPE_COLORS[type] || '#808080';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = type;
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'type-count';
+        countSpan.textContent = count;
+
+        checkbox.addEventListener('change', () => {
+          typeFilters[type] = checkbox.checked;
+          updateTypeFilterButton();
+          render();
+        });
+
+        item.appendChild(checkbox);
+        item.appendChild(colorBox);
+        item.appendChild(nameSpan);
+        item.appendChild(countSpan);
+        menu.appendChild(item);
+      });
+
+      updateTypeFilterButton();
+    }
+
+    // Update the type filter button text to show active filter count
+    function updateTypeFilterButton() {
+      const btn = document.getElementById('type-filter-btn');
+      const totalTypes = Object.keys(typeFilters).length;
+      const enabledTypes = Object.values(typeFilters).filter(v => v).length;
+      if (enabledTypes === totalTypes) {
+        btn.textContent = '🏷️ Types ▾';
+      } else {
+        btn.textContent = `🏷️ Types (${enabledTypes}/${totalTypes}) ▾`;
+      }
+    }
+
+    // Update type filter dropdown enabled state based on current view
+    function updateTypeFilterDropdownState() {
+      const dropdown = document.getElementById('type-filter-dropdown');
+      const isWaterfall = currentView === 'waterfall';
+      dropdown.classList.toggle('disabled', !isWaterfall);
     }
 
     function processAndRender() {
@@ -2452,6 +2689,10 @@ const userB = await fetch('/user/123');</pre>
       traceData.resources.forEach(r => {
         r._classification = classifyResource(r);
       });
+
+      // Initialize type filter buttons
+      initTypeFilters();
+      expandedStackTraces.clear();
 
       traceData.childrenMap = new Map();
       traceData.resources.forEach(r => {
@@ -3744,6 +3985,9 @@ const userB = await fetch('/user/123');</pre>
       filterMode.disabled = !filterEnabled;
       filterMode.style.opacity = filterEnabled ? '1' : '0.4';
       filterMode.style.cursor = filterEnabled ? 'pointer' : 'not-allowed';
+
+      // Type filter dropdown only works in Waterfall view
+      updateTypeFilterDropdownState();
     }
 
     // ==================== WATERFALL VIEW ====================
@@ -3812,6 +4056,10 @@ const userB = await fetch('/user/123');</pre>
         // Apply click-to-filter visibility
         if (clickToFilterEnabled && clickFilterResourceId !== null && !isResourceVisible(r.asyncId)) return;
 
+        // Create wrapper for row + stack trace panel
+        const wrapper = document.createElement('div');
+        wrapper.className = 'resource-row-wrapper';
+
         const row = document.createElement('div');
         row.className = 'resource-row';
         row.dataset.asyncId = r.asyncId;
@@ -3833,6 +4081,15 @@ const userB = await fetch('/user/123');</pre>
         // Hover highlighting for parent/children
         row.addEventListener('mouseenter', () => highlightRelatedRows(r.asyncId));
         row.addEventListener('mouseleave', () => clearRelatedHighlights());
+
+        // Stack trace expand button
+        const st = traceData.stackTraceMap.get(r.stackTraceId);
+        const hasStack = st && st.frames && st.frames.length > 0;
+        const expandBtn = document.createElement('div');
+        expandBtn.className = 'stack-trace-expand' + (hasStack ? '' : ' no-stack');
+        expandBtn.textContent = expandedStackTraces.has(r.asyncId) ? '▼' : '▶';
+        if (expandedStackTraces.has(r.asyncId)) expandBtn.classList.add('expanded');
+        row.appendChild(expandBtn);
 
         const label = document.createElement('div');
         label.className = 'resource-label';
@@ -3970,7 +4227,58 @@ const userB = await fetch('/user/123');</pre>
         });
         timeline.appendChild(bar);
         row.appendChild(timeline);
-        container.appendChild(row);
+        wrapper.appendChild(row);
+
+        // Create stack trace panel
+        const stackPanel = document.createElement('div');
+        stackPanel.className = 'stack-trace-panel' + (expandedStackTraces.has(r.asyncId) ? ' show' : '');
+        if (hasStack) {
+          st.frames.forEach(frame => {
+            const frameDiv = document.createElement('div');
+            frameDiv.className = 'stack-frame';
+            // Parse frame: "functionName @ file:line:col"
+            const match = frame.match(/^(.+?)\s*@\s*(.+)$/);
+            if (match) {
+              const funcSpan = document.createElement('span');
+              funcSpan.className = 'stack-function';
+              funcSpan.textContent = match[1];
+              frameDiv.appendChild(funcSpan);
+              frameDiv.appendChild(document.createTextNode(' @ '));
+              const locSpan = document.createElement('span');
+              locSpan.className = 'stack-location';
+              locSpan.textContent = match[2];
+              frameDiv.appendChild(locSpan);
+            } else {
+              frameDiv.textContent = frame;
+            }
+            stackPanel.appendChild(frameDiv);
+          });
+        } else {
+          const noStack = document.createElement('div');
+          noStack.className = 'no-stack-msg';
+          noStack.textContent = 'No stack trace available';
+          stackPanel.appendChild(noStack);
+        }
+        wrapper.appendChild(stackPanel);
+
+        // Expand button click handler
+        expandBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!hasStack) return;
+          if (expandedStackTraces.has(r.asyncId)) {
+            expandedStackTraces.delete(r.asyncId);
+            expandBtn.textContent = '▶';
+            expandBtn.classList.remove('expanded');
+            stackPanel.classList.remove('show');
+          } else {
+            expandedStackTraces.add(r.asyncId);
+            expandBtn.textContent = '▼';
+            expandBtn.classList.add('expanded');
+            stackPanel.classList.add('show');
+          }
+        });
+
+        container.appendChild(wrapper);
 
         // Store bar position for dependency arrows (will be updated after layout)
         waterfallRowPositions.set(r.asyncId, {
