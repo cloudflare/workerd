@@ -925,11 +925,11 @@
     <select id="view-select" class="view-select">
       <option value="waterfall">1: Waterfall</option>
       <option value="dag">2: Graph</option>
-      <option value="parallelism">3: Parallelism</option>
-      <option value="breakdown">4: Breakdown</option>
-      <option value="latency">5: Latency</option>
-      <option value="gaps">6: Gaps</option>
-      <option value="replay">7: Replay</option>
+      <option value="replay">3: Replay</option>
+      <option value="parallelism">4: Parallelism</option>
+      <option value="breakdown">5: Breakdown</option>
+      <option value="latency">6: Latency</option>
+      <option value="gaps">7: Gaps</option>
       <option value="heatmap">8: Heatmap</option>
     </select>
     <div class="controls">
@@ -1426,7 +1426,7 @@
           <table class="guide-table">
             <tr><th>Key</th><th>Action</th></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Navigation</td></tr>
-            <tr><td><code>1</code>-<code>8</code></td><td>Switch views (Waterfall, Graph, Parallelism, Breakdown, Latency, Gaps, Replay, Heatmap)</td></tr>
+            <tr><td><code>1</code>-<code>8</code></td><td>Switch views (Waterfall, Graph, Replay, Parallelism, Breakdown, Latency, Gaps, Heatmap)</td></tr>
             <tr><td><code>?</code> or <code>H</code></td><td>Show this help guide</td></tr>
             <tr><td><code>O</code> or <code>L</code></td><td>Open file dialog to load trace</td></tr>
             <tr><td><code>P</code> or <code>V</code></td><td>Toggle paste JSON area</td></tr>
@@ -1453,19 +1453,19 @@
           <table class="guide-table">
             <tr><th>View</th><th>Best For</th><th>What to Look For</th></tr>
             <tr><td><strong>1: Waterfall</strong></td><td>Timeline overview</td><td>Concurrency graph, stack traces (▶), type filters, hover for parent/child</td></tr>
-            <tr><td><strong>2: Graph</strong></td><td>Causality & dependencies</td><td>3 layouts (Bubble/Force/Hierarchical), path highlight on hover, ←/→ to switch</td></tr>
-            <tr><td><strong>3: Parallelism</strong></td><td>Concurrency level</td><td>Orange bars = serialization, stacked height = parallelism</td></tr>
-            <tr><td><strong>4: Breakdown</strong></td><td>Time allocation</td><td>Large boxes = time hogs, solid = CPU, faded = I/O</td></tr>
-            <tr><td><strong>5: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
-            <tr><td><strong>6: Gaps</strong></td><td>Idle time analysis</td><td>Orange gaps = nothing running, waiters during gaps</td></tr>
-            <tr><td><strong>7: Replay</strong></td><td>Understanding flow</td><td>Watch operations unfold, dependency arrows, state changes</td></tr>
+            <tr><td><strong>2: Graph</strong></td><td>Causality & dependencies</td><td>3 layouts (Bubble/Hierarchical/Force), path highlight on hover, ←/→ to switch</td></tr>
+            <tr><td><strong>3: Replay</strong></td><td>Understanding flow</td><td>Watch operations unfold, dependency arrows, state changes</td></tr>
+            <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Orange bars = serialization, stacked height = parallelism</td></tr>
+            <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Large boxes = time hogs, solid = CPU, faded = I/O</td></tr>
+            <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Right tail = outliers, percentile lines (p50/p90/p99)</td></tr>
+            <tr><td><strong>7: Gaps</strong></td><td>Idle time analysis</td><td>Orange gaps = nothing running, waiters during gaps</td></tr>
             <tr><td><strong>8: Heatmap</strong></td><td>Activity density</td><td>Hot spots = high activity, rows = resource types, intensity = count</td></tr>
           </table>
         </div>
 
         <div class="guide-section">
           <h3>1. Identify Serialization Bottlenecks</h3>
-          <p><strong>Views:</strong> Graph (2) with Bubble layout, Parallelism (3)</p>
+          <p><strong>Views:</strong> Graph (2) with Bubble layout, Parallelism (4)</p>
           <p><strong>Pattern:</strong> Long vertical chains or parallelism = 1</p>
           <div class="guide-example">
             <div class="guide-bad">
@@ -1488,7 +1488,7 @@ const c = await fetch('/api/c');</pre>
 
         <div class="guide-section">
           <h3>2. Find Async Bottlenecks (Long Waits)</h3>
-          <p><strong>Views:</strong> Graph (2) with Bubble layout, Latency (5)</p>
+          <p><strong>Views:</strong> Graph (2) with Bubble layout, Latency (6)</p>
           <p><strong>Pattern:</strong> <span style="color: #ffd700;">Gold edge labels</span> (>1ms) or right-tail outliers in histogram</p>
           <p><strong>Questions to ask:</strong></p>
           <ul>
@@ -1501,7 +1501,7 @@ const c = await fetch('/api/c');</pre>
 
         <div class="guide-section">
           <h3>3. Analyze CPU vs I/O Balance</h3>
-          <p><strong>Views:</strong> Breakdown (4), sidebar Time Breakdown</p>
+          <p><strong>Views:</strong> Breakdown (5), sidebar Time Breakdown</p>
           <table class="guide-table">
             <tr><th>Ratio</th><th>Meaning</th><th>Action</th></tr>
             <tr><td>90% async (faded)</td><td>I/O bound (typical)</td><td>Optimize fetch/cache</td></tr>
@@ -1513,7 +1513,7 @@ const c = await fetch('/api/c');</pre>
 
         <div class="guide-section">
           <h3>4. Find Idle Gaps</h3>
-          <p><strong>View:</strong> Gaps (6)</p>
+          <p><strong>View:</strong> Gaps (7)</p>
           <p><strong>Pattern:</strong> <span style="color: #ff6432;">Orange sections</span> where no work is happening</p>
           <ul>
             <li><strong>Gaps with waiters</strong> = blocking operation, check what's pending</li>
@@ -2122,11 +2122,11 @@ const userB = await fetch('/user/123');</pre>
         const viewKeys = {
           '1': 'waterfall',
           '2': 'dag',
-          '3': 'parallelism',
-          '4': 'breakdown',
-          '5': 'latency',
-          '6': 'gaps',
-          '7': 'replay',
+          '3': 'replay',
+          '4': 'parallelism',
+          '5': 'breakdown',
+          '6': 'latency',
+          '7': 'gaps',
           '8': 'heatmap'
         };
 
