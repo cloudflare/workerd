@@ -537,6 +537,43 @@ The trace JSON appears in stderr output at WARNING level. Some samples require `
 - `sample-real-nodejs-compat-streams.json` - Node.js streams pipeline (15 resources, 72.5ms)
 - `sample-real-tcp.json` - TCP socket to gopher server (120 resources, 819ms) - includes stream-read/write operations
 
+## Future Visualization Improvements
+
+The following improvements are planned for the visualization tool, particularly the Waterfall view:
+
+### Medium Impact
+
+| Feature | Description |
+|---------|-------------|
+| **Minimap/Overview** | A small collapsed view of the entire trace for quick navigation when zoomed in |
+| **Zoom & Pan** | Ability to zoom into specific time ranges and pan horizontally for detailed inspection |
+| **Stack Trace Integration** | Clicking a resource could expand to show its creation stack trace inline |
+| **Filter by Type** | Quick toggle buttons to show/hide specific resource types (promises, timers, etc.) |
+| **Search/Find** | Search for resources by asyncId, type, or stack frame content |
+
+### Lower Impact / Nice-to-Have
+
+| Feature | Description |
+|---------|-------------|
+| **Export Options** | Export the waterfall as SVG/PNG for documentation |
+| **Keyboard Navigation** | Arrow keys to move between resources, expand/collapse details |
+| **Time Scale Toggle** | Switch between absolute time and relative-to-parent time |
+| **Critical Path Highlighting** | Highlight the longest chain of dependencies in waterfall view |
+| **Resource Grouping** | Collapse groups of related resources (e.g., all promises from same stack trace) |
+
+### Recently Implemented (Waterfall View)
+
+The following high-impact features were added to the Waterfall view:
+
+| Feature | Description |
+|---------|-------------|
+| **Concurrency Graph** | Canvas-based graph above waterfall showing in-flight async operations over time |
+| **Dependency Arrows** | SVG overlay draws curved arrows from parent to child resources (tree sort mode) |
+| **Hover Highlighting** | Hovering a resource highlights its parent (blue) and children (green) |
+| **Time Cursor** | Interactive cursor in concurrency graph shows timestamp and active resource count |
+| **Callback Markers** | Visual markers showing when callbacks started and ended within resource bars |
+| **Temporal Edge Indicators** | Badges showing timing-based causality relationships |
+
 ## Reference: clinicjs/bubbleprof
 
 Bubbleprof visualization shows:
