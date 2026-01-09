@@ -1333,6 +1333,175 @@ export class UdfTestDO extends DurableObject {
   }
 
   // ===========================================================================
+  // UDF Side Effects and Transaction Semantics
+  //
+  // These tests document an important behavior: UDF side effects (modifications
+  // to JavaScript state, external calls, etc.) are NOT rolled back when a
+  // transaction fails. This matches SQLite's behavior - SQLite only manages
+  // database state, not application state.
+  //
+  // From SQLite docs: Functions with side effects should use SQLITE_DIRECTONLY
+  // flag, but SQLite does not attempt to roll back or undo side effects.
+  // ===========================================================================
+
+  async testSideEffectsNotRolledBackOnTransactionFailure() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    // Track side effects via closure
+    let sideEffectCounter = 0;
+
+    sql.createFunction('side_effect_fn', (x) => {
+      sideEffectCounter++; // Side effect happens immediately when UDF executes
+      return x * 2;
+    });
+
+    sql.exec('CREATE TABLE side_effect_test (value INTEGER)');
+
+    // Execute a transaction that will fail
+    let error = null;
+    try {
+      storage.transactionSync(() => {
+        sql.exec('INSERT INTO side_effect_test VALUES (side_effect_fn(1))');
+        sql.exec('INSERT INTO side_effect_test VALUES (side_effect_fn(2))');
+        sql.exec('INSERT INTO side_effect_test VALUES (side_effect_fn(3))');
+        throw new Error('Deliberate rollback');
+      });
+    } catch (e) {
+      error = e;
+    }
+
+    assert.ok(error !== null, 'Transaction should have failed');
+
+    // Database changes are rolled back - table should be empty
+    const rows = sql.exec('SELECT * FROM side_effect_test').toArray();
+    assert.strictEqual(
+      rows.length,
+      0,
+      'Database changes should be rolled back'
+    );
+
+    // But the side effects (counter increments) are NOT rolled back
+    // The UDF was called 3 times before the transaction failed
+    assert.strictEqual(
+      sideEffectCounter,
+      3,
+      'UDF side effects are NOT rolled back when transaction fails - this is expected SQLite behavior'
+    );
+
+    sql.exec('DROP TABLE side_effect_test');
+  }
+
+  async testAggregateSideEffectsNotRolledBack() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    let stepCallCount = 0;
+    let finalCallCount = 0;
+
+    sql.createFunction('tracking_sum', {
+      step: (state, value) => {
+        stepCallCount++; // Side effect
+        return (state ?? 0) + value;
+      },
+      final: (state) => {
+        finalCallCount++; // Side effect
+        return state ?? 0;
+      },
+    });
+
+    sql.exec('CREATE TABLE agg_side_effect_test (value INTEGER)');
+    sql.exec('INSERT INTO agg_side_effect_test VALUES (1), (2), (3)');
+
+    let error = null;
+    try {
+      storage.transactionSync(() => {
+        // This will call step 3 times and final 1 time
+        sql
+          .exec('SELECT tracking_sum(value) FROM agg_side_effect_test')
+          .toArray();
+        throw new Error('Deliberate rollback');
+      });
+    } catch (e) {
+      error = e;
+    }
+
+    assert.ok(error !== null, 'Transaction should have failed');
+
+    // Side effects persist even after rollback
+    assert.strictEqual(
+      stepCallCount,
+      3,
+      'Aggregate step side effects are NOT rolled back'
+    );
+    assert.strictEqual(
+      finalCallCount,
+      1,
+      'Aggregate final side effects are NOT rolled back'
+    );
+
+    sql.exec('DROP TABLE agg_side_effect_test');
+  }
+
+  async testUdfMayBeCalledMultipleTimesForSameRow() {
+    const sql = this.state.storage.sql;
+
+    // SQLite may evaluate a UDF multiple times for the same logical value
+    // due to query optimization, expression evaluation, etc.
+    // This test documents that side effects may occur more than expected.
+
+    let callCount = 0;
+    sql.createFunction('counting_fn', (x) => {
+      callCount++;
+      return x;
+    });
+
+    sql.exec('CREATE TABLE multi_call_test (value INTEGER)');
+    sql.exec('INSERT INTO multi_call_test VALUES (1)');
+
+    // Using the same UDF multiple times in a query
+    sql
+      .exec(
+        'SELECT counting_fn(value), counting_fn(value) FROM multi_call_test'
+      )
+      .toArray();
+
+    sql.exec('DROP TABLE multi_call_test');
+
+    // The UDF should be called at least twice (once per column reference)
+    // It might be called more times depending on SQLite's query plan
+    assert.ok(
+      callCount >= 2,
+      `UDF was called ${callCount} times for 2 column references - ` +
+        'side effects may occur multiple times per row'
+    );
+  }
+
+  async testSideEffectsOccurEvenIfResultUnused() {
+    const sql = this.state.storage.sql;
+
+    let called = false;
+    sql.createFunction('side_effect_unused', () => {
+      called = true;
+      return 42;
+    });
+
+    // Create cursor but don't consume results
+    const cursor = sql.exec('SELECT side_effect_unused() AS val');
+
+    // Even without iterating, just creating the cursor may execute the query
+    // (depends on implementation - document actual behavior)
+    // Force iteration to ensure execution
+    cursor.toArray();
+
+    assert.strictEqual(
+      called,
+      true,
+      'UDF side effects occur when query executes, regardless of result usage'
+    );
+  }
+
+  // ===========================================================================
   // Function Replacement/Override Tests
   // ===========================================================================
 
@@ -3435,6 +3604,12 @@ export default {
     await stub.testAggregateUdfErrorRollsBackSyncTransaction();
     await stub.testNestedSyncTransactionsWithUdf();
     await stub.testSyncTransactionReturnValue();
+
+    // Side effects and transaction semantics
+    await stub.testSideEffectsNotRolledBackOnTransactionFailure();
+    await stub.testAggregateSideEffectsNotRolledBack();
+    await stub.testUdfMayBeCalledMultipleTimesForSameRow();
+    await stub.testSideEffectsOccurEvenIfResultUnused();
 
     // Function replacement tests
     await stub.testScalarFunctionReplacement();
