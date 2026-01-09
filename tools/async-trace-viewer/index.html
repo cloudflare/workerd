@@ -1286,15 +1286,16 @@
         <div class="view-help" data-view="parallelism">
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
             <strong>Parallelism View:</strong><br>
-            • Stacked chart = concurrent ops over time<br>
-            • <span style="color: #ff6432;">Orange line</span> = serialization threshold (=1)<br>
-            • <span style="color: #ff6432;">Orange bars</span> = bottleneck moments
+            • <span style="opacity: 0.9;">Solid</span> = executing, <span style="opacity: 0.4;">faded</span> = waiting<br>
+            • <span style="color: #00e5ff;">Cyan dashed</span> = ideal parallelism<br>
+            • <span style="color: #ff6600;">Orange line</span> = critical path (when enabled)<br>
+            • Hover for details, click for breakdown
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Interpretation:</strong><br>
-            • High peaks = good parallelism<br>
-            • Flat at 1 = sequential execution<br>
-            • Colors show resource type mix
+            <strong>Sidebar Metrics:</strong><br>
+            • Utilization = actual vs ideal<br>
+            • Efficiency = work done vs time spent<br>
+            • Top bottlenecks = resources causing serialization
           </div>
         </div>
         <div class="view-help" data-view="breakdown">
@@ -2018,6 +2019,9 @@ const userB = await fetch('/user/123');</pre>
         updateViewHelp();
         updateControlStates();
         saveSettings();
+        // Clean up parallelism tooltip when leaving parallelism view
+        hideParallelismTooltip();
+        parallelismHoverBucket = -1;
         if (traceData) {
           // Reset replay state when switching to replay view
           if (currentView === 'replay') {
@@ -2242,6 +2246,9 @@ const userB = await fetch('/user/123');</pre>
           document.getElementById(newView + '-view').classList.add('active');
           updateViewHelp();
           updateControlStates();
+          // Clean up parallelism tooltip when leaving parallelism view
+          hideParallelismTooltip();
+          parallelismHoverBucket = -1;
           if (traceData) {
             // Reset replay state when switching to replay view
             if (newView === 'replay') {
@@ -5441,6 +5448,11 @@ const userB = await fetch('/user/123');</pre>
     }
 
     // ==================== PARALLELISM VIEW ====================
+    // Store parallelism view state for hover/click interaction
+    let parallelismBucketData = null;
+    let parallelismHoverBucket = -1;
+    let parallelismTooltip = null;
+
     function renderParallelism() {
       const container = document.getElementById('parallelism-view');
       const canvas = document.getElementById('parallelism-canvas');
@@ -5451,7 +5463,7 @@ const userB = await fetch('/user/123');</pre>
 
       const width = canvas.width;
       const height = canvas.height;
-      const padding = { top: 40, right: 20, bottom: 50, left: 60 };
+      const padding = { top: 40, right: 200, bottom: 50, left: 60 };
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
 
@@ -5464,48 +5476,132 @@ const userB = await fetch('/user/123');</pre>
       const numBuckets = Math.min(500, Math.floor(chartWidth / 2));
       const bucketSize = duration / numBuckets;
 
-      // Count concurrent operations per bucket, separated by type
-      const typeBuckets = new Map();  // type -> array of counts
+      // Track detailed info per bucket for hover/click
+      // Each bucket tracks: executing resources, waiting resources, bottleneck info
+      const bucketDetails = new Array(numBuckets).fill(null).map(() => ({
+        executing: [],      // Resources with callback running
+        waiting: [],        // Resources created but callback not started
+        criticalPath: [],   // Critical path resources active in this bucket
+        bottleneck: null    // If serialized, which resource is blocking
+      }));
+
+      // Count operations per bucket, now separating executing vs waiting
+      const executingBuckets = new Array(numBuckets).fill(0);
+      const waitingBuckets = new Array(numBuckets).fill(0);
+      const criticalPathBuckets = new Array(numBuckets).fill(0);
+
+      // For ideal parallelism: track what COULD run if everything started immediately
+      // This represents maximum theoretical parallelism based on operation durations
+      const idealBuckets = new Array(numBuckets).fill(0);
+
+      // Also track by type for stacked visualization
+      const typeExecutingBuckets = new Map();  // type -> array of executing counts
+      const typeWaitingBuckets = new Map();    // type -> array of waiting counts
       const allTypes = new Set();
 
       traceData.resources.forEach(r => {
         allTypes.add(r.type);
-        if (!typeBuckets.has(r.type)) {
-          typeBuckets.set(r.type, new Array(numBuckets).fill(0));
+        if (!typeExecutingBuckets.has(r.type)) {
+          typeExecutingBuckets.set(r.type, new Array(numBuckets).fill(0));
+          typeWaitingBuckets.set(r.type, new Array(numBuckets).fill(0));
         }
 
-        const start = r.createdAt;
-        const end = r.callbackEndedAt > 0 ? r.callbackEndedAt :
-                    (r.destroyedAt > 0 ? r.destroyedAt : duration);
+        const createdAt = r.createdAt;
+        const callbackStart = r.callbackStartedAt > 0 ? r.callbackStartedAt : duration;
+        const callbackEnd = r.callbackEndedAt > 0 ? r.callbackEndedAt :
+                          (r.destroyedAt > 0 ? r.destroyedAt : duration);
 
-        const startBucket = Math.max(0, Math.floor(start / bucketSize));
-        const endBucket = Math.min(numBuckets - 1, Math.floor(end / bucketSize));
+        const isOnCriticalPath = criticalPathSet.has(r.asyncId);
 
-        const buckets = typeBuckets.get(r.type);
-        for (let i = startBucket; i <= endBucket; i++) {
-          buckets[i]++;
+        // Waiting period: created but callback not started
+        if (createdAt < callbackStart) {
+          const startBucket = Math.max(0, Math.floor(createdAt / bucketSize));
+          const endBucket = Math.min(numBuckets - 1, Math.floor(callbackStart / bucketSize));
+          const waitBuckets = typeWaitingBuckets.get(r.type);
+
+          for (let i = startBucket; i <= endBucket; i++) {
+            waitBuckets[i]++;
+            waitingBuckets[i]++;
+            bucketDetails[i].waiting.push(r);
+            if (isOnCriticalPath) {
+              criticalPathBuckets[i]++;
+              bucketDetails[i].criticalPath.push(r);
+            }
+          }
+        }
+
+        // Executing period: callback running
+        if (r.callbackStartedAt > 0 && r.callbackStartedAt < callbackEnd) {
+          const startBucket = Math.max(0, Math.floor(r.callbackStartedAt / bucketSize));
+          const endBucket = Math.min(numBuckets - 1, Math.floor(callbackEnd / bucketSize));
+          const execBuckets = typeExecutingBuckets.get(r.type);
+
+          for (let i = startBucket; i <= endBucket; i++) {
+            execBuckets[i]++;
+            executingBuckets[i]++;
+            bucketDetails[i].executing.push(r);
+            if (isOnCriticalPath) {
+              criticalPathBuckets[i]++;
+              if (!bucketDetails[i].criticalPath.includes(r)) {
+                bucketDetails[i].criticalPath.push(r);
+              }
+            }
+          }
+        }
+
+        // For ideal parallelism: if this operation's sync work were shifted to time 0
+        // how much parallelism could we achieve? This shows theoretical maximum.
+        const syncDuration = r.callbackEndedAt > 0 && r.callbackStartedAt > 0 ?
+                            r.callbackEndedAt - r.callbackStartedAt : 0;
+        if (syncDuration > 0) {
+          const idealEndBucket = Math.min(numBuckets - 1, Math.floor(syncDuration / bucketSize));
+          for (let i = 0; i <= idealEndBucket; i++) {
+            idealBuckets[i]++;
+          }
         }
       });
 
-      // Calculate total per bucket and find max
+      // Calculate totals and find max
       const totalBuckets = new Array(numBuckets).fill(0);
-      typeBuckets.forEach(buckets => {
-        buckets.forEach((count, i) => totalBuckets[i] += count);
-      });
-      const maxConcurrent = Math.max(...totalBuckets, 1);
+      for (let i = 0; i < numBuckets; i++) {
+        totalBuckets[i] = executingBuckets[i] + waitingBuckets[i];
+      }
+      const maxConcurrent = Math.max(...totalBuckets, ...idealBuckets, 1);
+      const maxIdeal = Math.max(...idealBuckets, 1);
+
+      // Identify bottlenecks (when only 1 resource is active)
+      for (let i = 0; i < numBuckets; i++) {
+        const total = totalBuckets[i];
+        if (total === 1) {
+          const blocker = bucketDetails[i].executing[0] || bucketDetails[i].waiting[0];
+          if (blocker) {
+            bucketDetails[i].bottleneck = blocker;
+          }
+        }
+      }
 
       // Sort types by total count for consistent stacking
       const sortedTypes = Array.from(allTypes).sort((a, b) => {
-        const sumA = typeBuckets.get(a).reduce((s, v) => s + v, 0);
-        const sumB = typeBuckets.get(b).reduce((s, v) => s + v, 0);
+        const sumA = (typeExecutingBuckets.get(a) || []).reduce((s, v) => s + v, 0) +
+                    (typeWaitingBuckets.get(a) || []).reduce((s, v) => s + v, 0);
+        const sumB = (typeExecutingBuckets.get(b) || []).reduce((s, v) => s + v, 0) +
+                    (typeWaitingBuckets.get(b) || []).reduce((s, v) => s + v, 0);
         return sumB - sumA;
       });
+
+      // Store bucket data for hover interaction
+      parallelismBucketData = {
+        numBuckets, bucketSize, duration, bucketDetails,
+        executingBuckets, waitingBuckets, totalBuckets,
+        criticalPathBuckets, idealBuckets,
+        padding, chartWidth, chartHeight, maxConcurrent
+      };
 
       // Draw title
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Concurrent Operations Over Time', width / 2, 20);
+      ctx.fillText('Concurrent Operations Over Time (Executing vs Waiting)', width / 2 - 80, 20);
 
       // Draw axes
       ctx.strokeStyle = '#444';
@@ -5541,25 +5637,99 @@ const userB = await fetch('/user/123');</pre>
         ctx.fillText(time.toFixed(1) + 'ms', x, height - padding.bottom + 15);
       }
 
-      // Draw stacked area chart
+      // Draw stacked area chart - executing (solid) then waiting (striped/faded)
       const barWidth = chartWidth / numBuckets;
 
+      // First pass: draw executing (solid colors)
       for (let i = 0; i < numBuckets; i++) {
         let y = height - padding.bottom;
         const x = padding.left + i * barWidth;
 
         sortedTypes.forEach(type => {
-          const count = typeBuckets.get(type)[i];
-          if (count > 0) {
-            const barHeight = (count / maxConcurrent) * chartHeight;
+          const execCount = typeExecutingBuckets.get(type)?.[i] || 0;
+          if (execCount > 0) {
+            const barHeight = (execCount / maxConcurrent) * chartHeight;
             ctx.fillStyle = TYPE_COLORS[type] || '#808080';
-            ctx.globalAlpha = 0.8;
+            ctx.globalAlpha = 0.9;
+            ctx.fillRect(x, y - barHeight, barWidth + 0.5, barHeight);
+            y -= barHeight;
+          }
+        });
+      }
+
+      // Second pass: draw waiting (faded/hatched) on top
+      for (let i = 0; i < numBuckets; i++) {
+        let y = height - padding.bottom - (executingBuckets[i] / maxConcurrent) * chartHeight;
+        const x = padding.left + i * barWidth;
+
+        sortedTypes.forEach(type => {
+          const waitCount = typeWaitingBuckets.get(type)?.[i] || 0;
+          if (waitCount > 0) {
+            const barHeight = (waitCount / maxConcurrent) * chartHeight;
+            ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+            ctx.globalAlpha = 0.35;  // Faded for waiting
             ctx.fillRect(x, y - barHeight, barWidth + 0.5, barHeight);
             y -= barHeight;
           }
         });
       }
       ctx.globalAlpha = 1;
+
+      // Draw ideal parallelism - filled area with line on top
+      // First draw filled area underneath
+      ctx.fillStyle = 'rgba(0, 220, 255, 0.15)';
+      ctx.beginPath();
+      ctx.moveTo(padding.left, height - padding.bottom);
+      for (let i = 0; i < numBuckets; i++) {
+        const x = padding.left + i * barWidth + barWidth / 2;
+        const y = height - padding.bottom - (idealBuckets[i] / maxConcurrent) * chartHeight;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(padding.left + chartWidth, height - padding.bottom);
+      ctx.closePath();
+      ctx.fill();
+
+      // Then draw the line on top (bright cyan, thicker)
+      ctx.strokeStyle = '#00e5ff';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 3]);
+      ctx.beginPath();
+      for (let i = 0; i < numBuckets; i++) {
+        const x = padding.left + i * barWidth + barWidth / 2;
+        const y = height - padding.bottom - (idealBuckets[i] / maxConcurrent) * chartHeight;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw critical path overlay (when enabled)
+      if (showCriticalPath && criticalPathSet.size > 0) {
+        ctx.strokeStyle = '#ff6600';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < numBuckets; i++) {
+          const x = padding.left + i * barWidth + barWidth / 2;
+          const cpCount = criticalPathBuckets[i];
+          const y = height - padding.bottom - (cpCount / maxConcurrent) * chartHeight;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Fill under critical path with subtle highlight
+        ctx.fillStyle = 'rgba(255, 102, 0, 0.1)';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, height - padding.bottom);
+        for (let i = 0; i < numBuckets; i++) {
+          const x = padding.left + i * barWidth + barWidth / 2;
+          const y = height - padding.bottom - (criticalPathBuckets[i] / maxConcurrent) * chartHeight;
+          ctx.lineTo(x, y);
+        }
+        ctx.lineTo(padding.left + chartWidth, height - padding.bottom);
+        ctx.closePath();
+        ctx.fill();
+      }
 
       // Draw "parallelism = 1" danger line
       const oneLineY = height - padding.bottom - (1 / maxConcurrent) * chartHeight;
@@ -5572,62 +5742,415 @@ const userB = await fetch('/user/123');</pre>
         ctx.lineTo(width - padding.right, oneLineY);
         ctx.stroke();
         ctx.setLineDash([]);
-
-        ctx.fillStyle = '#ff6432';
-        ctx.font = '9px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText('← serialization (=1)', width - padding.right - 100, oneLineY - 5);
       }
 
-      // Find and highlight serialization points (where concurrency drops to 1)
-      let serializationPoints = [];
-      for (let i = 1; i < numBuckets - 1; i++) {
-        if (totalBuckets[i] === 1 && (totalBuckets[i-1] > 1 || totalBuckets[i+1] > 1)) {
-          serializationPoints.push(i);
+      // Find serialization regions (consecutive buckets where total <= 1)
+      const serializationRegions = [];
+      let regionStart = -1;
+      for (let i = 0; i < numBuckets; i++) {
+        if (totalBuckets[i] <= 1) {
+          if (regionStart === -1) regionStart = i;
+        } else {
+          if (regionStart !== -1) {
+            serializationRegions.push({ start: regionStart, end: i - 1 });
+            regionStart = -1;
+          }
         }
       }
+      if (regionStart !== -1) {
+        serializationRegions.push({ start: regionStart, end: numBuckets - 1 });
+      }
 
-      // Draw serialization markers
-      ctx.fillStyle = 'rgba(255, 100, 50, 0.3)';
-      serializationPoints.forEach(i => {
-        const x = padding.left + i * barWidth;
-        ctx.fillRect(x - 2, padding.top, 4, chartHeight);
+      // Draw serialization region highlights
+      ctx.fillStyle = 'rgba(255, 100, 50, 0.15)';
+      serializationRegions.forEach(region => {
+        const x = padding.left + region.start * barWidth;
+        const w = (region.end - region.start + 1) * barWidth;
+        ctx.fillRect(x, padding.top, w, chartHeight);
       });
+
+      // Draw hover highlight
+      if (parallelismHoverBucket >= 0 && parallelismHoverBucket < numBuckets) {
+        const x = padding.left + parallelismHoverBucket * barWidth;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.fillRect(x, padding.top, barWidth, chartHeight);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, padding.top, barWidth, chartHeight);
+      }
 
       // Draw legend
       const legendY = height - 25;
       let legendX = padding.left;
       ctx.font = '10px sans-serif';
 
-      sortedTypes.slice(0, 8).forEach(type => {
-        ctx.fillStyle = TYPE_COLORS[type] || '#808080';
-        ctx.fillRect(legendX, legendY, 12, 12);
+      // Executing/waiting legend
+      ctx.fillStyle = '#50c878';
+      ctx.globalAlpha = 0.9;
+      ctx.fillRect(legendX, legendY, 12, 12);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#aaa';
+      ctx.textAlign = 'left';
+      ctx.fillText('Executing', legendX + 16, legendY + 10);
+      legendX += 80;
+
+      ctx.fillStyle = '#50c878';
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(legendX, legendY, 12, 12);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#aaa';
+      ctx.fillText('Waiting', legendX + 16, legendY + 10);
+      legendX += 70;
+
+      // Ideal line legend
+      ctx.strokeStyle = '#00e5ff';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 3]);
+      ctx.beginPath();
+      ctx.moveTo(legendX, legendY + 6);
+      ctx.lineTo(legendX + 12, legendY + 6);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#aaa';
+      ctx.fillText('Ideal', legendX + 16, legendY + 10);
+      legendX += 55;
+
+      // Critical path legend (if enabled)
+      if (showCriticalPath && criticalPathSet.size > 0) {
+        ctx.strokeStyle = '#ff6600';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(legendX, legendY + 6);
+        ctx.lineTo(legendX + 12, legendY + 6);
+        ctx.stroke();
         ctx.fillStyle = '#aaa';
-        ctx.textAlign = 'left';
-        const label = type.replace('js-', '').substring(0, 8);
-        ctx.fillText(label, legendX + 16, legendY + 10);
-        legendX += ctx.measureText(label).width + 30;
+        ctx.fillText('Critical', legendX + 16, legendY + 10);
+        legendX += 60;
+      }
+
+      // Type colors (remaining space)
+      sortedTypes.slice(0, 5).forEach(type => {
+        if (legendX > width - padding.right - 100) return;
+        ctx.fillStyle = TYPE_COLORS[type] || '#808080';
+        ctx.fillRect(legendX, legendY, 10, 10);
+        ctx.fillStyle = '#888';
+        const label = type.replace('js-', '').substring(0, 6);
+        ctx.fillText(label, legendX + 14, legendY + 9);
+        legendX += ctx.measureText(label).width + 26;
       });
 
-      // Stats overlay
+      // ===== STATS SIDEBAR =====
+      const sidebarX = width - padding.right + 10;
+      const sidebarWidth = padding.right - 20;
+
+      // Calculate efficiency metrics
       const avgConcurrency = totalBuckets.reduce((s, v) => s + v, 0) / numBuckets;
-      const serializationPct = (totalBuckets.filter(v => v <= 1).length / numBuckets * 100).toFixed(0);
+      const avgExecuting = executingBuckets.reduce((s, v) => s + v, 0) / numBuckets;
+      const avgWaiting = waitingBuckets.reduce((s, v) => s + v, 0) / numBuckets;
+      const serializationTime = totalBuckets.filter(v => v <= 1).length * bucketSize;
+      const serializationPct = (serializationTime / duration * 100);
 
-      ctx.fillStyle = 'rgba(22, 33, 62, 0.9)';
-      ctx.fillRect(width - 180, padding.top, 170, 70);
+      // Total work done (sum of all operation durations)
+      let totalSyncWork = 0;
+      let totalAsyncWait = 0;
+      traceData.resources.forEach(r => {
+        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
+          totalSyncWork += r.callbackEndedAt - r.callbackStartedAt;
+        }
+        if (r.callbackStartedAt > 0 && r.createdAt > 0) {
+          totalAsyncWait += r.callbackStartedAt - r.createdAt;
+        }
+      });
+
+      // Efficiency: how well we're using available parallelism
+      // Theoretical minimum = total sync work / peak parallelism
+      const peakParallelism = Math.max(...executingBuckets, 1);
+      const theoreticalMin = totalSyncWork / peakParallelism;
+      const efficiency = theoreticalMin > 0 ? (theoreticalMin / duration * 100) : 0;
+
+      // Parallelization opportunity: how much faster could we be?
+      const idealAvg = idealBuckets.reduce((s, v) => s + v, 0) / numBuckets;
+      const parallelizationGap = idealAvg > 0 ? (avgExecuting / idealAvg * 100) : 100;
+
+      // Serialization cost: time lost to being serialized
+      const potentialSavings = serializationTime * (1 - 1/Math.max(avgConcurrency, 1));
+
+      // Draw sidebar background
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(sidebarX, padding.top, sidebarWidth, chartHeight);
       ctx.strokeStyle = '#0f3460';
-      ctx.strokeRect(width - 180, padding.top, 170, 70);
+      ctx.strokeRect(sidebarX, padding.top, sidebarWidth, chartHeight);
 
-      ctx.fillStyle = '#e94560';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText('Statistics', width - 170, padding.top + 15);
+      let sbY = padding.top + 15;
+      const lineHeight = 16;
 
-      ctx.fillStyle = '#aaa';
-      ctx.font = '10px sans-serif';
-      ctx.fillText(`Peak: ${maxConcurrent} concurrent`, width - 170, padding.top + 32);
-      ctx.fillText(`Avg: ${avgConcurrency.toFixed(1)} concurrent`, width - 170, padding.top + 46);
-      ctx.fillText(`Serialized: ${serializationPct}% of time`, width - 170, padding.top + 60);
+      const drawSectionHeader = (title, color = '#e94560') => {
+        ctx.fillStyle = color;
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(title, sidebarX + 8, sbY);
+        sbY += lineHeight + 2;
+      };
+
+      const drawStatLine = (label, value, color = '#aaa') => {
+        ctx.fillStyle = '#888';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(label + ':', sidebarX + 8, sbY);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'right';
+        ctx.fillText(String(value), sidebarX + sidebarWidth - 8, sbY);
+        ctx.textAlign = 'left';
+        sbY += lineHeight;
+      };
+
+      // Parallelism Stats
+      drawSectionHeader('Parallelism');
+      drawStatLine('Peak (exec)', peakParallelism, '#50c878');
+      drawStatLine('Avg executing', avgExecuting.toFixed(1), '#7ec8e3');
+      drawStatLine('Avg waiting', avgWaiting.toFixed(1), '#888');
+      drawStatLine('Avg total', avgConcurrency.toFixed(1));
+      sbY += 6;
+
+      // Efficiency Stats
+      drawSectionHeader('Efficiency', '#00bcd4');
+      drawStatLine('Ideal avg', idealAvg.toFixed(1), '#00bcd4');
+      drawStatLine('Utilization', parallelizationGap.toFixed(0) + '%',
+        parallelizationGap > 70 ? '#50c878' : (parallelizationGap > 40 ? '#ffd700' : '#ff6432'));
+      drawStatLine('Efficiency', efficiency.toFixed(0) + '%',
+        efficiency > 50 ? '#50c878' : (efficiency > 25 ? '#ffd700' : '#ff6432'));
+      sbY += 6;
+
+      // Serialization Stats
+      drawSectionHeader('Serialization', '#ff6432');
+      drawStatLine('Time', (serializationTime / 1e6).toFixed(2) + 'ms');
+      drawStatLine('Percent', serializationPct.toFixed(0) + '%',
+        serializationPct < 20 ? '#50c878' : (serializationPct < 50 ? '#ffd700' : '#ff6432'));
+      drawStatLine('Potential save', (potentialSavings / 1e6).toFixed(2) + 'ms',
+        potentialSavings > duration * 0.1 ? '#ffd700' : '#888');
+      sbY += 6;
+
+      // Critical path stats (if enabled)
+      if (showCriticalPath && criticalPathInfo) {
+        drawSectionHeader('Critical Path', '#ff6600');
+        drawStatLine('Resources', criticalPathInfo.path.length);
+        drawStatLine('Sync time', (criticalPathInfo.totalSyncTime / 1e6).toFixed(2) + 'ms');
+        drawStatLine('Async wait', (criticalPathInfo.totalAsyncWait / 1e6).toFixed(2) + 'ms');
+        sbY += 6;
+      }
+
+      // Bottleneck identification
+      const bottleneckCounts = new Map();
+      bucketDetails.forEach(bd => {
+        if (bd.bottleneck) {
+          const key = `${bd.bottleneck.type}#${bd.bottleneck.asyncId}`;
+          bottleneckCounts.set(key, (bottleneckCounts.get(key) || 0) + 1);
+        }
+      });
+
+      if (bottleneckCounts.size > 0) {
+        drawSectionHeader('Top Bottlenecks', '#ffd700');
+        const sorted = [...bottleneckCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3);
+
+        sorted.forEach(([key, count]) => {
+          const pct = (count / numBuckets * 100).toFixed(0);
+          const shortKey = key.length > 15 ? key.substring(0, 15) + '…' : key;
+          drawStatLine(shortKey, pct + '%', '#ffd700');
+        });
+      }
+
+      // Setup hover/click handlers (only once)
+      if (!canvas._parallelismHandlersSet) {
+        canvas._parallelismHandlersSet = true;
+
+        canvas.addEventListener('mousemove', (e) => {
+          if (currentView !== 'parallelism' || !parallelismBucketData) return;
+
+          const rect = canvas.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const pd = parallelismBucketData;
+
+          // Check if within chart area
+          if (x >= pd.padding.left && x <= pd.padding.left + pd.chartWidth &&
+              y >= pd.padding.top && y <= pd.padding.top + pd.chartHeight) {
+            const bucket = Math.floor((x - pd.padding.left) / (pd.chartWidth / pd.numBuckets));
+            if (bucket !== parallelismHoverBucket) {
+              parallelismHoverBucket = bucket;
+              renderParallelismFrame();
+              showParallelismTooltip(e, bucket);
+            }
+          } else {
+            if (parallelismHoverBucket !== -1) {
+              parallelismHoverBucket = -1;
+              hideParallelismTooltip();
+              renderParallelismFrame();
+            }
+          }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+          if (parallelismHoverBucket !== -1) {
+            parallelismHoverBucket = -1;
+            hideParallelismTooltip();
+            if (currentView === 'parallelism') renderParallelismFrame();
+          }
+        });
+
+        canvas.addEventListener('click', (e) => {
+          if (currentView !== 'parallelism' || !parallelismBucketData) return;
+
+          const rect = canvas.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const pd = parallelismBucketData;
+
+          if (x >= pd.padding.left && x <= pd.padding.left + pd.chartWidth) {
+            const bucket = Math.floor((x - pd.padding.left) / (pd.chartWidth / pd.numBuckets));
+            showParallelismDetailPanel(bucket);
+          }
+        });
+      }
+    }
+
+    function renderParallelismFrame() {
+      // Re-render without recalculating everything
+      if (currentView === 'parallelism') {
+        renderParallelism();
+      }
+    }
+
+    function showParallelismTooltip(e, bucket) {
+      if (!parallelismBucketData) return;
+
+      const pd = parallelismBucketData;
+      const bd = pd.bucketDetails[bucket];
+      const timeMs = (bucket * pd.bucketSize / 1e6).toFixed(2);
+
+      let tooltip = document.getElementById('parallelism-tooltip');
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'parallelism-tooltip';
+        tooltip.style.cssText = `
+          position: fixed; background: rgba(22, 33, 62, 0.95); border: 1px solid #0f3460;
+          padding: 8px 12px; border-radius: 4px; font-size: 11px; color: #e0e0e0;
+          pointer-events: none; z-index: 1000; max-width: 280px;
+        `;
+        document.body.appendChild(tooltip);
+      }
+
+      let html = `<div style="color: #e94560; font-weight: bold; margin-bottom: 4px;">@ ${timeMs}ms</div>`;
+      html += `<div style="margin-bottom: 4px;">`;
+      html += `<span style="color: #50c878;">⚡ ${bd.executing.length} executing</span> · `;
+      html += `<span style="color: #888;">⏳ ${bd.waiting.length} waiting</span>`;
+      html += `</div>`;
+
+      if (bd.bottleneck) {
+        const bn = bd.bottleneck;
+        html += `<div style="color: #ffd700; margin-top: 4px;">⚠️ Bottleneck: ${bn.type} #${bn.asyncId}</div>`;
+      }
+
+      if (bd.executing.length > 0) {
+        html += `<div style="margin-top: 4px; color: #aaa; font-size: 10px;">Executing:</div>`;
+        bd.executing.slice(0, 4).forEach(r => {
+          const isCritical = criticalPathSet.has(r.asyncId);
+          html += `<div style="font-size: 10px; color: ${isCritical ? '#ff6600' : '#ccc'};">`;
+          html += `${isCritical ? '🔥 ' : ''}${r.type} #${r.asyncId}</div>`;
+        });
+        if (bd.executing.length > 4) {
+          html += `<div style="font-size: 10px; color: #666;">...+${bd.executing.length - 4} more</div>`;
+        }
+      }
+
+      if (bd.waiting.length > 0 && bd.waiting.length <= 6) {
+        html += `<div style="margin-top: 4px; color: #aaa; font-size: 10px;">Waiting:</div>`;
+        bd.waiting.slice(0, 3).forEach(r => {
+          const isCritical = criticalPathSet.has(r.asyncId);
+          html += `<div style="font-size: 10px; color: ${isCritical ? '#ff6600' : '#888'};">`;
+          html += `${isCritical ? '🔥 ' : ''}${r.type} #${r.asyncId}</div>`;
+        });
+        if (bd.waiting.length > 3) {
+          html += `<div style="font-size: 10px; color: #666;">...+${bd.waiting.length - 3} more</div>`;
+        }
+      }
+
+      tooltip.innerHTML = html;
+      tooltip.style.left = (e.clientX + 15) + 'px';
+      tooltip.style.top = (e.clientY + 15) + 'px';
+      tooltip.style.display = 'block';
+    }
+
+    function hideParallelismTooltip() {
+      const tooltip = document.getElementById('parallelism-tooltip');
+      if (tooltip) tooltip.style.display = 'none';
+    }
+
+    function showParallelismDetailPanel(bucket) {
+      if (!parallelismBucketData) return;
+
+      const pd = parallelismBucketData;
+      const bd = pd.bucketDetails[bucket];
+      const timeMs = (bucket * pd.bucketSize / 1e6).toFixed(2);
+
+      // Show in the selected details panel
+      const selectedDetails = document.getElementById('selected-details');
+      const timingBreakdown = document.getElementById('timing-breakdown');
+      if (!selectedDetails) return;
+
+      let html = `<div class="detail-item">
+        <strong style="color: #e94560;">@ ${timeMs}ms</strong>
+      </div>`;
+
+      html += `<div class="detail-item">
+        <span style="color: #50c878;">⚡ ${bd.executing.length} executing</span><br>
+        <span style="color: #888;">⏳ ${bd.waiting.length} waiting</span>
+      </div>`;
+
+      if (bd.bottleneck) {
+        const bn = bd.bottleneck;
+        html += `<div class="detail-item" style="background: rgba(255, 215, 0, 0.1); padding: 4px; border-radius: 3px;">
+          <strong style="color: #ffd700;">⚠️ Bottleneck</strong><br>
+          ${bn.type} #${bn.asyncId}
+        </div>`;
+      }
+
+      if (bd.executing.length > 0) {
+        html += `<div class="detail-item"><strong>Executing:</strong></div>`;
+        bd.executing.forEach(r => {
+          const isCritical = criticalPathSet.has(r.asyncId);
+          const color = isCritical ? '#ff6600' : (TYPE_COLORS[r.type] || '#808080');
+          html += `<div class="detail-item" style="padding-left: 8px; border-left: 3px solid ${color};">
+            ${isCritical ? '🔥 ' : ''}<strong>${r.type}</strong> #${r.asyncId}
+          </div>`;
+        });
+      }
+
+      if (bd.waiting.length > 0) {
+        html += `<div class="detail-item"><strong>Waiting:</strong></div>`;
+        bd.waiting.slice(0, 10).forEach(r => {
+          const isCritical = criticalPathSet.has(r.asyncId);
+          const color = isCritical ? '#ff6600' : '#666';
+          html += `<div class="detail-item" style="padding-left: 8px; border-left: 3px solid ${color}; opacity: 0.7;">
+            ${isCritical ? '🔥 ' : ''}${r.type} #${r.asyncId}
+          </div>`;
+        });
+        if (bd.waiting.length > 10) {
+          html += `<div class="detail-item" style="color: #666;">...+${bd.waiting.length - 10} more waiting</div>`;
+        }
+      }
+
+      selectedDetails.innerHTML = html;
+
+      // Also update timing breakdown with summary
+      if (timingBreakdown) {
+        let timingHtml = `<div class="detail-item">
+          <strong>Time:</strong> ${timeMs}ms
+        </div>`;
+        timingHtml += `<div class="detail-item">
+          <strong>Parallelism:</strong> ${bd.executing.length + bd.waiting.length}
+        </div>`;
+        timingBreakdown.innerHTML = timingHtml;
+      }
     }
 
     // ==================== BREAKDOWN VIEW ====================
