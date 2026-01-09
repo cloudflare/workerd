@@ -266,6 +266,22 @@ kj::Maybe<kj::StringPtr> toMaybeString(const char* cstr) {
   }
 }
 
+// Helper function to convert a string to lowercase.
+// SQLite function names are case-insensitive, so we normalize to lowercase for HashMap lookups.
+kj::String toLowercase(kj::StringPtr str) {
+  auto result = kj::heapString(str.size());
+  for (auto i: kj::zeroTo(str.size())) {
+    char c = str[i];
+    // ASCII lowercase conversion
+    if (c >= 'A' && c <= 'Z') {
+      result[i] = c + ('a' - 'A');
+    } else {
+      result[i] = c;
+    }
+  }
+  return result;
+}
+
 // We allowlist these SQLite functions.
 static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   // https://www.sqlite.org/lang_corefunc.html
@@ -1155,13 +1171,17 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     {
       kj::StringPtr funcName = KJ_ASSERT_NONNULL(param2);
 
+      // SQLite function names are case-insensitive, so we normalize to lowercase for lookups.
+      // The ALLOWED_SQLITE_FUNCTIONS are already lowercase, and UDFs are stored with lowercase keys.
+      auto lowerFuncName = toLowercase(funcName);
+
       // Check if it's a registered scalar user-defined function
-      if (registeredUdfs.find(funcName) != kj::none) {
+      if (registeredUdfs.find(lowerFuncName) != kj::none) {
         return true;
       }
 
       // Check if it's a registered aggregate user-defined function
-      if (registeredAggregateUdfs.find(funcName) != kj::none) {
+      if (registeredAggregateUdfs.find(lowerFuncName) != kj::none) {
         return true;
       }
 
@@ -1173,7 +1193,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         }
         return result;
       }();
-      return allowSet.contains(funcName);
+      return allowSet.contains(lowerFuncName);
     }
 
       // ---------------------------------------------------------------
@@ -2674,12 +2694,14 @@ void SqliteDatabase::registerScalarFunction(
 
   // Create the RegisteredUdf structure to hold the callback
   auto udf = kj::heap<RegisteredUdf>();
-  udf->name = kj::str(name);
+  // Store the name in lowercase for case-insensitive lookup in the authorizer.
+  // SQLite function names are case-insensitive.
+  udf->name = toLowercase(name);
   udf->callback = kj::mv(callback);
   udf->db = this;  // Store pointer to database for exception handling
 
-  // Register with SQLite
-  int rc = sqlite3_create_function_v2(sqliteDb, udf->name.cStr(), argCount, SQLITE_UTF8,
+  // Register with SQLite using the original name (SQLite handles case-insensitivity internally)
+  int rc = sqlite3_create_function_v2(sqliteDb, name.cStr(), argCount, SQLITE_UTF8,
       udf.get(),  // user_data
       udfCallback,
       nullptr,  // xStep (for aggregate functions)
@@ -2783,13 +2805,15 @@ void SqliteDatabase::registerAggregateFunction(kj::StringPtr name,
 
   // Create the RegisteredAggregateUdf structure to hold the callbacks
   auto udf = kj::heap<RegisteredAggregateUdf>();
-  udf->name = kj::str(name);
+  // Store the name in lowercase for case-insensitive lookup in the authorizer.
+  // SQLite function names are case-insensitive.
+  udf->name = toLowercase(name);
   udf->stepCallback = kj::mv(stepCallback);
   udf->finalCallback = kj::mv(finalCallback);
   udf->db = this;
 
-  // Register with SQLite
-  int rc = sqlite3_create_function_v2(sqliteDb, udf->name.cStr(), argCount, SQLITE_UTF8,
+  // Register with SQLite using the original name (SQLite handles case-insensitivity internally)
+  int rc = sqlite3_create_function_v2(sqliteDb, name.cStr(), argCount, SQLITE_UTF8,
       udf.get(),               // user_data
       nullptr,                 // xFunc (for scalar functions)
       aggregateStepCallback,   // xStep

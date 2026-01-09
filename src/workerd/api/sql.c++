@@ -9,7 +9,6 @@
 #include <workerd/io/io-context.h>
 
 #include <cmath>
-#include <limits>
 
 namespace workerd::api {
 
@@ -190,8 +189,8 @@ static SqliteDatabase::UdfResultValue jsResultToSqlite(jsg::Lock& js, v8::Local<
     double num = handle.As<v8::Number>()->Value();
     double intPart;
     if (std::modf(num, &intPart) == 0.0 &&
-        num >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
-        num <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+        num >= static_cast<double>(static_cast<int64_t>(kj::minValue)) &&
+        num <= static_cast<double>(static_cast<int64_t>(kj::maxValue))) {
       return static_cast<int64_t>(num);
     }
     return num;

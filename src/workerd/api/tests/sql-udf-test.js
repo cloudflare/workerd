@@ -2280,6 +2280,780 @@ export class UdfTestDO extends DurableObject {
     );
   }
 
+  // ===========================================================================
+  // CRITICAL: Async Callback Tests
+  //
+  // UDF callbacks are invoked synchronously by SQLite during query execution.
+  // If a callback returns a Promise (is async), the Promise object itself
+  // would be coerced to a string like "[object Promise]" - this is almost
+  // certainly a bug in user code and should be clearly documented/tested.
+  // ===========================================================================
+
+  /**
+   * CRITICAL TEST: What happens when a UDF callback is async?
+   *
+   * Since SQLite calls UDFs synchronously, an async function will return
+   * a Promise object, which gets coerced to a string. This is almost certainly
+   * NOT what the user wants, so we need to document this behavior clearly.
+   */
+  async testAsyncScalarUdfReturnsPromiseObject() {
+    const sql = this.state.storage.sql;
+
+    // Register an async function as a UDF - this is likely a user mistake
+    sql.createFunction('async_udf', async (x) => {
+      // User might think they can await here
+      await Promise.resolve();
+      return x * 2;
+    });
+
+    // The async function returns a Promise, which gets coerced to string
+    const result = sql.exec('SELECT async_udf(5) AS val').one();
+
+    // Document the actual behavior - Promise is stringified
+    // This is "[object Promise]" because Promise.prototype.toString returns that
+    assert.strictEqual(
+      result.val,
+      '[object Promise]',
+      'Async UDF should return stringified Promise, not the resolved value'
+    );
+  }
+
+  /**
+   * Test async aggregate step callback behavior.
+   * Same issue - the Promise object gets used as state, not the resolved value.
+   */
+  async testAsyncAggregateStepReturnsPromiseObject() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction('async_agg', {
+      step: async (state, value) => {
+        await Promise.resolve();
+        return (state ?? 0) + value;
+      },
+      final: (state) => state ?? 0,
+    });
+
+    sql.exec('CREATE TABLE async_agg_test (value INTEGER)');
+    sql.exec('INSERT INTO async_agg_test VALUES (1), (2), (3)');
+
+    const result = sql
+      .exec('SELECT async_agg(value) AS total FROM async_agg_test')
+      .one();
+
+    sql.exec('DROP TABLE async_agg_test');
+
+    // The first step returns a Promise, which becomes the state
+    // Subsequent steps receive "[object Promise]" as state
+    // Final receives the stringified promise
+    // The exact result depends on how the Promise string interacts with ?? operator
+    // and the final callback, but it definitely won't be 6
+    assert.notStrictEqual(
+      result.total,
+      6,
+      'Async aggregate step should NOT produce correct sum'
+    );
+  }
+
+  /**
+   * Test async aggregate final callback behavior.
+   */
+  async testAsyncAggregateFinalReturnsPromiseObject() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction('async_final_agg', {
+      step: (state, value) => (state ?? 0) + value,
+      final: async (state) => {
+        await Promise.resolve();
+        return state ?? 0;
+      },
+    });
+
+    sql.exec('CREATE TABLE async_final_test (value INTEGER)');
+    sql.exec('INSERT INTO async_final_test VALUES (1), (2), (3)');
+
+    const result = sql
+      .exec('SELECT async_final_agg(value) AS total FROM async_final_test')
+      .one();
+
+    sql.exec('DROP TABLE async_final_test');
+
+    // Final returns a Promise which gets stringified
+    assert.strictEqual(
+      result.total,
+      '[object Promise]',
+      'Async final should return stringified Promise'
+    );
+  }
+
+  // ===========================================================================
+  // Function Name Edge Cases
+  // ===========================================================================
+
+  /**
+   * Test Unicode/non-ASCII function names.
+   * SQLite should support Unicode identifiers.
+   */
+  async testUnicodeFunctionName() {
+    const sql = this.state.storage.sql;
+
+    // Japanese function name
+    sql.createFunction('日本語関数', (x) => x * 2);
+    const r1 = sql.exec('SELECT 日本語関数(5) AS val').one();
+    assert.strictEqual(r1.val, 10);
+
+    // Emoji function name (if supported)
+    sql.createFunction('🚀rocket', (x) => x + 100);
+    const r2 = sql.exec('SELECT 🚀rocket(5) AS val').one();
+    assert.strictEqual(r2.val, 105);
+
+    // Greek letters
+    sql.createFunction('αβγ', (x) => x * 3);
+    const r3 = sql.exec('SELECT αβγ(5) AS val').one();
+    assert.strictEqual(r3.val, 15);
+  }
+
+  /**
+   * Test case sensitivity of function names.
+   *
+   * SQLite function names are case-insensitive. Our implementation correctly
+   * handles this by storing function names in lowercase and converting lookup keys
+   * to lowercase before HashMap lookups.
+   */
+  async testFunctionNameCaseSensitivity() {
+    const sql = this.state.storage.sql;
+
+    // Register with lowercase - should work with any case in queries
+    sql.createFunction('mytest', (x) => x * 2);
+
+    const r1 = sql.exec('SELECT mytest(5) AS val').one();
+    assert.strictEqual(r1.val, 10, 'lowercase call should work');
+
+    const r2 = sql.exec('SELECT MYTEST(5) AS val').one();
+    assert.strictEqual(r2.val, 10, 'uppercase call should work');
+
+    const r3 = sql.exec('SELECT MyTest(5) AS val').one();
+    assert.strictEqual(r3.val, 10, 'mixed case call should work');
+
+    // Register with mixed case - should also work with any case in queries
+    sql.createFunction('MixedCaseFunc', (x) => x * 3);
+
+    const r4 = sql.exec('SELECT MixedCaseFunc(5) AS val').one();
+    assert.strictEqual(r4.val, 15, 'exact case call should work');
+
+    const r5 = sql.exec('SELECT MIXEDCASEFUNC(5) AS val').one();
+    assert.strictEqual(
+      r5.val,
+      15,
+      'uppercase call should work for mixed-case registered func'
+    );
+
+    const r6 = sql.exec('SELECT mixedcasefunc(5) AS val').one();
+    assert.strictEqual(
+      r6.val,
+      15,
+      'lowercase call should work for mixed-case registered func'
+    );
+  }
+
+  /**
+   * Test replacing a function with different case.
+   *
+   * Since function names are case-insensitive and we normalize to lowercase,
+   * registering a function with different case simply replaces the existing
+   * function both in SQLite and in our HashMap.
+   */
+  async testFunctionReplacementDifferentCase() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction('myFunc', (x) => x * 2);
+    const r1 = sql.exec('SELECT myFunc(5) AS val').one();
+    assert.strictEqual(r1.val, 10);
+
+    // Register with different case - replaces the function (case-insensitive)
+    sql.createFunction('MYFUNC', (x) => x * 3);
+
+    // All cases use the new implementation
+    const r2 = sql.exec('SELECT myFunc(5) AS val').one();
+    assert.strictEqual(r2.val, 15, 'myFunc should use new implementation');
+
+    const r3 = sql.exec('SELECT MYFUNC(5) AS val').one();
+    assert.strictEqual(r3.val, 15, 'MYFUNC should use new implementation');
+
+    const r4 = sql.exec('SELECT myfunc(5) AS val').one();
+    assert.strictEqual(r4.val, 15, 'myfunc should use new implementation');
+  }
+
+  /**
+   * Test SQL reserved words as function names.
+   */
+  async testReservedWordFunctionNames() {
+    const sql = this.state.storage.sql;
+
+    // These might need quoting or might just work
+    // SQLite allows function names that are reserved words
+
+    sql.createFunction('select_func', (x) => x + 1);
+    const r1 = sql.exec('SELECT select_func(5) AS val').one();
+    assert.strictEqual(r1.val, 6);
+
+    sql.createFunction('from_func', (x) => x + 2);
+    const r2 = sql.exec('SELECT from_func(5) AS val').one();
+    assert.strictEqual(r2.val, 7);
+
+    sql.createFunction('where_func', (x) => x + 3);
+    const r3 = sql.exec('SELECT where_func(5) AS val').one();
+    assert.strictEqual(r3.val, 8);
+  }
+
+  // ===========================================================================
+  // Database State Edge Cases
+  // ===========================================================================
+
+  /**
+   * Test UDF behavior across deleteAll().
+   *
+   * NOTE: deleteAll() clears the entire database including UDF registrations.
+   * UDFs need to be re-registered after deleteAll() if they're needed.
+   * This is because deleteAll() may recreate the database connection,
+   * and sqlite3_create_function_v2 registrations are per-connection.
+   */
+  async testUdfSurvivesDeleteAll() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    // Register a UDF
+    sql.createFunction('survives_delete', (x) => x * 7);
+
+    // Create a table and use the UDF
+    sql.exec('CREATE TABLE delete_test (value INTEGER)');
+    sql.exec('INSERT INTO delete_test VALUES (6)');
+    const r1 = sql
+      .exec('SELECT survives_delete(value) AS val FROM delete_test')
+      .one();
+    assert.strictEqual(r1.val, 42);
+
+    // Delete everything
+    await storage.deleteAll();
+
+    // KNOWN BEHAVIOR: UDFs are cleared by deleteAll() because it may
+    // recreate the database connection. Need to re-register.
+    let udfCleared = false;
+    try {
+      sql.exec('SELECT survives_delete(6) AS val').one();
+    } catch (e) {
+      udfCleared = true;
+      assert.ok(
+        e.message.includes('no such function'),
+        `Expected 'no such function' error, got: ${e.message}`
+      );
+    }
+    assert.ok(udfCleared, 'UDF should be cleared by deleteAll()');
+
+    // Re-register the UDF
+    sql.createFunction('survives_delete', (x) => x * 7);
+
+    // Now it should work again
+    const r2 = sql.exec('SELECT survives_delete(6) AS val').one();
+    assert.strictEqual(r2.val, 42);
+
+    // Tables are also gone
+    let tableGone = false;
+    try {
+      sql.exec('SELECT * FROM delete_test');
+    } catch (e) {
+      tableGone = true;
+    }
+    assert.ok(tableGone, 'Table should be deleted');
+  }
+
+  /**
+   * Test UDF in CHECK constraint.
+   * The UDF should be called during INSERT/UPDATE to validate data.
+   */
+  async testUdfInCheckConstraint() {
+    const sql = this.state.storage.sql;
+
+    let checkCallCount = 0;
+    sql.createFunction('is_positive', (x) => {
+      checkCallCount++;
+      return x > 0 ? 1 : 0;
+    });
+
+    sql.exec(
+      'CREATE TABLE check_test (value INTEGER CHECK (is_positive(value)))'
+    );
+
+    // Valid insert should succeed
+    sql.exec('INSERT INTO check_test VALUES (5)');
+    assert.ok(checkCallCount > 0, 'CHECK constraint should call UDF');
+
+    const validCount = checkCallCount;
+
+    // Invalid insert should fail
+    let constraintFailed = false;
+    try {
+      sql.exec('INSERT INTO check_test VALUES (-5)');
+    } catch (e) {
+      constraintFailed = true;
+      assert.ok(
+        e.message.includes('CHECK') || e.message.includes('constraint'),
+        'Should fail with constraint error'
+      );
+    }
+
+    assert.ok(constraintFailed, 'Negative value should fail CHECK constraint');
+    assert.ok(
+      checkCallCount > validCount,
+      'CHECK should have called UDF again'
+    );
+
+    sql.exec('DROP TABLE check_test');
+  }
+
+  /**
+   * Test UDF in DEFAULT value.
+   * The UDF should be called when inserting without specifying the column.
+   */
+  async testUdfInDefaultValue() {
+    const sql = this.state.storage.sql;
+
+    let defaultCallCount = 0;
+    sql.createFunction('get_default', () => {
+      defaultCallCount++;
+      return 42;
+    });
+
+    sql.exec(
+      'CREATE TABLE default_test (id INTEGER PRIMARY KEY, value INTEGER DEFAULT (get_default()))'
+    );
+
+    // Insert without specifying value - should call UDF for default
+    sql.exec('INSERT INTO default_test (id) VALUES (1)');
+    assert.ok(defaultCallCount > 0, 'DEFAULT should call UDF');
+
+    const result = sql
+      .exec('SELECT value FROM default_test WHERE id = 1')
+      .one();
+    assert.strictEqual(result.value, 42);
+
+    // Insert with explicit value - should NOT call UDF
+    const beforeCount = defaultCallCount;
+    sql.exec('INSERT INTO default_test (id, value) VALUES (2, 100)');
+    // Note: SQLite might still evaluate DEFAULT even if not used, so we just check result
+    const result2 = sql
+      .exec('SELECT value FROM default_test WHERE id = 2')
+      .one();
+    assert.strictEqual(result2.value, 100);
+
+    sql.exec('DROP TABLE default_test');
+  }
+
+  /**
+   * Test UDF in generated/computed column.
+   *
+   * NOTE: SQLite requires functions used in generated columns to be deterministic.
+   * Our UDFs are NOT registered as deterministic (we don't pass SQLITE_DETERMINISTIC),
+   * so they CANNOT be used in generated columns. This documents that limitation.
+   */
+  async testUdfInGeneratedColumn() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction('compute_value', (x) => x * x);
+
+    // Attempting to use a non-deterministic UDF in a generated column should fail
+    let failedAsExpected = false;
+    try {
+      sql.exec(`
+        CREATE TABLE generated_test (
+          base INTEGER,
+          computed INTEGER GENERATED ALWAYS AS (compute_value(base)) STORED
+        )
+      `);
+    } catch (e) {
+      failedAsExpected = true;
+      assert.ok(
+        e.message.includes('non-deterministic') ||
+          e.message.includes('deterministic'),
+        `Expected determinism error, got: ${e.message}`
+      );
+    }
+
+    assert.ok(
+      failedAsExpected,
+      'UDFs should not be usable in generated columns (not registered as deterministic)'
+    );
+  }
+
+  /**
+   * Test attempting to shadow a built-in function.
+   * This should either fail or the user function should take precedence.
+   */
+  async testShadowBuiltinFunction() {
+    const sql = this.state.storage.sql;
+
+    // Try to shadow the built-in abs() function
+    sql.createFunction('abs', (x) => x * 1000); // Very different from real abs
+
+    // What happens when we call abs()?
+    const result = sql.exec('SELECT abs(-5) AS val').one();
+
+    // Document the behavior: either user function wins or built-in wins
+    // Most SQLite bindings allow user functions to shadow built-ins
+    // If user function wins: result should be -5000
+    // If built-in wins: result should be 5
+    assert.ok(
+      result.val === -5000 || result.val === 5,
+      `abs(-5) should return either -5000 (user) or 5 (built-in), got ${result.val}`
+    );
+
+    // Also test with upper()
+    sql.createFunction('upper', (s) => s + '_CUSTOM');
+    const result2 = sql.exec("SELECT upper('test') AS val").one();
+
+    // Document behavior
+    assert.ok(
+      result2.val === 'test_CUSTOM' || result2.val === 'TEST',
+      `upper('test') should return either 'test_CUSTOM' (user) or 'TEST' (built-in), got ${result2.val}`
+    );
+  }
+
+  // ===========================================================================
+  // Numeric Edge Cases
+  // ===========================================================================
+
+  /**
+   * Test integer overflow scenarios.
+   */
+  async testIntegerOverflow() {
+    const sql = this.state.storage.sql;
+
+    // Test Number.MAX_SAFE_INTEGER + 1
+    sql.createFunction('overflow_add', (x) => x + 1);
+    const r1 = sql
+      .exec(`SELECT overflow_add(${Number.MAX_SAFE_INTEGER}) AS val`)
+      .one();
+    // JS loses precision beyond MAX_SAFE_INTEGER
+    assert.ok(
+      r1.val > Number.MAX_SAFE_INTEGER,
+      'Should exceed MAX_SAFE_INTEGER'
+    );
+
+    // Test Number.MAX_VALUE * 2 -> Infinity
+    sql.createFunction('overflow_mult', (x) => x * 2);
+    const r2 = sql
+      .exec(`SELECT overflow_mult(${Number.MAX_VALUE}) AS val`)
+      .one();
+    assert.strictEqual(r2.val, Infinity, 'MAX_VALUE * 2 should be Infinity');
+
+    // Test very negative numbers
+    sql.createFunction('overflow_neg', (x) => x - 1);
+    const r3 = sql
+      .exec(`SELECT overflow_neg(${-Number.MAX_SAFE_INTEGER}) AS val`)
+      .one();
+    assert.ok(r3.val < -Number.MAX_SAFE_INTEGER, 'Should be more negative');
+
+    // Test -Infinity
+    sql.createFunction('return_neg_max', () => -Number.MAX_VALUE * 2);
+    const r4 = sql.exec('SELECT return_neg_max() AS val').one();
+    assert.strictEqual(r4.val, -Infinity);
+  }
+
+  /**
+   * Test special numeric values in more detail.
+   */
+  async testSpecialNumericValues() {
+    const sql = this.state.storage.sql;
+
+    // Negative zero
+    sql.createFunction('return_neg_zero', () => -0);
+    const r1 = sql.exec('SELECT return_neg_zero() AS val').one();
+    // SQLite likely converts -0 to 0
+    assert.strictEqual(r1.val, 0);
+    // But Object.is can distinguish... or not after SQLite round-trip
+    // Just document the behavior
+    assert.ok(r1.val === 0 || Object.is(r1.val, -0), 'Should be 0 or -0');
+
+    // Very small numbers (subnormal)
+    sql.createFunction('return_tiny', () => Number.MIN_VALUE);
+    const r2 = sql.exec('SELECT return_tiny() AS val').one();
+    assert.ok(r2.val > 0 && r2.val < 1e-300, 'Should preserve tiny numbers');
+
+    // Epsilon
+    sql.createFunction('return_epsilon', () => Number.EPSILON);
+    const r3 = sql.exec('SELECT return_epsilon() AS val').one();
+    assert.ok(
+      Math.abs(r3.val - Number.EPSILON) < 1e-20,
+      'Should preserve epsilon'
+    );
+  }
+
+  // ===========================================================================
+  // Argument Count Edge Cases
+  // ===========================================================================
+
+  /**
+   * Test maximum argument count (SQLite limit is 127 for user functions).
+   */
+  async testMaximumArgumentCount() {
+    const sql = this.state.storage.sql;
+
+    // Create a UDF that accepts many arguments
+    sql.createFunction('sum_many', (...args) => {
+      return args.reduce((sum, val) => sum + (val ?? 0), 0);
+    });
+
+    // Test with exactly 100 arguments (well within limit)
+    const args100 = Array.from({ length: 100 }, (_, i) => i + 1);
+    const query100 = `SELECT sum_many(${args100.join(',')}) AS val`;
+    const r100 = sql.exec(query100).one();
+    // Sum of 1 to 100 = 5050
+    assert.strictEqual(r100.val, 5050);
+
+    // Test with 127 arguments (SQLite's default SQLITE_MAX_FUNCTION_ARG)
+    const args127 = Array.from({ length: 127 }, (_, i) => i + 1);
+    const query127 = `SELECT sum_many(${args127.join(',')}) AS val`;
+    const r127 = sql.exec(query127).one();
+    // Sum of 1 to 127 = 127 * 128 / 2 = 8128
+    assert.strictEqual(r127.val, 8128);
+  }
+
+  /**
+   * Test calling a UDF with wrong number of arguments.
+   * Since we register with argCount=-1 (variadic), this should always work.
+   * But what if we registered with a specific count?
+   */
+  async testArgumentCountMismatch() {
+    const sql = this.state.storage.sql;
+
+    // Our implementation uses -1 (variadic), so any count should work
+    sql.createFunction('variadic_test', (...args) => args.length);
+
+    const r0 = sql.exec('SELECT variadic_test() AS cnt').one();
+    const r1 = sql.exec('SELECT variadic_test(1) AS cnt').one();
+    const r3 = sql.exec('SELECT variadic_test(1, 2, 3) AS cnt').one();
+
+    assert.strictEqual(r0.cnt, 0);
+    assert.strictEqual(r1.cnt, 1);
+    assert.strictEqual(r3.cnt, 3);
+  }
+
+  // ===========================================================================
+  // SQL Context Edge Cases
+  // ===========================================================================
+
+  /**
+   * Test UDF with RETURNING clause.
+   */
+  async testUdfWithReturning() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction('transform_for_return', (x) => x * 10);
+
+    sql.exec(
+      'CREATE TABLE returning_test (id INTEGER PRIMARY KEY, value INTEGER)'
+    );
+
+    // INSERT with RETURNING using UDF
+    const r1 = sql
+      .exec(
+        'INSERT INTO returning_test VALUES (1, 5) RETURNING transform_for_return(value) AS transformed'
+      )
+      .one();
+    assert.strictEqual(r1.transformed, 50);
+
+    // UPDATE with RETURNING using UDF
+    const r2 = sql
+      .exec(
+        'UPDATE returning_test SET value = 10 WHERE id = 1 RETURNING transform_for_return(value) AS transformed'
+      )
+      .one();
+    assert.strictEqual(r2.transformed, 100);
+
+    // DELETE with RETURNING using UDF
+    const r3 = sql
+      .exec(
+        'DELETE FROM returning_test WHERE id = 1 RETURNING transform_for_return(value) AS transformed'
+      )
+      .one();
+    assert.strictEqual(r3.transformed, 100);
+
+    sql.exec('DROP TABLE returning_test');
+  }
+
+  /**
+   * Test aggregate when step throws on the very first row.
+   * Is final() still called? What state is passed to it?
+   */
+  async testAggregateStepThrowsOnFirstRow() {
+    const sql = this.state.storage.sql;
+
+    let stepCalled = false;
+    let finalCalled = false;
+    let finalState = 'not called';
+
+    sql.createFunction('first_row_fail', {
+      step: (state, value) => {
+        stepCalled = true;
+        throw new Error('Fail on first row');
+      },
+      final: (state) => {
+        finalCalled = true;
+        finalState = state;
+        return state ?? 'default';
+      },
+    });
+
+    sql.exec('CREATE TABLE first_fail_test (value INTEGER)');
+    sql.exec('INSERT INTO first_fail_test VALUES (1), (2), (3)');
+
+    let error = null;
+    try {
+      sql
+        .exec('SELECT first_row_fail(value) AS result FROM first_fail_test')
+        .one();
+    } catch (e) {
+      error = e;
+    }
+
+    sql.exec('DROP TABLE first_fail_test');
+
+    assert.ok(stepCalled, 'Step should have been called');
+    assert.ok(error !== null, 'Should have thrown');
+    assert.ok(
+      error.message.includes('Fail on first row'),
+      'Error message preserved'
+    );
+
+    // Document whether final was called after step threw
+    // (It likely isn't, but good to document)
+  }
+
+  /**
+   * Test that same UDF called multiple times in same row is actually called multiple times.
+   */
+  async testSameUdfMultipleTimesPerRow() {
+    const sql = this.state.storage.sql;
+
+    let callCount = 0;
+    sql.createFunction('count_calls', (x) => {
+      callCount++;
+      return x;
+    });
+
+    sql.exec('CREATE TABLE multi_call_test (value INTEGER)');
+    sql.exec('INSERT INTO multi_call_test VALUES (1), (2), (3)');
+
+    const beforeCount = callCount;
+
+    // Call the same UDF twice per row
+    sql
+      .exec(
+        'SELECT count_calls(value), count_calls(value) FROM multi_call_test'
+      )
+      .toArray();
+
+    // 3 rows * 2 calls per row = 6 calls
+    assert.strictEqual(
+      callCount - beforeCount,
+      6,
+      'UDF should be called twice per row'
+    );
+
+    sql.exec('DROP TABLE multi_call_test');
+  }
+
+  /**
+   * Test UDF in CTE (Common Table Expression).
+   */
+  async testUdfInCte() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction('cte_transform', (x) => x * 2);
+
+    sql.exec('CREATE TABLE cte_source (value INTEGER)');
+    sql.exec('INSERT INTO cte_source VALUES (1), (2), (3)');
+
+    const results = sql
+      .exec(
+        `
+        WITH transformed AS (
+          SELECT cte_transform(value) AS doubled FROM cte_source
+        )
+        SELECT doubled FROM transformed ORDER BY doubled
+      `
+      )
+      .toArray();
+
+    sql.exec('DROP TABLE cte_source');
+
+    assert.strictEqual(results.length, 3);
+    assert.strictEqual(results[0].doubled, 2);
+    assert.strictEqual(results[1].doubled, 4);
+    assert.strictEqual(results[2].doubled, 6);
+  }
+
+  /**
+   * Test UDF in window function context (not as window function, but in OVER clause).
+   */
+  async testUdfInWindowContext() {
+    const sql = this.state.storage.sql;
+
+    sql.createFunction('window_transform', (x) => x * 10);
+
+    sql.exec('CREATE TABLE window_test (category TEXT, value INTEGER)');
+    sql.exec(
+      "INSERT INTO window_test VALUES ('a', 1), ('a', 2), ('b', 3), ('b', 4)"
+    );
+
+    // Use scalar UDF in a query with window function
+    const results = sql
+      .exec(
+        `
+        SELECT
+          category,
+          value,
+          window_transform(value) AS transformed,
+          SUM(value) OVER (PARTITION BY category) AS category_sum
+        FROM window_test
+        ORDER BY category, value
+      `
+      )
+      .toArray();
+
+    sql.exec('DROP TABLE window_test');
+
+    assert.strictEqual(results.length, 4);
+    assert.strictEqual(results[0].transformed, 10);
+    assert.strictEqual(results[0].category_sum, 3); // 1+2 for category 'a'
+    assert.strictEqual(results[2].transformed, 30);
+    assert.strictEqual(results[2].category_sum, 7); // 3+4 for category 'b'
+  }
+
+  /**
+   * Test UDF with custom valueOf/toString objects as return values.
+   */
+  async testUdfWithCustomValueOf() {
+    const sql = this.state.storage.sql;
+
+    // Object with custom valueOf - should be called during coercion
+    sql.createFunction('return_valueof', () => ({
+      valueOf: () => 42,
+      toString: () => 'custom string',
+    }));
+
+    const result = sql.exec('SELECT return_valueof() AS val').one();
+
+    // Document behavior: does it call valueOf, toString, or stringify the object?
+    // The coercion logic in jsResultToSqlite checks IsNumber/IsString first,
+    // so plain objects fall through to toString
+    assert.ok(
+      result.val === 42 ||
+        result.val === 'custom string' ||
+        result.val === '[object Object]',
+      `Custom valueOf object should be coerced somehow, got: ${result.val}`
+    );
+  }
+
   /**
    * Test that when a UDF throws mid-iteration, we properly clean up
    * and the cursor is left in a consistent state.
@@ -2481,5 +3255,39 @@ export default {
     await stub.testPreparedStatementWithReplacedUdf();
     await stub.testUdfReturnsUnsupportedTypes();
     await stub.testUdfThrowsAfterPartialResults();
+
+    // CRITICAL: Async callback tests
+    await stub.testAsyncScalarUdfReturnsPromiseObject();
+    await stub.testAsyncAggregateStepReturnsPromiseObject();
+    await stub.testAsyncAggregateFinalReturnsPromiseObject();
+
+    // Function name edge cases
+    await stub.testUnicodeFunctionName();
+    await stub.testFunctionNameCaseSensitivity();
+    await stub.testFunctionReplacementDifferentCase();
+    await stub.testReservedWordFunctionNames();
+
+    // Database state edge cases
+    await stub.testUdfSurvivesDeleteAll();
+    await stub.testUdfInCheckConstraint();
+    await stub.testUdfInDefaultValue();
+    await stub.testUdfInGeneratedColumn();
+    await stub.testShadowBuiltinFunction();
+
+    // Numeric edge cases
+    await stub.testIntegerOverflow();
+    await stub.testSpecialNumericValues();
+
+    // Argument count edge cases
+    await stub.testMaximumArgumentCount();
+    await stub.testArgumentCountMismatch();
+
+    // SQL context edge cases
+    await stub.testUdfWithReturning();
+    await stub.testAggregateStepThrowsOnFirstRow();
+    await stub.testSameUdfMultipleTimesPerRow();
+    await stub.testUdfInCte();
+    await stub.testUdfInWindowContext();
+    await stub.testUdfWithCustomValueOf();
   },
 };
