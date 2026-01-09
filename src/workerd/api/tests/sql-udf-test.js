@@ -915,35 +915,50 @@ export class UdfTestDO extends DurableObject {
 
     // With the factory pattern, detection happens at createFunction time.
     // If a zero-parameter function doesn't return a proper {step, final} object,
-    // it's treated as a scalar function instead. So these "invalid" aggregates
-    // actually become scalar functions that return objects.
+    // it's treated as a scalar function instead. These "invalid" aggregates
+    // become scalar functions that return plain objects, which now throws an error.
 
-    // Factory returns object without step - treated as scalar, returns the object
+    // Factory returns object without step - treated as scalar, throws on plain object
     sql.createFunction('bad_agg1', () => ({ final: () => 0 }));
-    const r1 = sql.exec('SELECT bad_agg1(1) AS val').one();
-    // Object gets stringified when returned from scalar UDF
-    assert.strictEqual(r1.val, '[object Object]');
+    assert.throws(
+      () => sql.exec('SELECT bad_agg1(1) AS val').one(),
+      (err) =>
+        err.message.includes('plain object') ||
+        err.message.includes('[object Object]')
+    );
 
-    // Factory returns object without final - treated as scalar, returns the object
+    // Factory returns object without final - treated as scalar, throws on plain object
     sql.createFunction('bad_agg2', () => ({ step: () => {} }));
-    const r2 = sql.exec('SELECT bad_agg2(1) AS val').one();
-    assert.strictEqual(r2.val, '[object Object]');
+    assert.throws(
+      () => sql.exec('SELECT bad_agg2(1) AS val').one(),
+      (err) =>
+        err.message.includes('plain object') ||
+        err.message.includes('[object Object]')
+    );
 
-    // Factory returns object where step is not a function - treated as scalar
+    // Factory returns object where step is not a function - treated as scalar, throws
     sql.createFunction('bad_agg3', () => ({
       step: 'not a function',
       final: () => 0,
     }));
-    const r3 = sql.exec('SELECT bad_agg3(1) AS val').one();
-    assert.strictEqual(r3.val, '[object Object]');
+    assert.throws(
+      () => sql.exec('SELECT bad_agg3(1) AS val').one(),
+      (err) =>
+        err.message.includes('plain object') ||
+        err.message.includes('[object Object]')
+    );
 
-    // Factory returns object where final is not a function - treated as scalar
+    // Factory returns object where final is not a function - treated as scalar, throws
     sql.createFunction('bad_agg4', () => ({
       step: () => {},
       final: 'not a function',
     }));
-    const r4 = sql.exec('SELECT bad_agg4(1) AS val').one();
-    assert.strictEqual(r4.val, '[object Object]');
+    assert.throws(
+      () => sql.exec('SELECT bad_agg4(1) AS val').one(),
+      (err) =>
+        err.message.includes('plain object') ||
+        err.message.includes('[object Object]')
+    );
   }
 
   async testAggregateMultipleArgs() {
@@ -2738,10 +2753,20 @@ export class UdfTestDO extends DurableObject {
   async testUdfReturnsUnsupportedTypes() {
     const sql = this.state.storage.sql;
 
-    // Object -> should be coerced to string "[object Object]"
+    // Plain object -> should throw an error (not useful to stringify to "[object Object]")
     sql.createFunction('return_object', () => ({ foo: 'bar' }));
-    const r1 = sql.exec('SELECT return_object() AS val').one();
-    assert.strictEqual(r1.val, '[object Object]');
+    let objectError = null;
+    try {
+      sql.exec('SELECT return_object() AS val').one();
+    } catch (e) {
+      objectError = e;
+    }
+    assert.ok(objectError !== null, 'Returning plain object should throw');
+    assert.ok(
+      objectError.message.includes('[object Object]') ||
+        objectError.message.includes('plain object'),
+      `Error should mention plain object issue, got: ${objectError.message}`
+    );
 
     // Array -> should be coerced to string "1,2,3"
     sql.createFunction('return_array', () => [1, 2, 3]);
@@ -2813,10 +2838,10 @@ export class UdfTestDO extends DurableObject {
    * CRITICAL TEST: What happens when a UDF callback is async?
    *
    * Since SQLite calls UDFs synchronously, an async function will return
-   * a Promise object, which gets coerced to a string. This is almost certainly
-   * NOT what the user wants, so we need to document this behavior clearly.
+   * a Promise object. This is almost certainly a mistake, so we throw a
+   * clear error to help the user understand what went wrong.
    */
-  async testAsyncScalarUdfReturnsPromiseObject() {
+  async testAsyncScalarUdfThrowsError() {
     const sql = this.state.storage.sql;
 
     // Register an async function as a UDF - this is likely a user mistake
@@ -2826,23 +2851,27 @@ export class UdfTestDO extends DurableObject {
       return x * 2;
     });
 
-    // The async function returns a Promise, which gets coerced to string
-    const result = sql.exec('SELECT async_udf(5) AS val').one();
+    // The async function returns a Promise, which should throw an error
+    let error = null;
+    try {
+      sql.exec('SELECT async_udf(5) AS val').one();
+    } catch (e) {
+      error = e;
+    }
 
-    // Document the actual behavior - Promise is stringified
-    // This is "[object Promise]" because Promise.prototype.toString returns that
-    assert.strictEqual(
-      result.val,
-      '[object Promise]',
-      'Async UDF should return stringified Promise, not the resolved value'
+    assert.ok(error !== null, 'Should have thrown an error');
+    assert.ok(
+      error.message.includes('Promise') &&
+        error.message.includes('synchronous'),
+      `Error should mention Promise and synchronous, got: ${error.message}`
     );
   }
 
   /**
    * Test async aggregate step callback behavior.
-   * Same issue - the Promise object gets used as state, not the resolved value.
+   * Async step functions return Promises, which should throw an error.
    */
-  async testAsyncAggregateStepReturnsPromiseObject() {
+  async testAsyncAggregateStepThrowsError() {
     const sql = this.state.storage.sql;
 
     sql.createFunction('async_agg', () => {
@@ -2859,28 +2888,28 @@ export class UdfTestDO extends DurableObject {
     sql.exec('CREATE TABLE async_agg_test (value INTEGER)');
     sql.exec('INSERT INTO async_agg_test VALUES (1), (2), (3)');
 
-    const result = sql
-      .exec('SELECT async_agg(value) AS total FROM async_agg_test')
-      .one();
+    // Async step returns a Promise, which should throw
+    let error = null;
+    try {
+      sql.exec('SELECT async_agg(value) AS total FROM async_agg_test').one();
+    } catch (e) {
+      error = e;
+    }
 
     sql.exec('DROP TABLE async_agg_test');
 
-    // The first step returns a Promise, which becomes the state
-    // Subsequent steps receive "[object Promise]" as state
-    // Final receives the stringified promise
-    // The exact result depends on how the Promise string interacts with ?? operator
-    // and the final callback, but it definitely won't be 6
-    assert.notStrictEqual(
-      result.total,
-      6,
-      'Async aggregate step should NOT produce correct sum'
+    assert.ok(error !== null, 'Should have thrown an error');
+    assert.ok(
+      error.message.includes('Promise'),
+      `Error should mention Promise, got: ${error.message}`
     );
   }
 
   /**
    * Test async aggregate final callback behavior.
+   * Async final functions return Promises, which should throw an error.
    */
-  async testAsyncAggregateFinalReturnsPromiseObject() {
+  async testAsyncAggregateFinalThrowsError() {
     const sql = this.state.storage.sql;
 
     sql.createFunction('async_final_agg', () => {
@@ -2899,17 +2928,22 @@ export class UdfTestDO extends DurableObject {
     sql.exec('CREATE TABLE async_final_test (value INTEGER)');
     sql.exec('INSERT INTO async_final_test VALUES (1), (2), (3)');
 
-    const result = sql
-      .exec('SELECT async_final_agg(value) AS total FROM async_final_test')
-      .one();
+    // Async final returns a Promise, which should throw
+    let error = null;
+    try {
+      sql
+        .exec('SELECT async_final_agg(value) AS total FROM async_final_test')
+        .one();
+    } catch (e) {
+      error = e;
+    }
 
     sql.exec('DROP TABLE async_final_test');
 
-    // Final returns a Promise which gets stringified
-    assert.strictEqual(
-      result.total,
-      '[object Promise]',
-      'Async final should return stringified Promise'
+    assert.ok(error !== null, 'Should have thrown an error');
+    assert.ok(
+      error.message.includes('Promise'),
+      `Error should mention Promise, got: ${error.message}`
     );
   }
 
@@ -3801,10 +3835,10 @@ export default {
     await stub.testUdfReturnsUnsupportedTypes();
     await stub.testUdfThrowsAfterPartialResults();
 
-    // CRITICAL: Async callback tests
-    await stub.testAsyncScalarUdfReturnsPromiseObject();
-    await stub.testAsyncAggregateStepReturnsPromiseObject();
-    await stub.testAsyncAggregateFinalReturnsPromiseObject();
+    // CRITICAL: Async callback tests (these verify async UDFs throw clear errors)
+    await stub.testAsyncScalarUdfThrowsError();
+    await stub.testAsyncAggregateStepThrowsError();
+    await stub.testAsyncAggregateFinalThrowsError();
 
     // Function name edge cases
     await stub.testUnicodeFunctionName();

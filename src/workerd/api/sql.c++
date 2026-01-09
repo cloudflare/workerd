@@ -202,8 +202,28 @@ static SqliteDatabase::UdfResultValue jsResultToSqlite(jsg::Lock& js, v8::Local<
     auto copy = kj::heapArray<kj::byte>(data.size());
     memcpy(copy.begin(), data.begin(), data.size());
     return kj::mv(copy);
+  } else if (handle->IsPromise()) {
+    // Async functions return Promises, which is almost certainly a mistake.
+    // Throw a clear error instead of silently stringifying to "[object Promise]".
+    JSG_FAIL_REQUIRE(TypeError,
+        "UDF returned a Promise. UDFs must be synchronous - async functions are not supported. "
+        "If you need async data, fetch it before the query and pass it as a parameter.");
   } else {
-    return kj::str(js.toString(jsg::JsValue(handle)));
+    // For other types (objects, arrays, booleans, dates, etc.), stringify them.
+    // This allows useful cases like returning Date objects (which stringify to a date string)
+    // or arrays (which stringify to comma-separated values), or objects with custom toString().
+    auto str = kj::str(js.toString(jsg::JsValue(handle)));
+
+    // Reject plain objects that stringify to "[object Object]" - this is never useful
+    // and almost certainly a mistake. Users should use JSON.stringify() if they want JSON.
+    if (str == "[object Object]") {
+      JSG_FAIL_REQUIRE(TypeError,
+          "UDF returned a plain object, which would stringify to \"[object Object]\". "
+          "If you want to return JSON, use JSON.stringify(). "
+          "If you want a custom string, add a toString() method to your object.");
+    }
+
+    return kj::mv(str);
   }
 }
 
@@ -349,7 +369,14 @@ void SqlStorage::createAggregateFunction(
     }
 
     // Call step method on the instance
-    callJsFunction(js, stepFunc, instance, argc, argv.begin());
+    auto stepResult = callJsFunction(js, stepFunc, instance, argc, argv.begin());
+
+    // Check if step returned a Promise (async function mistake)
+    if (stepResult->IsPromise()) {
+      JSG_FAIL_REQUIRE(TypeError,
+          "Aggregate step function returned a Promise. UDFs must be synchronous - "
+          "async functions are not supported.");
+    }
 
     // If this was the first call, we need to return a state value that encodes
     // a pointer to a persistent handle for the instance.
