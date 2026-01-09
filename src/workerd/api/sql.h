@@ -42,14 +42,16 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   // For scalar functions, pass a callback function:
   //   sql.createFunction('double', (x) => x * 2);
   //
-  // For aggregate functions, pass an options object with step/final callbacks:
-  //   sql.createFunction('my_sum', {
-  //     step: (state, value) => (state ?? 0) + value,
-  //     final: (state) => state ?? 0
+  // For aggregate functions, pass a factory function that returns {step, final}:
+  //   sql.createFunction('my_sum', () => {
+  //     let sum = 0;
+  //     return {
+  //       step: (value) => { sum += value; },
+  //       final: () => sum
+  //     };
   //   });
   //
-  // The callbackOrOptions parameter accepts either a function or an object.
-  // We detect the type at runtime using JsValue.
+  // The factory is called once per aggregation group. State lives in the closure.
   void createFunction(jsg::Lock& js, kj::String name, jsg::JsValue callbackOrOptions);
 
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
@@ -77,9 +79,9 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
     JSG_TS_OVERRIDE({
       exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>;
       createFunction(name: string, callback: (...args: SqlStorageValue[]) => SqlStorageValue): void;
-      createFunction(name: string, options: {
-        step: (state: SqlStorageValue | undefined, ...args: SqlStorageValue[]) => SqlStorageValue;
-        final: (state: SqlStorageValue | undefined) => SqlStorageValue;
+      createFunction(name: string, factory: () => {
+        step: (...args: SqlStorageValue[]) => void;
+        final: () => SqlStorageValue;
       }): void;
     });
   }
@@ -93,17 +95,13 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
       visitor.visit(entry.value->callback);
     }
     for (auto& entry: registeredAggregateFunctions) {
-      visitor.visit(entry.value->stepCallback);
-      visitor.visit(entry.value->finalCallback);
+      visitor.visit(entry.value->factory);
     }
   }
 
   // Helper methods for createFunction - implemented in sql.c++
   void createScalarFunction(jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> callback);
-  void createAggregateFunction(jsg::Lock& js,
-      kj::String name,
-      jsg::JsRef<jsg::JsValue> step,
-      jsg::JsRef<jsg::JsValue> final);
+  void createAggregateFunction(jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> factory);
 
   bool isAllowedName(kj::StringPtr name) const override;
   bool isAllowedTrigger(kj::StringPtr name) const override;
@@ -132,17 +130,14 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   };
   kj::HashMap<kj::StringPtr, kj::Own<RegisteredScalarFunction>> registeredScalarFunctions;
 
-  // Storage for user-defined aggregate functions.
+  // Storage for user-defined aggregate functions (factory pattern).
   struct RegisteredAggregateFunction {
     kj::String name;
-    jsg::JsRef<jsg::JsValue> stepCallback;
-    jsg::JsRef<jsg::JsValue> finalCallback;
+    jsg::JsRef<jsg::JsValue> factory;  // Factory function that returns {step, final}
 
-    RegisteredAggregateFunction(
-        kj::String name, jsg::JsRef<jsg::JsValue> step, jsg::JsRef<jsg::JsValue> final)
+    RegisteredAggregateFunction(kj::String name, jsg::JsRef<jsg::JsValue> factory)
         : name(kj::mv(name)),
-          stepCallback(kj::mv(step)),
-          finalCallback(kj::mv(final)) {}
+          factory(kj::mv(factory)) {}
   };
   kj::HashMap<kj::StringPtr, kj::Own<RegisteredAggregateFunction>> registeredAggregateFunctions;
 
