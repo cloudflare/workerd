@@ -64,9 +64,6 @@ def _py_wd_test_helper(
     flags = _get_enable_flags(python_flag) + feature_flags
     feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
 
-    # TODO(soon): Python workers don't work with nodejs_compat_v2 because of initialization order of
-    #             modules in the module registry.
-    feature_flags_txt += ",\"no_nodejs_compat_v2\""
     expand_template(
         name = name_flag + "@rule",
         out = templated_src,
