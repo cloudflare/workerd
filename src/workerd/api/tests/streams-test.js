@@ -826,6 +826,174 @@ export const readAtLeastByobReader = {
   },
 };
 
+export const writeSubarray = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+
+    const u8 = new Uint8Array([1, 2, 3, 4]);
+
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    writer.write(u8.subarray(1, 3));
+    writer.close();
+
+    const { value } = await reader.read();
+
+    strictEqual(value.length, 2);
+    strictEqual(value[0], u8[1]);
+    strictEqual(value[1], u8[2]);
+  },
+};
+
+export const writableStreamWriterConstructor = {
+  test() {
+    const t = new IdentityTransformStream();
+    new WritableStreamDefaultWriter(t.writable);
+  },
+};
+
+export const readableStreamDefaultReaderConstructor = {
+  test() {
+    const t = new IdentityTransformStream();
+    new ReadableStreamDefaultReader(t.readable);
+  },
+};
+
+export const readableStreamByobReaderConstructor = {
+  test() {
+    const t = new IdentityTransformStream();
+    new ReadableStreamBYOBReader(t.readable);
+  },
+};
+
+export const byobReaderDetachesBuffer = {
+  async test() {
+    const ts = new IdentityTransformStream();
+    const view = new Uint8Array(10);
+    const buffer = view.buffer;
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader({ mode: 'byob' });
+    strictEqual(view.byteLength, 10);
+    strictEqual(view.buffer.byteLength, 10);
+    const res = await Promise.all([
+      writer.write(new Uint8Array(10)),
+      reader.read(view),
+    ]);
+
+    strictEqual(view.byteLength, 0);
+    strictEqual(view.buffer.byteLength, 0);
+
+    ok(res[1].value.buffer instanceof ArrayBuffer);
+    ok(res[1].value.buffer !== buffer);
+
+    await rejects(async () => reader.read(view), TypeError);
+
+    // Using a non-detachable ArrayBuffer must fail with a rejection
+    const memory = new WebAssembly.Memory({
+      initial: 10,
+      maximum: 10,
+      shared: true,
+    });
+    await rejects(
+      async () => reader.read(new Uint8Array(memory.buffer)),
+      TypeError
+    );
+
+    await rejects(
+      async () => reader.read(new Uint8Array(new SharedArrayBuffer(10))),
+      TypeError
+    );
+  },
+};
+
+export const captureSyncThrows = {
+  async test() {
+    const { readable } = new IdentityTransformStream();
+    const reader = readable.getReader({ mode: 'byob' });
+    // Without the captureThrowsAsRejections flag enabled, this would throw synchronously.
+    // With the flag enabled, however, the synchronous throw is changed into a promise rejection.
+    await rejects(async () => reader.read(new ArrayBuffer(10)), TypeError);
+  },
+};
+
+export const teeFixedLengthStreamNoHang = {
+  async test() {
+    const ts = new FixedLengthStream(11);
+    const writer = ts.writable.getWriter();
+    writer.write(new TextEncoder().encode('foo bar baz'));
+    writer.close();
+    const [left, right] = ts.readable.tee();
+    const response = new Response(left);
+    strictEqual(await response.text(), 'foo bar baz');
+  },
+};
+
+export const transformStreamReadAllBytes = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const response = new Response(readable);
+    const writer = writable.getWriter();
+
+    const N = 8;
+    const M = 5000;
+
+    const writePromise = (async () => {
+      for (let i = 0; i < N; i++) {
+        const chunk = new Uint8Array(M);
+        chunk.fill(i + 1);
+        await writer.write(chunk);
+      }
+      await writer.close();
+    })();
+
+    const body = new Uint8Array(await response.arrayBuffer());
+    strictEqual(body.byteLength, N * M);
+    for (let i = 0; i < body.length; i++) {
+      strictEqual(body[i], Math.floor(i / M) + 1);
+    }
+    await writePromise;
+  },
+};
+
+export const transformStreamReadAllText = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const response = new Response(readable);
+    const writer = writable.getWriter();
+
+    const lowerCaseA = 97;
+    const N = 8;
+    const M = 5000;
+
+    const writePromise = (async () => {
+      for (let i = 0; i < N; i++) {
+        const chunk = new Uint8Array(M);
+        chunk.fill(i + lowerCaseA);
+        await writer.write(chunk);
+      }
+      await writer.close();
+    })();
+
+    const body = await response.text();
+    strictEqual(body.length, N * M);
+    for (let i = 0; i < N; i++) {
+      const expected = String.fromCharCode(i + lowerCaseA).repeat(M);
+      strictEqual(body.slice(i * M, i * M + M), expected);
+    }
+    await writePromise;
+  },
+};
+
+export const concurrentReadsRejected = {
+  async test() {
+    const { readable } = new IdentityTransformStream();
+    const reader = readable.getReader();
+    const p0 = reader.read();
+    await rejects(reader.read(), TypeError);
+  },
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
