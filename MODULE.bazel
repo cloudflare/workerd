@@ -44,7 +44,7 @@ git_override(
 # version, often by rejecting key values that it considers invalid/unsafe even though they are still
 # accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
 # downstream build.
-bazel_dep(name = "boringssl", version = "0.20251002.0", repo_name = "ssl")
+bazel_dep(name = "boringssl", version = "0.20251002.0", dev_dependency = True, repo_name = "ssl")
 archive_override(
     module_name = "boringssl",
     patch_strip = 1,

@@ -14,12 +14,12 @@ def wd_capnp_library(
     """
     base_name = src.removesuffix(".capnp")
     target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
+        "@@//build/config:no_build": ["@platforms//:incompatible"],
         "//conditions:default": [],
     })
 
     # json.capnp is available implicitly for c++ targets
-    cc_deps = [dep for dep in deps if dep != "@capnp-cpp//src/capnp/compat:json_capnp"]
+    cc_deps = [dep for dep in deps if dep != "@capnp-cpp//src/capnp/compat:json_capnp" and dep != "@@capnp-cpp//src/capnp/compat:json_capnp_rust_gen"]
 
     wd_cc_capnp_library(
         name = base_name + "_capnp",

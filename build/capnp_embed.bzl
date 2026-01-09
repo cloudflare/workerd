@@ -34,7 +34,7 @@ def capnp_embed(
     """
     if target_compatible_with == None:
         target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "@@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         })
 

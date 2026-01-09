@@ -22,7 +22,7 @@ def rust_cxx_bridge(
         cmd = "$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
         tools = ["@workerd-cxx//:codegen"],
         target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "@@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
     )
@@ -42,7 +42,7 @@ def rust_cxx_bridge(
         visibility = visibility,
         tags = tags,
         target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "@@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
     )
@@ -129,7 +129,7 @@ def wd_rust_crate(
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
         target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "@@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
     )

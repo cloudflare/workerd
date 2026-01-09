@@ -8,7 +8,7 @@ bazel_dep(name = "brotli", version = "1.2.0")
 # Override BCR versions.
 # We want to avoid version skew with v8, so we use identical versions.
 
-bazel_dep(name = "fast_float")
+bazel_dep(name = "fast_float", dev_dependency = True)
 archive_override(
     module_name = "fast_float",
     build_file_content = """cc_library(
@@ -28,7 +28,7 @@ archive_override(
     url = "https://github.com/fastfloat/fast_float/archive/cb1d42aaa1e14b09e1452cfdef373d051b8c02a4.tar.gz",
 )
 
-bazel_dep(name = "fp16")
+bazel_dep(name = "fp16", dev_dependency = True)
 archive_override(
     module_name = "fp16",
     build_file_content = "exports_files(glob([\"**\"]))",
@@ -43,7 +43,7 @@ archive_override(
     url = "https://github.com/Maratyszcza/FP16/archive/b3720617faf1a4581ed7e6787cc51722ec7751f0.tar.gz",
 )
 
-bazel_dep(name = "highway")
+bazel_dep(name = "highway", dev_dependency = True)
 archive_override(
     module_name = "highway",
     integrity = "sha256-fvP4kFP1D4jUYDZwu5qRXSUr2TMUztaR3fWRPtvE51s=",

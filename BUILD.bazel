@@ -10,14 +10,6 @@ load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 # We bake this file into the binary to avoid shipping it separately. (V8's normal GN build can
 # actually do this for us, but we use the Bazel build which doesn't have this option.) Using #embed
 # makes this very fast and convenient.
-wd_cc_embed(
-    name = "icudata-embed",
-    src = "@com_googlesource_chromium_icu//:common/icudtl.dat",
-    base_name = "icu-data-file",
-    strip_include_prefix = "",
-    visibility = ["//visibility:public"],
-)
-
 # Also re-export the v8 ICU library for @workerd-v8
 alias(
     name = "v8_icu",

@@ -79,7 +79,8 @@ local_path_override(
     path = "build/perfetto",
 )
 
-bazel_dep(name = "perfetto")
+bazel_dep(name = "perfetto", dev_dependency = True)
+
 bazel_dep(name = "workerd-v8")
 
 archive_override(

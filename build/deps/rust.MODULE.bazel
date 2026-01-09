@@ -55,7 +55,9 @@ new_local_repository(
 )
 
 # workerd-cxx
-http = use_extension("@//:build/exts/http.bzl", "http")
+#bazel_dep(name = "workerd-cxx", dev_dependency=True)
+#http = use_extension("@workerd//:build/exts/http.bzl", "http", dev_dependency = True)
+http = use_extension("@workerd//:build/exts/http.bzl", "http", dev_dependency = False)
 
 inject_repo(
     http,
