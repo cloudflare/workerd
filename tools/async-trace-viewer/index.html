@@ -2377,7 +2377,7 @@ const userB = await fetch('/user/123');</pre>
           'real-tcp': 'sample-real-tcp.json'
         };
       try {
-        const response = await fetch(files[demo]);
+        const response = await fetch(files[demo] + '?t=' + Date.now());
         traceData = await response.json();
         processAndRender();
       } catch (err) {
@@ -3854,6 +3854,15 @@ const userB = await fetch('/user/123');</pre>
           const syncTime = r.callbackEndedAt - r.callbackStartedAt;
           const total = endTime - startTime;
 
+          // Build tooltip for callback marker
+          let markerTooltip = `Callback fired at ${(r.callbackStartedAt / 1e6).toFixed(2)}ms`;
+          if (r.type === 'timer') {
+            const delayAnnotation = (traceData.annotations || []).find(a => a.asyncId === r.asyncId && a.key === 'delay');
+            if (delayAnnotation) {
+              markerTooltip += ` (${delayAnnotation.value}ms delay)`;
+            }
+          }
+
           if (asyncWait > 0 && total > 0) {
             const asyncDiv = document.createElement('div');
             asyncDiv.className = 'async-wait';
@@ -3862,12 +3871,28 @@ const userB = await fetch('/user/123');</pre>
             bar.appendChild(asyncDiv);
           }
 
+          // Insert callback marker as inline element between async-wait and sync-time
+          if (total > 0) {
+            const marker = document.createElement('div');
+            marker.className = 'callback-marker';
+            marker.style.cssText = `width: 6px; height: 100%; background: linear-gradient(90deg, transparent 2px, #000 2px, #000 4px, transparent 4px); flex-shrink: 0; `;
+            marker.title = markerTooltip;
+            bar.appendChild(marker);
+          }
+
           if (syncTime > 0 && total > 0) {
             const syncDiv = document.createElement('div');
             syncDiv.className = 'sync-time';
             syncDiv.style.width = ((syncTime / total) * 100) + '%';
             syncDiv.style.background = TYPE_COLORS[r.type] || '#808080';
             bar.appendChild(syncDiv);
+
+            // Add callback end marker
+            const endMarker = document.createElement('div');
+            endMarker.className = 'callback-end-marker';
+            endMarker.style.cssText = `width: 6px; height: 100%; background: linear-gradient(90deg, transparent 2px, #000 2px, #000 4px, transparent 4px); flex-shrink: 0; `;
+            endMarker.title = `Callback ended at ${(r.callbackEndedAt / 1e6).toFixed(2)}ms (${(syncTime / 1e6).toFixed(2)}ms sync time)`;
+            bar.appendChild(endMarker);
           }
         }
 
@@ -3877,6 +3902,37 @@ const userB = await fetch('/user/123');</pre>
           barLabel.className = 'bar-label';
           barLabel.textContent = totalMs.toFixed(1) + 'ms';
           bar.appendChild(barLabel);
+        }
+
+        // Add temporal edge indicators if enabled
+        if (showTemporalEdges && temporalEdges.length > 0) {
+          const outgoing = temporalEdges.filter(e => e.from === r.asyncId);
+          const incoming = temporalEdges.filter(e => e.to === r.asyncId);
+
+          if (outgoing.length > 0 || incoming.length > 0) {
+            const edgeIndicator = document.createElement('div');
+            edgeIndicator.className = 'temporal-edge-indicator';
+            edgeIndicator.style.cssText = `position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 10px; font-weight: bold; color: #fff; background: #2a9d4a; padding: 1px 4px; border-radius: 3px; pointer-events: auto;`;
+
+            let tooltipParts = [];
+            if (outgoing.length > 0) {
+              tooltipParts.push(`Spawns ${outgoing.length} callback(s): #${outgoing.map(e => e.to).join(', #')}`);
+            }
+            if (incoming.length > 0) {
+              const parent = traceData.resourceMap.get(incoming[0].from);
+              tooltipParts.push(`Started during #${incoming[0].from} (${parent ? parent.type : 'unknown'})`);
+            }
+            edgeIndicator.title = tooltipParts.join('\n');
+
+            if (outgoing.length > 0 && incoming.length > 0) {
+              edgeIndicator.textContent = `⏱↔${outgoing.length}`;
+            } else if (outgoing.length > 0) {
+              edgeIndicator.textContent = `⏱→${outgoing.length}`;
+            } else {
+              edgeIndicator.textContent = `⏱←`;
+            }
+            bar.appendChild(edgeIndicator);
+          }
         }
 
         bar.addEventListener('click', () => {
