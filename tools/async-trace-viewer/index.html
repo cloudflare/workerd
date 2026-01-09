@@ -1787,7 +1787,14 @@ const userB = await fetch('/user/123');</pre>
         updateViewHelp();
         updateControlStates();
         saveSettings();
-        if (traceData) render();
+        if (traceData) {
+          // Reset replay state when switching to replay view
+          if (currentView === 'replay') {
+            renderReplay();
+          } else {
+            render();
+          }
+        }
       });
 
       // Initialize help visibility
@@ -1942,7 +1949,14 @@ const userB = await fetch('/user/123');</pre>
           document.getElementById(newView + '-view').classList.add('active');
           updateViewHelp();
           updateControlStates();
-          if (traceData) render();
+          if (traceData) {
+            // Reset replay state when switching to replay view
+            if (newView === 'replay') {
+              renderReplay();
+            } else {
+              render();
+            }
+          }
           return;
         }
 
@@ -2455,7 +2469,12 @@ const userB = await fetch('/user/123');</pre>
       clickFilterResourceId = null;
       // Update analysis sidebar with new data
       updateAnalysisInfo();
-      render();
+      // Reset replay state when loading new data
+      if (currentView === 'replay') {
+        renderReplay();
+      } else {
+        render();
+      }
     }
 
     // Compute the critical path - the chain of resources that determines minimum latency.
@@ -3684,7 +3703,7 @@ const userB = await fetch('/user/123');</pre>
       } else if (currentView === 'gaps') {
         renderGaps();
       } else if (currentView === 'replay') {
-        renderReplay();
+        renderReplayFrame();
       } else if (currentView === 'heatmap') {
         renderHeatmap();
       }
@@ -5835,6 +5854,10 @@ const userB = await fetch('/user/123');</pre>
         positionMap.set(r.asyncId, { x, y, resource: r });
       });
 
+      // Store position map and radius on canvas for click/hover handling
+      canvas._replayPositionMap = positionMap;
+      canvas._replayCircleRadius = 28;
+
       // Calculate waiting counts - how many resources are waiting on each resource
       // A resource is "waiting on" another if it's created, callback not started, and is a descendant
       const waitingOnCount = new Map();
@@ -6585,6 +6608,23 @@ const userB = await fetch('/user/123');</pre>
           const clickProgress = (clickX - progressX) / chartWidth;
           replayTime = clickProgress * duration;
           renderReplayFrame();
+          return;
+        }
+
+        // Check resource circle clicks
+        if (canvas._replayPositionMap) {
+          const radius = canvas._replayCircleRadius || 28;
+          for (const [asyncId, pos] of canvas._replayPositionMap) {
+            const dx = clickX - pos.x;
+            const dy = clickY - pos.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= radius) {
+              selectResource(pos.resource);
+              if (clickToFilterEnabled) {
+                applyClickFilter(pos.resource.asyncId);
+              }
+              return;
+            }
+          }
         }
       };
 
@@ -6613,6 +6653,19 @@ const userB = await fetch('/user/123');</pre>
             mouseX >= progressX && mouseX <= progressX + chartWidth) {
           canvas.style.cursor = 'pointer';
           return;
+        }
+
+        // Check if over resource circles
+        if (canvas._replayPositionMap) {
+          const radius = canvas._replayCircleRadius || 28;
+          for (const [asyncId, pos] of canvas._replayPositionMap) {
+            const dx = mouseX - pos.x;
+            const dy = mouseY - pos.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= radius) {
+              canvas.style.cursor = 'pointer';
+              return;
+            }
+          }
         }
 
         canvas.style.cursor = 'default';
