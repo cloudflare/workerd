@@ -211,7 +211,7 @@ A bubbleprof-style HTML visualization tool is available at:
 |-----|------|-------------|
 | 1 | **Waterfall** | Timeline view showing resource lifetimes, async wait vs sync execution |
 | 2 | **Bubble** | Groups resources by type, sizes by sync time, shows causality links |
-| 3 | **DAG** | Directed acyclic graph of resource dependencies (force-directed layout) |
+| 3 | **DAG** | Directed acyclic graph of dependencies with force/hierarchical toggle, path highlighting on hover |
 | 4 | **Parallelism** | Shows concurrent resource count over time |
 | 5 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
 | 6 | **Latency** | Histogram of async wait times by resource type |
@@ -368,11 +368,14 @@ Intended behavior:
 - `G`: Stack trace grouping
 - `A`: High contrast / accessibility mode
 
+**View-Specific:**
+- `←`/`→`: Switch between Force and Hierarchical layouts (DAG view only)
+- `Space`: Play/pause (Replay view)
+- `R`: Reset animation (Replay view)
+
 **Other:**
 - `I`: Open AI analysis prompt
 - `Shift+R`: Refresh/reset current view (resets pan/zoom, clears cached layout)
-- `Space`: Play/pause (Replay view)
-- `R`: Reset animation (Replay view)
 
 ### AI Analysis Prompt
 
@@ -573,6 +576,17 @@ The following high-impact features were added to the Waterfall view:
 | **Temporal Edge Indicators** | Badges showing timing-based causality relationships |
 | **Stack Trace Integration** | Expandable stack traces inline - click ▶ button to show creation stack trace |
 | **Filter by Type** | Dropdown menu to show/hide specific resource types with "Enable All" shortcut |
+
+### Recently Implemented (DAG View)
+
+The following features were added to the DAG (Directed Acyclic Graph) view:
+
+| Feature | Description |
+|---------|-------------|
+| **Layout Toggle** | Switch between Force-directed and Hierarchical layouts via toggle buttons in view |
+| **Hierarchical Layout** | Tree-style layout with root at top, children below, computed subtree widths |
+| **Path Highlighting** | Hover over any node to highlight full ancestor/descendant chain with dimmed non-path elements |
+| **Arrow Key Navigation** | ←/→ hotkeys to switch between Force and Hierarchical layouts (DAG view only) |
 
 ## Reference: clinicjs/bubbleprof
 
