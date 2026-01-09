@@ -98,6 +98,10 @@ enum class ResourceType : uint16_t {
 - [x] KJ↔JS bridge tracking (`kj-to-js` and `js-to-kj` resource types)
 - [x] Temporal edges feature for timing-based causality
 - [x] AI analysis prompt with comprehensive trace context
+- [x] Replay view with lifecycle badges, event markers, execution trails
+- [x] Replay loop mode with pause before restart
+- [x] Replay ghost mode showing state change pulses
+- [x] Replay keyboard navigation (arrow stepping, event jumping)
 
 ### Not Yet Done
 - [ ] Unit tests for AsyncTraceContext
@@ -211,7 +215,7 @@ A bubbleprof-style HTML visualization tool is available at:
 |-----|------|-------------|
 | 1 | **Waterfall** | Timeline view showing resource lifetimes, async wait vs sync execution |
 | 2 | **Graph** | Combined view with 3 layouts: Bubble (default), Hierarchical, Force; path highlighting on hover |
-| 3 | **Replay** | Animated playback of request execution; ←/→ to step, Shift+←/→ to jump to events |
+| 3 | **Replay** | Animated playback with event markers, execution trails, lifecycle badges (⏳⚡✓), loop mode, ghost mode |
 | 4 | **Parallelism** | Shows concurrent resource count over time |
 | 5 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
 | 6 | **Latency** | Histogram of async wait times by resource type |
@@ -373,8 +377,31 @@ Intended behavior:
 - `←`/`→`: Switch between Bubble, Hierarchical, and Force layouts (Graph view only)
 - `←`/`→`: Step through timeline in 1% increments (Replay view only)
 - `Shift+←`/`Shift+→`: Jump to next/previous significant event (Replay view only)
+- `Ctrl+Shift+←`/`Ctrl+Shift+→`: Jump to next/previous critical path event (Replay view only)
+- `-`/`+`: Decrease/increase replay speed (0.25x, 0.5x, 1x, 2x) (Replay view only)
+- `Shift+L`: Toggle loop mode (Replay view only)
+- `Shift+O`: Toggle ghost mode - shows expanding pulse rings on state changes (Replay view only)
 - `Space`: Play/pause (Replay view)
 - `R`: Reset animation (Replay view)
+
+### Replay View Features
+
+The Replay view provides animated playback of request execution with rich visual feedback:
+
+| Feature | Description |
+|---------|-------------|
+| **Lifecycle Badges** | Each resource shows ⏳ (waiting), ⚡ (executing), or ✓ (completed) |
+| **Event Markers** | Progress bar shows green dots (creation) and red triangles (callback start) |
+| **Execution Trails** | Fading rings when resources complete execution |
+| **Loop Mode** | 🔁 button or `Shift+L` - continuously restart when complete (1s pause at end) |
+| **Ghost Mode** | 👻 button or `Shift+O` - expanding pulse rings show state transitions |
+| **Speed Control** | 0.25x, 0.5x, 1x, 2x playback speeds via buttons or `-`/`+` keys |
+| **Event Navigation** | Arrow keys to step, Shift+arrows to jump to events |
+
+**Ghost Mode Pulses:**
+- **Green ring** - resource just created
+- **Orange ring** - resource just started executing
+- **Colored ring** - resource just finished executing
 
 **Other:**
 - `I`: Open AI analysis prompt
@@ -602,6 +629,25 @@ The Bubble and DAG views have been consolidated into a single "Graph" view (key 
 
 **View Renumbering:** Views are now 1-8 (Waterfall, Graph, Replay, Parallelism, Breakdown, Latency, Gaps, Heatmap)
 
+### Recently Implemented (Replay View)
+
+The Replay view has been enhanced with rich visual feedback and navigation controls:
+
+| Feature | Description |
+|---------|-------------|
+| **Lifecycle Badges** | Each resource shows ⏳ (waiting), ⚡ (executing), or ✓ (completed) state |
+| **Event Markers** | Progress bar shows green dots (creation events) and red triangles (callback starts) |
+| **Execution Trails** | Fading/expanding rings appear when resources complete execution |
+| **Loop Mode** | 🔁 button or `Shift+L` - continuously loop with 1 second pause at end |
+| **Ghost Mode** | 👻 button or `Shift+O` - expanding pulse rings highlight state transitions |
+| **Speed Control** | 0.25x, 0.5x, 1x, 2x playback speeds via buttons or `-`/`+` keys |
+| **Arrow Navigation** | `←`/`→` step 1%, `Shift+←`/`→` jump to events, `Ctrl+Shift+←`/`→` critical path |
+
+**Ghost Mode Pulses:**
+- Green ring = resource just created
+- Orange ring = resource just started executing
+- Colored ring = resource just finished executing
+
 ## Reference: clinicjs/bubbleprof
 
 Bubbleprof visualization shows:
@@ -615,3 +661,17 @@ Bubbleprof visualization shows:
   - Long async delays
 
 The goal is to generate trace data compatible with (or convertible to) this visualization.
+
+## Future Ideas - Replay View Enhancements
+
+The following ideas could enhance the replay view experience:
+
+| Idea | Description |
+|------|-------------|
+| **Timeline Bookmarks** | Allow users to mark specific points in the timeline (e.g., "bug starts here") and jump between them |
+| **Audio/Visual Cues** | Sound effects or color flashes when significant events occur (optional) |
+| **Comparison Mode** | Load two traces and replay them side-by-side to spot differences |
+| **Focus Mode** | Click a resource to "follow" it - camera centers and zooms on that resource and its immediate relatives |
+| **Export Animation** | Export replay as GIF or video for sharing in bug reports/docs |
+| **Timeline Thumbnails** | Mini-preview thumbnails at intervals along the progress bar showing what the state looks like at each point |
+| **Annotation Layer** | Allow users to add text annotations at specific points in the timeline |
