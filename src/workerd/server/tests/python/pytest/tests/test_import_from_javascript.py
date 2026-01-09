@@ -2,7 +2,6 @@ import pytest
 from js import setTimeout
 from workers import import_from_javascript
 
-from pyodide import __version__
 from pyodide.ffi import create_once_callable
 
 
@@ -32,14 +31,9 @@ def test_import_from_javascript():
 
 
 def test_import_vectorize():
-    if __version__ == "0.26.0a2":
-        m = r"Failed to import 'cloudflare:vectorize': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
-        with pytest.raises(ImportError, match=m):
-            vectorize = import_from_javascript("cloudflare:vectorize")
-    else:
-        # Assert that imports that depend on JSPI work as expected
-        vectorize = import_from_javascript("cloudflare:vectorize")
-        assert hasattr(vectorize, "DistanceMetric")
+    # Assert that imports that depend on JSPI work as expected
+    vectorize = import_from_javascript("cloudflare:vectorize")
+    assert hasattr(vectorize, "DistanceMetric")
 
 
 def test_import_failures():

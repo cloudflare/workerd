@@ -14,6 +14,7 @@ vendored_py_wd_test(
     level = 0,
     main_py_file = "pytest/main.py",
     make_snapshot = False,
+    skip_python_flags = ["0.26.0a2"],
     test_template = "pytest/pytest.wd-test",
     use_snapshot = None,
 )

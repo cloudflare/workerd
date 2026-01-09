@@ -2,17 +2,10 @@ import pytest
 from js import Date, Reflect
 from workers import env, import_from_javascript, patch_env
 
-from pyodide import __version__
 from pyodide.ffi import create_proxy, to_js
-
-skip_0260 = pytest.mark.skipif(
-    __version__ == "0.26.0a2",
-    reason="doesn't work correctly in 0.26.0a2 for some reason",
-)
 
 
 @pytest.mark.asyncio
-@skip_0260
 async def test_memory_cache():
     # Test that cache exists and is accessible
     assert env.CACHE, "env.CACHE should exist"
@@ -34,7 +27,6 @@ async def test_memory_cache():
 
 
 @pytest.mark.asyncio
-@skip_0260
 async def test_with_env():
     workers_module = import_from_javascript("cloudflare:workers")
 
@@ -56,7 +48,6 @@ def check_normal():
     assert set(Reflect.ownKeys(env).to_py()).issuperset({"secret"})
 
 
-@skip_0260
 def test_patch_env():
     check_normal()
 
