@@ -205,19 +205,18 @@ The AsyncTraceContext outputs JSON with this structure:
 A bubbleprof-style HTML visualization tool is available at:
 `tools/async-trace-viewer/index.html`
 
-### Visualization Views (9 total)
+### Visualization Views (8 total)
 
 | Key | View | Description |
 |-----|------|-------------|
 | 1 | **Waterfall** | Timeline view showing resource lifetimes, async wait vs sync execution |
-| 2 | **Bubble** | Groups resources by type, sizes by sync time, shows causality links |
-| 3 | **DAG** | Directed acyclic graph of dependencies with force/hierarchical toggle, path highlighting on hover |
-| 4 | **Parallelism** | Shows concurrent resource count over time |
-| 5 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
-| 6 | **Latency** | Histogram of async wait times by resource type |
-| 7 | **Gaps** | Highlights idle periods and sync activity bursts; hover over gaps to see waiting operations |
-| 8 | **Replay** | Animated playback of request execution; click nodes to select |
-| 9 | **Heatmap** | Activity intensity over time by resource type |
+| 2 | **Graph** | Combined view with 3 layouts: Bubble (default), Hierarchical, Force; path highlighting on hover |
+| 3 | **Parallelism** | Shows concurrent resource count over time |
+| 4 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
+| 5 | **Latency** | Histogram of async wait times by resource type |
+| 6 | **Gaps** | Highlights idle periods and sync activity bursts; hover over gaps to see waiting operations |
+| 7 | **Replay** | Animated playback of request execution; click nodes to select |
+| 8 | **Heatmap** | Activity intensity over time by resource type |
 
 ### Analysis Features
 
@@ -577,16 +576,21 @@ The following high-impact features were added to the Waterfall view:
 | **Stack Trace Integration** | Expandable stack traces inline - click ▶ button to show creation stack trace |
 | **Filter by Type** | Dropdown menu to show/hide specific resource types with "Enable All" shortcut |
 
-### Recently Implemented (DAG View)
+### Recently Implemented (Graph View - Combined Bubble+DAG)
 
-The following features were added to the DAG (Directed Acyclic Graph) view:
+The Bubble and DAG views have been consolidated into a single "Graph" view (key 2) with three layout options:
 
 | Feature | Description |
 |---------|-------------|
-| **Layout Toggle** | Switch between Force-directed and Hierarchical layouts via toggle buttons in view |
+| **Layout Toggle** | Switch between Bubble, Hierarchical, and Force layouts via toggle buttons |
+| **Bubble Layout** (default) | Variable-sized nodes based on sync time, latency labels on edges, auto-centered on root |
 | **Hierarchical Layout** | Tree-style layout with root at top, children below, computed subtree widths |
+| **Force Layout** | Physics-based simulation that optimizes node positions |
 | **Path Highlighting** | Hover over any node to highlight full ancestor/descendant chain with dimmed non-path elements |
-| **Arrow Key Navigation** | ←/→ hotkeys to switch between Force and Hierarchical layouts (DAG view only) |
+| **Arrow Key Navigation** | ←/→ hotkeys to cycle through all three layouts (Graph view only) |
+| **Enhanced Tooltips** | Detailed tooltips with stack trace preview, timing info, and classification |
+
+**View Renumbering:** Views are now 1-8 (Waterfall, Graph, Parallelism, Breakdown, Latency, Gaps, Replay, Heatmap)
 
 ## Reference: clinicjs/bubbleprof
 
