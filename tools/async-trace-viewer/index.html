@@ -7,11 +7,15 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #1a1a2e;
       color: #eee;
-      min-height: 100vh;
       display: flex;
       flex-direction: column;
     }
@@ -576,8 +580,11 @@
       background: #16213e;
       border-left: 1px solid #0f3460;
       overflow-y: auto;
+      overflow-x: hidden;
       padding: 0.75rem;
       font-size: 0.8rem;
+      height: 100%;
+      min-height: 0; /* Allow flex shrinking for proper scroll */
     }
 
     .sidebar h2 { font-size: 0.9rem; margin-bottom: 0.5rem; color: #e94560; }
@@ -1032,6 +1039,7 @@
               <input type="range" id="threshold-fetch" min="3" max="20" value="6">
               <span id="threshold-fetch-val">6</span>
             </div>
+            <button id="restore-thresholds-btn" style="margin-top: 0.5rem; width: 100%; padding: 0.3rem; font-size: 0.65rem; background: #333; border: 1px solid #555; color: #aaa; border-radius: 3px; cursor: pointer;">Restore Defaults</button>
           </div>
         </div>
       </div>
@@ -1357,6 +1365,8 @@
             <strong>Controls:</strong><br>
             • Play/Pause to control animation<br>
             • Click progress bar to seek<br>
+            • ←/→ to step (1% increments)<br>
+            • Shift+←/→ to jump to events<br>
             • Adjust speed: 0.5x, 1x, 2x
           </div>
         </div>
@@ -1567,15 +1577,17 @@ const userB = await fetch('/user/123');</pre>
 
         <div class="guide-section">
           <h3>8. Watch Request Flow</h3>
-          <p><strong>View:</strong> Replay (8)</p>
+          <p><strong>View:</strong> Replay (3)</p>
           <p>Use replay to understand how your request executes:</p>
           <ul>
             <li><strong>Glowing circles</strong> = currently executing</li>
             <li><strong>Dashed outline</strong> = waiting for I/O</li>
             <li><strong>Faded circles</strong> = completed</li>
             <li><strong>Arrows</strong> = causality (parent triggered child)</li>
+            <li><strong>←/→</strong> = step through timeline (1% increments)</li>
+            <li><strong>Shift+←/→</strong> = jump to next/previous event</li>
           </ul>
-          <p class="guide-tip">💡 Use 0.5x speed to carefully observe the sequence of operations.</p>
+          <p class="guide-tip">💡 Use Shift+arrows to step through events one at a time.</p>
         </div>
 
         <div class="guide-section">
@@ -1728,9 +1740,11 @@ const userB = await fetch('/user/123');</pre>
     // Gaps view state for hover interaction
     let gapsData = [];  // Computed gaps from last render
     let gapsRenderParams = null;  // Rendering parameters for hit detection
+    let cachedTotalSync = 0;  // Cached for sidebar re-renders
+    let cachedTotalAsync = 0;
 
     // Pattern detection thresholds (configurable via UI)
-    let patternThresholds = {
+    const DEFAULT_PATTERN_THRESHOLDS = {
       syncBlockMs: 50,       // Event loop blocking threshold (ms)
       longGapMs: 500,        // Long async gap threshold (ms)
       promiseFlood: 20,      // Promise accumulation threshold (count per ms)
@@ -1739,6 +1753,10 @@ const userB = await fetch('/user/123');</pre>
       fetchFlood: 6,         // Concurrent fetch risk threshold (count)
       hotCallback: 5         // Hot callback threshold (children count)
     };
+    let patternThresholds = { ...DEFAULT_PATTERN_THRESHOLDS };
+
+    // Sidebar section collapsed states
+    let sidebarCollapsed = {};
 
     // Settings persistence
     const SETTINGS_KEY = 'async-trace-viewer-settings';
@@ -1753,7 +1771,8 @@ const userB = await fetch('/user/123');</pre>
         stackTraceGrouping,
         showTemporalEdges,
         accessibilityMode,
-        patternThresholds
+        patternThresholds,
+        sidebarCollapsed
       };
       try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -1824,6 +1843,17 @@ const userB = await fetch('/user/123');</pre>
             if (slider && patternThresholds[key] !== undefined) {
               slider.value = patternThresholds[key];
               if (valueSpan) valueSpan.textContent = patternThresholds[key] + suffix;
+            }
+          });
+        }
+
+        // Restore sidebar collapsed states
+        if (settings.sidebarCollapsed) {
+          sidebarCollapsed = settings.sidebarCollapsed;
+          document.querySelectorAll('.sidebar-section h3').forEach(header => {
+            const sectionName = header.textContent.trim();
+            if (sidebarCollapsed[sectionName]) {
+              header.parentElement.classList.add('collapsed');
             }
           });
         }
@@ -1975,6 +2005,25 @@ const userB = await fetch('/user/123');</pre>
       document.querySelectorAll('.sidebar-section h3').forEach(header => {
         header.addEventListener('click', () => {
           header.parentElement.classList.toggle('collapsed');
+          const sectionName = header.textContent.trim();
+          const isCollapsed = header.parentElement.classList.contains('collapsed');
+          sidebarCollapsed[sectionName] = isCollapsed;
+          saveSettings();
+
+          // Re-render charts when section is expanded (delay to allow layout update)
+          if (!isCollapsed && traceData) {
+            setTimeout(() => {
+              if (sectionName === 'Activity Timeline') {
+                renderTimelineChart();
+              } else if (sectionName === 'Type Distribution') {
+                renderTypeChart();
+              } else if (sectionName === 'Time Breakdown') {
+                renderTimeBreakdownChart(cachedTotalSync, cachedTotalAsync);
+              } else if (sectionName === 'Runtime Overhead') {
+                renderRuntimeOverheadChart();
+              }
+            }, 10);
+          }
         });
       });
 
@@ -2059,6 +2108,30 @@ const userB = await fetch('/user/123');</pre>
       setupThresholdSlider('threshold-callback', 'callbackStorm', '');
       setupThresholdSlider('threshold-unbatched', 'unbatchedOps', '');
       setupThresholdSlider('threshold-fetch', 'fetchFlood', '');
+
+      // Restore defaults button for thresholds
+      document.getElementById('restore-thresholds-btn').addEventListener('click', () => {
+        patternThresholds = { ...DEFAULT_PATTERN_THRESHOLDS };
+        const sliders = [
+          ['threshold-sync', 'syncBlockMs', 'ms'],
+          ['threshold-gap', 'longGapMs', 'ms'],
+          ['threshold-promise', 'promiseFlood', ''],
+          ['threshold-callback', 'callbackStorm', ''],
+          ['threshold-unbatched', 'unbatchedOps', ''],
+          ['threshold-fetch', 'fetchFlood', '']
+        ];
+        sliders.forEach(([id, key, suffix]) => {
+          const slider = document.getElementById(id);
+          const valueSpan = document.getElementById(id + '-val');
+          slider.value = patternThresholds[key];
+          valueSpan.textContent = patternThresholds[key] + suffix;
+        });
+        saveSettings();
+        if (showPatterns && traceData) {
+          detectPatterns();
+          render();
+        }
+      });
 
       // Tutorial modal
       document.getElementById('tutorial-btn').addEventListener('click', () => {
@@ -2171,6 +2244,57 @@ const userB = await fetch('/user/123');</pre>
               initDAGNodes();
             }
           }
+          return;
+        }
+
+        // Replay timeline stepping: Left/Right arrows (only when replay view is active)
+        if (currentView === 'replay' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+          if (!traceData) return;
+
+          if (e.shiftKey) {
+            // Shift+Arrow: Jump to next/previous significant event
+            // Collect all significant timestamps
+            const events = [];
+            traceData.resources.forEach(r => {
+              if (r.createdAt > 0) events.push(r.createdAt);
+              if (r.callbackStartedAt > 0) events.push(r.callbackStartedAt);
+              if (r.callbackEndedAt > 0) events.push(r.callbackEndedAt);
+            });
+            // Sort and deduplicate
+            const uniqueEvents = [...new Set(events)].sort((a, b) => a - b);
+
+            if (e.key === 'ArrowRight') {
+              // Find next event after current time
+              const nextEvent = uniqueEvents.find(t => t > replayTime);
+              if (nextEvent !== undefined) {
+                replayTime = nextEvent;
+              } else {
+                replayTime = traceData.requestDurationNs;
+              }
+            } else {
+              // Find previous event before current time
+              const prevEvents = uniqueEvents.filter(t => t < replayTime);
+              if (prevEvents.length > 0) {
+                replayTime = prevEvents[prevEvents.length - 1];
+              } else {
+                replayTime = 0;
+              }
+            }
+          } else {
+            // Regular arrow: Step by 1% increments
+            const stepSize = traceData.requestDurationNs / 100;
+            if (e.key === 'ArrowRight') {
+              replayTime = Math.min(replayTime + stepSize, traceData.requestDurationNs);
+            } else {
+              replayTime = Math.max(replayTime - stepSize, 0);
+            }
+          }
+
+          // Pause if playing
+          if (replayPlaying) {
+            stopReplayAnimation();
+          }
+          renderReplayFrame();
           return;
         }
 
@@ -3700,6 +3824,10 @@ const userB = await fetch('/user/123');</pre>
           totalAsync += r.callbackStartedAt - r.createdAt;
         }
       });
+      // Cache for sidebar re-renders
+      cachedTotalSync = totalSync;
+      cachedTotalAsync = totalAsync;
+
       document.getElementById('stat-duration').textContent = (traceData.requestDurationNs / 1e6).toFixed(1);
       document.getElementById('stat-resources').textContent = traceData.resources.length;
       document.getElementById('stat-sync').textContent = (totalSync / 1e6).toFixed(1);

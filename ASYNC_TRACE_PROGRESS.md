@@ -211,7 +211,7 @@ A bubbleprof-style HTML visualization tool is available at:
 |-----|------|-------------|
 | 1 | **Waterfall** | Timeline view showing resource lifetimes, async wait vs sync execution |
 | 2 | **Graph** | Combined view with 3 layouts: Bubble (default), Hierarchical, Force; path highlighting on hover |
-| 3 | **Replay** | Animated playback of request execution; click nodes to select |
+| 3 | **Replay** | Animated playback of request execution; ←/→ to step, Shift+←/→ to jump to events |
 | 4 | **Parallelism** | Shows concurrent resource count over time |
 | 5 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
 | 6 | **Latency** | Histogram of async wait times by resource type |
@@ -288,6 +288,8 @@ Pattern detection thresholds are configurable via sliders in the Analysis dropdo
 | Callback storm | 10 | Callbacks per 1ms window |
 | Unbatched ops | 3 | Operations to trigger unbatched detection |
 | Fetch concurrency | 6 | Parallel fetches to trigger warning |
+
+Thresholds are persisted across page refreshes. Click "Restore Defaults" to reset all thresholds to their default values.
 
 ### Extending Pattern Detection
 
@@ -368,7 +370,9 @@ Intended behavior:
 - `A`: High contrast / accessibility mode
 
 **View-Specific:**
-- `←`/`→`: Switch between Force and Hierarchical layouts (DAG view only)
+- `←`/`→`: Switch between Bubble, Hierarchical, and Force layouts (Graph view only)
+- `←`/`→`: Step through timeline in 1% increments (Replay view only)
+- `Shift+←`/`Shift+→`: Jump to next/previous significant event (Replay view only)
 - `Space`: Play/pause (Replay view)
 - `R`: Reset animation (Replay view)
 
@@ -426,6 +430,12 @@ The left sidebar displays key metrics and analysis results:
 | **Critical Path** | Details about the longest dependency chain (when enabled) |
 | **Detected Patterns** | List of anti-patterns found (when enabled) |
 | **Analysis** | Detailed trace analysis with recommendations |
+
+**Sidebar Behavior:**
+- Sections are collapsible - click headers to toggle
+- Collapsed states are persisted across page refreshes
+- Sidebar scrolls independently from the main visualization area
+- Charts re-render automatically when sections are expanded
 
 **Runtime Overhead Calculation:**
 
