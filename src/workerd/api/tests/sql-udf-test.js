@@ -1107,6 +1107,232 @@ export class UdfTestDO extends DurableObject {
   }
 
   // ===========================================================================
+  // Sync Transaction Tests
+  //
+  // These tests verify that UDFs work correctly with the synchronous
+  // transactionSync() API.
+  // ===========================================================================
+
+  async testScalarUdfInSyncTransaction() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    sql.createFunction('sync_txn_double', (x) => x * 2);
+
+    sql.exec(
+      'CREATE TABLE sync_txn_test (id INTEGER PRIMARY KEY, value INTEGER)'
+    );
+
+    storage.transactionSync(() => {
+      sql.exec('INSERT INTO sync_txn_test VALUES (1, sync_txn_double(21))');
+      sql.exec('INSERT INTO sync_txn_test VALUES (2, sync_txn_double(10))');
+    });
+
+    const results = sql
+      .exec('SELECT * FROM sync_txn_test ORDER BY id')
+      .toArray();
+    sql.exec('DROP TABLE sync_txn_test');
+
+    assert.strictEqual(results.length, 2);
+    assert.strictEqual(results[0].value, 42);
+    assert.strictEqual(results[1].value, 20);
+  }
+
+  async testScalarUdfErrorRollsBackSyncTransaction() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    sql.createFunction('sync_txn_fail', (x) => {
+      if (x === 2) {
+        throw new Error('UDF failure in sync transaction');
+      }
+      return x * 10;
+    });
+
+    sql.exec(
+      'CREATE TABLE sync_txn_rollback_test (id INTEGER PRIMARY KEY, value INTEGER)'
+    );
+    sql.exec('INSERT INTO sync_txn_rollback_test VALUES (0, 0)'); // Pre-existing row
+
+    let error = null;
+    try {
+      storage.transactionSync(() => {
+        sql.exec(
+          'INSERT INTO sync_txn_rollback_test VALUES (1, sync_txn_fail(1))'
+        );
+        sql.exec(
+          'INSERT INTO sync_txn_rollback_test VALUES (2, sync_txn_fail(2))'
+        ); // Fails
+        sql.exec(
+          'INSERT INTO sync_txn_rollback_test VALUES (3, sync_txn_fail(3))'
+        ); // Not executed
+      });
+    } catch (e) {
+      error = e;
+    }
+
+    assert.ok(error !== null, 'Transaction should have thrown');
+    assert.ok(
+      error.message.includes('UDF failure in sync transaction'),
+      `Expected UDF error message, got: ${error.message}`
+    );
+
+    // Verify rollback: only the pre-existing row should remain
+    const results = sql
+      .exec('SELECT * FROM sync_txn_rollback_test ORDER BY id')
+      .toArray();
+    sql.exec('DROP TABLE sync_txn_rollback_test');
+
+    assert.strictEqual(
+      results.length,
+      1,
+      'Transaction should have rolled back'
+    );
+    assert.strictEqual(results[0].id, 0);
+  }
+
+  async testAggregateUdfInSyncTransaction() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    sql.createFunction('sync_txn_sum', {
+      step: (state, value) => (state ?? 0) + value,
+      final: (state) => state ?? 0,
+    });
+
+    sql.exec('CREATE TABLE sync_txn_agg_test (value INTEGER)');
+
+    storage.transactionSync(() => {
+      sql.exec('INSERT INTO sync_txn_agg_test VALUES (10), (20), (30)');
+    });
+
+    const result = sql
+      .exec('SELECT sync_txn_sum(value) AS total FROM sync_txn_agg_test')
+      .one();
+    sql.exec('DROP TABLE sync_txn_agg_test');
+
+    assert.strictEqual(result.total, 60);
+  }
+
+  async testAggregateUdfErrorRollsBackSyncTransaction() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    let stepCount = 0;
+    sql.createFunction('sync_txn_fail_agg', {
+      step: (state, value) => {
+        stepCount++;
+        if (stepCount === 2) {
+          throw new Error('Aggregate failure in sync transaction');
+        }
+        return (state ?? 0) + value;
+      },
+      final: (state) => state ?? 0,
+    });
+
+    sql.exec('CREATE TABLE sync_txn_agg_fail_test (value INTEGER)');
+    sql.exec('INSERT INTO sync_txn_agg_fail_test VALUES (100)'); // Pre-existing
+
+    let error = null;
+    try {
+      storage.transactionSync(() => {
+        sql.exec('INSERT INTO sync_txn_agg_fail_test VALUES (1), (2), (3)');
+        // This query will fail on the second step
+        sql
+          .exec('SELECT sync_txn_fail_agg(value) FROM sync_txn_agg_fail_test')
+          .toArray();
+      });
+    } catch (e) {
+      error = e;
+    }
+
+    assert.ok(error !== null, 'Transaction should have thrown');
+    assert.ok(
+      error.message.includes('Aggregate failure in sync transaction'),
+      `Expected aggregate error message, got: ${error.message}`
+    );
+
+    // Verify rollback: only pre-existing row should remain
+    const results = sql.exec('SELECT * FROM sync_txn_agg_fail_test').toArray();
+    sql.exec('DROP TABLE sync_txn_agg_fail_test');
+
+    assert.strictEqual(
+      results.length,
+      1,
+      'Transaction should have rolled back'
+    );
+    assert.strictEqual(results[0].value, 100);
+  }
+
+  async testNestedSyncTransactionsWithUdf() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    sql.createFunction('nested_sync_triple', (x) => x * 3);
+
+    sql.exec(
+      'CREATE TABLE nested_sync_txn_test (id INTEGER PRIMARY KEY, value INTEGER)'
+    );
+
+    storage.transactionSync(() => {
+      sql.exec(
+        'INSERT INTO nested_sync_txn_test VALUES (1, nested_sync_triple(10))'
+      );
+
+      // Nested transaction that fails should rollback only its changes
+      try {
+        storage.transactionSync(() => {
+          sql.exec(
+            'INSERT INTO nested_sync_txn_test VALUES (2, nested_sync_triple(20))'
+          );
+          throw new Error('Inner sync transaction failure');
+        });
+      } catch (e) {
+        // Expected - inner transaction rolled back
+      }
+
+      // Outer transaction continues
+      sql.exec(
+        'INSERT INTO nested_sync_txn_test VALUES (3, nested_sync_triple(30))'
+      );
+    });
+
+    const results = sql
+      .exec('SELECT * FROM nested_sync_txn_test ORDER BY id')
+      .toArray();
+    sql.exec('DROP TABLE nested_sync_txn_test');
+
+    // Should have rows 1 and 3 (row 2 was rolled back with inner transaction)
+    assert.strictEqual(results.length, 2);
+    assert.strictEqual(results[0].id, 1);
+    assert.strictEqual(results[0].value, 30);
+    assert.strictEqual(results[1].id, 3);
+    assert.strictEqual(results[1].value, 90);
+  }
+
+  async testSyncTransactionReturnValue() {
+    const storage = this.state.storage;
+    const sql = storage.sql;
+
+    sql.createFunction('sync_ret_compute', (x) => x * x);
+
+    sql.exec('CREATE TABLE sync_ret_test (value INTEGER)');
+    sql.exec('INSERT INTO sync_ret_test VALUES (5)');
+
+    // transactionSync should return the value returned by the callback
+    const result = storage.transactionSync(() => {
+      const row = sql
+        .exec('SELECT sync_ret_compute(value) AS computed FROM sync_ret_test')
+        .one();
+      return row.computed;
+    });
+
+    sql.exec('DROP TABLE sync_ret_test');
+
+    assert.strictEqual(result, 25);
+  }
+
+  // ===========================================================================
   // Function Replacement/Override Tests
   // ===========================================================================
 
@@ -3195,12 +3421,20 @@ export default {
     await stub.testAggregateValidation();
     await stub.testAggregateMultipleArgs();
 
-    // Transaction interaction tests
+    // Transaction interaction tests (async)
     await stub.testScalarUdfInTransaction();
     await stub.testScalarUdfErrorRollsBackTransaction();
     await stub.testAggregateUdfInTransaction();
     await stub.testAggregateUdfErrorRollsBackTransaction();
     await stub.testUdfInNestedTransaction();
+
+    // Sync transaction tests
+    await stub.testScalarUdfInSyncTransaction();
+    await stub.testScalarUdfErrorRollsBackSyncTransaction();
+    await stub.testAggregateUdfInSyncTransaction();
+    await stub.testAggregateUdfErrorRollsBackSyncTransaction();
+    await stub.testNestedSyncTransactionsWithUdf();
+    await stub.testSyncTransactionReturnValue();
 
     // Function replacement tests
     await stub.testScalarFunctionReplacement();
