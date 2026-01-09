@@ -848,8 +848,23 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(jsg::Lock& js,
 
   function.setReceiver(js.v8Ref<v8::Value>(js.v8Context()->Global()));
   auto fn = [function = kj::mv(function), args = kj::mv(args),
-                asyncContextFrame = jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
+                asyncContextFrame = jsg::AsyncContextFrame::currentRef(js),
+                asyncTraceId](jsg::Lock& js) mutable {
     jsg::AsyncContextFrame::Scope scope(js, asyncContextFrame);
+    // Enter async trace callback scope for timer
+    if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+      if (auto* trace = IoContext::current().getAsyncTrace()) {
+        trace->enterCallback(asyncTraceId);
+      }
+    }
+    KJ_DEFER({
+      // Exit async trace callback scope
+      if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+        if (auto* trace = IoContext::current().getAsyncTrace()) {
+          trace->exitCallback();
+        }
+      }
+    });
     function(js, kj::mv(args));
   };
   auto timeoutId = context.setTimeoutImpl(timeoutIdGenerator,
@@ -885,8 +900,23 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(jsg::Lock& js,
 
   function.setReceiver(js.v8Ref<v8::Value>(js.v8Context()->Global()));
   auto fn = [function = kj::mv(function), args = kj::mv(args),
-                asyncContextFrame = jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
+                asyncContextFrame = jsg::AsyncContextFrame::currentRef(js),
+                asyncTraceId](jsg::Lock& js) mutable {
     jsg::AsyncContextFrame::Scope scope(js, asyncContextFrame);
+    // Enter async trace callback scope for timer
+    if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+      if (auto* trace = IoContext::current().getAsyncTrace()) {
+        trace->enterCallback(asyncTraceId);
+      }
+    }
+    KJ_DEFER({
+      // Exit async trace callback scope
+      if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+        if (auto* trace = IoContext::current().getAsyncTrace()) {
+          trace->exitCallback();
+        }
+      }
+    });
     // Because the fn is called multiple times, we will clone the args on each call.
     auto argv = KJ_MAP(i, args) { return i.addRef(js); };
     function(js, jsg::Arguments(kj::mv(argv)));
