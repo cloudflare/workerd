@@ -515,6 +515,42 @@
       height: 100%;
     }
 
+    /* DAG view controls */
+    .dag-controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 10;
+    }
+
+    .dag-layout-toggle {
+      display: flex;
+      background: rgba(22, 33, 62, 0.9);
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid #0f3460;
+    }
+
+    .dag-layout-btn {
+      padding: 6px 12px;
+      background: transparent;
+      border: none;
+      color: #888;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .dag-layout-btn:hover {
+      color: #ccc;
+      background: rgba(233, 69, 96, 0.2);
+    }
+
+    .dag-layout-btn.active {
+      background: #e94560;
+      color: white;
+    }
+
     .tooltip {
       position: fixed;
       background: rgba(22, 33, 62, 0.95);
@@ -1032,8 +1068,14 @@
       <canvas id="bubble-canvas"></canvas>
     </div>
 
-    <div class="view-container" id="dag-view" style="overflow: hidden; padding: 0;">
+    <div class="view-container" id="dag-view" style="overflow: hidden; padding: 0; position: relative;">
       <canvas id="dag-canvas"></canvas>
+      <div class="dag-controls">
+        <div class="dag-layout-toggle">
+          <button class="dag-layout-btn active" data-layout="force">Force</button>
+          <button class="dag-layout-btn" data-layout="hierarchical">Hierarchical</button>
+        </div>
+      </div>
     </div>
 
     <div class="view-container" id="parallelism-view" style="overflow: hidden; padding: 0;">
@@ -1643,6 +1685,10 @@ const userB = await fetch('/user/123');</pre>
     let dagZoom = 1;
     let dagIsPanning = false;
     let dagLastMouseX = 0, dagLastMouseY = 0;
+    let dagLayoutMode = 'force';  // 'force' or 'hierarchical'
+    let dagHoveredNode = null;  // Currently hovered node for path highlighting
+    let dagPathNodes = new Set();  // Nodes in the path to/from hovered node
+    let dagPathEdges = new Set();  // Edges in the path (stored as "fromId-toId")
 
     // Pan and zoom state for bubble view
     let panX = 0, panY = 0;
@@ -2114,6 +2160,23 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
+        // DAG layout toggle: Left/Right arrows (only when DAG view is active)
+        if (currentView === 'dag' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+          const newLayout = e.key === 'ArrowLeft' ? 'force' : 'hierarchical';
+          if (newLayout !== dagLayoutMode) {
+            dagLayoutMode = newLayout;
+            document.querySelectorAll('.dag-layout-btn').forEach(b => {
+              b.classList.toggle('active', b.dataset.layout === newLayout);
+            });
+            dagNodes = [];
+            dagSimulationRunning = false;
+            if (traceData) {
+              initDAGNodes();
+            }
+          }
+          return;
+        }
+
         // Accessibility mode toggle: A
         if (e.key === 'a' || e.key === 'A') {
           toggleAccessibility(true);
@@ -2268,6 +2331,25 @@ const userB = await fetch('/user/123');</pre>
         renderBubble();
       });
 
+      // DAG layout toggle buttons
+      document.querySelectorAll('.dag-layout-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const newLayout = btn.dataset.layout;
+          if (newLayout === dagLayoutMode) return;
+
+          dagLayoutMode = newLayout;
+          document.querySelectorAll('.dag-layout-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+
+          // Re-initialize nodes with new layout
+          dagNodes = [];
+          dagSimulationRunning = false;
+          if (traceData) {
+            initDAGNodes();
+          }
+        });
+      });
+
       // DAG canvas event handlers
       const dagCanvas = document.getElementById('dag-canvas');
 
@@ -2332,9 +2414,22 @@ const userB = await fetch('/user/123');</pre>
             tooltip.style.display = 'block';
             tooltip.style.left = (e.clientX + 10) + 'px';
             tooltip.style.top = (e.clientY + 10) + 'px';
+
+            // Path highlighting
+            if (dagHoveredNode !== hovered) {
+              dagHoveredNode = hovered;
+              computeDAGPath(r.asyncId);
+              renderDAG();
+            }
           } else {
             dagCanvas.style.cursor = 'default';
             document.getElementById('tooltip').style.display = 'none';
+
+            // Clear path highlighting
+            if (dagHoveredNode !== null) {
+              clearDAGPath();
+              renderDAG();
+            }
           }
         }
       });
@@ -2391,6 +2486,11 @@ const userB = await fetch('/user/123');</pre>
         if (dagDragNode) {
           dagDragNode.fixed = false;
           dagDragNode = null;
+        }
+        // Clear path highlighting
+        if (dagHoveredNode !== null) {
+          clearDAGPath();
+          renderDAG();
         }
       });
 
@@ -4956,42 +5056,185 @@ const userB = await fetch('/user/123');</pre>
       dagNodes = [];
       const nodeMap = new Map();
 
-      // Group by depth for initial layout
-      const depthGroups = new Map();
-      filteredResources.forEach(r => {
-        const depth = traceData.depthMap.get(r.asyncId) || 0;
-        if (!depthGroups.has(depth)) depthGroups.set(depth, []);
-        depthGroups.get(depth).push(r);
-      });
-
-      const maxDepth = Math.max(...depthGroups.keys(), 0);
-      const levelHeight = height / (maxDepth + 2);
-
-      depthGroups.forEach((resources, depth) => {
-        const levelWidth = width / (resources.length + 1);
-        resources.forEach((r, i) => {
-          const node = {
-            resource: r,
-            x: levelWidth * (i + 1),
-            y: levelHeight * (depth + 1),
-            vx: 0,
-            vy: 0,
-            radius: 15,
-            color: TYPE_COLORS[r.type] || '#808080',
-            fixed: false
-          };
-          dagNodes.push(node);
-          nodeMap.set(r.asyncId, node);
+      if (dagLayoutMode === 'hierarchical') {
+        // Hierarchical layout: proper tree structure with parent-centered children
+        computeHierarchicalLayout(filteredResources, width, height, nodeMap);
+      } else {
+        // Force-directed layout: initial positions by depth, then simulate
+        const depthGroups = new Map();
+        filteredResources.forEach(r => {
+          const depth = traceData.depthMap.get(r.asyncId) || 0;
+          if (!depthGroups.has(depth)) depthGroups.set(depth, []);
+          depthGroups.get(depth).push(r);
         });
-      });
+
+        const maxDepth = Math.max(...depthGroups.keys(), 0);
+        const levelHeight = height / (maxDepth + 2);
+
+        depthGroups.forEach((resources, depth) => {
+          const levelWidth = width / (resources.length + 1);
+          resources.forEach((r, i) => {
+            const node = {
+              resource: r,
+              x: levelWidth * (i + 1),
+              y: levelHeight * (depth + 1),
+              vx: 0,
+              vy: 0,
+              radius: 15,
+              color: TYPE_COLORS[r.type] || '#808080',
+              fixed: false
+            };
+            dagNodes.push(node);
+            nodeMap.set(r.asyncId, node);
+          });
+        });
+      }
 
       // Reset pan/zoom
       dagPanX = 0;
       dagPanY = 0;
       dagZoom = 1;
 
-      // Start force simulation
-      startDAGSimulation();
+      // Start force simulation only for force layout
+      if (dagLayoutMode === 'force') {
+        startDAGSimulation();
+      } else {
+        renderDAG();
+      }
+    }
+
+    // Compute hierarchical (tree) layout for DAG
+    function computeHierarchicalLayout(resources, width, height, nodeMap) {
+      // Build adjacency for children
+      const childrenMap = new Map();
+      resources.forEach(r => {
+        if (!childrenMap.has(r.triggerId)) childrenMap.set(r.triggerId, []);
+        if (r.triggerId !== 0 || r.type === 'root') {
+          // Only add if parent is in filtered set or this is root
+          childrenMap.get(r.triggerId).push(r);
+        }
+      });
+
+      // Find roots (resources whose parent is not in the filtered set)
+      const resourceIds = new Set(resources.map(r => r.asyncId));
+      const roots = resources.filter(r => r.triggerId === 0 || !resourceIds.has(r.triggerId));
+
+      // Sort children by creation time
+      childrenMap.forEach((children, parentId) => {
+        children.sort((a, b) => a.createdAt - b.createdAt);
+      });
+
+      // First pass: compute subtree widths
+      const subtreeWidths = new Map();
+      function computeSubtreeWidth(asyncId) {
+        const children = childrenMap.get(asyncId) || [];
+        if (children.length === 0) {
+          subtreeWidths.set(asyncId, 1);
+          return 1;
+        }
+        let totalWidth = 0;
+        children.forEach(child => {
+          totalWidth += computeSubtreeWidth(child.asyncId);
+        });
+        subtreeWidths.set(asyncId, totalWidth);
+        return totalWidth;
+      }
+
+      let totalWidth = 0;
+      roots.forEach(r => {
+        totalWidth += computeSubtreeWidth(r.asyncId);
+      });
+
+      // Second pass: assign positions
+      const padding = 60;
+      const usableWidth = width - padding * 2;
+      const maxDepth = Math.max(...resources.map(r => traceData.depthMap.get(r.asyncId) || 0), 0);
+      const levelHeight = (height - padding * 2) / (maxDepth + 1);
+      const nodeSpacing = usableWidth / Math.max(totalWidth, 1);
+
+      let currentX = padding;
+
+      function layoutSubtree(r, depth) {
+        const children = childrenMap.get(r.asyncId) || [];
+        const myWidth = subtreeWidths.get(r.asyncId) || 1;
+
+        let x;
+        if (children.length === 0) {
+          // Leaf node: place at currentX
+          x = currentX + nodeSpacing / 2;
+          currentX += nodeSpacing;
+        } else {
+          // Internal node: place children first, then center above them
+          const startX = currentX;
+          children.forEach(child => {
+            layoutSubtree(child, depth + 1);
+          });
+          const endX = currentX;
+          x = (startX + endX) / 2;
+        }
+
+        const y = padding + depth * levelHeight;
+
+        const node = {
+          resource: r,
+          x: x,
+          y: y,
+          vx: 0,
+          vy: 0,
+          radius: 15,
+          color: TYPE_COLORS[r.type] || '#808080',
+          fixed: true  // Fixed in hierarchical mode
+        };
+        dagNodes.push(node);
+        nodeMap.set(r.asyncId, node);
+      }
+
+      roots.forEach(r => {
+        layoutSubtree(r, 0);
+      });
+    }
+
+    // Compute path highlighting for DAG (ancestors and descendants of a node)
+    function computeDAGPath(asyncId) {
+      dagPathNodes.clear();
+      dagPathEdges.clear();
+
+      if (!asyncId || !traceData) return;
+
+      // Add the hovered node itself
+      dagPathNodes.add(asyncId);
+
+      // Find all ancestors (path to root)
+      let current = asyncId;
+      while (current) {
+        const resource = traceData.resourceMap.get(current);
+        if (!resource || resource.triggerId === 0) break;
+        dagPathNodes.add(resource.triggerId);
+        dagPathEdges.add(`${resource.triggerId}-${current}`);
+        current = resource.triggerId;
+      }
+
+      // Find all descendants (BFS)
+      const queue = [asyncId];
+      while (queue.length > 0) {
+        const nodeId = queue.shift();
+        const children = traceData.childrenMap.get(nodeId) || [];
+        children.forEach(childId => {
+          // Only include if child is in the current filtered view
+          const childNode = dagNodes.find(n => n.resource.asyncId === childId);
+          if (childNode) {
+            dagPathNodes.add(childId);
+            dagPathEdges.add(`${nodeId}-${childId}`);
+            queue.push(childId);
+          }
+        });
+      }
+    }
+
+    function clearDAGPath() {
+      dagHoveredNode = null;
+      dagPathNodes.clear();
+      dagPathEdges.clear();
     }
 
     function startDAGSimulation() {
@@ -5111,10 +5354,14 @@ const userB = await fetch('/user/123');</pre>
             const isHighlighted = highlightedChain.has(r.asyncId) && highlightedChain.has(r.triggerId);
             const isOnCriticalPath = showCriticalPath &&
               criticalPathSet.has(r.asyncId) && criticalPathSet.has(r.triggerId);
+            const isOnHoverPath = dagPathEdges.has(`${r.triggerId}-${r.asyncId}`);
+            const dimmed = dagPathNodes.size > 0 && !isOnHoverPath;
 
             ctx.strokeStyle = isOnCriticalPath ? '#ff6432' :
+                             isOnHoverPath ? '#50c878' :
+                             dimmed ? 'rgba(126, 200, 227, 0.1)' :
                              isHighlighted ? '#e94560' : 'rgba(126, 200, 227, 0.3)';
-            ctx.lineWidth = isOnCriticalPath ? 3 : (isHighlighted ? 2 : 1);
+            ctx.lineWidth = isOnCriticalPath ? 3 : (isOnHoverPath ? 2.5 : (isHighlighted ? 2 : 1));
 
             ctx.beginPath();
             ctx.moveTo(parent.x, parent.y);
@@ -5180,17 +5427,38 @@ const userB = await fetch('/user/123');</pre>
         const patternSeverity = getPatternSeverity(r.asyncId);
         const isPatternMatch = patternSeverity !== null;
         const isInternal = r._classification === 'internal';
+        const isOnHoverPath = dagPathNodes.has(r.asyncId);
+        const isHoveredNode = dagHoveredNode && dagHoveredNode.resource.asyncId === r.asyncId;
+
+        // Dim nodes not on the hover path when path highlighting is active
+        const dimmed = dagPathNodes.size > 0 && !isOnHoverPath;
 
         // Node circle
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
         ctx.fillStyle = node.color;
-        ctx.globalAlpha = isInternal ? 0.4 : (isHighlighted ? 1 : 0.8);
+        ctx.globalAlpha = dimmed ? 0.2 : (isInternal ? 0.4 : (isHighlighted || isOnHoverPath ? 1 : 0.8));
         ctx.fill();
         ctx.globalAlpha = 1;
 
+        // Hover path glow (green)
+        if (isHoveredNode) {
+          ctx.strokeStyle = '#50c878';
+          ctx.lineWidth = 4;
+          ctx.shadowColor = '#50c878';
+          ctx.shadowBlur = 15;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        } else if (isOnHoverPath) {
+          ctx.strokeStyle = '#50c878';
+          ctx.lineWidth = 2.5;
+          ctx.shadowColor = '#50c878';
+          ctx.shadowBlur = 8;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
         // Critical path glow
-        if (isOnCriticalPath) {
+        else if (isOnCriticalPath) {
           ctx.strokeStyle = '#ff6432';
           ctx.lineWidth = 3;
           ctx.shadowColor = '#ff6432';
@@ -5223,7 +5491,7 @@ const userB = await fetch('/user/123');</pre>
           ctx.strokeStyle = '#fff';
           ctx.lineWidth = 3;
           ctx.stroke();
-        } else if (isHighlighted && !isOnCriticalPath && !isBottleneck && !isPatternMatch) {
+        } else if (isHighlighted && !isOnCriticalPath && !isBottleneck && !isPatternMatch && !isOnHoverPath) {
           ctx.strokeStyle = '#e94560';
           ctx.lineWidth = 2;
           ctx.stroke();
