@@ -10,7 +10,7 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
-  # "experimental" flag is needed to test sql.createFunction().
+  # "experimental" flag is needed to test sql.newFunction() and sql.newAggregate().
   # "enable_weak_ref" is needed for FinalizationRegistry in GC tests.
   compatibilityFlags = ["experimental", "nodejs_compat", "enable_weak_ref"],
 

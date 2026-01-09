@@ -37,13 +37,27 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 
   double getDatabaseSize(jsg::Lock& js);
 
-  // Register a user-defined SQL function. The second argument determines the function type:
+  // Register a user-defined scalar SQL function.
   //
-  // For scalar functions, pass a callback function:
-  //   sql.createFunction('double', (x) => x * 2);
+  // Example:
+  //   sql.newFunction('double', (x) => x * 2);
+  //   sql.newFunction('greet', (name) => `Hello, ${name}!`);
   //
-  // For aggregate functions, pass a factory function that returns {step, final}:
-  //   sql.createFunction('my_sum', () => {
+  // The callback is invoked once per row, receiving the column values as arguments
+  // and returning a single value.
+  void newFunction(jsg::Lock& js, kj::String name, jsg::JsValue callback);
+
+  // Register a user-defined aggregate SQL function.
+  //
+  // Two forms are supported, auto-detected based on the callback signature:
+  //
+  // 1. Array-based (ergonomic, O(n) memory) - callback takes 1+ arguments:
+  //   sql.newAggregate('my_max', (values) => Math.max(...values));
+  //   sql.newAggregate('my_sum', (values) => values.reduce((a, b) => a + b, 0));
+  //   sql.newAggregate('weighted', (rows) => rows.reduce((s, [v, w]) => s + v * w, 0));
+  //
+  // 2. Factory pattern (efficient, O(1) memory) - callback takes 0 arguments:
+  //   sql.newAggregate('my_sum', () => {
   //     let sum = 0;
   //     return {
   //       step: (value) => { sum += value; },
@@ -51,20 +65,10 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   //     };
   //   });
   //
-  // The factory is called once per aggregation group. State lives in the closure.
-  void createFunction(jsg::Lock& js, kj::String name, jsg::JsValue callbackOrOptions);
-
-  // Helper to create an aggregate function from a simple array-based callback.
-  // This is sugar over the factory pattern - it buffers all values and passes
-  // them as an array to the callback at the end.
-  //
-  // Example:
-  //   sql.createFunction('my_max', sql.aggregate((values) => Math.max(...values)));
-  //   sql.createFunction('my_sum', sql.aggregate((values) => values.reduce((a, b) => a + b, 0)));
-  //
-  // Note: This buffers all values in memory, so it's not suitable for very large
-  // aggregation groups. For large datasets, use the factory pattern directly.
-  jsg::JsValue aggregate(jsg::Lock& js, jsg::JsValue callback);
+  // The factory pattern is preferred for large datasets since it doesn't buffer
+  // all values in memory. The factory is called once per aggregation group, and
+  // state lives in the closure.
+  void newAggregate(jsg::Lock& js, kj::String name, jsg::JsValue callback);
 
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
@@ -80,8 +84,8 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
       JSG_METHOD(setMaxPageCountForTest);
 
       // User-defined functions are experimental
-      JSG_METHOD(createFunction);
-      JSG_METHOD(aggregate);
+      JSG_METHOD(newFunction);
+      JSG_METHOD(newAggregate);
     }
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);
@@ -91,15 +95,12 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 
     JSG_TS_OVERRIDE({
       exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>;
-      createFunction(name: string, callback: (...args: SqlStorageValue[]) => SqlStorageValue): void;
-      createFunction(name: string, factory: () => {
+      newFunction(name: string, callback: (...args: SqlStorageValue[]) => SqlStorageValue): void;
+      newAggregate(name: string, callback: (values: SqlStorageValue[]) => SqlStorageValue): void;
+      newAggregate(name: string, factory: () => {
         step: (...args: SqlStorageValue[]) => void;
         final: () => SqlStorageValue;
       }): void;
-      aggregate(callback: (values: SqlStorageValue[]) => SqlStorageValue): () => {
-        step: (...args: SqlStorageValue[]) => void;
-        final: () => SqlStorageValue;
-      };
     });
   }
 

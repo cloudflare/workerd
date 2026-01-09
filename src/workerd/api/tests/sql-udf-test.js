@@ -21,53 +21,72 @@ export class UdfTestDO extends DurableObject {
     assert.strictEqual(result.answer, 42);
   }
 
-  async testCreateFunctionExists() {
+  async testNewFunctionExists() {
     const sql = this.state.storage.sql;
-    assert.strictEqual(typeof sql.createFunction, 'function');
+    assert.strictEqual(typeof sql.newFunction, 'function');
+    assert.strictEqual(typeof sql.newAggregate, 'function');
   }
 
-  async testCreateFunctionValidatesName() {
+  async testNewFunctionValidatesName() {
     const sql = this.state.storage.sql;
 
-    assert.throws(() => sql.createFunction('', () => 42), {
+    assert.throws(() => sql.newFunction('', () => 42), {
       name: 'TypeError',
       message: 'Function name cannot be empty.',
     });
 
     const longName = 'x'.repeat(256);
-    assert.throws(() => sql.createFunction(longName, () => 42), {
+    assert.throws(() => sql.newFunction(longName, () => 42), {
       name: 'TypeError',
       message: 'Function name is too long (max 255 bytes).',
     });
 
     const maxName = 'x'.repeat(255);
-    sql.createFunction(maxName, () => 42);
+    sql.newFunction(maxName, () => 42);
+  }
+
+  async testNewAggregateValidatesName() {
+    const sql = this.state.storage.sql;
+
+    assert.throws(() => sql.newAggregate('', (vals) => vals.length), {
+      name: 'TypeError',
+      message: 'Function name cannot be empty.',
+    });
+
+    const longName = 'x'.repeat(256);
+    assert.throws(() => sql.newAggregate(longName, (vals) => vals.length), {
+      name: 'TypeError',
+      message: 'Function name is too long (max 255 bytes).',
+    });
+
+    const maxName = 'y'.repeat(255);
+    sql.newAggregate(maxName, (vals) => vals.length);
   }
 
   async testSimpleScalarUdf() {
     const sql = this.state.storage.sql;
-    sql.createFunction('my_double', (x) => x * 2);
+    sql.newFunction('my_double', (x) => x * 2);
     const result = sql.exec('SELECT my_double(21) AS answer').one();
     assert.strictEqual(result.answer, 42);
   }
 
   async testUdfWithMultipleArgs() {
     const sql = this.state.storage.sql;
-    sql.createFunction('my_add', (a, b) => a + b);
+    sql.newFunction('my_add', (a, b) => a + b);
     const result = sql.exec('SELECT my_add(10, 32) AS answer').one();
     assert.strictEqual(result.answer, 42);
   }
 
   async testUdfWithStringResult() {
     const sql = this.state.storage.sql;
-    sql.createFunction('greet', (name) => `Hello, ${name}!`);
+    sql.newFunction('greet', (name) => `Hello, ${name}!`);
     const result = sql.exec("SELECT greet('World') AS greeting").one();
     assert.strictEqual(result.greeting, 'Hello, World!');
   }
 
   async testUdfReturnsNull() {
     const sql = this.state.storage.sql;
-    sql.createFunction('get_null', () => null);
+    sql.newFunction('get_null', () => null);
     const result = sql.exec('SELECT get_null() AS val').one();
     assert.strictEqual(result.val, null);
   }
@@ -81,7 +100,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfThrowsError() {
     const sql = this.state.storage.sql;
-    sql.createFunction('throw_error', () => {
+    sql.newFunction('throw_error', () => {
       throw new Error('UDF error message');
     });
     assert.throws(
@@ -92,7 +111,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfThrowsTypeError() {
     const sql = this.state.storage.sql;
-    sql.createFunction('throw_type_error', () => {
+    sql.newFunction('throw_type_error', () => {
       throw new TypeError('Invalid type in UDF');
     });
     assert.throws(
@@ -103,7 +122,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfThrowsString() {
     const sql = this.state.storage.sql;
-    sql.createFunction('throw_string', () => {
+    sql.newFunction('throw_string', () => {
       throw 'string error message';
     });
     // Native JS: throwing a string means you catch a string
@@ -119,7 +138,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfThrowsNumber() {
     const sql = this.state.storage.sql;
-    sql.createFunction('throw_number', () => {
+    sql.newFunction('throw_number', () => {
       throw 42;
     });
     // Native JS: throwing a number means you catch a number
@@ -135,7 +154,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfThrowsNull() {
     const sql = this.state.storage.sql;
-    sql.createFunction('throw_null', () => {
+    sql.newFunction('throw_null', () => {
       throw null;
     });
     // Native JS: throwing null means you catch null
@@ -153,7 +172,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfThrowsUndefined() {
     const sql = this.state.storage.sql;
-    sql.createFunction('throw_undefined', () => {
+    sql.newFunction('throw_undefined', () => {
       throw undefined;
     });
     // Native JS: throwing undefined means you catch undefined
@@ -171,7 +190,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfThrowsObject() {
     const sql = this.state.storage.sql;
-    sql.createFunction('throw_object', () => {
+    sql.newFunction('throw_object', () => {
       throw { custom: 'error object', code: 123 };
     });
     // Native JS: throwing a plain object means you catch a plain object
@@ -193,7 +212,7 @@ export class UdfTestDO extends DurableObject {
     sql.exec('INSERT INTO err_iter_test VALUES (1), (2), (3), (4), (5)');
 
     let callCount = 0;
-    sql.createFunction('fail_on_third', (id) => {
+    sql.newFunction('fail_on_third', (id) => {
       callCount++;
       if (id === 3) {
         throw new Error('Failed on id 3');
@@ -236,7 +255,7 @@ export class UdfTestDO extends DurableObject {
     sql.exec('CREATE TABLE err_where_test (id INTEGER)');
     sql.exec('INSERT INTO err_where_test VALUES (1), (2), (3)');
 
-    sql.createFunction('fail_in_where', (id) => {
+    sql.newFunction('fail_in_where', (id) => {
       if (id === 2) {
         throw new Error('WHERE clause error');
       }
@@ -263,7 +282,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfErrorWithErrorCause() {
     const sql = this.state.storage.sql;
-    sql.createFunction('throw_with_cause', () => {
+    sql.newFunction('throw_with_cause', () => {
       const cause = new Error('Root cause');
       throw new Error('Wrapper error', { cause });
     });
@@ -281,7 +300,7 @@ export class UdfTestDO extends DurableObject {
       throw new Error('Error from helper');
     }
 
-    sql.createFunction('throw_with_stack', () => {
+    sql.newFunction('throw_with_stack', () => {
       helperThatThrows();
     });
 
@@ -309,7 +328,7 @@ export class UdfTestDO extends DurableObject {
 
   async testUdfReturnsUndefined() {
     const sql = this.state.storage.sql;
-    sql.createFunction('get_undefined', () => {});
+    sql.newFunction('get_undefined', () => {});
     const result = sql.exec('SELECT get_undefined() AS val').one();
     assert.strictEqual(result.val, null);
   }
@@ -323,7 +342,7 @@ export class UdfTestDO extends DurableObject {
       new Uint8Array([1, 2, 3, 4, 5])
     );
 
-    sql.createFunction('blob_len', (blob) => {
+    sql.newFunction('blob_len', (blob) => {
       if (blob instanceof Uint8Array) return blob.length;
       if (blob instanceof ArrayBuffer) return blob.byteLength;
       if (ArrayBuffer.isView(blob)) return blob.byteLength;
@@ -341,7 +360,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfWithBlobOutput() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('make_blob', (size) => {
+    sql.newFunction('make_blob', (size) => {
       const arr = new Uint8Array(size);
       for (let i = 0; i < size; i++) arr[i] = i % 256;
       return arr;
@@ -383,15 +402,11 @@ export class UdfTestDO extends DurableObject {
   // ===========================================================================
 
   // Helper to create a UDF that attempts re-entrant SQL and tracks execution
-  // NOTE: We use a single explicit parameter `_unused` to ensure function.length > 0,
-  // which prevents the aggregate detection heuristic from calling this function
-  // during createFunction(). The actual re-entrancy test happens when the UDF is
-  // invoked from a SQL query.
   _createReentrantUdf(sql, name, reentrantCall) {
     let callCount = 0;
     let successCount = 0;
 
-    sql.createFunction(name, (_unused, ...args) => {
+    sql.newFunction(name, (_unused, ...args) => {
       callCount++;
       reentrantCall(sql, args);
       successCount++;
@@ -640,8 +655,8 @@ export class UdfTestDO extends DurableObject {
     // UDF calling another UDF is NOT re-entrancy - both execute within same sqlite3_step()
     const sql = this.state.storage.sql;
 
-    sql.createFunction('inner_udf', (x) => x * 2);
-    sql.createFunction('outer_udf', (x) => x + 10);
+    sql.newFunction('inner_udf', (x) => x * 2);
+    sql.newFunction('outer_udf', (x) => x + 10);
 
     const result = sql.exec('SELECT outer_udf(inner_udf(5)) AS val').one();
     assert.strictEqual(result.val, 20);
@@ -672,7 +687,7 @@ export class UdfTestDO extends DurableObject {
     // Multiple sequential queries with UDFs should work
     const sql = this.state.storage.sql;
 
-    sql.createFunction('seq_udf', (x) => x * 2);
+    sql.newFunction('seq_udf', (x) => x * 2);
 
     const r1 = sql.exec('SELECT seq_udf(5) AS val').one();
     assert.strictEqual(r1.val, 10);
@@ -691,7 +706,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateSum() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('my_sum', () => {
+    sql.newAggregate('my_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -715,7 +730,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateCount() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('my_count', () => {
+    sql.newAggregate('my_count', () => {
       let count = 0;
       return {
         step: () => {
@@ -739,7 +754,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateWithNoRows() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('sum_empty', () => {
+    sql.newAggregate('sum_empty', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -763,7 +778,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateWithGroupBy() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('group_sum', () => {
+    sql.newAggregate('group_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -795,7 +810,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateWithStringConcat() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('str_concat', () => {
+    sql.newAggregate('str_concat', () => {
       let result = '';
       return {
         step: (value) => {
@@ -820,7 +835,7 @@ export class UdfTestDO extends DurableObject {
     // Test collecting values into an array - much cleaner with factory pattern!
     const sql = this.state.storage.sql;
 
-    sql.createFunction('collect', () => {
+    sql.newAggregate('collect', () => {
       const arr = [];
       return {
         step: (value) => {
@@ -844,7 +859,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateStepError() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('error_step', () => {
+    sql.newAggregate('error_step', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -879,7 +894,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateFinalError() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('error_final', () => {
+    sql.newAggregate('error_final', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -913,51 +928,55 @@ export class UdfTestDO extends DurableObject {
   async testAggregateValidation() {
     const sql = this.state.storage.sql;
 
-    // With the factory pattern, detection happens at createFunction time.
+    // With newAggregate, validation happens at registration time.
     // If a zero-parameter function doesn't return a proper {step, final} object,
-    // it's treated as a scalar function instead. These "invalid" aggregates
-    // become scalar functions that return plain objects, which now throws an error.
+    // it throws immediately.
 
-    // Factory returns object without step - treated as scalar, throws on plain object
-    sql.createFunction('bad_agg1', () => ({ final: () => 0 }));
+    // Factory returns object without step - should throw at registration
     assert.throws(
-      () => sql.exec('SELECT bad_agg1(1) AS val').one(),
-      (err) =>
-        err.message.includes('plain object') ||
-        err.message.includes('[object Object]')
+      () => sql.newAggregate('bad_agg1', () => ({ final: () => 0 })),
+      (err) => err.message.includes('step and final')
     );
 
-    // Factory returns object without final - treated as scalar, throws on plain object
-    sql.createFunction('bad_agg2', () => ({ step: () => {} }));
+    // Factory returns object without final - should throw at registration
     assert.throws(
-      () => sql.exec('SELECT bad_agg2(1) AS val').one(),
-      (err) =>
-        err.message.includes('plain object') ||
-        err.message.includes('[object Object]')
+      () => sql.newAggregate('bad_agg2', () => ({ step: () => {} })),
+      (err) => err.message.includes('step and final')
     );
 
-    // Factory returns object where step is not a function - treated as scalar, throws
-    sql.createFunction('bad_agg3', () => ({
-      step: 'not a function',
-      final: () => 0,
-    }));
+    // Factory returns object where step is not a function - should throw at registration
     assert.throws(
-      () => sql.exec('SELECT bad_agg3(1) AS val').one(),
-      (err) =>
-        err.message.includes('plain object') ||
-        err.message.includes('[object Object]')
+      () =>
+        sql.newAggregate('bad_agg3', () => ({
+          step: 'not a function',
+          final: () => 0,
+        })),
+      (err) => err.message.includes('step and final')
     );
 
-    // Factory returns object where final is not a function - treated as scalar, throws
-    sql.createFunction('bad_agg4', () => ({
-      step: () => {},
-      final: 'not a function',
-    }));
+    // Factory returns object where final is not a function - should throw at registration
     assert.throws(
-      () => sql.exec('SELECT bad_agg4(1) AS val').one(),
-      (err) =>
-        err.message.includes('plain object') ||
-        err.message.includes('[object Object]')
+      () =>
+        sql.newAggregate('bad_agg4', () => ({
+          step: () => {},
+          final: 'not a function',
+        })),
+      (err) => err.message.includes('step and final')
+    );
+
+    // Factory that throws should throw at registration
+    assert.throws(
+      () =>
+        sql.newAggregate('bad_agg5', () => {
+          throw new Error('Factory error');
+        }),
+      (err) => err.message.includes('threw an error')
+    );
+
+    // Factory that returns non-object should throw at registration
+    assert.throws(
+      () => sql.newAggregate('bad_agg6', () => 42),
+      (err) => err.message.includes('return an object')
     );
   }
 
@@ -965,7 +984,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Weighted sum: sum of (value * weight)
-    sql.createFunction('weighted_sum', () => {
+    sql.newAggregate('weighted_sum', () => {
       let sum = 0;
       return {
         step: (value, weight) => {
@@ -988,21 +1007,18 @@ export class UdfTestDO extends DurableObject {
   }
 
   // ===========================================================================
-  // Array-Based Aggregate API (sql.aggregate helper)
+  // Array-Based Aggregate API
   //
   // These tests verify the ergonomic array-based API for aggregate functions.
-  // This is sugar on top of the factory pattern - values are buffered and
-  // passed as an array to the callback.
+  // When a function with 1+ parameters is passed to newAggregate, it's treated
+  // as an array-based aggregate - values are buffered and passed as an array.
   // ===========================================================================
 
   async testArrayAggregateSum() {
     const sql = this.state.storage.sql;
 
-    // Using sql.aggregate() helper for a simple sum
-    sql.createFunction(
-      'arr_sum',
-      sql.aggregate((values) => values.reduce((a, b) => a + b, 0))
-    );
+    // Array-based: callback takes 1+ params, receives array of all values
+    sql.newAggregate('arr_sum', (values) => values.reduce((a, b) => a + b, 0));
 
     sql.exec('CREATE TABLE arr_sum_test (value INTEGER)');
     sql.exec('INSERT INTO arr_sum_test VALUES (1), (2), (3), (4), (5)');
@@ -1019,10 +1035,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Using Math.max with spread - very natural JS
-    sql.createFunction(
-      'arr_max',
-      sql.aggregate((values) => Math.max(...values))
-    );
+    sql.newAggregate('arr_max', (values) => Math.max(...values));
 
     sql.exec('CREATE TABLE arr_max_test (value INTEGER)');
     sql.exec(
@@ -1040,10 +1053,7 @@ export class UdfTestDO extends DurableObject {
   async testArrayAggregateMin() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction(
-      'arr_min',
-      sql.aggregate((values) => Math.min(...values))
-    );
+    sql.newAggregate('arr_min', (values) => Math.min(...values));
 
     sql.exec('CREATE TABLE arr_min_test (value INTEGER)');
     sql.exec(
@@ -1061,11 +1071,9 @@ export class UdfTestDO extends DurableObject {
   async testArrayAggregateAvg() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction(
+    sql.newAggregate(
       'arr_avg',
-      sql.aggregate(
-        (values) => values.reduce((a, b) => a + b, 0) / values.length
-      )
+      (values) => values.reduce((a, b) => a + b, 0) / values.length
     );
 
     sql.exec('CREATE TABLE arr_avg_test (value INTEGER)');
@@ -1082,9 +1090,8 @@ export class UdfTestDO extends DurableObject {
   async testArrayAggregateWithGroupBy() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction(
-      'arr_group_sum',
-      sql.aggregate((values) => values.reduce((a, b) => a + b, 0))
+    sql.newAggregate('arr_group_sum', (values) =>
+      values.reduce((a, b) => a + b, 0)
     );
 
     sql.exec('CREATE TABLE arr_group_test (category TEXT, value INTEGER)');
@@ -1109,11 +1116,8 @@ export class UdfTestDO extends DurableObject {
   async testArrayAggregateWithEmptyTable() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction(
-      'arr_sum_empty',
-      sql.aggregate((values) =>
-        values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0)
-      )
+    sql.newAggregate('arr_sum_empty', (values) =>
+      values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0)
     );
 
     sql.exec('CREATE TABLE arr_empty_test (value INTEGER)');
@@ -1131,10 +1135,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Array.join is a natural fit
-    sql.createFunction(
-      'arr_join',
-      sql.aggregate((values) => values.join(', '))
-    );
+    sql.newAggregate('arr_join', (values) => values.join(', '));
 
     sql.exec('CREATE TABLE arr_join_test (name TEXT)');
     sql.exec(
@@ -1153,11 +1154,8 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Filter and sum in one go
-    sql.createFunction(
-      'arr_sum_positive',
-      sql.aggregate((values) =>
-        values.filter((v) => v > 0).reduce((a, b) => a + b, 0)
-      )
+    sql.newAggregate('arr_sum_positive', (values) =>
+      values.filter((v) => v > 0).reduce((a, b) => a + b, 0)
     );
 
     sql.exec('CREATE TABLE arr_filter_test (value INTEGER)');
@@ -1178,11 +1176,8 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // With multiple args, each row becomes an array [value, weight]
-    sql.createFunction(
-      'arr_weighted_sum',
-      sql.aggregate((rows) =>
-        rows.reduce((sum, [value, weight]) => sum + value * weight, 0)
-      )
+    sql.newAggregate('arr_weighted_sum', (rows) =>
+      rows.reduce((sum, [value, weight]) => sum + value * weight, 0)
     );
 
     sql.exec('CREATE TABLE arr_weighted_test (value INTEGER, weight INTEGER)');
@@ -1199,17 +1194,17 @@ export class UdfTestDO extends DurableObject {
     assert.strictEqual(result.total, 110);
   }
 
-  async testAggregateHelperValidation() {
+  async testNewAggregateValidation() {
     const sql = this.state.storage.sql;
 
-    // aggregate() should require a function
+    // newAggregate() should require a function
     assert.throws(
-      () => sql.aggregate('not a function'),
+      () => sql.newAggregate('bad1', 'not a function'),
       (err) => err.message.includes('function')
     );
 
     assert.throws(
-      () => sql.aggregate(null),
+      () => sql.newAggregate('bad2', null),
       (err) => err.message.includes('function')
     );
   }
@@ -1225,7 +1220,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('txn_double', (x) => x * 2);
+    sql.newFunction('txn_double', (x) => x * 2);
 
     sql.exec('CREATE TABLE txn_test (id INTEGER PRIMARY KEY, value INTEGER)');
 
@@ -1246,7 +1241,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('txn_fail', (x) => {
+    sql.newFunction('txn_fail', (x) => {
       if (x === 2) {
         throw new Error('UDF failure in transaction');
       }
@@ -1289,7 +1284,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('txn_sum', () => {
+    sql.newAggregate('txn_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -1322,7 +1317,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('txn_agg_fail', () => {
+    sql.newAggregate('txn_agg_fail', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -1372,7 +1367,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('nested_double', (x) => x * 2);
+    sql.newFunction('nested_double', (x) => x * 2);
 
     sql.exec(
       'CREATE TABLE nested_txn_test (id INTEGER PRIMARY KEY, value INTEGER)'
@@ -1410,7 +1405,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('sync_txn_double', (x) => x * 2);
+    sql.newFunction('sync_txn_double', (x) => x * 2);
 
     sql.exec(
       'CREATE TABLE sync_txn_test (id INTEGER PRIMARY KEY, value INTEGER)'
@@ -1435,7 +1430,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('sync_txn_fail', (x) => {
+    sql.newFunction('sync_txn_fail', (x) => {
       if (x === 2) {
         throw new Error('UDF failure in sync transaction');
       }
@@ -1488,7 +1483,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('sync_txn_sum', () => {
+    sql.newAggregate('sync_txn_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -1517,7 +1512,7 @@ export class UdfTestDO extends DurableObject {
     const sql = storage.sql;
 
     let stepCount = 0;
-    sql.createFunction('sync_txn_fail_agg', () => {
+    sql.newAggregate('sync_txn_fail_agg', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -1569,7 +1564,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('nested_sync_triple', (x) => x * 3);
+    sql.newFunction('nested_sync_triple', (x) => x * 3);
 
     sql.exec(
       'CREATE TABLE nested_sync_txn_test (id INTEGER PRIMARY KEY, value INTEGER)'
@@ -1615,7 +1610,7 @@ export class UdfTestDO extends DurableObject {
     const storage = this.state.storage;
     const sql = storage.sql;
 
-    sql.createFunction('sync_ret_compute', (x) => x * x);
+    sql.newFunction('sync_ret_compute', (x) => x * x);
 
     sql.exec('CREATE TABLE sync_ret_test (value INTEGER)');
     sql.exec('INSERT INTO sync_ret_test VALUES (5)');
@@ -1652,7 +1647,7 @@ export class UdfTestDO extends DurableObject {
     // Track side effects via closure
     let sideEffectCounter = 0;
 
-    sql.createFunction('side_effect_fn', (x) => {
+    sql.newFunction('side_effect_fn', (x) => {
       sideEffectCounter++; // Side effect happens immediately when UDF executes
       return x * 2;
     });
@@ -1700,7 +1695,7 @@ export class UdfTestDO extends DurableObject {
     let stepCallCount = 0;
     let finalCallCount = 0;
 
-    sql.createFunction('tracking_sum', () => {
+    sql.newAggregate('tracking_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -1755,7 +1750,7 @@ export class UdfTestDO extends DurableObject {
     // This test documents that side effects may occur more than expected.
 
     let callCount = 0;
-    sql.createFunction('counting_fn', (x) => {
+    sql.newFunction('counting_fn', (x) => {
       callCount++;
       return x;
     });
@@ -1785,7 +1780,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     let called = false;
-    sql.createFunction('side_effect_unused', () => {
+    sql.newFunction('side_effect_unused', () => {
       called = true;
       return 42;
     });
@@ -1813,12 +1808,12 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Register a function
-    sql.createFunction('replaceable', (x) => x * 2);
+    sql.newFunction('replaceable', (x) => x * 2);
     let result = sql.exec('SELECT replaceable(5) AS val').one();
     assert.strictEqual(result.val, 10);
 
     // Replace it with a different implementation
-    sql.createFunction('replaceable', (x) => x * 3);
+    sql.newFunction('replaceable', (x) => x * 3);
     result = sql.exec('SELECT replaceable(5) AS val').one();
     assert.strictEqual(result.val, 15);
   }
@@ -1830,7 +1825,7 @@ export class UdfTestDO extends DurableObject {
     sql.exec('INSERT INTO replace_agg_test VALUES (1), (2), (3)');
 
     // Register an aggregate function
-    sql.createFunction('replaceable_agg', () => {
+    sql.newAggregate('replaceable_agg', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -1845,7 +1840,7 @@ export class UdfTestDO extends DurableObject {
     assert.strictEqual(result.total, 6);
 
     // Replace it with a different implementation (product instead of sum)
-    sql.createFunction('replaceable_agg', () => {
+    sql.newAggregate('replaceable_agg', () => {
       let product = 1;
       return {
         step: (value) => {
@@ -1869,7 +1864,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfWithNaN() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('return_nan', () => NaN);
+    sql.newFunction('return_nan', () => NaN);
     const result = sql.exec('SELECT return_nan() AS val').one();
     // SQLite converts NaN to NULL (unlike Infinity which is preserved)
     assert.strictEqual(result.val, null);
@@ -1878,12 +1873,12 @@ export class UdfTestDO extends DurableObject {
   async testUdfWithInfinity() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('return_inf', () => Infinity);
+    sql.newFunction('return_inf', () => Infinity);
     const result = sql.exec('SELECT return_inf() AS val').one();
     // Infinity is stored as a double in SQLite and comes back as Infinity
     assert.strictEqual(result.val, Infinity);
 
-    sql.createFunction('return_neg_inf', () => -Infinity);
+    sql.newFunction('return_neg_inf', () => -Infinity);
     const result2 = sql.exec('SELECT return_neg_inf() AS val').one();
     assert.strictEqual(result2.val, -Infinity);
   }
@@ -1892,7 +1887,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     let receivedNull = false;
-    sql.createFunction('check_null', (x) => {
+    sql.newFunction('check_null', (x) => {
       if (x === null) {
         receivedNull = true;
       }
@@ -1908,7 +1903,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     const receivedValues = [];
-    sql.createFunction('track_nulls', () => {
+    sql.newAggregate('track_nulls', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -1942,7 +1937,7 @@ export class UdfTestDO extends DurableObject {
 
     // SQLite integers are 64-bit, JS safe integers are 53-bit
     const largeNum = Number.MAX_SAFE_INTEGER;
-    sql.createFunction('echo_large', (x) => x);
+    sql.newFunction('echo_large', (x) => x);
 
     const result = sql.exec(`SELECT echo_large(${largeNum}) AS val`).one();
     assert.strictEqual(result.val, largeNum);
@@ -1951,7 +1946,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfWithFloatingPoint() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('echo_float', (x) => x);
+    sql.newFunction('echo_float', (x) => x);
     const result = sql.exec('SELECT echo_float(3.14159) AS val').one();
     assert.ok(Math.abs(result.val - 3.14159) < 0.00001);
   }
@@ -1969,7 +1964,7 @@ export class UdfTestDO extends DurableObject {
     let stepCalled = false;
     let stepSucceeded = false;
 
-    sql.createFunction('reentrant_agg_step', () => {
+    sql.newAggregate('reentrant_agg_step', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2008,7 +2003,7 @@ export class UdfTestDO extends DurableObject {
     let finalCalled = false;
     let finalSucceeded = false;
 
-    sql.createFunction('reentrant_agg_final', () => {
+    sql.newAggregate('reentrant_agg_final', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2053,7 +2048,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfInSubquery() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('sub_double', (x) => x * 2);
+    sql.newFunction('sub_double', (x) => x * 2);
 
     sql.exec('CREATE TABLE subq_outer (id INTEGER)');
     sql.exec('CREATE TABLE subq_inner (id INTEGER, value INTEGER)');
@@ -2079,7 +2074,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfInOrderBy() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('order_key', (x) => -x); // Reverse the order
+    sql.newFunction('order_key', (x) => -x); // Reverse the order
 
     sql.exec('CREATE TABLE order_test (value INTEGER)');
     sql.exec('INSERT INTO order_test VALUES (3), (1), (4), (1), (5)');
@@ -2099,7 +2094,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Return 1 or 0 instead of true/false since SQLite HAVING expects numeric
-    sql.createFunction('having_filter', (x) => (x > 5 ? 1 : 0));
+    sql.newFunction('having_filter', (x) => (x > 5 ? 1 : 0));
 
     sql.exec('CREATE TABLE having_test (category TEXT, value INTEGER)');
     sql.exec(
@@ -2123,7 +2118,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateUdfInSubquery() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('subq_sum', () => {
+    sql.newAggregate('subq_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2162,7 +2157,7 @@ export class UdfTestDO extends DurableObject {
   async testMultipleAggregatesInSameQuery() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('agg_sum', () => {
+    sql.newAggregate('agg_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2172,7 +2167,7 @@ export class UdfTestDO extends DurableObject {
       };
     });
 
-    sql.createFunction('agg_count', () => {
+    sql.newAggregate('agg_count', () => {
       let count = 0;
       return {
         step: () => {
@@ -2182,7 +2177,7 @@ export class UdfTestDO extends DurableObject {
       };
     });
 
-    sql.createFunction('agg_max', () => {
+    sql.newAggregate('agg_max', () => {
       let max = null;
       return {
         step: (value) => {
@@ -2212,7 +2207,7 @@ export class UdfTestDO extends DurableObject {
   async testSameAggregateMultipleTimes() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('multi_sum', () => {
+    sql.newAggregate('multi_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2240,29 +2235,29 @@ export class UdfTestDO extends DurableObject {
   async testScalarUdfWithZeroArguments() {
     const sql = this.state.storage.sql;
 
-    // Note: Zero-argument functions are called once during createFunction()
-    // to detect if they're aggregate factories. This means the function
-    // will be called once during registration before any queries run.
+    // With the new API, newFunction is explicitly for scalar functions.
+    // Zero-argument scalars are NOT called during registration (unlike the
+    // old createFunction which had to probe for aggregate factories).
     let callCount = 0;
-    sql.createFunction('get_counter', () => {
+    sql.newFunction('get_counter', () => {
       return ++callCount;
     });
 
-    // The detection call already incremented callCount to 1, so queries start at 2
+    // Queries start at 1 since there's no detection call
     const r1 = sql.exec('SELECT get_counter() AS val').one();
     const r2 = sql.exec('SELECT get_counter() AS val').one();
     const r3 = sql.exec('SELECT get_counter() AS val').one();
 
-    // Verify the counter increments correctly (starting from 2 due to detection call)
-    assert.strictEqual(r1.val, 2);
-    assert.strictEqual(r2.val, 3);
-    assert.strictEqual(r3.val, 4);
+    // Verify the counter increments correctly (starting from 1)
+    assert.strictEqual(r1.val, 1);
+    assert.strictEqual(r2.val, 2);
+    assert.strictEqual(r3.val, 3);
   }
 
   async testAggregateWithDistinct() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('distinct_sum', () => {
+    sql.newAggregate('distinct_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2287,7 +2282,7 @@ export class UdfTestDO extends DurableObject {
   async testAggregateWithFilterClause() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('filter_sum', () => {
+    sql.newAggregate('filter_sum', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2314,7 +2309,7 @@ export class UdfTestDO extends DurableObject {
   async testScalarUdfInCaseExpression() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('is_even', (x) => (x % 2 === 0 ? 1 : 0));
+    sql.newFunction('is_even', (x) => (x % 2 === 0 ? 1 : 0));
 
     sql.exec('CREATE TABLE case_test (value INTEGER)');
     sql.exec('INSERT INTO case_test VALUES (1), (2), (3), (4)');
@@ -2336,7 +2331,7 @@ export class UdfTestDO extends DurableObject {
   async testScalarUdfInCoalesce() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('maybe_null', (x) => (x > 0 ? x : null));
+    sql.newFunction('maybe_null', (x) => (x > 0 ? x : null));
 
     const r1 = sql.exec('SELECT COALESCE(maybe_null(5), 0) AS val').one();
     const r2 = sql.exec('SELECT COALESCE(maybe_null(-5), 0) AS val').one();
@@ -2349,7 +2344,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Test with many arguments (SQLite max is 127)
-    sql.createFunction('sum_all', (...args) => {
+    sql.newFunction('sum_all', (...args) => {
       return args.reduce((sum, val) => sum + (val ?? 0), 0);
     });
 
@@ -2363,7 +2358,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Collect values in order they appear
-    sql.createFunction('ordered_collect', () => {
+    sql.newAggregate('ordered_collect', () => {
       const arr = [];
       return {
         step: (value) => {
@@ -2395,7 +2390,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Identity function - return exactly what was passed
-    sql.createFunction('identity', (x) => x);
+    sql.newFunction('identity', (x) => x);
 
     sql.exec('CREATE TABLE type_test (i INTEGER, r REAL, t TEXT, b BLOB)');
     sql.exec("INSERT INTO type_test VALUES (42, 3.14, 'hello', X'DEADBEEF')");
@@ -2419,7 +2414,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     let callCount = 0;
-    sql.createFunction('track_calls', (x) => {
+    sql.newFunction('track_calls', (x) => {
       callCount++;
       return x;
     });
@@ -2463,7 +2458,7 @@ export class UdfTestDO extends DurableObject {
     const changes = [];
 
     // Register a UDF that acts as our change hook
-    sql.createFunction(
+    sql.newFunction(
       'on_change',
       (operation, tableName, rowId, oldJson, newJson) => {
         changes.push({
@@ -2589,7 +2584,7 @@ export class UdfTestDO extends DurableObject {
       throw new Error('Error from step helper');
     }
 
-    sql.createFunction('stack_step', () => {
+    sql.newAggregate('stack_step', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2632,7 +2627,7 @@ export class UdfTestDO extends DurableObject {
       throw new Error('Error from final helper');
     }
 
-    sql.createFunction('stack_final', () => {
+    sql.newAggregate('stack_final', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2691,7 +2686,7 @@ export class UdfTestDO extends DurableObject {
     // so no local variable keeps it alive
     {
       const multiplier = 7; // Captured by closure
-      sql.createFunction('gc_test_func', (x) => x * multiplier);
+      sql.newFunction('gc_test_func', (x) => x * multiplier);
     }
 
     // Force GC multiple times - if the callback was incorrectly weak-referenced,
@@ -2720,7 +2715,7 @@ export class UdfTestDO extends DurableObject {
     let stepCallCount = 0;
     let finalCallCount = 0;
 
-    sql.createFunction('gc_agg_test', () => {
+    sql.newAggregate('gc_agg_test', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -2770,7 +2765,7 @@ export class UdfTestDO extends DurableObject {
       const trackedObject = { id: 'original', data: new Array(1000).fill('x') };
       registry.register(trackedObject, 'original-callback-object');
 
-      sql.createFunction('replaceable_gc', (x) => {
+      sql.newFunction('replaceable_gc', (x) => {
         // Reference trackedObject to capture it in the closure
         void trackedObject.id;
         return x * 2;
@@ -2804,7 +2799,7 @@ export class UdfTestDO extends DurableObject {
       };
       registry.register(newTrackedObject, 'replacement-callback-object');
 
-      sql.createFunction('replaceable_gc', (x) => {
+      sql.newFunction('replaceable_gc', (x) => {
         void newTrackedObject.id;
         return x * 3;
       });
@@ -2859,7 +2854,7 @@ export class UdfTestDO extends DurableObject {
     sql.exec('INSERT INTO agg_gc_test VALUES (1), (2), (3), (4), (5)');
 
     // Create an aggregate that uses an object as state (which we track)
-    sql.createFunction('tracked_agg', () => {
+    sql.newAggregate('tracked_agg', () => {
       const stateObj = { sum: 0, count: 0 };
       registry.register(stateObj, 'aggregate-state');
       return {
@@ -2908,7 +2903,7 @@ export class UdfTestDO extends DurableObject {
     }
 
     let processedCount = 0;
-    sql.createFunction('gc_stress_func', (id, value) => {
+    sql.newFunction('gc_stress_func', (id, value) => {
       processedCount++;
       // Periodically force GC during processing
       if (processedCount % 10 === 0) {
@@ -2943,7 +2938,7 @@ export class UdfTestDO extends DurableObject {
   async testPreparedStatementWithReplacedUdf() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('replaceable_prep', (x) => x * 2);
+    sql.newFunction('replaceable_prep', (x) => x * 2);
 
     sql.exec('CREATE TABLE prep_test (value INTEGER)');
     sql.exec('INSERT INTO prep_test VALUES (5)');
@@ -2958,14 +2953,14 @@ export class UdfTestDO extends DurableObject {
     assert.strictEqual(r1.result, 10); // 5 * 2
 
     // Replace the UDF
-    sql.createFunction('replaceable_prep', (x) => x * 3);
+    sql.newFunction('replaceable_prep', (x) => x * 3);
 
     // Execute the same prepared statement - should use NEW implementation
     const r2 = stmt().one();
     assert.strictEqual(r2.result, 15); // 5 * 3
 
     // Replace again
-    sql.createFunction('replaceable_prep', (x) => x + 100);
+    sql.newFunction('replaceable_prep', (x) => x + 100);
 
     const r3 = stmt().one();
     assert.strictEqual(r3.result, 105); // 5 + 100
@@ -2981,7 +2976,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Plain object -> should throw an error (not useful to stringify to "[object Object]")
-    sql.createFunction('return_object', () => ({ foo: 'bar' }));
+    sql.newFunction('return_object', () => ({ foo: 'bar' }));
     let objectError = null;
     try {
       sql.exec('SELECT return_object() AS val').one();
@@ -2996,28 +2991,28 @@ export class UdfTestDO extends DurableObject {
     );
 
     // Array -> should be coerced to string "1,2,3"
-    sql.createFunction('return_array', () => [1, 2, 3]);
+    sql.newFunction('return_array', () => [1, 2, 3]);
     const r2 = sql.exec('SELECT return_array() AS val').one();
     assert.strictEqual(r2.val, '1,2,3');
 
     // Boolean true -> coerced to string "true" or number?
-    sql.createFunction('return_true', () => true);
+    sql.newFunction('return_true', () => true);
     const r3 = sql.exec('SELECT return_true() AS val').one();
     // Booleans are not numbers in JS, so they get stringified
     assert.strictEqual(r3.val, 'true');
 
     // Boolean false
-    sql.createFunction('return_false', () => false);
+    sql.newFunction('return_false', () => false);
     const r4 = sql.exec('SELECT return_false() AS val').one();
     assert.strictEqual(r4.val, 'false');
 
     // Date -> should be coerced to string (ISO format or similar)
-    sql.createFunction('return_date', () => new Date('2024-01-15T12:00:00Z'));
+    sql.newFunction('return_date', () => new Date('2024-01-15T12:00:00Z'));
     const r5 = sql.exec('SELECT return_date() AS val').one();
     assert.ok(r5.val.includes('2024'), `Date should stringify, got: ${r5.val}`);
 
     // Function -> stringifies to function source or "[object Function]"
-    sql.createFunction('return_function', () => function test() {});
+    sql.newFunction('return_function', () => function test() {});
     const r6 = sql.exec('SELECT return_function() AS val').one();
     assert.ok(
       r6.val.includes('function') || r6.val.includes('Function'),
@@ -3026,7 +3021,7 @@ export class UdfTestDO extends DurableObject {
 
     // Symbol -> Symbols can't be converted to string implicitly
     // This should throw when js.toString() is called on it
-    sql.createFunction('return_symbol', () => Symbol('test'));
+    sql.newFunction('return_symbol', () => Symbol('test'));
     let symbolThrew = false;
     try {
       sql.exec('SELECT return_symbol() AS val').one();
@@ -3037,7 +3032,7 @@ export class UdfTestDO extends DurableObject {
     assert.ok(symbolThrew, 'Returning a Symbol should throw');
 
     // BigInt -> can't be implicitly converted to Number or String in some cases
-    sql.createFunction('return_bigint', () => BigInt(9007199254740993));
+    sql.newFunction('return_bigint', () => BigInt(9007199254740993));
     let bigintThrew = false;
     let bigintVal;
     try {
@@ -3072,7 +3067,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Register an async function as a UDF - this is likely a user mistake
-    sql.createFunction('async_udf', async (x) => {
+    sql.newFunction('async_udf', async (x) => {
       // User might think they can await here
       await Promise.resolve();
       return x * 2;
@@ -3101,7 +3096,7 @@ export class UdfTestDO extends DurableObject {
   async testAsyncAggregateStepThrowsError() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('async_agg', () => {
+    sql.newAggregate('async_agg', () => {
       let sum = 0;
       return {
         step: async (value) => {
@@ -3139,7 +3134,7 @@ export class UdfTestDO extends DurableObject {
   async testAsyncAggregateFinalThrowsError() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('async_final_agg', () => {
+    sql.newAggregate('async_final_agg', () => {
       let sum = 0;
       return {
         step: (value) => {
@@ -3186,17 +3181,17 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Japanese function name
-    sql.createFunction('日本語関数', (x) => x * 2);
+    sql.newFunction('日本語関数', (x) => x * 2);
     const r1 = sql.exec('SELECT 日本語関数(5) AS val').one();
     assert.strictEqual(r1.val, 10);
 
     // Emoji function name (if supported)
-    sql.createFunction('🚀rocket', (x) => x + 100);
+    sql.newFunction('🚀rocket', (x) => x + 100);
     const r2 = sql.exec('SELECT 🚀rocket(5) AS val').one();
     assert.strictEqual(r2.val, 105);
 
     // Greek letters
-    sql.createFunction('αβγ', (x) => x * 3);
+    sql.newFunction('αβγ', (x) => x * 3);
     const r3 = sql.exec('SELECT αβγ(5) AS val').one();
     assert.strictEqual(r3.val, 15);
   }
@@ -3212,7 +3207,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Register with lowercase - should work with any case in queries
-    sql.createFunction('mytest', (x) => x * 2);
+    sql.newFunction('mytest', (x) => x * 2);
 
     const r1 = sql.exec('SELECT mytest(5) AS val').one();
     assert.strictEqual(r1.val, 10, 'lowercase call should work');
@@ -3224,7 +3219,7 @@ export class UdfTestDO extends DurableObject {
     assert.strictEqual(r3.val, 10, 'mixed case call should work');
 
     // Register with mixed case - should also work with any case in queries
-    sql.createFunction('MixedCaseFunc', (x) => x * 3);
+    sql.newFunction('MixedCaseFunc', (x) => x * 3);
 
     const r4 = sql.exec('SELECT MixedCaseFunc(5) AS val').one();
     assert.strictEqual(r4.val, 15, 'exact case call should work');
@@ -3254,12 +3249,12 @@ export class UdfTestDO extends DurableObject {
   async testFunctionReplacementDifferentCase() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('myFunc', (x) => x * 2);
+    sql.newFunction('myFunc', (x) => x * 2);
     const r1 = sql.exec('SELECT myFunc(5) AS val').one();
     assert.strictEqual(r1.val, 10);
 
     // Register with different case - replaces the function (case-insensitive)
-    sql.createFunction('MYFUNC', (x) => x * 3);
+    sql.newFunction('MYFUNC', (x) => x * 3);
 
     // All cases use the new implementation
     const r2 = sql.exec('SELECT myFunc(5) AS val').one();
@@ -3281,15 +3276,15 @@ export class UdfTestDO extends DurableObject {
     // These might need quoting or might just work
     // SQLite allows function names that are reserved words
 
-    sql.createFunction('select_func', (x) => x + 1);
+    sql.newFunction('select_func', (x) => x + 1);
     const r1 = sql.exec('SELECT select_func(5) AS val').one();
     assert.strictEqual(r1.val, 6);
 
-    sql.createFunction('from_func', (x) => x + 2);
+    sql.newFunction('from_func', (x) => x + 2);
     const r2 = sql.exec('SELECT from_func(5) AS val').one();
     assert.strictEqual(r2.val, 7);
 
-    sql.createFunction('where_func', (x) => x + 3);
+    sql.newFunction('where_func', (x) => x + 3);
     const r3 = sql.exec('SELECT where_func(5) AS val').one();
     assert.strictEqual(r3.val, 8);
   }
@@ -3311,7 +3306,7 @@ export class UdfTestDO extends DurableObject {
     const sql = storage.sql;
 
     // Register a UDF
-    sql.createFunction('survives_delete', (x) => x * 7);
+    sql.newFunction('survives_delete', (x) => x * 7);
 
     // Create a table and use the UDF
     sql.exec('CREATE TABLE delete_test (value INTEGER)');
@@ -3339,7 +3334,7 @@ export class UdfTestDO extends DurableObject {
     assert.ok(udfCleared, 'UDF should be cleared by deleteAll()');
 
     // Re-register the UDF
-    sql.createFunction('survives_delete', (x) => x * 7);
+    sql.newFunction('survives_delete', (x) => x * 7);
 
     // Now it should work again
     const r2 = sql.exec('SELECT survives_delete(6) AS val').one();
@@ -3363,7 +3358,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     let checkCallCount = 0;
-    sql.createFunction('is_positive', (x) => {
+    sql.newFunction('is_positive', (x) => {
       checkCallCount++;
       return x > 0 ? 1 : 0;
     });
@@ -3407,7 +3402,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     let defaultCallCount = 0;
-    sql.createFunction('get_default', () => {
+    sql.newFunction('get_default', () => {
       defaultCallCount++;
       return 42;
     });
@@ -3447,7 +3442,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfInGeneratedColumn() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('compute_value', (x) => x * x);
+    sql.newFunction('compute_value', (x) => x * x);
 
     // Attempting to use a non-deterministic UDF in a generated column should fail
     let failedAsExpected = false;
@@ -3481,7 +3476,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Try to shadow the built-in abs() function
-    sql.createFunction('abs', (x) => x * 1000); // Very different from real abs
+    sql.newFunction('abs', (x) => x * 1000); // Very different from real abs
 
     // What happens when we call abs()?
     const result = sql.exec('SELECT abs(-5) AS val').one();
@@ -3496,7 +3491,7 @@ export class UdfTestDO extends DurableObject {
     );
 
     // Also test with upper()
-    sql.createFunction('upper', (s) => s + '_CUSTOM');
+    sql.newFunction('upper', (s) => s + '_CUSTOM');
     const result2 = sql.exec("SELECT upper('test') AS val").one();
 
     // Document behavior
@@ -3517,7 +3512,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Test Number.MAX_SAFE_INTEGER + 1
-    sql.createFunction('overflow_add', (x) => x + 1);
+    sql.newFunction('overflow_add', (x) => x + 1);
     const r1 = sql
       .exec(`SELECT overflow_add(${Number.MAX_SAFE_INTEGER}) AS val`)
       .one();
@@ -3528,21 +3523,21 @@ export class UdfTestDO extends DurableObject {
     );
 
     // Test Number.MAX_VALUE * 2 -> Infinity
-    sql.createFunction('overflow_mult', (x) => x * 2);
+    sql.newFunction('overflow_mult', (x) => x * 2);
     const r2 = sql
       .exec(`SELECT overflow_mult(${Number.MAX_VALUE}) AS val`)
       .one();
     assert.strictEqual(r2.val, Infinity, 'MAX_VALUE * 2 should be Infinity');
 
     // Test very negative numbers
-    sql.createFunction('overflow_neg', (x) => x - 1);
+    sql.newFunction('overflow_neg', (x) => x - 1);
     const r3 = sql
       .exec(`SELECT overflow_neg(${-Number.MAX_SAFE_INTEGER}) AS val`)
       .one();
     assert.ok(r3.val < -Number.MAX_SAFE_INTEGER, 'Should be more negative');
 
     // Test -Infinity
-    sql.createFunction('return_neg_max', () => -Number.MAX_VALUE * 2);
+    sql.newFunction('return_neg_max', () => -Number.MAX_VALUE * 2);
     const r4 = sql.exec('SELECT return_neg_max() AS val').one();
     assert.strictEqual(r4.val, -Infinity);
   }
@@ -3554,7 +3549,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Negative zero
-    sql.createFunction('return_neg_zero', () => -0);
+    sql.newFunction('return_neg_zero', () => -0);
     const r1 = sql.exec('SELECT return_neg_zero() AS val').one();
     // SQLite likely converts -0 to 0
     assert.strictEqual(r1.val, 0);
@@ -3563,12 +3558,12 @@ export class UdfTestDO extends DurableObject {
     assert.ok(r1.val === 0 || Object.is(r1.val, -0), 'Should be 0 or -0');
 
     // Very small numbers (subnormal)
-    sql.createFunction('return_tiny', () => Number.MIN_VALUE);
+    sql.newFunction('return_tiny', () => Number.MIN_VALUE);
     const r2 = sql.exec('SELECT return_tiny() AS val').one();
     assert.ok(r2.val > 0 && r2.val < 1e-300, 'Should preserve tiny numbers');
 
     // Epsilon
-    sql.createFunction('return_epsilon', () => Number.EPSILON);
+    sql.newFunction('return_epsilon', () => Number.EPSILON);
     const r3 = sql.exec('SELECT return_epsilon() AS val').one();
     assert.ok(
       Math.abs(r3.val - Number.EPSILON) < 1e-20,
@@ -3587,7 +3582,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Create a UDF that accepts many arguments
-    sql.createFunction('sum_many', (...args) => {
+    sql.newFunction('sum_many', (...args) => {
       return args.reduce((sum, val) => sum + (val ?? 0), 0);
     });
 
@@ -3615,7 +3610,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Our implementation uses -1 (variadic), so any count should work
-    sql.createFunction('variadic_test', (...args) => args.length);
+    sql.newFunction('variadic_test', (...args) => args.length);
 
     const r0 = sql.exec('SELECT variadic_test() AS cnt').one();
     const r1 = sql.exec('SELECT variadic_test(1) AS cnt').one();
@@ -3636,7 +3631,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfWithReturning() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('transform_for_return', (x) => x * 10);
+    sql.newFunction('transform_for_return', (x) => x * 10);
 
     sql.exec(
       'CREATE TABLE returning_test (id INTEGER PRIMARY KEY, value INTEGER)'
@@ -3680,7 +3675,7 @@ export class UdfTestDO extends DurableObject {
     let finalCalled = false;
     let finalState = 'not called';
 
-    sql.createFunction('first_row_fail', () => {
+    sql.newAggregate('first_row_fail', () => {
       let state = undefined;
       return {
         step: (value) => {
@@ -3727,7 +3722,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     let callCount = 0;
-    sql.createFunction('count_calls', (x) => {
+    sql.newFunction('count_calls', (x) => {
       callCount++;
       return x;
     });
@@ -3760,7 +3755,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfInCte() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('cte_transform', (x) => x * 2);
+    sql.newFunction('cte_transform', (x) => x * 2);
 
     sql.exec('CREATE TABLE cte_source (value INTEGER)');
     sql.exec('INSERT INTO cte_source VALUES (1), (2), (3)');
@@ -3790,7 +3785,7 @@ export class UdfTestDO extends DurableObject {
   async testUdfInWindowContext() {
     const sql = this.state.storage.sql;
 
-    sql.createFunction('window_transform', (x) => x * 10);
+    sql.newFunction('window_transform', (x) => x * 10);
 
     sql.exec('CREATE TABLE window_test (category TEXT, value INTEGER)');
     sql.exec(
@@ -3829,7 +3824,7 @@ export class UdfTestDO extends DurableObject {
     const sql = this.state.storage.sql;
 
     // Object with custom toString - should use the custom string
-    sql.createFunction('return_custom_tostring', () => ({
+    sql.newFunction('return_custom_tostring', () => ({
       valueOf: () => 42,
       toString: () => 'custom string',
     }));
@@ -3855,7 +3850,7 @@ export class UdfTestDO extends DurableObject {
       }
     }
 
-    sql.createFunction('format_money', (amount) => new Money(amount, '$'));
+    sql.newFunction('format_money', (amount) => new Money(amount, '$'));
     const moneyResult = sql.exec('SELECT format_money(19.99) AS val').one();
     assert.strictEqual(
       moneyResult.val,
@@ -3864,7 +3859,7 @@ export class UdfTestDO extends DurableObject {
     );
 
     // Plain objects WITHOUT custom toString still throw
-    sql.createFunction('return_plain_object', () => ({ amount: 100 }));
+    sql.newFunction('return_plain_object', () => ({ amount: 100 }));
     assert.throws(
       () => sql.exec('SELECT return_plain_object() AS val').one(),
       (err) =>
@@ -3885,7 +3880,7 @@ export class UdfTestDO extends DurableObject {
     sql.exec('INSERT INTO partial_test VALUES (1), (2), (3), (4), (5)');
 
     let callCount = 0;
-    sql.createFunction('fail_at_three', (id) => {
+    sql.newFunction('fail_at_three', (id) => {
       callCount++;
       if (id === 3) {
         throw new Error('Deliberate failure at id 3');
@@ -3956,8 +3951,9 @@ export default {
 
     // Basic functionality tests
     await stub.testSanityCheck();
-    await stub.testCreateFunctionExists();
-    await stub.testCreateFunctionValidatesName();
+    await stub.testNewFunctionExists();
+    await stub.testNewFunctionValidatesName();
+    await stub.testNewAggregateValidatesName();
     await stub.testSimpleScalarUdf();
     await stub.testUdfWithMultipleArgs();
     await stub.testUdfWithStringResult();
@@ -4015,7 +4011,7 @@ export default {
     await stub.testAggregateValidation();
     await stub.testAggregateMultipleArgs();
 
-    // Array-based aggregate tests (sql.aggregate helper)
+    // Array-based aggregate tests (newAggregate auto-detection)
     await stub.testArrayAggregateSum();
     await stub.testArrayAggregateMax();
     await stub.testArrayAggregateMin();
@@ -4025,7 +4021,7 @@ export default {
     await stub.testArrayAggregateStringJoin();
     await stub.testArrayAggregateWithFilter();
     await stub.testArrayAggregateMultipleArgs();
-    await stub.testAggregateHelperValidation();
+    await stub.testNewAggregateValidation();
 
     // Transaction interaction tests (async)
     await stub.testScalarUdfInTransaction();

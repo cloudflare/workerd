@@ -454,99 +454,99 @@ void SqlStorage::createAggregateFunction(
   db.registerAggregateFunction(jsFuncPtr->name.asPtr(), -1, kj::mv(stepCb), kj::mv(finalCb));
 }
 
-void SqlStorage::createFunction(jsg::Lock& js, kj::String name, jsg::JsValue callbackOrOptions) {
+void SqlStorage::newFunction(jsg::Lock& js, kj::String name, jsg::JsValue callback) {
   // Validate function name
   JSG_REQUIRE(name.size() > 0, TypeError, "Function name cannot be empty.");
   JSG_REQUIRE(name.size() <= 255, TypeError, "Function name is too long (max 255 bytes).");
 
   // JsValue implicitly converts to v8::Local<v8::Value>
-  v8::Local<v8::Value> handle = callbackOrOptions;
+  v8::Local<v8::Value> handle = callback;
 
-  JSG_REQUIRE(handle->IsFunction(), TypeError,
-      "createFunction expects a function. For scalar UDFs, pass a callback function. "
-      "For aggregate UDFs, pass a factory function that returns {step, final}.");
+  JSG_REQUIRE(handle->IsFunction(), TypeError, "newFunction expects a function callback.");
+
+  // Register as scalar function
+  createScalarFunction(js, kj::mv(name), jsg::JsRef<jsg::JsValue>(js, callback));
+}
+
+void SqlStorage::newAggregate(jsg::Lock& js, kj::String name, jsg::JsValue callback) {
+  // Validate function name
+  JSG_REQUIRE(name.size() > 0, TypeError, "Function name cannot be empty.");
+  JSG_REQUIRE(name.size() <= 255, TypeError, "Function name is too long (max 255 bytes).");
+
+  // JsValue implicitly converts to v8::Local<v8::Value>
+  v8::Local<v8::Value> handle = callback;
+
+  JSG_REQUIRE(handle->IsFunction(), TypeError, "newAggregate expects a function callback.");
 
   auto func = handle.As<v8::Function>();
 
-  // To distinguish between scalar and aggregate functions, we check the function's
-  // parameter count. If it has 0 declared parameters, we call it to see if it returns
-  // an object with step/final methods (aggregate factory). If not, or if it has
-  // parameters, it's a scalar function.
+  // Auto-detect based on function.length:
+  // - 0 parameters: factory pattern (returns {step, final})
+  // - 1+ parameters: array-based (receives array of all values)
   auto lengthKey = jsg::v8StrIntern(js.v8Isolate, "length"_kj);
   auto lengthVal = jsg::check(func->Get(js.v8Context(), lengthKey));
   int funcLength =
       lengthVal->IsNumber() ? static_cast<int>(lengthVal.As<v8::Number>()->Value()) : 0;
 
   if (funcLength == 0) {
-    // Zero parameters - could be an aggregate factory. Call it to check.
+    // Factory pattern: function returns {step, final}
+    // Validate by calling it once to check the return value
     v8::TryCatch tryCatch(js.v8Isolate);
     auto maybeResult = func->Call(js.v8Context(), v8::Undefined(js.v8Isolate), 0, nullptr);
 
-    if (!tryCatch.HasCaught() && !maybeResult.IsEmpty()) {
-      auto result = maybeResult.ToLocalChecked();
-      if (result->IsObject()) {
-        auto obj = result.As<v8::Object>();
-        auto stepKey = jsg::v8StrIntern(js.v8Isolate, "step"_kj);
-        auto finalKey = jsg::v8StrIntern(js.v8Isolate, "final"_kj);
-        auto stepVal = jsg::check(obj->Get(js.v8Context(), stepKey));
-        auto finalVal = jsg::check(obj->Get(js.v8Context(), finalKey));
+    JSG_REQUIRE(!tryCatch.HasCaught() && !maybeResult.IsEmpty(), TypeError,
+        "Aggregate factory function threw an error when called.");
 
-        if (stepVal->IsFunction() && finalVal->IsFunction()) {
-          // It's an aggregate factory function
-          createAggregateFunction(
-              js, kj::mv(name), jsg::JsRef<jsg::JsValue>(js, callbackOrOptions));
-          return;
-        }
-      }
-    }
-    // Either threw, returned non-object, or object doesn't have step/final - treat as scalar
+    auto result = maybeResult.ToLocalChecked();
+    JSG_REQUIRE(result->IsObject(), TypeError,
+        "Aggregate factory must return an object with step and final methods.");
+
+    auto obj = result.As<v8::Object>();
+    auto stepKey = jsg::v8StrIntern(js.v8Isolate, "step"_kj);
+    auto finalKey = jsg::v8StrIntern(js.v8Isolate, "final"_kj);
+    auto stepVal = jsg::check(obj->Get(js.v8Context(), stepKey));
+    auto finalVal = jsg::check(obj->Get(js.v8Context(), finalKey));
+
+    JSG_REQUIRE(stepVal->IsFunction() && finalVal->IsFunction(), TypeError,
+        "Aggregate factory must return an object with step and final methods.");
+
+    // Register as aggregate with factory pattern
+    createAggregateFunction(js, kj::mv(name), jsg::JsRef<jsg::JsValue>(js, callback));
+  } else {
+    // Array-based pattern: wrap the callback in a factory that buffers values
+    // This is implemented in JavaScript for simplicity
+    auto factoryCode = jsg::v8StrIntern(js.v8Isolate,
+        "(function(callback) {"
+        "  return function() {"
+        "    const values = [];"
+        "    return {"
+        "      step: function(...args) {"
+        "        if (args.length === 1) {"
+        "          values.push(args[0]);"
+        "        } else {"
+        "          values.push(args);"
+        "        }"
+        "      },"
+        "      final: function() {"
+        "        return callback(values);"
+        "      }"
+        "    };"
+        "  };"
+        "})"_kj);
+
+    // Compile and run the factory code
+    v8::Local<v8::Script> script = jsg::check(v8::Script::Compile(js.v8Context(), factoryCode));
+    v8::Local<v8::Value> factoryMaker = jsg::check(script->Run(js.v8Context()));
+
+    JSG_REQUIRE(factoryMaker->IsFunction(), Error, "Internal error creating aggregate wrapper");
+    auto factoryMakerFunc = factoryMaker.As<v8::Function>();
+    v8::Local<v8::Value> args[] = {handle};
+    v8::Local<v8::Value> factory =
+        jsg::check(factoryMakerFunc->Call(js.v8Context(), v8::Undefined(js.v8Isolate), 1, args));
+
+    // Register the wrapped factory
+    createAggregateFunction(js, kj::mv(name), jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(factory)));
   }
-
-  // Scalar function
-  createScalarFunction(js, kj::mv(name), jsg::JsRef<jsg::JsValue>(js, callbackOrOptions));
-}
-
-jsg::JsValue SqlStorage::aggregate(jsg::Lock& js, jsg::JsValue callback) {
-  // Validate that callback is a function
-  v8::Local<v8::Value> callbackHandle = callback;
-  JSG_REQUIRE(callbackHandle->IsFunction(), TypeError,
-      "aggregate() expects a function that takes an array of values.");
-
-  // Create a factory function that wraps the callback in the {step, final} pattern.
-  // This is implemented in JavaScript for simplicity - we create a function that:
-  // 1. Creates an array to buffer values
-  // 2. Returns {step, final} where step pushes to array and final calls the callback
-  auto factoryCode = jsg::v8StrIntern(js.v8Isolate,
-      "(function(callback) {"
-      "  return function() {"
-      "    const values = [];"
-      "    return {"
-      "      step: function(...args) {"
-      "        if (args.length === 1) {"
-      "          values.push(args[0]);"
-      "        } else {"
-      "          values.push(args);"
-      "        }"
-      "      },"
-      "      final: function() {"
-      "        return callback(values);"
-      "      }"
-      "    };"
-      "  };"
-      "})"_kj);
-
-  // Compile and run the factory code
-  v8::Local<v8::Script> script = jsg::check(v8::Script::Compile(js.v8Context(), factoryCode));
-  v8::Local<v8::Value> factoryMaker = jsg::check(script->Run(js.v8Context()));
-
-  // Call the factory maker with the user's callback to get the actual factory
-  JSG_REQUIRE(factoryMaker->IsFunction(), Error, "Internal error creating aggregate wrapper");
-  auto factoryMakerFunc = factoryMaker.As<v8::Function>();
-  v8::Local<v8::Value> args[] = {callbackHandle};
-  v8::Local<v8::Value> factory =
-      jsg::check(factoryMakerFunc->Call(js.v8Context(), v8::Undefined(js.v8Isolate), 1, args));
-
-  return jsg::JsValue(factory);
 }
 
 bool SqlStorage::isAllowedName(kj::StringPtr name) const {
