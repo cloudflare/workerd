@@ -547,8 +547,6 @@ The following improvements are planned for the visualization tool, particularly 
 |---------|-------------|
 | **Minimap/Overview** | A small collapsed view of the entire trace for quick navigation when zoomed in |
 | **Zoom & Pan** | Ability to zoom into specific time ranges and pan horizontally for detailed inspection |
-| **Stack Trace Integration** | Clicking a resource could expand to show its creation stack trace inline |
-| **Filter by Type** | Quick toggle buttons to show/hide specific resource types (promises, timers, etc.) |
 | **Search/Find** | Search for resources by asyncId, type, or stack frame content |
 
 ### Lower Impact / Nice-to-Have
@@ -573,6 +571,8 @@ The following high-impact features were added to the Waterfall view:
 | **Time Cursor** | Interactive cursor in concurrency graph shows timestamp and active resource count |
 | **Callback Markers** | Visual markers showing when callbacks started and ended within resource bars |
 | **Temporal Edge Indicators** | Badges showing timing-based causality relationships |
+| **Stack Trace Integration** | Expandable stack traces inline - click ▶ button to show creation stack trace |
+| **Filter by Type** | Dropdown menu to show/hide specific resource types with "Enable All" shortcut |
 
 ## Reference: clinicjs/bubbleprof
 
