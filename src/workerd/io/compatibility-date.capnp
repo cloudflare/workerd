@@ -1316,4 +1316,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Node.js-compatible versions from node:timers. setTimeout and setInterval return
   # Timeout objects with methods like refresh(), ref(), unref(), and hasRef().
   # This flag requires nodejs_compat or nodejs_compat_v2 to be enabled.
+
+  requireReturnsDefaultExport @154 :Bool
+    $compatEnableFlag("require_returns_default_export")
+    $compatDisableFlag("require_returns_namespace")
+    $compatEnableDate("2026-01-22");
+  # When enabled, require() will return the default export of a module if it exists.
+  # If the default export does not exist, it falls back to returning the mutable
+  # module namespace object. This matches the behavior that Node.js uses for
+  # require(esm) where the default export is returned when available.
+  # This flag is useful for frameworks like Next.js that expect to patch module exports.
 }
