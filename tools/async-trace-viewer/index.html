@@ -3443,6 +3443,17 @@ const userB = await fetch('/user/123');</pre>
         const time = (i / 4) * duration / 1e6;
         ctx.fillText(time.toFixed(0) + 'ms', x, 10);
       }
+
+      // Draw replay playhead when replay is active
+      if (currentView === 'replay' && replayTime > 0 && duration > 0) {
+        const playheadX = (replayTime / duration) * width;
+        ctx.strokeStyle = 'rgba(233, 69, 96, 0.6)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(playheadX, 0);
+        ctx.lineTo(playheadX, height);
+        ctx.stroke();
+      }
     }
 
     function renderTypeChart() {
@@ -5719,6 +5730,9 @@ const userB = await fetch('/user/123');</pre>
       ctx.stroke();
 
       if (!traceData) return;
+
+      // Update the sidebar timeline chart with playhead position
+      renderTimelineChart();
 
       const duration = traceData.requestDurationNs;
       const currentTimeMs = replayTime / 1e6;
