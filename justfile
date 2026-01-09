@@ -77,7 +77,7 @@ new-wpt-test test_name:
   echo 'wpt_test(name = "{{test_name}}", config = "{{test_name}}-test.ts", wpt_directory = "@wpt//:{{test_name}}@module")' >> src/wpt/BUILD.bazel
 
   ./tools/cross/format.py
-  bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
+  bazel test //src/wpt:{{test_name}}@ --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
 
 # Specify the full Bazel target name for the test to be created.
 # e.g. just new-test //src/workerd/api/tests:v8-temporal-test

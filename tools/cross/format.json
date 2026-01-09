@@ -21,7 +21,7 @@
   },
   {
     "directory": ".",
-    "globs": ["*.bzl", "WORKSPACE", "BUILD", "BUILD.*", "*.bazel"],
+    "globs": ["*.bzl", "BUILD", "BUILD.*", "*.bazel"],
     "formatter": "buildifier"
   }
 ]

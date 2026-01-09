@@ -832,7 +832,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       return true;
     }, "Save a baseline snapshot to the disk cache")
         .addOptionWithArg({"python-load-snapshot"}, CLI_METHOD(setPythonLoadSnapshot), "<path>",
-            "Load a snapshot from the package disk cache.");
+            "Load a snapshot from the python snapshot directory.")
+        .addOptionWithArg({"python-snapshot-dir"}, CLI_METHOD(setPythonSnapshotDirectory), "<path>",
+            "Set the snapshot snapshot directory.");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
@@ -935,6 +937,17 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     },
             "Enable predictable mode. This makes workerd behave more deterministically by using "
             "pre-set values instead of random data or timestamps to facilitate testing.")
+        .addOption({"all-autogates"},
+            [this]() {
+      allAutogates = true;
+      return true;
+    },
+            "Enable all autogates. This is useful for testing code paths that are guarded by "
+            "autogates.")
+        .addOptionWithArg({"compat-date"}, CLI_METHOD(setTestCompatDate), "<date>",
+            "Set the compatibility date for all workers. When specified, workers must NOT "
+            "specify compatibilityDate in the config. Use '0000-00-00' for oldest behavior "
+            "or '9999-12-31' for newest behavior.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
         .callAfterParsing(CLI_METHOD(test))
         .build();
@@ -1113,6 +1126,12 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   void setPythonLoadSnapshot(kj::StringPtr pathStr) {
     server->setPythonLoadSnapshot(kj::str(pathStr));
   }
+  void setPythonSnapshotDirectory(kj::StringPtr pathStr) {
+    kj::Path path = fs->getCurrentPath().eval(pathStr);
+    kj::Maybe<kj::Own<const kj::Directory>> dir =
+        fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
+    server->setPythonSnapshotDirectory(kj::mv(dir));
+  }
 
   void parsePythonCompatFlag(kj::StringPtr compatFlagStr) {
     auto builder = kj::heap<capnp::MallocMessageBuilder>();
@@ -1274,6 +1293,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       default:
         CLI_ERROR("Too many colons.");
     }
+  }
+
+  void setTestCompatDate(kj::StringPtr date) {
+    testCompatDate = kj::str(date);
   }
 
   void compile() {
@@ -1453,6 +1476,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     if (predictable) {
       setPredictableModeForTest();
     }
+    if (allAutogates) {
+      util::Autogate::initAllAutogates();
+    }
+
+    KJ_IF_SOME(compatDate, testCompatDate) {
+      server->setTestCompatibilityDateOverride(kj::str(compatDate));
+    }
 
     // Enable loopback sockets in tests only.
     network.enableLoopback();
@@ -1521,6 +1551,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool configOnly = false;
   bool noVerbose = false;
   bool predictable = false;
+  bool allAutogates = false;
+  kj::Maybe<kj::String> testCompatDate;
   kj::Maybe<FileWatcher> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();

@@ -147,6 +147,29 @@ export const invalidEncodingForToString = {
   },
 };
 
+export const toStringWithUndefinedEncoding = {
+  test(ctrl, env, ctx) {
+    // Test that Buffer.toString with undefined encoding defaults to utf8
+    const buf = Buffer.from('hello world');
+    strictEqual(buf.toString(undefined), 'hello world');
+    strictEqual(buf.toString(undefined), buf.toString('utf8'));
+
+    // Test with UTF-8 characters
+    const utf8Buf = Buffer.from('¡hέlló wôrld!');
+    strictEqual(utf8Buf.toString(undefined), '¡hέlló wôrld!');
+    strictEqual(utf8Buf.toString(undefined), utf8Buf.toString('utf8'));
+
+    // Test with start and end parameters
+    const sliceBuf = Buffer.from('hello world');
+    strictEqual(sliceBuf.toString(undefined, 0, 5), 'hello');
+    strictEqual(sliceBuf.toString(undefined, 6), 'world');
+    strictEqual(
+      sliceBuf.toString(undefined, 0, 5),
+      sliceBuf.toString('utf8', 0, 5)
+    );
+  },
+};
+
 export const zeroLengthBuffers = {
   test(ctrl, env, ctx) {
     Buffer.from('');

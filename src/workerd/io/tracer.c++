@@ -411,8 +411,8 @@ void BaseTracer::adjustSpanTime(tracing::CompleteSpan& span) {
           KJ_FAIL_ASSERT(
               "reported span without current request", span.operationName, hasCompleteTime);
         } else {
-          LOG_NOSENTRY(WARNING, "reported span without current request", span.operationName,
-              hasCompleteTime);
+          LOG_WARNING_PERIODICALLY(
+              "reported span without current request", span.operationName, hasCompleteTime);
         }
       }
     });
@@ -502,6 +502,19 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
     auto tag = tracing::Attribute("jsrpc.method"_kjc, methodName.clone());
     writer->report(context, kj::arr(kj::mv(tag)), timestamp);
   }
+}
+
+kj::Own<SpanObserver> UserSpanObserver::newChild() {
+  return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId);
+}
+
+void UserSpanObserver::report(const Span& span) {
+  submitter->submitSpan(spanId, parentSpanId, span);
+}
+
+// Provide I/O time to the tracing system for user spans.
+kj::Date UserSpanObserver::getTime() {
+  return IoContext::current().now();
 }
 
 }  // namespace workerd

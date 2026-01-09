@@ -37,20 +37,27 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 25;
 class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandler {
  public:
   using GetStreamSinkFunc = kj::Function<rpc::JsValue::StreamSink::Client()>;
+  using GetExternalPusherFunc = kj::Function<rpc::JsValue::ExternalPusher::Client()>;
+  using GetStreamHandlerFunc = kj::OneOf<GetStreamSinkFunc, GetExternalPusherFunc>;
 
   enum StubOwnership { TRANSFER, DUPLICATE };
 
   // `getStreamSinkFunc` will be called at most once, the first time a stream is encountered in
   // serialization, to get the StreamSink that should be used.
-  RpcSerializerExternalHandler(StubOwnership stubOwnership, GetStreamSinkFunc getStreamSinkFunc)
+  RpcSerializerExternalHandler(
+      StubOwnership stubOwnership, GetStreamHandlerFunc getStreamHandlerFunc)
       : stubOwnership(stubOwnership),
-        getStreamSinkFunc(kj::mv(getStreamSinkFunc)) {}
+        getStreamHandlerFunc(kj::mv(getStreamHandlerFunc)) {}
 
   inline StubOwnership getStubOwnership() {
     return stubOwnership;
   }
 
   using BuilderCallback = kj::Function<void(rpc::JsValue::External::Builder)>;
+
+  // Returns the ExternalPusher for the remote side. Returns kj::none if this serialization is
+  // using the older StreamSink approach, in which case you need to call `writeStream()` instead.
+  kj::Maybe<rpc::JsValue::ExternalPusher::Client> getExternalPusher();
 
   // Add an external. The value is a callback which will be invoked later to fill in the
   // JsValue::External in the Cap'n Proto structure. The external array cannot be allocated until
@@ -62,6 +69,9 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   // Like write(), but use this when there is also a stream associated with the external, i.e.
   // using StreamSink. This returns a capability which will eventually resolve to the stream.
+  //
+  // StreamSink is being replaced by ExternalPusher. You should only call writeStream() if
+  // getExternalPusher() returns kj::none. If ExternalPusher is available, this method will throw.
   capnp::Capability::Client writeStream(BuilderCallback callback);
 
   // Build the final list.
@@ -98,12 +108,13 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
  private:
   StubOwnership stubOwnership;
-  GetStreamSinkFunc getStreamSinkFunc;
+  GetStreamHandlerFunc getStreamHandlerFunc;
 
   kj::Vector<BuilderCallback> externals;
   kj::Vector<kj::Own<void>> stubDisposers;
 
   kj::Maybe<rpc::JsValue::StreamSink::Client> streamSink;
+  kj::Maybe<rpc::JsValue::ExternalPusher::Client> externalPusher;
 };
 
 class RpcStubDisposalGroup;
@@ -468,8 +479,8 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override {
-    return tracing::EventInfo(tracing::JsRpcEventInfo(nullptr));
+  tracing::EventInfo getEventInfo() const override {
+    return tracing::JsRpcEventInfo(nullptr);
   }
 
   rpc::JsRpcTarget::Client getCap() {

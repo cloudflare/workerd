@@ -105,4 +105,25 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
       kj::mv(maybeSnapshot));
   // clang-format on
 }
+
+kj::Maybe<kj::Array<kj::byte>> tryGetMetadataSnapshot(
+    const api::pyodide::PythonConfig& pythonConfig, api::pyodide::SnapshotToDisk snapshotToDisk) {
+  kj::Maybe<kj::Array<kj::byte>> memorySnapshot = kj::none;
+  KJ_IF_SOME(snapshot, pythonConfig.loadSnapshotFromDisk) {
+    auto& root = KJ_REQUIRE_NONNULL(pythonConfig.snapshotDirectory);
+    kj::Path path(snapshot);
+    auto maybeFile = root->tryOpenFile(path);
+    if (maybeFile == kj::none) {
+      KJ_FAIL_REQUIRE("Expected to find", snapshot, "in the package cache directory");
+    }
+    memorySnapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
+  }
+  return kj::mv(memorySnapshot);
+}
+
+jsg::Bundle::Reader retrievePyodideBundle(
+    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
+  auto result = pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  return KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle", version);
+}
 }  // namespace workerd::modules::python

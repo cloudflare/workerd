@@ -38,9 +38,24 @@ Local local_new_string(Isolate* isolate, ::rust::Str value) {
   return to_ffi(kj::mv(val));
 }
 
+Local local_new_boolean(Isolate* isolate, bool value) {
+  v8::Local<v8::Boolean> val = v8::Boolean::New(isolate, value);
+  return to_ffi(kj::mv(val));
+}
+
 Local local_new_object(Isolate* isolate) {
   v8::Local<v8::Object> object = v8::Object::New(isolate);
   return to_ffi(kj::mv(object));
+}
+
+Local local_new_null(Isolate* isolate) {
+  v8::Local<v8::Primitive> null = v8::Null(isolate);
+  return to_ffi(kj::mv(null));
+}
+
+Local local_new_undefined(Isolate* isolate) {
+  v8::Local<v8::Primitive> undefined = v8::Undefined(isolate);
+  return to_ffi(kj::mv(undefined));
 }
 
 bool local_eq(const Local& lhs, const Local& rhs) {
@@ -53,6 +68,41 @@ bool local_has_value(const Local& val) {
 
 bool local_is_string(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsString();
+}
+
+bool local_is_boolean(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBoolean();
+}
+
+bool local_is_number(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNumber();
+}
+
+bool local_is_null(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNull();
+}
+
+bool local_is_undefined(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUndefined();
+}
+
+bool local_is_null_or_undefined(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNullOrUndefined();
+}
+
+bool local_is_object(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsObject();
+}
+
+bool local_is_native_error(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNativeError();
+}
+
+::rust::String local_type_of(Isolate* isolate, const Local& val) {
+  auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
+  v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
+  v8::String::Utf8Value utf8(isolate, typeStr);
+  return ::rust::String(*utf8, utf8.length());
 }
 
 // Local<Object>
@@ -112,13 +162,26 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
   return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
 }
 
+bool unwrap_boolean(Isolate* isolate, Local value) {
+  return local_from_ffi<v8::Value>(kj::mv(value))->ToBoolean(isolate)->Value();
+}
+
+double unwrap_number(Isolate* isolate, Local value) {
+  return ::workerd::jsg::check(
+      local_from_ffi<v8::Value>(kj::mv(value))->ToNumber(isolate->GetCurrentContext()))
+      ->Value();
+}
+
 size_t unwrap_resource(Isolate* isolate, Local value) {
   auto v8_obj = local_from_ffi<v8::Object>(kj::mv(value));
   KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
-                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX) ==
+                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+                static_cast<v8::EmbedderDataTypeTag>(
+                    ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) ==
       const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
   return reinterpret_cast<size_t>(v8_obj->GetAlignedPointerFromInternalField(
-      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 }
 
 // Global<T>
@@ -264,10 +327,10 @@ Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::S
       return to_ffi(v8::Exception::SyntaxError(message));
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
-    case ExceptionType::Error:
-      return to_ffi(v8::Exception::Error(message));
     default:
-      KJ_UNREACHABLE;
+      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
+      // TODO(soon): Use js.domException() to create proper DOMException objects.
+      return to_ffi(v8::Exception::Error(message));
   }
 }
 

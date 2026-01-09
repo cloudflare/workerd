@@ -25,12 +25,13 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     "quote": crate.spec(version = "1"),
     "ruff_python_ast": crate.spec(git = "https://github.com/astral-sh/ruff", tag = "0.12.1"),
     "ruff_python_parser": crate.spec(git = "https://github.com/astral-sh/ruff", tag = "0.12.1"),
-    "serde_json": crate.spec(version = "1"),
+    # param_extractor depends on unbounded_depth feature
+    "serde_json": crate.spec(version = "1", features = ["unbounded_depth"]),
     "serde": crate.spec(version = "1", features = ["derive"]),
     "thiserror": crate.spec(version = "2"),
     # tokio is huge, let's enable only features when we actually need them.
     "tokio": crate.spec(version = "1", default_features = False, features = ["net", "rt", "rt-multi-thread", "time"]),
     "tracing": crate.spec(version = "0", default_features = False, features = ["std"]),
-    "swc_core": crate.spec(version = "35", features = ["common", "ecma_ast", "ecma_codegen", "ecma_parser", "ecma_transforms_typescript", "ecma_visit", "swc_ecma_visit", "swc_config"]),
-    "swc_ts_fast_strip": crate.spec(version = "29"),
+    "swc_common": crate.spec(version = "18"),
+    "swc_ts_fast_strip": crate.spec(version = "41"),
 }

@@ -248,6 +248,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "//src/workerd/util:state-machine",
         "@nbytes",
     ],
 )
@@ -435,7 +436,6 @@ wd_cc_library(
     implementation_deps = [
         "//src/workerd/io:features",
         "//src/workerd/util:strings",
-        "@simdutf",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -443,6 +443,7 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
+        "@simdutf",
     ],
 )
 

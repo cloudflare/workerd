@@ -43,7 +43,7 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
+  tracing::EventInfo getEventInfo() const override;
 
   void failed(const kj::Exception& e) override {
     capFulfiller->reject(kj::cp(e));

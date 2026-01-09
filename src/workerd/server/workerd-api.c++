@@ -157,21 +157,6 @@ static const PythonConfig defaultConfig{
   .createBaselineSnapshot = false,
 };
 
-kj::Maybe<kj::Array<kj::byte>> tryGetMetadataSnapshot(
-    const PythonConfig& pythonConfig, api::pyodide::SnapshotToDisk snapshotToDisk) {
-  kj::Maybe<kj::Array<kj::byte>> memorySnapshot = kj::none;
-  KJ_IF_SOME(snapshot, pythonConfig.loadSnapshotFromDisk) {
-    auto& root = KJ_REQUIRE_NONNULL(pythonConfig.packageDiskCacheRoot);
-    kj::Path path(snapshot);
-    auto maybeFile = root->tryOpenFile(path);
-    if (maybeFile == kj::none) {
-      KJ_FAIL_REQUIRE("Expected to find", snapshot, "in the package cache directory");
-    }
-    memorySnapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
-  }
-  return kj::mv(memorySnapshot);
-}
-
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
 // and will fail any writes.
 class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Server {
@@ -228,12 +213,6 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
 };
 
 }  // namespace
-
-jsg::Bundle::Reader retrievePyodideBundle(
-    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
-  auto result = pyConfig.pyodideBundleManager.getPyodideBundle(version);
-  return KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle", version);
-}
 
 /**
  * This function matches the implementation of `getPythonRequirements` in the internal repo. But it
@@ -555,70 +534,6 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     using namespace workerd::api::pyodide;
     auto featureFlags = getFeatureFlags();
-    if (source.isPython) {
-      KJ_REQUIRE(featureFlags.getPythonWorkers(),
-          "The python_workers compatibility flag is required to use Python.");
-      auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-      auto version = getPythonBundleName(pythonRelease);
-      auto bundle = retrievePyodideBundle(impl->pythonConfig, version);
-      // Inject SetupEmscripten module
-      {
-        auto emscriptenRuntime =
-            api::pyodide::EmscriptenRuntime::initialize(lockParam, true, bundle);
-        modules->addBuiltinModule("internal:setup-emscripten",
-            lockParam.alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
-            workerd::jsg::ModuleRegistry::Type::INTERNAL);
-      }
-
-      // Inject Pyodide bundle
-      modules->addBuiltinBundle(bundle, kj::none);
-      // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
-      {
-        Worker::Script::Module module{
-          .name = source.mainModule, .content = Worker::Script::EsModule{PYTHON_ENTRYPOINT}};
-
-        auto info = tryCompileLegacyModule(
-            lockParam, module.name, module.content, modules->getObserver(), featureFlags);
-
-        auto path = kj::Path::parse(source.mainModule);
-        modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
-      }
-
-      // Inject metadata that the entrypoint module will read.
-      api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(
-          impl->pythonConfig.createBaselineSnapshot);
-      api::pyodide::SnapshotToDisk snapshotToDisk(
-          impl->pythonConfig.createSnapshot || createBaselineSnapshot);
-      auto snapshot = tryGetMetadataSnapshot(impl->pythonConfig, snapshotToDisk);
-      modules->addBuiltinModule("pyodide-internal:runtime-generated/metadata",
-          lockParam.alloc<PyodideMetadataReader>(
-              workerd::modules::python::createPyodideMetadataState(source,
-                  api::pyodide::IsWorkerd::YES, api::pyodide::IsTracing::NO, snapshotToDisk,
-                  createBaselineSnapshot, pythonRelease, kj::mv(snapshot), featureFlags)),
-          jsg::ModuleRegistry::Type::INTERNAL);
-
-      // Inject packages tar file
-      modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
-          workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
-      // Inject artifact bundler.
-      modules->addBuiltinModule("pyodide-internal:artifacts",
-          lockParam.alloc<ArtifactBundler>(kj::mv(artifacts).orDefault(
-              []() { return api::pyodide::ArtifactBundler::makeDisabledBundler(); })),
-          jsg::ModuleRegistry::Type::INTERNAL);
-
-      // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
-      modules->addBuiltinModule("pyodide-internal:internalJaeger",
-          DisabledInternalJaeger::create(lockParam), jsg::ModuleRegistry::Type::INTERNAL);
-
-      // Inject disk cache module
-      modules->addBuiltinModule("pyodide-internal:disk_cache",
-          lockParam.alloc<DiskCache>(impl->pythonConfig.packageDiskCacheRoot),
-          jsg::ModuleRegistry::Type::INTERNAL);
-
-      // Inject a (disabled) SimplePythonLimiter
-      modules->addBuiltinModule("pyodide-internal:limiter",
-          SimplePythonLimiter::makeDisabled(lockParam), jsg::ModuleRegistry::Type::INTERNAL);
-    }
 
     for (auto& module: source.modules) {
       auto path = kj::Path::parse(module.name);
@@ -630,6 +545,11 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     }
 
     api::registerModules(*modules, featureFlags);
+
+    if (source.isPython) {
+      modules::python::registerPythonWorkerdModules<JsgWorkerdIsolate>(
+          lockParam, *modules, featureFlags, kj::mv(artifacts), impl->pythonConfig, source);
+    }
 
     for (auto extension: impl->extensions) {
       for (auto module: extension.getModules()) {

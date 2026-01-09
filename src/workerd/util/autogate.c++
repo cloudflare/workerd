@@ -31,18 +31,19 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "fetch-request-memory-adjustment"_kj;
     case AutogateKey::RUST_BACKED_NODE_DNS:
       return "rust-backed-node-dns"_kj;
+    case AutogateKey::COMPRESSION_STREAM_USE_STATE_MACHINE:
+      return "compression-stream-use-state-machine"_kj;
+    case AutogateKey::IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE:
+      return "identity-transform-stream-use-state-machine"_kj;
+    case AutogateKey::RPC_USE_EXTERNAL_PUSHER:
+      return "rpc-use-external-pusher"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
 }
 
 Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
-  // Init all gates to false.
-  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
-       i = AutogateKey(static_cast<int>(i) + 1)) {
-    gates[static_cast<unsigned long>(i)] = false;
-  }
-
+  // gates array is zero-initialized by default.
   for (auto name: autogates) {
     if (!name.startsWith("workerd-autogate-")) {
       LOG_ERROR_ONCE("Autogate configuration includes gate with invalid prefix.");
@@ -76,6 +77,15 @@ void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {
 
 void Autogate::deinitAutogate() {
   globalAutogate = kj::none;
+}
+
+void Autogate::initAllAutogates() {
+  Autogate autogate;
+  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
+       i = AutogateKey(static_cast<int>(i) + 1)) {
+    autogate.gates[static_cast<unsigned long>(i)] = true;
+  }
+  globalAutogate = kj::mv(autogate);
 }
 
 void Autogate::initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames) {

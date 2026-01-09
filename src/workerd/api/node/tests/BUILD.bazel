@@ -335,6 +335,8 @@ wd_test(
     src = "dns-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["dns-nodejs-test.js"],
+    # TODO(jsg-rs): This test breaks when RUST_BACKED_NODE_DNS is enabled.
+    generate_all_autogates_variant = False,
     tags = ["requires-network"],
 )
 
@@ -363,6 +365,12 @@ wd_test(
     src = "timers-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["timers-nodejs-test.js"],
+)
+
+wd_test(
+    src = "timers-global-override-test.wd-test",
+    args = ["--experimental"],
+    data = ["timers-global-override-test.js"],
 )
 
 wd_test(

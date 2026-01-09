@@ -9,7 +9,7 @@ Generates the `jsg::Struct` and `jsg::Type` implementations for data structures.
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
-    pub critical: u8,
+    pub critical: f64,
     pub field: String,
     pub value: String,
 }
@@ -24,16 +24,27 @@ pub struct MyRecord {
 
 Generates FFI callback functions for JSG resource methods. The `name` parameter is optional and defaults to converting the method name from `snake_case` to `camelCase`.
 
+Parameters and return values are handled via the `jsg::Wrappable` trait. Any type implementing `Wrappable` can be used as a parameter or return value:
+
+- `Option<T>` - accepts `T` or `undefined`, rejects `null`
+- `Nullable<T>` - accepts `T`, `null`, or `undefined`
+- `NonCoercible<T>` - rejects values that would require JavaScript coercion
+
 ```rust
 impl DnsUtil {
     #[jsg_method(name = "parseCaaRecord")]
-    pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
-        // implementation
+    pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
+        // Errors are thrown as JavaScript exceptions
     }
 
     #[jsg_method]
-    pub fn parse_naptr_record(&self, record: &str) -> Result<NaptrRecord, DnsParserError> {
-        // Exposed as "parseNaptrRecord" in JavaScript
+    pub fn get_name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[jsg_method]
+    pub fn reset(&self) {
+        // Void methods return undefined in JavaScript
     }
 }
 ```
@@ -58,7 +69,7 @@ pub struct MyUtil {
 #[jsg_resource]
 impl DnsUtil {
     #[jsg_method]
-    pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
+    pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
         // implementation
     }
 }

@@ -1,3 +1,4 @@
+load("@//:build/is_pyodide_bzlmod.bzl", "is_pyodide_bzlmod")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
@@ -6,7 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 def _get_enable_flags(python_flag):
     flags = [BUNDLE_VERSION_INFO[python_flag]["enable_flag_name"]]
     if "python_workers" not in flags:
-        flags += ["python_workers"]
+        flags.append("python_workers")
+    for key, value in BUNDLE_VERSION_INFO.items():
+        # With all-compat-flags variant we might end up accidently using a newer python bundle than
+        # intended. To make sure we get the speicific intended version we also need to disable newer
+        # python versions.
+        if python_flag != key and value["enable_flag_name"] not in ["python_workers", "python_workers_development"]:
+            flags.append("no_" + value["enable_flag_name"])
     return flags
 
 def _py_wd_test_helper(
@@ -23,6 +30,18 @@ def _py_wd_test_helper(
     name_flag = name + "_" + python_flag
     templated_src = name_flag.replace("/", "-") + "@template"
     templated_src = "/".join(src.split("/")[:-1] + [templated_src])
+
+    pkg_tag = BUNDLE_VERSION_INFO[python_flag]["packages"]
+    data = data + ["@all_pyodide_wheels_%s//:whls" % pkg_tag]
+    args = args + ["--pyodide-package-disk-cache-dir"]
+
+    # TODO(cleanup): We support both mangled and non-mangled wheels paths for now, clean up once
+    # downstream repo fully uses bzlmod
+    if is_pyodide_bzlmod:
+        # +pyodide+ is a bzlmod canonical repository name
+        args.append("../+pyodide+all_pyodide_wheels_%s" % pkg_tag)
+    else:
+        args.append("../all_pyodide_wheels_%s" % pkg_tag)
 
     load_snapshot = None
     pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
@@ -44,6 +63,7 @@ def _py_wd_test_helper(
 
     flags = _get_enable_flags(python_flag) + feature_flags
     feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
+
     expand_template(
         name = name_flag + "@rule",
         out = templated_src,
@@ -66,6 +86,11 @@ def _py_wd_test_helper(
         python_snapshot_test = make_snapshot,
         data = data,
         load_snapshot = load_snapshot,
+        # TODO(soon): at the time of disabling these they all passed but because of how slow python
+        #             tests are we disabled them for now. We should re-enable them when we have
+        #             a better way to run them.
+        generate_all_autogates_variant = False,
+        generate_all_compat_flags_variant = False,
         **kwargs
     )
 
@@ -81,11 +106,14 @@ def _snapshot_file(snapshot):
     return [":" + snapshot]
 
 def _snapshot_files(
+        name,
         baseline_snapshot = None,
         numpy_snapshot = None,
         fastapi_snapshot = None,
         dedicated_fastapi_snapshot = None,
         **_kwds):
+    if name == "development":
+        return []
     result = []
     result += _snapshot_file(baseline_snapshot)
     result += _snapshot_file(numpy_snapshot)
@@ -93,7 +121,29 @@ def _snapshot_files(
     result += _snapshot_file(dedicated_fastapi_snapshot)
     return result
 
-def python_test_setup():
+def _snapshot_file_group():
+    snapshots = []
+    for x in BUNDLE_VERSION_INFO.values():
+        snapshots += _snapshot_files(**x)
+
+    native.filegroup(
+        name = "python_snapshots",
+        data = snapshots,
+        visibility = ["//visibility:public"],
+    )
+
+def _capnp_bundle(id, **_kwds):
+    if id == "dev":
+        return
+    name = "pyodide_%s.capnp.bin" % id
+    copy_file(
+        name = name + "@rule",
+        src = "@%s//file" % name,
+        out = "pyodide-bundle-cache/" + name,
+        visibility = ["//visibility:public"],
+    )
+
+def _capnp_bundles_file_group():
     # pyodide_dev.capnp.bin represents a custom pyodide version "dev" that is generated
     # at build time using the latest contents of the src/pyodide directory.
     # This is used to run tests to ensure that they are always run against the latest build of
@@ -104,17 +154,15 @@ def python_test_setup():
         out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
         visibility = ["//visibility:public"],
     )
-    data = []
-    for x in BUNDLE_VERSION_INFO.values():
-        if x["name"] == "development":
-            continue
-        data += _snapshot_files(**x)
+    for info in BUNDLE_VERSION_INFO.values():
+        _capnp_bundle(**info)
 
-    native.filegroup(
-        name = "python_snapshots",
-        data = data,
-        visibility = ["//visibility:public"],
-    )
+def _capnp_rules():
+    return ["//src/workerd/server/tests/python:pyodide_%s.capnp.bin@rule" % info["id"] for info in BUNDLE_VERSION_INFO.values()]
+
+def python_test_setup():
+    _capnp_bundles_file_group()
+    _snapshot_file_group()
 
 def compute_python_flags(python_flags, skip_python_flags):
     if python_flags == "all":
@@ -154,12 +202,12 @@ def py_wd_test(
         name = directory
     elif name == None:
         name = src.removesuffix(".wd-test")
-    data += ["//src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule"]
+    data += _capnp_rules()
     args = args + [
         "--pyodide-bundle-disk-cache-dir",
         "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)/..",
         "--experimental",
-        "--pyodide-package-disk-cache-dir",
+        "--python-snapshot-dir",
         ".",
     ]
     tags = tags + ["py_wd_test", "python"]

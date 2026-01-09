@@ -159,8 +159,9 @@ void ValueQueue::handlePush(
 
   // Otherwise, pop the next pending read and resolve it. There should be nothing in the queue.
   KJ_REQUIRE(state.buffer.empty() && state.queueTotalSize == 0);
-  state.readRequests.front()->resolve(js, entry->getValue(js));
+  auto request = kj::mv(state.readRequests.front());
   state.readRequests.pop_front();
+  request->resolve(js, entry->getValue(js));
 }
 
 void ValueQueue::handleRead(jsg::Lock& js,
@@ -538,7 +539,7 @@ v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
 ByteQueue::ByteQueue(size_t highWaterMark): impl(highWaterMark) {}
 
 void ByteQueue::close(jsg::Lock& js) {
-  KJ_IF_SOME(ready, impl.state.tryGet<ByteQueue::QueueImpl::Ready>()) {
+  KJ_IF_SOME(ready, impl.state.tryGetUnsafe<ByteQueue::QueueImpl::Ready>()) {
     while (!ready.pendingByobReadRequests.empty()) {
       ready.pendingByobReadRequests.front()->invalidate();
       ready.pendingByobReadRequests.pop_front();
@@ -707,8 +708,9 @@ void ByteQueue::handlePush(
     // We do not need to adjust the pullInto.atLeast here since we are immediately
     // fulfilling the read at this point.
 
-    pending.resolve(js);
+    auto request = kj::mv(state.readRequests.front());
     state.readRequests.pop_front();
+    request->resolve(js);
   }
 
   // If the entry was consumed completely by the pending read, then we're done!
@@ -895,8 +897,9 @@ bool ByteQueue::handleMaybeClose(
           // Technically, we really shouldn't get here but the case is covered
           // just in case.
           KJ_ASSERT(state.queueTotalSize == 0);
-          pending.resolve(js);
+          auto request = kj::mv(state.readRequests.front());
           state.readRequests.pop_front();
+          request->resolve(js);
           return true;
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
@@ -945,8 +948,9 @@ bool ByteQueue::handleMaybeClose(
               // state.queueTotalSize happens to be zero, we can safely indicate that we
               // have read the remaining data as this may have been the last actual value
               // entry in the buffer.
-              pending.resolve(js);
+              auto request = kj::mv(state.readRequests.front());
               state.readRequests.pop_front();
+              request->resolve(js);
 
               if (state.queueTotalSize == 0) {
                 // If the queueTotalSize is zero at this point, the next item in the queue
@@ -979,8 +983,9 @@ bool ByteQueue::handleMaybeClose(
           // buffer.
           KJ_ASSERT(state.queueTotalSize > 0);
 
-          pending.resolve(js);
+          auto request = kj::mv(state.readRequests.front());
           state.readRequests.pop_front();
+          request->resolve(js);
           return false;
         }
       }

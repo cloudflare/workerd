@@ -36,7 +36,11 @@ declare global {
     name?: string,
     properties?: unknown
   ): void;
-  function async_test(func: TestFn, name?: string, properties?: unknown): void;
+  function async_test(
+    func: TestFn | string,
+    name?: string,
+    properties?: unknown
+  ): Test;
   function test(func: TestFn, name?: string, properties?: unknown): void;
 }
 
@@ -293,15 +297,38 @@ class AsyncTest extends Test {
   }
 }
 
-globalThis.async_test = (func, name, properties): void => {
-  if (maybeAddSkippedTest(name ?? '')) {
-    return;
+globalThis.async_test = (func, name, properties): Test => {
+  // async_test can be called in two ways:
+  // 1. async_test(func, name, properties) - func is a TestFn
+  // 2. async_test(name, properties) - just creates a test with the given name
+  let testName: string;
+  let testFunc: TestFn | undefined;
+
+  if (typeof func === 'string') {
+    // async_test(name, properties) signature
+    testName = func;
+    testFunc = undefined;
+    // name parameter is actually properties in this case
+    properties = name;
+  } else {
+    // async_test(func, name, properties) signature
+    testName = name ?? '';
+    testFunc = func;
   }
 
-  const testCase = new AsyncTest(name ?? '', properties);
+  if (maybeAddSkippedTest(testName)) {
+    // Return a dummy test object for skipped tests
+    return new SkippedTest(testName, 'DISABLED');
+  }
+
+  const testCase = new AsyncTest(testName, properties);
   globalThis.state.subtests.push(testCase);
 
-  testCase.step(func, testCase, testCase);
+  if (testFunc) {
+    testCase.step(testFunc, testCase, testCase);
+  }
+
+  return testCase;
 };
 
 /**

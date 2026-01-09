@@ -537,6 +537,51 @@ jsg::Promise<void> maybeRunAlgorithm(
   return js.resolvedPromise();
 }
 
+jsg::Promise<void> maybeRunAlgorithmAsync(
+    jsg::Lock& js, auto& maybeAlgorithm, auto&& onSuccess, auto&& onFailure, auto&&... args) {
+  // The algorithm is a JavaScript function mapped through jsg::Function.
+  // It is expected to return a Promise mapped via jsg::Promise. If the
+  // function returns synchronously, the jsg::Promise wrapper ensures
+  // that it is properly mapped to a jsg::Promise, but if the Promise
+  // throws synchronously, we have to convert that synchronous throw
+  // into a proper rejected jsg::Promise.
+  KJ_IF_SOME(algorithm, maybeAlgorithm) {
+    // We need two layers of tryCatch here, unfortunately. The inner layer
+    // covers the algorithm implementation itself and is our typical error
+    // handling path. It ensures that if the algorithm throws an exception,
+    // that is properly converted in to a rejected promise that is *then*
+    // handled by the onFailure handler that is passed in. The outer tryCatch
+    // handles the rare and generally unexpected failure of the calls to
+    // .then() itself, which can throw JS exceptions synchronously in certain
+    // rare cases. For those we return a rejected promise but do not call the
+    // onFailure case since such errors are generally indicative of a fatal
+    // condition in the isolate (e.g. out of memory, other fatal exception, etc).
+    return js.tryCatch([&] {
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+        return js
+            .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
+                [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
+            .then(js, ioContext.addFunctor(kj::mv(onSuccess)),
+                ioContext.addFunctor(kj::mv(onFailure)));
+      } else {
+        return js
+            .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
+                [&](jsg::Value&& exception) {
+          return js.rejectedPromise<void>(kj::mv(exception));
+        }).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+      }
+    }, [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+  }
+
+  // If the algorithm does not exist, we handle it as a success but ensure
+  // it runs asynchronously by scheduling via a resolved promise.
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    return js.resolvedPromise().then(js, ioContext.addFunctor(kj::mv(onSuccess)));
+  } else {
+    return js.resolvedPromise().then(js, kj::mv(onSuccess));
+  }
+}
+
 int getHighWaterMark(
     const UnderlyingSource& underlyingSource, const StreamQueuingStrategy& queuingStrategy) {
   bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
@@ -871,6 +916,12 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(!flags.started && !flags.starting);
   flags.starting = true;
 
+  // Per the streams spec, the size function should be called with `undefined` as `this`,
+  // not as a method on the strategy object.
+  KJ_IF_SOME(sizeFunc, algorithms.size) {
+    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.v8Undefined()));
+  }
+
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     flags.started = true;
     flags.starting = false;
@@ -1130,12 +1181,24 @@ template <typename Self>
 WritableImpl<Self>::WritableImpl(
     jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
     : owner(owner.addWeakRef()),
-      signal(kj::mv(abortSignal)) {}
+      signal(kj::mv(abortSignal)) {
+  flags.pedanticWpt = FeatureFlags::get(js).getPedanticWpt();
+}
 
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::abort(
     jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason) {
-  signal->triggerAbort(js, jsg::JsValue(reason));
+  // Per the spec, the signal.reason should be a DOMException with name 'AbortError'
+  // when no reason is provided, but the stored error should remain as the original reason.
+  auto signalReason = [&]() -> jsg::JsValue {
+    if (reason->IsUndefined() && FeatureFlags::get(js).getPedanticWpt()) {
+      auto ex = js.domException(
+          kj::str("AbortError"), kj::str("This writable stream has been aborted."), kj::none);
+      return jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+    }
+    return jsg::JsValue(reason);
+  }();
+  signal->triggerAbort(js, signalReason);
 
   // We have to check this again after the AbortSignal is triggered.
   if (state.template is<StreamStates::Closed>() || state.template is<StreamStates::Errored>()) {
@@ -1200,7 +1263,17 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
             finishInFlightClose(js, kj::mv(self), reason.getHandle(js));
           });
 
-      maybeRunAlgorithm(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+      // Per the spec, the close algorithm should always run asynchronously, even if
+      // there's no user-provided close handler. This ensures that releaseLock() can
+      // reject the closed promise before the close completes.
+      // The original maybeRunAlgorithm would call the onSuccess continuation
+      // synchronously if algorithms.close is not specified. maybeRunAlgorithmAsync
+      // always defers to a microtask.
+      if (FeatureFlags::get(js).getPedanticWpt()) {
+        maybeRunAlgorithmAsync(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+      } else {
+        maybeRunAlgorithm(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+      }
     }
     return;
   }
@@ -1434,6 +1507,11 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
   algorithms.close = kj::mv(underlyingSink.close);
   algorithms.abort = kj::mv(underlyingSink.abort);
   algorithms.size = kj::mv(queuingStrategy.size);
+  // Per the streams spec, the size function should be called with `undefined` as `this`,
+  // not as a method on the strategy object.
+  KJ_IF_SOME(sizeFunc, algorithms.size) {
+    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.v8Undefined()));
+  }
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
@@ -1467,7 +1545,7 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
         dealWithRejection(js, kj::mv(self), handle);
       });
 
-  flags.backpressure = getDesiredSize() < 0;
+  flags.backpressure = getDesiredSize() <= 0;
 
   maybeRunAlgorithm(js, startAlgorithm, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
@@ -1489,7 +1567,7 @@ template <typename Self>
 void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   KJ_ASSERT(isWritable());
   KJ_ASSERT(!isCloseQueuedOrInFlight());
-  bool bp = getDesiredSize() < 0;
+  bool bp = getDesiredSize() <= 0;
 
   if (bp != flags.backpressure) {
     flags.backpressure = bp;
@@ -3234,7 +3312,11 @@ void WritableStreamDefaultController::error(
   impl.error(js, JSG_THIS, reason.orDefault(js.undefined()));
 }
 
-ssize_t WritableStreamDefaultController::getDesiredSize() {
+kj::Maybe<ssize_t> WritableStreamDefaultController::getDesiredSize() {
+  // Per the spec, desiredSize should be null when the stream is erroring.
+  if (impl.flags.pedanticWpt && isErroring()) {
+    return kj::none;
+  }
   return impl.getDesiredSize();
 }
 
@@ -3341,6 +3423,10 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
           js, js.v8TypeError("This WritableStream has been closed."_kj), markAsHandled);
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      if (FeatureFlags::get(js).getPedanticWpt()) {
+        return rejectedMaybeHandledPromise<void>(
+            js, js.v8TypeError("This WritableStream has been errored."_kj), markAsHandled);
+      }
       return rejectedMaybeHandledPromise<void>(js, errored.getHandle(js), markAsHandled);
     }
     KJ_CASE_ONEOF(controller, Controller) {
@@ -3389,7 +3475,7 @@ kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
       return kj::none;
     }
     KJ_CASE_ONEOF(controller, Controller) {
-      return controller->getDesiredSize();
+      return controller->getDesiredSize().map([](ssize_t size) -> int { return size; });
     }
   }
   KJ_UNREACHABLE;
@@ -3400,6 +3486,10 @@ kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroring(jsg::Lock
     return controller->isErroring(js);
   }
   return kj::none;
+}
+
+bool WritableStreamDefaultController::isErroring() const {
+  return impl.state.is<StreamStates::Erroring>();
 }
 
 kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroredOrErroring(jsg::Lock& js) {
@@ -3476,6 +3566,14 @@ void WritableStreamJsController::setup(jsg::Lock& js,
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
+
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // Per the spec, the type property for WritableStream's underlying sink must be undefined.
+    // If it's anything else, throw a RangeError.
+    JSG_REQUIRE(underlyingSink.type == kj::none, RangeError,
+        "Invalid underlying sink type. Only undefined is valid.");
+  }
+
   // We account for the memory usage of the WritableStreamDefaultController and AbortSignal together
   // because their lifetimes are identical and memory accounting itself has a memory overhead.
   state = js.allocAccounted<WritableStreamDefaultController>(

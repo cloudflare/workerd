@@ -1,4 +1,5 @@
-import { strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, rejects, throws } from 'node:assert';
+import { mock } from 'node:test';
 
 const enc = new TextEncoder();
 
@@ -261,13 +262,7 @@ export const readAllTextFailedPull = {
       },
     });
     const response = new Response(rs);
-    const promise = response.text();
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(response.text(), { message: 'boom' });
   },
 };
 
@@ -280,13 +275,7 @@ export const readAllTextFailedStart = {
       },
     });
     const response = new Response(rs);
-    const promise = response.text();
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(response.text(), { message: 'boom' });
   },
 };
 
@@ -302,12 +291,7 @@ export const readAllTextFailed = {
     ok(!rs.locked);
     const promise = response.text();
     ok(rs.locked);
-    try {
-      await promise;
-      throw new Error('error was expected');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
-    }
+    await rejects(promise, { message: 'boom' });
   },
 };
 
@@ -350,12 +334,7 @@ export const tsCancel = {
           throw new Error('boomy');
         },
       });
-      try {
-        await writable.abort('boom');
-        throw new Error('expected to throw');
-      } catch (err) {
-        strictEqual(err.message, 'boomy');
-      }
+      await rejects(writable.abort('boom'), { message: 'boomy' });
     }
   },
 };
@@ -442,14 +421,12 @@ export const readableStreamFromThrowingAsyncGen = {
     }
     const rs = ReadableStream.from(gen());
     const chunks = [];
-    try {
+    async function consumeStream() {
       for await (const chunk of rs) {
         chunks.push(chunk);
       }
-      throw new Error('should have failed');
-    } catch (err) {
-      strictEqual(err.message, 'boom');
     }
+    await rejects(consumeStream, { message: 'boom' });
     deepStrictEqual(chunks, ['hello']);
   },
 };
@@ -500,8 +477,550 @@ export const finalReadOnInternalStreamReturnsBuffer = {
   },
 };
 
+// Test that canceling a stream rejects body consume function
+export const cancelStreamRejectsBodyConsume = {
+  async test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+
+    stream.cancel(new Error('a good reason'));
+
+    await rejects(response.text(), TypeError);
+  },
+};
+
+// Test that canceling a reader resolves closed promise
+export const cancelReaderResolvesClosedPromise = {
+  async test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+    const reader = stream.getReader();
+
+    reader.cancel();
+    const closed = await reader.closed;
+    strictEqual(typeof closed, 'undefined');
+    reader.releaseLock();
+
+    await rejects(response.text(), TypeError);
+  },
+};
+
+// Test that getReader with bad mode throws
+export const getReaderBadModeThrows = {
+  test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+
+    throws(() => stream.getReader({ mode: 'nope' }), TypeError);
+  },
+};
+
+// Test that stream is locked after getReader() called
+export const streamLockedAfterGetReader = {
+  test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+
+    const reader = stream.getReader();
+
+    ok(stream.locked);
+
+    throws(() => stream.getReader(), TypeError);
+
+    reader.releaseLock();
+    ok(!stream.locked);
+    reader.releaseLock(); // Second time should be a no-op
+  },
+};
+
+// Test BYOB reader constraints
+export const byobReaderConstraints = {
+  async test() {
+    const response = new Response('foo bar');
+    const stream = response.body;
+    const reader = stream.getReader({ mode: 'byob' });
+    // Start a read - this will consume part of the stream
+    reader.read(new Uint8Array(32)).catch(() => {}); // Ignore the result
+
+    // We use rejects() with async wrapper instead of throws() because the error
+    // is thrown synchronously without streams_enable_constructors but returned as
+    // a rejected promise when that flag is enabled. The async wrapper handles both.
+
+    // Cannot BYOB with a zero-length buffer
+    await rejects(async () => reader.read(new Uint8Array(0)), TypeError);
+
+    // Cannot BYOB an ArrayBuffer, only an ArrayBufferView
+    await rejects(async () => reader.read(new ArrayBuffer(32)), TypeError);
+
+    // Cannot use BYOB reader as a non-BYOB reader
+    await rejects(async () => reader.read(), TypeError);
+  },
+};
+
+// Test cancel error type propagation
+export const cancelErrorTypePropagation = {
+  async test() {
+    class ExampleError extends Error {
+      constructor() {
+        super('foo bar');
+        this.name = 'ExampleError';
+      }
+    }
+
+    const cancelErrorTests = [
+      {
+        cancelWith: new Error('test'),
+        expectError: 'Error: test',
+      },
+      {
+        cancelWith: 'test',
+        expectError: 'Error: test',
+      },
+      {
+        cancelWith: 'jsg.Error: test',
+        expectError: 'Error: jsg.Error: test',
+      },
+      {
+        cancelWith: new TypeError('Problems!'),
+        expectError: 'TypeError: Problems!',
+        errorType: TypeError,
+      },
+      {
+        cancelWith: new RangeError('Problems!'),
+        expectError: 'RangeError: Problems!',
+        errorType: RangeError,
+      },
+      {
+        cancelWith: new SyntaxError('The semicolons are bad'),
+        expectError: 'SyntaxError: The semicolons are bad',
+        errorType: SyntaxError,
+      },
+      {
+        cancelWith: new ReferenceError("Didn't find it"),
+        expectError: "ReferenceError: Didn't find it",
+        errorType: ReferenceError,
+      },
+      {
+        cancelWith: undefined,
+        expectError: 'Error: Stream was cancelled.',
+      },
+      {
+        cancelWith: new ExampleError(),
+        expectError: 'Error: ExampleError: foo bar',
+        errorType: Error,
+      },
+    ];
+
+    for (const testCase of cancelErrorTests) {
+      const ts = new IdentityTransformStream();
+
+      const writer = ts.writable.getWriter();
+      const reader = ts.readable.getReader();
+      const writePromise = writer.write(new TextEncoder().encode('a'));
+      const writerActualClosed = writer.close();
+      await reader.cancel(testCase.cancelWith);
+
+      for (const promise of [writePromise, writerActualClosed]) {
+        await rejects(promise, (e) => {
+          strictEqual(String(e), testCase.expectError);
+          if (testCase.errorType) {
+            ok(e instanceof testCase.errorType);
+          }
+          return true;
+        });
+      }
+    }
+  },
+};
+
+// Test IdentityTransformStream write before read
+export const identityTransformWriteBeforeRead = {
+  async test() {
+    const MAX_RW = 10;
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    const writePromises = [];
+    for (let i = 0; i < MAX_RW; i++) {
+      writePromises.push(writer.write(new Uint8Array([i])));
+    }
+
+    const chunks = [];
+    for (let i = 0; i < MAX_RW; i++) {
+      chunks.push(await reader.read());
+    }
+
+    await Promise.all(writePromises);
+
+    for (let i = 0; i < chunks.length; i++) {
+      deepStrictEqual([...chunks[i].value], [i]);
+      strictEqual(chunks[i].done, false);
+    }
+
+    const writeClosePromise = writer.close();
+    const chunk = await reader.read();
+    await writeClosePromise;
+
+    strictEqual(chunk.done, true);
+
+    await writer.closed;
+    await reader.closed;
+  },
+};
+
+// Test IdentityTransformStream read before write
+export const identityTransformReadBeforeWrite = {
+  async test() {
+    const MAX_RW = 10;
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    // IdentityTransformStream only supports one pending read at a time,
+    // so we test read-before-write by starting each read before its write
+    const chunks = [];
+    for (let i = 0; i < MAX_RW; i++) {
+      const readPromise = reader.read();
+      await writer.write(new Uint8Array([i]));
+      chunks.push(await readPromise);
+    }
+
+    for (let i = 0; i < chunks.length; i++) {
+      deepStrictEqual([...chunks[i].value], [i]);
+      strictEqual(chunks[i].done, false);
+    }
+
+    const readClosePromise = reader.read();
+    await writer.close();
+    const chunk = await readClosePromise;
+
+    strictEqual(chunk.done, true);
+
+    await writer.closed;
+    await reader.closed;
+  },
+};
+
+// Test closed promise under lock release
+export const closedPromiseUnderLockRelease = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    const writerClosed = writer.closed;
+    const readerClosed = reader.closed;
+
+    writer.releaseLock();
+
+    await rejects(writerClosed, TypeError);
+
+    reader.releaseLock();
+
+    await rejects(readerClosed, TypeError);
+  },
+};
+
+// Test closed promise under writer abort
+export const closedPromiseUnderWriterAbort = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    const writerClosed = writer.closed;
+    const readerClosed = reader.closed;
+
+    const readPromise = reader.read();
+    await writer.abort(new Error('Some arbitrary, capricious reason.'));
+
+    await rejects(writerClosed, Error);
+    await rejects(readPromise, Error);
+    await rejects(readerClosed, Error);
+  },
+};
+
+// Test FixedLengthStream constructor preconditions
+export const fixedLengthStreamPreconditions = {
+  test() {
+    // Can construct with negative zero
+    new FixedLengthStream(-0.0);
+
+    // Can construct with fraction (coerced to 0)
+    new FixedLengthStream(0.00001);
+
+    // Can construct with MAX_SAFE_INTEGER
+    new FixedLengthStream(Number.MAX_SAFE_INTEGER);
+
+    // Cannot construct with unsafe integer
+    throws(() => new FixedLengthStream(Number.MAX_SAFE_INTEGER + 1), TypeError);
+
+    // Cannot construct with negative integer
+    throws(() => new FixedLengthStream(-1), TypeError);
+  },
+};
+
+// Test non-standard readAtLeast() extension with default reader (should throw)
+export const readAtLeastDefaultReaderThrows = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull(c) {
+        c.enqueue(enc.encode('hello'));
+        c.close();
+      },
+    });
+
+    const reader = rs.getReader();
+    throws(() => reader.readAtLeast(1), TypeError);
+    reader.releaseLock();
+
+    // Consume the stream to clean up
+    for await (const _ of rs) {
+    }
+  },
+};
+
+// Test non-standard readAtLeast() extension with BYOB reader
+// Note: The original ew-test expected value=undefined on done, which was the legacy
+// behavior of internal streams. With `internal_stream_byob_return_view` compat flag
+// (enabled since 2024-05-13), the spec-compliant behavior returns an empty view.
+export const readAtLeastByobReader = {
+  async test(ctrl, env) {
+    // Use service binding to get chunked response
+    const response = await env.subrequest.fetch('http://test/chunked');
+    const reader = response.body.getReader({ mode: 'byob' });
+
+    // First readAtLeast: request min 4 bytes
+    // Server sends: 'foo' (3) + 'bar' (3) = 6 bytes, first chunk 'foo' only 3 bytes
+    // so readAtLeast(4) should wait for more data
+    let result = await reader.readAtLeast(4, new Uint8Array(20));
+    let value = new TextDecoder().decode(result.value);
+    strictEqual(result.done, false);
+    strictEqual(value.length, 6);
+    strictEqual(value, 'foobar');
+
+    // Regular read
+    result = await reader.read(new Uint8Array(20));
+    value = new TextDecoder().decode(result.value);
+    strictEqual(value.length, 1);
+    strictEqual(value, 'b');
+    strictEqual(result.done, false);
+
+    // Second readAtLeast: request min 4 bytes, only 'az' (2 bytes) remain
+    // Server sends: 'a' (1) + 'z' (1) = 2 bytes, then closes
+    result = await reader.readAtLeast(4, new Uint8Array(20));
+    value = new TextDecoder().decode(result.value);
+    strictEqual(value.length, 2);
+    strictEqual(value, 'az');
+    strictEqual(result.done, false);
+
+    // Final read should be done - spec requires empty view, not undefined
+    result = await reader.readAtLeast(4, new Uint8Array(20));
+    strictEqual(result.done, true);
+    ok(result.value instanceof Uint8Array);
+    strictEqual(result.value.byteLength, 0);
+  },
+};
+
+export const writeSubarray = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+
+    const u8 = new Uint8Array([1, 2, 3, 4]);
+
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+
+    writer.write(u8.subarray(1, 3));
+    writer.close();
+
+    const { value } = await reader.read();
+
+    strictEqual(value.length, 2);
+    strictEqual(value[0], u8[1]);
+    strictEqual(value[1], u8[2]);
+  },
+};
+
+export const writableStreamWriterConstructor = {
+  test() {
+    const t = new IdentityTransformStream();
+    new WritableStreamDefaultWriter(t.writable);
+  },
+};
+
+export const readableStreamDefaultReaderConstructor = {
+  test() {
+    const t = new IdentityTransformStream();
+    new ReadableStreamDefaultReader(t.readable);
+  },
+};
+
+export const readableStreamByobReaderConstructor = {
+  test() {
+    const t = new IdentityTransformStream();
+    new ReadableStreamBYOBReader(t.readable);
+  },
+};
+
+export const byobReaderDetachesBuffer = {
+  async test() {
+    const ts = new IdentityTransformStream();
+    const view = new Uint8Array(10);
+    const buffer = view.buffer;
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader({ mode: 'byob' });
+    strictEqual(view.byteLength, 10);
+    strictEqual(view.buffer.byteLength, 10);
+    const res = await Promise.all([
+      writer.write(new Uint8Array(10)),
+      reader.read(view),
+    ]);
+
+    strictEqual(view.byteLength, 0);
+    strictEqual(view.buffer.byteLength, 0);
+
+    ok(res[1].value.buffer instanceof ArrayBuffer);
+    ok(res[1].value.buffer !== buffer);
+
+    await rejects(async () => reader.read(view), TypeError);
+
+    // Using a non-detachable ArrayBuffer must fail with a rejection
+    const memory = new WebAssembly.Memory({
+      initial: 10,
+      maximum: 10,
+      shared: true,
+    });
+    await rejects(
+      async () => reader.read(new Uint8Array(memory.buffer)),
+      TypeError
+    );
+
+    await rejects(
+      async () => reader.read(new Uint8Array(new SharedArrayBuffer(10))),
+      TypeError
+    );
+  },
+};
+
+export const captureSyncThrows = {
+  async test() {
+    const { readable } = new IdentityTransformStream();
+    const reader = readable.getReader({ mode: 'byob' });
+    // Without the captureThrowsAsRejections flag enabled, this would throw synchronously.
+    // With the flag enabled, however, the synchronous throw is changed into a promise rejection.
+    await rejects(async () => reader.read(new ArrayBuffer(10)), TypeError);
+  },
+};
+
+export const teeFixedLengthStreamNoHang = {
+  async test() {
+    const ts = new FixedLengthStream(11);
+    const writer = ts.writable.getWriter();
+    writer.write(new TextEncoder().encode('foo bar baz'));
+    writer.close();
+    const [left, right] = ts.readable.tee();
+    const response = new Response(left);
+    strictEqual(await response.text(), 'foo bar baz');
+  },
+};
+
+export const transformStreamReadAllBytes = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const response = new Response(readable);
+    const writer = writable.getWriter();
+
+    const N = 8;
+    const M = 5000;
+
+    const writePromise = (async () => {
+      for (let i = 0; i < N; i++) {
+        const chunk = new Uint8Array(M);
+        chunk.fill(i + 1);
+        await writer.write(chunk);
+      }
+      await writer.close();
+    })();
+
+    const body = new Uint8Array(await response.arrayBuffer());
+    strictEqual(body.byteLength, N * M);
+    for (let i = 0; i < body.length; i++) {
+      strictEqual(body[i], Math.floor(i / M) + 1);
+    }
+    await writePromise;
+  },
+};
+
+export const transformStreamReadAllText = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const response = new Response(readable);
+    const writer = writable.getWriter();
+
+    const lowerCaseA = 97;
+    const N = 8;
+    const M = 5000;
+
+    const writePromise = (async () => {
+      for (let i = 0; i < N; i++) {
+        const chunk = new Uint8Array(M);
+        chunk.fill(i + lowerCaseA);
+        await writer.write(chunk);
+      }
+      await writer.close();
+    })();
+
+    const body = await response.text();
+    strictEqual(body.length, N * M);
+    for (let i = 0; i < N; i++) {
+      const expected = String.fromCharCode(i + lowerCaseA).repeat(M);
+      strictEqual(body.slice(i * M, i * M + M), expected);
+    }
+    await writePromise;
+  },
+};
+
+export const concurrentReadsRejected = {
+  async test() {
+    const { readable } = new IdentityTransformStream();
+    const reader = readable.getReader();
+    const p0 = reader.read();
+    await rejects(reader.read(), TypeError);
+  },
+};
+
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+
+    // Endpoint for chunked data for readAtLeast tests
+    if (url.pathname === '/chunked') {
+      const rs = new ReadableStream({
+        type: 'bytes',
+        async pull(controller) {
+          // Simulate chunked input: foo, bar, b, a, z
+          const chunks = [
+            enc.encode('foo'),
+            enc.encode('bar'),
+            enc.encode('b'),
+            enc.encode('a'),
+            enc.encode('z'),
+          ];
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+            await scheduler.wait(1);
+          }
+          controller.close();
+        },
+      });
+      return new Response(rs);
+    }
+
     strictEqual(request.headers.get('content-length'), '10');
     return new Response(request.body);
   },

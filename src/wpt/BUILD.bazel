@@ -111,6 +111,7 @@ wpt_test(
 wpt_test(
     name = "streams",
     size = "large",
+    compat_flags = ["pedantic_wpt"],
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )
@@ -127,4 +128,38 @@ wpt_test(
     name = "performance-timeline",
     config = "performance-timeline-test.ts",
     wpt_directory = "@wpt//:performance-timeline@module",
+)
+
+wpt_test(
+    name = "websockets",
+    size = "large",
+    config = "websockets-test.ts",
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:websockets@module",
+)
+
+wpt_test(
+    name = "eventsource",
+    size = "large",
+    config = "eventsource-test.ts",
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:eventsource@module",
+)
+
+wpt_test(
+    name = "webidl",
+    config = "webidl-test.ts",
+    wpt_directory = "@wpt//:webidl@module",
 )

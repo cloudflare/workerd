@@ -285,6 +285,9 @@ kj::Date IoContext::IncomingRequest::now() {
 
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!wasDelivered) {
+    KJ_IF_SOME(w, workerTracer) {
+      w->markUnused();
+    }
     // Request was never added to context->incomingRequests in the first place.
     return;
   }
@@ -306,8 +309,6 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
           kj::getStackTrace());
     }
   }
-
-  context->incomingRequests.remove(*this);
 
   KJ_IF_SOME(a, context->actor) {
     a.getMetrics().endRequest();
@@ -335,10 +336,15 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
       context->waitUntilTasks.clear();
     }
   }
+
+  // Remove incoming request after canceling waitUntil tasks, which may have spans attached that
+  // require accessing a timer from the active request.
+  context->incomingRequests.remove(*this);
 }
 
 InputGate::Lock IoContext::getInputLock() {
-  return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context").addRef();
+  return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context")
+      .addRef(getCurrentTraceSpan());
 }
 
 kj::Maybe<kj::Own<InputGate::CriticalSection>> IoContext::getCriticalSection() {
@@ -363,7 +369,8 @@ bool IoContext::hasOutputGate() {
 }
 
 kj::Maybe<kj::Promise<void>> IoContext::waitForOutputLocksIfNecessary() {
-  return actor.map([](Worker::Actor& actor) { return actor.getOutputGate().wait(); });
+  return actor.map(
+      [this](Worker::Actor& actor) { return actor.getOutputGate().wait(getCurrentTraceSpan()); });
 }
 
 kj::Maybe<IoOwn<kj::Promise<void>>> IoContext::waitForOutputLocksIfNecessaryIoOwn() {
@@ -899,6 +906,14 @@ kj::Date IoContext::now(IncomingRequest& incomingRequest) {
 
 kj::Date IoContext::now() {
   return now(getCurrentIncomingRequest());
+}
+
+kj::Rc<ExternalPusherImpl> IoContext::getExternalPusher() {
+  KJ_IF_SOME(ep, externalPusher) {
+    return ep.addRef();
+  } else {
+    return externalPusher.emplace(kj::rc<ExternalPusherImpl>(getByteStreamFactory())).addRef();
+  }
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(

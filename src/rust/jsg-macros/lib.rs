@@ -7,91 +7,54 @@ use syn::Fields;
 use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
-use syn::Type;
 use syn::parse_macro_input;
 use syn::spanned::Spanned;
 
 /// Generates `jsg::Struct` and `jsg::Type` implementations for data structures.
 ///
 /// Only public fields are included in the generated JavaScript object.
-/// Automatically implements `jsg::Type::class_name()` using the struct name,
-/// or a custom name if provided via the `name` parameter.
-///
-/// # Example
-/// ```rust
-/// #[jsg::struct]
-/// pub struct CaaRecord {
-///     pub critical: u8,
-///     pub field: String,
-/// }
-///
-/// #[jsg::struct(name = "CustomName")]
-/// pub struct MyRecord {
-///     pub value: String,
-/// }
-/// ```
-///
-/// # Panics
-/// Panics if applied to non-struct items or structs without named fields.
+/// Use `name` parameter for custom JavaScript class name.
 #[proc_macro_attribute]
 pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let name = &input.ident;
+    let class_name = extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string());
 
-    let class_name = if attr.is_empty() {
-        name.to_string()
-    } else {
-        extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string())
+    let Data::Struct(data) = &input.data else {
+        return error(&input, "#[jsg_struct] can only be applied to structs");
+    };
+    let Fields::Named(fields) = &data.fields else {
+        return error(
+            &input,
+            "#[jsg_struct] only supports structs with named fields",
+        );
     };
 
-    let fields = match &input.data {
-        Data::Struct(data) => match &data.fields {
-            Fields::Named(fields) => &fields.named,
-            _ => {
-                return syn::Error::new_spanned(
-                    &input,
-                    "#[jsg::struct] only supports structs with named fields",
-                )
-                .to_compile_error()
-                .into();
-            }
-        },
-        _ => {
-            return syn::Error::new_spanned(
-                &input,
-                "#[jsg::struct] can only be applied to structs",
-            )
-            .to_compile_error()
-            .into();
+    let field_assignments = fields.named.iter().filter_map(|field| {
+        if !matches!(field.vis, syn::Visibility::Public(_)) {
+            return None;
         }
-    };
-
-    let field_assignments = fields.iter().filter_map(|field| {
-        let is_public = matches!(field.vis, syn::Visibility::Public(_));
-        if is_public {
-            let field_name = &field.ident;
-            let field_name_str = field_name
-                .as_ref()
-                .expect("Named fields must have identifiers")
-                .to_string();
-            Some(quote! {
-                let #field_name = jsg::v8::ToLocalValue::to_local(&self.#field_name, lock);
-                obj.set(lock, #field_name_str, #field_name);
-            })
-        } else {
-            None
-        }
+        let field_name = field.ident.as_ref()?;
+        let field_name_str = field_name.to_string();
+        Some(quote! {
+            let #field_name = jsg::v8::ToLocalValue::to_local(&this.#field_name, lock);
+            obj.set(lock, #field_name_str, #field_name);
+        })
     });
 
-    let expanded = quote! {
+    quote! {
         #input
 
         impl jsg::Type for #name {
-            fn class_name() -> &'static str {
-                #class_name
-            }
+            fn class_name() -> &'static str { #class_name }
 
-            fn wrap<'a, 'b>(&self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                value.is_object()
+            }
+        }
+
+        impl jsg::ToJS for #name {
+            fn to_js<'a, 'b>(self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
@@ -99,6 +62,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 // similar to how C++ JSG optimizes object creation. This would avoid recreating
                 // the object shape on every wrap() call and improve performance.
                 unsafe {
+                    let this = self;
                     let mut obj = lock.new_object();
                     #(#field_assignments)*
                     obj.into()
@@ -106,33 +70,23 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
-        impl jsg::Struct for #name {
+        impl jsg::FromJS for #name {
+            type ResultType = Self;
 
+            fn from_js(_lock: &mut jsg::Lock, _value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                todo!("Struct from_js is not yet supported")
+            }
         }
-    };
 
-    TokenStream::from(expanded)
+        impl jsg::Struct for #name {}
+    }
+    .into()
 }
 
 /// Generates FFI callback for JSG methods.
 ///
-/// Creates a `{method_name}_callback` extern "C" function that bridges JavaScript and Rust.
-/// If no name is provided, automatically converts `snake_case` to `camelCase`.
-///
-/// # Example
-/// ```rust
-/// // With explicit name
-/// #[jsg::method(name = "parseRecord")]
-/// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
-///     // implementation
-/// }
-///
-/// // Without name - automatically becomes "parseRecord"
-/// #[jsg::method]
-/// pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
-///     // implementation
-/// }
-/// ```
+/// Parameters and return values are handled via `jsg::FromJS`.
+/// See `jsg/wrappable.rs` for supported types.
 #[proc_macro_attribute]
 pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
@@ -140,169 +94,126 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fn_vis = &input_fn.vis;
     let fn_sig = &input_fn.sig;
     let fn_block = &input_fn.block;
-
     let callback_name = syn::Ident::new(&format!("{fn_name}_callback"), fn_name.span());
 
     let params: Vec<_> = fn_sig
         .inputs
         .iter()
-        .filter_map(|arg| {
-            if let FnArg::Typed(pat_type) = arg {
-                Some((&pat_type.pat, &pat_type.ty))
-            } else {
-                None
-            }
+        .filter_map(|arg| match arg {
+            FnArg::Typed(pat_type) => Some(&pat_type.ty),
+            FnArg::Receiver(_) => None,
         })
         .collect();
 
-    let arg_unwraps: Vec<_> = params
+    let (unwraps, arg_exprs): (Vec<_>, Vec<_>) = params
         .iter()
         .enumerate()
-        .map(|(i, (_pat, ty))| {
-            let arg_name = syn::Ident::new(&format!("arg{i}"), fn_name.span());
-            let unwrap_code = generate_unwrap_code(&arg_name, ty, i);
-            (arg_name, unwrap_code)
-        })
-        .collect();
-
-    let unwrap_statements = arg_unwraps
-        .iter()
-        .map(|(_arg_name, unwrap_code)| unwrap_code);
-
-    let arg_refs: Vec<_> = params
-        .iter()
-        .zip(arg_unwraps.iter())
-        .map(|((_, ty), (arg_name, _))| {
-            if is_str_reference(ty) {
-                quote! { &#arg_name }
+        .map(|(i, ty)| {
+            let arg = syn::Ident::new(&format!("arg{i}"), fn_name.span());
+            let unwrap = quote! {
+                let #arg = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#i)) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        lock.throw_exception(&err);
+                        return;
+                    }
+                };
+            };
+            // For reference types (like &str), FromJS returns an owned type (String),
+            // so we need to borrow it when passing to the function.
+            let is_ref = matches!(ty.as_ref(), syn::Type::Reference(_));
+            let arg_expr = if is_ref {
+                quote! { &#arg }
             } else {
-                quote! { #arg_name }
-            }
+                quote! { #arg }
+            };
+            (unwrap, arg_expr)
         })
-        .collect();
+        .unzip();
 
-    let expanded = quote! {
-        #fn_vis #fn_sig {
-            #fn_block
+    // Check if return type is Result<T, E>
+    let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
+
+    let result_handling = if is_result {
+        quote! {
+            match result {
+                Ok(value) => args.set_return_value(jsg::ToJS::to_js(value, &mut lock)),
+                Err(err) => lock.throw_exception(&err.into()),
+            }
         }
+    } else {
+        quote! {
+            args.set_return_value(jsg::ToJS::to_js(result, &mut lock));
+        }
+    };
+
+    quote! {
+        #fn_vis #fn_sig { #fn_block }
 
         #[automatically_derived]
         extern "C" fn #callback_name(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
             let mut lock = unsafe { jsg::Lock::from_args(args) };
             let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-            #(#unwrap_statements)*
+            #(#unwraps)*
             let this = args.this();
             let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
-            let result = self_.#fn_name(#(#arg_refs),*);
-            unsafe { jsg::handle_result(&mut lock, &mut args, result) };
-        }
-    };
-
-    TokenStream::from(expanded)
-}
-
-fn is_str_reference(ty: &Type) -> bool {
-    match ty {
-        Type::Reference(type_ref) => {
-            matches!(&*type_ref.elem, Type::Path(type_path) if type_path.path.is_ident("str"))
-        }
-        _ => false,
-    }
-}
-
-fn generate_unwrap_code(
-    arg_name: &syn::Ident,
-    ty: &Type,
-    index: usize,
-) -> quote::__private::TokenStream {
-    if is_str_reference(ty) {
-        quote! {
-            let #arg_name = unsafe {
-                jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), args.get(#index).into_ffi())
-            };
-        }
-    } else {
-        quote! {
-            compile_error!("Unsupported parameter type for jsg::method. Currently only &str is supported.");
+            let result = self_.#fn_name(#(#arg_exprs),*);
+            #result_handling
         }
     }
+    .into()
 }
 
-/// Generates boilerplate code for JSG resources.
+/// Generates boilerplate for JSG resources.
 ///
-/// Works in two contexts:
-/// 1. On a struct - generates `jsg::Type`, Wrapper, and `ResourceTemplate` implementations
-/// 2. On an impl block - scans for `#[jsg::method]` and generates `Resource` trait implementation
-///
-/// Automatically implements `jsg::Type::class_name()` using the struct name,
-/// or a custom name if provided via the `name` parameter.
-///
-/// # Example
-/// ```rust
-/// #[jsg::resource]
-/// pub struct DnsUtil {
-///     pub _private: u8,
-/// }
-///
-/// #[jsg::resource(name = "CustomUtil")]
-/// pub struct MyUtil {
-///     pub _private: u8,
-/// }
-///
-/// #[jsg::resource]
-/// impl DnsUtil {
-///     #[jsg::method(name = "parseRecord")]
-///     pub fn parse_record(&self, data: &str) -> Result<Record, Error> {
-///         // implementation
-///     }
-/// }
-/// ```
-///
-/// # Panics
-/// Panics if applied to items other than structs or impl blocks.
+/// On structs: generates `jsg::Type` and `ResourceTemplate`.
+/// On impl blocks: generates `Resource` trait with method registrations.
 #[proc_macro_attribute]
 pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Try to parse as an impl block first
     if let Ok(impl_block) = syn::parse::<ItemImpl>(item.clone()) {
         return generate_resource_impl(&impl_block);
     }
 
-    // Otherwise, parse as a struct
     let input = parse_macro_input!(item as DeriveInput);
     let name = &input.ident;
-
-    let class_name = if attr.is_empty() {
-        name.to_string()
-    } else {
-        extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string())
-    };
-
+    let class_name = extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string());
     let template_name = syn::Ident::new(&format!("{name}Template"), name.span());
 
-    // Ensure it's a struct
     if !matches!(&input.data, Data::Struct(_)) {
-        return syn::Error::new_spanned(
+        return error(
             &input,
-            "#[jsg::resource] can only be applied to structs or impl blocks",
-        )
-        .to_compile_error()
-        .into();
+            "#[jsg_resource] can only be applied to structs or impl blocks",
+        );
     }
 
-    let expanded = quote! {
+    quote! {
         #input
 
         #[automatically_derived]
         impl jsg::Type for #name {
-            fn class_name() -> &'static str {
-                #class_name
-            }
+            fn class_name() -> &'static str { #class_name }
 
-            fn wrap<'a, 'b>(&self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                value.is_object()
+            }
+        }
+
+        #[automatically_derived]
+        impl jsg::ToJS for #name {
+            fn to_js<'a, 'b>(self, _lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
-                todo!("Implement wrap for jsg::Resource")
+                todo!("Resource to_js is not yet supported")
+            }
+        }
+
+        #[automatically_derived]
+        impl jsg::FromJS for #name {
+            type ResultType = jsg::Ref<Self>;
+
+            fn from_js(_lock: &mut jsg::Lock, _value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                todo!("Resource from_js is not yet supported")
             }
         }
 
@@ -314,104 +225,91 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[automatically_derived]
         impl jsg::ResourceTemplate for #template_name {
             fn new(lock: &mut jsg::Lock) -> Self {
-                Self {
-                    constructor: jsg::create_resource_constructor::<#name>(lock),
-                }
+                Self { constructor: jsg::create_resource_constructor::<#name>(lock) }
             }
 
             fn get_constructor(&self) -> &jsg::v8::Global<jsg::v8::FunctionTemplate> {
                 &self.constructor
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    }
+    .into()
 }
 
 fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
     let self_ty = &impl_block.self_ty;
-    let mut method_registrations = vec![];
 
-    for item in &impl_block.items {
-        if let syn::ImplItem::Fn(method) = item {
-            for attr in &method.attrs {
-                // TODO: More reliable way to detect jsg_method attribute
-                if attr.path().is_ident("jsg")
-                    || (attr.path().segments.len() == 1
-                        && attr.path().segments[0].ident == "jsg_method")
-                {
-                    let rust_method_name = &method.sig.ident;
+    let method_registrations: Vec<_> = impl_block
+        .items
+        .iter()
+        .filter_map(|item| {
+            let syn::ImplItem::Fn(method) = item else {
+                return None;
+            };
+            let attr = method.attrs.iter().find(|a| {
+                a.path().is_ident("jsg")
+                    || a.path()
+                        .segments
+                        .last()
+                        .is_some_and(|s| s.ident == "jsg_method")
+            })?;
 
-                    let attr_str = attr.meta.to_token_stream().to_string();
-                    let js_name = extract_name_attribute(&attr_str)
-                        .unwrap_or_else(|| snake_to_camel_case(&rust_method_name.to_string()));
+            let rust_name = &method.sig.ident;
+            let js_name = extract_name_attribute(&attr.meta.to_token_stream().to_string())
+                .unwrap_or_else(|| snake_to_camel(&rust_name.to_string()));
+            let callback = syn::Ident::new(&format!("{rust_name}_callback"), rust_name.span());
 
-                    let callback_name = syn::Ident::new(
-                        &format!("{rust_method_name}_callback"),
-                        rust_method_name.span(),
-                    );
+            Some(quote! {
+                jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback }
+            })
+        })
+        .collect();
 
-                    method_registrations.push(quote! {
-                        jsg::Member::Method {
-                            name: #js_name,
-                            callback: Self::#callback_name,
-                        }
-                    });
-                }
-            }
-        }
-    }
-
-    // Create a unique drop callback function name based on the type
     let type_name = match &**self_ty {
-        syn::Type::Path(type_path) => type_path
+        syn::Type::Path(p) => p
             .path
             .segments
             .last()
-            .map_or_else(|| "Unknown".to_owned(), |seg| seg.ident.to_string()),
-        _ => "Unknown".to_owned(),
+            .map_or("Unknown", |s| s.ident.to_string().leak()),
+        _ => "Unknown",
     };
-    let drop_callback_name =
-        syn::Ident::new(&format!("drop_{type_name}"), impl_block.self_ty.span());
+    let drop_fn = syn::Ident::new(&format!("drop_{type_name}"), self_ty.span());
 
-    let expanded = quote! {
+    quote! {
         #impl_block
 
         #[allow(non_snake_case)]
         #[automatically_derived]
-        unsafe extern "C" fn #drop_callback_name(isolate: *mut jsg::v8::ffi::Isolate, this: *mut std::os::raw::c_void) {
+        unsafe extern "C" fn #drop_fn(isolate: *mut jsg::v8::ffi::Isolate, this: *mut std::os::raw::c_void) {
             jsg::drop_resource::<#self_ty>(isolate, this);
         }
 
         #[automatically_derived]
         impl jsg::Resource for #self_ty {
-            fn members() -> Vec<jsg::Member>
-            where
-                Self: Sized,
-            {
-                vec![
-                    #(#method_registrations,)*
-                ]
+            fn members() -> Vec<jsg::Member> where Self: Sized {
+                vec![#(#method_registrations,)*]
             }
 
             fn get_drop_fn(&self) -> unsafe extern "C" fn(*mut jsg::v8::ffi::Isolate, *mut std::os::raw::c_void) {
-                #drop_callback_name
+                #drop_fn
             }
 
             fn get_state(&mut self) -> &mut jsg::ResourceState {
                 &mut self._state
             }
         }
-    };
+    }
+    .into()
+}
 
-    TokenStream::from(expanded)
+fn error(tokens: &impl ToTokens, msg: &str) -> TokenStream {
+    syn::Error::new_spanned(tokens, msg)
+        .to_compile_error()
+        .into()
 }
 
 fn extract_name_attribute(attr_str: &str) -> Option<String> {
-    if !attr_str.contains("name") {
-        return None;
-    }
-
+    attr_str.find("name")?.checked_add(0)?;
     attr_str
         .split('=')
         .nth(1)?
@@ -422,22 +320,29 @@ fn extract_name_attribute(attr_str: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn snake_to_camel_case(s: &str) -> String {
+fn snake_to_camel(s: &str) -> String {
     let mut result = String::new();
-    let mut capitalize_next = false;
-
-    for (i, ch) in s.chars().enumerate() {
-        if ch == '_' {
-            capitalize_next = true;
-        } else if i == 0 {
-            result.push(ch);
-        } else if capitalize_next {
-            result.push(ch.to_ascii_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(ch);
+    let mut cap_next = false;
+    for (i, c) in s.chars().enumerate() {
+        match c {
+            '_' => cap_next = true,
+            _ if i == 0 => result.push(c),
+            _ if cap_next => {
+                result.push(c.to_ascii_uppercase());
+                cap_next = false;
+            }
+            _ => result.push(c),
         }
     }
-
     result
+}
+
+/// Checks if a type is `Result<T, E>`.
+fn is_result_type(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        return segment.ident == "Result";
+    }
+    false
 }

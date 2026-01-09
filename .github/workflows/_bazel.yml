@@ -5,7 +5,7 @@ on:
       image:
         type: string
         required: false
-        default: 'ubuntu-22.04'
+        default: 'ubuntu-22.04-16core'
       os_name:
         type: string
         required: false
@@ -88,7 +88,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache${{ inputs.phase}}-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache${{ inputs.phase}}-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
           # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
           # ends up with a larger cache at the end when starting with an available cache entry,
           # resulting in a snowballing cache size and cache download/upload times.
@@ -144,15 +144,13 @@ jobs:
         run: |
           bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util
       - name: Upload test logs
-        if: inputs.upload_test_logs
+        if: always() && inputs.upload_test_logs
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
           path: bazel-testlogs/**/test.xml
       - name: Report disk usage (in MB)
-        # This step takes a few seconds on Mac and Linux but takes 16 minutes on Windows for
-        # some reason. It doesn't seem important enough to wait for 16 minutes on every build.
-        if: runner.os != 'Windows'
+        if: always() && runner.os != 'Windows'
         shell: bash
         run: |
           BAZEL_OUTPUT_BASE=$(bazel info output_base)
@@ -163,6 +161,26 @@ jobs:
           du -ms -t 1 $BAZEL_OUTPUT_BASE
           echo "Workspace usage statistics"
           du -ms -t 1 $GITHUB_WORKSPACE
+      - name: Report disk usage (in MB)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          function Get-SizeMB($path) {
+            if (Test-Path $path) {
+              $size = (Get-ChildItem -Path $path -Recurse -Force -ErrorAction SilentlyContinue |
+                       Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+              [math]::Round($size / 1MB)
+            } else { 0 }
+          }
+          $outputBase = bazel info output_base 2>$null
+          $repoCache = bazel info repository_cache 2>$null
+          echo "Bazel cache usage statistics"
+          echo "$(Get-SizeMB $env:USERPROFILE\bazel-disk-cache)`t$env:USERPROFILE\bazel-disk-cache"
+          echo "$(Get-SizeMB $repoCache)`t$repoCache"
+          echo "Bazel output usage statistics"
+          echo "$(Get-SizeMB $outputBase)`t$outputBase"
+          echo "Workspace usage statistics"
+          echo "$(Get-SizeMB $env:GITHUB_WORKSPACE)`t$env:GITHUB_WORKSPACE"
 
       - name: Upload binary
         if: inputs.upload_binary
@@ -172,7 +190,7 @@ jobs:
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
           if-no-files-found: error
       - name: Upload build statistics
-        if: inputs.run_tests
+        if: always() && inputs.run_tests
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.os_name }}${{ inputs.arch_name }}${{ inputs.suffix }}-bazel-profile
@@ -196,5 +214,6 @@ jobs:
           fi
 
       - name: Bazel shutdown
+        if: always()
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown

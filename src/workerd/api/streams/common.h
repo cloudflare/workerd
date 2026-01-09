@@ -287,12 +287,12 @@ class ReadableStreamSource {
 };
 
 struct PipeToOptions {
-  jsg::Optional<bool> preventClose;
   jsg::Optional<bool> preventAbort;
   jsg::Optional<bool> preventCancel;
+  jsg::Optional<bool> preventClose;
   jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
-  JSG_STRUCT(preventClose, preventAbort, preventCancel, signal);
+  JSG_STRUCT(preventAbort, preventCancel, preventClose, signal);
   JSG_STRUCT_TS_OVERRIDE(StreamPipeOptions);
 
   // An additional, internal only property that is used to indicate
@@ -303,12 +303,19 @@ struct PipeToOptions {
 };
 
 namespace StreamStates {
-struct Closed {};
+struct Closed {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+};
 using Errored = jsg::Value;
 struct Erroring {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "erroring"_kj;
   jsg::Value reason;
 
   Erroring(jsg::Value reason): reason(kj::mv(reason)) {}
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(reason);
+  }
 };
 }  // namespace StreamStates
 
@@ -758,13 +765,18 @@ kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext&
     kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
-struct Unlocked {};
-struct Locked {};
+struct Unlocked {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "unlocked"_kj;
+};
+struct Locked {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "locked"_kj;
+};
 
 // When a reader is locked to a ReadableStream, a ReaderLock instance
 // is used internally to represent the locked state in the ReadableStreamController.
 class ReaderLocked {
  public:
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "reader-locked"_kj;
   ReaderLocked(ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
@@ -817,6 +829,7 @@ class ReaderLocked {
 // is used internally to represent the locked state in the WritableStreamController.
 class WriterLocked {
  public:
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "writer-locked"_kj;
   WriterLocked(WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)

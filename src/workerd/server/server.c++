@@ -1699,10 +1699,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   kj::uint fetchStatus = 0;
 };
 
-class SpanSubmitter final: public kj::Refcounted {
+class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
-  SpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
-  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
+  SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
+  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
     tracing::CompleteSpan span2(
@@ -1718,43 +1718,14 @@ class SpanSubmitter final: public kj::Refcounted {
     workerTracer->addSpan(kj::mv(span2));
   }
 
-  tracing::SpanId makeSpanId() {
-    return tracing::SpanId(predictableSpanId++);
+  tracing::SpanId makeSpanId() override {
+    return tracing::SpanId(nextSpanId++);
   }
-  KJ_DISALLOW_COPY_AND_MOVE(SpanSubmitter);
+  KJ_DISALLOW_COPY_AND_MOVE(SequentialSpanSubmitter);
 
  private:
-  uint64_t predictableSpanId = 0;
+  uint64_t nextSpanId = 1;
   kj::Own<WorkerTracer> workerTracer;
-};
-
-class WorkerTracerSpanObserver: public SpanObserver {
- public:
-  WorkerTracerSpanObserver(
-      kj::Own<SpanSubmitter> spanSubmitter, tracing::SpanId parentSpanId = tracing::SpanId::nullId)
-      : spanSubmitter(kj::mv(spanSubmitter)),
-        spanId(this->spanSubmitter->makeSpanId()),
-        parentSpanId(parentSpanId) {}
-
-  KJ_DISALLOW_COPY_AND_MOVE(WorkerTracerSpanObserver);
-
-  [[nodiscard]] kj::Own<SpanObserver> newChild() override {
-    return kj::refcounted<WorkerTracerSpanObserver>(kj::addRef(*spanSubmitter), spanId);
-  }
-
-  void report(const Span& span) override {
-    spanSubmitter->submitSpan(spanId, parentSpanId, span);
-  }
-
-  // Provide I/O time to the tracing system for user spans.
-  kj::Date getTime() override {
-    return IoContext::current().now();
-  }
-
- private:
-  kj::Own<SpanSubmitter> spanSubmitter;
-  tracing::SpanId spanId;
-  tracing::SpanId parentSpanId;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -2201,8 +2172,8 @@ class Server::WorkerService final: public Service,
 
     KJ_IF_SOME(w, workerTracer) {
       w->setMakeUserRequestSpanFunc([&w = *w]() {
-        return SpanParent(
-            kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(w))));
+        return SpanParent(kj::refcounted<UserSpanObserver>(
+            kj::refcounted<SequentialSpanSubmitter>(kj::addRef(w))));
       });
     }
     kj::Own<RequestObserver> observer =
@@ -2342,6 +2313,11 @@ class Server::WorkerService final: public Service,
           auto reason = 0;
           a->shutdown(reason);
         }
+
+        // Drop the container client reference
+        // If setInactivityTimeout() was called, there's still a timer holding a reference
+        // If not, this may be the last reference and the ContainerClient destructor will run
+        containerClient = kj::none;
       }
 
       void active() override {
@@ -2470,6 +2446,7 @@ class Server::WorkerService final: public Service,
         manager = kj::none;
         tracker->shutdown();
         actor = kj::none;
+        containerClient = kj::none;
 
         KJ_IF_SOME(r, reason) {
           brokenReason = kj::cp(r);
@@ -2540,6 +2517,9 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
+
+      // Reference to the ContainerClient (if container is enabled for this actor)
+      kj::Maybe<kj::Own<ContainerClient>> containerClient;
 
       // If this is a `ForkedPromise<void>`, await the promise. When it has resolved, then
       // `classAndId` will have been replaced with the resolved `ClassAndId` value.
@@ -2712,6 +2692,11 @@ class Server::WorkerService final: public Service,
         }
         // Destroy the last strong Worker::Actor reference.
         actor = kj::none;
+
+        // Drop our reference to the ContainerClient
+        // If setInactivityTimeout() was called, the timer still holds a reference
+        // so the container stays alive until the timeout expires
+        containerClient = kj::none;
       }
 
       void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
@@ -2796,10 +2781,8 @@ class Server::WorkerService final: public Service,
 
         auto loopback = kj::refcounted<Loopback>(*this);
 
-        kj::Maybe<rpc::Container::Client> containerClient = kj::none;
+        kj::Maybe<rpc::Container::Client> container = kj::none;
         KJ_IF_SOME(config, containerOptions) {
-          auto& dockerPathRef = KJ_ASSERT_NONNULL(ns.dockerPath,
-              "dockerPath needs to be defined in order enable containers on this durable object.");
           KJ_ASSERT(config.hasImageName(), "Image name is required");
           auto imageName = config.getImageName();
           kj::String containerId;
@@ -2811,15 +2794,14 @@ class Server::WorkerService final: public Service,
               containerId = kj::str(existingId);
             }
           }
-          containerClient = kj::heap<ContainerClient>(ns.byteStreamFactory, timer, ns.dockerNetwork,
-              kj::str(dockerPathRef),
-              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId),
-              kj::str(imageName), ns.waitUntilTasks);
+
+          container = ns.getContainerClient(
+              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName);
         }
 
         auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
             kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
-            kj::mv(containerClient), *this);
+            kj::mv(container), *this);
         onBrokenTask = monitorOnBroken(*actor);
         this->actor = kj::mv(actor);
       }
@@ -2857,6 +2839,31 @@ class Server::WorkerService final: public Service,
       })->addRef();
     }
 
+    kj::Own<ContainerClient> getContainerClient(
+        kj::StringPtr containerId, kj::StringPtr imageName) {
+      KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
+        return existingClient->addRef();
+      }
+
+      // No existing container in the map, create a new one
+      auto& dockerPathRef = KJ_ASSERT_NONNULL(
+          dockerPath, "dockerPath must be defined to enable containers on this Durable Object.");
+
+      // Remove from the map when the container is destroyed
+      kj::Function<void()> cleanupCallback = [this, containerId = kj::str(containerId)]() {
+        containerClients.erase(containerId);
+      };
+
+      auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
+          kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName), waitUntilTasks,
+          kj::mv(cleanupCallback));
+
+      // Store raw pointer in map (does not own)
+      containerClients.insert(kj::str(containerId), client.get());
+
+      return kj::mv(client);
+    }
+
     void abortAll(kj::Maybe<const kj::Exception&> reason) {
       for (auto& actor: actors) {
         actor.value->abort(reason);
@@ -2885,6 +2892,12 @@ class Server::WorkerService final: public Service,
     // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
     // request comes in, we recreate the Own<Worker::Actor>.
     ActorMap actors;
+
+    // Map of container IDs to ContainerClients (for reconnection support with inactivity timeouts).
+    // The map holds raw pointers (not ownership) - ContainerClients are owned by actors and timers.
+    // When the last reference is dropped, the destructor removes the entry from this map.
+    kj::HashMap<kj::String, ContainerClient*> containerClients;
+
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
     capnp::ByteStreamFactory& byteStreamFactory;
@@ -4228,7 +4241,19 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   // TODO(beta): Factor out FeatureFlags from WorkerBundle.
   auto featureFlags = arena.initRoot<CompatibilityFlags>();
 
-  if (conf.hasCompatibilityDate()) {
+  KJ_IF_SOME(overrideDate, testCompatibilityDateOverride) {
+    // When testCompatibilityDateOverride is set, the config must NOT specify compatibilityDate.
+    if (conf.hasCompatibilityDate()) {
+      errorReporter.addError(kj::str(
+          "Worker specifies compatibilityDate but --compat-date was provided. "
+          "When using --compat-date, workers must not specify compatibilityDate in the config. "
+          "Use compatibilityFlags to enable/disable specific flags if needed."));
+    }
+    // Use FUTURE_FOR_TEST to allow any valid date (including far future like 2999-12-31)
+    // without validation against CODE_VERSION or current date.
+    compileCompatibilityFlags(overrideDate, conf.getCompatibilityFlags(), featureFlags,
+        errorReporter, experimental, CompatibilityDateValidation::FUTURE_FOR_TEST);
+  } else if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
         featureFlags, errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION);
   } else {

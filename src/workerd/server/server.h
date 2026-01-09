@@ -71,11 +71,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   void enableDebugPort(kj::String addr) {
     debugPortOverride = kj::mv(addr);
   }
-  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
-    pythonConfig.packageDiskCacheRoot = kj::mv(dkr);
+  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.packageDiskCacheRoot = kj::mv(dir);
   }
-  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
-    pythonConfig.pyodideDiskCacheRoot = kj::mv(dkr);
+  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.pyodideDiskCacheRoot = kj::mv(dir);
   }
   void setPythonCreateSnapshot() {
     pythonConfig.createSnapshot = true;
@@ -85,6 +85,16 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   }
   void setPythonLoadSnapshot(kj::String snapshot) {
     pythonConfig.loadSnapshotFromDisk = kj::mv(snapshot);
+  }
+  void setPythonSnapshotDirectory(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.snapshotDirectory = kj::mv(dir);
+  }
+
+  // Set the compatibility date to use for all workers. When set, workers in the config must NOT
+  // specify compatibilityDate (an error is reported if they do). This is used for testing to
+  // ensure tests run with both old and new compat dates.
+  void setTestCompatibilityDateOverride(kj::String date) {
+    testCompatibilityDateOverride = kj::mv(date);
   }
 
   // Runs the server using the given config.
@@ -134,6 +144,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     .loadSnapshotFromDisk = kj::none};
 
   bool experimental = false;
+
+  // When set, overrides compatibilityDate for all workers and enforces that workers don't
+  // specify their own compatibilityDate.
+  kj::Maybe<kj::String> testCompatibilityDateOverride;
 
   Worker::LoggingOptions loggingOptions;
 

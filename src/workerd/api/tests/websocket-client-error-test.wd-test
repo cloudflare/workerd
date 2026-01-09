@@ -8,7 +8,6 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
-  compatibilityDate = "2025-04-11",
   modules = [
     (name = "worker", esModule = embed "websocket-client-error-test.js"),
   ],

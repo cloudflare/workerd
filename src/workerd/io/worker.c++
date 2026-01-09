@@ -1689,6 +1689,14 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
         "Failed to initialize node:buffer module");
   }
 
+  // When enable_nodejs_global_timers is enabled, load the module that makes all 6 timer
+  // functions (setTimeout, setInterval, clearTimeout, clearInterval, setImmediate,
+  // clearImmediate) available on globalThis as Node.js-compatible versions from node:timers.
+  if (featureFlags.getEnableNodejsGlobalTimers()) {
+    JSG_REQUIRE_NONNULL(js.resolveInternalModule("node-internal:internal_timers_global_override"),
+        Error, "Failed to initialize node-internal:internal_timers_global_override module");
+  }
+
   return js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES);
 }
 }  // anonymous namespace
@@ -3741,7 +3749,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 }
 
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
-  InputGate::Lock inputLock = co_await impl->inputGate.wait();
+  InputGate::Lock inputLock = co_await impl->inputGate.wait(context.getCurrentTraceSpan());
 
   try {
     bool containerRunning = false;
@@ -3785,7 +3793,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       handler.missingSuperclass = info.missingSuperclass;
 
       impl->classInstance = kj::mv(handler);
-    }, inputLock.addRef());
+    }, inputLock.addRef(context.getCurrentTraceSpan()));
     // We addRef() the inputLock above rather than kj::mv() it so that the lock remains held
     // through the catch block below, if an exception is thrown. This is important since we
     // MUST update `impl->classInstance` to something other than `Initializing` before we

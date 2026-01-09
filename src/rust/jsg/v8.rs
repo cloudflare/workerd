@@ -1,7 +1,9 @@
 use core::ffi::c_void;
+use std::fmt::Display;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+use crate::FromJS;
 use crate::Lock;
 
 #[expect(clippy::missing_safety_doc)]
@@ -17,12 +19,24 @@ pub mod ffi {
         ptr: usize,
     }
 
-    enum ExceptionType {
-        RangeError,
-        ReferenceError,
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum ExceptionType {
+        OperationError,
+        DataError,
+        DataCloneError,
+        InvalidAccessError,
+        InvalidStateError,
+        InvalidCharacterError,
+        NotSupportedError,
         SyntaxError,
+        TimeoutError,
+        TypeMismatchError,
+        AbortError,
+        NotFoundError,
         TypeError,
         Error,
+        RangeError,
+        ReferenceError,
     }
 
     /// Module visibility level, corresponds to `workerd::jsg::ModuleType` from modules.capnp.
@@ -50,10 +64,21 @@ pub mod ffi {
         pub unsafe fn local_to_global(isolate: *mut Isolate, value: Local) -> Global;
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
         pub unsafe fn local_new_string(isolate: *mut Isolate, value: &str) -> Local;
+        pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_new_undefined(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
         pub unsafe fn local_has_value(value: &Local) -> bool;
         pub unsafe fn local_is_string(value: &Local) -> bool;
+        pub unsafe fn local_is_boolean(value: &Local) -> bool;
+        pub unsafe fn local_is_number(value: &Local) -> bool;
+        pub unsafe fn local_is_null(value: &Local) -> bool;
+        pub unsafe fn local_is_undefined(value: &Local) -> bool;
+        pub unsafe fn local_is_null_or_undefined(value: &Local) -> bool;
+        pub unsafe fn local_is_object(value: &Local) -> bool;
+        pub unsafe fn local_is_native_error(value: &Local) -> bool;
+        pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -86,6 +111,8 @@ pub mod ffi {
 
         // Unwrappers
         pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> String;
+        pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
+        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> f64;
 
         // FunctionCallbackInfo
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
@@ -163,12 +190,22 @@ pub mod ffi {
 impl std::fmt::Display for ffi::ExceptionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match *self {
+            Self::OperationError => "OperationError",
+            Self::DataError => "DataError",
+            Self::DataCloneError => "DataCloneError",
+            Self::InvalidAccessError => "InvalidAccessError",
+            Self::InvalidStateError => "InvalidStateError",
+            Self::InvalidCharacterError => "InvalidCharacterError",
+            Self::NotSupportedError => "NotSupportedError",
+            Self::SyntaxError => "SyntaxError",
+            Self::TimeoutError => "TimeoutError",
+            Self::TypeMismatchError => "TypeMismatchError",
+            Self::AbortError => "AbortError",
+            Self::NotFoundError => "NotFoundError",
+            Self::TypeError => "TypeError",
             Self::RangeError => "RangeError",
             Self::ReferenceError => "ReferenceError",
-            Self::SyntaxError => "SyntaxError",
-            Self::TypeError => "TypeError",
-            Self::Error => "Error",
-            _ => unreachable!(),
+            _ => "Error",
         };
         write!(f, "{name}")
     }
@@ -177,6 +214,16 @@ impl std::fmt::Display for ffi::ExceptionType {
 // Marker types for Local<T>
 #[derive(Debug)]
 pub struct Value;
+
+impl Display for Local<'_, Value> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut lock = unsafe { Lock::from_isolate_ptr(self.isolate.as_ffi()) };
+        match String::from_js(&mut lock, self.clone()) {
+            Ok(value) => write!(f, "{value}"),
+            Err(e) => write!(f, "{e:?}"),
+        }
+    }
+}
 #[derive(Debug)]
 pub struct Object;
 pub struct FunctionTemplate;
@@ -200,7 +247,6 @@ impl<T> Drop for Local<'_, T> {
 }
 
 // Common implementations for all Local<'a, T>
-#[expect(clippy::elidable_lifetime_names)]
 impl<'a, T> Local<'a, T> {
     /// Creates a `Local` from an FFI handle.
     ///
@@ -231,8 +277,21 @@ impl<'a, T> Local<'a, T> {
     ///
     /// # Safety
     /// The caller must ensure the returned reference is not used after this `Local` is dropped.
-    pub unsafe fn as_ffi_ref(&self) -> &ffi::Local {
+    pub unsafe fn as_ffi(&self) -> &ffi::Local {
         &self.handle
+    }
+
+    pub fn null(lock: &mut crate::Lock) -> Local<'a, Value> {
+        unsafe { Local::from_ffi(lock.isolate(), ffi::local_new_null(lock.isolate().as_ffi())) }
+    }
+
+    pub fn undefined(lock: &mut crate::Lock) -> Local<'a, Value> {
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::local_new_undefined(lock.isolate().as_ffi()),
+            )
+        }
     }
 
     pub fn has_value(&self) -> bool {
@@ -241,6 +300,51 @@ impl<'a, T> Local<'a, T> {
 
     pub fn is_string(&self) -> bool {
         unsafe { ffi::local_is_string(&self.handle) }
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        unsafe { ffi::local_is_boolean(&self.handle) }
+    }
+
+    pub fn is_number(&self) -> bool {
+        unsafe { ffi::local_is_number(&self.handle) }
+    }
+
+    pub fn is_null(&self) -> bool {
+        unsafe { ffi::local_is_null(&self.handle) }
+    }
+
+    pub fn is_undefined(&self) -> bool {
+        unsafe { ffi::local_is_undefined(&self.handle) }
+    }
+
+    pub fn is_null_or_undefined(&self) -> bool {
+        unsafe { ffi::local_is_null_or_undefined(&self.handle) }
+    }
+
+    /// Returns true if the value is a JavaScript object.
+    ///
+    /// Note: Unlike JavaScript's `typeof` operator which returns "object" for `null`,
+    /// this method returns `false` for `null` values. Use `is_null_or_undefined()`
+    /// to check for nullish values separately.
+    pub fn is_object(&self) -> bool {
+        unsafe { ffi::local_is_object(&self.handle) }
+    }
+
+    /// Returns true if the value is a native JavaScript error.
+    pub fn is_native_error(&self) -> bool {
+        unsafe { ffi::local_is_native_error(&self.handle) }
+    }
+
+    /// Returns the JavaScript type of the underlying value as a string.
+    ///
+    /// Uses V8's native `TypeOf` method which returns the same result as
+    /// JavaScript's `typeof` operator: "undefined", "boolean", "number",
+    /// "bigint", "string", "symbol", "function", or "object".
+    ///
+    /// Note: For `null`, this returns "object" (JavaScript's historical behavior).
+    pub fn type_of(&self) -> String {
+        unsafe { ffi::local_type_of(self.isolate.as_ffi(), &self.handle) }
     }
 
     /// Returns the isolate associated with this local handle.
@@ -453,6 +557,28 @@ impl ToLocalValue for &str {
             Local::from_ffi(
                 lock.isolate(),
                 ffi::local_new_string(lock.isolate().as_ffi(), self),
+            )
+        }
+    }
+}
+
+impl ToLocalValue for bool {
+    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::local_new_boolean(lock.isolate().as_ffi(), *self),
+            )
+        }
+    }
+}
+
+impl ToLocalValue for f64 {
+    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::local_new_number(lock.isolate().as_ffi(), *self),
             )
         }
     }

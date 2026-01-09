@@ -2066,3 +2066,32 @@ export let sendServiceStubOverRpc = {
     }
   },
 };
+
+// Make sure that calls are delivered in e-order, even in the presence of pushed externals.
+export let eOrderTest = {
+  async test(controller, env, ctx) {
+    let abortController = new AbortController();
+    let abortSignal = abortController.signal;
+
+    let readableController;
+    let readableStream = new ReadableStream({
+      start(c) {
+        readableController = c;
+      },
+    });
+
+    let stub = await env.MyService.makeCounter(0);
+
+    let promises = [];
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1, abortSignal));
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1, readableStream));
+    promises.push(stub.increment(1));
+
+    let results = await Promise.all(promises);
+
+    assert.deepEqual(results, [1, 2, 3, 4, 5, 6]);
+  },
+};

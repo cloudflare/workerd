@@ -1,5 +1,11 @@
+use std::pin::Pin;
+
+use jsg::FromJS;
 use jsg::v8;
 use kj_rs::KjOwn;
+
+#[cfg(test)]
+mod tests;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg_test")]
 mod ffi {
@@ -8,222 +14,152 @@ mod ffi {
         include!("workerd/rust/jsg/ffi.h");
 
         type Isolate = jsg::v8::ffi::Isolate;
+        type Local = jsg::v8::ffi::Local;
+    }
+
+    #[derive(Debug)]
+    struct EvalResult {
+        success: bool,
+        value: KjMaybe<Local>,
     }
 
     unsafe extern "C++" {
         include!("workerd/rust/jsg-test/ffi.h");
 
         type TestHarness;
+        type EvalContext;
 
         pub unsafe fn create_test_harness() -> KjOwn<TestHarness>;
-        pub unsafe fn run_in_context(self: &TestHarness, callback: unsafe fn(*mut Isolate));
+        pub unsafe fn run_in_context(
+            self: &TestHarness,
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */, *mut Isolate, Pin<&mut EvalContext>),
+        );
+
+        pub unsafe fn eval(self: &EvalContext, code: &str) -> EvalResult;
+        pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
     }
 }
 
 pub struct Harness(KjOwn<ffi::TestHarness>);
+
+pub struct EvalContext<'a> {
+    inner: &'a ffi::EvalContext,
+    isolate: v8::IsolatePtr,
+}
+
+#[derive(Debug)]
+pub enum EvalError<'a> {
+    UncoercibleResult {
+        value: v8::Local<'a, v8::Value>,
+        message: String,
+    },
+    Exception(v8::Local<'a, v8::Value>),
+    EvalFailed,
+}
+
+impl EvalError<'_> {
+    /// Extracts a `jsg::Error` from an `EvalError::Exception` variant.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is not `EvalError::Exception`, or if the value cannot be converted to a
+    /// `jsg::Error`.
+    pub fn unwrap_jsg_err(&self, lock: &mut jsg::Lock) -> jsg::Error {
+        match self {
+            EvalError::Exception(value) => jsg::Error::from_js(lock, value.clone())
+                .expect("Failed to convert exception to jsg::Error"),
+            _ => panic!("Unexpected error"),
+        }
+    }
+}
+impl EvalContext<'_> {
+    pub fn eval<T>(&self, lock: &mut jsg::Lock, code: &str) -> Result<T, EvalError<'_>>
+    where
+        T: jsg::FromJS<ResultType = T>,
+    {
+        let result = unsafe { self.inner.eval(code) };
+        let opt_local: Option<v8::ffi::Local> = result.value.into();
+
+        if result.success {
+            match opt_local {
+                Some(local) => {
+                    let local = unsafe { v8::Local::from_ffi(self.isolate, local) };
+                    match T::from_js(lock, local.clone()) {
+                        Err(e) => Err(EvalError::UncoercibleResult {
+                            value: local,
+                            message: e.to_string(),
+                        }),
+                        Ok(value) => Ok(value),
+                    }
+                }
+                None => unreachable!(),
+            }
+        } else {
+            match opt_local {
+                Some(local) => {
+                    let value = unsafe { v8::Local::from_ffi(self.isolate, local) };
+                    Err(EvalError::Exception(value))
+                }
+                None => Err(EvalError::EvalFailed),
+            }
+        }
+    }
+
+    pub fn set_global(&self, name: &str, value: v8::Local<v8::Value>) {
+        unsafe { self.inner.set_global(name, value.into_ffi()) }
+    }
+}
 
 impl Harness {
     pub fn new() -> Self {
         Self(unsafe { ffi::create_test_harness() })
     }
 
-    pub fn run_in_context(&self, callback: fn(*mut v8::ffi::Isolate)) {
-        unsafe { self.0.run_in_context(callback) }
+    /// Runs a callback within a V8 context.
+    ///
+    /// The callback is passed through C++ via a data pointer since CXX doesn't support
+    /// closures directly. The monomorphized trampoline function receives the pointer
+    /// and reconstructs the closure.
+    ///
+    /// The callback returns `Result<(), jsg::Error>` to allow use of the `?` operator.
+    /// If an error is returned, the test will panic.
+    pub fn run_in_context<F>(&self, callback: F)
+    where
+        F: FnOnce(&mut jsg::Lock, &mut EvalContext) -> Result<(), jsg::Error>,
+    {
+        #[expect(clippy::needless_pass_by_value)]
+        fn trampoline<F>(
+            data: usize,
+            isolate: *mut v8::ffi::Isolate,
+            context: Pin<&mut ffi::EvalContext>,
+        ) where
+            F: FnOnce(&mut jsg::Lock, &mut EvalContext) -> Result<(), jsg::Error>,
+        {
+            let cb = unsafe { &mut *(data as *mut Option<F>) };
+            if let Some(callback) = cb.take() {
+                let isolate_ptr = unsafe { v8::IsolatePtr::from_ffi(isolate) };
+                let mut eval_context = EvalContext {
+                    inner: &context,
+                    isolate: isolate_ptr,
+                };
+                let mut lock = unsafe { jsg::Lock::from_isolate_ptr(isolate) };
+                if let Err(e) = callback(&mut lock, &mut eval_context) {
+                    panic!("Test failed: {}: {}", e.name, e.message);
+                }
+            }
+        }
+
+        let mut callback = Some(callback);
+        unsafe {
+            self.0
+                .run_in_context(&raw mut callback as usize, trampoline::<F>);
+        }
     }
 }
 
 impl Default for Harness {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use jsg::Error;
-    use jsg::ExceptionType;
-    use jsg::Lock;
-    use jsg::Type;
-    use jsg::v8;
-    use jsg::v8::ToLocalValue;
-    use jsg_macros::jsg_struct;
-
-    #[jsg_struct]
-    struct TestStruct {
-        pub str: String,
-    }
-
-    #[jsg_struct]
-    struct MultiPropertyStruct {
-        pub name: String,
-        pub age: u32,
-        pub active: String,
-    }
-
-    #[jsg_struct]
-    struct NestedStruct {
-        pub inner: String,
-    }
-
-    #[test]
-    fn objects_can_be_wrapped_and_unwrapped() {
-        let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate_ptr(isolate);
-            let instance = TestStruct {
-                str: "test".to_owned(),
-            };
-            let wrapped = instance.wrap(&mut lock);
-            let mut obj: v8::Local<'_, v8::Object> = wrapped.into();
-            assert!(obj.has(&mut lock, "str"));
-            let str_value = obj.get(&mut lock, "str");
-            assert!(str_value.unwrap().is_string());
-            assert!(!obj.has(&mut lock, "test"));
-            let value = "value".to_local(&mut lock);
-            assert!(value.is_string());
-            obj.set(&mut lock, "test", value);
-            assert!(obj.has(&mut lock, "test"));
-        });
-    }
-
-    #[test]
-    fn struct_with_multiple_properties() {
-        let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate_ptr(isolate);
-            let instance = MultiPropertyStruct {
-                name: "Alice".to_owned(),
-                age: 30,
-                active: "true".to_owned(),
-            };
-            let wrapped = instance.wrap(&mut lock);
-            let obj: v8::Local<'_, v8::Object> = wrapped.into();
-
-            assert!(obj.has(&mut lock, "name"));
-            assert!(obj.has(&mut lock, "age"));
-            assert!(obj.has(&mut lock, "active"));
-
-            let name_value = obj.get(&mut lock, "name");
-            assert!(name_value.is_some());
-            assert!(name_value.unwrap().is_string());
-
-            let age_value = obj.get(&mut lock, "age");
-            assert!(age_value.is_some());
-
-            let active_value = obj.get(&mut lock, "active");
-            assert!(active_value.is_some());
-            assert!(active_value.unwrap().is_string());
-        });
-    }
-
-    #[test]
-    fn number_type_conversions() {
-        let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate_ptr(isolate);
-
-            let byte_val: u8 = 42;
-            let byte_local = byte_val.to_local(&mut lock);
-            assert!(byte_local.has_value());
-
-            let int_val: u32 = 12345;
-            let int_local = int_val.to_local(&mut lock);
-            assert!(int_local.has_value());
-        });
-    }
-
-    #[test]
-    fn empty_object_and_property_setting() {
-        let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate_ptr(isolate);
-            let mut obj = lock.new_object();
-
-            assert!(!obj.has(&mut lock, "nonexistent"));
-            assert!(obj.get(&mut lock, "nonexistent").is_none());
-
-            let str_value = "hello".to_local(&mut lock);
-            obj.set(&mut lock, "key1", str_value);
-            assert!(obj.has(&mut lock, "key1"));
-
-            let num_value = 100u32.to_local(&mut lock);
-            obj.set(&mut lock, "key2", num_value);
-            assert!(obj.has(&mut lock, "key2"));
-
-            let val1 = obj.get(&mut lock, "key1");
-            assert!(val1.is_some());
-            assert!(val1.unwrap().is_string());
-
-            let val2 = obj.get(&mut lock, "key2");
-            assert!(val2.is_some());
-        });
-    }
-
-    #[test]
-    fn global_handle_conversion() {
-        let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate_ptr(isolate);
-
-            let local_str = "global test".to_local(&mut lock);
-            assert!(local_str.has_value());
-
-            let global_str = local_str.to_global(&mut lock);
-            let local_again = global_str.as_local(&mut lock);
-            assert!(local_again.has_value());
-        });
-    }
-
-    #[test]
-    fn nested_object_properties() {
-        let harness = crate::Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = Lock::from_isolate_ptr(isolate);
-            let mut outer = lock.new_object();
-
-            let inner_instance = NestedStruct {
-                inner: "nested value".to_owned(),
-            };
-            let inner_wrapped = inner_instance.wrap(&mut lock);
-            outer.set(&mut lock, "nested", inner_wrapped);
-
-            assert!(outer.has(&mut lock, "nested"));
-            let nested_val = outer.get(&mut lock, "nested");
-            assert!(nested_val.is_some());
-
-            let nested_obj: v8::Local<'_, v8::Object> = nested_val.unwrap().into();
-            assert!(nested_obj.has(&mut lock, "inner"));
-
-            let inner_val = nested_obj.get(&mut lock, "inner");
-            assert!(inner_val.is_some());
-            assert!(inner_val.unwrap().is_string());
-        });
-    }
-
-    #[test]
-    fn error_creation_and_display() {
-        let error = Error::default();
-        assert_eq!(error.name.to_string(), "Error");
-        assert_eq!(error.message, "An unknown error occurred");
-
-        let type_error = Error::new(ExceptionType::TypeError, "Invalid type".to_owned());
-        assert_eq!(type_error.name.to_string(), "TypeError");
-        assert_eq!(type_error.message, "Invalid type");
-
-        // Test Display for all exception types
-        assert_eq!(format!("{}", ExceptionType::RangeError), "RangeError");
-        assert_eq!(
-            format!("{}", ExceptionType::ReferenceError),
-            "ReferenceError"
-        );
-        assert_eq!(format!("{}", ExceptionType::SyntaxError), "SyntaxError");
-    }
-
-    #[test]
-    fn error_from_parse_int_error() {
-        let parse_result: Result<i32, _> = "not_a_number".parse();
-        let error: Error = parse_result.unwrap_err().into();
-        assert_eq!(error.name.to_string(), "TypeError");
-        assert!(error.message.contains("Failed to parse integer"));
     }
 }
