@@ -216,7 +216,7 @@ A bubbleprof-style HTML visualization tool is available at:
 | 5 | **Breakdown** | Treemap showing time allocation by resource type (sync vs async) |
 | 6 | **Latency** | Histogram of async wait times by resource type |
 | 7 | **Gaps** | Highlights idle periods and sync activity bursts; hover over gaps to see waiting operations |
-| 8 | **Replay** | Animated playback of request execution |
+| 8 | **Replay** | Animated playback of request execution; click nodes to select |
 | 9 | **Heatmap** | Activity intensity over time by resource type |
 
 ### Analysis Features
