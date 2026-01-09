@@ -2666,7 +2666,7 @@ static void udfCallback(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
 
   // Convert arguments to UdfArgValue array (non-owning pointers to SQLite-managed memory)
   auto args = kj::heapArray<SqliteDatabase::UdfArgValue>(argc);
-  for (int i = 0; i < argc; i++) {
+  for (auto i: kj::zeroTo(argc)) {
     args[i] = sqliteValueToUdfArgValue(argv[i]);
   }
 
@@ -2739,7 +2739,7 @@ static void aggregateStepCallback(sqlite3_context* ctx, int argc, sqlite3_value*
 
   // Convert arguments to UdfArgValue array
   auto args = kj::heapArray<SqliteDatabase::UdfArgValue>(argc);
-  for (int i = 0; i < argc; i++) {
+  for (auto i: kj::zeroTo(argc)) {
     args[i] = sqliteValueToUdfArgValue(argv[i]);
   }
 

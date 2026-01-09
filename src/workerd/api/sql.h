@@ -75,7 +75,12 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
     JSG_NESTED_TYPE(Statement);
 
     JSG_TS_OVERRIDE({
-      exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>
+      exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>;
+      createFunction(name: string, callback: (...args: SqlStorageValue[]) => SqlStorageValue): void;
+      createFunction(name: string, options: {
+        step: (state: SqlStorageValue | undefined, ...args: SqlStorageValue[]) => SqlStorageValue;
+        final: (state: SqlStorageValue | undefined) => SqlStorageValue;
+      }): void;
     });
   }
 

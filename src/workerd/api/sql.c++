@@ -256,6 +256,11 @@ void SqlStorage::createScalarFunction(
   registeredScalarFunctions.insert(jsFuncPtr->name.asPtr(), kj::mv(jsFunc));
 
   auto& db = getDb(js);
+  // The lambda captures jsFuncPtr (a raw pointer) by value. This is safe because:
+  // 1. The RegisteredScalarFunction is owned by registeredScalarFunctions HashMap
+  // 2. The HashMap entry lives as long as this SqlStorage object
+  // 3. If the function is replaced, SQLite atomically replaces the callback, so the old
+  //    lambda (with its now-invalid pointer) will never be called
   db.registerScalarFunction(jsFuncPtr->name.asPtr(), -1,  // -1 = variadic
       [jsFuncPtr](
           kj::ArrayPtr<const SqliteDatabase::UdfArgValue> args) -> SqliteDatabase::UdfResultValue {
@@ -293,6 +298,12 @@ void SqlStorage::createAggregateFunction(
   registeredAggregateFunctions.insert(jsFuncPtr->name.asPtr(), kj::mv(jsFunc));
 
   auto& db = getDb(js);
+
+  // The lambdas capture jsFuncPtr (a raw pointer) by value. This is safe because:
+  // 1. The RegisteredAggregateFunction is owned by registeredAggregateFunctions HashMap
+  // 2. The HashMap entry lives as long as this SqlStorage object
+  // 3. If the function is replaced, SQLite atomically replaces the callbacks, so the old
+  //    lambdas (with their now-invalid pointers) will never be called
 
   // Step callback
   auto stepCb =
