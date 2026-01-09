@@ -2647,6 +2647,7 @@ class Lock {
 
   void setNodeJsCompatEnabled();
   void setNodeJsProcessV2Enabled();
+  void setRequireReturnsDefaultExportEnabled();
   void setThrowOnUnrecognizedImportAssertion();
   bool getThrowOnUnrecognizedImportAssertion() const;
   void setToStringTag();

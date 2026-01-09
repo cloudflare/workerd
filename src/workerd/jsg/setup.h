@@ -155,6 +155,10 @@ class IsolateBase {
     nodeJsProcessV2Enabled = enabled;
   }
 
+  inline void setRequireReturnsDefaultExportEnabled(kj::Badge<Lock>, bool enabled) {
+    requireReturnsDefaultExportEnabled = enabled;
+  }
+
   inline bool areWarningsLogged() const {
     return maybeLogger != kj::none;
   }
@@ -168,6 +172,10 @@ class IsolateBase {
 
   inline bool isNodeJsProcessV2Enabled() const {
     return nodeJsProcessV2Enabled;
+  }
+
+  inline bool isRequireReturnsDefaultExportEnabled() const {
+    return requireReturnsDefaultExportEnabled;
   }
 
   inline bool shouldSetToStringTag() const {
@@ -339,6 +347,7 @@ class IsolateBase {
   bool asyncContextTrackingEnabled = false;
   bool nodeJsCompatEnabled = false;
   bool nodeJsProcessV2Enabled = false;
+  bool requireReturnsDefaultExportEnabled = false;
   bool setToStringTag = false;
   bool shouldSetImmutablePrototypeFlag = false;
   bool allowTopLevelAwait = true;

@@ -1342,4 +1342,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $impliedByAfterDate(name = "pythonWorkers", date = "2026-02-25");
   # replaces depends param on steps to an implicit approach with step callables passed as params
   # these steps are called internally and act as dependencies
+
+  requireReturnsDefaultExport @156 :Bool
+    $compatEnableFlag("require_returns_default_export")
+    $compatDisableFlag("require_returns_namespace")
+    $compatEnableDate("2026-01-22");
+  # When enabled, require() will return the default export of a module if it exists.
+  # If the default export does not exist, it falls back to returning a mutable
+  # copy of the module namespace object. This matches the behavior that Node.js
+  # uses for require(esm) where the default export is returned when available.
+  # This flag is useful for frameworks like Next.js that expect to patch module exports.
+  #
+  # TODO(later): Once this is no longer experimental, this flag should be implied by
+  # exportCommonJsDefaultNamespace (or vice versa) for consistency.
 }
