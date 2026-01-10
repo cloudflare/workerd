@@ -346,3 +346,121 @@ fn is_result_type(ty: &syn::Type) -> bool {
     }
     false
 }
+
+/// Generates `jsg::Type` and `jsg::FromJS` implementations for union types.
+///
+/// This macro automatically implements the traits needed for enums with
+/// single-field tuple variants to be used directly as `jsg_method` parameters.
+/// Each variant should contain a type that implements `jsg::Type` and `jsg::FromJS`.
+///
+/// # Example
+///
+/// ```ignore
+/// use jsg_macros::jsg_oneof;
+///
+/// #[jsg_oneof]
+/// #[derive(Debug, Clone)]
+/// enum StringOrNumber {
+///     String(String),
+///     Number(f64),
+/// }
+///
+/// // Use directly as a parameter type:
+/// #[jsg_method]
+/// fn process(&self, value: StringOrNumber) -> Result<String, jsg::Error> {
+///     match value {
+///         StringOrNumber::String(s) => Ok(format!("string: {}", s)),
+///         StringOrNumber::Number(n) => Ok(format!("number: {}", n)),
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    let name = &input.ident;
+
+    let Data::Enum(data) = &input.data else {
+        return error(&input, "#[jsg_oneof] can only be applied to enums");
+    };
+
+    let mut variants = Vec::new();
+    for variant in &data.variants {
+        let variant_name = &variant.ident;
+        let Fields::Unnamed(fields) = &variant.fields else {
+            return error(
+                variant,
+                "#[jsg_oneof] variants must be tuple variants (e.g., `Variant(Type)`)",
+            );
+        };
+        if fields.unnamed.len() != 1 {
+            return error(variant, "#[jsg_oneof] variants must have exactly one field");
+        }
+        let inner_type = &fields.unnamed[0].ty;
+        variants.push((variant_name, inner_type));
+    }
+
+    if variants.is_empty() {
+        return error(&input, "#[jsg_oneof] requires at least one variant");
+    }
+
+    let type_checks: Vec<_> = variants
+        .iter()
+        .map(|(variant_name, inner_type)| {
+            quote! {
+                if let Some(result) = <#inner_type as jsg::FromJS>::try_from_js_exact(lock, &value) {
+                    return result.map(Self::#variant_name);
+                }
+            }
+        })
+        .collect();
+
+    let type_names: Vec<_> = variants
+        .iter()
+        .map(|(_, inner_type)| {
+            quote! { <#inner_type as jsg::Type>::class_name() }
+        })
+        .collect();
+
+    let is_exact_checks: Vec<_> = variants
+        .iter()
+        .map(|(_, inner_type)| {
+            quote! { <#inner_type as jsg::Type>::is_exact(value) }
+        })
+        .collect();
+
+    let error_msg = quote! {
+        let expected: Vec<&str> = vec![#(#type_names),*];
+        let msg = format!(
+            "Expected one of [{}] but got {}",
+            expected.join(", "),
+            value.type_of()
+        );
+        Err(jsg::Error::new_type_error(msg))
+    };
+
+    quote! {
+        #input
+
+        #[automatically_derived]
+        impl jsg::Type for #name {
+            fn class_name() -> &'static str {
+                stringify!(#name)
+            }
+
+            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+                #(#is_exact_checks)||*
+            }
+        }
+
+        #[automatically_derived]
+        impl jsg::FromJS for #name {
+            type ResultType = Self;
+
+            fn from_js(lock: &mut jsg::Lock, value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                #(#type_checks)*
+                #error_msg
+            }
+        }
+    }
+    .into()
+}
