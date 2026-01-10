@@ -1,0 +1,168 @@
+{
+  "requestDurationNs": 1850000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 1849000000, "destroyedAt": 1849500000},
+
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 200000, "callbackStartedAt": 300000, "callbackEndedAt": 800000, "destroyedAt": 0},
+
+    {"asyncId": 3, "triggerId": 2, "type": "fetch", "stackTraceId": 2, "createdAt": 1000000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 2, "type": "kj-to-js", "stackTraceId": 2, "createdAt": 1100000, "callbackStartedAt": 85000000, "callbackEndedAt": 85200000, "destroyedAt": 0},
+
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 3, "createdAt": 85300000, "callbackStartedAt": 85400000, "callbackEndedAt": 86000000, "destroyedAt": 0},
+
+    {"asyncId": 6, "triggerId": 5, "type": "fetch", "stackTraceId": 4, "createdAt": 86100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 5, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 86200000, "callbackStartedAt": 165000000, "callbackEndedAt": 165200000, "destroyedAt": 0},
+
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 5, "createdAt": 165300000, "callbackStartedAt": 165400000, "callbackEndedAt": 166000000, "destroyedAt": 0},
+
+    {"asyncId": 9, "triggerId": 8, "type": "fetch", "stackTraceId": 4, "createdAt": 166100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 8, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 166200000, "callbackStartedAt": 248000000, "callbackEndedAt": 248200000, "destroyedAt": 0},
+
+    {"asyncId": 11, "triggerId": 10, "type": "js-promise", "stackTraceId": 5, "createdAt": 248300000, "callbackStartedAt": 248400000, "callbackEndedAt": 249000000, "destroyedAt": 0},
+
+    {"asyncId": 12, "triggerId": 11, "type": "fetch", "stackTraceId": 4, "createdAt": 249100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 13, "triggerId": 11, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 249200000, "callbackStartedAt": 335000000, "callbackEndedAt": 335200000, "destroyedAt": 0},
+
+    {"asyncId": 14, "triggerId": 13, "type": "js-promise", "stackTraceId": 5, "createdAt": 335300000, "callbackStartedAt": 335400000, "callbackEndedAt": 336000000, "destroyedAt": 0},
+
+    {"asyncId": 15, "triggerId": 14, "type": "fetch", "stackTraceId": 4, "createdAt": 336100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 16, "triggerId": 14, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 336200000, "callbackStartedAt": 418000000, "callbackEndedAt": 418200000, "destroyedAt": 0},
+
+    {"asyncId": 17, "triggerId": 16, "type": "js-promise", "stackTraceId": 5, "createdAt": 418300000, "callbackStartedAt": 418400000, "callbackEndedAt": 419000000, "destroyedAt": 0},
+
+    {"asyncId": 18, "triggerId": 17, "type": "fetch", "stackTraceId": 4, "createdAt": 419100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 19, "triggerId": 17, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 419200000, "callbackStartedAt": 502000000, "callbackEndedAt": 502200000, "destroyedAt": 0},
+
+    {"asyncId": 20, "triggerId": 19, "type": "js-promise", "stackTraceId": 5, "createdAt": 502300000, "callbackStartedAt": 502400000, "callbackEndedAt": 503000000, "destroyedAt": 0},
+
+    {"asyncId": 21, "triggerId": 20, "type": "fetch", "stackTraceId": 4, "createdAt": 503100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 22, "triggerId": 20, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 503200000, "callbackStartedAt": 588000000, "callbackEndedAt": 588200000, "destroyedAt": 0},
+
+    {"asyncId": 23, "triggerId": 22, "type": "js-promise", "stackTraceId": 5, "createdAt": 588300000, "callbackStartedAt": 588400000, "callbackEndedAt": 589000000, "destroyedAt": 0},
+
+    {"asyncId": 24, "triggerId": 23, "type": "fetch", "stackTraceId": 4, "createdAt": 589100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 25, "triggerId": 23, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 589200000, "callbackStartedAt": 672000000, "callbackEndedAt": 672200000, "destroyedAt": 0},
+
+    {"asyncId": 26, "triggerId": 25, "type": "js-promise", "stackTraceId": 5, "createdAt": 672300000, "callbackStartedAt": 672400000, "callbackEndedAt": 673000000, "destroyedAt": 0},
+
+    {"asyncId": 27, "triggerId": 26, "type": "fetch", "stackTraceId": 4, "createdAt": 673100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 28, "triggerId": 26, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 673200000, "callbackStartedAt": 758000000, "callbackEndedAt": 758200000, "destroyedAt": 0},
+
+    {"asyncId": 29, "triggerId": 28, "type": "js-promise", "stackTraceId": 5, "createdAt": 758300000, "callbackStartedAt": 758400000, "callbackEndedAt": 759000000, "destroyedAt": 0},
+
+    {"asyncId": 30, "triggerId": 29, "type": "fetch", "stackTraceId": 4, "createdAt": 759100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 31, "triggerId": 29, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 759200000, "callbackStartedAt": 845000000, "callbackEndedAt": 845200000, "destroyedAt": 0},
+
+    {"asyncId": 32, "triggerId": 31, "type": "js-promise", "stackTraceId": 5, "createdAt": 845300000, "callbackStartedAt": 845400000, "callbackEndedAt": 846000000, "destroyedAt": 0},
+
+    {"asyncId": 33, "triggerId": 32, "type": "fetch", "stackTraceId": 4, "createdAt": 846100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 34, "triggerId": 32, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 846200000, "callbackStartedAt": 928000000, "callbackEndedAt": 928200000, "destroyedAt": 0},
+
+    {"asyncId": 35, "triggerId": 34, "type": "js-promise", "stackTraceId": 5, "createdAt": 928300000, "callbackStartedAt": 928400000, "callbackEndedAt": 929000000, "destroyedAt": 0},
+
+    {"asyncId": 36, "triggerId": 35, "type": "fetch", "stackTraceId": 4, "createdAt": 929100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 37, "triggerId": 35, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 929200000, "callbackStartedAt": 1015000000, "callbackEndedAt": 1015200000, "destroyedAt": 0},
+
+    {"asyncId": 38, "triggerId": 37, "type": "js-promise", "stackTraceId": 5, "createdAt": 1015300000, "callbackStartedAt": 1015400000, "callbackEndedAt": 1016000000, "destroyedAt": 0},
+
+    {"asyncId": 39, "triggerId": 38, "type": "fetch", "stackTraceId": 4, "createdAt": 1016100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 40, "triggerId": 38, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1016200000, "callbackStartedAt": 1098000000, "callbackEndedAt": 1098200000, "destroyedAt": 0},
+
+    {"asyncId": 41, "triggerId": 40, "type": "js-promise", "stackTraceId": 5, "createdAt": 1098300000, "callbackStartedAt": 1098400000, "callbackEndedAt": 1099000000, "destroyedAt": 0},
+
+    {"asyncId": 42, "triggerId": 41, "type": "fetch", "stackTraceId": 4, "createdAt": 1099100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 43, "triggerId": 41, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1099200000, "callbackStartedAt": 1185000000, "callbackEndedAt": 1185200000, "destroyedAt": 0},
+
+    {"asyncId": 44, "triggerId": 43, "type": "js-promise", "stackTraceId": 5, "createdAt": 1185300000, "callbackStartedAt": 1185400000, "callbackEndedAt": 1186000000, "destroyedAt": 0},
+
+    {"asyncId": 45, "triggerId": 44, "type": "fetch", "stackTraceId": 4, "createdAt": 1186100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 46, "triggerId": 44, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1186200000, "callbackStartedAt": 1268000000, "callbackEndedAt": 1268200000, "destroyedAt": 0},
+
+    {"asyncId": 47, "triggerId": 46, "type": "js-promise", "stackTraceId": 5, "createdAt": 1268300000, "callbackStartedAt": 1268400000, "callbackEndedAt": 1269000000, "destroyedAt": 0},
+
+    {"asyncId": 48, "triggerId": 47, "type": "fetch", "stackTraceId": 4, "createdAt": 1269100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 49, "triggerId": 47, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1269200000, "callbackStartedAt": 1352000000, "callbackEndedAt": 1352200000, "destroyedAt": 0},
+
+    {"asyncId": 50, "triggerId": 49, "type": "js-promise", "stackTraceId": 5, "createdAt": 1352300000, "callbackStartedAt": 1352400000, "callbackEndedAt": 1353000000, "destroyedAt": 0},
+
+    {"asyncId": 51, "triggerId": 50, "type": "fetch", "stackTraceId": 4, "createdAt": 1353100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 52, "triggerId": 50, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1353200000, "callbackStartedAt": 1438000000, "callbackEndedAt": 1438200000, "destroyedAt": 0},
+
+    {"asyncId": 53, "triggerId": 52, "type": "js-promise", "stackTraceId": 5, "createdAt": 1438300000, "callbackStartedAt": 1438400000, "callbackEndedAt": 1439000000, "destroyedAt": 0},
+
+    {"asyncId": 54, "triggerId": 53, "type": "fetch", "stackTraceId": 4, "createdAt": 1439100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 55, "triggerId": 53, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1439200000, "callbackStartedAt": 1525000000, "callbackEndedAt": 1525200000, "destroyedAt": 0},
+
+    {"asyncId": 56, "triggerId": 55, "type": "js-promise", "stackTraceId": 5, "createdAt": 1525300000, "callbackStartedAt": 1525400000, "callbackEndedAt": 1526000000, "destroyedAt": 0},
+
+    {"asyncId": 57, "triggerId": 56, "type": "fetch", "stackTraceId": 4, "createdAt": 1526100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 58, "triggerId": 56, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1526200000, "callbackStartedAt": 1608000000, "callbackEndedAt": 1608200000, "destroyedAt": 0},
+
+    {"asyncId": 59, "triggerId": 58, "type": "js-promise", "stackTraceId": 5, "createdAt": 1608300000, "callbackStartedAt": 1608400000, "callbackEndedAt": 1609000000, "destroyedAt": 0},
+
+    {"asyncId": 60, "triggerId": 59, "type": "fetch", "stackTraceId": 4, "createdAt": 1609100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 61, "triggerId": 59, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1609200000, "callbackStartedAt": 1695000000, "callbackEndedAt": 1695200000, "destroyedAt": 0},
+
+    {"asyncId": 62, "triggerId": 61, "type": "js-promise", "stackTraceId": 5, "createdAt": 1695300000, "callbackStartedAt": 1695400000, "callbackEndedAt": 1696000000, "destroyedAt": 0},
+
+    {"asyncId": 63, "triggerId": 62, "type": "fetch", "stackTraceId": 4, "createdAt": 1696100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 64, "triggerId": 62, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 1696200000, "callbackStartedAt": 1782000000, "callbackEndedAt": 1782200000, "destroyedAt": 0},
+
+    {"asyncId": 65, "triggerId": 64, "type": "js-promise", "stackTraceId": 5, "createdAt": 1782300000, "callbackStartedAt": 1782400000, "callbackEndedAt": 1783000000, "destroyedAt": 0},
+
+    {"asyncId": 66, "triggerId": 65, "type": "js-promise", "stackTraceId": 6, "createdAt": 1783100000, "callbackStartedAt": 1783200000, "callbackEndedAt": 1848000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:1:1"]},
+    {"id": 1, "frames": ["getOrdersPage @ orders/handler.js:15:3"]},
+    {"id": 2, "frames": ["fetchOrders @ orders/database.js:22:5", "getOrdersPage @ orders/handler.js:25:8"]},
+    {"id": 3, "frames": ["processOrdersResult @ orders/handler.js:35:5"]},
+    {"id": 4, "frames": ["fetchUser @ orders/enrichment.js:18:5", "enrichOrder @ orders/enrichment.js:42:8"]},
+    {"id": 5, "frames": ["processUserResult @ orders/enrichment.js:55:5"]},
+    {"id": 6, "frames": ["sendResponse @ orders/handler.js:75:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 3, "key": "url", "value": "https://db.internal/api/orders?page=1&limit=20"},
+    {"asyncId": 3, "key": "method", "value": "GET"},
+    {"asyncId": 6, "key": "url", "value": "https://users.internal/api/users/1001"},
+    {"asyncId": 6, "key": "method", "value": "GET"},
+    {"asyncId": 9, "key": "url", "value": "https://users.internal/api/users/1002"},
+    {"asyncId": 9, "key": "method", "value": "GET"},
+    {"asyncId": 12, "key": "url", "value": "https://users.internal/api/users/1003"},
+    {"asyncId": 12, "key": "method", "value": "GET"},
+    {"asyncId": 15, "key": "url", "value": "https://users.internal/api/users/1004"},
+    {"asyncId": 15, "key": "method", "value": "GET"},
+    {"asyncId": 18, "key": "url", "value": "https://users.internal/api/users/1005"},
+    {"asyncId": 18, "key": "method", "value": "GET"},
+    {"asyncId": 21, "key": "url", "value": "https://users.internal/api/users/1006"},
+    {"asyncId": 21, "key": "method", "value": "GET"},
+    {"asyncId": 24, "key": "url", "value": "https://users.internal/api/users/1007"},
+    {"asyncId": 24, "key": "method", "value": "GET"},
+    {"asyncId": 27, "key": "url", "value": "https://users.internal/api/users/1008"},
+    {"asyncId": 27, "key": "method", "value": "GET"},
+    {"asyncId": 30, "key": "url", "value": "https://users.internal/api/users/1009"},
+    {"asyncId": 30, "key": "method", "value": "GET"},
+    {"asyncId": 33, "key": "url", "value": "https://users.internal/api/users/1010"},
+    {"asyncId": 33, "key": "method", "value": "GET"},
+    {"asyncId": 36, "key": "url", "value": "https://users.internal/api/users/1011"},
+    {"asyncId": 36, "key": "method", "value": "GET"},
+    {"asyncId": 39, "key": "url", "value": "https://users.internal/api/users/1012"},
+    {"asyncId": 39, "key": "method", "value": "GET"},
+    {"asyncId": 42, "key": "url", "value": "https://users.internal/api/users/1013"},
+    {"asyncId": 42, "key": "method", "value": "GET"},
+    {"asyncId": 45, "key": "url", "value": "https://users.internal/api/users/1014"},
+    {"asyncId": 45, "key": "method", "value": "GET"},
+    {"asyncId": 48, "key": "url", "value": "https://users.internal/api/users/1015"},
+    {"asyncId": 48, "key": "method", "value": "GET"},
+    {"asyncId": 51, "key": "url", "value": "https://users.internal/api/users/1016"},
+    {"asyncId": 51, "key": "method", "value": "GET"},
+    {"asyncId": 54, "key": "url", "value": "https://users.internal/api/users/1017"},
+    {"asyncId": 54, "key": "method", "value": "GET"},
+    {"asyncId": 57, "key": "url", "value": "https://users.internal/api/users/1018"},
+    {"asyncId": 57, "key": "method", "value": "GET"},
+    {"asyncId": 60, "key": "url", "value": "https://users.internal/api/users/1019"},
+    {"asyncId": 60, "key": "method", "value": "GET"},
+    {"asyncId": 63, "key": "url", "value": "https://users.internal/api/users/1020"},
+    {"asyncId": 63, "key": "method", "value": "GET"}
+  ]
+}

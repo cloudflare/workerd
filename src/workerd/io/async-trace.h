@@ -65,10 +65,14 @@ class AsyncTraceContext {
     kD1Query,              // D1 query
     kQueueSend,            // Queue send
     kTimer,                // setTimeout/setInterval
+    kMicrotask,            // queueMicrotask
     kStreamRead,           // ReadableStream read
     kStreamWrite,          // WritableStream write
     kStreamPipeTo,         // ReadableStream.pipeTo()
     kStreamPipeThrough,    // ReadableStream.pipeThrough()
+    kSocketConnect,        // TCP socket connect
+    kSocketStartTls,       // Socket TLS upgrade
+    kSocketClose,          // Socket close
     kWebSocket,            // WebSocket operation
     kCrypto,               // Crypto operation (async)
     kAiInference,          // AI inference
@@ -290,6 +294,8 @@ inline kj::StringPtr AsyncTraceContext::resourceTypeName(ResourceType type) {
       return "queue-send"_kj;
     case ResourceType::kTimer:
       return "timer"_kj;
+    case ResourceType::kMicrotask:
+      return "microtask"_kj;
     case ResourceType::kStreamRead:
       return "stream-read"_kj;
     case ResourceType::kStreamWrite:
@@ -298,6 +304,12 @@ inline kj::StringPtr AsyncTraceContext::resourceTypeName(ResourceType type) {
       return "stream-pipe-to"_kj;
     case ResourceType::kStreamPipeThrough:
       return "stream-pipe-through"_kj;
+    case ResourceType::kSocketConnect:
+      return "socket-connect"_kj;
+    case ResourceType::kSocketStartTls:
+      return "socket-starttls"_kj;
+    case ResourceType::kSocketClose:
+      return "socket-close"_kj;
     case ResourceType::kWebSocket:
       return "websocket"_kj;
     case ResourceType::kCrypto:
