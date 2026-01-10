@@ -1134,56 +1134,70 @@ class _WorkflowStepWrapper:
         self._in_flight = {}
         self.step_closures = {}
 
-    def do(self, name=None, *, depends=None, concurrent=False, config=None):
-        def decorator(func):
-            async def wrapper():
-                # if implicit params are enabled, each param that is not context should be treated as a dependency and resolved
-                # In other words, we introspect the declaration and call a function (need to make sure it's a step) with the same name as the corresponding param
-                # This new code path should discard depends, as we encourage users to implicitly declare their invariant steps in the signature
-                # if the compat flag is disabled, then we just maintain the same legacy behavior
-                results_future_list = depends
+    def _compute_results_future_list(self, func):
+        sig = inspect.signature(func)
+        results_future_list = []
+        for p in sig.parameters.values():
+            if p.name in self.step_closures:
+                results_future_list.append(self.step_closures[p.name])
+            elif p.name == "ctx":
+                results_future_list.append(p)
+        return results_future_list
 
-                if python_from_rpc(_cloudflare_compat_flags)[
-                    "python_workflows_implicit_dependencies"
-                ]:
-                    if depends is not None:
-                        TypeError(
-                            "Received unexpected parameter depends. This was deprecated and dependencies can be declared using callable names"
-                        )
-                    sig = inspect.signature(func)
-                    results_future_list = []
-                    for p in sig.parameters.values():
-                        if p.name in self.step_closures:
-                            results_future_list.append(self.step_closures[p.name])
-                        elif p.name == "ctx":
-                            results_future_list.append(p)
+    async def _wrapper_body(self, name, concurrent, config, func, results_future_list):
+        if concurrent:
+            results = await gather(
+                *(self._resolve_dependency(dep) for dep in results_future_list or [])
+            )
+        else:
+            results = [
+                await self._resolve_dependency(dep) for dep in results_future_list or []
+            ]
+        python_results = [
+            result
+            if (hasattr(result, "name") and result.name == "ctx")
+            else python_from_rpc(result)
+            for result in results
+        ]
+        step_name = func.__name__ if name is None else name
+        return await _do_call(self, step_name, config, func, *python_results)
 
-                if concurrent:
-                    results = await gather(
-                        *[
-                            self._resolve_dependency(dep)
-                            for dep in results_future_list or []
-                        ]
+    if _cloudflare_compat_flags.python_workflows_implicit_dependencies:
+
+        def do(self, name=None, *, concurrent=False, config=None):
+            def decorator(func):
+                async def wrapper():
+                    # implicit params are enabled ==> each param that is not context should be
+                    # treated as a dependency and resolved.
+                    # In other words, we introspect the declaration and call a function (need to
+                    # make sure it's a step) with the same name as the corresponding param
+                    # This new code path should discard depends, as we encourage users to implicitly
+                    # declare their invariant steps in the signature
+                    results_future_list = self._compute_results_future_list(func)
+                    return await self._wrapper_body(
+                        name, concurrent, config, func, results_future_list
                     )
-                else:
-                    results = [
-                        await self._resolve_dependency(dep)
-                        for dep in results_future_list or []
-                    ]
-                python_results = [
-                    result
-                    if (hasattr(result, "name") and result.name == "ctx")
-                    else python_from_rpc(result)
-                    for result in results
-                ]
-                step_name = func.__name__ if name is None else name
-                return await _do_call(self, step_name, config, func, *python_results)
 
-            wrapper._step_name = name
-            self.step_closures[name] = wrapper
-            return wrapper
+                wrapper._step_name = name
+                self.step_closures[name] = wrapper
+                return wrapper
 
-        return decorator
+            return decorator
+    else:
+
+        def do(self, name=None, *, depends=None, concurrent=False, config=None):
+            def decorator(func):
+                async def wrapper():
+                    # if the compat flag is disabled, then we just maintain the same legacy behavior
+                    return await self._wrapper_body(
+                        name, concurrent, config, func, depends
+                    )
+
+                wrapper._step_name = name
+                self.step_closures[name] = wrapper
+                return wrapper
+
+            return decorator
 
     def sleep(self, *args, **kwargs):
         return self._js_step.sleep(*args, **kwargs)
