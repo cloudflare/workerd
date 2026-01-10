@@ -1,0 +1,98 @@
+{
+  "requestDurationNs": 425000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 424500000, "destroyedAt": 424800000},
+
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 200000, "callbackStartedAt": 300000, "callbackEndedAt": 800000, "destroyedAt": 0},
+
+    {"asyncId": 3, "triggerId": 2, "type": "stream-read", "stackTraceId": 2, "createdAt": 1000000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 2, "type": "kj-to-js", "stackTraceId": 2, "createdAt": 1100000, "callbackStartedAt": 15000000, "callbackEndedAt": 15200000, "destroyedAt": 0},
+
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 3, "createdAt": 15300000, "callbackStartedAt": 15400000, "callbackEndedAt": 18000000, "destroyedAt": 0},
+
+    {"asyncId": 6, "triggerId": 5, "type": "js-promise", "stackTraceId": 4, "createdAt": 18100000, "callbackStartedAt": 18200000, "callbackEndedAt": 22000000, "destroyedAt": 0},
+
+    {"asyncId": 7, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 22100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 22200000, "callbackStartedAt": 85000000, "callbackEndedAt": 85300000, "destroyedAt": 0},
+
+    {"asyncId": 9, "triggerId": 8, "type": "js-promise", "stackTraceId": 6, "createdAt": 85400000, "callbackStartedAt": 85500000, "callbackEndedAt": 85800000, "destroyedAt": 0},
+
+    {"asyncId": 10, "triggerId": 9, "type": "js-promise", "stackTraceId": 7, "createdAt": 85900000, "callbackStartedAt": 86000000, "callbackEndedAt": 135000000, "destroyedAt": 0},
+    {"asyncId": 11, "triggerId": 9, "type": "js-promise", "stackTraceId": 8, "createdAt": 85950000, "callbackStartedAt": 86100000, "callbackEndedAt": 115000000, "destroyedAt": 0},
+    {"asyncId": 12, "triggerId": 9, "type": "js-promise", "stackTraceId": 9, "createdAt": 86000000, "callbackStartedAt": 86200000, "callbackEndedAt": 98000000, "destroyedAt": 0},
+
+    {"asyncId": 13, "triggerId": 12, "type": "js-promise", "stackTraceId": 10, "createdAt": 98100000, "callbackStartedAt": 98200000, "callbackEndedAt": 105000000, "destroyedAt": 0},
+    {"asyncId": 14, "triggerId": 11, "type": "js-promise", "stackTraceId": 10, "createdAt": 115100000, "callbackStartedAt": 115200000, "callbackEndedAt": 125000000, "destroyedAt": 0},
+    {"asyncId": 15, "triggerId": 10, "type": "js-promise", "stackTraceId": 10, "createdAt": 135100000, "callbackStartedAt": 135200000, "callbackEndedAt": 148000000, "destroyedAt": 0},
+
+    {"asyncId": 16, "triggerId": 1, "type": "js-promise", "stackTraceId": 11, "createdAt": 150000000, "callbackStartedAt": 150100000, "callbackEndedAt": 150500000, "destroyedAt": 0},
+
+    {"asyncId": 17, "triggerId": 16, "type": "fetch", "stackTraceId": 12, "createdAt": 150600000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 18, "triggerId": 16, "type": "fetch", "stackTraceId": 12, "createdAt": 150700000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 19, "triggerId": 16, "type": "fetch", "stackTraceId": 12, "createdAt": 150800000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+
+    {"asyncId": 20, "triggerId": 16, "type": "kj-to-js", "stackTraceId": 12, "createdAt": 150900000, "callbackStartedAt": 220000000, "callbackEndedAt": 220100000, "destroyedAt": 0},
+    {"asyncId": 21, "triggerId": 16, "type": "kj-to-js", "stackTraceId": 12, "createdAt": 151000000, "callbackStartedAt": 195000000, "callbackEndedAt": 195100000, "destroyedAt": 0},
+    {"asyncId": 22, "triggerId": 16, "type": "kj-to-js", "stackTraceId": 12, "createdAt": 151100000, "callbackStartedAt": 185000000, "callbackEndedAt": 185100000, "destroyedAt": 0},
+
+    {"asyncId": 23, "triggerId": 22, "type": "js-promise", "stackTraceId": 13, "createdAt": 185200000, "callbackStartedAt": 185300000, "callbackEndedAt": 185400000, "destroyedAt": 0},
+    {"asyncId": 24, "triggerId": 21, "type": "js-promise", "stackTraceId": 13, "createdAt": 195200000, "callbackStartedAt": 195300000, "callbackEndedAt": 195400000, "destroyedAt": 0},
+    {"asyncId": 25, "triggerId": 20, "type": "js-promise", "stackTraceId": 13, "createdAt": 220200000, "callbackStartedAt": 220300000, "callbackEndedAt": 220400000, "destroyedAt": 0},
+
+    {"asyncId": 26, "triggerId": 1, "type": "js-promise", "stackTraceId": 14, "createdAt": 221000000, "callbackStartedAt": 221100000, "callbackEndedAt": 221500000, "destroyedAt": 0},
+
+    {"asyncId": 27, "triggerId": 26, "type": "fetch", "stackTraceId": 15, "createdAt": 221600000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 28, "triggerId": 26, "type": "kj-to-js", "stackTraceId": 15, "createdAt": 221700000, "callbackStartedAt": 285000000, "callbackEndedAt": 285200000, "destroyedAt": 0},
+
+    {"asyncId": 29, "triggerId": 28, "type": "js-promise", "stackTraceId": 16, "createdAt": 285300000, "callbackStartedAt": 285400000, "callbackEndedAt": 285600000, "destroyedAt": 0},
+
+    {"asyncId": 30, "triggerId": 29, "type": "fetch", "stackTraceId": 17, "createdAt": 285700000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 31, "triggerId": 29, "type": "kj-to-js", "stackTraceId": 17, "createdAt": 285800000, "callbackStartedAt": 380000000, "callbackEndedAt": 380200000, "destroyedAt": 0},
+
+    {"asyncId": 32, "triggerId": 31, "type": "js-promise", "stackTraceId": 18, "createdAt": 380300000, "callbackStartedAt": 380400000, "callbackEndedAt": 380600000, "destroyedAt": 0},
+
+    {"asyncId": 33, "triggerId": 32, "type": "fetch", "stackTraceId": 19, "createdAt": 380700000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 34, "triggerId": 32, "type": "kj-to-js", "stackTraceId": 19, "createdAt": 380800000, "callbackStartedAt": 415000000, "callbackEndedAt": 415100000, "destroyedAt": 0},
+
+    {"asyncId": 35, "triggerId": 34, "type": "js-promise", "stackTraceId": 20, "createdAt": 415200000, "callbackStartedAt": 415300000, "callbackEndedAt": 424000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:1:1"]},
+    {"id": 1, "frames": ["handleUpload @ image/handler.js:15:3"]},
+    {"id": 2, "frames": ["readRequestBody @ image/handler.js:22:5", "handleUpload @ image/handler.js:20:8"]},
+    {"id": 3, "frames": ["validateImage @ image/validation.js:12:5", "handleUpload @ image/handler.js:28:8"]},
+    {"id": 4, "frames": ["checkMimeType @ image/validation.js:35:5", "validateImage @ image/validation.js:18:8"]},
+    {"id": 5, "frames": ["scanForMalware @ image/security.js:15:5", "handleUpload @ image/handler.js:35:8"]},
+    {"id": 6, "frames": ["processScanResult @ image/security.js:42:5"]},
+    {"id": 7, "frames": ["generateThumbnail @ image/resize.js:18:5", "processImage @ image/pipeline.js:25:8"]},
+    {"id": 8, "frames": ["generateMedium @ image/resize.js:35:5", "processImage @ image/pipeline.js:26:8"]},
+    {"id": 9, "frames": ["generateLarge @ image/resize.js:52:5", "processImage @ image/pipeline.js:27:8"]},
+    {"id": 10, "frames": ["optimizeImage @ image/optimize.js:15:5", "generateThumbnail @ image/resize.js:28:8"]},
+    {"id": 11, "frames": ["uploadToR2 @ image/storage.js:22:5", "handleUpload @ image/handler.js:55:8"]},
+    {"id": 12, "frames": ["putObject @ image/storage.js:45:5", "uploadToR2 @ image/storage.js:32:8"]},
+    {"id": 13, "frames": ["processUploadResult @ image/storage.js:68:5"]},
+    {"id": 14, "frames": ["updateDatabase @ image/metadata.js:15:5", "handleUpload @ image/handler.js:65:8"]},
+    {"id": 15, "frames": ["insertImageRecord @ image/metadata.js:32:5", "updateDatabase @ image/metadata.js:22:8"]},
+    {"id": 16, "frames": ["processInsertResult @ image/metadata.js:48:5"]},
+    {"id": 17, "frames": ["invalidateCDN @ image/cdn.js:12:5", "handleUpload @ image/handler.js:72:8"]},
+    {"id": 18, "frames": ["processCDNResult @ image/cdn.js:28:5"]},
+    {"id": 19, "frames": ["sendWebhook @ image/webhooks.js:15:5", "handleUpload @ image/handler.js:78:8"]},
+    {"id": 20, "frames": ["sendResponse @ image/handler.js:88:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 7, "key": "url", "value": "https://scanner.internal/scan"},
+    {"asyncId": 7, "key": "method", "value": "POST"},
+    {"asyncId": 17, "key": "url", "value": "https://bucket.r2.cloudflarestorage.com/images/thumb_abc123.webp"},
+    {"asyncId": 17, "key": "method", "value": "PUT"},
+    {"asyncId": 18, "key": "url", "value": "https://bucket.r2.cloudflarestorage.com/images/medium_abc123.webp"},
+    {"asyncId": 18, "key": "method", "value": "PUT"},
+    {"asyncId": 19, "key": "url", "value": "https://bucket.r2.cloudflarestorage.com/images/large_abc123.webp"},
+    {"asyncId": 19, "key": "method", "value": "PUT"},
+    {"asyncId": 27, "key": "url", "value": "https://db.internal/images"},
+    {"asyncId": 27, "key": "method", "value": "POST"},
+    {"asyncId": 30, "key": "url", "value": "https://api.cloudflare.com/client/v4/zones/xxx/purge_cache"},
+    {"asyncId": 30, "key": "method", "value": "POST"},
+    {"asyncId": 33, "key": "url", "value": "https://webhooks.customer.com/image-ready"},
+    {"asyncId": 33, "key": "method", "value": "POST"}
+  ]
+}

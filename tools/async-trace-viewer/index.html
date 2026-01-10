@@ -962,6 +962,19 @@
         <option value="cache-misses">Bad: Cache Misses</option>
         <option value="streams-pipeline">Streams Pipeline</option>
         <option value="pathological">💀 Pathological Streams</option>
+        <option value="nextjs-ssr">Next.js SSR (Product Page)</option>
+        <option value="graphql-api">GraphQL API (User Dashboard)</option>
+        <option value="api-gateway">API Gateway (Fan-out)</option>
+        <option value="ecommerce-checkout">E-commerce Checkout</option>
+        <option value="image-pipeline">Image Upload Pipeline</option>
+        <option value="webhook-fanout">Webhook Fan-out</option>
+        <option value="auth-flow">Authentication Flow</option>
+        <option value="chat-message">Chat Message Send</option>
+        <option disabled>──────────</option>
+        <option value="antipattern-n-plus-one">💀 N+1 Query Problem</option>
+        <option value="antipattern-waterfall">💀 Waterfall (Serial Fetches)</option>
+        <option value="antipattern-promise-hell">💀 Promise Chain Hell</option>
+        <option value="antipattern-await-loop">💀 Await in Loop</option>
         <option disabled>──────────</option>
         <option value="real-helloworld">Real: Hello World (ESM)</option>
         <option value="real-helloworld-sw">Real: Hello World (SW)</option>
@@ -970,6 +983,8 @@
         <option value="real-nodejs-compat-fs">Real: Node.js FS</option>
         <option value="real-nodejs-compat-streams">Real: Node.js Streams</option>
         <option value="real-tcp">Real: TCP Socket (Gopher)</option>
+        <option value="real-eventsource">Real: EventSource (SSE)</option>
+        <option value="real-nodejs-compat-http">Real: Node.js HTTP</option>
       </select>
       <select id="sort-mode">
         <option value="tree">Tree</option>
@@ -2986,6 +3001,19 @@ const userB = await fetch('/user/123');</pre>
           'cache-misses': 'sample-cache-misses.json',
           'streams-pipeline': 'sample-streams-pipeline.json',
           'pathological': 'sample-pathological-streams.json',
+          'nextjs-ssr': 'sample-nextjs-ssr.json',
+          'graphql-api': 'sample-graphql-api.json',
+          'api-gateway': 'sample-api-gateway.json',
+          'ecommerce-checkout': 'sample-ecommerce-checkout.json',
+          'image-pipeline': 'sample-image-pipeline.json',
+          'webhook-fanout': 'sample-webhook-fanout.json',
+          'auth-flow': 'sample-auth-flow.json',
+          'chat-message': 'sample-chat-message.json',
+          // Pathological anti-patterns
+          'antipattern-n-plus-one': 'sample-antipattern-n-plus-one.json',
+          'antipattern-waterfall': 'sample-antipattern-waterfall.json',
+          'antipattern-promise-hell': 'sample-antipattern-promise-hell.json',
+          'antipattern-await-loop': 'sample-antipattern-await-in-loop.json',
           // Real traces captured from workerd samples
           'real-helloworld': 'sample-real-helloworld.json',
           'real-helloworld-sw': 'sample-real-helloworld-sw.json',
@@ -2993,7 +3021,9 @@ const userB = await fetch('/user/123');</pre>
           'real-durable-objects': 'sample-real-durable-objects.json',
           'real-nodejs-compat-fs': 'sample-real-nodejs-compat-fs.json',
           'real-nodejs-compat-streams': 'sample-real-nodejs-compat-streams.json',
-          'real-tcp': 'sample-real-tcp.json'
+          'real-tcp': 'sample-real-tcp.json',
+          'real-eventsource': 'sample-real-eventsource.json',
+          'real-nodejs-compat-http': 'sample-real-nodejs-compat-http.json'
         };
       try {
         const response = await fetch(files[demo] + '?t=' + Date.now());

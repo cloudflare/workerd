@@ -777,9 +777,32 @@ jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void()> task) {
+  auto& context = IoContext::current();
+
+  // Create async trace resource for this microtask
+  AsyncTraceContext::AsyncId asyncTraceId = AsyncTraceContext::INVALID_ID;
+  if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+    asyncTraceId =
+        asyncTrace->createResource(AsyncTraceContext::ResourceType::kMicrotask, js.v8Isolate);
+  }
+
   auto fn = js.wrapSimpleFunction(js.v8Context(),
-      JSG_VISITABLE_LAMBDA((this, fn = kj::mv(task)), (fn),
+      JSG_VISITABLE_LAMBDA((this, fn = kj::mv(task), asyncTraceId), (fn),
           (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+            // Enter async trace callback scope for microtask
+            if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+            if (auto* trace = IoContext::current().getAsyncTrace()) {
+            trace->enterCallback(asyncTraceId);
+            }
+            }
+            KJ_DEFER({
+              // Exit async trace callback scope
+              if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+              if (auto* trace = IoContext::current().getAsyncTrace()) {
+              trace->exitCallback();
+              }
+              }
+            });
             js.tryCatch([&] {
               // The function won't be called with any arguments, so we can
               // safely ignore anything passed in to args.
@@ -1088,9 +1111,34 @@ jsg::Ref<Immediate> ServiceWorkerGlobalScope::setImmediate(jsg::Lock& js,
   // would require a compat flag... but that's OK for now?
 
   auto& context = IoContext::current();
+
+  // Create async trace resource for this immediate
+  AsyncTraceContext::AsyncId asyncTraceId = AsyncTraceContext::INVALID_ID;
+  if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+    asyncTraceId =
+        asyncTrace->createResource(AsyncTraceContext::ResourceType::kTimer, js.v8Isolate);
+    asyncTrace->annotate(asyncTraceId, "delay"_kj, "0"_kj);
+    asyncTrace->annotate(asyncTraceId, "type"_kj, "setImmediate"_kj);
+  }
+
   auto fn = [function = kj::mv(function), args = kj::mv(args),
-                context = jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
-    jsg::AsyncContextFrame::Scope scope(js, context);
+                asyncContextFrame = jsg::AsyncContextFrame::currentRef(js),
+                asyncTraceId](jsg::Lock& js) mutable {
+    jsg::AsyncContextFrame::Scope scope(js, asyncContextFrame);
+    // Enter async trace callback scope for immediate
+    if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+      if (auto* trace = IoContext::current().getAsyncTrace()) {
+        trace->enterCallback(asyncTraceId);
+      }
+    }
+    KJ_DEFER({
+      // Exit async trace callback scope
+      if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+        if (auto* trace = IoContext::current().getAsyncTrace()) {
+          trace->exitCallback();
+        }
+      }
+    });
     function(js, kj::mv(args));
   };
   auto timeoutId = context.setTimeoutImpl(timeoutIdGenerator,

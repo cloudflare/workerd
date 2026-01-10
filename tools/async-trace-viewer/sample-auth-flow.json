@@ -1,0 +1,94 @@
+{
+  "requestDurationNs": 245000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 244500000, "destroyedAt": 244800000},
+
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 200000, "callbackStartedAt": 300000, "callbackEndedAt": 1200000, "destroyedAt": 0},
+
+    {"asyncId": 3, "triggerId": 2, "type": "js-promise", "stackTraceId": 2, "createdAt": 1300000, "callbackStartedAt": 1400000, "callbackEndedAt": 2500000, "destroyedAt": 0},
+
+    {"asyncId": 4, "triggerId": 3, "type": "cache-get", "stackTraceId": 3, "createdAt": 2600000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 3, "type": "kj-to-js", "stackTraceId": 3, "createdAt": 2700000, "callbackStartedAt": 5000000, "callbackEndedAt": 5100000, "destroyedAt": 0},
+
+    {"asyncId": 6, "triggerId": 5, "type": "js-promise", "stackTraceId": 4, "createdAt": 5200000, "callbackStartedAt": 5300000, "callbackEndedAt": 5800000, "destroyedAt": 0},
+
+    {"asyncId": 7, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 5900000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 6000000, "callbackStartedAt": 45000000, "callbackEndedAt": 45200000, "destroyedAt": 0},
+
+    {"asyncId": 9, "triggerId": 8, "type": "js-promise", "stackTraceId": 6, "createdAt": 45300000, "callbackStartedAt": 45400000, "callbackEndedAt": 48000000, "destroyedAt": 0},
+
+    {"asyncId": 10, "triggerId": 9, "type": "js-promise", "stackTraceId": 7, "createdAt": 48100000, "callbackStartedAt": 48200000, "callbackEndedAt": 55000000, "destroyedAt": 0},
+
+    {"asyncId": 11, "triggerId": 10, "type": "fetch", "stackTraceId": 8, "createdAt": 55100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 12, "triggerId": 10, "type": "kj-to-js", "stackTraceId": 8, "createdAt": 55200000, "callbackStartedAt": 95000000, "callbackEndedAt": 95200000, "destroyedAt": 0},
+
+    {"asyncId": 13, "triggerId": 12, "type": "js-promise", "stackTraceId": 9, "createdAt": 95300000, "callbackStartedAt": 95400000, "callbackEndedAt": 98000000, "destroyedAt": 0},
+
+    {"asyncId": 14, "triggerId": 13, "type": "kv-get", "stackTraceId": 10, "createdAt": 98100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 15, "triggerId": 13, "type": "kj-to-js", "stackTraceId": 10, "createdAt": 98200000, "callbackStartedAt": 105000000, "callbackEndedAt": 105100000, "destroyedAt": 0},
+
+    {"asyncId": 16, "triggerId": 15, "type": "js-promise", "stackTraceId": 11, "createdAt": 105200000, "callbackStartedAt": 105300000, "callbackEndedAt": 108000000, "destroyedAt": 0},
+
+    {"asyncId": 17, "triggerId": 16, "type": "js-promise", "stackTraceId": 12, "createdAt": 108100000, "callbackStartedAt": 108200000, "callbackEndedAt": 115000000, "destroyedAt": 0},
+
+    {"asyncId": 18, "triggerId": 17, "type": "fetch", "stackTraceId": 13, "createdAt": 115100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 19, "triggerId": 17, "type": "kj-to-js", "stackTraceId": 13, "createdAt": 115200000, "callbackStartedAt": 165000000, "callbackEndedAt": 165200000, "destroyedAt": 0},
+
+    {"asyncId": 20, "triggerId": 19, "type": "js-promise", "stackTraceId": 14, "createdAt": 165300000, "callbackStartedAt": 165400000, "callbackEndedAt": 168000000, "destroyedAt": 0},
+
+    {"asyncId": 21, "triggerId": 20, "type": "js-promise", "stackTraceId": 15, "createdAt": 168100000, "callbackStartedAt": 168200000, "callbackEndedAt": 175000000, "destroyedAt": 0},
+
+    {"asyncId": 22, "triggerId": 21, "type": "cache-put", "stackTraceId": 16, "createdAt": 175100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 23, "triggerId": 21, "type": "kj-to-js", "stackTraceId": 16, "createdAt": 175200000, "callbackStartedAt": 180000000, "callbackEndedAt": 180100000, "destroyedAt": 0},
+
+    {"asyncId": 24, "triggerId": 23, "type": "js-promise", "stackTraceId": 17, "createdAt": 180200000, "callbackStartedAt": 180300000, "callbackEndedAt": 185000000, "destroyedAt": 0},
+
+    {"asyncId": 25, "triggerId": 24, "type": "kv-put", "stackTraceId": 18, "createdAt": 185100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 26, "triggerId": 24, "type": "kj-to-js", "stackTraceId": 18, "createdAt": 185200000, "callbackStartedAt": 195000000, "callbackEndedAt": 195100000, "destroyedAt": 0},
+
+    {"asyncId": 27, "triggerId": 26, "type": "js-promise", "stackTraceId": 19, "createdAt": 195200000, "callbackStartedAt": 195300000, "callbackEndedAt": 198000000, "destroyedAt": 0},
+
+    {"asyncId": 28, "triggerId": 27, "type": "fetch", "stackTraceId": 20, "createdAt": 198100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 29, "triggerId": 27, "type": "kj-to-js", "stackTraceId": 20, "createdAt": 198200000, "callbackStartedAt": 235000000, "callbackEndedAt": 235100000, "destroyedAt": 0},
+
+    {"asyncId": 30, "triggerId": 29, "type": "js-promise", "stackTraceId": 21, "createdAt": 235200000, "callbackStartedAt": 235300000, "callbackEndedAt": 244000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:1:1"]},
+    {"id": 1, "frames": ["handleLogin @ auth/handler.js:15:3"]},
+    {"id": 2, "frames": ["extractCredentials @ auth/parser.js:22:5", "handleLogin @ auth/handler.js:22:8"]},
+    {"id": 3, "frames": ["checkRateLimit @ auth/rate-limit.js:18:5", "handleLogin @ auth/handler.js:28:8"]},
+    {"id": 4, "frames": ["processRateLimitResult @ auth/rate-limit.js:35:5"]},
+    {"id": 5, "frames": ["verifyPassword @ auth/password.js:15:5", "handleLogin @ auth/handler.js:35:8"]},
+    {"id": 6, "frames": ["processPasswordResult @ auth/password.js:42:5"]},
+    {"id": 7, "frames": ["hashAndCompare @ auth/password.js:55:5"]},
+    {"id": 8, "frames": ["check2FA @ auth/mfa.js:18:5", "handleLogin @ auth/handler.js:45:8"]},
+    {"id": 9, "frames": ["process2FAResult @ auth/mfa.js:45:5"]},
+    {"id": 10, "frames": ["loadUserPermissions @ auth/permissions.js:22:5", "handleLogin @ auth/handler.js:52:8"]},
+    {"id": 11, "frames": ["parsePermissions @ auth/permissions.js:45:5"]},
+    {"id": 12, "frames": ["buildPermissionTree @ auth/permissions.js:62:5"]},
+    {"id": 13, "frames": ["createSession @ auth/session.js:18:5", "handleLogin @ auth/handler.js:58:8"]},
+    {"id": 14, "frames": ["processSessionResponse @ auth/session.js:48:5"]},
+    {"id": 15, "frames": ["generateTokens @ auth/tokens.js:22:5", "handleLogin @ auth/handler.js:65:8"]},
+    {"id": 16, "frames": ["cacheSession @ auth/cache.js:15:5", "handleLogin @ auth/handler.js:72:8"]},
+    {"id": 17, "frames": ["processCacheResult @ auth/cache.js:32:5"]},
+    {"id": 18, "frames": ["storeRefreshToken @ auth/tokens.js:55:5", "handleLogin @ auth/handler.js:78:8"]},
+    {"id": 19, "frames": ["processStorageResult @ auth/tokens.js:72:5"]},
+    {"id": 20, "frames": ["logAuthEvent @ auth/audit.js:18:5", "handleLogin @ auth/handler.js:85:8"]},
+    {"id": 21, "frames": ["sendLoginResponse @ auth/handler.js:95:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 4, "key": "key", "value": "rate:login:192.168.1.100"},
+    {"asyncId": 7, "key": "url", "value": "https://auth.internal/api/verify"},
+    {"asyncId": 7, "key": "method", "value": "POST"},
+    {"asyncId": 11, "key": "url", "value": "https://mfa.internal/api/totp/verify"},
+    {"asyncId": 11, "key": "method", "value": "POST"},
+    {"asyncId": 14, "key": "key", "value": "permissions:user:12345"},
+    {"asyncId": 18, "key": "url", "value": "https://sessions.internal/api/create"},
+    {"asyncId": 18, "key": "method", "value": "POST"},
+    {"asyncId": 22, "key": "key", "value": "session:sess_abc123xyz"},
+    {"asyncId": 25, "key": "key", "value": "refresh:user:12345:device:browser_xyz"},
+    {"asyncId": 28, "key": "url", "value": "https://audit.internal/api/events"},
+    {"asyncId": 28, "key": "method", "value": "POST"}
+  ]
+}

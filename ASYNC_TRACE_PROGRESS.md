@@ -43,8 +43,10 @@ enum class ResourceType : uint16_t {
   kR2Get/Put/Delete/List,      // R2 operations
   kD1Query,           // D1 query
   kQueueSend,         // Queue send
-  kTimer,             // setTimeout/setInterval
+  kTimer,             // setTimeout/setInterval/setImmediate
+  kMicrotask,         // queueMicrotask
   kStreamRead/Write/PipeTo/PipeThrough,  // Stream operations
+  kSocketConnect/StartTls/Close,         // Socket operations
   kWebSocket,         // WebSocket operations
   kCrypto,            // Crypto operations
   kAiInference,       // AI inference
@@ -66,13 +68,20 @@ enum class ResourceType : uint16_t {
 **Basic APIs** (`src/workerd/api/`):
 - [x] `fetch()` in `http.c++` - creates kFetch with URL/method annotations
 - [x] `cache.match/put/delete` in `cache.c++` - creates kCacheGet/kCachePut
-- [x] `setTimeout/setInterval` in `global-scope.c++` - creates kTimer with delay annotation
+- [x] `setTimeout/setInterval` in `global-scope.c++` - creates kTimer with delay/type annotations
+- [x] `setImmediate` in `global-scope.c++` - creates kTimer with type="setImmediate"
+- [x] `queueMicrotask` in `global-scope.c++` - creates kMicrotask
 
 **Stream Operations** (`src/workerd/api/streams/`):
 - [x] `ReaderImpl::read()` → kStreamRead
 - [x] `WritableStreamDefaultWriter::write()` → kStreamWrite
 - [x] `ReadableStream::pipeTo()` → kStreamPipeTo
 - [x] `ReadableStream::pipeThrough()` → kStreamPipeThrough
+
+**Socket Operations** (`src/workerd/api/sockets.c++`):
+- [x] `connect()` → kSocketConnect with address/secureTransport annotations
+- [x] `Socket::startTls()` → kSocketStartTls with address annotation
+- [x] `Socket::close()` → kSocketClose with address annotation
 
 **KJ↔JS Bridges** (`src/workerd/io/io-context.h`):
 - [x] `awaitIoImpl()` → kKjToJsBridge (KJ promise wrapped for JS)
@@ -370,7 +379,7 @@ python3 -m http.server 8888
 
 # Session Notes
 
-## Latest Session (January 2025)
+## Session (January 2025) - Visualization Enhancements
 
 **Completed:**
 - Latency view: hover/click, histogram/CDF toggle, outlier detection, critical path integration
@@ -381,6 +390,23 @@ python3 -m http.server 8888
 - `tools/async-trace-viewer/index.html` - all visualization changes
 - `ASYNC_TRACE_PROGRESS.md` - consolidated from separate tracker file
 
+## Latest Session (January 2025) - Socket/Microtask/Immediate Instrumentation
+
+**Completed:**
+- Added `kMicrotask` ResourceType to `async-trace.h`
+- Instrumented `queueMicrotask()` in `global-scope.c++` - creates kMicrotask resource with callback tracking
+- Instrumented `setImmediate()` in `global-scope.c++` - creates kTimer with type="setImmediate" annotation
+- Added socket ResourceTypes: `kSocketConnect`, `kSocketStartTls`, `kSocketClose`
+- Instrumented `connect()` in `sockets.c++` - creates kSocketConnect with address/secureTransport annotations
+- Instrumented `Socket::startTls()` in `sockets.c++` - creates kSocketStartTls
+- Instrumented `Socket::close()` in `sockets.c++` - creates kSocketClose
+
+**Files modified:**
+- `src/workerd/io/async-trace.h` - added kMicrotask, kSocketConnect, kSocketStartTls, kSocketClose
+- `src/workerd/api/global-scope.c++` - instrumented queueMicrotask and setImmediate
+- `src/workerd/api/sockets.c++` - instrumented connect, startTls, close
+
 **Where we left off:**
 - Visualization tool enhancements largely complete for all 8 views
-- C++ instrumentation still needs: KV, DO, R2, D1, Queue, WebSocket, Crypto, AI APIs
+- C++ instrumentation: fetch, cache, timers, streams, bridges, microtask, immediate, sockets complete
+- Still could instrument: KV, DO, R2, D1, Queue, WebSocket, Crypto, AI APIs (if desired)

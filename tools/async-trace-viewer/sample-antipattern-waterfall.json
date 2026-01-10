@@ -1,0 +1,62 @@
+{
+  "requestDurationNs": 892000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 891000000, "destroyedAt": 891500000},
+
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 200000, "callbackStartedAt": 300000, "callbackEndedAt": 800000, "destroyedAt": 0},
+
+    {"asyncId": 3, "triggerId": 2, "type": "fetch", "stackTraceId": 2, "createdAt": 1000000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 2, "type": "kj-to-js", "stackTraceId": 2, "createdAt": 1100000, "callbackStartedAt": 125000000, "callbackEndedAt": 125200000, "destroyedAt": 0},
+
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 3, "createdAt": 125300000, "callbackStartedAt": 125400000, "callbackEndedAt": 126000000, "destroyedAt": 0},
+
+    {"asyncId": 6, "triggerId": 5, "type": "fetch", "stackTraceId": 4, "createdAt": 126100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 5, "type": "kj-to-js", "stackTraceId": 4, "createdAt": 126200000, "callbackStartedAt": 268000000, "callbackEndedAt": 268200000, "destroyedAt": 0},
+
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 5, "createdAt": 268300000, "callbackStartedAt": 268400000, "callbackEndedAt": 269000000, "destroyedAt": 0},
+
+    {"asyncId": 9, "triggerId": 8, "type": "fetch", "stackTraceId": 6, "createdAt": 269100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 8, "type": "kj-to-js", "stackTraceId": 6, "createdAt": 269200000, "callbackStartedAt": 458000000, "callbackEndedAt": 458200000, "destroyedAt": 0},
+
+    {"asyncId": 11, "triggerId": 10, "type": "js-promise", "stackTraceId": 7, "createdAt": 458300000, "callbackStartedAt": 458400000, "callbackEndedAt": 459000000, "destroyedAt": 0},
+
+    {"asyncId": 12, "triggerId": 11, "type": "fetch", "stackTraceId": 8, "createdAt": 459100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 13, "triggerId": 11, "type": "kj-to-js", "stackTraceId": 8, "createdAt": 459200000, "callbackStartedAt": 612000000, "callbackEndedAt": 612200000, "destroyedAt": 0},
+
+    {"asyncId": 14, "triggerId": 13, "type": "js-promise", "stackTraceId": 9, "createdAt": 612300000, "callbackStartedAt": 612400000, "callbackEndedAt": 613000000, "destroyedAt": 0},
+
+    {"asyncId": 15, "triggerId": 14, "type": "fetch", "stackTraceId": 10, "createdAt": 613100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 16, "triggerId": 14, "type": "kj-to-js", "stackTraceId": 10, "createdAt": 613200000, "callbackStartedAt": 785000000, "callbackEndedAt": 785200000, "destroyedAt": 0},
+
+    {"asyncId": 17, "triggerId": 16, "type": "js-promise", "stackTraceId": 11, "createdAt": 785300000, "callbackStartedAt": 785400000, "callbackEndedAt": 786000000, "destroyedAt": 0},
+
+    {"asyncId": 18, "triggerId": 17, "type": "js-promise", "stackTraceId": 12, "createdAt": 786100000, "callbackStartedAt": 786200000, "callbackEndedAt": 890000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:1:1"]},
+    {"id": 1, "frames": ["getDashboard @ dashboard/handler.js:15:3"]},
+    {"id": 2, "frames": ["fetchUserProfile @ dashboard/data.js:22:5", "getDashboard @ dashboard/handler.js:25:8"]},
+    {"id": 3, "frames": ["processUserProfile @ dashboard/data.js:42:5"]},
+    {"id": 4, "frames": ["fetchUserOrders @ dashboard/data.js:55:5", "getDashboard @ dashboard/handler.js:32:8"]},
+    {"id": 5, "frames": ["processUserOrders @ dashboard/data.js:72:5"]},
+    {"id": 6, "frames": ["fetchUserNotifications @ dashboard/data.js:85:5", "getDashboard @ dashboard/handler.js:38:8"]},
+    {"id": 7, "frames": ["processNotifications @ dashboard/data.js:105:5"]},
+    {"id": 8, "frames": ["fetchUserRecommendations @ dashboard/data.js:118:5", "getDashboard @ dashboard/handler.js:45:8"]},
+    {"id": 9, "frames": ["processRecommendations @ dashboard/data.js:138:5"]},
+    {"id": 10, "frames": ["fetchUserAnalytics @ dashboard/data.js:152:5", "getDashboard @ dashboard/handler.js:52:8"]},
+    {"id": 11, "frames": ["processAnalytics @ dashboard/data.js:172:5"]},
+    {"id": 12, "frames": ["sendResponse @ dashboard/handler.js:65:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 3, "key": "url", "value": "https://users.internal/api/profile/12345"},
+    {"asyncId": 3, "key": "method", "value": "GET"},
+    {"asyncId": 6, "key": "url", "value": "https://orders.internal/api/user/12345/recent"},
+    {"asyncId": 6, "key": "method", "value": "GET"},
+    {"asyncId": 9, "key": "url", "value": "https://notifications.internal/api/user/12345"},
+    {"asyncId": 9, "key": "method", "value": "GET"},
+    {"asyncId": 12, "key": "url", "value": "https://recommendations.internal/api/user/12345"},
+    {"asyncId": 12, "key": "method", "value": "GET"},
+    {"asyncId": 15, "key": "url", "value": "https://analytics.internal/api/user/12345/dashboard"},
+    {"asyncId": 15, "key": "method", "value": "GET"}
+  ]
+}
