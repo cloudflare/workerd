@@ -11,7 +11,7 @@ bazel_dep(name = "abseil-cpp", version = "20260107.0")
 bazel_dep(name = "apple_support", version = "2.1.0")
 
 # aspect_bazel_lib
-bazel_dep(name = "aspect_bazel_lib", version = "2.22.4")
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.2")
 
 # aspect_rules_lint
 bazel_dep(name = "aspect_rules_lint", version = "1.13.0")

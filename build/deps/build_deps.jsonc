@@ -4,7 +4,10 @@
     // bazel_deps from MODULE.bazel
     {
       "name": "aspect_bazel_lib",
-      "type": "bazel_dep"
+      "type": "bazel_dep",
+      // 2.22.4 causes resolution issues, breaking the build entirely.
+      // If you can't trust a patch release anymore, what can you trust?
+      "freeze_version": "2.22.2"
     },
     {
       "name": "aspect_rules_lint",
