@@ -76,3 +76,32 @@ impl DnsUtil {
 ```
 
 On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceTemplate` implementations. On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation.
+
+## `#[jsg_oneof]`
+
+Generates `jsg::Type` and `jsg::FromJS` implementations for union types. Use this to accept parameters that can be one of several JavaScript types.
+
+Each enum variant should be a single-field tuple variant where the field type implements `jsg::Type` and `jsg::FromJS` (e.g., `String`, `f64`, `bool`).
+
+```rust
+use jsg_macros::jsg_oneof;
+
+#[jsg_oneof]
+#[derive(Debug, Clone)]
+enum StringOrNumber {
+    String(String),
+    Number(f64),
+}
+
+impl MyResource {
+    #[jsg_method]
+    pub fn process(&self, value: StringOrNumber) -> Result<String, jsg::Error> {
+        match value {
+            StringOrNumber::String(s) => Ok(format!("string: {}", s)),
+            StringOrNumber::Number(n) => Ok(format!("number: {}", n)),
+        }
+    }
+}
+```
+
+The macro generates type-checking code that matches JavaScript values to enum variants without coercion. If no variant matches, a `TypeError` is thrown listing all expected types.

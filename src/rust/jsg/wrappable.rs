@@ -54,6 +54,23 @@ pub trait FromJS: Sized {
 
     /// Converts a JavaScript value into this Rust type.
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error>;
+
+    /// Tries to convert only if the JavaScript type matches exactly.
+    /// Returns `None` if the type doesn't match, `Some(result)` if conversion was attempted.
+    /// Used by `#[jsg_oneof]` macro to try each variant without coercion.
+    fn try_from_js_exact(
+        lock: &mut Lock,
+        value: &v8::Local<v8::Value>,
+    ) -> Option<Result<Self::ResultType, Error>>
+    where
+        Self: Type,
+    {
+        if Self::is_exact(value) {
+            Some(Self::from_js(lock, value.clone()))
+        } else {
+            None
+        }
+    }
 }
 
 // =============================================================================
@@ -114,6 +131,14 @@ impl FromJS for &str {
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) })
+    }
+}
+
+impl<T: FromJS<ResultType = T>> FromJS for &T {
+    type ResultType = T;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        T::from_js(lock, value)
     }
 }
 

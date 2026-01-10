@@ -13,3 +13,28 @@ pub unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
 ```
 
 For more information on unsafe Rust and raw pointers, see the [Rust Book: Unsafe Superpowers](https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html#unsafe-superpowers).
+
+## Union Types
+
+To accept JavaScript values that can be one of several types, define an enum with the `#[jsg_oneof]` macro:
+
+```rust
+use jsg_macros::jsg_oneof;
+
+#[jsg_oneof]
+#[derive(Debug, Clone)]
+enum StringOrNumber {
+    String(String),
+    Number(f64),
+}
+
+// In a jsg_method:
+pub fn process(&self, value: StringOrNumber) -> Result<String, jsg::Error> {
+    match value {
+        StringOrNumber::String(s) => Ok(format!("string: {}", s)),
+        StringOrNumber::Number(n) => Ok(format!("number: {}", n)),
+    }
+}
+```
+
+This is similar to `kj::OneOf<>` in C++ JSG.
