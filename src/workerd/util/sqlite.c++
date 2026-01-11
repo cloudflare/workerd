@@ -1554,8 +1554,9 @@ SqliteDatabase::Query::ValuePtr SqliteDatabase::Query::getValue(uint column) {
       return getBlob(column);
     case SQLITE_NULL:
       return nullptr;
+    default:
+      KJ_UNREACHABLE;
   }
-  KJ_UNREACHABLE;
 }
 
 kj::StringPtr SqliteDatabase::Query::getColumnName(uint column) {

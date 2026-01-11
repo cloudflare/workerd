@@ -285,12 +285,11 @@ JsonWebKey toJwk(const EVPKeyPointer& key, KeyType keyType) {
         // DSA keys are not supported for JWK export.
         break;
       }
+      default:
+        break;
     }
   }
-
-  return JsonWebKey{
-    .kty = kj::str("INVALID"),
-  };
+  return JsonWebKey{.kty = kj::str("INVALID")};
 }
 
 EVPKeyPointer fromJwk(const JsonWebKey& jwk, KeyType keyType) {

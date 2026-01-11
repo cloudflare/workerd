@@ -1120,9 +1120,9 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(jsg::Lock& j
     case NID_X25519:
       return generateKeyImpl<X25519_PUBLIC_VALUE_LEN, X25519_keypair>(js, normalizedName, nid,
           privateKeyUsages, publicKeyUsages, extractablePrivateKey, "X25519"_kj);
+    default:
+      KJ_FAIL_REQUIRE("ED ", normalizedName, " unimplemented", nid);
   }
-
-  KJ_FAIL_REQUIRE("ED ", normalizedName, " unimplemented", nid);
 }
 
 }  // namespace

@@ -820,6 +820,7 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
         }
         break;
       }
+      default:
     }
   }
 

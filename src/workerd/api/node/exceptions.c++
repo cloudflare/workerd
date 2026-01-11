@@ -63,7 +63,11 @@ namespace {
   case UV_##name:                                                                                  \
     return js.str(#name##_kj);
 jsg::JsValue uv_err_name(jsg::Lock& js, int err) {
-  switch (err) { UV_ERRNO_MAP(UV_ERR_NAME_GEN) }
+  switch (err) {
+    UV_ERRNO_MAP(UV_ERR_NAME_GEN)
+    default:
+      break;
+  }
   return js.str("UNKNOWN"_kj);
 }
 #undef UV_ERR_NAME_GEN

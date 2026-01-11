@@ -623,8 +623,7 @@ void URLSearchParams::forEach(jsg::Lock& js,
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
-  for (size_t i = 0; i < this->url->query.size(); i++) {
-    auto& [key, value] = this->url->query[i];
+  for (auto& [key, value]: this->url->query) {
     callback(js, value, key, JSG_THIS);
   }
 }

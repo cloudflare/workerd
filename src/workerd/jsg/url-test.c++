@@ -1215,8 +1215,8 @@ KJ_TEST("Special scheme URLS") {
     kj::str("file:///example"),
   };
 
-  for (auto n = 0; n < kj::size(tests); n++) {
-    KJ_ASSERT_NONNULL(Url::tryParse(tests[n].asPtr()));
+  for (const auto& test: tests) {
+    KJ_ASSERT_NONNULL(Url::tryParse(test.asPtr()));
   }
 }
 

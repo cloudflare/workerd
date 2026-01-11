@@ -512,8 +512,7 @@ void FormData::forEach(jsg::Lock& js,
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
-  for (size_t i = 0; i < this->data.size(); i++) {
-    auto& [key, value] = this->data[i];
+  for (auto& [key, value]: this->data) {
     callback(js, clone(js, value), key, JSG_THIS);
   }
 }

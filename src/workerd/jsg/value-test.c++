@@ -1219,8 +1219,9 @@ struct ExceptionContext: public ContextGlobalObject {
         return JSG_KJ_EXCEPTION(FAILED, TypeError, "boom");
       case 2:
         return JSG_KJ_EXCEPTION(FAILED, DOMAbortError, "boom");
+      default:
+        KJ_UNREACHABLE;
     }
-    KJ_UNREACHABLE;
   }
 
   JSG_RESOURCE_TYPE(ExceptionContext) {
