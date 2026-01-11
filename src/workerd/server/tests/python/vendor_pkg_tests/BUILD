@@ -32,3 +32,5 @@ vendored_py_wd_test(
     use_snapshot = "dedicated_fastapi",
     vendored_package_name = "fastapi",
 )
+
+exports_files(["generate_modules.py"])
