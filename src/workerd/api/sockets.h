@@ -44,9 +44,11 @@ struct SocketOptions {
   jsg::Optional<kj::String> secureTransport;
   bool allowHalfOpen = false;
   jsg::Optional<uint64_t> highWaterMark;
-  JSG_STRUCT(secureTransport, allowHalfOpen, highWaterMark);
+  jsg::Optional<kj::Array<kj::byte>> caCerts;
+  JSG_STRUCT(secureTransport, allowHalfOpen, highWaterMark, caCerts);
   JSG_MEMORY_INFO(SocketOptions) {
     tracker.trackField("secureTransport", secureTransport);
+    tracker.trackField("caCerts", caCerts);
   }
 };
 

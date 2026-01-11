@@ -26,6 +26,23 @@ export type SocketAddress = {
 export type SocketOptions = {
   secureTransport?: 'off' | 'on' | 'starttls';
   allowHalfOpen?: boolean;
+  /**
+   * Optional PEM-encoded CA certificate(s) to use for verifying the server certificate
+   * during TLS handshake. If set, these certificates will be used instead of the default
+   * system CA store. This is useful for connecting through intercepting proxies that use
+   * custom CA certificates.
+   *
+   * NOTE: This option only works when deployed to Cloudflare Workers. For local development
+   * with workerd, configure trusted certificates in your workerd.capnp config file instead:
+   *
+   *   ( name = "internet",
+   *     network = (
+   *       allow = ["public"],
+   *       tlsOptions = (trustedCertificates = [embed "my-ca.pem"])
+   *     )
+   *   )
+   */
+  caCerts?: ArrayBuffer;
 };
 
 export function connect(

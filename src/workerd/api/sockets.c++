@@ -7,6 +7,7 @@
 #include "streams/standard.h"
 #include "system-streams.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
@@ -252,6 +253,11 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   KJ_IF_SOME(opts, options) {
     secureTransport = parseSecureTransport(opts);
     httpConnectSettings.useTls = secureTransport == SecureTransportKind::ON;
+    KJ_IF_SOME(certs, opts.caCerts) {
+      JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), Error,
+          "caCerts option requires the 'experimental' compatibility flag.");
+      httpConnectSettings.caCerts = certs.asPtr();
+    }
   }
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
   httpConnectSettings.tlsStarter = tlsStarter;
