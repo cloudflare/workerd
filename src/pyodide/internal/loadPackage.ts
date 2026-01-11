@@ -39,7 +39,7 @@ function getPackageMetadata(requirement: string): PackageDeclaration {
 
 function loadBundleFromArtifactBundler(requirement: string): Reader {
   const filename = getPackageMetadata(requirement).file_name;
-  const fullPath = `python-package-bucket/${PACKAGES_VERSION}/${filename}`;
+  const fullPath = `${PACKAGES_VERSION}/${filename}`;
   const reader = ArtifactBundler.getPackage(fullPath);
   if (!reader) {
     throw new PythonWorkersInternalError(
