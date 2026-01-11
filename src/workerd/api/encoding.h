@@ -16,7 +16,7 @@ namespace workerd::api {
 // the second label is the public identifier.
 #define EW_ENCODINGS(V)                                                                            \
   V(Utf8, "utf-8")                                                                                 \
-  V(Ibm866, "ibm-866")                                                                             \
+  V(Ibm866, "ibm866")                                                                              \
   V(Iso8859_2, "iso-8859-2")                                                                       \
   V(Iso8859_3, "iso-8859-3")                                                                       \
   V(Iso8859_4, "iso-8859-4")                                                                       \
@@ -49,7 +49,7 @@ namespace workerd::api {
   V(Big5, "big5")                                                                                  \
   V(Euc_Jp, "euc-jp")                                                                              \
   V(Iso2022_Jp, "iso-2022-jp")                                                                     \
-  V(Shift_Jis, "shift-jis")                                                                        \
+  V(Shift_Jis, "shift_jis")                                                                        \
   V(Euc_Kr, "euc-kr")                                                                              \
   V(Replacement, "replacement")                                                                    \
   V(Utf16be, "utf-16be")                                                                           \
