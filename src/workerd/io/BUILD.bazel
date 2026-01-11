@@ -410,6 +410,7 @@ kj_test(
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
+        "@sqlite3",
     ],
 )
 

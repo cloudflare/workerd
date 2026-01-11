@@ -157,6 +157,9 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     bool getAlarmDirty();
     void setAlarmDirty();
 
+    void setSomeWriteConfirmed(bool someWriteConfirmed);
+    bool isSomeWriteConfirmed() const;
+
     kj::Maybe<kj::Promise<void>> commit() override;
     kj::Promise<void> rollback() override;
     // Implements ActorCacheInterface::Transaction.
@@ -190,6 +193,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     bool hasChild = false;
     bool committed = false;
     bool alarmDirty = false;
+    // True if any of the writes in this commit are confirmed writes.
+    bool someWriteConfirmed = false;
 
     void rollbackImpl();
   };
