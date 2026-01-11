@@ -70,7 +70,10 @@ wpt_test(
 wpt_test(
     name = "fetch/api",
     size = "large",
-    compat_flags = ["strip_bom_in_read_all_text"],
+    compat_flags = [
+        "strip_bom_in_read_all_text",
+        "use_null_prototype_for_opaque_wrappers",
+    ],
     config = "fetch/api-test.ts",
     start_server = True,
     target_compatible_with = select({
@@ -111,7 +114,10 @@ wpt_test(
 wpt_test(
     name = "streams",
     size = "large",
-    compat_flags = ["pedantic_wpt"],
+    compat_flags = [
+        "use_null_prototype_for_opaque_wrappers",
+        "pedantic_wpt",
+    ],
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )

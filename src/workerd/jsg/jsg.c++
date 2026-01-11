@@ -239,6 +239,10 @@ void Lock::setImmutablePrototype() {
   IsolateBase::from(v8Isolate).enableSetImmutablePrototype();
 }
 
+void Lock::setNullPrototypeForOpaqueWrappers() {
+  IsolateBase::from(v8Isolate).enableNullPrototypeForOpaqueWrappers();
+}
+
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
   IsolateBase::from(v8Isolate).setLoggerCallback({}, kj::mv(logger));
 }
