@@ -202,12 +202,12 @@ class QueueImpl final {
   // If we are already closed or errored, set totalQueueSize to zero.
   void maybeUpdateBackpressure() {
     totalQueueSize = 0;
-    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
+    state.whenActive([this](Ready& ready) {
       auto consumers = ready.consumers.snapshot();
       for (auto consumer: consumers) {
         totalQueueSize = kj::max(totalQueueSize, consumer->size());
       }
-    }
+    });
   }
 
   // Forwards the entry to all consumers (except skipConsumer if given).
@@ -483,12 +483,12 @@ class ConsumerImpl final {
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
     // Already closed or errored - nothing to do.
-    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
+    state.whenActive([&](Ready& ready) {
       for (auto& request: ready.readRequests) {
         request->resolver.reject(js, reason);
       }
       ready.readRequests.clear();
-    }
+    });
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -552,13 +552,9 @@ class ConsumerImpl final {
   bool isClosing() {
     // Closing state is determined by whether there is a Close sentinel that has been
     // pushed into the end of Ready state buffer.
-    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      if (ready.buffer.empty()) {
-        return false;
-      }
-      return ready.buffer.back().template is<Close>();
-    }
-    return false;
+    return state.whenActiveOr([](Ready& ready) {
+      return !ready.buffer.empty() && ready.buffer.back().template is<Close>();
+    }, false);
   }
 
   void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
