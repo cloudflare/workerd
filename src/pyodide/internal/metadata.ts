@@ -62,6 +62,8 @@ const FORCE_NEW_VENDOR_PATH: boolean =
 export const IS_DEDICATED_SNAPSHOT_ENABLED: boolean =
   !!COMPATIBILITY_FLAGS.python_dedicated_snapshot;
 const EXTERNAL_SDK = !!COMPATIBILITY_FLAGS.enable_python_external_sdk;
+export const WORKFLOWS_IMPLICIT_DEPS =
+  !!COMPATIBILITY_FLAGS.python_workflows_implicit_dependencies;
 
 export const LEGACY_GLOBAL_HANDLERS = !NO_GLOBAL_HANDLERS;
 export const LEGACY_VENDOR_PATH = !FORCE_NEW_VENDOR_PATH;
