@@ -51,6 +51,10 @@ on:
         type: boolean
         required: false
         default: false
+      upload_coverage:
+        type: boolean
+        required: false
+        default: false
       fetch_depth:
         type: number
         required: false
@@ -68,6 +72,8 @@ on:
         required: true
       WORKERS_MIRROR_URL:
         required: true
+      CODECOV_TOKEN:
+        required: false
 
 permissions:
   # Read repo
@@ -133,9 +139,22 @@ jobs:
           docker version
           bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
       - name: Bazel test
-        if: inputs.run_tests
+        if: inputs.run_tests && !inputs.upload_coverage
         run: |
           bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Bazel coverage
+        if: inputs.upload_coverage
+        run: |
+          bazel coverage --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=coverage ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Upload coverage to Codecov
+        if: inputs.upload_coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./bazel-out/_coverage/_coverage_report.dat
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - name: Parse headers
         # TODO(cleanup): Bazel does not allow for only parsing headers in non-recursive targets, so
         # we can't widely enable header parsing for now (dependencies like V8 do not specify
