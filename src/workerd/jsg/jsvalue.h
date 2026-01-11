@@ -465,6 +465,11 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
 
   int hashCode() const;
 
+  // Returns true if this object is an ES module namespace object.
+  bool isModuleNamespaceObject() const {
+    return inner->IsModuleNamespaceObject();
+  }
+
   kj::String getConstructorName() KJ_WARN_UNUSED_RESULT;
   JsArray getPropertyNames(Lock& js,
       KeyCollectionFilter keyFilter,

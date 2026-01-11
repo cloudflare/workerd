@@ -1107,6 +1107,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getEnableNodeJsProcessV2()) {
       lock->setNodeJsProcessV2Enabled();
     }
+    if (features.getRequireReturnsDefaultExport()) {
+      lock->setRequireReturnsDefaultExportEnabled();
+    }
     if (features.getThrowOnUnrecognizedImportAssertion()) {
       lock->setThrowOnUnrecognizedImportAssertion();
     }
