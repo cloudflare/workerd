@@ -1374,6 +1374,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSequence(sequence);
   auto eventBuilder = builder.initEvent();
+  // Serialize tail events to RPC. Note that sizeHint is not being propagated here: When tail events
+  // are being sent via RPC over the tail stream, they have already passed the tail event queue
+  // where we apply a size limit, so the size hint is not needed anymore.
   KJ_SWITCH_ONEOF(event) {
     KJ_CASE_ONEOF(onset, Onset) {
       onset.copyTo(eventBuilder.initOnset());
