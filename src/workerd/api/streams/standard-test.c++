@@ -854,5 +854,654 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed start 2)") {
   });
 }
 
+// ======================================================================================
+// DrainingReader tests
+
+KJ_TEST("DrainingReader basic creation and locking (value stream)") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    rs->getController().setup(js, UnderlyingSource{}, StreamQueuingStrategy{.highWaterMark = 0});
+
+    // Stream should not be locked initially
+    KJ_ASSERT(!rs->isLocked());
+
+    // Create DrainingReader
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      // Stream should now be locked
+      KJ_ASSERT(rs->isLocked());
+      KJ_ASSERT(reader->isAttached());
+
+      // Release the lock
+      reader->releaseLock(js);
+      KJ_ASSERT(!rs->isLocked());
+      KJ_ASSERT(!reader->isAttached());
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader cannot be created on locked stream") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    rs->getController().setup(js, UnderlyingSource{}, StreamQueuingStrategy{.highWaterMark = 0});
+
+    // Create first reader to lock the stream
+    KJ_IF_SOME(reader1, DrainingReader::create(js, *rs)) {
+      KJ_ASSERT(rs->isLocked());
+
+      // Try to create another reader - should fail
+      auto maybeReader2 = DrainingReader::create(js, *rs);
+      KJ_ASSERT(maybeReader2 == kj::none);
+
+      reader1->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create first DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read drains buffered data (value stream)") {
+  preamble([](jsg::Lock& js) {
+    uint pullCount = 0;
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            pullCount++;
+            if (pullCount == 1) {
+              // First pull - enqueue multiple chunks
+              c->enqueue(js, toBytes(js, kj::str("Hello, ")));
+              c->enqueue(js, toBytes(js, kj::str("world!")));
+            } else {
+              // Second pull - close the stream
+              c->close(js);
+            }
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should have drained both chunks
+        KJ_ASSERT(result.chunks.size() == 2);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "Hello, ");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "world!");
+        KJ_ASSERT(!result.done);  // Stream not closed yet
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+      KJ_ASSERT(pullCount == 1);  // Only one pull needed
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read drains buffered data (byte stream)") {
+  preamble([](jsg::Lock& js) {
+    uint pullCount = 0;
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+            pullCount++;
+            if (pullCount == 1) {
+              c->enqueue(js, toBufferSource(js, kj::str("Hello, ")));
+              c->enqueue(js, toBufferSource(js, kj::str("world!")));
+            } else {
+              c->close(js);
+            }
+            return js.resolvedPromise();
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should have drained both chunks
+        KJ_ASSERT(result.chunks.size() == 2);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "Hello, ");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "world!");
+        KJ_ASSERT(!result.done);
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+      KJ_ASSERT(pullCount == 1);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read on closed stream returns done") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .start = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            c->close(js);
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    js.runMicrotasks();
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 0);
+        KJ_ASSERT(result.done);
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read after releaseLock rejects") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    rs->getController().setup(js, UnderlyingSource{}, StreamQueuingStrategy{.highWaterMark = 0});
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      reader->releaseLock(js);
+
+      bool readRejected = false;
+      auto promise =
+          reader->read(js).catch_(js, [&](jsg::Lock& js, jsg::Value reason) -> DrainingReadResult {
+        readRejected = true;
+        return DrainingReadResult{
+          .chunks = kj::Array<kj::Array<kj::byte>>(),
+          .done = true,
+        };
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readRejected);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader sync data then async pull waits") {
+  // Test case: pull enqueues some data synchronously, then returns a pending promise.
+  // The first draining read should get the sync data immediately.
+  // A second draining read should wait for the async pull to complete.
+  preamble([](jsg::Lock& js) {
+    uint pullCount = 0;
+    kj::Maybe<jsg::Promise<void>::Resolver> asyncResolver;
+    kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> savedController;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            pullCount++;
+            if (pullCount == 1) {
+              // First pull: enqueue data synchronously, but return async promise
+              c->enqueue(js, toBytes(js, kj::str("sync-chunk")));
+              // Return a promise that resolves later
+              auto prp = js.newPromiseAndResolver<void>();
+              asyncResolver = kj::mv(prp.resolver);
+              savedController = c.addRef();
+              return kj::mv(prp.promise);
+            } else if (pullCount == 2) {
+              // Second pull after async resolution: enqueue more data
+              c->enqueue(js, toBytes(js, kj::str("async-chunk")));
+              return js.resolvedPromise();
+            }
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      // First read - should get sync data immediately
+      bool firstReadCompleted = false;
+      auto promise1 = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "sync-chunk");
+        KJ_ASSERT(!result.done);
+        firstReadCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(firstReadCompleted);
+      KJ_ASSERT(pullCount == 1);  // Only first pull happened
+
+      // Second read - should wait for async data
+      bool secondReadCompleted = false;
+      auto promise2 = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should get the async chunk
+        KJ_ASSERT(result.chunks.size() >= 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "async-chunk");
+        KJ_ASSERT(!result.done);
+        secondReadCompleted = true;
+      });
+
+      js.runMicrotasks();
+      // Second read should NOT complete yet - still waiting for async pull
+      KJ_ASSERT(!secondReadCompleted);
+
+      // Now resolve the async pull
+      KJ_ASSERT_NONNULL(asyncResolver).resolve(js);
+      js.runMicrotasks();
+
+      // Now second read should complete
+      KJ_ASSERT(secondReadCompleted);
+      KJ_ASSERT(pullCount == 2);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader with fully async pull") {
+  // Test case: pull returns a promise without enqueueing anything synchronously.
+  // The draining read should wait for the pull to complete and then get the data.
+  preamble([](jsg::Lock& js) {
+    uint pullCount = 0;
+    kj::Maybe<jsg::Promise<void>::Resolver> asyncResolver;
+    kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> savedController;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            pullCount++;
+            // Return a promise and save the controller - will enqueue data when resolved
+            auto prp = js.newPromiseAndResolver<void>();
+            asyncResolver = kj::mv(prp.resolver);
+            savedController = c.addRef();
+            return kj::mv(prp.promise);
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "async-data");
+        KJ_ASSERT(!result.done);
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      // Read should NOT complete yet - waiting for async pull
+      KJ_ASSERT(!readCompleted);
+      KJ_ASSERT(pullCount == 1);
+
+      // Enqueue data and resolve the pull
+      KJ_ASSERT_NONNULL(savedController)->enqueue(js, toBytes(js, kj::str("async-data")));
+      KJ_ASSERT_NONNULL(asyncResolver).resolve(js);
+      js.runMicrotasks();
+
+      // Now read should complete
+      KJ_ASSERT(readCompleted);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader byte stream with async pull") {
+  // Test async behavior with byte streams
+  preamble([](jsg::Lock& js) {
+    uint pullCount = 0;
+    kj::Maybe<jsg::Promise<void>::Resolver> asyncResolver;
+    kj::Maybe<jsg::Ref<ReadableByteStreamController>> savedController;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+            pullCount++;
+            if (pullCount == 1) {
+              // Enqueue sync data but return async
+              c->enqueue(js, toBufferSource(js, kj::str("sync-bytes")));
+              auto prp = js.newPromiseAndResolver<void>();
+              asyncResolver = kj::mv(prp.resolver);
+              savedController = c.addRef();
+              return kj::mv(prp.promise);
+            }
+            return js.resolvedPromise();
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      // First read gets sync data
+      bool firstReadCompleted = false;
+      auto promise1 = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "sync-bytes");
+        KJ_ASSERT(!result.done);
+        firstReadCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(firstReadCompleted);
+
+      // Resolve async pull to allow future pulls
+      KJ_ASSERT_NONNULL(asyncResolver).resolve(js);
+      js.runMicrotasks();
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader multiple sync chunks then close") {
+  // Test: Multiple sync chunks followed by close in the same pull
+  preamble([](jsg::Lock& js) {
+    uint pullCount = 0;
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            pullCount++;
+            // Enqueue multiple chunks then close
+            c->enqueue(js, toBytes(js, kj::str("chunk1")));
+            c->enqueue(js, toBytes(js, kj::str("chunk2")));
+            c->enqueue(js, toBytes(js, kj::str("chunk3")));
+            c->close(js);
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should get all 3 chunks and done=true
+        KJ_ASSERT(result.chunks.size() == 3);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "chunk1");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "chunk2");
+        KJ_ASSERT(kj::str(result.chunks[2].asChars()) == "chunk3");
+        KJ_ASSERT(result.done);
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+      KJ_ASSERT(pullCount == 1);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read from teed branches") {
+  // Test: DrainingReader works correctly on both branches of a teed stream
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            c->enqueue(js, toBytes(js, kj::str("chunk1")));
+            c->enqueue(js, toBytes(js, kj::str("chunk2")));
+            c->close(js);
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    // Tee the stream into two branches
+    auto branches = rs->tee(js);
+    KJ_ASSERT(branches.size() == 2);
+    auto& branch1 = branches[0];
+    auto& branch2 = branches[1];
+
+    // Create DrainingReader on branch1
+    KJ_IF_SOME(reader1, DrainingReader::create(js, *branch1)) {
+      bool read1Completed = false;
+      auto promise1 = reader1->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 2);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "chunk1");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "chunk2");
+        KJ_ASSERT(result.done);
+        read1Completed = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(read1Completed, "Branch1 read should complete");
+
+      reader1->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader for branch1");
+    }
+
+    // Create DrainingReader on branch2 - should get the same data
+    KJ_IF_SOME(reader2, DrainingReader::create(js, *branch2)) {
+      bool read2Completed = false;
+      auto promise2 = reader2->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 2);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "chunk1");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "chunk2");
+        KJ_ASSERT(result.done);
+        read2Completed = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(read2Completed, "Branch2 read should complete");
+
+      reader2->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader for branch2");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read from byte stream with BYOB support") {
+  // Test: DrainingReader works correctly with byte streams (which support BYOB reads)
+  // even though DrainingReader itself uses a default reader. This tests that closing
+  // the controller synchronously during draining works correctly - the controller's
+  // close triggers doClose() which must be deferred while onConsumerWantsData is active.
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+            // Enqueue multiple byte chunks - verifies DrainingReader handles
+            // byte stream chunks correctly and preserves order
+            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk1")));
+            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk2")));
+            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk3")));
+            // Close synchronously - this tests that the fix for use-after-free works.
+            // Without the fix, this would cause ByteReadable to be destroyed while
+            // onConsumerWantsData is still on the stack.
+            c->close(js);
+            return js.resolvedPromise();
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    // Use DrainingReader (which uses default reader) to drain the BYOB-capable byte stream
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should successfully drain all byte chunks in order
+        KJ_ASSERT(result.chunks.size() == 3, "Should get 3 chunks");
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "byob-chunk1");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "byob-chunk2");
+        KJ_ASSERT(kj::str(result.chunks[2].asChars()) == "byob-chunk3");
+        KJ_ASSERT(result.done);  // Stream closed, so done should be true
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader read from stream with transform-like pattern") {
+  // Test: DrainingReader works correctly with a stream that simulates the
+  // TransformStream pattern where data is written to writable and read from readable
+  preamble([](jsg::Lock& js) {
+    // Create a stream where the controller is stored and chunks are enqueued asynchronously
+    // (simulating how TransformStream's readable side receives transformed data)
+    kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> savedController;
+    bool startResolved = false;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .start = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            savedController = c.addRef();
+            startResolved = true;
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      },
+      .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        // No-op pull - data comes from external enqueue calls (like transform writes)
+        return js.resolvedPromise();
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    js.runMicrotasks();
+    KJ_ASSERT(startResolved, "Stream should have started");
+
+    auto& controller = KJ_ASSERT_NONNULL(savedController, "Controller should be saved");
+
+    // Simulate TransformStream write->transform->enqueue pattern
+    // Enqueue transformed chunks (like what TransformStream's transform callback would do)
+    controller->enqueue(js, toBytes(js, kj::str("transformed-a")));
+    controller->enqueue(js, toBytes(js, kj::str("transformed-b")));
+
+    // Create DrainingReader to drain all buffered transformed data
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should drain all enqueued chunks
+        KJ_ASSERT(result.chunks.size() == 2);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "transformed-a");
+        KJ_ASSERT(kj::str(result.chunks[1].asChars()) == "transformed-b");
+        KJ_ASSERT(!result.done);  // Stream not closed yet
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+
+      // Simulate more data being written/transformed
+      controller->enqueue(js, toBytes(js, kj::str("transformed-c")));
+      controller->close(js);
+
+      bool finalReadCompleted = false;
+      auto finalPromise =
+          reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "transformed-c");
+        KJ_ASSERT(result.done);  // Stream now closed
+        finalReadCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(finalReadCompleted);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

@@ -1078,254 +1078,102 @@ void ReadableSourceKjAdapter::throwIfCancelingOrCanceled(Active& active) {
 
 kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
     kj::Own<Active> active, WritableSink& output, EndAfterPump end) {
-  // Note: this intentionally contains code that is similar to the ReadableSourceImpl::pumpImpl
-  // impl in readable-source.c++. The optimizations are generally the same but the targets are
-  // a bit different (ReadableStream vs. kj::AsyncInputStream).
+  // This implementation uses DrainingReader to efficiently pull all synchronously
+  // available data from the underlying JS stream in each iteration. This minimizes
+  // the number of isolate lock acquisitions by getting all available data at once
+  // rather than reading into fixed-size buffers.
+
   KJ_DASSERT(active->state.is<Active::Idle>() || active->state.is<Active::Readable>(),
       "pumpToImpl called when stream is not in an active state.");
 
-  static constexpr size_t DEFAULT_BUFFER_SIZE = 16384;
-  static constexpr size_t MIN_BUFFER_SIZE = 1024;
-  static constexpr size_t MED_BUFFER_SIZE = MIN_BUFFER_SIZE << 6;
-  static constexpr size_t MAX_BUFFER_SIZE = MIN_BUFFER_SIZE << 7;
-  static constexpr size_t MEDIUM_THRESHOLD = 1048576;
-  static_assert(MIN_BUFFER_SIZE < DEFAULT_BUFFER_SIZE);
-  static_assert(DEFAULT_BUFFER_SIZE < MED_BUFFER_SIZE);
-  static_assert(MED_BUFFER_SIZE < MAX_BUFFER_SIZE);
-  static_assert(MAX_BUFFER_SIZE < MEDIUM_THRESHOLD);
-
-  // The minimum read policy to use during the pump. Starts as OPPORTUNISTIC
-  // but will be adjusted based on observed stream behavior.
-  MinReadPolicy minReadPolicy = MinReadPolicy::OPPORTUNISTIC;
-
-  // Our stream may or may not have a known length.
-  size_t bufferSize = DEFAULT_BUFFER_SIZE;
-  kj::Maybe<uint64_t> maybeRemaining = active->stream->tryGetLength(StreamEncoding::IDENTITY);
-  KJ_IF_SOME(length, maybeRemaining) {
-    // Streams that advertise their length SHOULD always tell the truth.
-    // But... on the off chance they don't, we'll still try to behave
-    // reasonably. At worst we will allocate a backing buffer and
-    // perform a single read. If this proves to be a performance issue,
-    // we can fall back to strictly enforcing the advertised length.
-    if (length <= MEDIUM_THRESHOLD) {
-      // When `length` is below the medium threshold, use
-      // the nearest power of 2 >= length within the range
-      // [MIN_BUFFER_SIZE, MED_BUFFER_SIZE].
-      bufferSize = kj::max(MIN_BUFFER_SIZE, std::bit_ceil(length));
-      bufferSize = kj::min(MED_BUFFER_SIZE, bufferSize);
-    } else {
-      // Otherwise, use the biggest buffer.
-      bufferSize = MAX_BUFFER_SIZE;
-    }
-  }
-
   bool writeFailed = false;
-  bool readFailed = false;
 
   // First, if the active state is in the Readable state, we need to drain the
   // left over data before starting the main read loop.
+  // This is unlikely to occur in the typical case, but we need to handle it
+  // nonetheless.
   KJ_IF_SOME(readable, active->state.tryGetUnsafe<Active::Readable>()) {
     co_await output.write(readable.view);
     active->state.transitionTo<Active::Idle>();
   }
 
-  static const auto pumpReadImpl = [](Active& active, kj::ArrayPtr<kj::byte> dest, size_t minBytes,
-                                       MinReadPolicy minReadPolicy) -> kj::Promise<size_t> {
-    // Keep in mind that every call to pumpReadImpl requires acquiring the isolate lock!
-    auto context = kj::heap<ReadContext>({
-      .stream = active.stream.addRef(),
-      .reader = active.reader.addRef(),
-      .buffer = dest,
-      .totalRead = 0,
-      .minBytes = minBytes,
-      .adapterRef = kj::none,  // no need to track adapter liveness during pump
-    });
+  // We hold the DrainingReader during the pump. The pointer remains valid because
+  // the reader is created and owned during the pump loop lifetime.
+  kj::Maybe<kj::Own<DrainingReader>> maybeReader;
 
-    // We need to pass a pointer to active into the promise continuation so we can
-    // save any leftover data. The caller (pumpToImpl) owns the Active and keeps it
-    // alive for the duration of the pump, so this is safe.
-    Active* activePtr = &active;
+  // Initialize the pump by releasing the default reader and creating a DrainingReader.
+  // This requires the isolate lock.
+  co_await active->ioContext.run(
+      [&active, &maybeReader](jsg::Lock& js) mutable -> kj::Promise<void> {
+    // Release the existing reader's lock so we can create a DrainingReader.
+    active->reader->releaseLock(js);
 
-    return active.ioContext.run(
-        [activePtr, context = kj::mv(context), minReadPolicy](jsg::Lock& js) mutable {
-      auto& ioContext = IoContext::current();
-      // The readInternal method (and the underlying read on the stream) should optimize
-      // itself based on the bytes available in the stream itself and the minBytes requested.
-      return ioContext
-          .awaitJs(js, ReadableSourceKjAdapter::readInternal(js, kj::mv(context), minReadPolicy))
-          .then([activePtr](kj::Own<ReadContext> context) mutable -> kj::Promise<size_t> {
-        // If there's leftover data from reading a chunk larger than the buffer,
-        // save it to active.state so it can be used on the next read iteration.
-        // Only do this if we're still in Idle state - if the state has transitioned
-        // to something else (e.g. Done, Canceling, Canceled), we discard the leftover.
-        KJ_IF_SOME(leftOver, context->maybeLeftOver) {
-          if (activePtr->state.is<Active::Idle>()) {
-            activePtr->state.transitionTo<Active::Readable>(kj::mv(leftOver));
-          }
-        }
-        return context->totalRead;
-      });
-    });
-  };
+    // Create the DrainingReader for the stream.
+    maybeReader = KJ_ASSERT_NONNULL(DrainingReader::create(js, *active->stream),
+        "Failed to create DrainingReader - stream should not be locked");
+    return kj::READY_NOW;
+  });
 
-  static const auto cancelReaderImpl = [](Active& active,
-                                           kj::Exception reason) -> kj::Promise<void> {
-    // Canceling the reader requires acquiring the isolate lock, unfortunately.
-    return active.ioContext.run(
-        [reader = active.reader.addRef(), exception = kj::mv(reason)](jsg::Lock& js) mutable {
-      auto& ioContext = IoContext::current();
-      auto error = js.exceptionToJsValue(kj::mv(exception));
-      auto promise = reader->cancel(js, error.getHandle(js));
-      return ioContext.awaitJs(js, kj::mv(promise));
-    });
-  };
-
-  int currentReadBuf = 0;
-  kj::SmallArray<kj::byte, 4 * MIN_BUFFER_SIZE> backing(bufferSize * 2);
-  kj::ArrayPtr<kj::byte> buffers[2] = {
-    backing.first(bufferSize),
-    backing.slice(bufferSize),
-  };
-
-  // We will use an adaptive minBytes value to try to optimize read sizes based on
-  // observed stream behavior. We start with a minBytes set to half the buffer size.
-  // As the stream is read, we will adjust minBytes up or down depending on whether
-  // the stream is consistently filling the buffer or not.
-  size_t minBytes = bufferSize >> 1;
+  auto& reader = KJ_ASSERT_NONNULL(maybeReader);
   kj::Maybe<kj::Exception> pendingException;
-
-  // Initiate our first read.
-  auto readPromise = pumpReadImpl(*active, buffers[currentReadBuf], minBytes, minReadPolicy);
-  size_t iterationCount = 0;
-  size_t consecutiveFastReads = 0;
 
   try {
     while (true) {
-      size_t amount = 0;
-      {
-        KJ_ON_SCOPE_FAILURE(readFailed = true);
-        amount = co_await readPromise;
-      }
-      iterationCount++;
+      // Perform a draining read to get all synchronously available data.
+      // Pass raw pointer to reader into the lambda - safe because we own it
+      // and keep it alive for the duration of the pump.
+      // The draining reader grabs all data currently available in the stream's
+      // queue, then tries to read more data up to a limit as long as the data
+      // can be provided synchronously. The idea is to drain off as much data
+      // from the stream as possible each time we are holding the isolate lock
+      // to minimize the number of times we need to re-enter the lock.
+      DrainingReader* readerPtr = reader.get();
+      DrainingReadResult result =
+          co_await active->ioContext.run([readerPtr](jsg::Lock& js) mutable {
+        auto& ioContext = IoContext::current();
+        // Use a 256KB limit to allow periodic yielding to the event loop,
+        // preventing a fast producer from monopolizing the thread. This limit
+        // only affects subsequent pump iterations after the initial buffer drain.
+        constexpr size_t kMaxReadPerCycle = 256 * 1024;
+        return ioContext.awaitJs(js, readerPtr->read(js, kMaxReadPerCycle));
+      });
 
-      // If the read returned < minBytes, that indicates the stream is done.
-      // Let's write the bytes we got, end the output if needed, and exit.
-      if (amount < minBytes) {
+      // Write all the chunks we received using vectored write for efficiency.
+      if (result.chunks.size() > 0) {
         KJ_ON_SCOPE_FAILURE(writeFailed = true);
-        if (amount > 0) {
-          co_await output.write(buffers[currentReadBuf].slice(0, amount));
-        }
+        // Convert Array<Array<byte>> to ArrayPtr<ArrayPtr<const byte>> for vectored write.
+        auto pieces =
+            KJ_MAP(chunk, result.chunks) -> kj::ArrayPtr<const kj::byte> { return chunk.asPtr(); };
+        co_await output.write(pieces);
+      }
+
+      // If the stream is done, end the output if needed and exit.
+      if (result.done) {
+        KJ_ON_SCOPE_FAILURE(writeFailed = true);
         if (end) {
           co_await output.end();
         }
         co_return;
       }
-
-      auto writeBuf = buffers[currentReadBuf].slice(0, amount);
-      currentReadBuf = 1 - currentReadBuf;  // switch buffers
-
-      // Before we perform the next read, let's adapt minBytes based on stream behavior
-      // we have observed on the previous read.
-      if (iterationCount <= 3 || iterationCount % 10 == 0) {
-        if (amount == bufferSize) {
-          // Stream is filling buffer completely... Use smaller minBytes to
-          // increase responsiveness, should produce more reads with less data.
-          if (bufferSize >= 4 * DEFAULT_BUFFER_SIZE) {
-            // For large buffers (≥64KB), be more aggressive about responsiveness.
-            // 25% of a large buffer is still a substantial chunk (e.g., 32KB for 128KB).
-            minBytes = bufferSize >> 2;  // 25%
-          } else {
-            // For smaller buffers, 50% provides better balance, avoiding chunks
-            // that are too small for efficient processing (e.g., keeps 16KB → 8KB).
-            minBytes = bufferSize >> 1;  // 50%
-          }
-        } else {
-          // Stream didn't fill buffer - likely slower or at natural boundary.
-          // Use higher minBytes to accumulate larger chunks and reduce iteration overhead.
-          minBytes = (bufferSize >> 2) + (bufferSize >> 1);  // 75%
-        }
-      }
-
-      KJ_IF_SOME(remaining, maybeRemaining) {
-        if (amount > remaining) {
-          // The stream lied about its length. Ignore further length tracking.
-          maybeRemaining = kj::none;
-        } else {
-          // Otherwise, set minBytes to whatever is expected to remain.
-          remaining -= amount;
-          maybeRemaining = remaining;
-          if (remaining < minBytes && remaining > 0) {
-            minBytes = remaining;
-          }
-        }
-      }
-
-      // If we're in IMMEDIATE mode, check if the stream has recovered and is consistently
-      // providing good amounts of data. If so, switch back to OPPORTUNISTIC to reduce
-      // the number of isolate lock acquisitions.
-      if (minReadPolicy == MinReadPolicy::IMMEDIATE) {
-        if (amount >= (bufferSize >> 1)) {
-          consecutiveFastReads++;
-          if (consecutiveFastReads >= 10) {
-            minReadPolicy = MinReadPolicy::OPPORTUNISTIC;
-            consecutiveFastReads = 0;
-          }
-        } else {
-          consecutiveFastReads = 0;
-        }
-      }
-
-      // Switch to IMMEDIATE after 3 iterations if we're seeing consistently small reads
-      // (< 25% of buffer).
-      if (minReadPolicy == MinReadPolicy::OPPORTUNISTIC && iterationCount > 3 &&
-          amount < (bufferSize >> 2)) {
-        minReadPolicy = MinReadPolicy::IMMEDIATE;
-        consecutiveFastReads = 0;
-      }
-
-      // If there's leftover data from the previous read (happens when a JS chunk
-      // is larger than the buffer), extract it before starting the next read.
-      // We must do this BEFORE starting the next read so that active->state is Idle
-      // when the next read's promise continuation tries to save its leftover.
-      kj::Maybe<Active::Readable> maybeLeftover;
-      KJ_IF_SOME(readable, active->state.tryGetUnsafe<Active::Readable>()) {
-        maybeLeftover = kj::mv(readable);
-      }
-
-      // Start working on the next read. At this point, if there was leftover, we've
-      // moved it to maybeLeftover, so the next read can safely set its leftover
-      // to active->state when it completes.
-      active->state.transitionTo<Active::Idle>();
-      readPromise = pumpReadImpl(*active, buffers[currentReadBuf], minBytes, minReadPolicy);
-
-      {
-        KJ_ON_SCOPE_FAILURE(writeFailed = true);
-        co_await output.write(writeBuf);
-
-        // Write any leftover from the previous read.
-        KJ_IF_SOME(leftover, maybeLeftover) {
-          co_await output.write(leftover.view);
-        }
-      }
     }
   } catch (...) {
     auto exception = kj::getCaughtExceptionAsKj();
     if (!writeFailed) {
-      // If we got an error and it wasn't the write that failed, arrange to abort
-      // the output...
+      // If we got an error and it wasn't the write that failed, abort the output.
       output.abort(kj::cp(exception));
     }
-    if (readFailed) {
-      // If the read failed, the reader should already be in an errored state
-      // so we can skip canceling it. Just propagate the exception directly.
-      kj::throwFatalException(kj::mv(exception));
-    }
-    // Otherwise, we need to cancel the reader. Let's not do that within the catch block...
+    // Store the exception to handle after the catch block.
     pendingException = kj::mv(exception);
   }
 
+  // If there was an error, cancel the reader and propagate the exception.
   KJ_IF_SOME(exception, pendingException) {
-    co_await cancelReaderImpl(*active, kj::cp(exception));
+    DrainingReader* readerPtr = reader.get();
+    co_await active->ioContext.run([readerPtr, ex = kj::cp(exception)](jsg::Lock& js) mutable {
+      auto& ioContext = IoContext::current();
+      auto error = js.exceptionToJsValue(kj::mv(ex));
+      return ioContext.awaitJs(js, readerPtr->cancel(js, error.getHandle(js)));
+    });
     kj::throwFatalException(kj::mv(exception));
   }
 }
