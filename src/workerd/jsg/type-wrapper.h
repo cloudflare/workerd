@@ -401,6 +401,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public BufferSourceWrapper,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
+                   public DeferredPromiseWrapper<Self>,
                    public NonCoercibleWrapper<Self>,
                    public MemoizedIdentityWrapper<Self>,
                    public IdentifiedWrapper<Self>,
@@ -464,6 +465,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(BufferSourceWrapper);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
+  USING_WRAPPER(DeferredPromiseWrapper<Self>);
   USING_WRAPPER(NonCoercibleWrapper<Self>);
   USING_WRAPPER(MemoizedIdentityWrapper<Self>);
   USING_WRAPPER(IdentifiedWrapper<Self>);

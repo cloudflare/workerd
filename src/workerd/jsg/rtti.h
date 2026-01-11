@@ -450,6 +450,13 @@ struct BuildRtti<Configuration, jsg::Promise<T>> {
   }
 };
 
+template <typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::DeferredPromise<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, T>::build(builder.initPromise().initValue(), rtti);
+  }
+};
+
 template <typename Configuration>
 struct BuildRtti<Configuration, v8::Promise> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {

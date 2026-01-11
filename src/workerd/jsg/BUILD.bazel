@@ -93,6 +93,7 @@ wd_cc_library(
     hdrs = [
         "async-context.h",
         "buffersource.h",
+        "deferred-promise.h",
         "dom-exception.h",
         "fast-api.h",
         "function.h",
@@ -134,6 +135,7 @@ wd_cc_library(
         "//src/workerd/util",  # Required for util/batch-queue.h
         "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
+        "//src/workerd/util:state-machine",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",

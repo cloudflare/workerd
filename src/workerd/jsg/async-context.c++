@@ -191,4 +191,24 @@ void AsyncContextFrame::jsgVisitForGc(GcVisitor& visitor) {
     visitor.visit(entry.value);
   }
 }
+
+// ======================================================================================
+// AsyncContextScope implementation
+
+kj::Maybe<Ref<AsyncContextFrame>> AsyncContextScope::capture(Lock& js) {
+  return AsyncContextFrame::currentRef(js);
+}
+
+AsyncContextScope::AsyncContextScope(Lock& js, kj::Maybe<Ref<AsyncContextFrame>>& frame)
+    : isolate(js.v8Isolate),
+      prior(AsyncContextFrame::current(isolate)) {
+  kj::Maybe<AsyncContextFrame&> frameRef =
+      frame.map([](Ref<AsyncContextFrame>& f) -> AsyncContextFrame& { return *f.get(); });
+  maybeSetV8ContinuationContext(isolate, frameRef);
+}
+
+AsyncContextScope::~AsyncContextScope() noexcept(false) {
+  maybeSetV8ContinuationContext(isolate, prior);
+}
+
 }  // namespace workerd::jsg
