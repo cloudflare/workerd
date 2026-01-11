@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "capnp",
+    name = "indexmap",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,7 +29,6 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
         "default",
         "std",
     ],
@@ -40,10 +39,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnp",
+        "crate-name=indexmap",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.24.0",
+    version = "2.13.0",
+    deps = [
+        "@crates_vendor__equivalent-1.0.2//:equivalent",
+        "@crates_vendor__hashbrown-0.16.1//:hashbrown",
+    ],
 )
