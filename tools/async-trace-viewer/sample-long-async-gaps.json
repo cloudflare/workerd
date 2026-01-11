@@ -1,0 +1,31 @@
+{
+  "requestDurationNs": 2500000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 2490000000, "destroyedAt": 2500000000},
+    {"asyncId": 2, "triggerId": 1, "type": "fetch", "stackTraceId": 1, "createdAt": 1000000, "callbackStartedAt": 800000000, "callbackEndedAt": 801000000, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 2, "type": "js-promise", "stackTraceId": 2, "createdAt": 801500000, "callbackStartedAt": 802000000, "callbackEndedAt": 803000000, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 3, "type": "fetch", "stackTraceId": 3, "createdAt": 803500000, "callbackStartedAt": 1500000000, "callbackEndedAt": 1501000000, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 2, "createdAt": 1501500000, "callbackStartedAt": 1502000000, "callbackEndedAt": 1503000000, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 5, "type": "fetch", "stackTraceId": 4, "createdAt": 1503500000, "callbackStartedAt": 2100000000, "callbackEndedAt": 2101000000, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 1, "type": "timer", "stackTraceId": 5, "createdAt": 2000000, "callbackStartedAt": 1002000000, "callbackEndedAt": 1003000000, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 6, "type": "js-promise", "stackTraceId": 6, "createdAt": 2101500000, "callbackStartedAt": 2102000000, "callbackEndedAt": 2489000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:5:10"]},
+    {"id": 1, "frames": ["fetch @ worker.js:15:20", "callSlowAPI @ worker.js:12:3"]},
+    {"id": 2, "frames": ["processResponse @ worker.js:25:5"]},
+    {"id": 3, "frames": ["fetch @ worker.js:35:20", "callAnotherSlowAPI @ worker.js:32:3"]},
+    {"id": 4, "frames": ["fetch @ worker.js:45:20", "callExternalService @ worker.js:42:3"]},
+    {"id": 5, "frames": ["setTimeout @ worker.js:55:10", "scheduleLongTask @ worker.js:52:3"]},
+    {"id": 6, "frames": ["combineResults @ worker.js:65:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 2, "key": "url", "value": "https://slow-api.example.com/compute"},
+    {"asyncId": 2, "key": "method", "value": "POST"},
+    {"asyncId": 4, "key": "url", "value": "https://external-db.example.com/query"},
+    {"asyncId": 4, "key": "method", "value": "POST"},
+    {"asyncId": 6, "key": "url", "value": "https://third-party.example.com/validate"},
+    {"asyncId": 6, "key": "method", "value": "GET"},
+    {"asyncId": 7, "key": "delay", "value": "1000ms"}
+  ]
+}

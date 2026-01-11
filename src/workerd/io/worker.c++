@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-cache.h"
+#include "async-trace-hooks.h"
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
@@ -1190,6 +1191,10 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         }
       }
     });
+
+    // Install the promise hook for async tracing (bubbleprof-style visualization).
+    // This tracks promise lifecycle for requests that have async tracing enabled.
+    AsyncTracePromiseHook::install(lock->v8Isolate);
 
     // The PromiseCrossContextCallback is used to allow cross-IoContext promise following.
     // When the IoContext scope is entered, we set the "promise context tag" associated

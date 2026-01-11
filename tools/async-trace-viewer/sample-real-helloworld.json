@@ -1,0 +1,15 @@
+{
+  "requestDurationNs": 6810758,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 6730102, "destroyedAt": 6730766},
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 0, "createdAt": 2382236, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 3746042, "callbackStartedAt": 4522053, "callbackEndedAt": 5016120, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 3, "type": "js-promise", "stackTraceId": 1, "createdAt": 4166904, "callbackStartedAt": 5087538, "callbackEndedAt": 5884494, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 1, "createdAt": 4373705, "callbackStartedAt": 5918464, "callbackEndedAt": 6042060, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker:6:14"]},
+    {"id": 1, "frames": []}
+  ],
+  "annotations": []
+}

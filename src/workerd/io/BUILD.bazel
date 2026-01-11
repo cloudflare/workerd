@@ -33,6 +33,8 @@ wd_cc_library(
     # IoContext -> Worker -> ServiceWorkerGlobalScope -> (various api targets) dependency chain.
     # TODO(cleanup): Fix this.
     srcs = [
+        "async-trace.c++",
+        "async-trace-hooks.c++",
         "compatibility-date.c++",
         "external-pusher.c++",
         "features.c++",
@@ -47,6 +49,8 @@ wd_cc_library(
         "worker-fs.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
+        "async-trace.h",
+        "async-trace-hooks.h",
         "compatibility-date.h",
         "external-pusher.h",
         "hibernation-manager.h",

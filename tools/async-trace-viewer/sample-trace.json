@@ -1,0 +1,30 @@
+{
+  "requestDurationNs": 17352613,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 17312797, "destroyedAt": 17313045},
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 0, "createdAt": 2634289, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 3309095, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 1, "type": "timer", "stackTraceId": 2, "createdAt": 3888952, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 3, "type": "js-promise", "stackTraceId": 1, "createdAt": 4285533, "callbackStartedAt": 10582028, "callbackEndedAt": 11644945, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 1, "type": "js-promise", "stackTraceId": 3, "createdAt": 4488664, "callbackStartedAt": 16676083, "callbackEndedAt": 16730254, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 6, "type": "js-promise", "stackTraceId": 3, "createdAt": 4659101, "callbackStartedAt": 16738928, "callbackEndedAt": 16929339, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 3, "createdAt": 4750698, "callbackStartedAt": 16938959, "callbackEndedAt": 16975076, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 5, "type": "js-promise", "stackTraceId": 4, "createdAt": 10656560, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 5, "type": "timer", "stackTraceId": 5, "createdAt": 11209059, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 11, "triggerId": 9, "type": "js-promise", "stackTraceId": 4, "createdAt": 11541632, "callbackStartedAt": 16245010, "callbackEndedAt": 16662593, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker:2:14"]},
+    {"id": 1, "frames": ["fetch @ worker:4:27"]},
+    {"id": 2, "frames": ["result1 @ worker:5:7", "fetch @ worker:4:27"]},
+    {"id": 3, "frames": []},
+    {"id": 4, "frames": ["fetch @ worker:8:27"]},
+    {"id": 5, "frames": ["result2 @ worker:9:7", "fetch @ worker:8:27"]}
+  ],
+  "annotations": [
+    {"asyncId": 4, "key": "delay", "value": "10"},
+    {"asyncId": 4, "key": "type", "value": "setTimeout"},
+    {"asyncId": 10, "key": "delay", "value": "5"},
+    {"asyncId": 10, "key": "type", "value": "setTimeout"}
+  ]
+}

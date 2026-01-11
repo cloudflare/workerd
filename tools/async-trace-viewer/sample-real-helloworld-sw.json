@@ -1,0 +1,16 @@
+{
+  "requestDurationNs": 3955964,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 3937871, "destroyedAt": 3938025},
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 0, "createdAt": 2006611, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 2887385, "callbackStartedAt": 3378287, "callbackEndedAt": 3426294, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 3, "type": "js-promise", "stackTraceId": 2, "createdAt": 3182242, "callbackStartedAt": 3434269, "callbackEndedAt": 3620886, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 2, "createdAt": 3271515, "callbackStartedAt": 3627582, "callbackEndedAt": 3652831, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["handle @ main:9:22", "<anonymous> @ main:6:21"]},
+    {"id": 1, "frames": ["<anonymous> @ main:6:9"]},
+    {"id": 2, "frames": []}
+  ],
+  "annotations": []
+}

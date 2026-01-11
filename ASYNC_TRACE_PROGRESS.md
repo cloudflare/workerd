@@ -1,0 +1,412 @@
+# Async Trace Implementation Progress
+
+This file tracks progress on implementing async tracing for Workers, enabling clinicjs/bubbleprof-style visualization of async activity.
+
+## Goal
+
+Enable visualization of async activity in workers by tracking:
+- Async resource creation and destruction
+- Causality chains (which async operation triggered which)
+- Timing (when callbacks start/end, async delays)
+- Stack traces at resource creation
+
+## Architecture Overview
+
+1. **AsyncTraceContext** (`src/workerd/io/async-trace.h/.c++`): Core tracking
+   - Tracks async resources with unique IDs and trigger relationships
+   - Captures deduplicated stack traces, timing at nanosecond precision
+   - Supports annotations (e.g., URLs for fetch)
+   - Emits Perfetto trace events and JSON output
+
+2. **AsyncTracePromiseHook** (`src/workerd/io/async-trace-hooks.h/.c++`): V8 Promise integration
+   - Uses V8's PromiseHook API for promise lifecycle tracking
+
+3. **IoContext Integration** (`src/workerd/io/io-context.h/.c++`):
+   - `asyncTrace` member per request, auto-enabled with Perfetto tracing
+
+4. **API Instrumentation**: fetch, cache, timers, streams, KJ↔JS bridges
+
+## Resource Types
+
+```cpp
+enum class ResourceType : uint16_t {
+  kRoot,              // Root context (request handler)
+  kJsPromise,         // JavaScript promise
+  kKjPromise,         // KJ promise (C++ side)
+  kKjToJsBridge,      // KJ promise wrapped for JS
+  kJsToKjBridge,      // JS promise awaited in KJ
+  kFetch,             // fetch() subrequest
+  kCacheGet,          // Cache API get
+  kCachePut,          // Cache API put
+  kKvGet/Put/Delete/List,      // KV operations
+  kDurableObjectGet/Put/Delete/List/Call,  // DO operations
+  kR2Get/Put/Delete/List,      // R2 operations
+  kD1Query,           // D1 query
+  kQueueSend,         // Queue send
+  kTimer,             // setTimeout/setInterval/setImmediate
+  kMicrotask,         // queueMicrotask
+  kStreamRead/Write/PipeTo/PipeThrough,  // Stream operations
+  kSocketConnect/StartTls/Close,         // Socket operations
+  kWebSocket,         // WebSocket operations
+  kCrypto,            // Crypto operations
+  kAiInference,       // AI inference
+  kOther              // Unclassified
+};
+```
+
+## Implementation Status
+
+### Core Infrastructure - Complete
+- [x] AsyncTraceContext with resource tracking, stack traces, timing, annotations
+- [x] V8 Promise hook integration
+- [x] IoContext integration
+- [x] JSON output format
+- [x] Perfetto trace event emission
+
+### Completed Instrumentation
+
+**Basic APIs** (`src/workerd/api/`):
+- [x] `fetch()` in `http.c++` - creates kFetch with URL/method annotations
+- [x] `cache.match/put/delete` in `cache.c++` - creates kCacheGet/kCachePut
+- [x] `setTimeout/setInterval` in `global-scope.c++` - creates kTimer with delay/type annotations
+- [x] `setImmediate` in `global-scope.c++` - creates kTimer with type="setImmediate"
+- [x] `queueMicrotask` in `global-scope.c++` - creates kMicrotask
+
+**Stream Operations** (`src/workerd/api/streams/`):
+- [x] `ReaderImpl::read()` → kStreamRead
+- [x] `WritableStreamDefaultWriter::write()` → kStreamWrite
+- [x] `ReadableStream::pipeTo()` → kStreamPipeTo
+- [x] `ReadableStream::pipeThrough()` → kStreamPipeThrough
+
+**Socket Operations** (`src/workerd/api/sockets.c++`):
+- [x] `connect()` → kSocketConnect with address/secureTransport annotations
+- [x] `Socket::startTls()` → kSocketStartTls with address annotation
+- [x] `Socket::close()` → kSocketClose with address annotation
+
+**KJ↔JS Bridges** (`src/workerd/io/io-context.h`):
+- [x] `awaitIoImpl()` → kKjToJsBridge (KJ promise wrapped for JS)
+- [x] `awaitJs()` → kJsToKjBridge (JS promise awaited in KJ)
+- Both use `KJ_DEFER` for exception-safe callback exit
+
+### TODO - Instrumentation Needed
+
+The following APIs need instrumentation following the pattern in `http.c++`:
+
+| API | File | Resource Types |
+|-----|------|----------------|
+| KV | `src/workerd/api/kv.c++` | kKvGet, kKvPut, kKvDelete, kKvList |
+| Durable Objects | `src/workerd/api/actor-state.c++` | kDurableObjectGet/Put/Delete/List/Call |
+| R2 | `src/workerd/api/r2*.c++` | kR2Get, kR2Put, kR2Delete, kR2List |
+| D1 | `src/workerd/api/sql.c++` | kD1Query |
+| Queues | `src/workerd/api/queue.c++` | kQueueSend |
+| WebSocket | `src/workerd/api/web-socket.c++` | kWebSocket |
+| Crypto | `src/workerd/api/crypto*.c++` | kCrypto |
+| AI | `src/workerd/api/ai.c++` | kAiInference |
+
+**Instrumentation pattern:**
+```cpp
+// Get trace context
+auto& ioContext = IoContext::current();
+if (auto* trace = ioContext.getAsyncTrace()) {
+  auto asyncId = trace->createResource(AsyncTraceContext::ResourceType::kFetch,
+                                        trace->getCurrentAsyncId());
+  trace->addAnnotation(asyncId, "url", url.toString());
+  // ... do work ...
+  trace->enterCallback(asyncId);
+  KJ_DEFER(trace->exitCallback(asyncId));
+}
+```
+
+### Other TODO
+- [ ] Unit tests for AsyncTraceContext
+- [ ] Perfetto UI validation
+- [ ] Consider exposing trace via response header or separate endpoint
+- [ ] Production sampling strategy
+- [ ] Integration with existing tracing infrastructure
+
+## Notes for Resuming Instrumentation Work
+
+1. **Verify build**: `bazel build //src/workerd/io:io`
+2. **Test pattern**: Create a `.wd-test` exercising the API, verify JSON in logs
+3. **Follow existing patterns**: See `http.c++` for fetch, `cache.c++` for cache ops
+4. **For KJ promises**: Look at `awaitIo()` in `io-context.h`
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/workerd/io/async-trace.h/.c++` | Core AsyncTraceContext |
+| `src/workerd/io/async-trace-hooks.h/.c++` | V8 Promise hook |
+| `src/workerd/io/io-context.h/.c++` | IoContext integration |
+| `src/workerd/api/http.c++` | fetch() instrumentation |
+| `src/workerd/api/cache.c++` | Cache API instrumentation |
+| `src/workerd/api/global-scope.c++` | Timer instrumentation |
+| `src/workerd/api/streams/*.c++` | Stream instrumentation |
+
+## JSON Output Format
+
+```json
+{
+  "requestDurationNs": 123456789,
+  "resources": [
+    { "asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0,
+      "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 123456789, "destroyedAt": 0 }
+  ],
+  "stackTraces": [{ "id": 0, "frames": ["functionName @ script.js:10:5"] }],
+  "annotations": [{ "asyncId": 2, "key": "url", "value": "https://example.com" }]
+}
+```
+
+## Capturing Traces
+
+```bash
+bazel-bin/src/workerd/server/workerd serve \
+    --verbose --perfetto-trace=/tmp/trace.perfetto=workerd \
+    samples/helloworld_esm/config.capnp 2>&1 &
+curl http://localhost:8080/
+pkill workerd  # Trace JSON output on shutdown
+```
+
+Trace JSON appears in stderr with prefix: `AsyncTrace completed; toJson() = {...}`
+
+---
+
+# Visualization Tool
+
+Location: `tools/async-trace-viewer/index.html` (single-file HTML/CSS/JS application)
+
+## Code Structure
+
+The viewer is a single HTML file with embedded CSS and JavaScript. Key organization:
+
+### State Variables (search for `// ... view state`)
+Each view has its own state variables for hover, data caching, and render params:
+```javascript
+// Example pattern for view-specific state
+let heatmapHoverCell = null;      // Current hover state
+let heatmapData = null;           // Cached computed data for hit detection
+let heatmapRenderParams = null;   // Render params for coordinate mapping
+let heatmapBucketCount = 40;      // Control state
+```
+
+### Render Functions
+Each view has a `render<ViewName>()` function (e.g., `renderHeatmap()`, `renderGaps()`). Pattern:
+1. Get canvas and context
+2. Account for controls height if view has controls div
+3. Clear and draw
+4. Store data/params for hover detection
+5. Setup event handlers once (check `canvas._<view>HandlersSet`)
+
+### Adding Controls to a View
+1. Add control HTML inside the view's container div (before canvas)
+2. Add CSS rule: `#<view>-view.active { display: flex; flex-direction: column; }`
+3. Add state variables for control values
+4. In render function, account for controls height: `container.clientHeight - controlsHeight`
+5. In `setup<View>EventHandlers()`, add listeners for controls
+
+### Event Handler Pattern
+```javascript
+function setup<View>EventHandlers(canvas) {
+  // Control handlers
+  document.getElementById('<view>-control').addEventListener('input/change', (e) => {
+    stateVar = e.target.value;
+    render<View>();
+  });
+
+  // Hover handler - update hover state, re-render, show/hide tooltip
+  canvas.addEventListener('mousemove', (e) => { ... });
+  canvas.addEventListener('mouseleave', () => { ... });
+
+  // Click handler - populate sidebar details
+  canvas.addEventListener('click', (e) => { ... });
+}
+```
+
+### Tooltip Pattern
+Each view with tooltips creates a tooltip element on first use:
+```javascript
+function show<View>Tooltip(e, data) {
+  if (!<view>Tooltip) {
+    <view>Tooltip = document.createElement('div');
+    <view>Tooltip.style.cssText = `position: fixed; background: rgba(22, 33, 62, 0.95); ...`;
+    document.body.appendChild(<view>Tooltip);
+  }
+  <view>Tooltip.innerHTML = html;
+  <view>Tooltip.style.left = (e.clientX + 15) + 'px';
+  <view>Tooltip.style.top = (e.clientY + 15) + 'px';
+  <view>Tooltip.style.display = 'block';
+}
+```
+
+### Keyboard Handling
+Global keyboard handler at `document.addEventListener('keydown', ...)` around line 2334. View-specific keys check `currentView` first. Add new view-specific shortcuts there.
+
+### Critical Path Integration
+When adding critical path support to a view:
+1. Check `showCriticalPath` global flag
+2. Use `criticalPathSet.has(r.asyncId)` to check if resource is on critical path
+3. Typically show orange color/border and 🔥 badge
+
+## Testing Changes
+
+```bash
+cd tools/async-trace-viewer
+python3 -m http.server 8888
+# Open http://localhost:8888, use demo dropdown or load trace JSON
+```
+
+## Views
+
+| Key | View | Description |
+|-----|------|-------------|
+| 1 | **Waterfall** | Timeline with concurrency graph, dependency arrows, hover highlighting |
+| 2 | **Graph** | Bubble/Hierarchical/Force layouts (←/→ to switch), path highlighting |
+| 3 | **Replay** | Animated playback with lifecycle badges, event markers, loop/ghost modes |
+| 4 | **Parallelism** | Concurrent ops over time, efficiency metrics, ideal comparison |
+| 5 | **Breakdown** | Treemap/Sunburst by type/trigger/stack, drill-down navigation |
+| 6 | **Latency** | Histogram/CDF of async wait times, outlier detection |
+| 7 | **Gaps** | Idle periods with classification, recommendations |
+| 8 | **Heatmap** | Activity intensity grid, multiple color schemes |
+
+## Analysis Features (🔬 dropdown)
+
+| Key | Feature | Description |
+|-----|---------|-------------|
+| C | Critical Path | Highlights minimum-latency dependency chain |
+| B | Bottlenecks | Top 5 resources consuming most time |
+| T | Patterns | Detects 14 anti-patterns (sequential fetches, blocking, etc.) |
+| F | Click Filter | Filter to clicked resource's ancestors/descendants |
+| G | Stack Group | Group by creation stack trace |
+| E | Temporal Edges | Shows timing-based causality |
+| A | High Contrast | Accessibility mode |
+
+## Keyboard Shortcuts
+
+**Navigation:** `1`-`8` switch views, `?` help, `O` load, `P` paste, `Esc` close
+
+**Analysis:** `C` critical path, `B` bottlenecks, `T` patterns, `F` filter, `G` stack group, `A` accessibility
+
+**View-Specific:**
+- Graph: `←`/`→` switch layouts
+- Replay: `Space` play/pause, `R` reset, `←`/`→` step, `Shift+←`/`→` jump to events, `-`/`+` speed, `Shift+L` loop, `Shift+O` ghost
+- Heatmap: `←`/`→` adjust bucket count
+- All: `Shift+R` reset view, `I` AI analysis prompt
+
+## Pattern Detection
+
+14 patterns detected with configurable thresholds:
+
+| Severity | Patterns |
+|----------|----------|
+| **High** | Sequential fetches, Event loop blocking (>50ms), Unbatched operations |
+| **Medium** | Duplicate fetches, Deep chains (>10), Waterfall fetches, Long gaps, Promise/callback floods, Fetch concurrency (>6) |
+| **Low** | Unresolved promises, Redundant timers, Cache misses, Hot callbacks |
+
+## Sample Traces
+
+**Real traces:** helloworld, async-context, durable-objects, nodejs-compat-fs/streams, tcp
+
+**Anti-pattern examples:** sequential, duplicates, waterfall, unresolved, long-gaps, redundant-timers, cache-misses
+
+---
+
+# View Enhancement Tracker
+
+## Implementation Details by View
+
+### Waterfall
+- **State:** Uses `highlightedChain` Set for hover highlighting
+- **Features:** Concurrency graph (canvas above), dependency arrows (SVG overlay in tree mode), expandable stack traces (▶ button)
+
+### Graph (combined Bubble/DAG)
+- **State:** `dagLayoutMode` ('bubble'|'hierarchical'|'force'), `dagNodes`, `dagSimulationRunning`
+- **Features:** 3 layouts with ←/→ switching, path highlighting on hover, drag to reposition nodes
+
+### Replay
+- **State:** `replayProgress`, `replayPlaying`, `replaySpeed`, `replayLoopMode`, `replayGhostMode`, `replayTrails`, `replayGhosts`
+- **Features:** Animated playback, lifecycle badges, ghost pulses for state changes, keyboard navigation
+
+### Parallelism
+- **State:** `parallelismHoverBucket`, `parallelismBucketData`, `parallelismRenderParams`
+- **Features:** Stacked bars (sync solid, async faded), cyan ideal line, orange critical path line, efficiency sidebar
+
+### Breakdown
+- **State:** `breakdownGroupBy`, `breakdownVizMode`, `breakdownDrillPath`, `breakdownHoverItem`, `breakdownData`
+- **Features:** Treemap/sunburst toggle, 4 grouping modes, drill-down with breadcrumbs, Shift+R to reset drill path
+- **Gotcha:** Drill-down uses `canDrillDown = item.count > 1` and checks `wouldBeSameGroup` to prevent infinite recursion
+
+### Latency
+- **State:** `latencyMode` ('histogram'|'cdf'), `latencyShowOutliers`, `latencyBucketData`, `latencyHoverBucket`
+- **Features:** Histogram/CDF toggle, outlier detection (>3σ with red border), percentile lines (p50/p90/p99)
+- **Controls:** Mode dropdown, outliers checkbox
+
+### Gaps
+- **State:** `gapsHoverIndex`, `gapsShowClassification`, `gapsShowRecommendations`, `gapsThresholdPercent`, `gapsShowMinor`, `gapsData`
+- **Features:** Gap classification by cause (fetch/timer/io/promise), color-coded gaps, optimization recommendations
+- **Controls:** Threshold slider, show minor checkbox, classify checkbox, recommendations checkbox
+
+### Heatmap
+- **State:** `heatmapHoverCell`, `heatmapBucketCount`, `heatmapColorScheme`, `heatmapActivityMode`, `heatmapSortMode`, `heatmapData`, `heatmapRenderParams`
+- **Features:** Hover/click interaction, 3 color schemes, 4 activity modes, 4 sort modes, critical path row highlighting
+- **Controls:** Bucket slider (10-120, ←/→ keys), color dropdown, activity dropdown, sort dropdown
+
+## Known Issues / Gotchas
+
+1. **View switching CSS:** Views with controls need `#<view>-view.active { display: flex; flex-direction: column; }` to override the default `display: block`
+
+2. **Breakdown drill-down recursion:** The trigger chain grouping traces to root ancestor; must use same logic in both grouping and `wouldBeSameGroup` check
+
+3. **Canvas sizing:** For views with controls, must subtract controls height: `canvas.height = container.clientHeight - controlsHeight`
+
+4. **Event handler setup:** Use `canvas._<view>HandlersSet` flag to avoid adding duplicate handlers on re-render
+
+## Potential Future Enhancements
+
+### General
+- [ ] Cross-view linking (selections sync across views)
+- [ ] Export/share functionality
+- [ ] Comparison mode (diff two traces)
+- [ ] Minimap/overview for navigation
+- [ ] Search by asyncId, type, or stack frame
+
+### Per-View
+- **Latency:** Type filtering, zoom/range selection
+- **Gaps:** Gap-to-resource linking, ideal timeline comparison
+- **Heatmap:** Row filtering, time range zoom
+- **Replay:** Timeline bookmarks, focus mode, export animation
+
+---
+
+# Session Notes
+
+## Session (January 2025) - Visualization Enhancements
+
+**Completed:**
+- Latency view: hover/click, histogram/CDF toggle, outlier detection, critical path integration
+- Gaps view: hover/click, gap classification with color-coding, threshold controls, optimization recommendations
+- Heatmap view: hover/click, bucket slider with ←/→ keys, 3 color schemes, 4 activity modes, 4 sort modes, critical path rows
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - all visualization changes
+- `ASYNC_TRACE_PROGRESS.md` - consolidated from separate tracker file
+
+## Latest Session (January 2025) - Socket/Microtask/Immediate Instrumentation
+
+**Completed:**
+- Added `kMicrotask` ResourceType to `async-trace.h`
+- Instrumented `queueMicrotask()` in `global-scope.c++` - creates kMicrotask resource with callback tracking
+- Instrumented `setImmediate()` in `global-scope.c++` - creates kTimer with type="setImmediate" annotation
+- Added socket ResourceTypes: `kSocketConnect`, `kSocketStartTls`, `kSocketClose`
+- Instrumented `connect()` in `sockets.c++` - creates kSocketConnect with address/secureTransport annotations
+- Instrumented `Socket::startTls()` in `sockets.c++` - creates kSocketStartTls
+- Instrumented `Socket::close()` in `sockets.c++` - creates kSocketClose
+
+**Files modified:**
+- `src/workerd/io/async-trace.h` - added kMicrotask, kSocketConnect, kSocketStartTls, kSocketClose
+- `src/workerd/api/global-scope.c++` - instrumented queueMicrotask and setImmediate
+- `src/workerd/api/sockets.c++` - instrumented connect, startTls, close
+
+**Where we left off:**
+- Visualization tool enhancements largely complete for all 8 views
+- C++ instrumentation: fetch, cache, timers, streams, bridges, microtask, immediate, sockets complete
+- Still could instrument: KV, DO, R2, D1, Queue, WebSocket, Crypto, AI APIs (if desired)
