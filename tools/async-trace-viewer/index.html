@@ -1544,22 +1544,22 @@
           <h3>Keyboard Shortcuts</h3>
           <table class="guide-table">
             <tr><th>Key</th><th>Action</th></tr>
-            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Navigation</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">Navigation</td></tr>
             <tr><td><code>1</code>-<code>8</code></td><td>Switch views (Waterfall, Graph, Replay, Parallelism, Breakdown, Latency, Gaps, Heatmap)</td></tr>
             <tr><td><code>?</code> or <code>H</code></td><td>Show this help guide</td></tr>
             <tr><td><code>O</code> or <code>L</code></td><td>Open file dialog to load trace</td></tr>
             <tr><td><code>P</code> or <code>V</code></td><td>Toggle paste JSON area</td></tr>
             <tr><td><code>Esc</code></td><td>Close modals / dropdowns</td></tr>
-            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Analysis (via dropdown)</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">Analysis (via dropdown)</td></tr>
             <tr><td><code>C</code></td><td>Toggle critical path highlight</td></tr>
             <tr><td><code>B</code></td><td>Toggle bottleneck detection</td></tr>
             <tr><td><code>T</code></td><td>Toggle pattern detection</td></tr>
             <tr><td><code>F</code></td><td>Toggle click-to-filter mode</td></tr>
             <tr><td><code>G</code></td><td>Toggle stack trace grouping</td></tr>
             <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
-            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">View-Specific</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">View-Specific</td></tr>
             <tr><td><code>←</code> / <code>→</code></td><td>Switch Graph layout: Bubble → Hierarchical → Force (Graph view only)</td></tr>
-            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Replay View Controls</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">Replay View Controls</td></tr>
             <tr><td><code>Space</code></td><td>Play/Pause animation</td></tr>
             <tr><td><code>R</code></td><td>Reset animation to start</td></tr>
             <tr><td><code>←</code> / <code>→</code></td><td>Step through timeline (1% increments)</td></tr>
@@ -1568,7 +1568,7 @@
             <tr><td><code>-</code> / <code>+</code></td><td>Decrease/increase speed (0.25x, 0.5x, 1x, 2x)</td></tr>
             <tr><td><code>Shift+L</code></td><td>Toggle loop mode</td></tr>
             <tr><td><code>Shift+O</code></td><td>Toggle ghost mode (state change pulses)</td></tr>
-            <tr><td colspan="2" style="font-weight:bold; background:#f0f0f0;">Other</td></tr>
+            <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">Other</td></tr>
             <tr><td><code>I</code></td><td>Open AI analysis prompt</td></tr>
             <tr><td><code>Shift+R</code></td><td>Refresh/reset current view</td></tr>
           </table>
@@ -1839,7 +1839,7 @@ const userB = await fetch('/user/123');</pre>
     let replayLoopPauseUntil = 0;  // Timestamp when loop pause ends
     let replayGhostMode = false;  // Ghost mode - show previous states
     let replayTrail = [];  // Execution trail - { asyncId, fadeStart, x, y, color }
-    let replayLayoutMode = 'grid';  // 'grid' or 'bubble'
+    let replayLayoutMode = 'grid';  // 'grid', 'bubble', or 'rings'
     let replayBubbleNodes = new Map();  // asyncId -> { x, y, targetX, targetY, radius, targetRadius }
     let replayBubbleViewport = { x: 0, y: 0, scale: 1 };  // Pan/zoom for bubble view
     let replayBubbleLastLayout = null;  // Cache last layout computation time
@@ -2047,7 +2047,7 @@ const userB = await fetch('/user/123');</pre>
 
         // Restore replay layout mode
         if (settings.replayLayoutMode !== undefined) {
-          const validModes = ['grid', 'bubble'];
+          const validModes = ['grid', 'bubble', 'rings'];
           if (validModes.includes(settings.replayLayoutMode)) {
             replayLayoutMode = settings.replayLayoutMode;
           }
@@ -9068,55 +9068,54 @@ const userB = await fetch('/user/123');</pre>
       ctx.fillText('⏮ Reset', btnX + btnWidth/2, btnY + 15);
       btnX += btnWidth + btnSpacing;
 
-      // Speed buttons
+      // Speed buttons (compact)
       const speeds = [0.25, 0.5, 1, 2];
       speeds.forEach(speed => {
+        const speedWidth = speed === 0.25 ? 32 : 28;
         ctx.fillStyle = replaySpeed === speed ? '#e94560' : '#0f3460';
-        ctx.fillRect(btnX, btnY, 40, btnHeight);
+        ctx.fillRect(btnX, btnY, speedWidth, btnHeight);
         ctx.strokeStyle = '#e94560';
-        ctx.strokeRect(btnX, btnY, 40, btnHeight);
+        ctx.strokeRect(btnX, btnY, speedWidth, btnHeight);
         ctx.fillStyle = replaySpeed === speed ? 'white' : '#e94560';
-        ctx.fillText(`${speed}x`, btnX + 20, btnY + 15);
-        btnX += 40 + 5;
+        ctx.fillText(`${speed}x`, btnX + speedWidth/2, btnY + 15);
+        btnX += speedWidth + 3;
       });
 
       // Loop button
-      btnX += 5;  // Extra spacing
+      btnX += 3;
       ctx.fillStyle = replayLoop ? '#50c878' : '#0f3460';
-      ctx.fillRect(btnX, btnY, 45, btnHeight);
+      ctx.fillRect(btnX, btnY, 38, btnHeight);
       ctx.strokeStyle = replayLoop ? '#50c878' : '#e94560';
-      ctx.strokeRect(btnX, btnY, 45, btnHeight);
+      ctx.strokeRect(btnX, btnY, 38, btnHeight);
       ctx.fillStyle = replayLoop ? 'white' : '#e94560';
-      ctx.fillText('🔁 Loop', btnX + 22.5, btnY + 15);
-      btnX += 50;
+      ctx.fillText('🔁', btnX + 19, btnY + 15);
+      btnX += 41;
 
       // Ghost button
       ctx.fillStyle = replayGhostMode ? '#9966cc' : '#0f3460';
-      ctx.fillRect(btnX, btnY, 50, btnHeight);
+      ctx.fillRect(btnX, btnY, 38, btnHeight);
       ctx.strokeStyle = replayGhostMode ? '#9966cc' : '#e94560';
-      ctx.strokeRect(btnX, btnY, 50, btnHeight);
+      ctx.strokeRect(btnX, btnY, 38, btnHeight);
       ctx.fillStyle = replayGhostMode ? 'white' : '#e94560';
-      ctx.fillText('👻 Ghost', btnX + 25, btnY + 15);
-      btnX += 55;
+      ctx.fillText('👻', btnX + 19, btnY + 15);
+      btnX += 41;
 
-      // Layout toggle buttons
-      btnX += 10;  // Extra spacing before layout buttons
-      // Grid button
-      ctx.fillStyle = replayLayoutMode === 'grid' ? '#4a9eff' : '#0f3460';
-      ctx.fillRect(btnX, btnY, 40, btnHeight);
-      ctx.strokeStyle = replayLayoutMode === 'grid' ? '#4a9eff' : '#e94560';
-      ctx.strokeRect(btnX, btnY, 40, btnHeight);
-      ctx.fillStyle = replayLayoutMode === 'grid' ? 'white' : '#e94560';
-      ctx.fillText('Grid', btnX + 20, btnY + 15);
-      btnX += 45;
-
-      // Bubble button
-      ctx.fillStyle = replayLayoutMode === 'bubble' ? '#4a9eff' : '#0f3460';
-      ctx.fillRect(btnX, btnY, 50, btnHeight);
-      ctx.strokeStyle = replayLayoutMode === 'bubble' ? '#4a9eff' : '#e94560';
-      ctx.strokeRect(btnX, btnY, 50, btnHeight);
-      ctx.fillStyle = replayLayoutMode === 'bubble' ? 'white' : '#e94560';
-      ctx.fillText('Bubble', btnX + 25, btnY + 15);
+      // Layout toggle buttons (compact with single letter + icon style)
+      btnX += 5;
+      const layoutModes = [
+        { mode: 'grid', label: '⊞', width: 28 },
+        { mode: 'bubble', label: '◉', width: 28 },
+        { mode: 'rings', label: '◎', width: 28 }
+      ];
+      layoutModes.forEach(({ mode, label, width }) => {
+        ctx.fillStyle = replayLayoutMode === mode ? '#4a9eff' : '#0f3460';
+        ctx.fillRect(btnX, btnY, width, btnHeight);
+        ctx.strokeStyle = replayLayoutMode === mode ? '#4a9eff' : '#e94560';
+        ctx.strokeRect(btnX, btnY, width, btnHeight);
+        ctx.fillStyle = replayLayoutMode === mode ? 'white' : '#e94560';
+        ctx.fillText(label, btnX + width/2, btnY + 15);
+        btnX += width + 3;
+      });
 
       // Progress bar (in main area)
       const progressY = btnY + btnHeight + 10;
@@ -9204,6 +9203,129 @@ const userB = await fetch('/user/123');</pre>
 
         // Variable radius in bubble mode
         defaultRadius = null;
+      } else if (replayLayoutMode === 'rings') {
+        // Rings layout - time flows outward from center like tree rings
+        // Resources placed on rings based on creation time, angular position based on parent
+        const centerX = resourceAreaLeft + chartWidth / 2;
+        const centerY = resourceAreaTop + resourceAreaHeight / 2;
+        const maxRadius = Math.min(chartWidth, resourceAreaHeight) / 2 - 40;
+        const minRadius = 30;  // Inner ring radius
+
+        // Group resources by time buckets (rings)
+        const numRings = Math.min(Math.max(10, Math.ceil(sortedVisible.length / 8)), 25);
+        const ringWidth = (maxRadius - minRadius) / numRings;
+
+        // Build parent->children map for angular positioning
+        const childrenMap = new Map();
+        sortedVisible.forEach(r => {
+          if (r.triggerId !== 0) {
+            if (!childrenMap.has(r.triggerId)) {
+              childrenMap.set(r.triggerId, []);
+            }
+            childrenMap.get(r.triggerId).push(r);
+          }
+        });
+
+        // Assign angular positions using BFS from root
+        // Children are placed near their parent's angle
+        const angleMap = new Map();
+        const ringAssignment = new Map();
+
+        // Assign rings based on creation time buckets
+        sortedVisible.forEach((r, idx) => {
+          const timeFraction = r.createdAt / duration;
+          const ringIndex = Math.min(numRings - 1, Math.floor(timeFraction * numRings));
+          ringAssignment.set(r.asyncId, ringIndex);
+        });
+
+        // Count resources per ring for even distribution
+        const resourcesPerRing = new Array(numRings).fill(0).map(() => []);
+        sortedVisible.forEach(r => {
+          const ringIdx = ringAssignment.get(r.asyncId);
+          resourcesPerRing[ringIdx].push(r);
+        });
+
+        // Assign angles - try to place children near parents
+        // First pass: assign angles to resources with no parent angle yet
+        const processedAngles = new Set();
+
+        // BFS from root(s) to assign angles based on parent position
+        const queue = sortedVisible.filter(r => r.triggerId === 0 || !sortedVisible.find(p => p.asyncId === r.triggerId));
+
+        // Initialize roots at even spacing
+        const roots = queue.slice();
+        roots.forEach((r, i) => {
+          angleMap.set(r.asyncId, (i / Math.max(1, roots.length)) * Math.PI * 2);
+        });
+
+        // Process children, placing them near their parent
+        while (queue.length > 0) {
+          const resource = queue.shift();
+          if (processedAngles.has(resource.asyncId)) continue;
+          processedAngles.add(resource.asyncId);
+
+          const children = childrenMap.get(resource.asyncId) || [];
+          const parentAngle = angleMap.get(resource.asyncId) || 0;
+
+          // Spread children around parent's angle
+          const spread = Math.PI / 4;  // 45 degrees spread
+          children.forEach((child, i) => {
+            if (!angleMap.has(child.asyncId)) {
+              const offset = children.length > 1
+                ? (i / (children.length - 1) - 0.5) * spread
+                : 0;
+              angleMap.set(child.asyncId, parentAngle + offset);
+              queue.push(child);
+            }
+          });
+        }
+
+        // Final angle adjustment: spread resources within each ring evenly while respecting parent proximity
+        resourcesPerRing.forEach((ringResources, ringIdx) => {
+          if (ringResources.length === 0) return;
+
+          // Sort by current angle
+          ringResources.sort((a, b) => (angleMap.get(a.asyncId) || 0) - (angleMap.get(b.asyncId) || 0));
+
+          // Ensure minimum spacing between nodes on same ring
+          const minAngularSpacing = (Math.PI * 2) / Math.max(ringResources.length, 1);
+          ringResources.forEach((r, i) => {
+            const baseAngle = angleMap.get(r.asyncId) || 0;
+            // Blend between parent-based angle and even distribution
+            const evenAngle = (i / ringResources.length) * Math.PI * 2;
+            angleMap.set(r.asyncId, baseAngle * 0.3 + evenAngle * 0.7);
+          });
+        });
+
+        // Calculate positions
+        sortedVisible.forEach(r => {
+          const ringIdx = ringAssignment.get(r.asyncId);
+          const ringRadius = minRadius + (ringIdx + 0.5) * ringWidth;
+          const angle = angleMap.get(r.asyncId) || 0;
+
+          // Node radius based on execution time (like bubble mode)
+          let nodeRadius = 8;  // Base size
+          if (r.callbackStartedAt > 0) {
+            const syncEndTime = Math.min(r.callbackEndedAt > 0 ? r.callbackEndedAt : replayTime, replayTime);
+            const syncTime = Math.max(0, syncEndTime - r.callbackStartedAt);
+            // Scale radius with sync time (max 20px for largest)
+            nodeRadius = 8 + Math.min(12, (syncTime / duration) * 200);
+          }
+
+          const x = centerX + ringRadius * Math.cos(angle - Math.PI / 2);  // Start from top
+          const y = centerY + ringRadius * Math.sin(angle - Math.PI / 2);
+
+          positionMap.set(r.asyncId, {
+            x, y,
+            resource: r,
+            radius: nodeRadius,
+            ringRadius,  // Store for connection drawing
+            angle        // Store for connection drawing
+          });
+        });
+
+        // Variable radius in rings mode
+        defaultRadius = null;
       } else {
         // Grid layout - original behavior
         const maxCols = Math.floor(chartWidth / 100);
@@ -9232,6 +9354,80 @@ const userB = await fetch('/user/123');</pre>
       ctx.beginPath();
       ctx.rect(mainX, resourceAreaTop, mainWidth, resourceAreaHeight);
       ctx.clip();
+
+      // Draw ring guides when in rings mode
+      if (replayLayoutMode === 'rings') {
+        const centerX = resourceAreaLeft + chartWidth / 2;
+        const centerY = resourceAreaTop + resourceAreaHeight / 2;
+        const maxRadius = Math.min(chartWidth, resourceAreaHeight) / 2 - 40;
+        const minRadius = 30;
+        const numRings = Math.min(Math.max(10, Math.ceil(sortedVisible.length / 8)), 25);
+        const ringWidth = (maxRadius - minRadius) / numRings;
+
+        // Draw concentric ring guides
+        ctx.strokeStyle = 'rgba(100, 100, 140, 0.2)';
+        ctx.lineWidth = 1;
+
+        // Draw filled rings with alternating shades for time progression
+        for (let i = 0; i < numRings; i++) {
+          const radius = minRadius + (i + 1) * ringWidth;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // Draw radial guides (like clock hands)
+        ctx.strokeStyle = 'rgba(100, 100, 140, 0.1)';
+        for (let i = 0; i < 12; i++) {
+          const angle = (i / 12) * Math.PI * 2 - Math.PI / 2;
+          ctx.beginPath();
+          ctx.moveTo(centerX + minRadius * Math.cos(angle), centerY + minRadius * Math.sin(angle));
+          ctx.lineTo(centerX + maxRadius * Math.cos(angle), centerY + maxRadius * Math.sin(angle));
+          ctx.stroke();
+        }
+
+        // Draw center point with "t=0" label
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(233, 69, 96, 0.6)';
+        ctx.fill();
+
+        // Center label
+        ctx.fillStyle = 'rgba(233, 69, 96, 0.7)';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('t=0', centerX, centerY - 10);
+
+        // Time labels on rings (show a few key time markers)
+        ctx.fillStyle = 'rgba(100, 100, 140, 0.5)';
+        ctx.font = '8px sans-serif';
+        const timeLabelsToShow = [0.25, 0.5, 0.75, 1.0];
+        timeLabelsToShow.forEach(fraction => {
+          const ringRadius = minRadius + (maxRadius - minRadius) * fraction;
+          const timeMs = (duration * fraction) / 1e6;
+          const label = timeMs >= 1000 ? `${(timeMs/1000).toFixed(1)}s` : `${timeMs.toFixed(0)}ms`;
+          // Position label on the right side of the ring
+          ctx.textAlign = 'left';
+          ctx.fillText(label, centerX + ringRadius + 3, centerY + 3);
+        });
+
+        // "time →" indicator arrow on bottom right
+        const arrowX = centerX + maxRadius * 0.7;
+        const arrowY = centerY + maxRadius * 0.7;
+        ctx.fillStyle = 'rgba(100, 100, 140, 0.4)';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('time →', arrowX, arrowY);
+
+        // Time indicator - shows current replay position as a sweeping line
+        const timeAngle = (replayTime / duration) * Math.PI * 2 - Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.lineTo(centerX + maxRadius * Math.cos(timeAngle), centerY + maxRadius * Math.sin(timeAngle));
+        ctx.strokeStyle = 'rgba(233, 69, 96, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
 
       // Calculate waiting counts - how many resources are waiting on each resource
       // A resource is "waiting on" another if it's created, callback not started, and is a descendant
@@ -9579,88 +9775,91 @@ const userB = await fetch('/user/123');</pre>
         const label = r.type.replace('js-', '').substring(0, 6);
         ctx.fillText(label, x, y - 4);
 
-        // Lifecycle badge - ⏳ waiting, ⚡ executing, ✓ done
-        ctx.font = '10px sans-serif';
-        if (!isActive) {
-          ctx.fillText('✓', x, y + 10);
-        } else if (isExecuting) {
-          ctx.fillText('⚡', x, y + 10);
-        } else if (isWaiting) {
-          ctx.fillText('⏳', x, y + 10);
-        }
+        // Badges suppressed in rings view to reduce visual clutter
+        if (replayLayoutMode !== 'rings') {
+          // Lifecycle badge - ⏳ waiting, ⚡ executing, ✓ done
+          ctx.font = '10px sans-serif';
+          if (!isActive) {
+            ctx.fillText('✓', x, y + 10);
+          } else if (isExecuting) {
+            ctx.fillText('⚡', x, y + 10);
+          } else if (isWaiting) {
+            ctx.fillText('⏳', x, y + 10);
+          }
 
-        // Waiting count badge
-        const waitCount = waitingOnCount.get(r.asyncId) || 0;
-        if (waitCount > 0 && isActive) {
-          const badgeX = x + radius - 5;
-          const badgeY = y - radius + 5;
-          const badgeRadius = waitCount > 9 ? 10 : 8;
+          // Waiting count badge
+          const waitCount = waitingOnCount.get(r.asyncId) || 0;
+          if (waitCount > 0 && isActive) {
+            const badgeX = x + radius - 5;
+            const badgeY = y - radius + 5;
+            const badgeRadius = waitCount > 9 ? 10 : 8;
 
-          // Badge background
-          ctx.beginPath();
-          ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
-          ctx.fillStyle = '#ff6432';
-          ctx.fill();
-          ctx.strokeStyle = '#1a1a2e';
-          ctx.lineWidth = 2;
-          ctx.stroke();
+            // Badge background
+            ctx.beginPath();
+            ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff6432';
+            ctx.fill();
+            ctx.strokeStyle = '#1a1a2e';
+            ctx.lineWidth = 2;
+            ctx.stroke();
 
-          // Badge text
-          ctx.fillStyle = 'white';
-          ctx.font = 'bold 9px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(waitCount > 99 ? '99+' : waitCount.toString(), badgeX, badgeY);
-        }
+            // Badge text
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(waitCount > 99 ? '99+' : waitCount.toString(), badgeX, badgeY);
+          }
 
-        // Critical path flame icon (shown for all critical path nodes, subtle when inactive)
-        if (isOnCriticalPath) {
-          const flameX = x - radius + 8;
-          const flameY = y + radius - 8;
-          ctx.font = isActive ? '14px sans-serif' : '12px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.globalAlpha = isActive ? 1.0 : 0.6;
-          ctx.fillText('🔥', flameX, flameY);
-          ctx.globalAlpha = 1;
-        }
+          // Critical path flame icon (shown for all critical path nodes, subtle when inactive)
+          if (isOnCriticalPath) {
+            const flameX = x - radius + 8;
+            const flameY = y + radius - 8;
+            ctx.font = isActive ? '14px sans-serif' : '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.globalAlpha = isActive ? 1.0 : 0.6;
+            ctx.fillText('🔥', flameX, flameY);
+            ctx.globalAlpha = 1;
+          }
 
-        // Unresolved promise indicator (shown when replay is complete or near end)
-        const isUnresolved = r.type === 'js-promise' &&
-                            r.createdAt > 0 &&
-                            r.callbackStartedAt === 0 &&
-                            r.destroyedAt === 0;
-        if (isUnresolved && replayTime >= duration * 0.9) {
-          // Draw a subtle "?" badge in the lower-right
-          const badgeX = x + radius - 6;
-          const badgeY = y + radius - 6;
+          // Unresolved promise indicator (shown when replay is complete or near end)
+          const isUnresolved = r.type === 'js-promise' &&
+                              r.createdAt > 0 &&
+                              r.callbackStartedAt === 0 &&
+                              r.destroyedAt === 0;
+          if (isUnresolved && replayTime >= duration * 0.9) {
+            // Draw a subtle "?" badge in the lower-right
+            const badgeX = x + radius - 6;
+            const badgeY = y + radius - 6;
 
-          ctx.beginPath();
-          ctx.arc(badgeX, badgeY, 8, 0, Math.PI * 2);
-          ctx.fillStyle = '#9966cc';
-          ctx.globalAlpha = 0.8;
-          ctx.fill();
-          ctx.globalAlpha = 1;
-          ctx.strokeStyle = '#1a1a2e';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(badgeX, badgeY, 8, 0, Math.PI * 2);
+            ctx.fillStyle = '#9966cc';
+            ctx.globalAlpha = 0.8;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = '#1a1a2e';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
 
-          ctx.fillStyle = 'white';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('?', badgeX, badgeY);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('?', badgeX, badgeY);
 
-          // Also draw a dashed border around the node
-          ctx.beginPath();
-          ctx.arc(x, y, radius + 3, 0, Math.PI * 2);
-          ctx.strokeStyle = '#9966cc';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([4, 4]);
-          ctx.globalAlpha = 0.6;
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.globalAlpha = 1;
+            // Also draw a dashed border around the node
+            ctx.beginPath();
+            ctx.arc(x, y, radius + 3, 0, Math.PI * 2);
+            ctx.strokeStyle = '#9966cc';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 4]);
+            ctx.globalAlpha = 0.6;
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
+          }
         }
       });
 
@@ -10160,19 +10359,21 @@ const userB = await fetch('/user/123');</pre>
 
         // Check speed buttons
         let speedBtnX = resetBtnX + btnWidth + btnSpacing;
+        // Speed buttons (compact layout)
         speeds.forEach(speed => {
-          if (clickX >= speedBtnX && clickX <= speedBtnX + 40 &&
+          const speedWidth = speed === 0.25 ? 32 : 28;
+          if (clickX >= speedBtnX && clickX <= speedBtnX + speedWidth &&
               clickY >= btnY && clickY <= btnY + btnHeight) {
             replaySpeed = speed;
             saveSettings();
             renderReplayFrame();
           }
-          speedBtnX += 45;
+          speedBtnX += speedWidth + 3;
         });
 
-        // Check loop button
-        const loopBtnX = speedBtnX + 5;  // Extra spacing matches render code
-        if (clickX >= loopBtnX && clickX <= loopBtnX + 45 &&
+        // Check loop button (compact: icon only)
+        const loopBtnX = speedBtnX + 3;
+        if (clickX >= loopBtnX && clickX <= loopBtnX + 38 &&
             clickY >= btnY && clickY <= btnY + btnHeight) {
           replayLoop = !replayLoop;
           saveSettings();
@@ -10180,9 +10381,9 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
-        // Check ghost button
-        const ghostBtnX = loopBtnX + 50;
-        if (clickX >= ghostBtnX && clickX <= ghostBtnX + 50 &&
+        // Check ghost button (compact: icon only)
+        const ghostBtnX = loopBtnX + 41;
+        if (clickX >= ghostBtnX && clickX <= ghostBtnX + 38 &&
             clickY >= btnY && clickY <= btnY + btnHeight) {
           replayGhostMode = !replayGhostMode;
           saveSettings();
@@ -10190,29 +10391,23 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
-        // Check layout buttons (Grid and Bubble)
-        const layoutBtnStartX = ghostBtnX + 55 + 10;  // Match render code spacing
-        // Grid button
-        if (clickX >= layoutBtnStartX && clickX <= layoutBtnStartX + 40 &&
-            clickY >= btnY && clickY <= btnY + btnHeight) {
-          replayLayoutMode = 'grid';
-          replayBubbleNodes.clear();
-          replayBubbleViewport = { x: 0, y: 0, scale: 1 };
-          saveSettings();
-          renderReplayFrame();
-          return;
-        }
-        // Bubble button
-        const bubbleBtnX = layoutBtnStartX + 45;
-        if (clickX >= bubbleBtnX && clickX <= bubbleBtnX + 50 &&
-            clickY >= btnY && clickY <= btnY + btnHeight) {
-          replayLayoutMode = 'bubble';
-          replayBubbleNodes.clear();
-          replayBubbleViewport = { x: 0, y: 0, scale: 1 };
-          saveSettings();
-          renderReplayFrame();
-          return;
-        }
+        // Check layout buttons (compact: icons only, 28px each)
+        const layoutBtnStartX = ghostBtnX + 41 + 5;
+        const layoutBtnWidth = 28;
+        const layoutBtnSpacing = 31;  // 28 + 3
+        const layoutModes = ['grid', 'bubble', 'rings'];
+        layoutModes.forEach((mode, idx) => {
+          const btnX = layoutBtnStartX + idx * layoutBtnSpacing;
+          if (clickX >= btnX && clickX <= btnX + layoutBtnWidth &&
+              clickY >= btnY && clickY <= btnY + btnHeight) {
+            replayLayoutMode = mode;
+            replayBubbleNodes.clear();
+            replayBubbleViewport = { x: 0, y: 0, scale: 1 };
+            saveSettings();
+            renderReplayFrame();
+            return;
+          }
+        });
 
         // Check progress bar click (in main area)
         if (clickY >= progressY && clickY <= progressY + 8 &&

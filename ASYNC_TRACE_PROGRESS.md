@@ -261,7 +261,7 @@ python3 -m http.server 8888
 |-----|------|-------------|
 | 1 | **Waterfall** | Timeline with concurrency graph, dependency arrows, hover highlighting |
 | 2 | **Graph** | Bubble/Hierarchical/Force layouts (←/→ to switch), path highlighting |
-| 3 | **Replay** | Animated playback with Grid/Bubble layouts, lifecycle badges, loop/ghost modes |
+| 3 | **Replay** | Animated playback with Grid/Bubble/Rings layouts, lifecycle badges, loop/ghost modes |
 | 4 | **Parallelism** | Concurrent ops over time, efficiency metrics, ideal comparison |
 | 5 | **Breakdown** | Treemap/Sunburst by type/trigger/stack, drill-down navigation |
 | 6 | **Latency** | Histogram/CDF of async wait times, outlier detection |
@@ -324,8 +324,10 @@ python3 -m http.server 8888
 
 ### Replay
 - **State:** `replayProgress`, `replayPlaying`, `replaySpeed`, `replayLoopMode`, `replayGhostMode`, `replayTrails`, `replayGhosts`, `replayLayoutMode`, `replayBubbleNodes`, `replayBubbleViewport`
-- **Features:** Animated playback, Grid/Bubble layout toggle, dynamic node sizing (grows during callback), lifecycle badges, ghost pulses for state changes, keyboard navigation
-- **Bubble Mode:** Hierarchical tree layout, position smoothing, auto-fit viewport
+- **Features:** Animated playback, 3-way layout toggle (Grid/Bubble/Rings), dynamic node sizing (grows during callback), lifecycle badges, ghost pulses for state changes, keyboard navigation
+- **Grid Mode:** Resources in sequential grid, fixed node size, simple layout
+- **Bubble Mode:** Hierarchical tree layout based on trigger relationships, position smoothing, auto-panning viewport, variable node size based on sync time
+- **Rings Mode:** Time-based concentric rings (tree rings metaphor), resources placed on ring by creation time, angular position based on parent, sweeping time indicator
 
 ### Parallelism
 - **State:** `parallelismHoverBucket`, `parallelismBucketData`, `parallelismRenderParams`
@@ -441,3 +443,64 @@ python3 -m http.server 8888
 - Maintains tree structure visibility even with many resources
 - Works with all existing replay controls (play/pause, speed, loop, ghost mode)
 - Temporal edges rendered (dashed green lines) when enabled, appearing progressively as nodes become visible
+
+## Session (January 2025) - Tree Rings Layout
+
+**Completed:**
+- Added "Rings" as third layout mode in Replay view (alongside Grid and Bubble)
+- Time flows outward from center like tree rings
+- Resources placed on concentric rings based on creation time
+- Angular positioning based on parent-child relationships (children near parents)
+- Node size reflects callback execution time (like bubble mode)
+- Visual guides: concentric ring circles, radial lines, center point, sweeping time indicator
+
+**Implementation details:**
+- `replayLayoutMode` now supports 'grid', 'bubble', or 'rings'
+- Ring assignment based on creation time divided into time buckets
+- Angular position uses BFS from root, spreading children around parent angle
+- Final angles blend parent-based position (30%) with even distribution (70%)
+- Ring guide lines drawn behind nodes for visual context
+- Sweeping time indicator line shows current replay position
+
+**Rings Layout Features:**
+- Center represents time 0 (trace start)
+- Outer rings represent later time slices
+- Resources appear on ring corresponding to their creation time
+- Children positioned near their parent's angular position
+- Node radius grows during callback execution
+- 12 radial guide lines (like clock face)
+- Animated time sweep line showing replay progress
+
+## Future Replay Animation Ideas
+
+Brainstormed concepts for alternative replay visualizations:
+
+### High Priority / Most Promising
+
+1. **Pulse/Ripple Propagation** - Visualize "energy" flowing through the system. When a callback fires, send a visible pulse along edges to triggered children. Bottlenecks appear where pulses queue up.
+
+2. **Flame Graph Animation** - Build a flame graph in real-time. Width = time consumed, stacking = async nesting. Watch flames grow as callbacks execute.
+
+3. **Railway/Track Diagram** - Each resource gets a horizontal track. Execution = train moving. Trigger relationships = track switches. Clear parallelism vs serialization visualization.
+
+4. **Pressure/Heat Map Flow** - Show pressure building in the graph. Executing nodes glow hot (red/orange), idle nodes cool (blue). Heat flows along edges, accumulates at bottlenecks.
+
+5. **First-Person/Follow Mode** - Pick a resource and follow its lifecycle. Camera tracks it, dims unrelated activity. Great for debugging specific operations.
+
+### Medium Priority
+
+6. **Concurrency Lanes** - Swimming pool lanes representing concurrent capacity. Resources move through lanes during execution. Full lanes = visible queueing. (Attempted but removed - needs rethinking for better clarity)
+
+7. **Particle System / Sparks** - Executing callbacks emit particles. Visual energy reflects activity. Particles flow along edges when triggering children.
+
+8. **Delta/Diff Mode** - Show only changes, not cumulative state. New resources flash in, transitions pulse, completed fade out. Focuses attention on action.
+
+9. **Causality Wave Front** - Time as a visible wave sweeping across visualization. Events cascade as wave passes through trigger chains.
+
+10. **Resource Pool Visualization** - Group by type into visual pools. Show check-out (execute) and return (complete). Reveals contention patterns.
+
+### Experimental
+
+11. **Audio Sonification** - Map activity to sound. Types = instruments, depth = pitch, sync time = volume. Concurrent = chords, sequential = melody.
+
+12. **3D Depth Mode** - Z-axis for time or trigger depth. Rotate for different perspectives on async execution.
