@@ -471,6 +471,32 @@ python3 -m http.server 8888
 - 12 radial guide lines (like clock face)
 - Animated time sweep line showing replay progress
 
+## Session (January 2025) - Internal Event Classification & UI Improvements
+
+**Completed:**
+
+*Classification fixes:*
+- Improved resource classification logic to properly identify internal events
+- Added `isInternalFrame()` helper that parses stack frame format (`functionName @ module:line:col`)
+- Internal module prefixes now detected: `node-internal:`, `node:`, `cloudflare-internal:`, `cloudflare:`, `workerd-internal:`, `workerd:`
+- Resources with stacks containing only internal module frames now classified as "internal"
+- Bridge types (`kj-to-js`, `js-to-kj`) now classified as "internal" rather than "typed" (API)
+
+*Hide Internal toggle:*
+- Replaced "All/User Only/Typed Only" filter combo with "Hide Internal" toggle in Analysis dropdown
+- Keyboard shortcut: `H` (help changed to `?` only)
+- Setting persisted to localStorage
+- Affects Waterfall, Graph, and Heatmap views
+
+*Waterfall controls relocation:*
+- Moved Sort dropdown and Types dropdown from main header into Waterfall view control bar
+- Consistent with other views (Heatmap, Gaps, Latency, Breakdown) that have view-specific controls
+- Removed disabled-state logic for controls (no longer needed)
+- Fixed Types dropdown alignment to prevent left-side clipping
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - classification, Hide Internal, control bar changes
+
 ## Future Replay Animation Ideas
 
 Brainstormed concepts for alternative replay visualizations:

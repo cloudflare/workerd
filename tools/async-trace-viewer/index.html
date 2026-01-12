@@ -226,6 +226,7 @@
     }
 
     .view-container.active { display: block; }
+    #waterfall-view.active { display: flex; flex-direction: column; }
     #breakdown-view.active { display: flex; flex-direction: column; }
     #latency-view.active { display: flex; flex-direction: column; }
     #gaps-view.active { display: flex; flex-direction: column; }
@@ -262,13 +263,9 @@
     }
 
     /* Type filter dropdown */
-    #type-filter-dropdown.disabled .dropdown-btn {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    #type-filter-dropdown.disabled .dropdown-btn:hover {
-      background: #0f3460;
+    #type-filter-dropdown .dropdown-content {
+      right: auto;
+      left: 0;
     }
 
     .type-filter-item {
@@ -986,20 +983,6 @@
         <option value="real-eventsource">Real: EventSource (SSE)</option>
         <option value="real-nodejs-compat-http">Real: Node.js HTTP</option>
       </select>
-      <select id="sort-mode">
-        <option value="tree">Tree</option>
-        <option value="creation">Time</option>
-        <option value="duration">Duration</option>
-      </select>
-      <select id="filter-mode">
-        <option value="all">All</option>
-        <option value="user">User Only</option>
-        <option value="typed">Typed Only</option>
-      </select>
-      <div class="dropdown" id="type-filter-dropdown">
-        <button class="dropdown-btn" id="type-filter-btn">🏷️ Types ▾</button>
-        <div class="dropdown-content" id="type-filter-menu"></div>
-      </div>
       <div class="dropdown" id="analysis-dropdown">
         <button class="dropdown-btn" id="analysis-btn">🔬 Analysis ▾</button>
         <div class="dropdown-content" id="analysis-menu">
@@ -1020,6 +1003,9 @@
           </label>
           <label class="dropdown-item" id="temporal-edges-item">
             <input type="checkbox" id="temporal-edges-check"> ⏱️ Temporal Edges <span class="hotkey">E</span>
+          </label>
+          <label class="dropdown-item" id="hide-internal-item">
+            <input type="checkbox" id="hide-internal-check"> 🔒 Hide Internal <span class="hotkey">H</span>
           </label>
           <div class="dropdown-divider"></div>
           <label class="dropdown-item" id="accessibility-item">
@@ -1073,12 +1059,26 @@
   </div>
 
   <div class="main-container">
-    <div class="view-container active" id="waterfall-view">
-      <div class="empty-state" id="waterfall-empty">
+    <div class="view-container active" id="waterfall-view" style="overflow: hidden; padding: 0;">
+      <div id="waterfall-controls" style="display: flex; gap: 12px; padding: 6px 10px; background: #16213e; border-bottom: 1px solid #0f3460; align-items: center; flex-shrink: 0; flex-wrap: wrap;">
+        <label style="color: #aaa; font-size: 11px;">
+          Sort:
+          <select id="sort-mode" style="background: #0f3460; color: #e0e0e0; border: 1px solid #444; border-radius: 3px; padding: 2px 4px; font-size: 10px;">
+            <option value="tree">Tree</option>
+            <option value="creation">Time</option>
+            <option value="duration">Duration</option>
+          </select>
+        </label>
+        <div class="dropdown" id="type-filter-dropdown">
+          <button class="dropdown-btn" id="type-filter-btn" style="font-size: 10px; padding: 2px 6px;">🏷️ Types ▾</button>
+          <div class="dropdown-content" id="type-filter-menu"></div>
+        </div>
+      </div>
+      <div class="empty-state" id="waterfall-empty" style="flex: 1;">
         <div style="font-size: 2rem; margin-bottom: 0.5rem;">📊</div>
         <div>Load a trace to visualize</div>
       </div>
-      <div id="waterfall-container" style="display: none; position: relative;">
+      <div id="waterfall-container" style="display: none; position: relative; flex: 1; overflow: auto;">
         <div id="concurrency-graph" style="height: 50px; margin-left: 180px; margin-bottom: 4px; position: relative; background: rgba(0,0,0,0.3); border-radius: 4px;">
           <canvas id="concurrency-canvas" style="width: 100%; height: 100%;"></canvas>
           <div id="time-cursor" style="position: absolute; top: 0; bottom: 0; width: 2px; background: #ff6b6b; pointer-events: none; display: none; z-index: 20;">
@@ -1546,7 +1546,7 @@
             <tr><th>Key</th><th>Action</th></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">Navigation</td></tr>
             <tr><td><code>1</code>-<code>8</code></td><td>Switch views (Waterfall, Graph, Replay, Parallelism, Breakdown, Latency, Gaps, Heatmap)</td></tr>
-            <tr><td><code>?</code> or <code>H</code></td><td>Show this help guide</td></tr>
+            <tr><td><code>?</code></td><td>Show this help guide</td></tr>
             <tr><td><code>O</code> or <code>L</code></td><td>Open file dialog to load trace</td></tr>
             <tr><td><code>P</code> or <code>V</code></td><td>Toggle paste JSON area</td></tr>
             <tr><td><code>Esc</code></td><td>Close modals / dropdowns</td></tr>
@@ -1556,6 +1556,8 @@
             <tr><td><code>T</code></td><td>Toggle pattern detection</td></tr>
             <tr><td><code>F</code></td><td>Toggle click-to-filter mode</td></tr>
             <tr><td><code>G</code></td><td>Toggle stack trace grouping</td></tr>
+            <tr><td><code>E</code></td><td>Toggle temporal edges</td></tr>
+            <tr><td><code>H</code></td><td>Toggle hide internal resources</td></tr>
             <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">View-Specific</td></tr>
             <tr><td><code>←</code> / <code>→</code></td><td>Switch Graph layout: Bubble → Hierarchical → Force (Graph view only)</td></tr>
@@ -1661,7 +1663,7 @@ const c = await fetch('/api/c');</pre>
         <div class="guide-section">
           <h3>5. Reduce Runtime Overhead</h3>
           <p><strong>Pattern:</strong> Many dimmed (internal) promises</p>
-          <p>Use <strong>"User Only"</strong> filter to focus on your code.</p>
+          <p>Use <strong>Hide Internal</strong> (H key or Analysis menu) to focus on your code.</p>
           <ul>
             <li>Deeply nested <code>.then()</code> chains create overhead</li>
             <li>Flatten with <code>async/await</code></li>
@@ -1861,6 +1863,7 @@ const userB = await fetch('/user/123');</pre>
     let clickToFilterEnabled = false;
     let stackTraceGrouping = false;
     let showTemporalEdges = false;
+    let hideInternal = false;
     let clickFilterResourceId = null;  // Currently filtered resource
     let detectedBottlenecks = [];  // Top N slowest resources
     let detectedPatterns = [];  // Detected anti-patterns
@@ -1933,6 +1936,7 @@ const userB = await fetch('/user/123');</pre>
         clickToFilterEnabled,
         stackTraceGrouping,
         showTemporalEdges,
+        hideInternal,
         accessibilityMode,
         patternThresholds,
         sidebarCollapsed,
@@ -1988,6 +1992,10 @@ const userB = await fetch('/user/123');</pre>
         if (settings.showTemporalEdges !== undefined) {
           showTemporalEdges = settings.showTemporalEdges;
           document.getElementById('temporal-edges-check').checked = showTemporalEdges;
+        }
+        if (settings.hideInternal !== undefined) {
+          hideInternal = settings.hideInternal;
+          document.getElementById('hide-internal-check').checked = hideInternal;
         }
         if (settings.accessibilityMode !== undefined) {
           accessibilityMode = settings.accessibilityMode;
@@ -2248,10 +2256,6 @@ const userB = await fetch('/user/123');</pre>
       document.getElementById('load-json-btn').addEventListener('click', loadFromTextarea);
       document.getElementById('demo-select').addEventListener('change', loadDemoData);
       document.getElementById('sort-mode').addEventListener('change', render);
-      document.getElementById('filter-mode').addEventListener('change', () => {
-        dagNodes = [];  // Re-initialize DAG when filter changes
-        render();
-      });
       document.getElementById('nav-parent').addEventListener('click', navigateToParent);
       document.getElementById('nav-children').addEventListener('click', navigateToChildren);
 
@@ -2300,6 +2304,7 @@ const userB = await fetch('/user/123');</pre>
       document.getElementById('click-filter-check').addEventListener('change', toggleClickFilter);
       document.getElementById('stack-group-check').addEventListener('change', toggleStackGrouping);
       document.getElementById('temporal-edges-check').addEventListener('change', toggleTemporalEdges);
+      document.getElementById('hide-internal-check').addEventListener('change', toggleHideInternal);
       document.getElementById('accessibility-check').addEventListener('change', toggleAccessibility);
 
       // Threshold slider handlers
@@ -2372,8 +2377,8 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
-        // Help hotkey: ? or H
-        if (e.key === '?' || e.key === 'h' || e.key === 'H') {
+        // Help hotkey: ?
+        if (e.key === '?') {
           document.getElementById('tutorial-modal').style.display = 'flex';
           return;
         }
@@ -2630,6 +2635,12 @@ const userB = await fetch('/user/123');</pre>
         // Temporal edges toggle: E
         if (e.key === 'e' || e.key === 'E') {
           toggleTemporalEdges(true);
+          return;
+        }
+
+        // Hide internal toggle: H
+        if (e.key === 'h' || e.key === 'H') {
+          toggleHideInternal(true);
           return;
         }
 
@@ -3047,21 +3058,44 @@ const userB = await fetch('/user/123');</pre>
       }
     }
 
+    // Check if a stack frame is from an internal module
+    // Frame format: "functionName @ module:line:col" or just "functionName @ module"
+    function isInternalFrame(frame) {
+      if (!frame) return true;
+      const atIndex = frame.indexOf(' @ ');
+      if (atIndex === -1) return false; // Can't determine, assume user
+      const moduleAndLocation = frame.slice(atIndex + 3);
+      // Internal module prefixes that indicate runtime/platform code
+      const internalPrefixes = [
+        'node-internal:',
+        'node:',
+        'cloudflare-internal:',
+        'cloudflare:',
+        'workerd-internal:',
+        'workerd:',
+      ];
+      return internalPrefixes.some(prefix => moduleAndLocation.startsWith(prefix));
+    }
+
     // Classify a resource as 'typed', 'user', or 'internal'
     function classifyResource(r) {
-      // Typed resources are explicit API operations (not js-promise)
+      // Internal bridge types are runtime machinery, not user-facing APIs
+      const internalTypes = ['kj-to-js', 'js-to-kj'];
+      if (internalTypes.includes(r.type)) {
+        return 'internal';
+      }
+      // Typed resources are explicit API operations (not js-promise or internal bridges)
       if (r.type !== 'js-promise') {
         return 'typed';
       }
       // JS promises with stack traces pointing to user code = user
       const st = traceData.stackTraceMap.get(r.stackTraceId);
       if (st && st.frames && st.frames.length > 0) {
-        // Check if any frame is in user code (not empty, not internal)
-        const hasUserFrame = st.frames.some(f =>
-          f && !f.startsWith('node:') && !f.startsWith('cloudflare:'));
+        // Check if any frame is in user code (not internal)
+        const hasUserFrame = st.frames.some(f => !isInternalFrame(f));
         if (hasUserFrame) return 'user';
       }
-      // JS promises with empty stack traces = internal runtime machinery
+      // JS promises with empty stack traces or only internal frames = internal runtime machinery
       return 'internal';
     }
 
@@ -3069,15 +3103,9 @@ const userB = await fetch('/user/123');</pre>
       // Check type filter first
       if (typeFilters[r.type] === false) return false;
 
-      const filterMode = document.getElementById('filter-mode').value;
-      if (filterMode === 'all') return true;
-
-      const classification = r._classification || classifyResource(r);
-      if (filterMode === 'user') {
-        return classification === 'typed' || classification === 'user';
-      }
-      if (filterMode === 'typed') {
-        return classification === 'typed';
+      // Hide internal resources if enabled
+      if (hideInternal && r._classification === 'internal') {
+        return false;
       }
       return true;
     }
@@ -3166,13 +3194,6 @@ const userB = await fetch('/user/123');</pre>
       } else {
         btn.textContent = `🏷️ Types (${enabledTypes}/${totalTypes}) ▾`;
       }
-    }
-
-    // Update type filter dropdown enabled state based on current view
-    function updateTypeFilterDropdownState() {
-      const dropdown = document.getElementById('type-filter-dropdown');
-      const isWaterfall = currentView === 'waterfall';
-      dropdown.classList.toggle('disabled', !isWaterfall);
     }
 
     function processAndRender() {
@@ -3362,7 +3383,7 @@ const userB = await fetch('/user/123');</pre>
     }
 
     function updateAnalysisButtonState() {
-      const activeCount = [showCriticalPath, showBottlenecks, showPatterns, clickToFilterEnabled, stackTraceGrouping, showTemporalEdges, accessibilityMode].filter(x => x).length;
+      const activeCount = [showCriticalPath, showBottlenecks, showPatterns, clickToFilterEnabled, stackTraceGrouping, showTemporalEdges, hideInternal, accessibilityMode].filter(x => x).length;
       const btn = document.getElementById('analysis-btn');
       if (activeCount > 0) {
         btn.textContent = `🔬 Analysis (${activeCount}) ▾`;
@@ -4094,6 +4115,22 @@ const userB = await fetch('/user/123');</pre>
       }
     }
 
+    // ==================== HIDE INTERNAL ====================
+    // Hide internal runtime machinery to focus on user code
+    function toggleHideInternal(fromHotkey = false) {
+      const checkbox = document.getElementById('hide-internal-check');
+      if (fromHotkey) {
+        hideInternal = !hideInternal;
+        checkbox.checked = hideInternal;
+      } else {
+        hideInternal = checkbox.checked;
+      }
+      dagNodes = [];  // Re-initialize DAG when filter changes
+      updateAnalysisButtonState();
+      saveSettings();
+      render();
+    }
+
     function computeTemporalEdges() {
       if (!traceData) {
         temporalEdges = [];
@@ -4478,23 +4515,7 @@ const userB = await fetch('/user/123');</pre>
     }
 
     function updateControlStates() {
-      // Sort mode only works in Waterfall view
-      const sortMode = document.getElementById('sort-mode');
-      const isWaterfall = currentView === 'waterfall';
-      sortMode.disabled = !isWaterfall;
-      sortMode.style.opacity = isWaterfall ? '1' : '0.4';
-      sortMode.style.cursor = isWaterfall ? 'pointer' : 'not-allowed';
-
-      // Filter mode only works in certain views
-      const filterMode = document.getElementById('filter-mode');
-      const filterViews = ['waterfall', 'dag', 'heatmap'];
-      const filterEnabled = filterViews.includes(currentView);
-      filterMode.disabled = !filterEnabled;
-      filterMode.style.opacity = filterEnabled ? '1' : '0.4';
-      filterMode.style.cursor = filterEnabled ? 'pointer' : 'not-allowed';
-
-      // Type filter dropdown only works in Waterfall view
-      updateTypeFilterDropdownState();
+      // Controls are now in their respective views, nothing to update
     }
 
     // ==================== WATERFALL VIEW ====================
@@ -10503,10 +10524,8 @@ const userB = await fetch('/user/123');</pre>
       if (!traceData) return;
 
       // Get filtered resources
-      const filterMode = document.getElementById('filter-mode').value;
       let resources = traceData.resources.filter(r => {
-        if (filterMode === 'user') return r._classification === 'user' || r._classification === 'typed';
-        if (filterMode === 'typed') return r._classification === 'typed';
+        if (hideInternal && r._classification === 'internal') return false;
         return true;
       });
 
