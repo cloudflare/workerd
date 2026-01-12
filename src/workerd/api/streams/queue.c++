@@ -274,17 +274,10 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     // Convert the value to bytes.
     kj::Vector<kj::Array<kj::byte>> chunks;
     KJ_IF_SOME(val, result.value) {
-      auto jsval = jsg::JsValue(val.getHandle(js));
-
-      KJ_IF_SOME(ab, jsval.tryCast<jsg::JsArrayBuffer>()) {
-        chunks.add(kj::heapArray(ab.asArrayPtr()));
-      } else KJ_IF_SOME(abView, jsval.tryCast<jsg::JsArrayBufferView>()) {
-        chunks.add(kj::heapArray(abView.asArrayPtr()));
-      } else KJ_IF_SOME(str, jsval.tryCast<jsg::JsString>()) {
-        auto data = str.toUSVString(js);
-        chunks.add(kj::heapArray(data.asBytes()));
+      KJ_IF_SOME(bytes, valueToBytes(js, val)) {
+        chunks.add(kj::mv(bytes));
       }
-      // If none of the above matched, we just return empty chunks.
+      // If valueToBytes returned kj::none, we just return empty chunks.
       // The error case should have been caught earlier.
     }
 

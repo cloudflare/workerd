@@ -1625,6 +1625,64 @@ KJ_TEST("ByteQueue draining read with close signal") {
   });
 }
 
+KJ_TEST("ValueQueue draining read errors on non-byte value") {
+  // Test that drainingRead correctly errors when encountering a value that
+  // cannot be converted to bytes (not ArrayBuffer, ArrayBufferView, or string).
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Push a plain object - this cannot be converted to bytes
+    auto obj = v8::Object::New(js.v8Isolate);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(obj.As<v8::Value>()), 1));
+
+    KJ_ASSERT(consumer.size() == 1);
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      // Should get a TypeError about non-convertible value
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      auto message = jsg::JsValue(value.getHandle(js))
+                         .tryCast<jsg::JsObject>()
+                         .map([&](jsg::JsObject obj) {
+        return obj.get(js, "message")
+            .tryCast<jsg::JsString>()
+            .map([&](jsg::JsString str) {
+          return str.toString(js);
+        }).orDefault(kj::str());
+      }).orDefault(kj::str());
+      KJ_ASSERT(message.contains("cannot be converted to bytes"));
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+    // MustCall verifies the error continuation was called
+  });
+}
+
+KJ_TEST("ValueQueue draining read errors on number value") {
+  // Another non-byte value test with a number
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Push a number - this cannot be converted to bytes
+    auto num = v8::Number::New(js.v8Isolate, 42);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(num.As<v8::Value>()), 1));
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+    // MustCall verifies the error continuation was called
+  });
+}
+
 #pragma endregion Draining Read Tests
 
 #pragma region Draining Read maxRead Tests

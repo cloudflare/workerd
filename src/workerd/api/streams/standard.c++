@@ -1810,11 +1810,16 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     // the queue that knows about all of the attached consumers.
     if (pendingCancel) return js.resolvedPromise();
     KJ_IF_SOME(s, state) {
+      // Check if there's a pending draining read before calling cancel, since cancel
+      // will resolve the pending read and we need to know if we should defer destruction.
+      bool hasPendingDrainingRead = s.consumer->hasPendingDrainingRead();
       s.consumer->cancel(js, maybeReason);
       auto promise = s.controller->cancel(js, kj::mv(maybeReason));
-      // If we're currently in a read, we need to wait for that to finish
-      // before dropping our state.
-      if (reading) {
+      // If we're currently in a read (sync or draining), we need to wait for that to
+      // finish before dropping our state. For draining reads, the promise callbacks
+      // capture 'this' (the Consumer) to clear hasPendingDrainingRead. If we destroy
+      // the state now, those callbacks will UAF.
+      if (reading || hasPendingDrainingRead) {
         pendingCancel = true;
       } else {
         state = kj::none;
@@ -1901,6 +1906,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   using State = ReadableState<ByobController, ByteQueue>;
   kj::Maybe<State> state;
   kj::Maybe<int> autoAllocateChunkSize;
+  bool pendingCancel = false;
 
   JSG_MEMORY_INFO(ByteReadable) {
     KJ_IF_SOME(s, state) {
@@ -2032,10 +2038,22 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   // Here, we rely on the controller implementing the correct behavior since it owns
   // the queue that knows about all of the attached consumers.
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+    if (pendingCancel) return js.resolvedPromise();
     KJ_IF_SOME(s, state) {
+      // Check if there's a pending draining read before calling cancel, since cancel
+      // will resolve the pending read and we need to know if we should defer destruction.
+      bool hasPendingDrainingRead = s.consumer->hasPendingDrainingRead();
       s.consumer->cancel(js, maybeReason);
       auto promise = s.controller->cancel(js, kj::mv(maybeReason));
-      state = kj::none;
+      // If there's a pending draining read, we need to wait for it to finish before
+      // dropping our state. The draining read's promise callbacks capture 'this' (the
+      // Consumer) to clear hasPendingDrainingRead. If we destroy the state now, those
+      // callbacks will UAF.
+      if (hasPendingDrainingRead) {
+        pendingCancel = true;
+      } else {
+        state = kj::none;
+      }
       return kj::mv(promise);
     }
 
@@ -2695,6 +2713,24 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
     }
   }
 
+  // Like deferControllerStateChange for regular reads, we need to prevent the controller
+  // state from being destroyed while a draining read's promise callbacks are pending.
+  // The drainingRead implementation captures `this` (the Consumer) in promise lambdas to
+  // clear hasPendingDrainingRead. If the state is changed (destroying the Consumer) before
+  // those callbacks run, we get a use-after-free.
+  auto wrapDrainingRead =
+      [this](jsg::Lock& js,
+          jsg::Promise<DrainingReadResult> promise) -> jsg::Promise<DrainingReadResult> {
+    pendingReadCount++;
+    return promise.then(js, [this](jsg::Lock& js, DrainingReadResult result) {
+      decrementPendingReadCountAndProcess(js);
+      return kj::mv(result);
+    }, [this](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
+      decrementPendingReadCountAndProcess(js);
+      js.throwException(kj::mv(exception));
+    });
+  };
+
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return js.resolvedPromise(DrainingReadResult{
@@ -2706,12 +2742,10 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
       return js.rejectedPromise<DrainingReadResult>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
-      // drainingRead has its own mutual exclusion handling, so we don't need
-      // the deferControllerStateChange wrapper used by regular reads.
-      return consumer->drainingRead(js, maxRead);
+      return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      return consumer->drainingRead(js, maxRead);
+      return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
     }
   }
   KJ_UNREACHABLE;

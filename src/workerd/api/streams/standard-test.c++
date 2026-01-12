@@ -1503,5 +1503,331 @@ KJ_TEST("DrainingReader read from stream with transform-like pattern") {
   });
 }
 
+KJ_TEST("DrainingReader cancel while read is pending (value stream)") {
+  // Test: Calling cancel() on the reader while a read() is pending should
+  // cause the pending read to reject and the stream to be canceled.
+  preamble([](jsg::Lock& js) {
+    kj::Maybe<jsg::Promise<void>::Resolver> asyncResolver;
+    bool cancelCalled = false;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        // Return a pending promise to keep the read waiting
+        auto prp = js.newPromiseAndResolver<void>();
+        asyncResolver = kj::mv(prp.resolver);
+        return kj::mv(prp.promise);
+      },
+      .cancel = [&](jsg::Lock& js, auto reason) -> jsg::Promise<void> {
+        cancelCalled = true;
+        KJ_ASSERT(kj::str(reason) == "canceled by reader");
+        return js.resolvedPromise();
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      // Start a read that will be pending (waiting for async pull)
+      bool readRejected = false;
+      bool readResolved = false;
+      auto readPromise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        readResolved = true;
+      }, [&](jsg::Lock& js, jsg::Value&& reason) { readRejected = true; });
+
+      js.runMicrotasks();
+      // Read should still be pending - waiting for async pull
+      KJ_ASSERT(!readResolved);
+      KJ_ASSERT(!readRejected);
+
+      // Now cancel while read is pending
+      bool cancelResolved = false;
+      auto cancelPromise =
+          reader->cancel(js, js.str("canceled by reader"_kjc)).then(js, [&](jsg::Lock& js) {
+        cancelResolved = true;
+      });
+
+      js.runMicrotasks();
+
+      // Cancel should have completed
+      KJ_ASSERT(cancelResolved, "cancel() should resolve");
+      KJ_ASSERT(cancelCalled, "underlying source cancel should be called");
+
+      // The pending read should have been rejected or resolved with done
+      KJ_ASSERT(readResolved || readRejected, "pending read should complete after cancel");
+
+      // Stream should be in closed/errored state
+      KJ_ASSERT(rs->getController().isClosedOrErrored());
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader cancel while read is pending (byte stream)") {
+  // Test: Same as above but with byte stream
+  preamble([](jsg::Lock& js) {
+    kj::Maybe<jsg::Promise<void>::Resolver> asyncResolver;
+    bool cancelCalled = false;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        // Return a pending promise to keep the read waiting
+        auto prp = js.newPromiseAndResolver<void>();
+        asyncResolver = kj::mv(prp.resolver);
+        return kj::mv(prp.promise);
+      },
+      .cancel = [&](jsg::Lock& js, auto reason) -> jsg::Promise<void> {
+        cancelCalled = true;
+        KJ_ASSERT(kj::str(reason) == "canceled by reader");
+        return js.resolvedPromise();
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      // Start a read that will be pending
+      bool readRejected = false;
+      bool readResolved = false;
+      auto readPromise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        readResolved = true;
+      }, [&](jsg::Lock& js, jsg::Value&& reason) { readRejected = true; });
+
+      js.runMicrotasks();
+      KJ_ASSERT(!readResolved);
+      KJ_ASSERT(!readRejected);
+
+      // Cancel while read is pending
+      bool cancelResolved = false;
+      auto cancelPromise =
+          reader->cancel(js, js.str("canceled by reader"_kjc)).then(js, [&](jsg::Lock& js) {
+        cancelResolved = true;
+      });
+
+      js.runMicrotasks();
+
+      KJ_ASSERT(cancelResolved, "cancel() should resolve");
+      KJ_ASSERT(cancelCalled, "underlying source cancel should be called");
+      KJ_ASSERT(readResolved || readRejected, "pending read should complete after cancel");
+      KJ_ASSERT(rs->getController().isClosedOrErrored());
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader cancel while read is pending with buffered data") {
+  // Test: Cancel while read is pending, but there's already some buffered data.
+  // The buffered data should be discarded and the stream canceled.
+  preamble([](jsg::Lock& js) {
+    kj::Maybe<jsg::Promise<void>::Resolver> asyncResolver;
+    kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> savedController;
+    bool cancelCalled = false;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            // Enqueue some data synchronously
+            c->enqueue(js, toBytes(js, kj::str("buffered-data")));
+            savedController = c.addRef();
+            // But return a pending promise (more data coming)
+            auto prp = js.newPromiseAndResolver<void>();
+            asyncResolver = kj::mv(prp.resolver);
+            return kj::mv(prp.promise);
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      },
+      .cancel = [&](jsg::Lock& js, auto reason) -> jsg::Promise<void> {
+        cancelCalled = true;
+        return js.resolvedPromise();
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      // First read gets the buffered data
+      bool firstReadCompleted = false;
+      auto readPromise1 =
+          reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "buffered-data");
+        KJ_ASSERT(!result.done);
+        firstReadCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(firstReadCompleted);
+
+      // Second read will be pending (waiting for async pull resolution)
+      bool secondReadRejected = false;
+      bool secondReadResolved = false;
+      auto readPromise2 = reader->read(js).then(js,
+          [&](jsg::Lock& js, DrainingReadResult&& result) { secondReadResolved = true; },
+          [&](jsg::Lock& js, jsg::Value&& reason) { secondReadRejected = true; });
+
+      js.runMicrotasks();
+      KJ_ASSERT(!secondReadResolved);
+      KJ_ASSERT(!secondReadRejected);
+
+      // Cancel while second read is pending
+      bool cancelResolved = false;
+      auto cancelPromise =
+          reader->cancel(js, js.str("cancel reason"_kjc)).then(js, [&](jsg::Lock& js) {
+        cancelResolved = true;
+      });
+
+      js.runMicrotasks();
+
+      KJ_ASSERT(cancelResolved);
+      KJ_ASSERT(cancelCalled);
+      KJ_ASSERT(secondReadResolved || secondReadRejected);
+      KJ_ASSERT(rs->getController().isClosedOrErrored());
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader cancel while read pending - UAF safety (value stream)") {
+  // This test specifically exercises the potential UAF scenario where:
+  // 1. A draining read creates a promise with lambdas capturing `this` (the Consumer)
+  // 2. Cancel is called, which rejects the pending read (scheduling the error lambda)
+  // 3. doClose() destroys the Consumer
+  // 4. The error lambda runs and must NOT access the destroyed Consumer
+  //
+  // The lambdas in ValueQueue::Consumer::drainingRead capture `this` to clear
+  // hasPendingDrainingRead. If the Consumer is destroyed before the lambda runs,
+  // this would be a use-after-free.
+  preamble([](jsg::Lock& js) {
+    kj::Maybe<jsg::Promise<void>::Resolver> asyncResolver;
+    bool cancelCalled = false;
+    bool pullCalled = false;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        pullCalled = true;
+        // Return a pending promise - this keeps the read waiting
+        auto prp = js.newPromiseAndResolver<void>();
+        asyncResolver = kj::mv(prp.resolver);
+        return kj::mv(prp.promise);
+      },
+      .cancel = [&](jsg::Lock& js, auto reason) -> jsg::Promise<void> {
+        cancelCalled = true;
+        return js.resolvedPromise();
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      // Start a draining read - this will:
+      // 1. Call pull (which returns pending promise)
+      // 2. Queue a ReadRequest
+      // 3. Return a promise with lambdas capturing `this` (the Consumer)
+      bool readRejected = false;
+      bool readResolved = false;
+      auto readPromise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        readResolved = true;
+      }, [&](jsg::Lock& js, jsg::Value&& reason) {
+        // This error handler runs after cancel rejects the pending read.
+        // The lambda in drainingRead also runs to clear hasPendingDrainingRead.
+        // If that lambda accesses a destroyed Consumer, we have UAF.
+        readRejected = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(pullCalled, "pull should have been called");
+      KJ_ASSERT(!readResolved);
+      KJ_ASSERT(!readRejected);
+
+      // Now cancel. This will:
+      // 1. Call cancelPendingReads() which rejects the ReadRequest
+      // 2. The rejection schedules the error lambda as a microtask
+      // 3. doClose() runs (via KJ_DEFER) and may destroy the Consumer
+      // 4. Microtasks run - the error lambda in drainingRead accesses `this`
+      //
+      // If `this` is destroyed before the lambda runs, we have UAF.
+      bool cancelResolved = false;
+      auto cancelPromise =
+          reader->cancel(js, js.str("cancel for UAF test"_kjc)).then(js, [&](jsg::Lock& js) {
+        cancelResolved = true;
+      });
+
+      // Run microtasks - this is where UAF would occur if the bug exists
+      js.runMicrotasks();
+
+      KJ_ASSERT(cancelResolved, "cancel should resolve");
+      KJ_ASSERT(cancelCalled, "underlying source cancel should be called");
+      KJ_ASSERT(readResolved || readRejected, "read should complete after cancel");
+      KJ_ASSERT(rs->getController().isClosedOrErrored(), "stream should be closed/errored");
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader cancel while read pending - UAF safety (byte stream)") {
+  // Same test as above but for byte streams (ByteQueue::Consumer)
+  preamble([](jsg::Lock& js) {
+    kj::Maybe<jsg::Promise<void>::Resolver> asyncResolver;
+    bool cancelCalled = false;
+    bool pullCalled = false;
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        pullCalled = true;
+        auto prp = js.newPromiseAndResolver<void>();
+        asyncResolver = kj::mv(prp.resolver);
+        return kj::mv(prp.promise);
+      },
+      .cancel = [&](jsg::Lock& js, auto reason) -> jsg::Promise<void> {
+        cancelCalled = true;
+        return js.resolvedPromise();
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readRejected = false;
+      bool readResolved = false;
+      auto readPromise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        readResolved = true;
+      }, [&](jsg::Lock& js, jsg::Value&& reason) { readRejected = true; });
+
+      js.runMicrotasks();
+      KJ_ASSERT(pullCalled);
+      KJ_ASSERT(!readResolved);
+      KJ_ASSERT(!readRejected);
+
+      bool cancelResolved = false;
+      auto cancelPromise =
+          reader->cancel(js, js.str("cancel for UAF test"_kjc)).then(js, [&](jsg::Lock& js) {
+        cancelResolved = true;
+      });
+
+      js.runMicrotasks();
+
+      KJ_ASSERT(cancelResolved);
+      KJ_ASSERT(cancelCalled);
+      KJ_ASSERT(readResolved || readRejected);
+      KJ_ASSERT(rs->getController().isClosedOrErrored());
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api
