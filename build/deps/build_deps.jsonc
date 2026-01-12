@@ -51,6 +51,37 @@
       "name": "rules_rust",
       "type": "bazel_dep"
     },
+    // Node.js
+    {
+      "name": "aspect_rules_esbuild",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "aspect_rules_js",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "aspect_rules_ts",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_nodejs",
+      "type": "bazel_dep"
+    },
+    // Python
+    {
+      "name": "rules_python",
+      "type": "bazel_dep"
+    },
+    // rules_oci and rules_multirun are used to build Docker images
+    {
+      "name": "rules_oci",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_multirun",
+      "type": "bazel_dep"
+    },
     // rust
     {
       "name": "cargo_bazel_linux_x64",

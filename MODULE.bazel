@@ -33,18 +33,18 @@ archive_override(
 )
 
 include("//build/deps:deps.MODULE.bazel")
-include("//build/deps:nodejs.MODULE.bazel")
-include("//build/deps:python.MODULE.bazel")
-include("//build/deps:v8.MODULE.bazel")
-include("//build/deps:oci.MODULE.bazel")
 
 # Automatically managed dependencies
 include("//build/deps:gen/deps.MODULE.bazel")
 include("//build/deps:gen/build_deps.MODULE.bazel")
 include("//build/deps:gen/shared_deps.MODULE.bazel")
 
-# Must be loaded after automated dependencies, which provide rules_rust
+# Must be loaded after automated dependencies
 include("//build/deps:rust.MODULE.bazel")
+include("//build/deps:nodejs.MODULE.bazel")
+include("//build/deps:python.MODULE.bazel")
+include("//build/deps:v8.MODULE.bazel")
+include("//build/deps:oci.MODULE.bazel")
 
 # compatibility proxy is needed when using current rules_cc with Bazel 8
 compat = use_extension("@rules_cc//cc:extensions.bzl", "compatibility_proxy")
