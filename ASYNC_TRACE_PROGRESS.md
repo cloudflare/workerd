@@ -504,3 +504,81 @@ Brainstormed concepts for alternative replay visualizations:
 11. **Audio Sonification** - Map activity to sound. Types = instruments, depth = pitch, sync time = volume. Concurrent = chords, sequential = melody.
 
 12. **3D Depth Mode** - Z-axis for time or trigger depth. Rotate for different perspectives on async execution.
+
+## Data Science Visualization Ideas
+
+Visualization techniques from other domains that could reveal async patterns:
+
+### Tier 1: High Impact (Recommended)
+
+**1. Phase Space Plot** ⭐⭐⭐
+- **Domain:** Physics, dynamical systems
+- **Concept:** X-axis = waiting time, Y-axis = execution time. Each resource is a point.
+- **Value:** Instantly reveals outliers, clusters by behavior pattern, and whether problems are "waiting too long" vs "executing too long"
+- **Problems solved:** Mystery latency, identifying slow operations, pattern discovery
+- **Implementation:** Scatter plot, color by type, click to inspect, quadrant labels ("fast", "slow start", "slow execution", "slow everything")
+
+**2. Sankey Diagram** ⭐⭐⭐
+- **Domain:** Flow visualization, energy/material flow analysis
+- **Concept:** Resources flow through states (created → waiting → executing → done/leaked). Width = count or cumulative duration.
+- **Value:** Immediately shows where resources pile up, leak, or get stuck. Bottlenecks visible as wide flows into narrow states.
+- **Problems solved:** Promise leaks, resource exhaustion, flow bottlenecks
+- **Implementation:** States as columns, flows sized by count or duration, color by resource type
+
+**3. Arc Diagram** ⭐⭐⭐
+- **Domain:** Network science, genomics (sequence alignment)
+- **Concept:** Linear timeline with arcs connecting parent→child relationships above the line. Arc height = time distance between creation events.
+- **Value:** Shows dependency depth, cascade risk, long-lived dependencies. Long arcs spanning timeline = potential problems.
+- **Problems solved:** Deep dependency chains, cascade failures, understanding trigger relationships
+- **Implementation:** Time flows left-to-right, arcs connect parent to child, height proportional to time span
+
+### Tier 2: Strong Value
+
+**4. Piano Roll** ⭐⭐
+- **Domain:** Music production (MIDI editors)
+- **Concept:** Each resource type is a "note" row, horizontal bars show when active. Like a MIDI piano roll.
+- **Value:** Intuitive parallelism visualization. Instantly reveals sequential patterns that should be parallel, gaps, bursts.
+- **Problems solved:** Unexpected sequential execution, parallelism opportunities
+- **Similar to:** Existing timeline but grouped by type rather than hierarchy
+
+**5. Chord Diagram** ⭐⭐
+- **Domain:** Network science, genomics (Circos)
+- **Concept:** Circular layout with ribbons connecting resource types. Shows which types trigger which.
+- **Value:** Understanding async "metabolism" - "fetch operations spawn 40% of promises, timers spawn 30%"
+- **Problems solved:** Architectural understanding, type relationship patterns
+- **Implementation:** Types around circle, ribbon width = spawn count between types
+
+### Tier 3: Specialized Value
+
+**6. Horizon Chart** ⭐
+- **Domain:** Financial time series, monitoring
+- **Concept:** Compact way to show multiple metrics (parallelism, memory, wait-queue-depth) simultaneously in minimal vertical space.
+- **Value:** Dashboard-style monitoring, comparing multiple traces
+- **Problems solved:** Multi-metric monitoring, trace comparison
+- **Tradeoff:** Requires learning to read; less intuitive
+
+**7. Candlestick/Box Plot Timeline** ⭐
+- **Domain:** Financial analysis, statistics
+- **Concept:** For each time bucket, show distribution of durations (min, quartiles, max, outliers).
+- **Value:** Identifying "system gets slower over time" or "latency variance increases under load"
+- **Problems solved:** Statistical patterns, performance degradation over time
+- **Tradeoff:** More useful for aggregate analysis than single-trace debugging
+
+### Other Considered Techniques
+
+| Technique | Domain | Potential Use | Priority |
+|-----------|--------|---------------|----------|
+| Circos Plot | Genomics | Cross-type relationships in circular layout | Low (complex) |
+| Phylogenetic Tree | Biology | Clustering similar execution patterns | Low (abstract) |
+| Contour/Density Heatmap | GIS | Activity concentration in projected space | Medium |
+| Trajectory Animation | Physics | Resources move through 2D state space | Medium |
+| Spectrogram | Audio | Time vs type with intensity = activity | Medium |
+| Flow Map | Cartography | Arrow-based spawn frequency visualization | Low |
+| Entropy Visualization | Information theory | Predictability of async patterns | Low (abstract)
+
+### Implementation Priority
+
+If implementing incrementally:
+1. **Phase Space Plot** - Simple, immediately actionable, answers "which operations are slow and why"
+2. **Sankey Diagram** - Flow understanding, spotting leaks and pileups
+3. **Arc Diagram** - Causal chain visualization, cascade risk assessment
