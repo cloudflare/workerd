@@ -183,7 +183,7 @@ interface SpanContext {
   // For Hibernate and Mark this would be the span under which they were emitted.
   // spanId is not set ONLY if:
   //  1. This is an Onset event
-  //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+  //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
   readonly spanId?: string;
 }
 
