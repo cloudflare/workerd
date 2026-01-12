@@ -1839,6 +1839,10 @@ const userB = await fetch('/user/123');</pre>
     let replayLoopPauseUntil = 0;  // Timestamp when loop pause ends
     let replayGhostMode = false;  // Ghost mode - show previous states
     let replayTrail = [];  // Execution trail - { asyncId, fadeStart, x, y, color }
+    let replayLayoutMode = 'grid';  // 'grid' or 'bubble'
+    let replayBubbleNodes = new Map();  // asyncId -> { x, y, targetX, targetY, radius, targetRadius }
+    let replayBubbleViewport = { x: 0, y: 0, scale: 1 };  // Pan/zoom for bubble view
+    let replayBubbleLastLayout = null;  // Cache last layout computation time
     // Replay sidebar section collapse state
     let replaySidebarCollapsed = {
       metrics: false,
@@ -1935,6 +1939,7 @@ const userB = await fetch('/user/123');</pre>
         replaySpeed,
         replayLoop,
         replayGhostMode,
+        replayLayoutMode,
         breakdownGroupBy,
         breakdownVizMode
       };
@@ -2038,6 +2043,14 @@ const userB = await fetch('/user/123');</pre>
         // Restore replay ghost mode
         if (settings.replayGhostMode !== undefined) {
           replayGhostMode = settings.replayGhostMode;
+        }
+
+        // Restore replay layout mode
+        if (settings.replayLayoutMode !== undefined) {
+          const validModes = ['grid', 'bubble'];
+          if (validModes.includes(settings.replayLayoutMode)) {
+            replayLayoutMode = settings.replayLayoutMode;
+          }
         }
 
         // Restore breakdown view settings
@@ -8601,6 +8614,295 @@ const userB = await fetch('/user/123');</pre>
     }
 
     // ==================== REPLAY VIEW ====================
+
+    // Compute bubble layout for replay - positions nodes hierarchically based on trigger relationships
+    // Returns a Map of asyncId -> { x, y, radius }
+    function computeReplayBubbleLayout(visibleResources, chartWidth, chartHeight, chartLeft, chartTop) {
+      if (visibleResources.length === 0) return new Map();
+
+      const padding = 30;
+      const minRadius = 15;
+      const maxRadius = 40;
+      const nodeSpacing = 25;
+
+      // Build children map for visible resources only
+      const childrenMap = new Map();
+      const visibleIds = new Set(visibleResources.map(r => r.asyncId));
+
+      visibleResources.forEach(r => {
+        // Initialize empty children array for each resource
+        if (!childrenMap.has(r.asyncId)) {
+          childrenMap.set(r.asyncId, []);
+        }
+        // Add to parent's children if parent is visible
+        if (r.triggerId !== 0 && visibleIds.has(r.triggerId)) {
+          if (!childrenMap.has(r.triggerId)) {
+            childrenMap.set(r.triggerId, []);
+          }
+          childrenMap.get(r.triggerId).push(r);
+        }
+      });
+
+      // Sort children by creation time
+      childrenMap.forEach(children => {
+        children.sort((a, b) => a.createdAt - b.createdAt);
+      });
+
+      // Find roots (no visible parent)
+      const roots = visibleResources.filter(r =>
+        r.triggerId === 0 || !visibleIds.has(r.triggerId)
+      );
+
+      // Calculate current sync time for each resource (for dynamic sizing)
+      // If callback is in progress, use time elapsed so far
+      const duration = traceData.requestDurationNs;
+      const getSyncTime = (r) => {
+        if (r.callbackStartedAt <= 0) return 0;
+        if (r.callbackEndedAt > 0 && r.callbackEndedAt <= replayTime) {
+          // Callback completed
+          return r.callbackEndedAt - r.callbackStartedAt;
+        }
+        if (r.callbackStartedAt <= replayTime) {
+          // Callback in progress - use time elapsed so far
+          return replayTime - r.callbackStartedAt;
+        }
+        return 0;
+      };
+
+      // Find max sync time among visible resources for relative sizing
+      const maxSyncTime = Math.max(...visibleResources.map(getSyncTime), 1);
+
+      // Compute node radii based on sync time
+      const nodeRadii = new Map();
+      visibleResources.forEach(r => {
+        const syncTime = getSyncTime(r);
+        const ratio = Math.sqrt(syncTime / maxSyncTime);
+        const radius = minRadius + ratio * (maxRadius - minRadius);
+        nodeRadii.set(r.asyncId, radius);
+      });
+
+      // Compute depth for each node
+      const depthMap = new Map();
+      function computeDepth(r, depth) {
+        depthMap.set(r.asyncId, depth);
+        const children = childrenMap.get(r.asyncId) || [];
+        children.forEach(child => computeDepth(child, depth + 1));
+      }
+      roots.forEach(r => computeDepth(r, 0));
+
+      // Compute subtree widths
+      const subtreeWidths = new Map();
+      function computeSubtreeWidth(asyncId) {
+        const children = childrenMap.get(asyncId) || [];
+        const myRadius = nodeRadii.get(asyncId) || minRadius;
+
+        if (children.length === 0) {
+          const w = myRadius * 2 + nodeSpacing;
+          subtreeWidths.set(asyncId, w);
+          return w;
+        }
+
+        let childrenTotalWidth = 0;
+        children.forEach(child => {
+          childrenTotalWidth += computeSubtreeWidth(child.asyncId);
+        });
+
+        const myWidth = Math.max(myRadius * 2 + nodeSpacing, childrenTotalWidth);
+        subtreeWidths.set(asyncId, myWidth);
+        return myWidth;
+      }
+
+      let totalWidth = 0;
+      roots.forEach(r => {
+        totalWidth += computeSubtreeWidth(r.asyncId);
+      });
+
+      // Calculate depth-based Y positions
+      const maxDepth = Math.max(...Array.from(depthMap.values()), 0);
+      const availableHeight = chartHeight - padding * 2;
+      const levelHeight = maxDepth > 0 ? Math.min(80, availableHeight / (maxDepth + 1)) : 80;
+
+      // Layout nodes
+      const positions = new Map();
+      let currentX = padding;
+
+      function layoutSubtree(r, depth) {
+        const children = childrenMap.get(r.asyncId) || [];
+        const myWidth = subtreeWidths.get(r.asyncId) || 50;
+        const myRadius = nodeRadii.get(r.asyncId) || minRadius;
+
+        let x;
+        if (children.length === 0) {
+          x = currentX + myWidth / 2;
+          currentX += myWidth;
+        } else {
+          const startX = currentX;
+          children.forEach(child => layoutSubtree(child, depth + 1));
+          const endX = currentX;
+          x = (startX + endX) / 2;
+        }
+
+        const y = padding + 30 + depth * levelHeight;
+
+        positions.set(r.asyncId, {
+          x: x,
+          y: y,
+          radius: myRadius,
+          resource: r
+        });
+      }
+
+      roots.forEach(r => layoutSubtree(r, 0));
+
+      // Handle orphans (resources not in the tree due to filtering)
+      let orphanX = padding;
+      const orphanY = chartHeight - padding - 30;
+      visibleResources.forEach(r => {
+        if (!positions.has(r.asyncId)) {
+          const radius = nodeRadii.get(r.asyncId) || minRadius;
+          positions.set(r.asyncId, {
+            x: orphanX + radius,
+            y: orphanY,
+            radius: radius,
+            resource: r
+          });
+          orphanX += radius * 2 + nodeSpacing;
+        }
+      });
+
+      // Calculate bounds
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      positions.forEach(pos => {
+        minX = Math.min(minX, pos.x - pos.radius);
+        maxX = Math.max(maxX, pos.x + pos.radius);
+        minY = Math.min(minY, pos.y - pos.radius);
+        maxY = Math.max(maxY, pos.y + pos.radius);
+      });
+
+      const layoutWidth = maxX - minX + padding * 2;
+      const layoutHeight = maxY - minY + padding * 2;
+
+      // Use a minimum scale to keep nodes readable (don't shrink too much)
+      const scaleX = chartWidth / layoutWidth;
+      const scaleY = chartHeight / layoutHeight;
+      const minScale = 0.6;  // Don't shrink below 60%
+      const scale = Math.max(Math.min(scaleX, scaleY, 1.5), minScale);
+
+      // Find the focus point - prioritize: newly created > executing > most recent
+      let focusX = 0, focusY = 0;
+      let focusFound = false;
+
+      // Look for nodes that just appeared or are executing
+      const recentThreshold = traceData.requestDurationNs * 0.05;  // Last 5% of trace time
+      let newestNode = null;
+      let newestTime = -1;
+      let executingNode = null;
+
+      positions.forEach((pos, asyncId) => {
+        const r = pos.resource;
+        // Track newest node
+        if (r.createdAt > newestTime && r.createdAt <= replayTime) {
+          newestTime = r.createdAt;
+          newestNode = pos;
+        }
+        // Track executing node
+        if (r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime &&
+            (r.callbackEndedAt === 0 || r.callbackEndedAt > replayTime)) {
+          executingNode = pos;
+        }
+      });
+
+      // Priority: executing node > newest node > center of layout
+      if (executingNode) {
+        focusX = executingNode.x;
+        focusY = executingNode.y;
+        focusFound = true;
+      } else if (newestNode && (replayTime - newestTime) < recentThreshold) {
+        focusX = newestNode.x;
+        focusY = newestNode.y;
+        focusFound = true;
+      } else {
+        // Default to center of layout
+        focusX = (minX + maxX) / 2;
+        focusY = (minY + maxY) / 2;
+      }
+
+      // Calculate target viewport offset to center focus point
+      const targetOffsetX = chartLeft + chartWidth / 2 - focusX * scale;
+      const targetOffsetY = chartTop + chartHeight / 2 - focusY * scale;
+
+      // Smoothly interpolate viewport (stored in replayBubbleViewport)
+      const panSmoothing = 0.08;  // Smooth panning
+      if (replayBubbleViewport.scale === 1 && replayBubbleViewport.x === 0 && replayBubbleViewport.y === 0) {
+        // First frame - jump to position
+        replayBubbleViewport.x = targetOffsetX;
+        replayBubbleViewport.y = targetOffsetY;
+        replayBubbleViewport.scale = scale;
+      } else {
+        // Smooth pan
+        replayBubbleViewport.x += (targetOffsetX - replayBubbleViewport.x) * panSmoothing;
+        replayBubbleViewport.y += (targetOffsetY - replayBubbleViewport.y) * panSmoothing;
+        replayBubbleViewport.scale += (scale - replayBubbleViewport.scale) * panSmoothing;
+      }
+
+      const offsetX = replayBubbleViewport.x;
+      const offsetY = replayBubbleViewport.y;
+      const currentScale = replayBubbleViewport.scale;
+
+      // Apply transform
+      const transformedPositions = new Map();
+      positions.forEach((pos, asyncId) => {
+        transformedPositions.set(asyncId, {
+          x: offsetX + pos.x * currentScale,
+          y: offsetY + pos.y * currentScale,
+          radius: pos.radius * currentScale,
+          resource: pos.resource
+        });
+      });
+
+      return transformedPositions;
+    }
+
+    // Update bubble node positions with smoothing
+    function updateReplayBubblePositions(targetPositions, deltaTime) {
+      const smoothingFactor = Math.min(1, deltaTime * 0.008);  // Smooth over ~125ms
+
+      targetPositions.forEach((target, asyncId) => {
+        let node = replayBubbleNodes.get(asyncId);
+        if (!node) {
+          // New node - start at target position
+          node = {
+            x: target.x,
+            y: target.y,
+            radius: target.radius,
+            targetX: target.x,
+            targetY: target.y,
+            targetRadius: target.radius,
+            resource: target.resource
+          };
+          replayBubbleNodes.set(asyncId, node);
+        } else {
+          // Update targets
+          node.targetX = target.x;
+          node.targetY = target.y;
+          node.targetRadius = target.radius;
+          node.resource = target.resource;
+
+          // Interpolate current towards target
+          node.x += (node.targetX - node.x) * smoothingFactor;
+          node.y += (node.targetY - node.y) * smoothingFactor;
+          node.radius += (node.targetRadius - node.radius) * smoothingFactor;
+        }
+      });
+
+      // Remove nodes that are no longer in target
+      for (const asyncId of replayBubbleNodes.keys()) {
+        if (!targetPositions.has(asyncId)) {
+          replayBubbleNodes.delete(asyncId);
+        }
+      }
+    }
+
     function renderReplay() {
       // Stop any existing animation
       if (replayAnimationId) {
@@ -8616,6 +8918,8 @@ const userB = await fetch('/user/123');</pre>
       replayAlertedPatterns = new Set();
       replayTrail = [];
       replayLoopPauseUntil = 0;
+      replayBubbleNodes.clear();
+      replayBubbleViewport = { x: 0, y: 0, scale: 1 };
       renderReplayFrame();
     }
 
@@ -8793,6 +9097,26 @@ const userB = await fetch('/user/123');</pre>
       ctx.strokeRect(btnX, btnY, 50, btnHeight);
       ctx.fillStyle = replayGhostMode ? 'white' : '#e94560';
       ctx.fillText('👻 Ghost', btnX + 25, btnY + 15);
+      btnX += 55;
+
+      // Layout toggle buttons
+      btnX += 10;  // Extra spacing before layout buttons
+      // Grid button
+      ctx.fillStyle = replayLayoutMode === 'grid' ? '#4a9eff' : '#0f3460';
+      ctx.fillRect(btnX, btnY, 40, btnHeight);
+      ctx.strokeStyle = replayLayoutMode === 'grid' ? '#4a9eff' : '#e94560';
+      ctx.strokeRect(btnX, btnY, 40, btnHeight);
+      ctx.fillStyle = replayLayoutMode === 'grid' ? 'white' : '#e94560';
+      ctx.fillText('Grid', btnX + 20, btnY + 15);
+      btnX += 45;
+
+      // Bubble button
+      ctx.fillStyle = replayLayoutMode === 'bubble' ? '#4a9eff' : '#0f3460';
+      ctx.fillRect(btnX, btnY, 50, btnHeight);
+      ctx.strokeStyle = replayLayoutMode === 'bubble' ? '#4a9eff' : '#e94560';
+      ctx.strokeRect(btnX, btnY, 50, btnHeight);
+      ctx.fillStyle = replayLayoutMode === 'bubble' ? 'white' : '#e94560';
+      ctx.fillText('Bubble', btnX + 25, btnY + 15);
 
       // Progress bar (in main area)
       const progressY = btnY + btnHeight + 10;
@@ -8843,32 +9167,71 @@ const userB = await fetch('/user/123');</pre>
         return endTime >= replayTime;
       });
 
-      // Layout resources in a grid (in main area)
+      // Layout resources (grid or bubble mode)
       const resourceAreaTop = progressY + 25;
       const resourceAreaHeight = height - resourceAreaTop - padding.bottom;
       const resourceAreaLeft = mainX + padding.left;
-      const maxCols = Math.floor(chartWidth / 100);
-      const maxRows = Math.floor(resourceAreaHeight / 80);
-      const cellWidth = chartWidth / Math.max(maxCols, 1);
-      const cellHeight = resourceAreaHeight / Math.max(maxRows, 1);
 
       // Sort by creation time for stable layout
       const sortedVisible = [...visibleResources].sort((a, b) => a.createdAt - b.createdAt);
 
       // Build position map for dependency lines
-      const positionMap = new Map();
-      sortedVisible.forEach((r, idx) => {
-        if (idx >= maxCols * maxRows) return;
-        const col = idx % maxCols;
-        const row = Math.floor(idx / maxCols);
-        const x = resourceAreaLeft + col * cellWidth + cellWidth / 2;
-        const y = resourceAreaTop + row * cellHeight + cellHeight / 2;
-        positionMap.set(r.asyncId, { x, y, resource: r });
-      });
+      let positionMap = new Map();
+      let defaultRadius = 28;
+
+      if (replayLayoutMode === 'bubble') {
+        // Bubble layout - hierarchical based on trigger relationships
+        const targetPositions = computeReplayBubbleLayout(
+          sortedVisible,
+          chartWidth,
+          resourceAreaHeight,
+          resourceAreaLeft,
+          resourceAreaTop
+        );
+
+        // Update positions with smoothing (use 16ms as approx frame time)
+        updateReplayBubblePositions(targetPositions, 16);
+
+        // Build position map from smoothed positions
+        replayBubbleNodes.forEach((node, asyncId) => {
+          positionMap.set(asyncId, {
+            x: node.x,
+            y: node.y,
+            radius: node.radius,
+            resource: node.resource
+          });
+        });
+
+        // Variable radius in bubble mode
+        defaultRadius = null;
+      } else {
+        // Grid layout - original behavior
+        const maxCols = Math.floor(chartWidth / 100);
+        const maxRows = Math.floor(resourceAreaHeight / 80);
+        const cellWidth = chartWidth / Math.max(maxCols, 1);
+        const cellHeight = resourceAreaHeight / Math.max(maxRows, 1);
+
+        sortedVisible.forEach((r, idx) => {
+          if (idx >= maxCols * maxRows) return;
+          const col = idx % maxCols;
+          const row = Math.floor(idx / maxCols);
+          const x = resourceAreaLeft + col * cellWidth + cellWidth / 2;
+          const y = resourceAreaTop + row * cellHeight + cellHeight / 2;
+          positionMap.set(r.asyncId, { x, y, resource: r, radius: 28 });
+        });
+
+        defaultRadius = 28;
+      }
 
       // Store position map and radius on canvas for click/hover handling
       canvas._replayPositionMap = positionMap;
-      canvas._replayCircleRadius = 28;
+      canvas._replayCircleRadius = defaultRadius;
+
+      // Clip graph rendering to main area (don't draw over sidebar)
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(mainX, resourceAreaTop, mainWidth, resourceAreaHeight);
+      ctx.clip();
 
       // Calculate waiting counts - how many resources are waiting on each resource
       // A resource is "waiting on" another if it's created, callback not started, and is a descendant
@@ -8903,8 +9266,6 @@ const userB = await fetch('/user/123');</pre>
             replayTrail.push({
               asyncId: r.asyncId,
               fadeStart: r.callbackEndedAt,
-              x: pos.x,
-              y: pos.y,
               color: TYPE_COLORS[r.type] || '#808080'
             });
           }
@@ -8917,12 +9278,17 @@ const userB = await fetch('/user/123');</pre>
         if (age < 0) return false;  // Remove trails from "future" (user navigated backwards)
         if (age > trailDuration) return false;  // Remove expired trails
 
+        // Look up current position (handles viewport panning)
+        const pos = positionMap.get(trail.asyncId);
+        if (!pos) return false;  // Node no longer visible
+
         const fadeProgress = age / trailDuration;
         const alpha = Math.max(0, 0.4 * (1 - fadeProgress));
-        const size = 28 + 15 * fadeProgress;  // Expand as it fades
+        const baseSize = pos.radius || defaultRadius || 28;
+        const size = baseSize + 15 * fadeProgress;  // Expand as it fades
 
         ctx.beginPath();
-        ctx.arc(trail.x, trail.y, size, 0, Math.PI * 2);
+        ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
         ctx.fillStyle = trail.color;
         ctx.globalAlpha = alpha;
         ctx.fill();
@@ -8936,11 +9302,11 @@ const userB = await fetch('/user/123');</pre>
         const ghostTime = replayTime - (duration * 0.05);  // Look back 5% of duration
         if (ghostTime > 0) {
           sortedVisible.forEach((r, idx) => {
-            if (idx >= maxCols * maxRows) return;
             const pos = positionMap.get(r.asyncId);
             if (!pos) return;
 
             const { x, y } = pos;
+            const nodeRadius = pos.radius || defaultRadius || 28;
             const color = TYPE_COLORS[r.type] || '#808080';
 
             // Determine CURRENT state
@@ -8969,7 +9335,7 @@ const userB = await fetch('/user/123');</pre>
               const age = replayTime - r.createdAt;
               const pulseProgress = Math.min(1, age / (duration * 0.05));
               ctx.beginPath();
-              ctx.arc(x, y, 28 + 20 * pulseProgress, 0, Math.PI * 2);
+              ctx.arc(x, y, nodeRadius + 20 * pulseProgress, 0, Math.PI * 2);
               ctx.strokeStyle = '#50c878';  // Green for new
               ctx.lineWidth = 4 * (1 - pulseProgress);
               ctx.globalAlpha = 0.8 * (1 - pulseProgress);
@@ -8982,7 +9348,7 @@ const userB = await fetch('/user/123');</pre>
               const age = replayTime - r.callbackStartedAt;
               const pulseProgress = Math.min(1, age / (duration * 0.05));
               ctx.beginPath();
-              ctx.arc(x, y, 28 + 25 * pulseProgress, 0, Math.PI * 2);
+              ctx.arc(x, y, nodeRadius + 25 * pulseProgress, 0, Math.PI * 2);
               ctx.strokeStyle = '#ffaa00';  // Orange for execution start
               ctx.lineWidth = 5 * (1 - pulseProgress);
               ctx.globalAlpha = 0.9 * (1 - pulseProgress);
@@ -8995,7 +9361,7 @@ const userB = await fetch('/user/123');</pre>
               const age = replayTime - r.callbackEndedAt;
               const pulseProgress = Math.min(1, age / (duration * 0.05));
               ctx.beginPath();
-              ctx.arc(x, y, 28 + 30 * pulseProgress, 0, Math.PI * 2);
+              ctx.arc(x, y, nodeRadius + 30 * pulseProgress, 0, Math.PI * 2);
               ctx.strokeStyle = color;
               ctx.lineWidth = 6 * (1 - pulseProgress);
               ctx.globalAlpha = 0.7 * (1 - pulseProgress);
@@ -9009,7 +9375,6 @@ const userB = await fetch('/user/123');</pre>
       // Draw dependency lines first (behind circles)
       ctx.lineWidth = 1.5;
       sortedVisible.forEach((r, idx) => {
-        if (idx >= maxCols * maxRows) return;
         const childPos = positionMap.get(r.asyncId);
         const parentPos = positionMap.get(r.triggerId);
         if (!childPos || !parentPos || r.triggerId === 0) return;
@@ -9027,11 +9392,13 @@ const userB = await fetch('/user/123');</pre>
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < 1) return;
 
-        const radius = 28;
-        const startX = parentPos.x + (dx / dist) * radius;
-        const startY = parentPos.y + (dy / dist) * radius;
-        const endX = childPos.x - (dx / dist) * radius;
-        const endY = childPos.y - (dy / dist) * radius;
+        // Use per-node radius in bubble mode, fixed radius in grid mode
+        const parentRadius = parentPos.radius || defaultRadius || 28;
+        const childRadius = childPos.radius || defaultRadius || 28;
+        const startX = parentPos.x + (dx / dist) * parentRadius;
+        const startY = parentPos.y + (dy / dist) * parentRadius;
+        const endX = childPos.x - (dx / dist) * childRadius;
+        const endY = childPos.y - (dy / dist) * childRadius;
 
         // Color and style based on state
         const parentColor = TYPE_COLORS[parentPos.resource.type] || '#808080';
@@ -9061,14 +9428,66 @@ const userB = await fetch('/user/123');</pre>
         ctx.globalAlpha = 1;
       });
 
-      // Draw resource circles
-      const radius = 28;
-      sortedVisible.forEach((r, idx) => {
-        if (idx >= maxCols * maxRows) return;
+      // Draw temporal edges (dashed, green) if enabled
+      if (showTemporalEdges && temporalEdges.length > 0) {
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = 'rgba(80, 200, 120, 0.6)';
+        ctx.lineWidth = 1.5;
 
+        temporalEdges.forEach(edge => {
+          const fromPos = positionMap.get(edge.from);
+          const toPos = positionMap.get(edge.to);
+          // Only draw if both nodes are visible (have positions) at current replay time
+          if (!fromPos || !toPos) return;
+
+          // Check if both resources are currently visible
+          const fromResource = fromPos.resource;
+          const toResource = toPos.resource;
+          if (!fromResource || !toResource) return;
+
+          // Both should be created by current replay time
+          if (fromResource.createdAt > replayTime || toResource.createdAt > replayTime) return;
+
+          const fromRadius = fromPos.radius || defaultRadius || 28;
+          const toRadius = toPos.radius || defaultRadius || 28;
+
+          // Calculate line endpoints at circle edges
+          const dx = toPos.x - fromPos.x;
+          const dy = toPos.y - fromPos.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 1) return;
+
+          const startX = fromPos.x + (dx / dist) * fromRadius;
+          const startY = fromPos.y + (dy / dist) * fromRadius;
+          const endX = toPos.x - (dx / dist) * toRadius;
+          const endY = toPos.y - (dy / dist) * toRadius;
+
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(endX, endY);
+          ctx.stroke();
+
+          // Small arrowhead
+          const angle = Math.atan2(endY - startY, endX - startX);
+          const arrowSize = 5;
+          ctx.beginPath();
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(endX - arrowSize * Math.cos(angle - 0.4), endY - arrowSize * Math.sin(angle - 0.4));
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(endX - arrowSize * Math.cos(angle + 0.4), endY - arrowSize * Math.sin(angle + 0.4));
+          ctx.stroke();
+        });
+
+        ctx.restore();
+      }
+
+      // Draw resource circles
+      sortedVisible.forEach((r, idx) => {
         const pos = positionMap.get(r.asyncId);
         if (!pos) return;
         const { x, y } = pos;
+        const radius = pos.radius || defaultRadius || 28;
 
         const endTime = r.callbackEndedAt > 0 ? r.callbackEndedAt :
                        (r.destroyedAt > 0 ? r.destroyedAt : duration);
@@ -9124,13 +9543,15 @@ const userB = await fetch('/user/123');</pre>
           ctx.fill();
           ctx.shadowBlur = 0;
 
-          // Spinning indicator
-          const spinAngle = (replayTime / 1e6) * 10;
-          ctx.strokeStyle = 'white';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(x, y, radius - 6, spinAngle, spinAngle + Math.PI);
-          ctx.stroke();
+          // Spinning indicator (only if radius is large enough)
+          if (radius > 8) {
+            const spinAngle = (replayTime / 1e6) * 10;
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(x, y, radius - 6, spinAngle, spinAngle + Math.PI);
+            ctx.stroke();
+          }
         } else if (isWaiting) {
           // Waiting - pulsing outline
           ctx.fillStyle = color;
@@ -9242,6 +9663,9 @@ const userB = await fetch('/user/123');</pre>
           ctx.globalAlpha = 1;
         }
       });
+
+      // Restore context (remove clipping) before drawing sidebar
+      ctx.restore();
 
       // Calculate live metrics
       const executing = activeResources.filter(r =>
@@ -9766,6 +10190,30 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
+        // Check layout buttons (Grid and Bubble)
+        const layoutBtnStartX = ghostBtnX + 55 + 10;  // Match render code spacing
+        // Grid button
+        if (clickX >= layoutBtnStartX && clickX <= layoutBtnStartX + 40 &&
+            clickY >= btnY && clickY <= btnY + btnHeight) {
+          replayLayoutMode = 'grid';
+          replayBubbleNodes.clear();
+          replayBubbleViewport = { x: 0, y: 0, scale: 1 };
+          saveSettings();
+          renderReplayFrame();
+          return;
+        }
+        // Bubble button
+        const bubbleBtnX = layoutBtnStartX + 45;
+        if (clickX >= bubbleBtnX && clickX <= bubbleBtnX + 50 &&
+            clickY >= btnY && clickY <= btnY + btnHeight) {
+          replayLayoutMode = 'bubble';
+          replayBubbleNodes.clear();
+          replayBubbleViewport = { x: 0, y: 0, scale: 1 };
+          saveSettings();
+          renderReplayFrame();
+          return;
+        }
+
         // Check progress bar click (in main area)
         if (clickY >= progressY && clickY <= progressY + 8 &&
             clickX >= progressX && clickX <= progressX + chartWidth) {
@@ -9777,8 +10225,8 @@ const userB = await fetch('/user/123');</pre>
 
         // Check resource circle clicks
         if (canvas._replayPositionMap) {
-          const radius = canvas._replayCircleRadius || 28;
           for (const [asyncId, pos] of canvas._replayPositionMap) {
+            const radius = pos.radius || canvas._replayCircleRadius || 28;
             const dx = clickX - pos.x;
             const dy = clickY - pos.y;
             if (Math.sqrt(dx * dx + dy * dy) <= radius) {
@@ -9821,8 +10269,8 @@ const userB = await fetch('/user/123');</pre>
 
         // Check if over resource circles
         if (canvas._replayPositionMap) {
-          const radius = canvas._replayCircleRadius || 28;
           for (const [asyncId, pos] of canvas._replayPositionMap) {
+            const radius = pos.radius || canvas._replayCircleRadius || 28;
             const dx = mouseX - pos.x;
             const dy = mouseY - pos.y;
             if (Math.sqrt(dx * dx + dy * dy) <= radius) {

@@ -261,7 +261,7 @@ python3 -m http.server 8888
 |-----|------|-------------|
 | 1 | **Waterfall** | Timeline with concurrency graph, dependency arrows, hover highlighting |
 | 2 | **Graph** | Bubble/Hierarchical/Force layouts (←/→ to switch), path highlighting |
-| 3 | **Replay** | Animated playback with lifecycle badges, event markers, loop/ghost modes |
+| 3 | **Replay** | Animated playback with Grid/Bubble layouts, lifecycle badges, loop/ghost modes |
 | 4 | **Parallelism** | Concurrent ops over time, efficiency metrics, ideal comparison |
 | 5 | **Breakdown** | Treemap/Sunburst by type/trigger/stack, drill-down navigation |
 | 6 | **Latency** | Histogram/CDF of async wait times, outlier detection |
@@ -323,8 +323,9 @@ python3 -m http.server 8888
 - **Features:** 3 layouts with ←/→ switching, path highlighting on hover, drag to reposition nodes
 
 ### Replay
-- **State:** `replayProgress`, `replayPlaying`, `replaySpeed`, `replayLoopMode`, `replayGhostMode`, `replayTrails`, `replayGhosts`
-- **Features:** Animated playback, lifecycle badges, ghost pulses for state changes, keyboard navigation
+- **State:** `replayProgress`, `replayPlaying`, `replaySpeed`, `replayLoopMode`, `replayGhostMode`, `replayTrails`, `replayGhosts`, `replayLayoutMode`, `replayBubbleNodes`, `replayBubbleViewport`
+- **Features:** Animated playback, Grid/Bubble layout toggle, dynamic node sizing (grows during callback), lifecycle badges, ghost pulses for state changes, keyboard navigation
+- **Bubble Mode:** Hierarchical tree layout, position smoothing, auto-fit viewport
 
 ### Parallelism
 - **State:** `parallelismHoverBucket`, `parallelismBucketData`, `parallelismRenderParams`
@@ -410,3 +411,33 @@ python3 -m http.server 8888
 - Visualization tool enhancements largely complete for all 8 views
 - C++ instrumentation: fetch, cache, timers, streams, bridges, microtask, immediate, sockets complete
 - Still could instrument: KV, DO, R2, D1, Queue, WebSocket, Crypto, AI APIs (if desired)
+
+## Session (January 2025) - Bubble Replay Mode
+
+**Completed:**
+- Added bubble layout mode to Replay view alongside existing grid layout
+- Layout toggle buttons (Grid/Bubble) in replay controls
+- Dynamic node sizing: nodes grow as callbacks execute (proportional to sync time)
+- Hierarchical tree layout based on trigger relationships (parents above children)
+- Position smoothing: nodes animate smoothly when layout changes as new resources appear
+- Auto-fit: viewport automatically scales to show all visible nodes
+- All existing replay features work in both modes (ghost mode, trails, critical path, etc.)
+
+**Implementation details:**
+- `replayLayoutMode` state variable ('grid' or 'bubble')
+- `replayBubbleNodes` Map stores current/target positions for smooth interpolation
+- `computeReplayBubbleLayout()` computes hierarchical tree positions
+- `updateReplayBubblePositions()` handles smooth position transitions
+- Variable radius per node based on current sync time progress
+- Click/hover handlers updated to use per-node radius
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - bubble replay implementation
+
+**Bubble Replay Features:**
+- Nodes positioned hierarchically: root at top, children below
+- Node size reflects callback execution time (grows during execution)
+- Layout recomputes as new nodes appear, with smooth transitions
+- Maintains tree structure visibility even with many resources
+- Works with all existing replay controls (play/pause, speed, loop, ghost mode)
+- Temporal edges rendered (dashed green lines) when enabled, appearing progressively as nodes become visible
