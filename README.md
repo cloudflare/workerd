@@ -96,6 +96,12 @@ You may then build `workerd` at the command-line with:
 bazel build //src/workerd/server:workerd
 ```
 
+You can pass `--config=release` to compile in release mode:
+
+```sh
+bazel build //src/workerd/server:workerd --config=release
+```
+
 You can also build from within Visual Studio Code using the instructions in [docs/vscode.md](docs/vscode.md).
 
 The compiled binary will be located at `bazel-bin/src/workerd/server/workerd`.
@@ -189,7 +195,7 @@ Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
 You can use [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (v3.0 or greater) to develop Cloudflare Workers locally, using `workerd`. First, run the following command to configure Miniflare to use this build of `workerd`.
 
 ```
-$ export MINIFLARE_WORKERD_PATH="<WORKERD_REPO_DIR>/bazel-bin/src/workerd/server/workerd"
+export MINIFLARE_WORKERD_PATH="<WORKERD_REPO_DIR>/bazel-bin/src/workerd/server/workerd"
 ```
 
 Then, run:
