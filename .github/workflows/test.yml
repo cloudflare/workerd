@@ -183,7 +183,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           # Match workers-sdk node version
-          node-version: 20.19.1
+          node-version: 20.19.6
           cache: 'pnpm'
       - name: Install workers-sdk dependencies
         run: pnpm install
