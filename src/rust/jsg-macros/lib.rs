@@ -42,6 +42,31 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         })
     });
 
+    let field_extractions = fields.named.iter().filter_map(|field| {
+        if !matches!(field.vis, syn::Visibility::Public(_)) {
+            return None;
+        }
+        let field_name = field.ident.as_ref()?;
+        let field_name_str = field_name.to_string();
+        let field_type = &field.ty;
+        Some(quote! {
+            let #field_name = {
+                let prop = obj.get(lock, #field_name_str)
+                    .ok_or_else(|| jsg::Error::new_type_error(
+                        format!("Missing property '{}'", #field_name_str)
+                    ))?;
+                <#field_type as jsg::FromJS>::from_js(lock, prop)?
+            };
+        })
+    });
+
+    let field_names = fields.named.iter().filter_map(|field| {
+        if !matches!(field.vis, syn::Visibility::Public(_)) {
+            return None;
+        }
+        field.ident.as_ref()
+    });
+
     quote! {
         #input
 
@@ -73,8 +98,15 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl jsg::FromJS for #name {
             type ResultType = Self;
 
-            fn from_js(_lock: &mut jsg::Lock, _value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
-                todo!("Struct from_js is not yet supported")
+            fn from_js(lock: &mut jsg::Lock, value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                if !value.is_object() {
+                    return Err(jsg::Error::new_type_error(
+                        format!("Expected object but got {}", value.type_of())
+                    ));
+                }
+                let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
+                #(#field_extractions)*
+                Ok(Self { #(#field_names),* })
             }
         }
 

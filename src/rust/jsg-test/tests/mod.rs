@@ -1,3 +1,4 @@
+mod arrays;
 mod eval;
 mod jsg_oneof;
 mod jsg_struct;
