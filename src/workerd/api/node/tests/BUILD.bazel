@@ -235,6 +235,12 @@ wd_test(
 )
 
 wd_test(
+    src = "module-import-mutable-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-import-mutable-test.js"],
+)
+
+wd_test(
     src = "process-exit-test.wd-test",
     args = ["--experimental"],
     data = ["process-exit-test.js"],
