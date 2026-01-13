@@ -1,6 +1,19 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
+    // bazel_deps from deps.MODULE.bazel
+    {
+      "name": "ada-url",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "brotli",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "tcmalloc",
+      "type": "bazel_dep"
+    },
     {
       "name": "capnp-cpp",
       "type": "github_tarball",
