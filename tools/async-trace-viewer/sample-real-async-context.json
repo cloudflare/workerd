@@ -1,25 +1,26 @@
 {
-  "requestDurationNs": 42856127,
+  "requestDurationNs": 45072706,
   "resources": [
-    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 42852869, "destroyedAt": 42852969},
-    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 0, "createdAt": 2108089, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
-    {"asyncId": 3, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 3613440, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
-    {"asyncId": 4, "triggerId": 1, "type": "timer", "stackTraceId": 2, "createdAt": 4008905, "callbackStartedAt": 5599507, "callbackEndedAt": 41880590, "destroyedAt": 0},
-    {"asyncId": 5, "triggerId": 1, "type": "kj-to-js", "stackTraceId": 3, "createdAt": 4549246, "callbackStartedAt": 42109259, "callbackEndedAt": 42171950, "destroyedAt": 0},
-    {"asyncId": 6, "triggerId": 1, "type": "js-promise", "stackTraceId": 3, "createdAt": 4640531, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
-    {"asyncId": 7, "triggerId": 6, "type": "js-promise", "stackTraceId": 3, "createdAt": 4803423, "callbackStartedAt": 42213796, "callbackEndedAt": 42238946, "destroyedAt": 0},
-    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 3, "createdAt": 4925105, "callbackStartedAt": 42243963, "callbackEndedAt": 42251418, "destroyedAt": 0},
-    {"asyncId": 9, "triggerId": 8, "type": "js-promise", "stackTraceId": 3, "createdAt": 5022567, "callbackStartedAt": 42255828, "callbackEndedAt": 42475616, "destroyedAt": 0},
-    {"asyncId": 10, "triggerId": 1, "type": "js-promise", "stackTraceId": 4, "createdAt": 5138329, "callbackStartedAt": 42496412, "callbackEndedAt": 42518162, "destroyedAt": 0},
-    {"asyncId": 11, "triggerId": 10, "type": "js-promise", "stackTraceId": 4, "createdAt": 5235788, "callbackStartedAt": 42522631, "callbackEndedAt": 42630160, "destroyedAt": 0},
-    {"asyncId": 12, "triggerId": 1, "type": "js-to-kj", "stackTraceId": 4, "createdAt": 5253449, "callbackStartedAt": 42640825, "callbackEndedAt": 42643758, "destroyedAt": 0},
-    {"asyncId": 13, "triggerId": 11, "type": "js-promise", "stackTraceId": 4, "createdAt": 5332125, "callbackStartedAt": 42634830, "callbackEndedAt": 42652745, "destroyedAt": 0},
-    {"asyncId": 14, "triggerId": 3, "type": "js-promise", "stackTraceId": 4, "createdAt": 5411859, "callbackStartedAt": 42480708, "callbackEndedAt": 42492093, "destroyedAt": 0},
-    {"asyncId": 15, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 21289749, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
-    {"asyncId": 16, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 21641195, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
-    {"asyncId": 17, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 21713742, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
-    {"asyncId": 18, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 25181221, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
-    {"asyncId": 19, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 26255716, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0}
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 45052206, "destroyedAt": 45052451},
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 0, "createdAt": 2052152, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 3625306, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 1, "type": "timer", "stackTraceId": 2, "createdAt": 4098072, "callbackStartedAt": 5940973, "callbackEndedAt": 43906060, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 1, "type": "timer", "stackTraceId": 3, "createdAt": 4566762, "callbackStartedAt": 44077178, "callbackEndedAt": 44108134, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 1, "type": "kj-to-js", "stackTraceId": 3, "createdAt": 4708052, "callbackStartedAt": 44179807, "callbackEndedAt": 44250087, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 1, "type": "js-promise", "stackTraceId": 3, "createdAt": 4779634, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 3, "createdAt": 4968157, "callbackStartedAt": 44271591, "callbackEndedAt": 44303897, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 8, "type": "js-promise", "stackTraceId": 3, "createdAt": 5095213, "callbackStartedAt": 44310111, "callbackEndedAt": 44324001, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 9, "type": "js-promise", "stackTraceId": 3, "createdAt": 5197547, "callbackStartedAt": 44329270, "callbackEndedAt": 44556254, "destroyedAt": 0},
+    {"asyncId": 11, "triggerId": 1, "type": "js-promise", "stackTraceId": 4, "createdAt": 5341735, "callbackStartedAt": 44587946, "callbackEndedAt": 44621855, "destroyedAt": 0},
+    {"asyncId": 12, "triggerId": 11, "type": "js-promise", "stackTraceId": 4, "createdAt": 5442416, "callbackStartedAt": 44627402, "callbackEndedAt": 44760458, "destroyedAt": 0},
+    {"asyncId": 13, "triggerId": 1, "type": "js-to-kj", "stackTraceId": 4, "createdAt": 5474931, "callbackStartedAt": 44780186, "callbackEndedAt": 44789444, "destroyedAt": 0},
+    {"asyncId": 14, "triggerId": 12, "type": "js-promise", "stackTraceId": 4, "createdAt": 5542032, "callbackStartedAt": 44766654, "callbackEndedAt": 44799870, "destroyedAt": 0},
+    {"asyncId": 15, "triggerId": 3, "type": "js-promise", "stackTraceId": 4, "createdAt": 5670451, "callbackStartedAt": 44563013, "callbackEndedAt": 44582533, "destroyedAt": 0},
+    {"asyncId": 16, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 22524164, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 17, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 22943024, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 18, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 23041242, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 19, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 26550304, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 20, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 27783688, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0}
   ],
   "stackTraces": [
     {"id": 0, "frames": ["fetch @ worker:10:14"]},
@@ -31,6 +32,9 @@
   ],
   "annotations": [
     {"asyncId": 4, "key": "delay", "value": "5"},
-    {"asyncId": 4, "key": "type", "value": "setTimeout"}
+    {"asyncId": 4, "key": "type", "value": "setTimeout"},
+    {"asyncId": 5, "key": "delay", "value": "10"},
+    {"asyncId": 5, "key": "type", "value": "scheduler.wait"}
   ]
 }
+
