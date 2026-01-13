@@ -172,32 +172,42 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   bool isClosing = false;
   size_t totalRead = 0;
 
-  // Drain the buffer. Note: the initial buffer drain ignores maxRead - it always
-  // drains all currently buffered data. maxRead only gates subsequent pump attempts.
-  while (!ready.buffer.empty()) {
-    auto& item = ready.buffer.front();
-    KJ_SWITCH_ONEOF(item) {
-      KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
-        isClosing = true;
-        break;
-      }
-      KJ_CASE_ONEOF(entry, QueueEntry) {
-        auto value = entry.entry->getValue(js);
-        KJ_IF_SOME(bytes, valueToBytes(js, value)) {
-          totalRead += bytes.size();
-          chunks.add(kj::mv(bytes));
-          ready.queueTotalSize -= entry.entry->getSize();
-          ready.buffer.pop_front();
-        } else {
-          // Error the stream and reject.
-          auto error = js.typeError(
-              "Draining read encountered a value that cannot be converted to bytes"_kj);
-          impl.error(js, jsg::Value(js.v8Isolate, error));
-          return js.rejectedPromise<DrainingReadResult>(error);
+  // Drains buffered data, converting values to bytes. Returns a rejected promise if a value
+  // cannot be converted; otherwise returns kj::none to indicate success.
+  static const auto drainBuffer =
+      [](jsg::Lock& js, ConsumerImpl& impl, ConsumerImpl::Ready& ready,
+          kj::Vector<kj::Array<kj::byte>>& chunks, size_t& totalRead,
+          bool& isClosing) -> kj::Maybe<jsg::Promise<DrainingReadResult>> {
+    while (!ready.buffer.empty() && !isClosing) {
+      auto& item = ready.buffer.front();
+      KJ_SWITCH_ONEOF(item) {
+        KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
+          isClosing = true;
+          break;
+        }
+        KJ_CASE_ONEOF(entry, QueueEntry) {
+          auto value = entry.entry->getValue(js);
+          KJ_IF_SOME(bytes, valueToBytes(js, value)) {
+            totalRead += bytes.size();
+            chunks.add(kj::mv(bytes));
+            ready.queueTotalSize -= entry.entry->getSize();
+            ready.buffer.pop_front();
+          } else {
+            auto error = js.typeError(
+                "Draining read encountered a value that cannot be converted to bytes"_kj);
+            impl.error(js, jsg::Value(js.v8Isolate, error));
+            return js.rejectedPromise<DrainingReadResult>(error);
+          }
         }
       }
     }
-    if (isClosing) break;
+    return kj::none;
+  };
+
+  // Drain the buffer. Note: the initial buffer drain ignores maxRead - it always
+  // drains all currently buffered data. maxRead only gates subsequent pump attempts.
+  KJ_IF_SOME(errorPromise, drainBuffer(js, impl, ready, chunks, totalRead, isClosing)) {
+    return kj::mv(errorPromise);
   }
 
   // Pump the controller for more synchronously available data.
@@ -208,28 +218,8 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
       // Drain all buffered data that was added by the pull.
-      while (!ready.buffer.empty() && !isClosing) {
-        auto& item = ready.buffer.front();
-        KJ_SWITCH_ONEOF(item) {
-          KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
-            isClosing = true;
-            break;
-          }
-          KJ_CASE_ONEOF(entry, QueueEntry) {
-            auto value = entry.entry->getValue(js);
-            KJ_IF_SOME(bytes, valueToBytes(js, value)) {
-              totalRead += bytes.size();
-              chunks.add(kj::mv(bytes));
-              ready.queueTotalSize -= entry.entry->getSize();
-              ready.buffer.pop_front();
-            } else {
-              auto error = js.typeError(
-                  "Draining read encountered a value that cannot be converted to bytes"_kj);
-              impl.error(js, jsg::Value(js.v8Isolate, error));
-              return js.rejectedPromise<DrainingReadResult>(error);
-            }
-          }
-        }
+      KJ_IF_SOME(errorPromise, drainBuffer(js, impl, ready, chunks, totalRead, isClosing)) {
+        return kj::mv(errorPromise);
       }
 
       // If pull is async or no new data was added, stop pumping.
@@ -604,27 +594,33 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   bool isClosing = false;
   size_t totalRead = 0;
 
-  // Drain the buffer. Note: the initial buffer drain ignores maxRead - it always
-  // drains all currently buffered data. maxRead only gates subsequent pump attempts.
-  while (!ready.buffer.empty()) {
-    auto& item = ready.buffer.front();
-    KJ_SWITCH_ONEOF(item) {
-      KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
-        isClosing = true;
-        break;
-      }
-      KJ_CASE_ONEOF(entry, QueueEntry) {
-        auto ptr = entry.entry->toArrayPtr();
-        auto offset = entry.offset;
-        auto size = ptr.size() - offset;
-        totalRead += size;
-        chunks.add(kj::heapArray(ptr.slice(offset, offset + size)));
-        ready.queueTotalSize -= size;
-        ready.buffer.pop_front();
+  // Drains buffered byte data into chunks.
+  static const auto drainBuffer = [](ConsumerImpl::Ready& ready,
+                                      kj::Vector<kj::Array<kj::byte>>& chunks, size_t& totalRead,
+                                      bool& isClosing) {
+    while (!ready.buffer.empty() && !isClosing) {
+      auto& item = ready.buffer.front();
+      KJ_SWITCH_ONEOF(item) {
+        KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
+          isClosing = true;
+          break;
+        }
+        KJ_CASE_ONEOF(entry, QueueEntry) {
+          auto ptr = entry.entry->toArrayPtr();
+          auto offset = entry.offset;
+          auto size = ptr.size() - offset;
+          totalRead += size;
+          chunks.add(kj::heapArray(ptr.slice(offset, offset + size)));
+          ready.queueTotalSize -= size;
+          ready.buffer.pop_front();
+        }
       }
     }
-    if (isClosing) break;
-  }
+  };
+
+  // Drain the buffer. Note: the initial buffer drain ignores maxRead - it always
+  // drains all currently buffered data. maxRead only gates subsequent pump attempts.
+  drainBuffer(ready, chunks, totalRead, isClosing);
 
   // Pump the controller for more synchronously available data.
   // maxRead is checked here: we only proceed with pumping if we haven't exceeded it.
@@ -634,24 +630,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
       // Drain all buffered data that was added by the pull.
-      while (!ready.buffer.empty() && !isClosing) {
-        auto& item = ready.buffer.front();
-        KJ_SWITCH_ONEOF(item) {
-          KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
-            isClosing = true;
-            break;
-          }
-          KJ_CASE_ONEOF(entry, QueueEntry) {
-            auto ptr = entry.entry->toArrayPtr();
-            auto offset = entry.offset;
-            auto size = ptr.size() - offset;
-            totalRead += size;
-            chunks.add(kj::heapArray(ptr.slice(offset, offset + size)));
-            ready.queueTotalSize -= size;
-            ready.buffer.pop_front();
-          }
-        }
-      }
+      drainBuffer(ready, chunks, totalRead, isClosing);
 
       // If pull is async or no new data was added, stop pumping.
       if (!pullCompletedSync || chunks.size() == prevChunkCount) {
