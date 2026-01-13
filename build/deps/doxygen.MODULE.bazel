@@ -1,0 +1,22 @@
+"""Doxygen dependency configuration.
+
+This module builds doxygen from source with libclang support, enabling
+clang-assisted parsing of C++ code for accurate documentation generation.
+"""
+
+doxygen_repository = use_repo_rule("//build/doxygen:doxygen.bzl", "doxygen_repository")
+
+DOXYGEN_VERSION = "1.13.2"
+
+doxygen_repository(
+    name = "doxygen",
+    sha256 = "4c9d9c8e95c2af4163ee92bcb0f3af03b2a4089402a353e4715771e8d3701c48",
+    strip_prefix = "doxygen-Release_{version}".format(
+        version = DOXYGEN_VERSION.replace(".", "_"),
+    ),
+    urls = [
+        "https://github.com/doxygen/doxygen/archive/refs/tags/Release_{version}.tar.gz".format(
+            version = DOXYGEN_VERSION.replace(".", "_"),
+        ),
+    ],
+)
