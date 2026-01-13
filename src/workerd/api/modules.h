@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/base64.h>
+#include <workerd/api/bun/bun.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
@@ -78,6 +79,7 @@ class EnvModule final: public jsg::Object {
 template <class Registry>
 void registerModules(Registry& registry, auto featureFlags) {
   node::registerNodeJsCompatModules(registry, featureFlags);
+  bun::registerBunCompatModules(registry, featureFlags);
   registerUnsafeModules(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
@@ -100,6 +102,8 @@ template <class TypeWrapper>
 void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto featureFlags) {
   builder.add(node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags));
   builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags));
+  builder.add(bun::getInternalBunCompatModuleBundle(featureFlags));
+  builder.add(bun::getExternalBunCompatModuleBundle(featureFlags));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));

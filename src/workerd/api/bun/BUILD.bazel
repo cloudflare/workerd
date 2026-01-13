@@ -1,0 +1,13 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+
+wd_cc_library(
+    name = "bun",
+    hdrs = [
+        "bun.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/bun",
+        "//src/workerd/jsg",
+    ],
+)
