@@ -1442,6 +1442,7 @@
             <strong>Layout Toggle (←/→ arrows):</strong><br>
             • Bubble = variable size by sync time<br>
             &nbsp;&nbsp;(shows latency labels on edges)<br>
+            &nbsp;&nbsp;No label = sync/overlapping creation<br>
             • Hierarchical = tree structure<br>
             • Force = physics simulation
           </div>
@@ -1449,7 +1450,8 @@
             <strong>Controls:</strong><br>
             • Drag nodes to rearrange<br>
             • Shift+drag to pan, scroll to zoom<br>
-            • Click node to select
+            • Click node to select<br>
+            • Shift+click group to expand/collapse
           </div>
         </div>
         <div class="view-help" data-view="parallelism">
@@ -1691,6 +1693,7 @@ const c = await fetch('/api/c');</pre>
           <h3>2. Find Async Bottlenecks (Long Waits)</h3>
           <p><strong>Views:</strong> Graph (2) with Bubble layout, Latency (6)</p>
           <p><strong>Pattern:</strong> <span style="color: #ffd700;">Gold edge labels</span> (>1ms) or right-tail outliers in histogram</p>
+          <p style="font-size: 0.85em; color: #aaa;">Edges without labels = child created during parent callback (sync/overlapping, no wait time)</p>
           <p><strong>Questions to ask:</strong></p>
           <ul>
             <li>Can this fetch response be cached?</li>
@@ -1796,6 +1799,7 @@ const userB = await fetch('/user/123');</pre>
             <tr><th>Visual Pattern</th><th>Where</th><th>Meaning</th><th>Fix</th></tr>
             <tr><td>Tall narrow tree</td><td>Bubble</td><td>Sequential ops</td><td>Promise.all</td></tr>
             <tr><td style="color: #ffd700;">Gold edges</td><td>Bubble</td><td>High latency</td><td>Cache/batch</td></tr>
+            <tr><td style="color: #888;">No edge label</td><td>Bubble</td><td>Sync creation</td><td>Normal, no wait</td></tr>
             <tr><td style="color: #ff6432;">Orange bars</td><td>Parallelism</td><td>Serialization</td><td>Parallelize</td></tr>
             <tr><td style="color: #ff6432;">Orange gaps</td><td>Gaps</td><td>Idle time</td><td>Start work earlier</td></tr>
             <tr><td>Right tail</td><td>Latency</td><td>Outliers</td><td>Investigate slow ops</td></tr>
@@ -1857,8 +1861,8 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
           <p><strong>Compound Nodes:</strong></p>
           <ul>
             <li><strong>Dashed blue ring</strong> + <strong>red badge</strong> (e.g., "×8") = collapsed group</li>
-            <li><strong>Click</strong> to expand and see individual members</li>
-            <li><strong>Click minus badge</strong> to collapse again</li>
+            <li><strong>Shift+Click</strong> to expand and see individual members</li>
+            <li><strong>Shift+Click minus badge</strong> to collapse again</li>
             <li><strong>Hover</strong> to see group type (Sibling/Cousin), count, and member types</li>
           </ul>
           <p><strong>Options</strong> (expand with ▶):</p>
@@ -3107,6 +3111,7 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
                   <div style="margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid #444;">
                     <div style="color: #4ecdc4; font-weight: bold;">${groupType} (${memberCount} resources)</div>
                     <div style="color: #aaa; font-size: 0.7rem;">Types: ${typeList}</div>
+                    <div style="color: #888; font-size: 0.65rem; margin-top: 0.2rem;">Shift+Click to expand</div>
                   </div>
                 `;
               }
@@ -3171,8 +3176,8 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
           selectResource(clicked.resource);
 
           // Handle expand/collapse for compound nodes (sibling group representatives)
-          // Check if this is the representative of any sibling group (expanded or not)
-          if (groupSiblings) {
+          // Shift+Click to expand/collapse - regular click still selects/drags
+          if (e.shiftKey && groupSiblings) {
             const group = getSiblingGroup(clicked.resource.asyncId);
             if (group && group.representative.asyncId === clicked.resource.asyncId) {
               const groupKey = group.key;
@@ -6177,13 +6182,18 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
             ctx.stroke();
 
             // Draw latency label on edge (in bubble mode or when paths aren't highlighted)
+            // Only show positive latencies - these represent actual wait time between parent
+            // callback end and child creation. Negative values mean the child was created
+            // during the parent's callback execution (overlapping/sync), which is common
+            // and not meaningful to display as "latency".
             if (dagLayoutMode === 'bubble' && !dimmed) {
               const parentEnd = parent.resource.callbackEndedAt > 0 ? parent.resource.callbackEndedAt : parent.resource.createdAt;
               const childStart = r.createdAt;
               const latencyNs = childStart - parentEnd;
               const latencyMs = latencyNs / 1e6;
 
-              if (Math.abs(latencyMs) >= 0.01) {
+              // Only show positive latencies >= 10µs (skip sync/overlapping creation)
+              if (latencyMs >= 0.01) {
                 const midX = (parent.x + node.x) / 2;
                 const midY = (parent.y + node.y) / 2;
 
@@ -6383,7 +6393,7 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       ctx.fillStyle = '#444';
       ctx.font = '10px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('Drag nodes | Shift+drag: pan | Scroll: zoom', 10, canvas.height - 10);
+      ctx.fillText('Drag nodes | Shift+drag: pan | Shift+click: expand group | Scroll: zoom', 10, canvas.height - 10);
     }
 
     // ==================== PARALLELISM VIEW ====================

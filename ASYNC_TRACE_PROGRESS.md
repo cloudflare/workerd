@@ -809,3 +809,21 @@ If implementing incrementally:
 1. **Phase Space Plot** - Simple, immediately actionable, answers "which operations are slow and why"
 2. **Sankey Diagram** - Flow understanding, spotting leaks and pileups
 3. **Arc Diagram** - Causal chain visualization, cascade risk assessment
+
+## Session (January 2025) - Graph View Fixes
+
+**Fixed:**
+- **Negative latency display in Graph view**: Edge latency labels were showing negative values like "-693ms" for real traces
+
+**Root cause:**
+The latency calculation on edges was: `childStart - parentEnd` where:
+- `parentEnd` = parent's `callbackEndedAt` (or `createdAt` if no callback)
+- `childStart` = child's `createdAt`
+
+In many cases, children are created *during* the parent's callback execution (synchronous creation), not after. This is normal async behavior but results in negative latency values that aren't meaningful.
+
+**Fix:**
+Changed the latency label display to only show positive latencies (actual wait times). Negative/zero latencies (indicating synchronous/overlapping creation) are now hidden, as they don't represent real "latency" between operations.
+
+*Files modified:*
+- `tools/async-trace-viewer/index.html` - edge latency label conditional
