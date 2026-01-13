@@ -911,3 +911,44 @@ Recommendations for additional latency analysis features, ordered by potential v
 9. **Sequential Wait Chains** - Identify the longest chain of operations where each waits on the previous to complete. Different from critical path - focuses specifically on sequential dependencies that could potentially be parallelized.
 
 10. **Trace Comparison** - Compare latency distributions between two traces (before/after optimization). Show overlaid histograms or CDFs with statistical significance indicators.
+
+## Session (January 2025) - By User Code Location & Violin Plots
+
+**Renamed and improved "By Top Stack Frame" to "By User Code Location":**
+
+The original implementation grouped by the literal top stack frame, which was often internal runtime code (e.g., `connect@cloudflare:sockets`). This made the view confusing and not actionable.
+
+*Changes:*
+- Now walks down the stack to find the **first non-internal frame** (user code)
+- Uses `isInternalFrame()` to skip frames from `cloudflare:`, `node:`, `workerd:`, etc.
+- Preserves line numbers for granular grouping (e.g., `fetch@worker:26` vs `fetch@worker:39`)
+- Filters out resources with no user code in stack trace (internal-only or empty stacks)
+- Renamed throughout UI: dropdown, chart title, sidebar, guide
+
+*Result:* The view now answers "which lines of MY code are waiting the longest?" instead of exposing internal implementation details.
+
+**Implemented violin plots:**
+
+Box plots hide distribution shape - a group with latencies ranging from 1ms to 300ms appears as a tall box, but you can't tell if most operations are fast with a few slow outliers, or if the distribution is bimodal, etc.
+
+*Implementation:*
+- Gaussian kernel density estimation (KDE) with Silverman's rule for bandwidth
+- Per-violin normalization so each violin fills its available width
+- Strictly clamped to data range (min to max) - no rendering outside bounds
+- Wide violins (up to 90% of column width) for clear shape visibility
+- Inner reference elements: dark Q1-Q3 bar, white median line, gold mean diamond
+- Individual data points shown as dots for groups ≤30 items
+
+*Reading violin plots:*
+- **Wide bulge** = high density of operations at that latency
+- **Thin neck** = few operations in that range
+- **Multiple bulges** = bimodal distribution (fast bookkeeping vs slow I/O)
+- **Bottom-heavy** = most ops fast, some slow outliers
+- **Mean >> median** = right-skewed, slow outliers pulling up average
+
+*Example insight (TCP trace):*
+The `fetch@worker:39` violin shows a bimodal distribution - large bulge at ~1ms (promise chain bookkeeping) and smaller density around 200-300ms (actual network I/O). This reveals that the code creates two distinct populations of async operations, which the box plot completely hid.
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - user code grouping, violin plots, guide updates
+- `ASYNC_TRACE_PROGRESS.md` - session documentation

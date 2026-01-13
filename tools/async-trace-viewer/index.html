@@ -1204,7 +1204,7 @@
           <option value="cdf">CDF (Cumulative)</option>
           <option value="birth-order">By Birth Order</option>
           <option value="by-type">By Resource Type</option>
-          <option value="by-stack">By Top Stack Frame</option>
+          <option value="by-stack">By User Code Location</option>
         </select>
         <label style="color: #aaa; font-size: 11px; margin-left: 10px;">
           <input type="checkbox" id="latency-outliers-checkbox" checked style="margin-right: 4px;">
@@ -1492,13 +1492,19 @@
             <strong>Latency View Modes:</strong><br>
             • Histogram / CDF = distribution<br>
             • Birth Order = sibling queuing<br>
-            • By Type = box plots per type<br>
-            • By Stack = box plots per code location
+            • By Type = violin plots per type<br>
+            • By User Code = violin plots per code location
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
             <strong>Histogram/CDF:</strong><br>
             • <span style="color: #50c878;">p50</span> / <span style="color: #ffd700;">p90</span> / <span style="color: #ff6347;">p99</span> lines<br>
             • <span style="color: #ff6347;">Red</span> = outliers, <span style="color: #ff6600;">Orange</span> = critical
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Violin Plots:</strong><br>
+            • Width = density of operations at that latency<br>
+            • <span style="color: #fff;">White line</span> = median, <span style="color: #ffd700;">◆</span> = mean<br>
+            • Multiple bulges = bimodal (fast vs slow paths)
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
             <strong>Birth Order:</strong><br>
@@ -1721,10 +1727,22 @@ const c = await fetch('/api/c');</pre>
             <li><strong>Histogram</strong> = distribution of wait times, stacked by type</li>
             <li><strong>CDF</strong> = cumulative %, good for SLO analysis ("X% complete under Y ms")</li>
             <li><strong>Birth Order</strong> = latency vs sibling position. Rising trend = queuing/contention</li>
-            <li><strong>By Type</strong> = box plots by resource type, sorted by total latency contribution</li>
-            <li><strong>By Stack</strong> = box plots by top stack frame - shows which code locations wait longest</li>
+            <li><strong>By Type</strong> = violin plots by resource type, sorted by total latency contribution</li>
+            <li><strong>By User Code</strong> = violin plots by user code location (skips internal frames) - shows which lines of YOUR code wait longest</li>
           </ul>
-          <p class="guide-tip">💡 By Type and By Stack are sorted by total latency (% shown), not count. Use Hide Internal (H) to filter noise. Hover over box plots for detailed stats; By Stack shows full stack trace (up to 5 frames) from the highest-latency call in each group, helping trace from internal code back to your code.</p>
+          <p class="guide-tip">💡 By Type and By User Code are sorted by total latency (% shown), not count. Use Hide Internal (H) to filter noise. Hover for detailed stats and full stack traces. By User Code groups by the first non-internal frame, so you see your code (e.g., "fetch@worker:26") rather than internal implementations.</p>
+
+          <h4>Reading Violin Plots</h4>
+          <p>Violin plots show the <strong>distribution shape</strong> of latencies, revealing patterns that box plots hide:</p>
+          <ul>
+            <li><strong>Wide bulge</strong> = many operations clustered at that latency</li>
+            <li><strong>Thin neck</strong> = few operations in that range</li>
+            <li><strong>Multiple bulges</strong> = bimodal distribution (e.g., fast bookkeeping vs slow I/O)</li>
+            <li><strong>Bottom-heavy</strong> = most ops fast, some slow outliers</li>
+            <li><strong>Uniform width</strong> = even spread across the latency range</li>
+          </ul>
+          <p>Inside each violin: <strong>white line</strong> = median, <strong>gold ◆</strong> = mean, <strong>dark bar</strong> = Q1-Q3 range, <strong>dots</strong> = individual data points (for small groups).</p>
+          <p class="guide-tip">💡 When mean >> median (diamond far above line), you have right-skewed data where slow outliers pull up the average. Bimodal shapes suggest your code has distinct "fast path" and "slow path" operations - consider whether the slow path can be optimized or if it's expected I/O latency.</p>
         </div>
 
         <div class="guide-section">
@@ -8809,20 +8827,31 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       const grandTotal = sortedTypes.reduce((sum, [_, values]) =>
         sum + values.reduce((s, v) => s + v, 0), 0);
 
-      // Calculate box plot stats for each type
+      // Calculate stats and KDE for each type (violin plots)
       const boxPlots = sortedTypes.map(([type, values]) => {
         values.sort((a, b) => a - b);
         const n = values.length;
         const total = values.reduce((a, b) => a + b, 0);
+        const mean = total / n;
+
+        // Calculate KDE bandwidth using Silverman's rule
+        const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / n;
+        const stdDev = Math.sqrt(variance);
+        const iqr = values[Math.floor(n * 0.75)] - values[Math.floor(n * 0.25)];
+        const bandwidth = 0.9 * Math.min(stdDev, iqr / 1.34) * Math.pow(n, -0.2);
+        const h = Math.max(bandwidth, (values[n-1] - values[0]) / 50, 0.1);
+
         return {
           type,
+          values,  // Keep raw values for KDE
           count: n,
           min: values[0],
           q1: values[Math.floor(n * 0.25)],
           median: values[Math.floor(n * 0.5)],
           q3: values[Math.floor(n * 0.75)],
           max: values[n - 1],
-          mean: total / n,
+          mean,
+          bandwidth: h,
           total,
           pct: (total / grandTotal * 100).toFixed(1)
         };
@@ -8836,7 +8865,7 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Latency by Resource Type (Box Plot)', (width - padding.right + padding.left) / 2, 25);
+      ctx.fillText('Latency by Resource Type (Violin Plot)', (width - padding.right + padding.left) / 2, 25);
 
       // Draw axes
       ctx.strokeStyle = '#444';
@@ -8893,73 +8922,143 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         }
       }
 
-      // Draw box plots
-      const boxWidth = Math.min(50, chartWidth / boxPlots.length * 0.7);
+      // Draw violin plots
       const boxSpacing = chartWidth / boxPlots.length;
+      const violinMaxWidth = Math.min(80, boxSpacing * 0.9);
+
+      // Gaussian kernel for KDE
+      function gaussianKernel(u) {
+        return Math.exp(-0.5 * u * u) / Math.sqrt(2 * Math.PI);
+      }
+
+      // Calculate KDE at a given point
+      function kde(values, bandwidth, x) {
+        const n = values.length;
+        let sum = 0;
+        for (const v of values) {
+          sum += gaussianKernel((x - v) / bandwidth);
+        }
+        return sum / (n * bandwidth);
+      }
+
+      // Pre-compute violin densities - per-violin normalization
+      const violinData = boxPlots.map(bp => {
+        const numSteps = 60;
+        const range = bp.max - bp.min;
+        const step = range / numSteps;
+        const densities = [];
+        let maxDensity = 0;
+
+        for (let i = 0; i <= numSteps; i++) {
+          const y = bp.min + i * step;
+          const density = kde(bp.values, bp.bandwidth, y);
+          densities.push({ y, density });
+          if (density > maxDensity) maxDensity = density;
+        }
+
+        return { densities, maxDensity };
+      });
 
       boxPlots.forEach((bp, i) => {
         const centerX = padding.left + (i + 0.5) * boxSpacing;
         const color = TYPE_COLORS[bp.type] || '#808080';
+        const { densities, maxDensity } = violinData[i];
 
-        // Whiskers (min to q1, q3 to max)
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-
-        // Lower whisker
-        ctx.beginPath();
-        ctx.moveTo(centerX, latencyToY(bp.min));
-        ctx.lineTo(centerX, latencyToY(bp.q1));
-        ctx.stroke();
-        // Whisker cap
-        ctx.beginPath();
-        ctx.moveTo(centerX - boxWidth / 4, latencyToY(bp.min));
-        ctx.lineTo(centerX + boxWidth / 4, latencyToY(bp.min));
-        ctx.stroke();
-
-        // Upper whisker
-        ctx.beginPath();
-        ctx.moveTo(centerX, latencyToY(bp.q3));
-        ctx.lineTo(centerX, latencyToY(bp.max));
-        ctx.stroke();
-        // Whisker cap
-        ctx.beginPath();
-        ctx.moveTo(centerX - boxWidth / 4, latencyToY(bp.max));
-        ctx.lineTo(centerX + boxWidth / 4, latencyToY(bp.max));
-        ctx.stroke();
-
-        // Box (q1 to q3)
-        const boxTop = latencyToY(bp.q3);
-        const boxBottom = latencyToY(bp.q1);
-        const boxHeight = boxBottom - boxTop;
-
+        // Draw violin shape
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.3;
-        ctx.fillRect(centerX - boxWidth / 2, boxTop, boxWidth, boxHeight);
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+
+        // Right side of violin
+        let firstPoint = true;
+        for (const { y, density } of densities) {
+          const yPos = latencyToY(y);
+          const width = (density / maxDensity) * (violinMaxWidth / 2);
+          if (firstPoint) {
+            ctx.moveTo(centerX + width, yPos);
+            firstPoint = false;
+          } else {
+            ctx.lineTo(centerX + width, yPos);
+          }
+        }
+
+        // Left side of violin
+        for (let j = densities.length - 1; j >= 0; j--) {
+          const { y, density } = densities[j];
+          const yPos = latencyToY(y);
+          const width = (density / maxDensity) * (violinMaxWidth / 2);
+          ctx.lineTo(centerX - width, yPos);
+        }
+
+        ctx.closePath();
+        ctx.fill();
         ctx.globalAlpha = 1;
 
+        // Violin outline
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
-        ctx.strokeRect(centerX - boxWidth / 2, boxTop, boxWidth, boxHeight);
-
-        // Median line
-        const medianY = latencyToY(bp.median);
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(centerX - boxWidth / 2, medianY);
-        ctx.lineTo(centerX + boxWidth / 2, medianY);
+        firstPoint = true;
+        for (const { y, density } of densities) {
+          const yPos = latencyToY(y);
+          const width = (density / maxDensity) * (violinMaxWidth / 2);
+          if (firstPoint) {
+            ctx.moveTo(centerX + width, yPos);
+            firstPoint = false;
+          } else {
+            ctx.lineTo(centerX + width, yPos);
+          }
+        }
+        for (let j = densities.length - 1; j >= 0; j--) {
+          const { y, density } = densities[j];
+          const yPos = latencyToY(y);
+          const width = (density / maxDensity) * (violinMaxWidth / 2);
+          ctx.lineTo(centerX - width, yPos);
+        }
+        ctx.closePath();
         ctx.stroke();
 
-        // Mean marker (diamond)
+        // Inner reference elements
+        // Q1-Q3 box (thin dark bar)
+        const q1Y = latencyToY(bp.q1);
+        const q3Y = latencyToY(bp.q3);
+        const innerBoxWidth = 8;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(centerX - innerBoxWidth / 2, q3Y, innerBoxWidth, q1Y - q3Y);
+
+        // Median line (white)
+        const medianY = latencyToY(bp.median);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(centerX - innerBoxWidth * 1.5, medianY);
+        ctx.lineTo(centerX + innerBoxWidth * 1.5, medianY);
+        ctx.stroke();
+
+        // Mean marker (gold diamond)
         const meanY = latencyToY(bp.mean);
         ctx.fillStyle = '#ffd700';
         ctx.beginPath();
-        ctx.moveTo(centerX, meanY - 4);
-        ctx.lineTo(centerX + 4, meanY);
-        ctx.lineTo(centerX, meanY + 4);
-        ctx.lineTo(centerX - 4, meanY);
+        ctx.moveTo(centerX, meanY - 5);
+        ctx.lineTo(centerX + 5, meanY);
+        ctx.lineTo(centerX, meanY + 5);
+        ctx.lineTo(centerX - 5, meanY);
         ctx.closePath();
         ctx.fill();
+
+        // Individual data points for small groups
+        if (bp.count <= 30) {
+          ctx.fillStyle = '#fff';
+          ctx.globalAlpha = 0.7;
+          bp.values.forEach(v => {
+            const yPos = latencyToY(v);
+            const jitter = (Math.random() - 0.5) * violinMaxWidth * 0.3;
+            ctx.beginPath();
+            ctx.arc(centerX + jitter, yPos, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          });
+          ctx.globalAlpha = 1;
+        }
 
         // X-axis label (type name)
         ctx.fillStyle = color;
@@ -8968,7 +9067,7 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         const typeLabel = bp.type.length > 12 ? bp.type.substring(0, 10) + '..' : bp.type;
         ctx.fillText(typeLabel, centerX, height - padding.bottom + 14);
 
-        // Percentage of total latency below type (latency-weighted)
+        // Percentage of total latency below type
         ctx.fillStyle = '#ffd700';
         ctx.font = '10px sans-serif';
         ctx.fillText(`${bp.pct}%`, centerX, height - padding.bottom + 26);
@@ -8978,6 +9077,9 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         ctx.font = '9px sans-serif';
         ctx.fillText(`n=${bp.count}`, centerX, height - padding.bottom + 38);
       });
+
+      // Store boxWidth for hover detection
+      const boxWidth = violinMaxWidth;
 
       // X-axis title
       ctx.fillStyle = '#888';
@@ -9031,19 +9133,20 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       ctx.font = 'bold 10px sans-serif';
       ctx.fillText('Legend', sbX + 10, sbY); sbY += 14;
       ctx.font = '9px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText('Shape: Density (KDE)', sbX + 10, sbY); sbY += 12;
       ctx.fillStyle = '#fff';
       ctx.fillText('─ Median', sbX + 10, sbY); sbY += 12;
       ctx.fillStyle = '#ffd700';
       ctx.fillText('◆ Mean', sbX + 10, sbY); sbY += 12;
       ctx.fillStyle = '#aaa';
-      ctx.fillText('Box: Q1-Q3', sbX + 10, sbY); sbY += 12;
-      ctx.fillText('Whisker: Min-Max', sbX + 10, sbY);
+      ctx.fillText('Bar: Q1-Q3', sbX + 10, sbY);
 
       // Store box plot data for hover detection
       latencyBoxPlotData = { boxPlots, boxSpacing, boxWidth, padding, chartHeight, height, mode: 'by-type' };
     }
 
-    // Render latency grouped by top stack frame (box plots)
+    // Render latency grouped by first user code frame (box plots)
     function renderLatencyByStack(ctx, latencies, width, height, padding, chartWidth, chartHeight) {
       // Filter latencies based on hideInternal setting
       const filteredLatencies = hideInternal
@@ -9058,32 +9161,60 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         return;
       }
 
-      // Group latencies by top stack frame
+      // Group latencies by first user code frame (skip internal frames)
       const byStack = new Map();  // simplified frame -> { latencies: number[], items: latency objects[] }
 
       filteredLatencies.forEach(l => {
         const stackTrace = traceData.stackTraceMap.get(l.resource.stackTraceId);
-        let topFrame = '(no stack)';
+        let groupingKey = '(no user code)';
         if (stackTrace && stackTrace.frames && stackTrace.frames.length > 0) {
-          // Get the top frame and simplify for grouping
-          const frame = stackTrace.frames[0];
-          // Extract function name and file, removing line numbers for grouping
-          const match = frame.match(/^([^@]+)@([^:]+)/);
-          if (match) {
-            topFrame = `${match[1]}@${match[2].split('/').pop()}`;
-          } else {
-            topFrame = frame.split(':')[0]; // Remove line numbers
+          // Find the first non-internal frame (user code)
+          let userFrame = null;
+          for (const frame of stackTrace.frames) {
+            if (!isInternalFrame(frame)) {
+              userFrame = frame;
+              break;
+            }
           }
+
+          if (userFrame) {
+            // Keep line number for granular grouping (e.g., "fetch@worker:26" vs "fetch@worker:39")
+            // Format: "functionName @ module:line:col" -> "functionName@module:line"
+            const match = userFrame.match(/^([^@]+)\s*@\s*([^:]+):(\d+)/);
+            if (match) {
+              const funcName = match[1].trim();
+              const module = match[2].split('/').pop(); // Get filename from path
+              const line = match[3];
+              groupingKey = `${funcName}@${module}:${line}`;
+            } else {
+              // Fallback: use the frame as-is but clean it up
+              groupingKey = userFrame.replace(/:\d+$/, ''); // Remove column if present
+            }
+          } else {
+            // All frames are internal - skip this resource (not useful for user code analysis)
+            return;
+          }
+        } else {
+          // No stack trace at all - skip this resource
+          return;
         }
-        if (!byStack.has(topFrame)) {
-          byStack.set(topFrame, { latencies: [], items: [] });
+        if (!byStack.has(groupingKey)) {
+          byStack.set(groupingKey, { latencies: [], items: [] });
         }
-        const group = byStack.get(topFrame);
+        const group = byStack.get(groupingKey);
         group.latencies.push(l.latencyMs);
         group.items.push(l);  // Keep full latency object for stack trace lookup
       });
 
-      if (byStack.size === 0) return;
+      if (byStack.size === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No user code locations found in stack traces', width / 2, height / 2);
+        ctx.font = '11px sans-serif';
+        ctx.fillText('(all operations have internal-only or missing stack traces)', width / 2, height / 2 + 20);
+        return;
+      }
 
       // Sort by TOTAL latency (latency-weighted)
       const sortedFrames = Array.from(byStack.entries())
@@ -9100,7 +9231,7 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       const grandTotal = sortedFrames.reduce((sum, [_, group]) =>
         sum + group.latencies.reduce((s, v) => s + v, 0), 0);
 
-      // Calculate box plot stats for each frame
+      // Calculate stats and KDE for each frame (violin plots)
       const boxPlots = topFrames.map(([frame, group]) => {
         const values = group.latencies.slice().sort((a, b) => a - b);
         const n = values.length;
@@ -9121,17 +9252,29 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
           stackTrace = st.frames.slice(0, 5);
         }
 
+        // Calculate KDE bandwidth using Silverman's rule
+        const mean = total / n;
+        const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / n;
+        const stdDev = Math.sqrt(variance);
+        const iqr = values[Math.floor(n * 0.75)] - values[Math.floor(n * 0.25)];
+        // Silverman's rule of thumb
+        const bandwidth = 0.9 * Math.min(stdDev, iqr / 1.34) * Math.pow(n, -0.2);
+        // Ensure reasonable bandwidth
+        const h = Math.max(bandwidth, (values[n-1] - values[0]) / 50, 0.1);
+
         return {
           frame,
-          stackTrace,  // Full stack trace (up to 5 frames) from highest-latency resource
+          stackTrace,
           maxLatencyMs: maxLatencyItem.latencyMs,
+          values,  // Keep raw values for KDE
           count: n,
           min: values[0],
           q1: values[Math.floor(n * 0.25)],
           median: values[Math.floor(n * 0.5)],
           q3: values[Math.floor(n * 0.75)],
           max: values[n - 1],
-          mean: total / n,
+          mean,
+          bandwidth: h,
           total,
           pct: (total / grandTotal * 100).toFixed(1)
         };
@@ -9147,7 +9290,7 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Latency by Top Stack Frame (Box Plot)', (width - padding.right + padding.left) / 2, 25);
+      ctx.fillText('Latency by User Code Location (Violin Plot)', (width - padding.right + padding.left) / 2, 25);
 
       // Draw axes
       ctx.strokeStyle = '#444';
@@ -9204,82 +9347,161 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         }
       }
 
-      // Draw box plots
-      const boxWidth = Math.min(40, chartWidth / boxPlots.length * 0.7);
+      // Draw violin plots
       const boxSpacing = chartWidth / boxPlots.length;
+      // Make violins wide - up to 90% of available space
+      const violinMaxWidth = Math.min(80, boxSpacing * 0.9);
 
       // Color palette for stack frames (cycle through)
       const frameColors = ['#e94560', '#7ec8e3', '#50c878', '#ffd700', '#ff6347',
                            '#9370db', '#20b2aa', '#ff69b4', '#87ceeb', '#dda0dd',
                            '#98fb98', '#f0e68c', '#add8e6', '#ffb6c1', '#b0c4de'];
 
+      // Gaussian kernel for KDE
+      function gaussianKernel(u) {
+        return Math.exp(-0.5 * u * u) / Math.sqrt(2 * Math.PI);
+      }
+
+      // Calculate KDE at a given point
+      function kde(values, bandwidth, x) {
+        const n = values.length;
+        let sum = 0;
+        for (const v of values) {
+          sum += gaussianKernel((x - v) / bandwidth);
+        }
+        return sum / (n * bandwidth);
+      }
+
+      // Pre-compute violin densities - stay within data range, normalize per-violin
+      const violinData = boxPlots.map(bp => {
+        const numSteps = 60;
+        // Stay strictly within the data range (min to max)
+        const range = bp.max - bp.min;
+        const step = range / numSteps;
+        const densities = [];
+        let maxDensity = 0;
+
+        for (let i = 0; i <= numSteps; i++) {
+          const y = bp.min + i * step;
+          const density = kde(bp.values, bp.bandwidth, y);
+          densities.push({ y, density });
+          if (density > maxDensity) maxDensity = density;
+        }
+
+        // Normalize this violin's densities to fill its available width
+        return {
+          densities,
+          maxDensity
+        };
+      });
+
       boxPlots.forEach((bp, i) => {
         const centerX = padding.left + (i + 0.5) * boxSpacing;
         const color = frameColors[i % frameColors.length];
+        const { densities, maxDensity } = violinData[i];
 
-        // Whiskers (min to q1, q3 to max)
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-
-        // Lower whisker
-        ctx.beginPath();
-        ctx.moveTo(centerX, latencyToY(bp.min));
-        ctx.lineTo(centerX, latencyToY(bp.q1));
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(centerX - boxWidth / 4, latencyToY(bp.min));
-        ctx.lineTo(centerX + boxWidth / 4, latencyToY(bp.min));
-        ctx.stroke();
-
-        // Upper whisker
-        ctx.beginPath();
-        ctx.moveTo(centerX, latencyToY(bp.q3));
-        ctx.lineTo(centerX, latencyToY(bp.max));
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(centerX - boxWidth / 4, latencyToY(bp.max));
-        ctx.lineTo(centerX + boxWidth / 4, latencyToY(bp.max));
-        ctx.stroke();
-
-        // Box (q1 to q3)
-        const boxTop = latencyToY(bp.q3);
-        const boxBottom = latencyToY(bp.q1);
-        const boxHeight = boxBottom - boxTop;
-
+        // Draw violin shape - each violin normalized to fill its space
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.3;
-        ctx.fillRect(centerX - boxWidth / 2, boxTop, boxWidth, boxHeight);
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+
+        // Right side of violin (top to bottom in data, which is bottom to top on screen)
+        let firstPoint = true;
+        for (const { y, density } of densities) {
+          const yPos = latencyToY(y);
+          // Normalize to this violin's max density so it fills available width
+          const width = (density / maxDensity) * (violinMaxWidth / 2);
+          if (firstPoint) {
+            ctx.moveTo(centerX + width, yPos);
+            firstPoint = false;
+          } else {
+            ctx.lineTo(centerX + width, yPos);
+          }
+        }
+
+        // Left side of violin (bottom to top)
+        for (let j = densities.length - 1; j >= 0; j--) {
+          const { y, density } = densities[j];
+          const yPos = latencyToY(y);
+          const width = (density / maxDensity) * (violinMaxWidth / 2);
+          ctx.lineTo(centerX - width, yPos);
+        }
+
+        ctx.closePath();
+        ctx.fill();
         ctx.globalAlpha = 1;
 
+        // Violin outline
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
-        ctx.strokeRect(centerX - boxWidth / 2, boxTop, boxWidth, boxHeight);
-
-        // Median line
-        const medianY = latencyToY(bp.median);
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(centerX - boxWidth / 2, medianY);
-        ctx.lineTo(centerX + boxWidth / 2, medianY);
+        firstPoint = true;
+        for (const { y, density } of densities) {
+          const yPos = latencyToY(y);
+          const width = (density / maxDensity) * (violinMaxWidth / 2);
+          if (firstPoint) {
+            ctx.moveTo(centerX + width, yPos);
+            firstPoint = false;
+          } else {
+            ctx.lineTo(centerX + width, yPos);
+          }
+        }
+        for (let j = densities.length - 1; j >= 0; j--) {
+          const { y, density } = densities[j];
+          const yPos = latencyToY(y);
+          const width = (density / maxDensity) * (violinMaxWidth / 2);
+          ctx.lineTo(centerX - width, yPos);
+        }
+        ctx.closePath();
         ctx.stroke();
 
-        // Mean marker (diamond)
+        // Inner box plot elements for reference
+        // Q1-Q3 box (thin dark bar)
+        const q1Y = latencyToY(bp.q1);
+        const q3Y = latencyToY(bp.q3);
+        const innerBoxWidth = 8;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(centerX - innerBoxWidth / 2, q3Y, innerBoxWidth, q1Y - q3Y);
+
+        // Median line (white, wider)
+        const medianY = latencyToY(bp.median);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(centerX - innerBoxWidth * 1.5, medianY);
+        ctx.lineTo(centerX + innerBoxWidth * 1.5, medianY);
+        ctx.stroke();
+
+        // Mean marker (gold diamond, larger)
         const meanY = latencyToY(bp.mean);
         ctx.fillStyle = '#ffd700';
         ctx.beginPath();
-        ctx.moveTo(centerX, meanY - 4);
-        ctx.lineTo(centerX + 4, meanY);
-        ctx.lineTo(centerX, meanY + 4);
-        ctx.lineTo(centerX - 4, meanY);
+        ctx.moveTo(centerX, meanY - 5);
+        ctx.lineTo(centerX + 5, meanY);
+        ctx.lineTo(centerX, meanY + 5);
+        ctx.lineTo(centerX - 5, meanY);
         ctx.closePath();
         ctx.fill();
+
+        // Individual data points (small dots) for small n
+        if (bp.count <= 30) {
+          ctx.fillStyle = '#fff';
+          ctx.globalAlpha = 0.7;
+          bp.values.forEach(v => {
+            const yPos = latencyToY(v);
+            // Jitter based on density at this point for better spread
+            const jitter = (Math.random() - 0.5) * violinMaxWidth * 0.3;
+            ctx.beginPath();
+            ctx.arc(centerX + jitter, yPos, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          });
+          ctx.globalAlpha = 1;
+        }
 
         // X-axis label (frame name, truncated)
         ctx.fillStyle = color;
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'center';
-        // Extract just the function name for display
         const funcName = bp.frame.split('@')[0];
         const frameLabel = funcName.length > 14 ? funcName.substring(0, 12) + '..' : funcName;
         ctx.fillText(frameLabel, centerX, height - padding.bottom + 12);
@@ -9290,11 +9512,14 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         ctx.fillText(`${bp.pct}%`, centerX, height - padding.bottom + 23);
       });
 
+      // Store boxWidth for hover detection (use violinMaxWidth)
+      const boxWidth = violinMaxWidth;
+
       // X-axis title
       ctx.fillStyle = '#888';
       ctx.font = '11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Top Stack Frame (sorted by total latency)', (width - padding.right + padding.left) / 2, height - padding.bottom + 38);
+      ctx.fillText('User Code Location (sorted by total latency)', (width - padding.right + padding.left) / 2, height - padding.bottom + 38);
 
       // Stats sidebar
       const sbX = width - padding.right + 10;
@@ -9309,12 +9534,12 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       ctx.fillStyle = '#e94560';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('By Stack Stats', sbX + 10, sbY);
+      ctx.fillText('User Code Stats', sbX + 10, sbY);
       sbY += 18;
 
       ctx.font = '10px sans-serif';
       ctx.fillStyle = '#aaa';
-      ctx.fillText(`Frames: ${byStack.size}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Locations: ${byStack.size}`, sbX + 10, sbY); sbY += 14;
       ctx.fillText(`Shown: ${boxPlots.length}`, sbX + 10, sbY); sbY += 14;
       ctx.fillText(`Total: ${formatLatency(grandTotal)}`, sbX + 10, sbY); sbY += 14;
       if (hideInternal) {
@@ -9345,12 +9570,14 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       ctx.font = 'bold 10px sans-serif';
       ctx.fillText('Legend', sbX + 10, sbY); sbY += 14;
       ctx.font = '9px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText('Shape: Density (KDE)', sbX + 10, sbY); sbY += 12;
       ctx.fillStyle = '#fff';
       ctx.fillText('─ Median', sbX + 10, sbY); sbY += 12;
       ctx.fillStyle = '#ffd700';
       ctx.fillText('◆ Mean', sbX + 10, sbY); sbY += 12;
       ctx.fillStyle = '#aaa';
-      ctx.fillText('Box: Q1-Q3', sbX + 10, sbY);
+      ctx.fillText('Bar: Q1-Q3', sbX + 10, sbY);
 
       // Store box plot data for hover detection
       latencyBoxPlotData = { boxPlots, boxSpacing, boxWidth, padding, chartHeight, height, mode: 'by-stack' };
