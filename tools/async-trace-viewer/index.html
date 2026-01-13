@@ -1202,6 +1202,9 @@
         <select id="latency-mode-select" style="font-size: 11px; padding: 2px 6px; background: #0f3460; color: #e0e0e0; border: 1px solid #1a1a2e; border-radius: 3px;">
           <option value="histogram">Histogram</option>
           <option value="cdf">CDF (Cumulative)</option>
+          <option value="birth-order">By Birth Order</option>
+          <option value="by-type">By Resource Type</option>
+          <option value="by-stack">By Top Stack Frame</option>
         </select>
         <label style="color: #aaa; font-size: 11px; margin-left: 10px;">
           <input type="checkbox" id="latency-outliers-checkbox" checked style="margin-right: 4px;">
@@ -1486,16 +1489,28 @@
         </div>
         <div class="view-help" data-view="latency">
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
-            <strong>Latency View:</strong><br>
-            • Histogram or CDF (toggle in controls)<br>
-            • <span style="color: #50c878;">p50</span> / <span style="color: #ffd700;">p90</span> / <span style="color: #ff6347;">p99</span> percentile lines<br>
-            • Hover bars for details, click for resources
+            <strong>Latency View Modes:</strong><br>
+            • Histogram / CDF = distribution<br>
+            • Birth Order = sibling queuing<br>
+            • By Type = box plots per type<br>
+            • By Stack = box plots per code location
           </div>
           <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Highlights:</strong><br>
-            • <span style="color: #ff6347;">Red border</span> = outliers (>3σ)<br>
-            • <span style="color: #ff6600;">Orange dash</span> = critical path<br>
-            • Sidebar shows stats & type breakdown
+            <strong>Histogram/CDF:</strong><br>
+            • <span style="color: #50c878;">p50</span> / <span style="color: #ffd700;">p90</span> / <span style="color: #ff6347;">p99</span> lines<br>
+            • <span style="color: #ff6347;">Red</span> = outliers, <span style="color: #ff6600;">Orange</span> = critical
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Birth Order:</strong><br>
+            • X = Nth child of parent<br>
+            • <span style="color: #50c878;">Green line</span> = trend (avg)
+          </div>
+          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
+            <strong>Box Plots (By Type/Stack):</strong><br>
+            • Sorted by total latency (% shown)<br>
+            • Box = Q1-Q3, whiskers = min-max<br>
+            • <span style="color: #fff;">White line</span> = median, <span style="color: #ffd700;">◆</span> = mean<br>
+            • Hover for stats; By Stack shows full stack trace
           </div>
         </div>
         <div class="view-help" data-view="gaps">
@@ -1660,7 +1675,7 @@
             <tr><td><strong>3: Replay</strong></td><td>Understanding flow</td><td>Animated playback, lifecycle badges (⏳⚡✓), loop (Shift+L), ghost (Shift+O) for state pulses</td></tr>
             <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Solid=executing, faded=waiting, cyan line=ideal, hover/click for details, sidebar efficiency metrics</td></tr>
             <tr><td><strong>5: Breakdown</strong></td><td>Time allocation</td><td>Treemap/Sunburst, group by Type/Class/Trigger/Stack, click to drill down, ▶=can drill, Shift+R=reset</td></tr>
-            <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>Histogram/CDF toggle, hover/click bars, outlier detection (red), critical path (orange)</td></tr>
+            <tr><td><strong>6: Latency</strong></td><td>Wait distribution</td><td>5 modes (Histogram/CDF/Birth Order/By Type/By Stack), latency-weighted sorting, honors Hide Internal</td></tr>
             <tr><td><strong>7: Gaps</strong></td><td>Idle time analysis</td><td>Color-coded gaps by cause, hover/click for details, threshold slider, recommendations in sidebar</td></tr>
             <tr><td><strong>8: Heatmap</strong></td><td>Activity density</td><td>Hover/click cells, bucket/color/activity/sort controls, critical path rows highlighted</td></tr>
           </table>
@@ -1701,15 +1716,15 @@ const c = await fetch('/api/c');</pre>
             <li>Can non-critical work use <code>ctx.waitUntil()</code>?</li>
           </ul>
           <p class="guide-tip">💡 Enable outlier detection to highlight >3σ items. Click histogram bars to see individual resources.</p>
-          <p style="margin-top: 0.5rem;"><strong>Reading the CDF (Cumulative Distribution):</strong></p>
+          <p style="margin-top: 0.5rem;"><strong>Latency View Modes:</strong></p>
           <ul>
-            <li><strong>Y-axis</strong> = "% of operations completing within X time"</li>
-            <li><strong>Steep curve</strong> = most operations have similar latency (good)</li>
-            <li><strong>Long flat tail</strong> = some operations much slower (investigate)</li>
-            <li><strong>p50 at 1ms, p99 at 100ms</strong> = high variance, find outliers</li>
-            <li><strong>Orange line</strong> (when critical path on) = critical path latencies</li>
+            <li><strong>Histogram</strong> = distribution of wait times, stacked by type</li>
+            <li><strong>CDF</strong> = cumulative %, good for SLO analysis ("X% complete under Y ms")</li>
+            <li><strong>Birth Order</strong> = latency vs sibling position. Rising trend = queuing/contention</li>
+            <li><strong>By Type</strong> = box plots by resource type, sorted by total latency contribution</li>
+            <li><strong>By Stack</strong> = box plots by top stack frame - shows which code locations wait longest</li>
           </ul>
-          <p class="guide-tip">💡 CDF is useful for SLO analysis: "What % of requests complete under 50ms?" Read the Y value at X=50ms.</p>
+          <p class="guide-tip">💡 By Type and By Stack are sorted by total latency (% shown), not count. Use Hide Internal (H) to filter noise. Hover over box plots for detailed stats; By Stack shows full stack trace (up to 5 frames) from the highest-latency call in each group, helping trace from internal code back to your code.</p>
         </div>
 
         <div class="guide-section">
@@ -2007,10 +2022,12 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
     let breakdownTooltip = null;  // Tooltip element
 
     // Latency view state
-    let latencyMode = 'histogram';  // 'histogram' or 'cdf'
+    let latencyMode = 'histogram';  // 'histogram', 'cdf', 'birth-order', 'by-type', or 'by-stack'
     let latencyShowOutliers = true;
     let latencyBucketData = null;  // Cached bucket data for hit detection
+    let latencyBoxPlotData = null;  // Cached box plot data for hit detection (by-type, by-stack)
     let latencyHoverBucket = -1;
+    let latencyHoverBox = -1;  // Hovered box plot index
     let latencyTooltip = null;
 
     // Heatmap view state
@@ -8114,6 +8131,24 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         return;
       }
 
+      // Handle special modes that need different data processing
+      if (latencyMode === 'birth-order') {
+        latencyBoxPlotData = null; // Clear box plot data for non-box-plot modes
+        renderLatencyByBirthOrder(ctx, latencies, width, height, padding, chartWidth, chartHeight);
+        return;
+      }
+      if (latencyMode === 'by-type') {
+        renderLatencyByType(ctx, latencies, width, height, padding, chartWidth, chartHeight);
+        return;
+      }
+      if (latencyMode === 'by-stack') {
+        renderLatencyByStack(ctx, latencies, width, height, padding, chartWidth, chartHeight);
+        return;
+      }
+
+      // Clear box plot data for histogram/cdf modes
+      latencyBoxPlotData = null;
+
       // Sort by latency for percentile calculations
       latencies.sort((a, b) => a.latencyNs - b.latencyNs);
 
@@ -8504,6 +8539,823 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       return `${ms.toFixed(2)}ms`;
     }
 
+    // Render latency by sibling birth order (Nth child of same parent)
+    function renderLatencyByBirthOrder(ctx, latencies, width, height, padding, chartWidth, chartHeight) {
+      // Calculate birth order for each resource
+      const birthOrderData = [];
+      const childrenByParent = new Map();
+
+      // First pass: group resources by parent
+      latencies.forEach(l => {
+        const parentId = l.resource.triggerId;
+        if (!childrenByParent.has(parentId)) {
+          childrenByParent.set(parentId, []);
+        }
+        childrenByParent.get(parentId).push(l);
+      });
+
+      // Second pass: sort by creation time and assign birth order
+      childrenByParent.forEach((children, parentId) => {
+        children.sort((a, b) => a.resource.createdAt - b.resource.createdAt);
+        children.forEach((l, index) => {
+          birthOrderData.push({
+            ...l,
+            birthOrder: index + 1,
+            siblingCount: children.length
+          });
+        });
+      });
+
+      if (birthOrderData.length === 0) return;
+
+      const maxBirthOrder = Math.max(...birthOrderData.map(d => d.birthOrder));
+      const maxLatency = Math.max(...birthOrderData.map(d => d.latencyMs));
+      const minLatency = Math.min(...birthOrderData.map(d => d.latencyMs));
+      const useLogScale = maxLatency / Math.max(minLatency, 0.001) > 100;
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Latency by Sibling Birth Order', (width - padding.right + padding.left) / 2, 25);
+
+      // Draw axes
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, height - padding.bottom);
+      ctx.lineTo(width - padding.right, height - padding.bottom);
+      ctx.stroke();
+
+      // Y-axis (latency) - log or linear scale
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 5; i++) {
+        const y = padding.top + (1 - i / 5) * chartHeight;
+        let value;
+        if (useLogScale) {
+          const logMin = Math.log10(Math.max(minLatency, 0.001));
+          const logMax = Math.log10(maxLatency);
+          const logVal = logMin + (i / 5) * (logMax - logMin);
+          value = formatLatency(Math.pow(10, logVal));
+        } else {
+          value = formatLatency((i / 5) * maxLatency);
+        }
+        ctx.fillText(value, padding.left - 8, y + 3);
+
+        ctx.strokeStyle = '#333';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+      }
+
+      // Y-axis title
+      ctx.save();
+      ctx.translate(15, height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Latency' + (useLogScale ? ' (log scale)' : ''), 0, 0);
+      ctx.restore();
+
+      // X-axis labels
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      const xLabelInterval = Math.max(1, Math.ceil(maxBirthOrder / 10));
+      for (let i = 1; i <= maxBirthOrder; i += xLabelInterval) {
+        const x = padding.left + ((i - 0.5) / maxBirthOrder) * chartWidth;
+        ctx.fillText(i.toString(), x, height - padding.bottom + 15);
+      }
+
+      // X-axis title
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Birth Order (Nth child of same parent)', (width - padding.right + padding.left) / 2, height - padding.bottom + 35);
+
+      // Calculate averages per birth order for trend line
+      const avgByOrder = new Map();
+      birthOrderData.forEach(d => {
+        if (!avgByOrder.has(d.birthOrder)) {
+          avgByOrder.set(d.birthOrder, { sum: 0, count: 0 });
+        }
+        const entry = avgByOrder.get(d.birthOrder);
+        entry.sum += d.latencyMs;
+        entry.count++;
+      });
+
+      // Draw scatter points
+      birthOrderData.forEach(d => {
+        const x = padding.left + ((d.birthOrder - 0.5) / maxBirthOrder) * chartWidth;
+        // Add jitter based on hash of asyncId
+        const jitter = ((d.resource.asyncId * 7) % 20 - 10) / maxBirthOrder * chartWidth * 0.3;
+
+        let y;
+        if (useLogScale) {
+          const logMin = Math.log10(Math.max(minLatency, 0.001));
+          const logMax = Math.log10(maxLatency);
+          const logVal = Math.log10(Math.max(d.latencyMs, 0.001));
+          y = padding.top + (1 - (logVal - logMin) / (logMax - logMin)) * chartHeight;
+        } else {
+          y = padding.top + (1 - d.latencyMs / maxLatency) * chartHeight;
+        }
+
+        ctx.beginPath();
+        ctx.arc(x + jitter, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = TYPE_COLORS[d.resource.type] || '#808080';
+        ctx.globalAlpha = 0.7;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Highlight critical path
+        if (d.onCriticalPath) {
+          ctx.strokeStyle = '#ff6600';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      });
+
+      // Draw trend line (average per birth order)
+      const sortedOrders = Array.from(avgByOrder.keys()).sort((a, b) => a - b);
+      if (sortedOrders.length > 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#50c878';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+
+        sortedOrders.forEach((order, i) => {
+          const entry = avgByOrder.get(order);
+          const avgLatency = entry.sum / entry.count;
+          const x = padding.left + ((order - 0.5) / maxBirthOrder) * chartWidth;
+          let y;
+          if (useLogScale) {
+            const logMin = Math.log10(Math.max(minLatency, 0.001));
+            const logMax = Math.log10(maxLatency);
+            const logVal = Math.log10(Math.max(avgLatency, 0.001));
+            y = padding.top + (1 - (logVal - logMin) / (logMax - logMin)) * chartHeight;
+          } else {
+            y = padding.top + (1 - avgLatency / maxLatency) * chartHeight;
+          }
+
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Stats sidebar
+      const sbX = width - padding.right + 10;
+      const sbWidth = padding.right - 20;
+
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(sbX, padding.top, sbWidth, chartHeight);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(sbX, padding.top, sbWidth, chartHeight);
+
+      let sbY = padding.top + 15;
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Birth Order Stats', sbX + 10, sbY);
+      sbY += 18;
+
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(`Points: ${birthOrderData.length}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Max siblings: ${maxBirthOrder}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Parents: ${childrenByParent.size}`, sbX + 10, sbY); sbY += 20;
+
+      // Trend summary
+      const firstOrderAvg = avgByOrder.get(1);
+      const lastOrderAvg = avgByOrder.get(maxBirthOrder);
+      if (firstOrderAvg && lastOrderAvg && maxBirthOrder > 1) {
+        ctx.fillStyle = '#e94560';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText('Trend', sbX + 10, sbY); sbY += 14;
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = '#aaa';
+        const firstAvg = firstOrderAvg.sum / firstOrderAvg.count;
+        const lastAvg = lastOrderAvg.sum / lastOrderAvg.count;
+        ctx.fillText(`1st child: ${formatLatency(firstAvg)}`, sbX + 10, sbY); sbY += 14;
+        ctx.fillText(`${maxBirthOrder}th child: ${formatLatency(lastAvg)}`, sbX + 10, sbY); sbY += 14;
+        const change = ((lastAvg - firstAvg) / firstAvg * 100).toFixed(0);
+        const changeColor = lastAvg > firstAvg ? '#ff6347' : '#50c878';
+        ctx.fillStyle = changeColor;
+        ctx.fillText(`Change: ${change > 0 ? '+' : ''}${change}%`, sbX + 10, sbY); sbY += 20;
+      } else if (maxBirthOrder === 1) {
+        // No siblings - explain why no trend line
+        ctx.fillStyle = '#888';
+        ctx.font = '9px sans-serif';
+        ctx.fillText('No siblings found.', sbX + 10, sbY); sbY += 12;
+        ctx.fillText('Each parent has only', sbX + 10, sbY); sbY += 12;
+        ctx.fillText('one child (sequential', sbX + 10, sbY); sbY += 12;
+        ctx.fillText('await pattern).', sbX + 10, sbY); sbY += 20;
+      }
+
+      // Legend
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('Legend', sbX + 10, sbY); sbY += 14;
+      ctx.font = '9px sans-serif';
+      ctx.fillStyle = '#50c878';
+      ctx.fillText('--- Trend (avg)', sbX + 10, sbY); sbY += 14;
+      ctx.fillStyle = '#ff6600';
+      ctx.fillText('○ Critical path', sbX + 10, sbY); sbY += 14;
+    }
+
+    // Render latency grouped by resource type (box plots)
+    function renderLatencyByType(ctx, latencies, width, height, padding, chartWidth, chartHeight) {
+      // Filter latencies based on hideInternal setting
+      const filteredLatencies = hideInternal
+        ? latencies.filter(l => l.resource._classification !== 'internal')
+        : latencies;
+
+      if (filteredLatencies.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No data (all filtered as internal)', width / 2, height / 2);
+        return;
+      }
+
+      // Group latencies by resource type
+      const byType = new Map();
+
+      filteredLatencies.forEach(l => {
+        const type = l.resource.type;
+        if (!byType.has(type)) {
+          byType.set(type, []);
+        }
+        byType.get(type).push(l.latencyMs);
+      });
+
+      if (byType.size === 0) return;
+
+      // Sort types by TOTAL latency (latency-weighted) instead of count
+      const sortedTypes = Array.from(byType.entries())
+        .sort((a, b) => {
+          const totalA = a[1].reduce((sum, v) => sum + v, 0);
+          const totalB = b[1].reduce((sum, v) => sum + v, 0);
+          return totalB - totalA;
+        });
+
+      // Calculate total latency across all types for percentage calculation
+      const grandTotal = sortedTypes.reduce((sum, [_, values]) =>
+        sum + values.reduce((s, v) => s + v, 0), 0);
+
+      // Calculate box plot stats for each type
+      const boxPlots = sortedTypes.map(([type, values]) => {
+        values.sort((a, b) => a - b);
+        const n = values.length;
+        const total = values.reduce((a, b) => a + b, 0);
+        return {
+          type,
+          count: n,
+          min: values[0],
+          q1: values[Math.floor(n * 0.25)],
+          median: values[Math.floor(n * 0.5)],
+          q3: values[Math.floor(n * 0.75)],
+          max: values[n - 1],
+          mean: total / n,
+          total,
+          pct: (total / grandTotal * 100).toFixed(1)
+        };
+      });
+
+      const allMax = Math.max(...boxPlots.map(b => b.max));
+      const allMin = Math.min(...boxPlots.map(b => b.min));
+      const useLogScale = allMax / Math.max(allMin, 0.001) > 100;
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Latency by Resource Type (Box Plot)', (width - padding.right + padding.left) / 2, 25);
+
+      // Draw axes
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, height - padding.bottom);
+      ctx.lineTo(width - padding.right, height - padding.bottom);
+      ctx.stroke();
+
+      // Y-axis (latency)
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 5; i++) {
+        const y = padding.top + (1 - i / 5) * chartHeight;
+        let value;
+        if (useLogScale) {
+          const logMin = Math.log10(Math.max(allMin, 0.001));
+          const logMax = Math.log10(allMax);
+          const logVal = logMin + (i / 5) * (logMax - logMin);
+          value = formatLatency(Math.pow(10, logVal));
+        } else {
+          value = formatLatency((i / 5) * allMax);
+        }
+        ctx.fillText(value, padding.left - 8, y + 3);
+
+        ctx.strokeStyle = '#333';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+      }
+
+      // Y-axis title
+      ctx.save();
+      ctx.translate(15, height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Latency' + (useLogScale ? ' (log scale)' : ''), 0, 0);
+      ctx.restore();
+
+      // Helper to map latency to Y coordinate
+      function latencyToY(latency) {
+        if (useLogScale) {
+          const logMin = Math.log10(Math.max(allMin, 0.001));
+          const logMax = Math.log10(allMax);
+          const logVal = Math.log10(Math.max(latency, 0.001));
+          return padding.top + (1 - (logVal - logMin) / (logMax - logMin)) * chartHeight;
+        } else {
+          return padding.top + (1 - latency / allMax) * chartHeight;
+        }
+      }
+
+      // Draw box plots
+      const boxWidth = Math.min(50, chartWidth / boxPlots.length * 0.7);
+      const boxSpacing = chartWidth / boxPlots.length;
+
+      boxPlots.forEach((bp, i) => {
+        const centerX = padding.left + (i + 0.5) * boxSpacing;
+        const color = TYPE_COLORS[bp.type] || '#808080';
+
+        // Whiskers (min to q1, q3 to max)
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+
+        // Lower whisker
+        ctx.beginPath();
+        ctx.moveTo(centerX, latencyToY(bp.min));
+        ctx.lineTo(centerX, latencyToY(bp.q1));
+        ctx.stroke();
+        // Whisker cap
+        ctx.beginPath();
+        ctx.moveTo(centerX - boxWidth / 4, latencyToY(bp.min));
+        ctx.lineTo(centerX + boxWidth / 4, latencyToY(bp.min));
+        ctx.stroke();
+
+        // Upper whisker
+        ctx.beginPath();
+        ctx.moveTo(centerX, latencyToY(bp.q3));
+        ctx.lineTo(centerX, latencyToY(bp.max));
+        ctx.stroke();
+        // Whisker cap
+        ctx.beginPath();
+        ctx.moveTo(centerX - boxWidth / 4, latencyToY(bp.max));
+        ctx.lineTo(centerX + boxWidth / 4, latencyToY(bp.max));
+        ctx.stroke();
+
+        // Box (q1 to q3)
+        const boxTop = latencyToY(bp.q3);
+        const boxBottom = latencyToY(bp.q1);
+        const boxHeight = boxBottom - boxTop;
+
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.3;
+        ctx.fillRect(centerX - boxWidth / 2, boxTop, boxWidth, boxHeight);
+        ctx.globalAlpha = 1;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(centerX - boxWidth / 2, boxTop, boxWidth, boxHeight);
+
+        // Median line
+        const medianY = latencyToY(bp.median);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX - boxWidth / 2, medianY);
+        ctx.lineTo(centerX + boxWidth / 2, medianY);
+        ctx.stroke();
+
+        // Mean marker (diamond)
+        const meanY = latencyToY(bp.mean);
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath();
+        ctx.moveTo(centerX, meanY - 4);
+        ctx.lineTo(centerX + 4, meanY);
+        ctx.lineTo(centerX, meanY + 4);
+        ctx.lineTo(centerX - 4, meanY);
+        ctx.closePath();
+        ctx.fill();
+
+        // X-axis label (type name)
+        ctx.fillStyle = color;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        const typeLabel = bp.type.length > 12 ? bp.type.substring(0, 10) + '..' : bp.type;
+        ctx.fillText(typeLabel, centerX, height - padding.bottom + 14);
+
+        // Percentage of total latency below type (latency-weighted)
+        ctx.fillStyle = '#ffd700';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(`${bp.pct}%`, centerX, height - padding.bottom + 26);
+
+        // Count below percentage
+        ctx.fillStyle = '#666';
+        ctx.font = '9px sans-serif';
+        ctx.fillText(`n=${bp.count}`, centerX, height - padding.bottom + 38);
+      });
+
+      // X-axis title
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Resource Type (sorted by total latency)', (width - padding.right + padding.left) / 2, height - padding.bottom + 52);
+
+      // Stats sidebar
+      const sbX = width - padding.right + 10;
+      const sbWidth = padding.right - 20;
+
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(sbX, padding.top, sbWidth, chartHeight);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(sbX, padding.top, sbWidth, chartHeight);
+
+      let sbY = padding.top + 15;
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('By Type Stats', sbX + 10, sbY);
+      sbY += 18;
+
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(`Types: ${boxPlots.length}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Ops: ${filteredLatencies.length}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Total: ${formatLatency(grandTotal)}`, sbX + 10, sbY); sbY += 14;
+      if (hideInternal) {
+        ctx.fillStyle = '#4ecdc4';
+        ctx.fillText('(internals hidden)', sbX + 10, sbY);
+      }
+      sbY += 16;
+
+      // Top types by total latency (already sorted this way)
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('By Total Latency', sbX + 10, sbY); sbY += 14;
+      ctx.font = '9px sans-serif';
+      boxPlots.slice(0, 5).forEach(bp => {
+        ctx.fillStyle = TYPE_COLORS[bp.type] || '#808080';
+        ctx.fillRect(sbX + 10, sbY - 8, 8, 8);
+        ctx.fillStyle = '#ffd700';
+        const label = bp.type.length > 6 ? bp.type.substring(0, 5) + '..' : bp.type;
+        ctx.fillText(`${label}: ${bp.pct}%`, sbX + 22, sbY);
+        sbY += 12;
+      });
+
+      sbY += 10;
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('Legend', sbX + 10, sbY); sbY += 14;
+      ctx.font = '9px sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('─ Median', sbX + 10, sbY); sbY += 12;
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText('◆ Mean', sbX + 10, sbY); sbY += 12;
+      ctx.fillStyle = '#aaa';
+      ctx.fillText('Box: Q1-Q3', sbX + 10, sbY); sbY += 12;
+      ctx.fillText('Whisker: Min-Max', sbX + 10, sbY);
+
+      // Store box plot data for hover detection
+      latencyBoxPlotData = { boxPlots, boxSpacing, boxWidth, padding, chartHeight, height, mode: 'by-type' };
+    }
+
+    // Render latency grouped by top stack frame (box plots)
+    function renderLatencyByStack(ctx, latencies, width, height, padding, chartWidth, chartHeight) {
+      // Filter latencies based on hideInternal setting
+      const filteredLatencies = hideInternal
+        ? latencies.filter(l => l.resource._classification !== 'internal')
+        : latencies;
+
+      if (filteredLatencies.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No data (all filtered as internal)', width / 2, height / 2);
+        return;
+      }
+
+      // Group latencies by top stack frame
+      const byStack = new Map();  // simplified frame -> { latencies: number[], items: latency objects[] }
+
+      filteredLatencies.forEach(l => {
+        const stackTrace = traceData.stackTraceMap.get(l.resource.stackTraceId);
+        let topFrame = '(no stack)';
+        if (stackTrace && stackTrace.frames && stackTrace.frames.length > 0) {
+          // Get the top frame and simplify for grouping
+          const frame = stackTrace.frames[0];
+          // Extract function name and file, removing line numbers for grouping
+          const match = frame.match(/^([^@]+)@([^:]+)/);
+          if (match) {
+            topFrame = `${match[1]}@${match[2].split('/').pop()}`;
+          } else {
+            topFrame = frame.split(':')[0]; // Remove line numbers
+          }
+        }
+        if (!byStack.has(topFrame)) {
+          byStack.set(topFrame, { latencies: [], items: [] });
+        }
+        const group = byStack.get(topFrame);
+        group.latencies.push(l.latencyMs);
+        group.items.push(l);  // Keep full latency object for stack trace lookup
+      });
+
+      if (byStack.size === 0) return;
+
+      // Sort by TOTAL latency (latency-weighted)
+      const sortedFrames = Array.from(byStack.entries())
+        .sort((a, b) => {
+          const totalA = a[1].latencies.reduce((sum, v) => sum + v, 0);
+          const totalB = b[1].latencies.reduce((sum, v) => sum + v, 0);
+          return totalB - totalA;
+        });
+
+      // Limit to top 15 frames to avoid overcrowding
+      const topFrames = sortedFrames.slice(0, 15);
+
+      // Calculate total latency for percentage
+      const grandTotal = sortedFrames.reduce((sum, [_, group]) =>
+        sum + group.latencies.reduce((s, v) => s + v, 0), 0);
+
+      // Calculate box plot stats for each frame
+      const boxPlots = topFrames.map(([frame, group]) => {
+        const values = group.latencies.slice().sort((a, b) => a - b);
+        const n = values.length;
+        const total = values.reduce((a, b) => a + b, 0);
+
+        // Find the resource with highest latency to get its full stack trace
+        let maxLatencyItem = group.items[0];
+        for (const item of group.items) {
+          if (item.latencyMs > maxLatencyItem.latencyMs) {
+            maxLatencyItem = item;
+          }
+        }
+
+        // Get full stack trace (up to 5 frames) from highest-latency resource
+        let stackTrace = [];
+        const st = traceData.stackTraceMap.get(maxLatencyItem.resource.stackTraceId);
+        if (st && st.frames) {
+          stackTrace = st.frames.slice(0, 5);
+        }
+
+        return {
+          frame,
+          stackTrace,  // Full stack trace (up to 5 frames) from highest-latency resource
+          maxLatencyMs: maxLatencyItem.latencyMs,
+          count: n,
+          min: values[0],
+          q1: values[Math.floor(n * 0.25)],
+          median: values[Math.floor(n * 0.5)],
+          q3: values[Math.floor(n * 0.75)],
+          max: values[n - 1],
+          mean: total / n,
+          total,
+          pct: (total / grandTotal * 100).toFixed(1)
+        };
+      });
+
+      if (boxPlots.length === 0) return;
+
+      const allMax = Math.max(...boxPlots.map(b => b.max));
+      const allMin = Math.min(...boxPlots.map(b => b.min));
+      const useLogScale = allMax / Math.max(allMin, 0.001) > 100;
+
+      // Draw title
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Latency by Top Stack Frame (Box Plot)', (width - padding.right + padding.left) / 2, 25);
+
+      // Draw axes
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, height - padding.bottom);
+      ctx.lineTo(width - padding.right, height - padding.bottom);
+      ctx.stroke();
+
+      // Y-axis (latency)
+      ctx.fillStyle = '#888';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 5; i++) {
+        const y = padding.top + (1 - i / 5) * chartHeight;
+        let value;
+        if (useLogScale) {
+          const logMin = Math.log10(Math.max(allMin, 0.001));
+          const logMax = Math.log10(allMax);
+          const logVal = logMin + (i / 5) * (logMax - logMin);
+          value = formatLatency(Math.pow(10, logVal));
+        } else {
+          value = formatLatency((i / 5) * allMax);
+        }
+        ctx.fillText(value, padding.left - 8, y + 3);
+
+        ctx.strokeStyle = '#333';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+      }
+
+      // Y-axis title
+      ctx.save();
+      ctx.translate(15, height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Latency' + (useLogScale ? ' (log scale)' : ''), 0, 0);
+      ctx.restore();
+
+      // Helper to map latency to Y coordinate
+      function latencyToY(latency) {
+        if (useLogScale) {
+          const logMin = Math.log10(Math.max(allMin, 0.001));
+          const logMax = Math.log10(allMax);
+          const logVal = Math.log10(Math.max(latency, 0.001));
+          return padding.top + (1 - (logVal - logMin) / (logMax - logMin)) * chartHeight;
+        } else {
+          return padding.top + (1 - latency / allMax) * chartHeight;
+        }
+      }
+
+      // Draw box plots
+      const boxWidth = Math.min(40, chartWidth / boxPlots.length * 0.7);
+      const boxSpacing = chartWidth / boxPlots.length;
+
+      // Color palette for stack frames (cycle through)
+      const frameColors = ['#e94560', '#7ec8e3', '#50c878', '#ffd700', '#ff6347',
+                           '#9370db', '#20b2aa', '#ff69b4', '#87ceeb', '#dda0dd',
+                           '#98fb98', '#f0e68c', '#add8e6', '#ffb6c1', '#b0c4de'];
+
+      boxPlots.forEach((bp, i) => {
+        const centerX = padding.left + (i + 0.5) * boxSpacing;
+        const color = frameColors[i % frameColors.length];
+
+        // Whiskers (min to q1, q3 to max)
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+
+        // Lower whisker
+        ctx.beginPath();
+        ctx.moveTo(centerX, latencyToY(bp.min));
+        ctx.lineTo(centerX, latencyToY(bp.q1));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(centerX - boxWidth / 4, latencyToY(bp.min));
+        ctx.lineTo(centerX + boxWidth / 4, latencyToY(bp.min));
+        ctx.stroke();
+
+        // Upper whisker
+        ctx.beginPath();
+        ctx.moveTo(centerX, latencyToY(bp.q3));
+        ctx.lineTo(centerX, latencyToY(bp.max));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(centerX - boxWidth / 4, latencyToY(bp.max));
+        ctx.lineTo(centerX + boxWidth / 4, latencyToY(bp.max));
+        ctx.stroke();
+
+        // Box (q1 to q3)
+        const boxTop = latencyToY(bp.q3);
+        const boxBottom = latencyToY(bp.q1);
+        const boxHeight = boxBottom - boxTop;
+
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.3;
+        ctx.fillRect(centerX - boxWidth / 2, boxTop, boxWidth, boxHeight);
+        ctx.globalAlpha = 1;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(centerX - boxWidth / 2, boxTop, boxWidth, boxHeight);
+
+        // Median line
+        const medianY = latencyToY(bp.median);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX - boxWidth / 2, medianY);
+        ctx.lineTo(centerX + boxWidth / 2, medianY);
+        ctx.stroke();
+
+        // Mean marker (diamond)
+        const meanY = latencyToY(bp.mean);
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath();
+        ctx.moveTo(centerX, meanY - 4);
+        ctx.lineTo(centerX + 4, meanY);
+        ctx.lineTo(centerX, meanY + 4);
+        ctx.lineTo(centerX - 4, meanY);
+        ctx.closePath();
+        ctx.fill();
+
+        // X-axis label (frame name, truncated)
+        ctx.fillStyle = color;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        // Extract just the function name for display
+        const funcName = bp.frame.split('@')[0];
+        const frameLabel = funcName.length > 14 ? funcName.substring(0, 12) + '..' : funcName;
+        ctx.fillText(frameLabel, centerX, height - padding.bottom + 12);
+
+        // Percentage below
+        ctx.fillStyle = '#ffd700';
+        ctx.font = '9px sans-serif';
+        ctx.fillText(`${bp.pct}%`, centerX, height - padding.bottom + 23);
+      });
+
+      // X-axis title
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Top Stack Frame (sorted by total latency)', (width - padding.right + padding.left) / 2, height - padding.bottom + 38);
+
+      // Stats sidebar
+      const sbX = width - padding.right + 10;
+      const sbWidth = padding.right - 20;
+
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.95)';
+      ctx.fillRect(sbX, padding.top, sbWidth, chartHeight);
+      ctx.strokeStyle = '#0f3460';
+      ctx.strokeRect(sbX, padding.top, sbWidth, chartHeight);
+
+      let sbY = padding.top + 15;
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('By Stack Stats', sbX + 10, sbY);
+      sbY += 18;
+
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#aaa';
+      ctx.fillText(`Frames: ${byStack.size}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Shown: ${boxPlots.length}`, sbX + 10, sbY); sbY += 14;
+      ctx.fillText(`Total: ${formatLatency(grandTotal)}`, sbX + 10, sbY); sbY += 14;
+      if (hideInternal) {
+        ctx.fillStyle = '#4ecdc4';
+        ctx.fillText('(internals hidden)', sbX + 10, sbY);
+      }
+      sbY += 16;
+
+      // Top frames by total latency
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('Top Frames', sbX + 10, sbY); sbY += 14;
+      ctx.font = '8px sans-serif';
+      boxPlots.slice(0, 6).forEach((bp, i) => {
+        ctx.fillStyle = frameColors[i % frameColors.length];
+        ctx.fillRect(sbX + 10, sbY - 7, 6, 6);
+        ctx.fillStyle = '#aaa';
+        const funcName = bp.frame.split('@')[0];
+        const label = funcName.length > 10 ? funcName.substring(0, 8) + '..' : funcName;
+        ctx.fillText(`${label}`, sbX + 20, sbY);
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText(`${bp.pct}%`, sbX + sbWidth - 30, sbY);
+        sbY += 11;
+      });
+
+      sbY += 8;
+      ctx.fillStyle = '#e94560';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('Legend', sbX + 10, sbY); sbY += 14;
+      ctx.font = '9px sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('─ Median', sbX + 10, sbY); sbY += 12;
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText('◆ Mean', sbX + 10, sbY); sbY += 12;
+      ctx.fillStyle = '#aaa';
+      ctx.fillText('Box: Q1-Q3', sbX + 10, sbY);
+
+      // Store box plot data for hover detection
+      latencyBoxPlotData = { boxPlots, boxSpacing, boxWidth, padding, chartHeight, height, mode: 'by-stack' };
+    }
+
     function setupLatencyEventHandlers(canvas) {
       // Mode select handler
       document.getElementById('latency-mode-select').addEventListener('change', (e) => {
@@ -8517,9 +9369,9 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         renderLatency();
       });
 
-      // Hover handler
+      // Hover handler for histogram and box plot modes
       canvas.addEventListener('mousemove', (e) => {
-        if (currentView !== 'latency' || !latencyBucketData || latencyMode === 'cdf') {
+        if (currentView !== 'latency') {
           canvas.style.cursor = 'default';
           return;
         }
@@ -8528,29 +9380,66 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        const { buckets, barWidth, padding, chartHeight, height } = latencyBucketData;
+        // Handle histogram mode
+        if (latencyMode === 'histogram' && latencyBucketData) {
+          const { buckets, barWidth, padding, height } = latencyBucketData;
 
-        // Find which bucket is hovered
-        let hoveredBucket = -1;
-        if (x >= padding.left && x <= padding.left + buckets.length * barWidth &&
-            y >= padding.top && y <= height - padding.bottom) {
-          hoveredBucket = Math.floor((x - padding.left) / barWidth);
-          if (hoveredBucket >= buckets.length) hoveredBucket = buckets.length - 1;
-        }
-
-        canvas.style.cursor = hoveredBucket >= 0 ? 'pointer' : 'default';
-
-        if (hoveredBucket !== latencyHoverBucket) {
-          latencyHoverBucket = hoveredBucket;
-          renderLatency();
-          if (hoveredBucket >= 0) {
-            showLatencyTooltip(e, buckets[hoveredBucket]);
-          } else {
-            hideLatencyTooltip();
+          // Find which bucket is hovered
+          let hoveredBucket = -1;
+          if (x >= padding.left && x <= padding.left + buckets.length * barWidth &&
+              y >= padding.top && y <= height - padding.bottom) {
+            hoveredBucket = Math.floor((x - padding.left) / barWidth);
+            if (hoveredBucket >= buckets.length) hoveredBucket = buckets.length - 1;
           }
-        } else if (hoveredBucket >= 0) {
-          updateLatencyTooltipPosition(e);
+
+          canvas.style.cursor = hoveredBucket >= 0 ? 'pointer' : 'default';
+
+          if (hoveredBucket !== latencyHoverBucket) {
+            latencyHoverBucket = hoveredBucket;
+            renderLatency();
+            if (hoveredBucket >= 0) {
+              showLatencyTooltip(e, buckets[hoveredBucket]);
+            } else {
+              hideLatencyTooltip();
+            }
+          } else if (hoveredBucket >= 0) {
+            updateLatencyTooltipPosition(e);
+          }
+          return;
         }
+
+        // Handle box plot modes (by-type, by-stack)
+        if ((latencyMode === 'by-type' || latencyMode === 'by-stack') && latencyBoxPlotData) {
+          const { boxPlots, boxSpacing, boxWidth, padding, height } = latencyBoxPlotData;
+
+          // Find which box is hovered
+          let hoveredBox = -1;
+          if (x >= padding.left && x <= padding.left + boxPlots.length * boxSpacing &&
+              y >= padding.top && y <= height - padding.bottom) {
+            const boxIdx = Math.floor((x - padding.left) / boxSpacing);
+            // Check if within the box width
+            const centerX = padding.left + (boxIdx + 0.5) * boxSpacing;
+            if (Math.abs(x - centerX) <= boxWidth / 2 && boxIdx >= 0 && boxIdx < boxPlots.length) {
+              hoveredBox = boxIdx;
+            }
+          }
+
+          canvas.style.cursor = hoveredBox >= 0 ? 'pointer' : 'default';
+
+          if (hoveredBox !== latencyHoverBox) {
+            latencyHoverBox = hoveredBox;
+            if (hoveredBox >= 0) {
+              showBoxPlotTooltip(e, boxPlots[hoveredBox]);
+            } else {
+              hideLatencyTooltip();
+            }
+          } else if (hoveredBox >= 0) {
+            updateLatencyTooltipPosition(e);
+          }
+          return;
+        }
+
+        canvas.style.cursor = 'default';
       });
 
       canvas.addEventListener('mouseleave', () => {
@@ -8559,11 +9448,15 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
           hideLatencyTooltip();
           if (currentView === 'latency') renderLatency();
         }
+        if (latencyHoverBox !== -1) {
+          latencyHoverBox = -1;
+          hideLatencyTooltip();
+        }
       });
 
-      // Click handler - show resources in sidebar
+      // Click handler - show resources in sidebar (only for histogram mode)
       canvas.addEventListener('click', (e) => {
-        if (currentView !== 'latency' || !latencyBucketData || latencyMode === 'cdf') return;
+        if (currentView !== 'latency' || !latencyBucketData || latencyMode !== 'histogram') return;
 
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -8642,6 +9535,60 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
     function hideLatencyTooltip() {
       const tooltip = document.getElementById('latency-tooltip');
       if (tooltip) tooltip.style.display = 'none';
+    }
+
+    function showBoxPlotTooltip(e, bp) {
+      let tooltip = document.getElementById('latency-tooltip');
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'latency-tooltip';
+        tooltip.style.cssText = `
+          position: fixed; background: rgba(22, 33, 62, 0.95); border: 1px solid #0f3460;
+          padding: 10px 14px; border-radius: 4px; font-size: 11px; color: #e0e0e0;
+          pointer-events: none; z-index: 1000; max-width: 500px;
+        `;
+        document.body.appendChild(tooltip);
+      }
+
+      let html = '';
+
+      // Show stack trace for by-stack mode, type for by-type mode
+      if (bp.stackTrace && bp.stackTrace.length > 0) {
+        html += `<div style="font-weight: bold; color: #e94560; margin-bottom: 4px;">Grouped by: <span style="color: #7ec8e3;">${bp.frame}</span></div>`;
+        html += `<div style="font-weight: bold; color: #888; margin-bottom: 4px; font-size: 10px;">Stack trace from highest-latency call (${formatLatency(bp.maxLatencyMs)}):</div>`;
+        html += `<div style="font-family: monospace; font-size: 9px; color: #aaa; margin-bottom: 8px; border-left: 2px solid #0f3460; padding-left: 8px;">`;
+        bp.stackTrace.forEach((frame, i) => {
+          const color = i === 0 ? '#7ec8e3' : '#888';
+          html += `<div style="color: ${color}; word-break: break-all; margin-bottom: 2px;">${frame}</div>`;
+        });
+        html += `</div>`;
+      } else if (bp.type) {
+        const color = TYPE_COLORS[bp.type] || '#808080';
+        html += `<div style="font-weight: bold; color: ${color}; margin-bottom: 6px;">${bp.type}</div>`;
+      } else if (bp.frame) {
+        html += `<div style="font-weight: bold; color: #e94560; margin-bottom: 6px;">${bp.frame}</div>`;
+      }
+
+      html += `<div style="display: grid; grid-template-columns: auto auto; gap: 2px 12px;">`;
+      html += `<span style="color: #888;">Count:</span><span>${bp.count}</span>`;
+      html += `<span style="color: #888;">Total:</span><span>${formatLatency(bp.total)}</span>`;
+      html += `<span style="color: #ffd700;">% of latency:</span><span>${bp.pct}%</span>`;
+      html += `</div>`;
+
+      html += `<div style="margin-top: 8px; font-weight: bold; color: #7ec8e3; font-size: 10px;">Box Plot Stats</div>`;
+      html += `<div style="display: grid; grid-template-columns: auto auto; gap: 2px 12px; font-size: 10px;">`;
+      html += `<span style="color: #888;">Min:</span><span>${formatLatency(bp.min)}</span>`;
+      html += `<span style="color: #888;">Q1:</span><span>${formatLatency(bp.q1)}</span>`;
+      html += `<span style="color: #fff;">Median:</span><span>${formatLatency(bp.median)}</span>`;
+      html += `<span style="color: #ffd700;">Mean:</span><span>${formatLatency(bp.mean)}</span>`;
+      html += `<span style="color: #888;">Q3:</span><span>${formatLatency(bp.q3)}</span>`;
+      html += `<span style="color: #888;">Max:</span><span>${formatLatency(bp.max)}</span>`;
+      html += `</div>`;
+
+      tooltip.innerHTML = html;
+      tooltip.style.left = (e.clientX + 15) + 'px';
+      tooltip.style.top = (e.clientY + 15) + 'px';
+      tooltip.style.display = 'block';
     }
 
     function showLatencyBucketDetails(bucket) {

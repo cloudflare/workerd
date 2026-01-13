@@ -827,3 +827,87 @@ Changed the latency label display to only show positive latencies (actual wait t
 
 *Files modified:*
 - `tools/async-trace-viewer/index.html` - edge latency label conditional
+
+## Session (January 2025) - Latency View Enhancements
+
+**New Latency View Modes:**
+
+Added two new visualization modes to the Latency view (View 6) for analyzing latency patterns within a single request:
+
+1. **Birth Order** - Scatter plot showing latency vs sibling position
+   - X-axis: Birth order (Nth child of same parent)
+   - Y-axis: Latency (auto log scale if range > 100x)
+   - Points colored by resource type with jitter to show density
+   - Green dashed trend line shows average latency per birth order
+   - Reveals queuing/contention effects - rising trend means later siblings wait longer
+   - Sidebar shows stats: point count, max siblings, parent count, trend comparison
+
+2. **By Resource Type** - Box plots grouped by resource type
+   - X-axis: Resource type (fetch, js-promise, stream-read, etc.)
+   - Y-axis: Latency (auto log scale)
+   - Box shows Q1-Q3 range, whiskers show min-max
+   - White line = median, gold diamond = mean
+   - **Latency-weighted**: Sorted by total latency contribution, not count
+   - Shows percentage of total latency for each type
+   - Honors "Hide Internal" setting to filter noise
+   - Sidebar shows types sorted by total latency contribution
+
+3. **By Top Stack Frame** - Box plots grouped by code location
+   - X-axis: Top stack frame (function@file)
+   - Y-axis: Latency (auto log scale)
+   - Groups operations by where they were created in code
+   - **Latency-weighted**: Sorted by total latency contribution
+   - Shows percentage of total latency for each location
+   - Honors "Hide Internal" setting
+   - Directly answers "what code is waiting the longest?"
+   - Limited to top 15 frames to avoid overcrowding
+
+**UI Changes:**
+- Changed sibling group expand/collapse to Shift+Click (regular click for select/drag)
+- By Type and By Stack views now latency-weighted (sorted by total latency, show percentages)
+- By Type and By Stack honor Hide Internal setting
+- Updated all related documentation (Guide, How to Read, tooltips, on-canvas instructions)
+
+*Files modified:*
+- `tools/async-trace-viewer/index.html` - new latency modes, Shift+Click for groups, latency weighting
+
+**By Top Stack Frame tooltip enhancement:**
+- Hover tooltip now shows full stack trace (up to 5 frames) from the highest-latency resource in each group
+- This addresses the limitation where the top frame is often internal runtime code (e.g., `connect@cloudflare:sockets`)
+- The stack trace allows tracing back from internal code to user code that called it
+- Tooltip shows: grouping key, latency of highest-latency call, full stack, and box plot stats
+
+**X-axis label size increase:**
+- Increased font sizes on both By Type and By Stack views for better readability
+- Type names: 9px → 11px, percentages: 8px → 10px, counts: 7px → 9px
+- Frame names: 8px → 10px, percentages: 7px → 9px
+
+## Future Latency View Enhancements
+
+Recommendations for additional latency analysis features, ordered by potential value:
+
+### High Value
+
+1. **Latency by Depth** - Are deeper async operations slower? Scatter plot or box plots grouped by depth level in the trigger tree. Could reveal if delays cascade/accumulate as you go deeper.
+
+2. **Critical Path Latency Breakdown** - Dedicated view showing only resources on the critical path with a waterfall-style visualization of where time actually went. Focus on what actually determined request duration.
+
+3. **Wait vs Execution Time** - Currently we show latency (time waiting before callback starts). Adding callback duration would help distinguish "blocked on I/O" from "CPU-bound callback taking too long". Could be a 2D scatter (wait time vs execution time).
+
+4. **Top Latency Contributors** - Simple ranked list of the N specific resources (not grouped) that contributed the most absolute latency. Direct answer to "what single thing should I optimize first?"
+
+### Medium Value
+
+5. **Latency Over Request Timeline** - When did high-latency operations occur? Scatter plot with X = creation time, Y = latency. Could reveal if latency spikes correlate with specific phases of request processing.
+
+6. **Parent→Child Type Latency Matrix** - When resource type A creates type B, what's the typical latency? A heatmap matrix showing average latencies for each parent-type → child-type combination. Reveals if certain type transitions are particularly slow.
+
+7. **Concurrency vs Latency** - Show latency against concurrency level at creation time. Do operations created during high concurrency take longer? Could reveal contention or resource exhaustion patterns.
+
+8. **Outlier Deep Dive** - Dedicated analysis of statistical outliers (>3σ from mean). What do they have in common? Group by type, stack, depth, parent type. Help identify root causes of occasional slowness.
+
+### Lower Priority / Advanced
+
+9. **Sequential Wait Chains** - Identify the longest chain of operations where each waits on the previous to complete. Different from critical path - focuses specifically on sequential dependencies that could potentially be parallelized.
+
+10. **Trace Comparison** - Compare latency distributions between two traces (before/after optimization). Show overlaid histograms or CDFs with statistical significance indicators.
