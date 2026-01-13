@@ -657,6 +657,47 @@ Under the "Group Siblings" option in the Analysis dropdown:
 **Files modified:**
 - `tools/async-trace-viewer/index.html` - internal grouping, cousin grouping, tooltip, in-app guide
 
+## Future Sibling/Cousin Grouping Enhancements
+
+Potential improvements to the grouping feature:
+
+### Group Quality Indicators
+Visually indicate grouping "confidence" based on how strong the similarity signal is:
+- **High confidence**: Same stack trace with actual frames + same direct trigger
+- **Medium confidence**: Cousin groups (same stack + sibling triggers)
+- **Low confidence**: Internal/empty stack trace groups (grouped only by trigger relationship)
+
+Could show as different badge colors or ring styles on compound nodes.
+
+### Hierarchical Grouping Display
+Instead of flat groups, show nested structure in sidebar or expanded view:
+```
+Stream Read Batch 1 (parent: #26)
+  ├─ Primary siblings: #34, #35, #36, #37, #38, #39, #40, #41
+  └─ Derived cousins: (#44,#45), (#46,#47), (#48,#50), (#49,#51)
+```
+Would help users understand the relationship between sibling and cousin groups.
+
+### Type-Based Grouping
+Additional grouping dimension that considers resource type:
+- Group resources of the same type created in quick succession
+- Useful when stack traces are unavailable but types indicate similar operations
+- Could be a separate toggle or combined with existing grouping
+
+### Group Statistics in Sidebar
+When clicking a compound node, show aggregate statistics:
+- Total sync time across all members
+- Average/min/max wait time
+- Member count breakdown by type
+- Combined children count
+- Critical path members highlighted
+
+### Group Comparison Mode
+Select two groups to compare their timing characteristics:
+- Side-by-side timing distributions
+- Highlight outliers within groups
+- Useful for identifying why some iterations are slower than others
+
 ## Future Replay Animation Ideas
 
 Brainstormed concepts for alternative replay visualizations:
