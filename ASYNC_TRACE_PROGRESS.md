@@ -497,6 +497,36 @@ python3 -m http.server 8888
 **Files modified:**
 - `tools/async-trace-viewer/index.html` - classification, Hide Internal, control bar changes
 
+## Session (January 2025) - Group Siblings Feature
+
+**Completed:**
+
+*Sibling grouping algorithm:*
+- Groups resources that share the same stackTraceId + triggerId + temporal proximity
+- Resources must be created during the trigger's callback execution window (or within 1ms of each other)
+- Groups of 2+ resources get a "representative" (first resource in group)
+
+*Graph view compound nodes:*
+- When "Group Siblings" enabled (Analysis dropdown or 'S' key), sibling groups collapse into compound nodes
+- Compound nodes show larger radius with dashed blue ring
+- Red count badge shows number of siblings in group (e.g., "3")
+- Non-representative siblings hidden from graph, edges redirected to representative
+
+*Click-to-expand/collapse:*
+- Click compound node to expand - shows all siblings in their natural tree positions
+- Expanded representative shows blue badge with minus sign ("−")
+- Click minus badge to collapse back to compound node
+- Layout properly handles parent redirection to keep tree connected
+
+*Technical implementation:*
+- `siblingGroups` Map stores group membership and representatives
+- `expandedSiblingGroups` Set tracks which groups are currently expanded
+- `_effectiveTriggerId` property handles edge redirection during layout
+- All three layout modes (Force, Hierarchical, Bubble) updated for sibling support
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - sibling grouping, compound nodes, expand/collapse
+
 ## Future Replay Animation Ideas
 
 Brainstormed concepts for alternative replay visualizations:

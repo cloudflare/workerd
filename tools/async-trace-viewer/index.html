@@ -1007,6 +1007,9 @@
           <label class="dropdown-item" id="hide-internal-item">
             <input type="checkbox" id="hide-internal-check"> 🔒 Hide Internal <span class="hotkey">H</span>
           </label>
+          <label class="dropdown-item" id="group-siblings-item">
+            <input type="checkbox" id="group-siblings-check"> 🔗 Group Siblings <span class="hotkey">S</span>
+          </label>
           <div class="dropdown-divider"></div>
           <label class="dropdown-item" id="accessibility-item">
             <input type="checkbox" id="accessibility-check"> ♿ High Contrast <span class="hotkey">A</span>
@@ -1558,6 +1561,7 @@
             <tr><td><code>G</code></td><td>Toggle stack trace grouping</td></tr>
             <tr><td><code>E</code></td><td>Toggle temporal edges</td></tr>
             <tr><td><code>H</code></td><td>Toggle hide internal resources</td></tr>
+            <tr><td><code>S</code></td><td>Toggle sibling grouping (Graph view)</td></tr>
             <tr><td><code>A</code></td><td>Toggle high contrast / accessibility mode</td></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">View-Specific</td></tr>
             <tr><td><code>←</code> / <code>→</code></td><td>Switch Graph layout: Bubble → Hierarchical → Force (Graph view only)</td></tr>
@@ -1864,10 +1868,13 @@ const userB = await fetch('/user/123');</pre>
     let stackTraceGrouping = false;
     let showTemporalEdges = false;
     let hideInternal = false;
+    let groupSiblings = false;
     let clickFilterResourceId = null;  // Currently filtered resource
     let detectedBottlenecks = [];  // Top N slowest resources
     let detectedPatterns = [];  // Detected anti-patterns
     let temporalEdges = [];  // Edges based on callback timing
+    let siblingGroups = new Map();  // Map from group key to array of asyncIds
+    let expandedSiblingGroups = new Set();  // Set of group keys that are expanded
 
     // Type filter state - which resource types are visible
     let typeFilters = {};  // { 'js-promise': true, 'fetch': true, ... }
@@ -1937,6 +1944,7 @@ const userB = await fetch('/user/123');</pre>
         stackTraceGrouping,
         showTemporalEdges,
         hideInternal,
+        groupSiblings,
         accessibilityMode,
         patternThresholds,
         sidebarCollapsed,
@@ -1996,6 +2004,10 @@ const userB = await fetch('/user/123');</pre>
         if (settings.hideInternal !== undefined) {
           hideInternal = settings.hideInternal;
           document.getElementById('hide-internal-check').checked = hideInternal;
+        }
+        if (settings.groupSiblings !== undefined) {
+          groupSiblings = settings.groupSiblings;
+          document.getElementById('group-siblings-check').checked = groupSiblings;
         }
         if (settings.accessibilityMode !== undefined) {
           accessibilityMode = settings.accessibilityMode;
@@ -2305,6 +2317,7 @@ const userB = await fetch('/user/123');</pre>
       document.getElementById('stack-group-check').addEventListener('change', toggleStackGrouping);
       document.getElementById('temporal-edges-check').addEventListener('change', toggleTemporalEdges);
       document.getElementById('hide-internal-check').addEventListener('change', toggleHideInternal);
+      document.getElementById('group-siblings-check').addEventListener('change', toggleGroupSiblings);
       document.getElementById('accessibility-check').addEventListener('change', toggleAccessibility);
 
       // Threshold slider handlers
@@ -2644,6 +2657,12 @@ const userB = await fetch('/user/123');</pre>
           return;
         }
 
+        // Group siblings toggle: S
+        if (e.key === 's' || e.key === 'S') {
+          toggleGroupSiblings(true);
+          return;
+        }
+
         // Refresh/Reset current view: Shift+R
         if (e.shiftKey && (e.key === 'r' || e.key === 'R')) {
           if (traceData) {
@@ -2864,6 +2883,25 @@ const userB = await fetch('/user/123');</pre>
 
         if (clicked) {
           selectResource(clicked.resource);
+
+          // Handle expand/collapse for compound nodes (sibling group representatives)
+          // Check if this is the representative of any sibling group (expanded or not)
+          if (groupSiblings) {
+            const group = getSiblingGroup(clicked.resource.asyncId);
+            if (group && group.representative.asyncId === clicked.resource.asyncId) {
+              const groupKey = group.key;
+              if (expandedSiblingGroups.has(groupKey)) {
+                expandedSiblingGroups.delete(groupKey);
+              } else {
+                expandedSiblingGroups.add(groupKey);
+              }
+              // Re-initialize DAG to show/hide siblings
+              dagNodes = [];
+              initDAGNodes();
+              return;
+            }
+          }
+
           // Handle click-to-filter
           if (clickToFilterEnabled) {
             applyClickFilter(clicked.resource.asyncId);
@@ -3221,6 +3259,7 @@ const userB = await fetch('/user/123');</pre>
       // Initialize type filter buttons
       initTypeFilters();
       expandedStackTraces.clear();
+      expandedSiblingGroups.clear();
 
       traceData.childrenMap = new Map();
       traceData.resources.forEach(r => {
@@ -3383,7 +3422,7 @@ const userB = await fetch('/user/123');</pre>
     }
 
     function updateAnalysisButtonState() {
-      const activeCount = [showCriticalPath, showBottlenecks, showPatterns, clickToFilterEnabled, stackTraceGrouping, showTemporalEdges, hideInternal, accessibilityMode].filter(x => x).length;
+      const activeCount = [showCriticalPath, showBottlenecks, showPatterns, clickToFilterEnabled, stackTraceGrouping, showTemporalEdges, hideInternal, groupSiblings, accessibilityMode].filter(x => x).length;
       const btn = document.getElementById('analysis-btn');
       if (activeCount > 0) {
         btn.textContent = `🔬 Analysis (${activeCount}) ▾`;
@@ -4129,6 +4168,120 @@ const userB = await fetch('/user/123');</pre>
       updateAnalysisButtonState();
       saveSettings();
       render();
+    }
+
+    // ==================== GROUP SIBLINGS ====================
+    // Group resources that share the same stack trace and trigger,
+    // created during the same callback execution window
+    function toggleGroupSiblings(fromHotkey = false) {
+      const checkbox = document.getElementById('group-siblings-check');
+      if (fromHotkey) {
+        groupSiblings = !groupSiblings;
+        checkbox.checked = groupSiblings;
+      } else {
+        groupSiblings = checkbox.checked;
+      }
+      dagNodes = [];  // Re-initialize DAG when grouping changes
+      expandedSiblingGroups.clear();  // Clear expanded state when toggling
+      if (groupSiblings && traceData) {
+        computeSiblingGroups();
+      }
+      updateAnalysisButtonState();
+      saveSettings();
+      render();
+    }
+
+    function computeSiblingGroups() {
+      siblingGroups = new Map();
+      if (!traceData) return;
+
+      // Build a map of triggerId -> trigger resource for callback window checks
+      const triggerMap = new Map();
+      traceData.resources.forEach(r => triggerMap.set(r.asyncId, r));
+
+      // Group resources by (stackTraceId, triggerId)
+      const candidates = new Map();
+      traceData.resources.forEach(r => {
+        // Skip root
+        if (r.triggerId === 0) return;
+
+        const key = `${r.stackTraceId}:${r.triggerId}`;
+        if (!candidates.has(key)) {
+          candidates.set(key, []);
+        }
+        candidates.get(key).push(r);
+      });
+
+      // Filter to groups where resources were created during trigger's callback
+      // and have more than one member
+      candidates.forEach((resources, key) => {
+        if (resources.length < 2) return;
+
+        const triggerId = resources[0].triggerId;
+        const trigger = triggerMap.get(triggerId);
+
+        // Check if resources were created during trigger's callback execution
+        // or within a small time window of each other (for triggers without callback timing)
+        let validGroup = [];
+
+        if (trigger && trigger.callbackStartedAt > 0 && trigger.callbackEndedAt > 0) {
+          // Filter to resources created during trigger's callback
+          validGroup = resources.filter(r =>
+            r.createdAt >= trigger.callbackStartedAt &&
+            r.createdAt <= trigger.callbackEndedAt
+          );
+        } else {
+          // No callback timing - use temporal proximity (within 1ms of each other)
+          const sorted = [...resources].sort((a, b) => a.createdAt - b.createdAt);
+          const timeWindow = 1_000_000; // 1ms in nanoseconds
+
+          // Find largest cluster within time window
+          let bestCluster = [];
+          for (let i = 0; i < sorted.length; i++) {
+            const cluster = [sorted[i]];
+            for (let j = i + 1; j < sorted.length; j++) {
+              if (sorted[j].createdAt - sorted[i].createdAt <= timeWindow) {
+                cluster.push(sorted[j]);
+              } else {
+                break;
+              }
+            }
+            if (cluster.length > bestCluster.length) {
+              bestCluster = cluster;
+            }
+          }
+          validGroup = bestCluster;
+        }
+
+        if (validGroup.length >= 2) {
+          // Create group with first resource as the "representative"
+          const groupKey = `sibling:${key}`;
+          siblingGroups.set(groupKey, {
+            key: groupKey,
+            members: validGroup.map(r => r.asyncId),
+            representative: validGroup[0],
+            stackTraceId: validGroup[0].stackTraceId,
+            triggerId: validGroup[0].triggerId,
+            types: [...new Set(validGroup.map(r => r.type))]
+          });
+        }
+      });
+    }
+
+    // Get the sibling group a resource belongs to, if any
+    function getSiblingGroup(asyncId) {
+      for (const [key, group] of siblingGroups) {
+        if (group.members.includes(asyncId)) {
+          return group;
+        }
+      }
+      return null;
+    }
+
+    // Check if a resource is the representative of its sibling group
+    function isSiblingRepresentative(asyncId) {
+      const group = getSiblingGroup(asyncId);
+      return group && group.representative.asyncId === asyncId;
     }
 
     function computeTemporalEdges() {
@@ -5044,14 +5197,50 @@ const userB = await fetch('/user/123');</pre>
     function initDAGNodes() {
       if (!traceData) return;
 
+      // Recompute sibling groups if grouping is enabled
+      if (groupSiblings) {
+        computeSiblingGroups();
+      }
+
       const container = document.getElementById('dag-view');
       const width = container.clientWidth;
       const height = container.clientHeight;
 
       // Filter based on current filter mode and click filter
-      const filteredResources = traceData.resources.filter(r =>
+      let filteredResources = traceData.resources.filter(r =>
         shouldShowResource(r) && isResourceVisible(r.asyncId)
       );
+
+      // When grouping siblings, only show representative nodes (unless group is expanded)
+      // Also build a redirect map for layout purposes
+      const siblingTriggerRedirect = new Map();
+      if (groupSiblings && siblingGroups.size > 0) {
+        // Build redirect map: hidden sibling asyncId -> representative asyncId
+        siblingGroups.forEach(group => {
+          if (expandedSiblingGroups.has(group.key)) return; // Skip expanded groups
+          const repId = group.representative.asyncId;
+          group.members.forEach(memberId => {
+            if (memberId !== repId) {
+              siblingTriggerRedirect.set(memberId, repId);
+            }
+          });
+        });
+
+        filteredResources = filteredResources.filter(r => {
+          const group = getSiblingGroup(r.asyncId);
+          // Keep if not in a group
+          if (!group) return true;
+          // Keep if group is expanded (show all siblings)
+          if (expandedSiblingGroups.has(group.key)) return true;
+          // Otherwise, only keep the representative
+          return group.representative.asyncId === r.asyncId;
+        });
+      }
+
+      // Add effective trigger ID to each resource (redirecting if trigger was a hidden sibling)
+      filteredResources.forEach(r => {
+        r._effectiveTriggerId = siblingTriggerRedirect.get(r.triggerId) || r.triggerId;
+      });
 
       // Create nodes with initial positions based on depth
       dagNodes = [];
@@ -5078,15 +5267,31 @@ const userB = await fetch('/user/123');</pre>
         depthGroups.forEach((resources, depth) => {
           const levelWidth = width / (resources.length + 1);
           resources.forEach((r, i) => {
+            const sibGroup = groupSiblings ? getSiblingGroup(r.asyncId) : null;
+            // Track if this is a group representative (collapsed or expanded)
+            const isGroupExpanded = sibGroup && expandedSiblingGroups.has(sibGroup.key);
+            const isRep = sibGroup && sibGroup.representative.asyncId === r.asyncId;
+            const isGroupRep = isRep && !isGroupExpanded;  // Collapsed rep (shows count)
+            const isExpandedRep = isRep && isGroupExpanded;  // Expanded rep (shows -)
+            const isExpandedSibling = sibGroup && isGroupExpanded && !isRep;  // Non-rep sibling of expanded group
+            const groupSize = isGroupRep ? sibGroup.members.length : 1;
+            // Scale radius based on group size (but cap it)
+            const baseRadius = 15;
+            const radius = isGroupRep ? baseRadius + Math.min(groupSize * 2, 15) : baseRadius;
+
             const node = {
               resource: r,
               x: levelWidth * (i + 1),
               y: levelHeight * (depth + 1),
               vx: 0,
               vy: 0,
-              radius: 15,
+              radius: radius,
               color: TYPE_COLORS[r.type] || '#808080',
-              fixed: false
+              fixed: false,
+              siblingGroup: sibGroup,
+              isGroupRep: isGroupRep,
+              isExpandedRep: isExpandedRep,
+              isExpandedSibling: isExpandedSibling
             };
             dagNodes.push(node);
             nodeMap.set(r.asyncId, node);
@@ -5109,19 +5314,23 @@ const userB = await fetch('/user/123');</pre>
 
     // Compute hierarchical (tree) layout for DAG
     function computeHierarchicalLayout(resources, width, height, nodeMap) {
-      // Build adjacency for children
+      // Build adjacency for children using effective trigger ID (handles sibling redirects)
       const childrenMap = new Map();
       resources.forEach(r => {
-        if (!childrenMap.has(r.triggerId)) childrenMap.set(r.triggerId, []);
-        if (r.triggerId !== 0 || r.type === 'root') {
+        const effTriggerId = r._effectiveTriggerId || r.triggerId;
+        if (!childrenMap.has(effTriggerId)) childrenMap.set(effTriggerId, []);
+        if (effTriggerId !== 0 || r.type === 'root') {
           // Only add if parent is in filtered set or this is root
-          childrenMap.get(r.triggerId).push(r);
+          childrenMap.get(effTriggerId).push(r);
         }
       });
 
       // Find roots (resources whose parent is not in the filtered set)
       const resourceIds = new Set(resources.map(r => r.asyncId));
-      const roots = resources.filter(r => r.triggerId === 0 || !resourceIds.has(r.triggerId));
+      const roots = resources.filter(r => {
+        const effTriggerId = r._effectiveTriggerId || r.triggerId;
+        return effTriggerId === 0 || !resourceIds.has(effTriggerId);
+      });
 
       // Sort children by creation time
       childrenMap.forEach((children, parentId) => {
@@ -5179,15 +5388,30 @@ const userB = await fetch('/user/123');</pre>
 
         const y = padding + depth * levelHeight;
 
+        const sibGroup = groupSiblings ? getSiblingGroup(r.asyncId) : null;
+        // Track if this is a group representative (collapsed or expanded)
+        const isGroupExpanded = sibGroup && expandedSiblingGroups.has(sibGroup.key);
+        const isRep = sibGroup && sibGroup.representative.asyncId === r.asyncId;
+        const isGroupRep = isRep && !isGroupExpanded;  // Collapsed rep (shows count)
+        const isExpandedRep = isRep && isGroupExpanded;  // Expanded rep (shows -)
+        const isExpandedSibling = sibGroup && isGroupExpanded && !isRep;  // Non-rep sibling of expanded group
+        const groupSize = isGroupRep ? sibGroup.members.length : 1;
+        const baseRadius = 15;
+        const radius = isGroupRep ? baseRadius + Math.min(groupSize * 2, 15) : baseRadius;
+
         const node = {
           resource: r,
           x: x,
           y: y,
           vx: 0,
           vy: 0,
-          radius: 15,
+          radius: radius,
           color: TYPE_COLORS[r.type] || '#808080',
-          fixed: true  // Fixed in hierarchical mode
+          fixed: true,  // Fixed in hierarchical mode
+          siblingGroup: sibGroup,
+          isGroupRep: isGroupRep,
+          isExpandedRep: isExpandedRep,
+          isExpandedSibling: isExpandedSibling
         };
         dagNodes.push(node);
         nodeMap.set(r.asyncId, node);
@@ -5207,18 +5431,22 @@ const userB = await fetch('/user/123');</pre>
         (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0
       ), 1);
 
-      // Build adjacency for children
+      // Build adjacency for children using effective trigger ID (handles sibling redirects)
       const childrenMap = new Map();
       resources.forEach(r => {
-        if (!childrenMap.has(r.triggerId)) childrenMap.set(r.triggerId, []);
-        if (r.triggerId !== 0 || r.type === 'root') {
-          childrenMap.get(r.triggerId).push(r);
+        const effTriggerId = r._effectiveTriggerId || r.triggerId;
+        if (!childrenMap.has(effTriggerId)) childrenMap.set(effTriggerId, []);
+        if (effTriggerId !== 0 || r.type === 'root') {
+          childrenMap.get(effTriggerId).push(r);
         }
       });
 
       // Find roots
       const resourceIds = new Set(resources.map(r => r.asyncId));
-      const roots = resources.filter(r => r.triggerId === 0 || !resourceIds.has(r.triggerId));
+      const roots = resources.filter(r => {
+        const effTriggerId = r._effectiveTriggerId || r.triggerId;
+        return effTriggerId === 0 || !resourceIds.has(effTriggerId);
+      });
 
       // Sort children by creation time
       childrenMap.forEach((children, parentId) => {
@@ -5290,16 +5518,31 @@ const userB = await fetch('/user/123');</pre>
         const y = padding + 30 + depth * levelHeight;
         const syncTime = (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) ? r.callbackEndedAt - r.callbackStartedAt : 0;
 
+        const sibGroup = groupSiblings ? getSiblingGroup(r.asyncId) : null;
+        // Track if this is a group representative (collapsed or expanded)
+        const isGroupExpanded = sibGroup && expandedSiblingGroups.has(sibGroup.key);
+        const isRep = sibGroup && sibGroup.representative.asyncId === r.asyncId;
+        const isGroupRep = isRep && !isGroupExpanded;  // Collapsed rep (shows count)
+        const isExpandedRep = isRep && isGroupExpanded;  // Expanded rep (shows -)
+        const isExpandedSibling = sibGroup && isGroupExpanded && !isRep;  // Non-rep sibling of expanded group
+        const groupSize = isGroupRep ? sibGroup.members.length : 1;
+        // Add extra radius for group representatives
+        const radius = isGroupRep ? myRadius + Math.min(groupSize * 2, 10) : myRadius;
+
         const node = {
           resource: r,
           x: x,
           y: y,
           vx: 0,
           vy: 0,
-          radius: myRadius,
+          radius: radius,
           color: TYPE_COLORS[r.type] || '#808080',
           fixed: true,
-          syncTime: syncTime  // Store for potential display
+          syncTime: syncTime,  // Store for potential display
+          siblingGroup: sibGroup,
+          isGroupRep: isGroupRep,
+          isExpandedRep: isExpandedRep,
+          isExpandedSibling: isExpandedSibling
         };
         dagNodes.push(node);
         nodeMap.set(r.asyncId, node);
@@ -5442,6 +5685,35 @@ const userB = await fetch('/user/123');</pre>
             }
           }
 
+          // Sibling attraction - keep expanded siblings grouped together
+          if (groupSiblings && (node.isExpandedSibling || node.isExpandedRep) && node.siblingGroup) {
+            // Find other siblings in the same group
+            const siblings = dagNodes.filter(n =>
+              n !== node &&
+              n.siblingGroup &&
+              n.siblingGroup.key === node.siblingGroup.key
+            );
+
+            if (siblings.length > 0) {
+              // Calculate centroid of sibling group
+              let centroidX = node.x, centroidY = node.y;
+              siblings.forEach(sib => {
+                centroidX += sib.x;
+                centroidY += sib.y;
+              });
+              centroidX /= (siblings.length + 1);
+              centroidY /= (siblings.length + 1);
+
+              // Attract toward centroid
+              const dx = centroidX - node.x;
+              const dy = centroidY - node.y;
+              const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+              const force = dist * 0.08;  // Stronger attraction to keep siblings together
+              fx += (dx / dist) * force;
+              fy += (dy / dist) * force;
+            }
+          }
+
           // Weak centering force
           fx += (centerX - node.x) * 0.001;
           fy += (centerY - node.y) * 0.001;
@@ -5491,11 +5763,31 @@ const userB = await fetch('/user/123');</pre>
       const nodeMap = new Map();
       dagNodes.forEach(n => nodeMap.set(n.resource.asyncId, n));
 
+      // Build mapping from hidden siblings to their representative (only for collapsed groups)
+      const siblingRedirect = new Map();
+      if (groupSiblings && siblingGroups.size > 0) {
+        siblingGroups.forEach(group => {
+          // Skip expanded groups - their siblings are visible
+          if (expandedSiblingGroups.has(group.key)) return;
+          const repId = group.representative.asyncId;
+          group.members.forEach(memberId => {
+            if (memberId !== repId) {
+              siblingRedirect.set(memberId, repId);
+            }
+          });
+        });
+      }
+
       // Draw edges
       dagNodes.forEach(node => {
         const r = node.resource;
         if (r.triggerId !== 0) {
-          const parent = nodeMap.get(r.triggerId);
+          // If trigger is a hidden sibling, redirect to the representative
+          let effectiveTriggerId = r.triggerId;
+          if (siblingRedirect.has(r.triggerId)) {
+            effectiveTriggerId = siblingRedirect.get(r.triggerId);
+          }
+          const parent = nodeMap.get(effectiveTriggerId);
           if (parent) {
             const isHighlighted = highlightedChain.has(r.asyncId) && highlightedChain.has(r.triggerId);
             const isOnCriticalPath = showCriticalPath &&
@@ -5670,6 +5962,27 @@ const userB = await fetch('/user/123');</pre>
           ctx.stroke();
         }
 
+        // Sibling group indicator - dashed ring for collapsed rep, subtle ring for expanded siblings
+        if (node.isGroupRep && node.siblingGroup) {
+          // Collapsed group rep - prominent dashed ring
+          ctx.strokeStyle = '#7ec8e3';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([3, 2]);
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 4, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else if (node.isExpandedSibling || node.isExpandedRep) {
+          // Expanded group members - subtle blue ring to show they're related
+          ctx.strokeStyle = '#4a9eff';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([2, 2]);
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 3, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
         // Label
         ctx.fillStyle = 'white';
         ctx.font = '9px sans-serif';
@@ -5677,6 +5990,34 @@ const userB = await fetch('/user/123');</pre>
         ctx.textBaseline = 'middle';
         const label = r.type.replace('js-', '').substring(0, 4);
         ctx.fillText(label, node.x, node.y);
+
+        // Sibling group badge - count for collapsed, minus for expanded
+        if ((node.isGroupRep || node.isExpandedRep) && node.siblingGroup) {
+          const badgeX = node.x + node.radius * 0.7;
+          const badgeY = node.y - node.radius * 0.7;
+          const badgeRadius = 8;
+
+          // Badge background - red for collapsed (count), blue for expanded (minus)
+          ctx.beginPath();
+          ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+          ctx.fillStyle = node.isExpandedRep ? '#4a9eff' : '#e94560';
+          ctx.fill();
+          ctx.strokeStyle = '#1a1a2e';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Badge text - count or minus sign
+          ctx.fillStyle = 'white';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          if (node.isExpandedRep) {
+            ctx.fillText('−', badgeX, badgeY);  // Unicode minus sign
+          } else {
+            ctx.font = 'bold 8px sans-serif';
+            ctx.fillText(node.siblingGroup.members.length.toString(), badgeX, badgeY);
+          }
+        }
       });
 
       ctx.restore();
