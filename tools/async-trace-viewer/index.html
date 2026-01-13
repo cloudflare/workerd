@@ -229,6 +229,7 @@
     #waterfall-view.active { display: flex; flex-direction: column; }
     #latency-view.active { display: flex; flex-direction: column; }
     #gaps-view.active { display: flex; flex-direction: column; }
+    #replay-view.active { display: flex; flex-direction: column; }
 
     /* Waterfall styles */
     .waterfall { position: relative; min-height: 100%; }
@@ -1026,6 +1027,10 @@
         <option value="real-tcp">Real: TCP Socket (Gopher)</option>
         <option value="real-eventsource">Real: EventSource (SSE)</option>
         <option value="real-nodejs-compat-http">Real: Node.js HTTP</option>
+        <option value="real-web-streams-sync">Real: Web Streams (sync)</option>
+        <option value="real-web-streams-async">Real: Web Streams (async)</option>
+        <option value="real-web-streams-bytes-sync">Real: Web Streams Bytes (sync)</option>
+        <option value="real-web-streams-bytes-async">Real: Web Streams Bytes (async)</option>
       </select>
       <div class="dropdown" id="analysis-dropdown">
         <button class="dropdown-btn" id="analysis-btn">🔬 Analysis ▾</button>
@@ -1215,7 +1220,13 @@
     </div>
 
     <div class="view-container" id="replay-view" style="overflow: hidden; padding: 0;">
-      <canvas id="replay-canvas"></canvas>
+      <canvas id="replay-controls-canvas" style="flex-shrink: 0;"></canvas>
+      <div id="replay-main-area" style="flex: 1; display: flex; flex-direction: row; min-height: 0;">
+        <canvas id="replay-sidebar-canvas" style="flex-shrink: 0; width: 210px;"></canvas>
+        <div id="replay-scroll-container" style="flex: 1; overflow-y: auto; overflow-x: hidden;">
+          <canvas id="replay-canvas"></canvas>
+        </div>
+      </div>
     </div>
 
     <div class="sidebar">
@@ -1892,6 +1903,11 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       alerts: false,
       eventFeed: false
     };
+    // Replay scroll state
+    let replayScrollY = 0;  // Current scroll position
+    let replayAutoScroll = true;  // Auto-scroll to follow action
+    let replayContentHeight = 0;  // Calculated content height
+    let replayControlsHeight = 95;  // Height of fixed controls area
 
     // Accessibility mode - uses patterns instead of colors
     let accessibilityMode = false;
@@ -3252,7 +3268,11 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
           'real-nodejs-compat-streams': 'sample-real-nodejs-compat-streams.json',
           'real-tcp': 'sample-real-tcp.json',
           'real-eventsource': 'sample-real-eventsource.json',
-          'real-nodejs-compat-http': 'sample-real-nodejs-compat-http.json'
+          'real-nodejs-compat-http': 'sample-real-nodejs-compat-http.json',
+          'real-web-streams-sync': 'sample-real-web-streams-sync.json',
+          'real-web-streams-async': 'sample-real-web-streams-async.json',
+          'real-web-streams-bytes-sync': 'sample-real-web-streams-bytes-sync.json',
+          'real-web-streams-bytes-async': 'sample-real-web-streams-bytes-async.json'
         };
       try {
         const response = await fetch(files[demo] + '?t=' + Date.now());
@@ -9759,39 +9779,95 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
 
     function renderReplayFrame() {
       const container = document.getElementById('replay-view');
+      const mainArea = document.getElementById('replay-main-area');
+      const scrollContainer = document.getElementById('replay-scroll-container');
+      const controlsCanvas = document.getElementById('replay-controls-canvas');
+      const sidebarCanvas = document.getElementById('replay-sidebar-canvas');
       const canvas = document.getElementById('replay-canvas');
+      const ctrlCtx = controlsCanvas.getContext('2d');
+      const sbCtx = sidebarCanvas.getContext('2d');
       const ctx = canvas.getContext('2d');
 
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
-
-      const width = canvas.width;
-      const height = canvas.height;
+      // Set up controls canvas (fixed at top)
+      const containerWidth = container.clientWidth;
+      controlsCanvas.width = containerWidth;
+      controlsCanvas.height = replayControlsHeight;
 
       // Sidebar dimensions
       const sidebarWidth = 210;
-      const sidebarX = 0;
 
-      // Main area dimensions (to the right of sidebar)
-      const mainX = sidebarWidth;
-      const mainWidth = width - sidebarWidth;
-      const padding = { top: 80, right: 30, bottom: 50, left: 10 };
+      // Set up sidebar canvas (fixed on left)
+      const sidebarHeight = mainArea.clientHeight;
+      sidebarCanvas.width = sidebarWidth;
+      sidebarCanvas.height = sidebarHeight;
+
+      // Main visualization area dimensions (to the right of sidebar)
+      const mainX = 0;  // Canvas starts at 0 since sidebar is separate
+      const mainWidth = scrollContainer.clientWidth;
+      const padding = { top: 10, right: 30, bottom: 50, left: 10 };
       const chartWidth = mainWidth - padding.left - padding.right;
+
+      // Calculate required content height based on resource count and layout
+      const scrollContainerHeight = scrollContainer.clientHeight;
+      let requiredHeight = scrollContainerHeight;  // Minimum is visible area
+
+      if (traceData) {
+        const resourceCount = traceData.resources.length;
+        if (replayLayoutMode === 'grid') {
+          // Grid layout: calculate rows needed
+          const maxCols = Math.max(1, Math.floor(chartWidth / 100));
+          const rowsNeeded = Math.ceil(resourceCount / maxCols);
+          const cellHeight = 80;
+          requiredHeight = Math.max(scrollContainerHeight, rowsNeeded * cellHeight + padding.top + padding.bottom + 50);
+        } else if (replayLayoutMode === 'bubble') {
+          // Bubble layout: estimate based on tree depth and width
+          const depthEstimate = Math.ceil(Math.log2(resourceCount + 1)) + 1;
+          const levelHeight = 120;
+          requiredHeight = Math.max(scrollContainerHeight, depthEstimate * levelHeight + padding.bottom + 100);
+        } else {
+          // Rings layout: needs square-ish area, use visible height
+          requiredHeight = scrollContainerHeight;
+        }
+      }
+      replayContentHeight = requiredHeight;
+
+      // Set up main canvas (scrollable visualization only, no sidebar)
+      canvas.width = mainWidth;
+      canvas.height = requiredHeight;
+      canvas.style.height = requiredHeight + 'px';
+
+      const width = canvas.width;
+      const height = canvas.height;
       const chartHeight = height - padding.top - padding.bottom;
 
+      // === RENDER CONTROLS CANVAS ===
+      ctrlCtx.fillStyle = '#1a1a2e';
+      ctrlCtx.fillRect(0, 0, containerWidth, replayControlsHeight);
+
+      // Sidebar background in controls header
+      ctrlCtx.fillStyle = 'rgba(15, 52, 96, 0.5)';
+      ctrlCtx.fillRect(0, 0, sidebarWidth, replayControlsHeight);
+      ctrlCtx.strokeStyle = '#0f3460';
+      ctrlCtx.lineWidth = 1;
+      ctrlCtx.beginPath();
+      ctrlCtx.moveTo(sidebarWidth, 0);
+      ctrlCtx.lineTo(sidebarWidth, replayControlsHeight);
+      ctrlCtx.stroke();
+
+      // === RENDER SIDEBAR CANVAS ===
+      sbCtx.fillStyle = 'rgba(15, 52, 96, 0.5)';
+      sbCtx.fillRect(0, 0, sidebarWidth, sidebarHeight);
+      sbCtx.strokeStyle = '#0f3460';
+      sbCtx.lineWidth = 1;
+      sbCtx.beginPath();
+      sbCtx.moveTo(sidebarWidth - 1, 0);
+      sbCtx.lineTo(sidebarWidth - 1, sidebarHeight);
+      sbCtx.stroke();
+
+      // === RENDER MAIN CANVAS ===
       // Background
       ctx.fillStyle = '#1a1a2e';
       ctx.fillRect(0, 0, width, height);
-
-      // Sidebar background
-      ctx.fillStyle = 'rgba(15, 52, 96, 0.5)';
-      ctx.fillRect(sidebarX, 0, sidebarWidth, height);
-      ctx.strokeStyle = '#0f3460';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sidebarWidth, 0);
-      ctx.lineTo(sidebarWidth, height);
-      ctx.stroke();
 
       if (!traceData) return;
 
@@ -9803,18 +9879,19 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       const durationMs = duration / 1e6;
       const progress = replayTime / duration;
 
+      // === DRAW CONTROLS (to controls canvas) ===
       // Draw title (centered in main area)
-      ctx.fillStyle = '#e94560';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Request Replay', mainX + mainWidth / 2, 25);
+      ctrlCtx.fillStyle = '#e94560';
+      ctrlCtx.font = 'bold 14px sans-serif';
+      ctrlCtx.textAlign = 'center';
+      ctrlCtx.fillText('Request Replay', mainX + mainWidth / 2, 18);
 
       // Draw playback controls area
-      const controlsY = 45;
-      ctx.fillStyle = '#888';
-      ctx.font = '11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`Time: ${currentTimeMs.toFixed(2)}ms / ${durationMs.toFixed(2)}ms`, mainX + mainWidth / 2, controlsY);
+      const controlsY = 32;
+      ctrlCtx.fillStyle = '#888';
+      ctrlCtx.font = '11px sans-serif';
+      ctrlCtx.textAlign = 'center';
+      ctrlCtx.fillText(`Time: ${currentTimeMs.toFixed(2)}ms / ${durationMs.toFixed(2)}ms`, mainX + mainWidth / 2, controlsY);
 
       // Draw control buttons (centered in main area)
       const btnY = controlsY + 8;
@@ -9825,53 +9902,53 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       let btnX = mainX + (mainWidth - totalBtnWidth) / 2;
 
       // Play/Pause button
-      ctx.fillStyle = replayPlaying ? '#ff6432' : '#50c878';
-      ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.fillText(replayPlaying ? '⏸ Pause' : '▶ Play', btnX + btnWidth/2, btnY + 15);
+      ctrlCtx.fillStyle = replayPlaying ? '#ff6432' : '#50c878';
+      ctrlCtx.fillRect(btnX, btnY, btnWidth, btnHeight);
+      ctrlCtx.fillStyle = 'white';
+      ctrlCtx.font = 'bold 10px sans-serif';
+      ctrlCtx.fillText(replayPlaying ? '⏸ Pause' : '▶ Play', btnX + btnWidth/2, btnY + 15);
       btnX += btnWidth + btnSpacing;
 
       // Reset button
-      ctx.fillStyle = '#0f3460';
-      ctx.strokeStyle = '#e94560';
-      ctx.lineWidth = 1;
-      ctx.fillRect(btnX, btnY, btnWidth, btnHeight);
-      ctx.strokeRect(btnX, btnY, btnWidth, btnHeight);
-      ctx.fillStyle = '#e94560';
-      ctx.fillText('⏮ Reset', btnX + btnWidth/2, btnY + 15);
+      ctrlCtx.fillStyle = '#0f3460';
+      ctrlCtx.strokeStyle = '#e94560';
+      ctrlCtx.lineWidth = 1;
+      ctrlCtx.fillRect(btnX, btnY, btnWidth, btnHeight);
+      ctrlCtx.strokeRect(btnX, btnY, btnWidth, btnHeight);
+      ctrlCtx.fillStyle = '#e94560';
+      ctrlCtx.fillText('⏮ Reset', btnX + btnWidth/2, btnY + 15);
       btnX += btnWidth + btnSpacing;
 
       // Speed buttons (compact)
       const speeds = [0.25, 0.5, 1, 2];
       speeds.forEach(speed => {
         const speedWidth = speed === 0.25 ? 32 : 28;
-        ctx.fillStyle = replaySpeed === speed ? '#e94560' : '#0f3460';
-        ctx.fillRect(btnX, btnY, speedWidth, btnHeight);
-        ctx.strokeStyle = '#e94560';
-        ctx.strokeRect(btnX, btnY, speedWidth, btnHeight);
-        ctx.fillStyle = replaySpeed === speed ? 'white' : '#e94560';
-        ctx.fillText(`${speed}x`, btnX + speedWidth/2, btnY + 15);
+        ctrlCtx.fillStyle = replaySpeed === speed ? '#e94560' : '#0f3460';
+        ctrlCtx.fillRect(btnX, btnY, speedWidth, btnHeight);
+        ctrlCtx.strokeStyle = '#e94560';
+        ctrlCtx.strokeRect(btnX, btnY, speedWidth, btnHeight);
+        ctrlCtx.fillStyle = replaySpeed === speed ? 'white' : '#e94560';
+        ctrlCtx.fillText(`${speed}x`, btnX + speedWidth/2, btnY + 15);
         btnX += speedWidth + 3;
       });
 
       // Loop button
       btnX += 3;
-      ctx.fillStyle = replayLoop ? '#50c878' : '#0f3460';
-      ctx.fillRect(btnX, btnY, 38, btnHeight);
-      ctx.strokeStyle = replayLoop ? '#50c878' : '#e94560';
-      ctx.strokeRect(btnX, btnY, 38, btnHeight);
-      ctx.fillStyle = replayLoop ? 'white' : '#e94560';
-      ctx.fillText('🔁', btnX + 19, btnY + 15);
+      ctrlCtx.fillStyle = replayLoop ? '#50c878' : '#0f3460';
+      ctrlCtx.fillRect(btnX, btnY, 38, btnHeight);
+      ctrlCtx.strokeStyle = replayLoop ? '#50c878' : '#e94560';
+      ctrlCtx.strokeRect(btnX, btnY, 38, btnHeight);
+      ctrlCtx.fillStyle = replayLoop ? 'white' : '#e94560';
+      ctrlCtx.fillText('🔁', btnX + 19, btnY + 15);
       btnX += 41;
 
       // Ghost button
-      ctx.fillStyle = replayGhostMode ? '#9966cc' : '#0f3460';
-      ctx.fillRect(btnX, btnY, 38, btnHeight);
-      ctx.strokeStyle = replayGhostMode ? '#9966cc' : '#e94560';
-      ctx.strokeRect(btnX, btnY, 38, btnHeight);
-      ctx.fillStyle = replayGhostMode ? 'white' : '#e94560';
-      ctx.fillText('👻', btnX + 19, btnY + 15);
+      ctrlCtx.fillStyle = replayGhostMode ? '#9966cc' : '#0f3460';
+      ctrlCtx.fillRect(btnX, btnY, 38, btnHeight);
+      ctrlCtx.strokeStyle = replayGhostMode ? '#9966cc' : '#e94560';
+      ctrlCtx.strokeRect(btnX, btnY, 38, btnHeight);
+      ctrlCtx.fillStyle = replayGhostMode ? 'white' : '#e94560';
+      ctrlCtx.fillText('👻', btnX + 19, btnY + 15);
       btnX += 41;
 
       // Layout toggle buttons (compact with single letter + icon style)
@@ -9881,57 +9958,72 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         { mode: 'bubble', label: '◉', width: 28 },
         { mode: 'rings', label: '◎', width: 28 }
       ];
-      layoutModes.forEach(({ mode, label, width }) => {
-        ctx.fillStyle = replayLayoutMode === mode ? '#4a9eff' : '#0f3460';
-        ctx.fillRect(btnX, btnY, width, btnHeight);
-        ctx.strokeStyle = replayLayoutMode === mode ? '#4a9eff' : '#e94560';
-        ctx.strokeRect(btnX, btnY, width, btnHeight);
-        ctx.fillStyle = replayLayoutMode === mode ? 'white' : '#e94560';
-        ctx.fillText(label, btnX + width/2, btnY + 15);
-        btnX += width + 3;
+      layoutModes.forEach(({ mode, label, width: btnW }) => {
+        ctrlCtx.fillStyle = replayLayoutMode === mode ? '#4a9eff' : '#0f3460';
+        ctrlCtx.fillRect(btnX, btnY, btnW, btnHeight);
+        ctrlCtx.strokeStyle = replayLayoutMode === mode ? '#4a9eff' : '#e94560';
+        ctrlCtx.strokeRect(btnX, btnY, btnW, btnHeight);
+        ctrlCtx.fillStyle = replayLayoutMode === mode ? 'white' : '#e94560';
+        ctrlCtx.fillText(label, btnX + btnW/2, btnY + 15);
+        btnX += btnW + 3;
       });
 
-      // Progress bar (in main area)
-      const progressY = btnY + btnHeight + 10;
-      const progressX = mainX + padding.left;
-      ctx.fillStyle = '#0f3460';
-      ctx.fillRect(progressX, progressY, chartWidth, 8);
+      // Progress bar (in controls canvas - position after sidebar)
+      const progressY = btnY + btnHeight + 8;
+      const progressX = sidebarWidth + padding.left;
+      ctrlCtx.fillStyle = '#0f3460';
+      ctrlCtx.fillRect(progressX, progressY, chartWidth, 8);
 
       // Event markers on progress bar
       traceData.resources.forEach(r => {
         // Mark creation events
         if (r.createdAt > 0) {
           const x = progressX + (r.createdAt / duration) * chartWidth;
-          ctx.fillStyle = 'rgba(80, 200, 120, 0.6)';  // Green for creation
-          ctx.beginPath();
-          ctx.arc(x, progressY + 4, 2, 0, Math.PI * 2);
-          ctx.fill();
+          ctrlCtx.fillStyle = 'rgba(80, 200, 120, 0.6)';  // Green for creation
+          ctrlCtx.beginPath();
+          ctrlCtx.arc(x, progressY + 4, 2, 0, Math.PI * 2);
+          ctrlCtx.fill();
         }
         // Mark callback start events (more prominent)
         if (r.callbackStartedAt > 0) {
           const x = progressX + (r.callbackStartedAt / duration) * chartWidth;
-          ctx.fillStyle = 'rgba(233, 69, 96, 0.8)';  // Red for callback
-          ctx.beginPath();
-          ctx.moveTo(x, progressY - 2);
-          ctx.lineTo(x - 3, progressY + 10);
-          ctx.lineTo(x + 3, progressY + 10);
-          ctx.closePath();
-          ctx.fill();
+          ctrlCtx.fillStyle = 'rgba(233, 69, 96, 0.8)';  // Red for callback
+          ctrlCtx.beginPath();
+          ctrlCtx.moveTo(x, progressY - 2);
+          ctrlCtx.lineTo(x - 3, progressY + 10);
+          ctrlCtx.lineTo(x + 3, progressY + 10);
+          ctrlCtx.closePath();
+          ctrlCtx.fill();
         }
       });
 
       // Progress fill (drawn on top of markers)
-      ctx.fillStyle = '#e94560';
-      ctx.globalAlpha = 0.6;
-      ctx.fillRect(progressX, progressY, chartWidth * progress, 8);
-      ctx.globalAlpha = 1;
+      ctrlCtx.fillStyle = '#e94560';
+      ctrlCtx.globalAlpha = 0.6;
+      ctrlCtx.fillRect(progressX, progressY, chartWidth * progress, 8);
+      ctrlCtx.globalAlpha = 1;
 
       // Playhead
-      ctx.fillStyle = 'white';
-      ctx.beginPath();
-      ctx.arc(progressX + chartWidth * progress, progressY + 4, 6, 0, Math.PI * 2);
-      ctx.fill();
+      ctrlCtx.fillStyle = 'white';
+      ctrlCtx.beginPath();
+      ctrlCtx.arc(progressX + chartWidth * progress, progressY + 4, 6, 0, Math.PI * 2);
+      ctrlCtx.fill();
 
+      // Store controls layout info for click handling
+      controlsCanvas._btnY = btnY;
+      controlsCanvas._btnHeight = btnHeight;
+      controlsCanvas._btnWidth = btnWidth;
+      controlsCanvas._btnSpacing = btnSpacing;
+      controlsCanvas._totalBtnWidth = totalBtnWidth;
+      controlsCanvas._mainX = mainX;
+      controlsCanvas._mainWidth = mainWidth;
+      controlsCanvas._progressY = progressY;
+      controlsCanvas._progressX = progressX;
+      controlsCanvas._chartWidth = chartWidth;
+      controlsCanvas._duration = duration;
+      controlsCanvas._speeds = speeds;
+
+      // === DRAW RESOURCES (to main scrollable canvas) ===
       // Draw resources that exist at current time
       const visibleResources = traceData.resources.filter(r => r.createdAt <= replayTime);
       const activeResources = visibleResources.filter(r => {
@@ -9941,9 +10033,9 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       });
 
       // Layout resources (grid or bubble mode)
-      const resourceAreaTop = progressY + 25;
+      const resourceAreaTop = padding.top;
       const resourceAreaHeight = height - resourceAreaTop - padding.bottom;
-      const resourceAreaLeft = mainX + padding.left;
+      const resourceAreaLeft = padding.left;
 
       // Sort by creation time for stable layout
       const sortedVisible = [...visibleResources].sort((a, b) => a.createdAt - b.createdAt);
@@ -10879,17 +10971,17 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         const isCollapsed = replaySidebarCollapsed[sectionKey];
 
         // Draw header text
-        ctx.fillStyle = color;
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(title, sbPadding, sbY);
+        sbCtx.fillStyle = color;
+        sbCtx.font = 'bold 10px sans-serif';
+        sbCtx.textAlign = 'left';
+        sbCtx.fillText(title, sbPadding, sbY);
 
         // Draw collapse arrow
-        ctx.font = '8px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillStyle = '#666';
-        ctx.fillText(isCollapsed ? '▶' : '▼', sidebarWidth - sbPadding, sbY);
-        ctx.textAlign = 'left';
+        sbCtx.font = '8px sans-serif';
+        sbCtx.textAlign = 'right';
+        sbCtx.fillStyle = '#666';
+        sbCtx.fillText(isCollapsed ? '▶' : '▼', sidebarWidth - sbPadding, sbY);
+        sbCtx.textAlign = 'left';
 
         // Store hit area for click handling
         sectionHeaders.push({
@@ -10901,12 +10993,12 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         sbY += 4;
 
         // Draw separator line under header
-        ctx.strokeStyle = '#0f3460';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(sbPadding, sbY);
-        ctx.lineTo(sidebarWidth - sbPadding, sbY);
-        ctx.stroke();
+        sbCtx.strokeStyle = '#0f3460';
+        sbCtx.lineWidth = 1;
+        sbCtx.beginPath();
+        sbCtx.moveTo(sbPadding, sbY);
+        sbCtx.lineTo(sidebarWidth - sbPadding, sbY);
+        sbCtx.stroke();
         sbY += 8;
 
         return !isCollapsed;  // Return true if section should show content
@@ -10914,9 +11006,9 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
 
       // Helper to draw stat line
       const drawStatLine = (label, value, color = '#aaa') => {
-        ctx.fillStyle = color;
-        ctx.font = '10px sans-serif';
-        ctx.fillText(`${label}: ${value}`, sbPadding, sbY);
+        sbCtx.fillStyle = color;
+        sbCtx.font = '10px sans-serif';
+        sbCtx.fillText(`${label}: ${value}`, sbPadding, sbY);
         sbY += 14;
       };
 
@@ -10950,39 +11042,39 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
           const runtimeBarWidth = barWidth * runtimePct;
 
           // User portion (green)
-          ctx.fillStyle = '#50c878';
-          ctx.fillRect(sbPadding, sbY, userBarWidth, barHeight);
+          sbCtx.fillStyle = '#50c878';
+          sbCtx.fillRect(sbPadding, sbY, userBarWidth, barHeight);
 
           // Runtime portion (orange)
-          ctx.fillStyle = '#ff8c00';
-          ctx.fillRect(sbPadding + userBarWidth, sbY, runtimeBarWidth, barHeight);
+          sbCtx.fillStyle = '#ff8c00';
+          sbCtx.fillRect(sbPadding + userBarWidth, sbY, runtimeBarWidth, barHeight);
 
           // Border
-          ctx.strokeStyle = '#333';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(sbPadding, sbY, barWidth, barHeight);
+          sbCtx.strokeStyle = '#333';
+          sbCtx.lineWidth = 1;
+          sbCtx.strokeRect(sbPadding, sbY, barWidth, barHeight);
 
-          sbY += barHeight + 6;
+          sbY += barHeight + 10;
 
           // Percentage labels
-          ctx.font = '9px sans-serif';
-          ctx.fillStyle = '#50c878';
-          ctx.fillText(`User ${(userPct * 100).toFixed(0)}%`, sbPadding, sbY);
-          ctx.fillStyle = '#ff8c00';
-          ctx.textAlign = 'right';
-          ctx.fillText(`${(runtimePct * 100).toFixed(0)}% Runtime`, sbPadding + barWidth, sbY);
-          ctx.textAlign = 'left';
+          sbCtx.font = '9px sans-serif';
+          sbCtx.fillStyle = '#50c878';
+          sbCtx.fillText(`User ${(userPct * 100).toFixed(0)}%`, sbPadding, sbY);
+          sbCtx.fillStyle = '#ff8c00';
+          sbCtx.textAlign = 'right';
+          sbCtx.fillText(`${(runtimePct * 100).toFixed(0)}% Runtime`, sbPadding + barWidth, sbY);
+          sbCtx.textAlign = 'left';
           sbY += 12;
 
           // Time values
-          ctx.fillStyle = '#666';
-          ctx.font = '8px sans-serif';
-          ctx.fillText(`${(accUserTime / 1e6).toFixed(1)}ms / ${(accRuntimeTime / 1e6).toFixed(1)}ms`, sbPadding, sbY);
+          sbCtx.fillStyle = '#666';
+          sbCtx.font = '8px sans-serif';
+          sbCtx.fillText(`${(accUserTime / 1e6).toFixed(1)}ms / ${(accRuntimeTime / 1e6).toFixed(1)}ms`, sbPadding, sbY);
           sbY += 4;
         } else {
-          ctx.fillStyle = '#666';
-          ctx.font = '9px sans-serif';
-          ctx.fillText('No timing data yet', sbPadding, sbY);
+          sbCtx.fillStyle = '#666';
+          sbCtx.font = '9px sans-serif';
+          sbCtx.fillText('No timing data yet', sbPadding, sbY);
           sbY += 14;
         }
       }
@@ -11006,17 +11098,17 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
           });
           cpCompleted = Math.floor(cpCompleted);
 
-          ctx.fillStyle = '#ff8c5a';
-          ctx.font = '10px sans-serif';
-          ctx.fillText(`Step ${cpCompleted} of ${criticalPathInfo.path.length}`, sbPadding, sbY);
+          sbCtx.fillStyle = '#ff8c5a';
+          sbCtx.font = '10px sans-serif';
+          sbCtx.fillText(`Step ${cpCompleted} of ${criticalPathInfo.path.length}`, sbPadding, sbY);
           sbY += 12;
 
           // Progress bar
           const cpProgress = cpCompleted / criticalPathInfo.path.length;
-          ctx.fillStyle = '#333';
-          ctx.fillRect(sbPadding, sbY, sbContentWidth, 6);
-          ctx.fillStyle = '#ff6432';
-          ctx.fillRect(sbPadding, sbY, sbContentWidth * cpProgress, 6);
+          sbCtx.fillStyle = '#333';
+          sbCtx.fillRect(sbPadding, sbY, sbContentWidth, 6);
+          sbCtx.fillStyle = '#ff6432';
+          sbCtx.fillRect(sbPadding, sbY, sbContentWidth * cpProgress, 6);
           sbY += 10;
         }
         drawSectionEnd();
@@ -11027,26 +11119,26 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         if (drawSectionHeader('Alerts', 'alerts', '#cc66ff')) {
           replayLiveAlerts.slice(0, 4).forEach(alert => {
             const remaining = (alert.expireTime - replayTime) / (duration * 0.15);
-            ctx.globalAlpha = Math.min(1, Math.max(0.3, remaining));
-            ctx.fillStyle = alert.color;
-            ctx.font = '9px sans-serif';
+            sbCtx.globalAlpha = Math.min(1, Math.max(0.3, remaining));
+            sbCtx.fillStyle = alert.color;
+            sbCtx.font = '9px sans-serif';
             // Wrap long messages to multiple lines
             const maxChars = 28;
             const msg = alert.message;
             if (msg.length <= maxChars) {
-              ctx.fillText(msg, sbPadding, sbY);
+              sbCtx.fillText(msg, sbPadding, sbY);
               sbY += 13;
             } else {
               // Split into two lines
               const line1 = msg.substring(0, maxChars);
               const line2 = msg.substring(maxChars, maxChars * 2);
-              ctx.fillText(line1, sbPadding, sbY);
+              sbCtx.fillText(line1, sbPadding, sbY);
               sbY += 11;
-              ctx.fillText(line2 + (msg.length > maxChars * 2 ? '…' : ''), sbPadding, sbY);
+              sbCtx.fillText(line2 + (msg.length > maxChars * 2 ? '…' : ''), sbPadding, sbY);
               sbY += 13;
             }
           });
-          ctx.globalAlpha = 1;
+          sbCtx.globalAlpha = 1;
         }
         drawSectionEnd();
       }
@@ -11054,42 +11146,208 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       // ----- Event Feed Section -----
       if (drawSectionHeader('Event Feed', 'eventFeed')) {
         if (replayEventLog.length === 0) {
-          ctx.fillStyle = '#666';
-          ctx.font = '9px sans-serif';
-          ctx.fillText('Press Play to start', sbPadding, sbY);
+          sbCtx.fillStyle = '#666';
+          sbCtx.font = '9px sans-serif';
+          sbCtx.fillText('Press Play to start', sbPadding, sbY);
           sbY += 14;
         } else {
           // Show recent events (newest at top)
-          const maxEvents = Math.min(8, Math.floor((height - sbY - 10) / 13));
+          const maxEvents = Math.min(8, Math.floor((sidebarHeight - sbY - 10) / 13));
           const recentEvents = replayEventLog.slice(-maxEvents).reverse();
-          ctx.font = '9px monospace';
+          sbCtx.font = '9px monospace';
           recentEvents.forEach((event, idx) => {
             const alpha = 1 - (idx * 0.08);
-            ctx.globalAlpha = alpha;
-            ctx.fillStyle = event.color;
+            sbCtx.globalAlpha = alpha;
+            sbCtx.fillStyle = event.color;
             const timeStr = (event.time / 1e6).toFixed(1).padStart(5);
             const msgTrunc = event.message.length > 15 ? event.message.substring(0, 15) + '…' : event.message;
-            ctx.fillText(`${timeStr} ${msgTrunc}`, sbPadding, sbY);
+            sbCtx.fillText(`${timeStr} ${msgTrunc}`, sbPadding, sbY);
             sbY += 13;
           });
-          ctx.globalAlpha = 1;
+          sbCtx.globalAlpha = 1;
         }
       }
 
       // Store section headers for click handling
-      canvas._sidebarHeaders = sectionHeaders;
+      sidebarCanvas._sidebarHeaders = sectionHeaders;
 
-      ctx.textAlign = 'left';  // Reset
+      sbCtx.textAlign = 'left';  // Reset
 
-      // Handle click events for controls
-      canvas.onclick = (e) => {
-        const rect = canvas.getBoundingClientRect();
+      // === AUTO-SCROLL during playback ===
+      if (replayPlaying && replayAutoScroll && replayLayoutMode === 'grid') {
+        // Find the newest executing or recently created resource
+        let targetY = null;
+        const executingResources = visibleResources.filter(r =>
+          r.callbackStartedAt > 0 && r.callbackStartedAt <= replayTime &&
+          r.callbackEndedAt > 0 && r.callbackEndedAt >= replayTime
+        );
+        if (executingResources.length > 0) {
+          // Focus on the first executing resource
+          const targetResource = executingResources[0];
+          const pos = positionMap.get(targetResource.asyncId);
+          if (pos) targetY = pos.y;
+        } else {
+          // Focus on the newest visible resource
+          const newestResource = sortedVisible[sortedVisible.length - 1];
+          if (newestResource) {
+            const pos = positionMap.get(newestResource.asyncId);
+            if (pos) targetY = pos.y;
+          }
+        }
+        if (targetY !== null) {
+          const visibleHeight = scrollContainerHeight;
+          const targetScroll = Math.max(0, targetY - visibleHeight / 2);
+          const maxScroll = Math.max(0, replayContentHeight - visibleHeight);
+          const clampedTarget = Math.min(targetScroll, maxScroll);
+          // Smooth scroll
+          if (Math.abs(scrollContainer.scrollTop - clampedTarget) > 10) {
+            scrollContainer.scrollTop += (clampedTarget - scrollContainer.scrollTop) * 0.1;
+          }
+        }
+      }
+
+      // === CONTROLS CANVAS CLICK HANDLER ===
+      if (!controlsCanvas._clickHandlerSet) {
+        controlsCanvas._clickHandlerSet = true;
+        controlsCanvas.onclick = (e) => {
+          const rect = controlsCanvas.getBoundingClientRect();
+          const clickX = e.clientX - rect.left;
+          const clickY = e.clientY - rect.top;
+
+          const { _btnY, _btnHeight, _btnWidth, _btnSpacing, _totalBtnWidth,
+                  _mainX, _mainWidth, _progressY, _progressX, _chartWidth, _duration, _speeds } = controlsCanvas;
+
+          // Check play/pause button
+          const playBtnX = _mainX + (_mainWidth - _totalBtnWidth) / 2;
+          if (clickX >= playBtnX && clickX <= playBtnX + _btnWidth &&
+              clickY >= _btnY && clickY <= _btnY + _btnHeight) {
+            if (replayPlaying) {
+              stopReplayAnimation();
+            } else {
+              if (replayTime >= _duration) {
+                replayTime = 0;
+                replayTrail = [];
+              }
+              startReplayAnimation();
+            }
+            renderReplayFrame();
+            return;
+          }
+
+          // Check reset button
+          const resetBtnX = playBtnX + _btnWidth + _btnSpacing;
+          if (clickX >= resetBtnX && clickX <= resetBtnX + _btnWidth &&
+              clickY >= _btnY && clickY <= _btnY + _btnHeight) {
+            stopReplayAnimation();
+            replayTime = 0;
+            replayPeakParallelism = 0;
+            replayEventLog = [];
+            replayLastEventTime = 0;
+            replayLiveAlerts = [];
+            replayAlertedPatterns = new Set();
+            replayTrail = [];
+            scrollContainer.scrollTop = 0;
+            renderReplayFrame();
+            return;
+          }
+
+          // Check speed buttons
+          let speedBtnX = resetBtnX + _btnWidth + _btnSpacing;
+          _speeds.forEach(speed => {
+            const speedWidth = speed === 0.25 ? 32 : 28;
+            if (clickX >= speedBtnX && clickX <= speedBtnX + speedWidth &&
+                clickY >= _btnY && clickY <= _btnY + _btnHeight) {
+              replaySpeed = speed;
+              saveSettings();
+              renderReplayFrame();
+            }
+            speedBtnX += speedWidth + 3;
+          });
+
+          // Check loop button
+          const loopBtnX = speedBtnX + 3;
+          if (clickX >= loopBtnX && clickX <= loopBtnX + 38 &&
+              clickY >= _btnY && clickY <= _btnY + _btnHeight) {
+            replayLoop = !replayLoop;
+            saveSettings();
+            renderReplayFrame();
+            return;
+          }
+
+          // Check ghost button
+          const ghostBtnX = loopBtnX + 41;
+          if (clickX >= ghostBtnX && clickX <= ghostBtnX + 38 &&
+              clickY >= _btnY && clickY <= _btnY + _btnHeight) {
+            replayGhostMode = !replayGhostMode;
+            saveSettings();
+            renderReplayFrame();
+            return;
+          }
+
+          // Check layout buttons
+          const layoutBtnStartX = ghostBtnX + 41 + 5;
+          const layoutBtnW = 28;
+          const layoutBtnSpacing = 31;
+          ['grid', 'bubble', 'rings'].forEach((mode, idx) => {
+            const bX = layoutBtnStartX + idx * layoutBtnSpacing;
+            if (clickX >= bX && clickX <= bX + layoutBtnW &&
+                clickY >= _btnY && clickY <= _btnY + _btnHeight) {
+              replayLayoutMode = mode;
+              replayBubbleNodes.clear();
+              replayBubbleViewport = { x: 0, y: 0, scale: 1 };
+              saveSettings();
+              renderReplayFrame();
+            }
+          });
+
+          // Check progress bar click
+          if (clickY >= _progressY && clickY <= _progressY + 8 &&
+              clickX >= _progressX && clickX <= _progressX + _chartWidth) {
+            const clickProgress = (clickX - _progressX) / _chartWidth;
+            replayTime = clickProgress * _duration;
+            renderReplayFrame();
+            return;
+          }
+        };
+
+        controlsCanvas.onmousemove = (e) => {
+          const rect = controlsCanvas.getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
+
+          const { _btnY, _btnHeight, _progressY, _progressX, _chartWidth,
+                  _mainX, _mainWidth, _totalBtnWidth, _btnWidth, _btnSpacing } = controlsCanvas;
+
+          // Check if over any control button area
+          const playBtnX = _mainX + (_mainWidth - _totalBtnWidth) / 2;
+          const controlsEndX = playBtnX + _totalBtnWidth + 200;  // Approximate end of all buttons
+
+          if (mouseY >= _btnY && mouseY <= _btnY + _btnHeight &&
+              mouseX >= playBtnX && mouseX <= controlsEndX) {
+            controlsCanvas.style.cursor = 'pointer';
+            return;
+          }
+
+          // Check progress bar
+          if (mouseY >= _progressY && mouseY <= _progressY + 8 &&
+              mouseX >= _progressX && mouseX <= _progressX + _chartWidth) {
+            controlsCanvas.style.cursor = 'pointer';
+            return;
+          }
+
+          controlsCanvas.style.cursor = 'default';
+        };
+      }
+
+      // === SIDEBAR CANVAS CLICK HANDLER ===
+      sidebarCanvas.onclick = (e) => {
+        const rect = sidebarCanvas.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
         // Check sidebar section header clicks
-        if (clickX >= 0 && clickX <= sidebarWidth && canvas._sidebarHeaders) {
-          for (const header of canvas._sidebarHeaders) {
+        if (sidebarCanvas._sidebarHeaders) {
+          for (const header of sidebarCanvas._sidebarHeaders) {
             if (clickY >= header.y && clickY <= header.y + header.height) {
               replaySidebarCollapsed[header.key] = !replaySidebarCollapsed[header.key];
               renderReplayFrame();
@@ -11097,100 +11355,31 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
             }
           }
         }
+      };
 
-        // Check play/pause button (centered in main area)
-        const playBtnX = mainX + (mainWidth - totalBtnWidth) / 2;
-        if (clickX >= playBtnX && clickX <= playBtnX + btnWidth &&
-            clickY >= btnY && clickY <= btnY + btnHeight) {
-          if (replayPlaying) {
-            stopReplayAnimation();
-          } else {
-            if (replayTime >= duration) {
-              replayTime = 0;
-              replayTrail = [];
+      // Show pointer cursor over clickable sidebar elements
+      sidebarCanvas.onmousemove = (e) => {
+        const rect = sidebarCanvas.getBoundingClientRect();
+        const mouseY = e.clientY - rect.top;
+
+        // Check if over sidebar section header
+        if (sidebarCanvas._sidebarHeaders) {
+          for (const header of sidebarCanvas._sidebarHeaders) {
+            if (mouseY >= header.y && mouseY <= header.y + header.height) {
+              sidebarCanvas.style.cursor = 'pointer';
+              return;
             }
-            startReplayAnimation();
           }
-          renderReplayFrame();
-          return;
         }
 
-        // Check reset button
-        const resetBtnX = playBtnX + btnWidth + btnSpacing;
-        if (clickX >= resetBtnX && clickX <= resetBtnX + btnWidth &&
-            clickY >= btnY && clickY <= btnY + btnHeight) {
-          stopReplayAnimation();
-          replayTime = 0;
-          replayPeakParallelism = 0;
-          replayEventLog = [];
-          replayLastEventTime = 0;
-          replayLiveAlerts = [];
-          replayAlertedPatterns = new Set();
-          replayTrail = [];
-          renderReplayFrame();
-          return;
-        }
+        sidebarCanvas.style.cursor = 'default';
+      };
 
-        // Check speed buttons
-        let speedBtnX = resetBtnX + btnWidth + btnSpacing;
-        // Speed buttons (compact layout)
-        speeds.forEach(speed => {
-          const speedWidth = speed === 0.25 ? 32 : 28;
-          if (clickX >= speedBtnX && clickX <= speedBtnX + speedWidth &&
-              clickY >= btnY && clickY <= btnY + btnHeight) {
-            replaySpeed = speed;
-            saveSettings();
-            renderReplayFrame();
-          }
-          speedBtnX += speedWidth + 3;
-        });
-
-        // Check loop button (compact: icon only)
-        const loopBtnX = speedBtnX + 3;
-        if (clickX >= loopBtnX && clickX <= loopBtnX + 38 &&
-            clickY >= btnY && clickY <= btnY + btnHeight) {
-          replayLoop = !replayLoop;
-          saveSettings();
-          renderReplayFrame();
-          return;
-        }
-
-        // Check ghost button (compact: icon only)
-        const ghostBtnX = loopBtnX + 41;
-        if (clickX >= ghostBtnX && clickX <= ghostBtnX + 38 &&
-            clickY >= btnY && clickY <= btnY + btnHeight) {
-          replayGhostMode = !replayGhostMode;
-          saveSettings();
-          renderReplayFrame();
-          return;
-        }
-
-        // Check layout buttons (compact: icons only, 28px each)
-        const layoutBtnStartX = ghostBtnX + 41 + 5;
-        const layoutBtnWidth = 28;
-        const layoutBtnSpacing = 31;  // 28 + 3
-        const layoutModes = ['grid', 'bubble', 'rings'];
-        layoutModes.forEach((mode, idx) => {
-          const btnX = layoutBtnStartX + idx * layoutBtnSpacing;
-          if (clickX >= btnX && clickX <= btnX + layoutBtnWidth &&
-              clickY >= btnY && clickY <= btnY + btnHeight) {
-            replayLayoutMode = mode;
-            replayBubbleNodes.clear();
-            replayBubbleViewport = { x: 0, y: 0, scale: 1 };
-            saveSettings();
-            renderReplayFrame();
-            return;
-          }
-        });
-
-        // Check progress bar click (in main area)
-        if (clickY >= progressY && clickY <= progressY + 8 &&
-            clickX >= progressX && clickX <= progressX + chartWidth) {
-          const clickProgress = (clickX - progressX) / chartWidth;
-          replayTime = clickProgress * duration;
-          renderReplayFrame();
-          return;
-        }
+      // === MAIN CANVAS CLICK HANDLER ===
+      canvas.onclick = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
 
         // Check resource circle clicks
         if (canvas._replayPositionMap) {
@@ -11209,32 +11398,11 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         }
       };
 
-      // Show pointer cursor over clickable elements
+      // Show pointer cursor over clickable elements (main canvas)
       canvas.onmousemove = (e) => {
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-
-        // Check if over sidebar section header
-        if (mouseX >= 0 && mouseX <= sidebarWidth && canvas._sidebarHeaders) {
-          for (const header of canvas._sidebarHeaders) {
-            if (mouseY >= header.y && mouseY <= header.y + header.height) {
-              canvas.style.cursor = 'pointer';
-              return;
-            }
-          }
-        }
-
-        // Check if over control buttons or progress bar
-        if (mouseY >= btnY && mouseY <= btnY + btnHeight) {
-          canvas.style.cursor = 'pointer';
-          return;
-        }
-        if (mouseY >= progressY && mouseY <= progressY + 8 &&
-            mouseX >= progressX && mouseX <= progressX + chartWidth) {
-          canvas.style.cursor = 'pointer';
-          return;
-        }
 
         // Check if over resource circles
         if (canvas._replayPositionMap) {
