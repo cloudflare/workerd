@@ -7,16 +7,21 @@ const unitTests :Workerd.Config = (
         modules = [
           ( name = "worker", esModule = embed "images-api-test.js" )
         ],
-        compatibilityFlags = ["experimental", "nodejs_compat", "nodejs_compat_v2", "service_binding_extra_handlers", "streams_enable_constructors", "transformstream_enable_standard_constructor", "formdata_parser_supports_files"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "nodejs_compat_v2", "service_binding_extra_handlers", "rpc", "streams_enable_constructors", "transformstream_enable_standard_constructor", "formdata_parser_supports_files"],
         streamingTails = ["tail"],
         bindings = [
           ( name = "images",
             wrapped = (
               moduleName = "cloudflare-internal:images-api",
-              innerBindings = [(
-                name = "fetcher",
-                service = "images-upstream-mock"
-              )],
+              innerBindings = [
+                (
+                  name = "fetcher",
+                  service = (
+                    name = "images-upstream-mock",
+                    entrypoint = "ServiceEntrypoint"
+                  )
+                )
+              ],
             )
           )
         ],
