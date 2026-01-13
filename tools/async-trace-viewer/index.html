@@ -556,6 +556,54 @@
       color: white;
     }
 
+    .dag-zoom-controls {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: rgba(22, 33, 62, 0.85);
+      border-radius: 4px;
+      padding: 4px 6px;
+      border: 1px solid #0f3460;
+    }
+
+    .dag-zoom-btn {
+      width: 24px;
+      height: 24px;
+      background: transparent;
+      border: none;
+      color: #888;
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .dag-zoom-btn:hover {
+      color: #fff;
+      background: rgba(233, 69, 96, 0.3);
+    }
+
+    .dag-zoom-reset {
+      margin-left: 4px;
+      border-left: 1px solid #0f3460;
+      padding-left: 6px;
+    }
+
+    .dag-zoom-level {
+      color: #666;
+      font-size: 10px;
+      min-width: 36px;
+      text-align: center;
+      user-select: none;
+    }
+
     .tooltip {
       position: fixed;
       background: rgba(22, 33, 62, 0.95);
@@ -1116,6 +1164,12 @@
           <button class="dag-layout-btn" data-layout="hierarchical">Hierarchical</button>
           <button class="dag-layout-btn" data-layout="force">Force</button>
         </div>
+      </div>
+      <div class="dag-zoom-controls">
+        <button class="dag-zoom-btn" id="dag-zoom-in" title="Zoom in">+</button>
+        <span class="dag-zoom-level" id="dag-zoom-level">100%</span>
+        <button class="dag-zoom-btn" id="dag-zoom-out" title="Zoom out">−</button>
+        <button class="dag-zoom-btn dag-zoom-reset" id="dag-zoom-reset" title="Reset view">⟲</button>
       </div>
     </div>
 
@@ -2830,6 +2884,7 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
             // Reset view-specific state
             if (currentView === 'dag') {
               dagPanX = 0; dagPanY = 0; dagZoom = 1;
+              updateDagZoomLevel();
               dagNodes = [];
             } else if (currentView === 'replay') {
               stopReplayAnimation();
@@ -2912,6 +2967,45 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
             initDAGNodes();
           }
         });
+      });
+
+      // DAG zoom controls
+      function updateDagZoomLevel() {
+        document.getElementById('dag-zoom-level').textContent = Math.round(dagZoom * 100) + '%';
+      }
+
+      document.getElementById('dag-zoom-in').addEventListener('click', () => {
+        const container = document.getElementById('dag-view');
+        const centerX = container.clientWidth / 2;
+        const centerY = container.clientHeight / 2;
+        const oldZoom = dagZoom;
+        dagZoom = Math.min(5, dagZoom * 1.25);
+        // Zoom toward center
+        dagPanX = centerX - (centerX - dagPanX) * (dagZoom / oldZoom);
+        dagPanY = centerY - (centerY - dagPanY) * (dagZoom / oldZoom);
+        updateDagZoomLevel();
+        renderDAG();
+      });
+
+      document.getElementById('dag-zoom-out').addEventListener('click', () => {
+        const container = document.getElementById('dag-view');
+        const centerX = container.clientWidth / 2;
+        const centerY = container.clientHeight / 2;
+        const oldZoom = dagZoom;
+        dagZoom = Math.max(0.1, dagZoom / 1.25);
+        // Zoom toward center
+        dagPanX = centerX - (centerX - dagPanX) * (dagZoom / oldZoom);
+        dagPanY = centerY - (centerY - dagPanY) * (dagZoom / oldZoom);
+        updateDagZoomLevel();
+        renderDAG();
+      });
+
+      document.getElementById('dag-zoom-reset').addEventListener('click', () => {
+        dagPanX = 0;
+        dagPanY = 0;
+        dagZoom = 1;
+        updateDagZoomLevel();
+        renderDAG();
       });
 
       // DAG canvas event handlers
@@ -3114,6 +3208,7 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         dagPanX = mouseX - (mouseX - dagPanX) * (dagZoom / oldZoom);
         dagPanY = mouseY - (mouseY - dagPanY) * (dagZoom / oldZoom);
 
+        updateDagZoomLevel();
         renderDAG();
       });
 
@@ -3429,6 +3524,8 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
     function processAndRender() {
       dagNodes = [];  // Invalidate DAG layout when loading new data
       dagPanX = 0; dagPanY = 0; dagZoom = 1;  // Reset DAG pan/zoom
+      const zoomEl = document.getElementById('dag-zoom-level');
+      if (zoomEl) zoomEl.textContent = '100%';
       panX = 0; panY = 0; zoom = 1;  // Reset pan/zoom
 
       traceData.resourceMap = new Map();
@@ -5561,6 +5658,8 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
       dagPanX = 0;
       dagPanY = 0;
       dagZoom = 1;
+      const zoomEl = document.getElementById('dag-zoom-level');
+      if (zoomEl) zoomEl.textContent = '100%';
 
       // Start force simulation only for force layout
       if (dagLayoutMode === 'force') {
