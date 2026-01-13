@@ -183,14 +183,13 @@ The viewer is a single HTML file with embedded CSS and JavaScript. Key organizat
 Each view has its own state variables for hover, data caching, and render params:
 ```javascript
 // Example pattern for view-specific state
-let heatmapHoverCell = null;      // Current hover state
-let heatmapData = null;           // Cached computed data for hit detection
-let heatmapRenderParams = null;   // Render params for coordinate mapping
-let heatmapBucketCount = 40;      // Control state
+let gapsHoverIndex = -1;          // Current hover state
+let gapsData = null;              // Cached computed data for hit detection
+let gapsThresholdPercent = 1;     // Control state
 ```
 
 ### Render Functions
-Each view has a `render<ViewName>()` function (e.g., `renderHeatmap()`, `renderGaps()`). Pattern:
+Each view has a `render<ViewName>()` function (e.g., `renderGaps()`, `renderLatency()`). Pattern:
 1. Get canvas and context
 2. Account for controls height if view has controls div
 3. Clear and draw
@@ -263,10 +262,8 @@ python3 -m http.server 8888
 | 2 | **Graph** | Bubble/Hierarchical/Force layouts (←/→ to switch), path highlighting |
 | 3 | **Replay** | Animated playback with Grid/Bubble/Rings layouts, lifecycle badges, loop/ghost modes |
 | 4 | **Parallelism** | Concurrent ops over time, efficiency metrics, ideal comparison |
-| 5 | **Breakdown** | Treemap/Sunburst by type/trigger/stack, drill-down navigation |
-| 6 | **Latency** | Histogram/CDF of async wait times, outlier detection |
-| 7 | **Gaps** | Idle periods with classification, recommendations |
-| 8 | **Heatmap** | Activity intensity grid, multiple color schemes |
+| 5 | **Latency** | Histogram/CDF/Birth Order/By Type/By Location modes, violin plots, outlier detection |
+| 6 | **Gaps** | Idle periods with classification, recommendations |
 
 ## Analysis Features (🔬 dropdown)
 
@@ -334,14 +331,13 @@ Under the "Group Siblings" option in the Analysis dropdown:
 
 ## Keyboard Shortcuts
 
-**Navigation:** `1`-`8` switch views, `?` help, `O` load, `P` paste, `Esc` close
+**Navigation:** `1`-`6` switch views, `?` help, `O` load, `P` paste, `Esc` close
 
 **Analysis:** `C` critical path, `B` bottlenecks, `T` patterns, `F` filter, `G` stack group, `E` temporal edges, `H` hide internal, `S` group siblings, `A` accessibility
 
 **View-Specific:**
 - Graph: `←`/`→` switch layouts
 - Replay: `Space` play/pause, `R` reset, `←`/`→` step, `Shift+←`/`→` jump to events, `-`/`+` speed, `Shift+L` loop, `Shift+O` ghost
-- Heatmap: `←`/`→` adjust bucket count
 - All: `Shift+R` reset view, `I` AI analysis prompt
 
 ## Pattern Detection
@@ -385,11 +381,6 @@ Under the "Group Siblings" option in the Analysis dropdown:
 - **State:** `parallelismHoverBucket`, `parallelismBucketData`, `parallelismRenderParams`
 - **Features:** Stacked bars (sync solid, async faded), cyan ideal line, orange critical path line, efficiency sidebar
 
-### Breakdown
-- **State:** `breakdownGroupBy`, `breakdownVizMode`, `breakdownDrillPath`, `breakdownHoverItem`, `breakdownData`
-- **Features:** Treemap/sunburst toggle, 4 grouping modes, drill-down with breadcrumbs, Shift+R to reset drill path
-- **Gotcha:** Drill-down uses `canDrillDown = item.count > 1` and checks `wouldBeSameGroup` to prevent infinite recursion
-
 ### Latency
 - **State:** `latencyMode` ('histogram'|'cdf'), `latencyShowOutliers`, `latencyBucketData`, `latencyHoverBucket`
 - **Features:** Histogram/CDF toggle, outlier detection (>3σ with red border), percentile lines (p50/p90/p99)
@@ -400,20 +391,13 @@ Under the "Group Siblings" option in the Analysis dropdown:
 - **Features:** Gap classification by cause (fetch/timer/io/promise), color-coded gaps, optimization recommendations
 - **Controls:** Threshold slider, show minor checkbox, classify checkbox, recommendations checkbox
 
-### Heatmap
-- **State:** `heatmapHoverCell`, `heatmapBucketCount`, `heatmapColorScheme`, `heatmapActivityMode`, `heatmapSortMode`, `heatmapData`, `heatmapRenderParams`
-- **Features:** Hover/click interaction, 3 color schemes, 4 activity modes, 4 sort modes, critical path row highlighting
-- **Controls:** Bucket slider (10-120, ←/→ keys), color dropdown, activity dropdown, sort dropdown
-
 ## Known Issues / Gotchas
 
 1. **View switching CSS:** Views with controls need `#<view>-view.active { display: flex; flex-direction: column; }` to override the default `display: block`
 
-2. **Breakdown drill-down recursion:** The trigger chain grouping traces to root ancestor; must use same logic in both grouping and `wouldBeSameGroup` check
+2. **Canvas sizing:** For views with controls, must subtract controls height: `canvas.height = container.clientHeight - controlsHeight`
 
-3. **Canvas sizing:** For views with controls, must subtract controls height: `canvas.height = container.clientHeight - controlsHeight`
-
-4. **Event handler setup:** Use `canvas._<view>HandlersSet` flag to avoid adding duplicate handlers on re-render
+3. **Event handler setup:** Use `canvas._<view>HandlersSet` flag to avoid adding duplicate handlers on re-render
 
 ## Potential Future Enhancements
 
@@ -427,7 +411,6 @@ Under the "Group Siblings" option in the Analysis dropdown:
 ### Per-View
 - **Latency:** Type filtering, zoom/range selection
 - **Gaps:** Gap-to-resource linking, ideal timeline comparison
-- **Heatmap:** Row filtering, time range zoom
 - **Replay:** Timeline bookmarks, focus mode, export animation
 
 ---
@@ -439,7 +422,7 @@ Under the "Group Siblings" option in the Analysis dropdown:
 **Completed:**
 - Latency view: hover/click, histogram/CDF toggle, outlier detection, critical path integration
 - Gaps view: hover/click, gap classification with color-coding, threshold controls, optimization recommendations
-- Heatmap view: hover/click, bucket slider with ←/→ keys, 3 color schemes, 4 activity modes, 4 sort modes, critical path rows
+- Heatmap view: hover/click, bucket slider with ←/→ keys, 3 color schemes, 4 activity modes, 4 sort modes, critical path rows (later removed - not useful for diagnostics)
 
 **Files modified:**
 - `tools/async-trace-viewer/index.html` - all visualization changes
@@ -462,7 +445,7 @@ Under the "Group Siblings" option in the Analysis dropdown:
 - `src/workerd/api/sockets.c++` - instrumented connect, startTls, close
 
 **Where we left off:**
-- Visualization tool enhancements largely complete for all 8 views
+- Visualization tool enhancements largely complete for all 6 views
 - C++ instrumentation: fetch, cache, timers, streams, bridges, microtask, immediate, sockets complete
 - Still could instrument: KV, DO, R2, D1, Queue, WebSocket, Crypto, AI APIs (if desired)
 
@@ -538,11 +521,11 @@ Under the "Group Siblings" option in the Analysis dropdown:
 - Replaced "All/User Only/Typed Only" filter combo with "Hide Internal" toggle in Analysis dropdown
 - Keyboard shortcut: `H` (help changed to `?` only)
 - Setting persisted to localStorage
-- Affects Waterfall, Graph, and Heatmap views
+- Affects Waterfall and Graph views
 
 *Waterfall controls relocation:*
 - Moved Sort dropdown and Types dropdown from main header into Waterfall view control bar
-- Consistent with other views (Heatmap, Gaps, Latency, Breakdown) that have view-specific controls
+- Consistent with other views (Gaps, Latency) that have view-specific controls
 - Removed disabled-state logic for controls (no longer needed)
 - Fixed Types dropdown alignment to prevent left-side clipping
 
@@ -952,3 +935,30 @@ The `fetch@worker:39` violin shows a bimodal distribution - large bulge at ~1ms 
 **Files modified:**
 - `tools/async-trace-viewer/index.html` - user code grouping, violin plots, guide updates
 - `ASYNC_TRACE_PROGRESS.md` - session documentation
+
+## Session (January 2025) - Removed Breakdown View
+
+**Completed:**
+- Removed the Breakdown view (was view 5 with Treemap/Sunburst visualization)
+- The view wasn't proving useful for async trace diagnostics
+- Renumbered remaining views: Latency is now 5, Gaps is 6, Heatmap is 7
+- Updated keyboard shortcuts accordingly
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - removed Breakdown view code and UI
+- `ASYNC_TRACE_PROGRESS.md` - updated all references to reflect 7 views instead of 8
+
+## Session (January 2025) - Removed Heatmap View
+
+**Completed:**
+- Removed the Heatmap view (was view 7 with activity density grid)
+- Analysis showed the view wasn't providing actionable diagnostic value:
+  - Aggregation by type loses individual resource detail
+  - Information shown redundantly by Parallelism and Latency views
+  - No clear path from observation to fix
+- Renumbered remaining views: now 6 views total (Waterfall, Graph, Replay, Parallelism, Latency, Gaps)
+- Updated keyboard shortcuts to `1`-`6`
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - removed Heatmap view code, HTML, CSS, and all references
+- `ASYNC_TRACE_PROGRESS.md` - updated all references to reflect 6 views

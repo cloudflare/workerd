@@ -229,7 +229,6 @@
     #waterfall-view.active { display: flex; flex-direction: column; }
     #latency-view.active { display: flex; flex-direction: column; }
     #gaps-view.active { display: flex; flex-direction: column; }
-    #heatmap-view.active { display: flex; flex-direction: column; }
 
     /* Waterfall styles */
     .waterfall { position: relative; min-height: 100%; }
@@ -513,7 +512,7 @@
     }
 
     /* Bubble view styles */
-    #bubble-canvas, #parallelism-canvas, #dag-canvas, #latency-canvas, #gaps-canvas, #replay-canvas, #heatmap-canvas {
+    #bubble-canvas, #parallelism-canvas, #dag-canvas, #latency-canvas, #gaps-canvas, #replay-canvas {
       display: block;
       width: 100%;
       height: 100%;
@@ -984,7 +983,6 @@
       <option value="parallelism">4: Parallelism</option>
       <option value="latency">5: Latency</option>
       <option value="gaps">6: Gaps</option>
-      <option value="heatmap">7: Heatmap</option>
     </select>
     <div class="controls">
       <label class="file-label" for="file-input">📁 Load</label>
@@ -1218,43 +1216,6 @@
 
     <div class="view-container" id="replay-view" style="overflow: hidden; padding: 0;">
       <canvas id="replay-canvas"></canvas>
-    </div>
-
-    <div class="view-container" id="heatmap-view" style="overflow: hidden; padding: 0;">
-      <div id="heatmap-controls" style="display: flex; gap: 12px; padding: 6px 10px; background: #16213e; border-bottom: 1px solid #0f3460; align-items: center; flex-shrink: 0; flex-wrap: wrap;">
-        <label style="color: #aaa; font-size: 11px;">
-          Buckets (←/→):
-          <input type="range" id="heatmap-bucket-slider" min="10" max="120" step="10" value="40" style="width: 80px; vertical-align: middle;">
-          <span id="heatmap-bucket-value" style="color: #e0e0e0; min-width: 24px; display: inline-block;">40</span>
-        </label>
-        <label style="color: #aaa; font-size: 11px;">
-          Colors:
-          <select id="heatmap-color-select" style="background: #0f3460; color: #e0e0e0; border: 1px solid #444; border-radius: 3px; padding: 2px 4px; font-size: 10px;">
-            <option value="type">Per-type</option>
-            <option value="heat">Heat gradient</option>
-            <option value="mono">Monochrome</option>
-          </select>
-        </label>
-        <label style="color: #aaa; font-size: 11px;">
-          Activity:
-          <select id="heatmap-activity-select" style="background: #0f3460; color: #e0e0e0; border: 1px solid #444; border-radius: 3px; padding: 2px 4px; font-size: 10px;">
-            <option value="combined">Combined</option>
-            <option value="sync">Sync only</option>
-            <option value="async">Async only</option>
-            <option value="count">Count</option>
-          </select>
-        </label>
-        <label style="color: #aaa; font-size: 11px;">
-          Sort:
-          <select id="heatmap-sort-select" style="background: #0f3460; color: #e0e0e0; border: 1px solid #444; border-radius: 3px; padding: 2px 4px; font-size: 10px;">
-            <option value="activity">By activity</option>
-            <option value="alpha">Alphabetical</option>
-            <option value="peak">By peak</option>
-            <option value="first">By first occurrence</option>
-          </select>
-        </label>
-      </div>
-      <canvas id="heatmap-canvas" style="flex: 1;"></canvas>
     </div>
 
     <div class="sidebar">
@@ -1533,27 +1494,7 @@
             • -/+ speed (0.25x, 0.5x, 1x, 2x)
           </div>
         </div>
-        <div class="view-help" data-view="heatmap">
-          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4;">
-            <strong>Heatmap View:</strong><br>
-            • Grid: rows=types, columns=time<br>
-            • Hover for details, click for breakdown<br>
-            • Controls: buckets, colors, activity, sort
-          </div>
-          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Activity Modes:</strong><br>
-            • Combined = sync + async weighted<br>
-            • Sync/Async = individual activity<br>
-            • Count = resource count only
-          </div>
-          <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
-            <strong>Highlights:</strong><br>
-            • <span style="color: #ff6600;">Orange row</span> = critical path type<br>
-            • Hot spots = busy periods<br>
-            • Diagonal = cascading ops
-          </div>
-        </div>
-            <div class="view-help" data-view="all">
+        <div class="view-help" data-view="all">
               <div class="detail-item" style="font-size: 0.7rem; line-height: 1.4; margin-top: 0.3rem;">
                 <strong>Resource Types:</strong><br>
                 • <span style="color: #50c878;">Typed</span> = API calls (fetch, timer, cache)<br>
@@ -1604,7 +1545,7 @@
           <table class="guide-table">
             <tr><th>Key</th><th>Action</th></tr>
             <tr><td colspan="2" style="font-weight:bold; background:#0f3460; color:#7ec8e3;">Navigation</td></tr>
-            <tr><td><code>1</code>-<code>7</code></td><td>Switch views (Waterfall, Graph, Replay, Parallelism, Latency, Gaps, Heatmap)</td></tr>
+            <tr><td><code>1</code>-<code>6</code></td><td>Switch views (Waterfall, Graph, Replay, Parallelism, Latency, Gaps)</td></tr>
             <tr><td><code>?</code></td><td>Show this help guide</td></tr>
             <tr><td><code>O</code> or <code>L</code></td><td>Open file dialog to load trace</td></tr>
             <tr><td><code>P</code> or <code>V</code></td><td>Toggle paste JSON area</td></tr>
@@ -1646,7 +1587,6 @@
             <tr><td><strong>4: Parallelism</strong></td><td>Concurrency level</td><td>Solid=executing, faded=waiting, cyan line=ideal, hover/click for details, sidebar efficiency metrics</td></tr>
             <tr><td><strong>5: Latency</strong></td><td>Wait distribution</td><td>5 modes (Histogram/CDF/Birth Order/By Type/By Stack), latency-weighted sorting, honors Hide Internal</td></tr>
             <tr><td><strong>6: Gaps</strong></td><td>Idle time analysis</td><td>Color-coded gaps by cause, hover/click for details, threshold slider, recommendations in sidebar</td></tr>
-            <tr><td><strong>7: Heatmap</strong></td><td>Activity density</td><td>Hover/click cells, bucket/color/activity/sort controls, critical path rows highlighted</td></tr>
           </table>
         </div>
 
@@ -1998,16 +1938,6 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
     let latencyHoverBucket = -1;
     let latencyHoverBox = -1;  // Hovered box plot index
     let latencyTooltip = null;
-
-    // Heatmap view state
-    let heatmapHoverCell = null;  // {typeIdx, bucket} or null
-    let heatmapBucketCount = 40;  // Default bucket count
-    let heatmapColorScheme = 'type';  // 'type', 'heat', 'mono'
-    let heatmapActivityMode = 'combined';  // 'combined', 'sync', 'async', 'count'
-    let heatmapSortMode = 'activity';  // 'activity', 'alpha', 'peak', 'first'
-    let heatmapData = null;  // Cached data for hover detection
-    let heatmapRenderParams = null;  // Render params for coordinate mapping
-    let heatmapTooltip = null;
 
     // Pattern detection thresholds (configurable via UI)
     const DEFAULT_PATTERN_THRESHOLDS = {
@@ -2617,15 +2547,14 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
           return;
         }
 
-        // View hotkeys: 1-7 for different views (Graph combines DAG layouts including Bubble)
+        // View hotkeys: 1-6 for different views (Graph combines DAG layouts including Bubble)
         const viewKeys = {
           '1': 'waterfall',
           '2': 'dag',
           '3': 'replay',
           '4': 'parallelism',
           '5': 'latency',
-          '6': 'gaps',
-          '7': 'heatmap'
+          '6': 'gaps'
         };
 
         if (viewKeys[e.key]) {
@@ -2646,27 +2575,6 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
             } else {
               render();
             }
-          }
-          return;
-        }
-
-        // Heatmap bucket adjustment: Left/Right arrows (only when heatmap view is active)
-        if (currentView === 'heatmap' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-          const slider = document.getElementById('heatmap-bucket-slider');
-          const step = parseInt(slider.step);
-          const min = parseInt(slider.min);
-          const max = parseInt(slider.max);
-          let newValue = heatmapBucketCount;
-          if (e.key === 'ArrowRight') {
-            newValue = Math.min(max, heatmapBucketCount + step);
-          } else {
-            newValue = Math.max(min, heatmapBucketCount - step);
-          }
-          if (newValue !== heatmapBucketCount) {
-            heatmapBucketCount = newValue;
-            slider.value = newValue;
-            document.getElementById('heatmap-bucket-value').textContent = newValue;
-            if (traceData) renderHeatmap();
           }
           return;
         }
@@ -4980,8 +4888,6 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
         renderGaps();
       } else if (currentView === 'replay') {
         renderReplayFrame();
-      } else if (currentView === 'heatmap') {
-        renderHeatmap();
       }
     }
 
@@ -11345,512 +11251,6 @@ Parent #26 spawns siblings: #38, #39, #40, #41<br>
 
         canvas.style.cursor = 'default';
       };
-    }
-
-    // ==================== HEATMAP VIEW ====================
-    function renderHeatmap() {
-      const container = document.getElementById('heatmap-view');
-      const canvas = document.getElementById('heatmap-canvas');
-      const ctx = canvas.getContext('2d');
-
-      // Account for controls height
-      const controls = document.getElementById('heatmap-controls');
-      const controlsHeight = controls ? controls.offsetHeight : 0;
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight - controlsHeight;
-
-      const width = canvas.width;
-      const height = canvas.height;
-      const padding = { top: 60, right: 30, bottom: 60, left: 120 };
-      const chartWidth = width - padding.left - padding.right;
-      const chartHeight = height - padding.top - padding.bottom;
-
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(0, 0, width, height);
-
-      if (!traceData) return;
-
-      // Get filtered resources
-      let resources = traceData.resources.filter(r => {
-        if (hideInternal && r._classification === 'internal') return false;
-        return true;
-      });
-
-      // Apply click-to-filter
-      if (clickToFilterEnabled && clickFilterResourceId !== null) {
-        resources = resources.filter(r => isResourceVisible(r.asyncId));
-      }
-
-      const duration = traceData.requestDurationNs;
-
-      // Get unique resource types
-      let types = Array.from(new Set(resources.map(r => r.type)));
-      if (types.length === 0) {
-        ctx.fillStyle = '#666';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('No resources to display', width / 2, height / 2);
-        return;
-      }
-
-      // Compute type metrics for sorting
-      const typeMetrics = new Map();
-      types.forEach(t => typeMetrics.set(t, { activity: 0, peak: 0, first: duration }));
-      resources.forEach(r => {
-        const m = typeMetrics.get(r.type);
-        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
-          m.activity += r.callbackEndedAt - r.callbackStartedAt;
-        }
-        if (r.createdAt > 0 && r.createdAt < m.first) {
-          m.first = r.createdAt;
-        }
-      });
-
-      // Sort types based on selected mode
-      switch (heatmapSortMode) {
-        case 'alpha':
-          types.sort((a, b) => a.localeCompare(b));
-          break;
-        case 'peak':
-          // Will be computed after bucket data
-          break;
-        case 'first':
-          types.sort((a, b) => typeMetrics.get(a).first - typeMetrics.get(b).first);
-          break;
-        case 'activity':
-        default:
-          types.sort((a, b) => typeMetrics.get(b).activity - typeMetrics.get(a).activity);
-          break;
-      }
-
-      // Define time buckets
-      const autoBuckets = Math.min(80, Math.floor(chartWidth / 8));
-      const numBuckets = heatmapBucketCount > 0 ? heatmapBucketCount : autoBuckets;
-      const bucketWidth = duration / numBuckets;
-      const rowHeight = Math.min(30, chartHeight / types.length);
-
-      // Build heatmap data: [type][bucket] = {sync, async, count, resources}
-      const heatmapDataMap = new Map();
-      types.forEach(type => {
-        heatmapDataMap.set(type, new Array(numBuckets).fill(null).map(() => ({
-          sync: 0, async: 0, count: 0, resources: []
-        })));
-      });
-
-      // Fill heatmap with activity
-      resources.forEach(r => {
-        const typeData = heatmapDataMap.get(r.type);
-        if (!typeData) return;
-
-        // Add activity during callback execution (sync)
-        if (r.callbackStartedAt > 0 && r.callbackEndedAt > 0) {
-          const startBucket = Math.floor(r.callbackStartedAt / bucketWidth);
-          const endBucket = Math.floor(r.callbackEndedAt / bucketWidth);
-          for (let b = Math.max(0, startBucket); b <= Math.min(numBuckets - 1, endBucket); b++) {
-            typeData[b].sync += 1;
-            typeData[b].count += 1;
-            if (!typeData[b].resources.includes(r)) typeData[b].resources.push(r);
-          }
-        }
-
-        // Async waiting time
-        if (r.createdAt > 0) {
-          const waitEnd = r.callbackStartedAt > 0 ? r.callbackStartedAt :
-                         (r.destroyedAt > 0 ? r.destroyedAt : duration);
-          if (waitEnd > r.createdAt) {
-            const startBucket = Math.floor(r.createdAt / bucketWidth);
-            const endBucket = Math.floor(waitEnd / bucketWidth);
-            for (let b = Math.max(0, startBucket); b <= Math.min(numBuckets - 1, endBucket); b++) {
-              typeData[b].async += 1;
-              if (!typeData[b].resources.includes(r)) typeData[b].resources.push(r);
-            }
-          }
-        }
-      });
-
-      // For peak sorting, compute peak intensity per type
-      if (heatmapSortMode === 'peak') {
-        types.forEach(type => {
-          const typeData = heatmapDataMap.get(type);
-          let peak = 0;
-          typeData.forEach(cell => {
-            const val = cell.sync + cell.async * 0.3;
-            if (val > peak) peak = val;
-          });
-          typeMetrics.get(type).peak = peak;
-        });
-        types.sort((a, b) => typeMetrics.get(b).peak - typeMetrics.get(a).peak);
-      }
-
-      // Compute intensity based on activity mode
-      const getIntensity = (cell) => {
-        switch (heatmapActivityMode) {
-          case 'sync': return cell.sync;
-          case 'async': return cell.async;
-          case 'count': return cell.count;
-          case 'combined':
-          default: return cell.sync + cell.async * 0.3;
-        }
-      };
-
-      // Find max intensity for normalization
-      let maxIntensity = 0;
-      heatmapDataMap.forEach(typeData => {
-        typeData.forEach(cell => {
-          const v = getIntensity(cell);
-          if (v > maxIntensity) maxIntensity = v;
-        });
-      });
-      if (maxIntensity === 0) maxIntensity = 1;
-
-      // Store for hover detection
-      heatmapData = { types, dataMap: heatmapDataMap, bucketWidth, numBuckets };
-      heatmapRenderParams = { padding, chartWidth, chartHeight, rowHeight, cellWidth: chartWidth / numBuckets, duration, height };
-
-      // Check which types are on critical path
-      const criticalTypes = new Set();
-      if (showCriticalPath) {
-        resources.forEach(r => {
-          if (criticalPathSet.has(r.asyncId)) {
-            criticalTypes.add(r.type);
-          }
-        });
-      }
-
-      // Draw title
-      ctx.fillStyle = '#e94560';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      const modeLabels = { combined: 'Combined', sync: 'Sync Only', async: 'Async Only', count: 'Resource Count' };
-      ctx.fillText(`Activity Heatmap - ${modeLabels[heatmapActivityMode]}`, width / 2, 25);
-
-      ctx.fillStyle = '#888';
-      ctx.font = '11px sans-serif';
-      ctx.fillText('Brighter = more activity in that time window', width / 2, 42);
-
-      // Color scheme helpers
-      const getHeatColor = (normalizedIntensity) => {
-        // Blue -> Cyan -> Yellow -> Red
-        if (normalizedIntensity < 0.33) {
-          const t = normalizedIntensity / 0.33;
-          return `rgb(${Math.floor(30 * (1 - t))}, ${Math.floor(100 * t + 30)}, ${Math.floor(200 * t + 50)})`;
-        } else if (normalizedIntensity < 0.66) {
-          const t = (normalizedIntensity - 0.33) / 0.33;
-          return `rgb(${Math.floor(255 * t)}, ${Math.floor(200 + 55 * t)}, ${Math.floor(250 * (1 - t))})`;
-        } else {
-          const t = (normalizedIntensity - 0.66) / 0.34;
-          return `rgb(255, ${Math.floor(255 * (1 - t))}, ${Math.floor(50 * (1 - t))})`;
-        }
-      };
-
-      const getMonoColor = (normalizedIntensity) => {
-        const v = Math.floor(normalizedIntensity * 200 + 30);
-        return `rgb(${v}, ${v}, ${v})`;
-      };
-
-      // Draw heatmap cells
-      const cellWidth = chartWidth / numBuckets;
-      types.forEach((type, typeIdx) => {
-        const y = padding.top + typeIdx * rowHeight;
-        const typeData = heatmapDataMap.get(type);
-        const baseColor = TYPE_COLORS[type] || '#808080';
-        const isOnCriticalPath = criticalTypes.has(type);
-
-        // Parse base color to RGB for 'type' scheme
-        const hex = baseColor.replace('#', '');
-        const baseR = parseInt(hex.substr(0, 2), 16);
-        const baseG = parseInt(hex.substr(2, 2), 16);
-        const baseB = parseInt(hex.substr(4, 2), 16);
-
-        typeData.forEach((cell, bucket) => {
-          const x = padding.left + bucket * cellWidth;
-          const intensity = getIntensity(cell);
-          const normalizedIntensity = intensity / maxIntensity;
-          const isHovered = heatmapHoverCell && heatmapHoverCell.typeIdx === typeIdx && heatmapHoverCell.bucket === bucket;
-
-          // Determine cell color based on scheme
-          let fillColor;
-          switch (heatmapColorScheme) {
-            case 'heat':
-              fillColor = normalizedIntensity > 0.01 ? getHeatColor(normalizedIntensity) : 'rgba(30, 30, 50, 0.5)';
-              break;
-            case 'mono':
-              fillColor = normalizedIntensity > 0.01 ? getMonoColor(normalizedIntensity) : 'rgba(30, 30, 50, 0.5)';
-              break;
-            case 'type':
-            default:
-              const alpha = Math.min(1, normalizedIntensity * 1.5);
-              fillColor = normalizedIntensity > 0.01 ? `rgba(${baseR}, ${baseG}, ${baseB}, ${alpha * 0.9})` : 'rgba(30, 30, 50, 0.3)';
-              break;
-          }
-
-          ctx.fillStyle = fillColor;
-          ctx.fillRect(x, y, cellWidth + 0.5, rowHeight - 1);
-
-          // Add brighter highlight for high intensity
-          if (normalizedIntensity > 0.7 && heatmapColorScheme === 'type') {
-            ctx.fillStyle = `rgba(255, 255, 255, ${(normalizedIntensity - 0.7) * 0.5})`;
-            ctx.fillRect(x, y, cellWidth + 0.5, rowHeight - 1);
-          }
-
-          // Hover highlight
-          if (isHovered) {
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(x + 1, y + 1, cellWidth - 2, rowHeight - 3);
-          }
-        });
-
-        // Critical path indicator on row
-        if (showCriticalPath && isOnCriticalPath) {
-          ctx.strokeStyle = '#ff6600';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([4, 2]);
-          ctx.strokeRect(padding.left - 2, y - 1, chartWidth + 4, rowHeight + 1);
-          ctx.setLineDash([]);
-        }
-
-        // Type label
-        ctx.fillStyle = TYPE_COLORS[type] || '#888';
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        const label = type.replace('js-', '').replace('cache-', 'c:');
-        const critBadge = showCriticalPath && isOnCriticalPath ? ' 🔥' : '';
-        ctx.fillText(label + critBadge, padding.left - 8, y + rowHeight / 2);
-      });
-
-      // Draw time axis
-      ctx.strokeStyle = '#444';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(padding.left, padding.top + types.length * rowHeight);
-      ctx.lineTo(padding.left + chartWidth, padding.top + types.length * rowHeight);
-      ctx.stroke();
-
-      // Time labels
-      ctx.fillStyle = '#888';
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      const numLabels = Math.min(10, numBuckets);
-      for (let i = 0; i <= numLabels; i++) {
-        const x = padding.left + (i / numLabels) * chartWidth;
-        const time = (i / numLabels) * duration / 1e6;
-        ctx.fillText(`${time.toFixed(1)}ms`, x, padding.top + types.length * rowHeight + 5);
-
-        // Grid line
-        if (i > 0 && i < numLabels) {
-          ctx.strokeStyle = 'rgba(68, 68, 68, 0.3)';
-          ctx.beginPath();
-          ctx.moveTo(x, padding.top);
-          ctx.lineTo(x, padding.top + types.length * rowHeight);
-          ctx.stroke();
-        }
-      }
-
-      // Legend
-      const legendY = height - 30;
-      ctx.fillStyle = '#888';
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText('Intensity:', padding.left, legendY);
-
-      const gradientWidth = 100;
-      const gradientX = padding.left + 60;
-      for (let i = 0; i < gradientWidth; i++) {
-        const intensity = i / gradientWidth;
-        switch (heatmapColorScheme) {
-          case 'heat':
-            ctx.fillStyle = getHeatColor(intensity);
-            break;
-          case 'mono':
-            ctx.fillStyle = getMonoColor(intensity);
-            break;
-          case 'type':
-          default:
-            ctx.fillStyle = `rgba(233, 69, 96, ${intensity})`;
-            break;
-        }
-        ctx.fillRect(gradientX + i, legendY - 5, 1, 10);
-      }
-      ctx.fillStyle = '#888';
-      ctx.fillText('Low', gradientX - 25, legendY);
-      ctx.fillText('High', gradientX + gradientWidth + 5, legendY);
-
-      // Setup event handlers (once)
-      if (!canvas._heatmapHandlersSet) {
-        canvas._heatmapHandlersSet = true;
-        setupHeatmapEventHandlers(canvas);
-      }
-    }
-
-    function setupHeatmapEventHandlers(canvas) {
-      // Control handlers
-      document.getElementById('heatmap-bucket-slider').addEventListener('input', (e) => {
-        heatmapBucketCount = parseInt(e.target.value);
-        document.getElementById('heatmap-bucket-value').textContent = heatmapBucketCount;
-        renderHeatmap();
-      });
-
-      document.getElementById('heatmap-color-select').addEventListener('change', (e) => {
-        heatmapColorScheme = e.target.value;
-        renderHeatmap();
-      });
-
-      document.getElementById('heatmap-activity-select').addEventListener('change', (e) => {
-        heatmapActivityMode = e.target.value;
-        renderHeatmap();
-      });
-
-      document.getElementById('heatmap-sort-select').addEventListener('change', (e) => {
-        heatmapSortMode = e.target.value;
-        renderHeatmap();
-      });
-
-      // Hover handler
-      canvas.addEventListener('mousemove', (e) => {
-        if (currentView !== 'heatmap' || !heatmapRenderParams || !heatmapData) {
-          canvas.style.cursor = 'default';
-          return;
-        }
-
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        const { padding, rowHeight, cellWidth, height } = heatmapRenderParams;
-        const { types, numBuckets } = heatmapData;
-
-        let hoveredCell = null;
-        if (x >= padding.left && x <= padding.left + cellWidth * numBuckets &&
-            y >= padding.top && y <= padding.top + types.length * rowHeight) {
-          const bucket = Math.floor((x - padding.left) / cellWidth);
-          const typeIdx = Math.floor((y - padding.top) / rowHeight);
-          if (bucket >= 0 && bucket < numBuckets && typeIdx >= 0 && typeIdx < types.length) {
-            hoveredCell = { typeIdx, bucket };
-          }
-        }
-
-        canvas.style.cursor = hoveredCell ? 'pointer' : 'default';
-
-        const cellChanged = !heatmapHoverCell && hoveredCell ||
-                           heatmapHoverCell && !hoveredCell ||
-                           (heatmapHoverCell && hoveredCell &&
-                            (heatmapHoverCell.typeIdx !== hoveredCell.typeIdx ||
-                             heatmapHoverCell.bucket !== hoveredCell.bucket));
-
-        if (cellChanged) {
-          heatmapHoverCell = hoveredCell;
-          renderHeatmap();
-          if (hoveredCell) {
-            showHeatmapTooltip(e, hoveredCell);
-          } else {
-            hideHeatmapTooltip();
-          }
-        } else if (hoveredCell) {
-          updateHeatmapTooltipPosition(e);
-        }
-      });
-
-      canvas.addEventListener('mouseleave', () => {
-        if (heatmapHoverCell) {
-          heatmapHoverCell = null;
-          hideHeatmapTooltip();
-          if (currentView === 'heatmap') renderHeatmap();
-        }
-      });
-
-      // Click handler
-      canvas.addEventListener('click', (e) => {
-        if (currentView !== 'heatmap' || !heatmapHoverCell || !heatmapData) return;
-        showHeatmapCellDetails(heatmapHoverCell);
-      });
-    }
-
-    function showHeatmapTooltip(e, cell) {
-      if (!heatmapTooltip) {
-        heatmapTooltip = document.createElement('div');
-        heatmapTooltip.style.cssText = `
-          position: fixed; background: rgba(22, 33, 62, 0.95); border: 1px solid #0f3460;
-          padding: 10px 14px; border-radius: 4px; font-size: 11px; color: #e0e0e0;
-          pointer-events: none; z-index: 1000; max-width: 280px;
-        `;
-        document.body.appendChild(heatmapTooltip);
-      }
-
-      const { types, dataMap, bucketWidth } = heatmapData;
-      const type = types[cell.typeIdx];
-      const cellData = dataMap.get(type)[cell.bucket];
-      const timeStart = (cell.bucket * bucketWidth / 1e6).toFixed(2);
-      const timeEnd = ((cell.bucket + 1) * bucketWidth / 1e6).toFixed(2);
-
-      let html = `<div style="font-weight: bold; color: ${TYPE_COLORS[type] || '#888'}; margin-bottom: 6px;">${type}</div>`;
-      html += `<div style="display: grid; grid-template-columns: auto auto; gap: 2px 12px;">`;
-      html += `<span style="color: #888;">Time:</span><span>${timeStart}ms - ${timeEnd}ms</span>`;
-      html += `<span style="color: #888;">Sync ops:</span><span>${cellData.sync}</span>`;
-      html += `<span style="color: #888;">Async ops:</span><span>${cellData.async}</span>`;
-      html += `<span style="color: #888;">Resources:</span><span>${cellData.resources.length}</span>`;
-      html += `</div>`;
-
-      // Show critical path info if applicable
-      if (showCriticalPath && cellData.resources.some(r => criticalPathSet.has(r.asyncId))) {
-        const critCount = cellData.resources.filter(r => criticalPathSet.has(r.asyncId)).length;
-        html += `<div style="margin-top: 6px; color: #ff6600;">🔥 ${critCount} on critical path</div>`;
-      }
-
-      html += `<div style="color: #7ec8e3; margin-top: 6px; font-size: 10px;">Click for details</div>`;
-
-      heatmapTooltip.innerHTML = html;
-      heatmapTooltip.style.left = (e.clientX + 15) + 'px';
-      heatmapTooltip.style.top = (e.clientY + 15) + 'px';
-      heatmapTooltip.style.display = 'block';
-    }
-
-    function updateHeatmapTooltipPosition(e) {
-      if (heatmapTooltip) {
-        heatmapTooltip.style.left = (e.clientX + 15) + 'px';
-        heatmapTooltip.style.top = (e.clientY + 15) + 'px';
-      }
-    }
-
-    function hideHeatmapTooltip() {
-      if (heatmapTooltip) {
-        heatmapTooltip.style.display = 'none';
-      }
-    }
-
-    function showHeatmapCellDetails(cell) {
-      const { types, dataMap, bucketWidth } = heatmapData;
-      const type = types[cell.typeIdx];
-      const cellData = dataMap.get(type)[cell.bucket];
-      const timeStart = (cell.bucket * bucketWidth / 1e6).toFixed(2);
-      const timeEnd = ((cell.bucket + 1) * bucketWidth / 1e6).toFixed(2);
-
-      const detailsEl = document.getElementById('selected-details');
-      let html = `<div class="detail-item"><strong>Type:</strong> <span style="color: ${TYPE_COLORS[type] || '#888'};">${type}</span></div>`;
-      html += `<div class="detail-item"><strong>Time:</strong> ${timeStart}ms - ${timeEnd}ms</div>`;
-      html += `<div class="detail-item"><strong>Sync:</strong> ${cellData.sync} | <strong>Async:</strong> ${cellData.async}</div>`;
-
-      if (cellData.resources.length > 0) {
-        html += `<div class="detail-item" style="margin-top: 8px;"><strong>Resources (${cellData.resources.length}):</strong></div>`;
-        cellData.resources.slice(0, 10).forEach(r => {
-          const critBadge = showCriticalPath && criticalPathSet.has(r.asyncId) ? ' 🔥' : '';
-          html += `<div class="detail-item" style="font-size: 0.7rem; padding-left: 8px;">`;
-          html += `#${r.asyncId}${critBadge} - `;
-          if (r.callbackStartedAt > 0) {
-            html += `${(r.callbackStartedAt / 1e6).toFixed(2)}ms`;
-          } else {
-            html += `created ${(r.createdAt / 1e6).toFixed(2)}ms`;
-          }
-          html += `</div>`;
-        });
-        if (cellData.resources.length > 10) {
-          html += `<div class="detail-item" style="font-size: 0.7rem; color: #888;">... and ${cellData.resources.length - 10} more</div>`;
-        }
-      }
-
-      detailsEl.innerHTML = html;
     }
 
     // ==================== SELECTION ====================
