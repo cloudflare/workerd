@@ -278,13 +278,65 @@ python3 -m http.server 8888
 | F | Click Filter | Filter to clicked resource's ancestors/descendants |
 | G | Stack Group | Group by creation stack trace |
 | E | Temporal Edges | Shows timing-based causality |
+| H | Hide Internal | Hides internal runtime machinery (bridges, empty stacks) |
+| S | Group Siblings | Collapses sibling resources into compound nodes (options: Proximity 1-5ms, Cousins Y/N) |
 | A | High Contrast | Accessibility mode |
+
+## Understanding Sibling & Cousin Grouping
+
+Async traces can contain many resources that are essentially "the same operation repeated". For example, reading a stream in chunks creates multiple similar promise chains. Sibling grouping collapses these repetitive patterns to reduce visual clutter.
+
+### What are Siblings?
+
+**Siblings** are resources that:
+1. Were created from the **same code location** (same stack trace)
+2. Were triggered by the **same parent** resource
+3. Were created within a short **time window** (during parent's callback, or within the proximity threshold)
+
+Example: A loop that creates 10 fetch requests will produce 10 sibling resources - all from the same line of code, all triggered by the same parent.
+
+### What are Cousins?
+
+**Cousins** are resources that:
+1. Were created from the **same code location** (same stack trace)
+2. Were triggered by **different parents that are themselves siblings**
+
+Example: If you have 4 sibling stream-read operations, and each spawns 2 promise children from the same code location, those 8 promises are cousins of each other.
+
+```
+Parent #26 spawns siblings: #38, #39, #40, #41 (same stack trace)
+  └─ #38 spawns: #44, #45
+  └─ #39 spawns: #46, #47   ← These 8 promises are "cousins"
+  └─ #40 spawns: #48, #50
+  └─ #41 spawns: #49, #51
+```
+
+Without cousin grouping: 4 separate pairs (8 nodes shown as 4 groups)
+With cousin grouping: 1 merged group (8 nodes collapsed into 1 compound node)
+
+### Internal Resources
+
+Resources classified as "internal" (runtime machinery like KJ↔JS bridges, or promises with no/internal-only stack traces) are grouped together if they share the same parent, regardless of their specific stack trace ID. This prevents internal implementation details from fragmenting otherwise cohesive groups.
+
+### How to Interpret Compound Nodes
+
+In the Graph view, when sibling grouping is enabled:
+- **Compound nodes** appear with a dashed blue ring and a red count badge (e.g., "×8")
+- **Click** a compound node to expand it and see individual members
+- **Click** the minus badge on an expanded group to collapse it again
+- Edges to/from the group connect to the "representative" (first member)
+
+### Adjusting Grouping Behavior
+
+Under the "Group Siblings" option in the Analysis dropdown:
+- **Proximity (1-5ms)**: How close in time resources must be created to be considered siblings when the parent has no callback timing data
+- **Cousins (Y/N)**: Whether to merge cousin groups into larger compound nodes
 
 ## Keyboard Shortcuts
 
 **Navigation:** `1`-`8` switch views, `?` help, `O` load, `P` paste, `Esc` close
 
-**Analysis:** `C` critical path, `B` bottlenecks, `T` patterns, `F` filter, `G` stack group, `A` accessibility
+**Analysis:** `C` critical path, `B` bottlenecks, `T` patterns, `F` filter, `G` stack group, `E` temporal edges, `H` hide internal, `S` group siblings, `A` accessibility
 
 **View-Specific:**
 - Graph: `←`/`→` switch layouts
@@ -502,9 +554,11 @@ python3 -m http.server 8888
 **Completed:**
 
 *Sibling grouping algorithm:*
-- Groups resources that share the same stackTraceId + triggerId + temporal proximity
-- Resources must be created during the trigger's callback execution window (or within 1ms of each other)
+- Groups resources that share the same stack key + triggerId + temporal proximity
+- Stack key is `stackTraceId` for user/typed resources, or `"internal"` for internal resources (empty stack or internal-only frames)
+- Resources must be created during the trigger's callback execution window (or within proximity threshold of each other)
 - Groups of 2+ resources get a "representative" (first resource in group)
+- Optional "cousin grouping" merges groups whose triggers are themselves siblings
 
 *Graph view compound nodes:*
 - When "Group Siblings" enabled (Analysis dropdown or 'S' key), sibling groups collapse into compound nodes
@@ -526,6 +580,82 @@ python3 -m http.server 8888
 
 **Files modified:**
 - `tools/async-trace-viewer/index.html` - sibling grouping, compound nodes, expand/collapse
+
+## Session (January 2025) - Analysis Dropdown UI Improvements
+
+**Completed:**
+
+*Configurable sibling proximity threshold:*
+- Added `siblingProximityMs` setting (default 1ms, range 1-5ms)
+- Slider in Analysis dropdown under "Group Siblings" option
+- `computeSiblingGroups()` now uses configurable threshold instead of hardcoded 1ms
+- Setting persisted to localStorage
+
+*Reorganized Analysis dropdown:*
+- Moved Pattern Thresholds from bottom of dropdown to directly under "Patterns" checkbox
+- Sibling Proximity slider positioned directly under "Group Siblings" checkbox
+- Consistent indentation (`padding-left: 24px`) for sub-options
+- "Restore Defaults" button moved to bottom of dropdown
+
+*Collapsible threshold sections:*
+- Added expand/collapse toggles (▶/▼) on "Patterns" and "Group Siblings" lines
+- Sections start collapsed by default
+- `patternThresholdsExpanded` and `siblingOptionsExpanded` state variables
+- Expanded state persisted to localStorage
+- `updateExpandedSection(type)` helper function for UI updates
+
+*Hotkey alignment fix:*
+- Expand toggle uses `margin-left: auto` to push right
+- Hotkey follows toggle with `margin-left: 0`
+- Ensures consistent hotkey alignment across all dropdown items
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - dropdown reorganization, collapsible sections
+- `ASYNC_TRACE_PROGRESS.md` - session documentation
+
+## Session (January 2025) - Internal Node & Cousin Grouping
+
+**Completed:**
+
+*Internal node grouping:*
+- Resources classified as "internal" (empty stack trace OR only internal module frames) now use `"internal"` as their stack grouping key
+- This allows internal runtime machinery to group together based on sharing the same trigger parent, regardless of their specific stackTraceId
+- Leverages existing `_classification` property set during trace loading
+
+*Cousin grouping:*
+- New "Cousins" Y/N slider in sibling options (under "Group Siblings")
+- When enabled, resources with the same stack key whose triggers are in the same sibling group get merged
+- Example: In TCP trace, pairs like `(#44,#45)`, `(#46,#47)`, `(#48,#50)`, `(#49,#51)` merge into one group because their triggers (#38, #39, #40, #41) are siblings
+- Reduces TCP trace from 38 sibling groups to 20 groups when enabled
+- `cousinGrouping` state variable persisted to localStorage
+
+*Algorithm changes in `computeSiblingGroups()`:*
+- Phase 1: Compute initial sibling groups using `getStackKey(r)` which returns `"internal"` for internal resources
+- Phase 2: If `cousinGrouping` enabled, re-key groups by `(stackKey, triggerSiblingGroupKey)` instead of `(stackKey, triggerId)`
+- Merged cousin groups marked with `isCousin: true` property
+
+*UI improvements:*
+- Cousins slider styled consistently with Proximity slider (Y/N values)
+- Added `white-space: nowrap` to "Group Siblings" label to prevent text wrapping
+- Added `padding-right: 12px` to expanded option sections for better spacing
+- Handler invalidates `dagNodes` and clears `expandedSiblingGroups` to force DAG re-render
+
+*Tooltip enhancement:*
+- Hovering over collapsed compound nodes now shows additional group information
+- Displays group type ("Sibling group" or "Cousin group")
+- Shows total member count (e.g., "8 resources")
+- Lists type breakdown (e.g., "Types: js-promise: 6, stream-read: 2")
+- Only shown for collapsed groups (not when expanded)
+
+*Documentation:*
+- Added "Sibling & Cousin Grouping" section to in-app Guide (❓ button)
+- Explains what siblings and cousins are with visual example
+- Documents compound node visual indicators and interaction
+- Lists configurable options (Proximity, Cousins)
+- Updated ASYNC_TRACE_PROGRESS.md with detailed session notes
+
+**Files modified:**
+- `tools/async-trace-viewer/index.html` - internal grouping, cousin grouping, tooltip, in-app guide
 
 ## Future Replay Animation Ideas
 

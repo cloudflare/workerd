@@ -993,30 +993,11 @@
             <input type="checkbox" id="bottleneck-check"> 🐢 Bottlenecks <span class="hotkey">B</span>
           </label>
           <label class="dropdown-item" id="pattern-item">
-            <input type="checkbox" id="pattern-check"> 🔍 Patterns <span class="hotkey">T</span>
+            <input type="checkbox" id="pattern-check"> 🔍 Patterns
+            <span id="pattern-expand-toggle" class="expand-toggle" style="margin-left: auto; cursor: pointer; font-size: 10px; color: #888; padding: 0 4px;">▶</span>
+            <span class="hotkey" style="margin-left: 0;">T</span>
           </label>
-          <label class="dropdown-item" id="click-filter-item">
-            <input type="checkbox" id="click-filter-check"> 🎯 Click Filter <span class="hotkey">F</span>
-          </label>
-          <label class="dropdown-item" id="stack-group-item">
-            <input type="checkbox" id="stack-group-check"> 📚 Stack Group <span class="hotkey">G</span>
-          </label>
-          <label class="dropdown-item" id="temporal-edges-item">
-            <input type="checkbox" id="temporal-edges-check"> ⏱️ Temporal Edges <span class="hotkey">E</span>
-          </label>
-          <label class="dropdown-item" id="hide-internal-item">
-            <input type="checkbox" id="hide-internal-check"> 🔒 Hide Internal <span class="hotkey">H</span>
-          </label>
-          <label class="dropdown-item" id="group-siblings-item">
-            <input type="checkbox" id="group-siblings-check"> 🔗 Group Siblings <span class="hotkey">S</span>
-          </label>
-          <div class="dropdown-divider"></div>
-          <label class="dropdown-item" id="accessibility-item">
-            <input type="checkbox" id="accessibility-check"> ♿ High Contrast <span class="hotkey">A</span>
-          </label>
-          <div class="dropdown-divider"></div>
-          <div class="threshold-section">
-            <div class="threshold-header">Pattern Thresholds</div>
+          <div id="pattern-thresholds-section" style="padding-left: 24px; padding-right: 12px; margin: 2px 0; display: none;">
             <div class="threshold-item">
               <span>Sync block:</span>
               <input type="range" id="threshold-sync" min="10" max="200" value="50">
@@ -1047,8 +1028,42 @@
               <input type="range" id="threshold-fetch" min="3" max="20" value="6">
               <span id="threshold-fetch-val">6</span>
             </div>
-            <button id="restore-thresholds-btn" style="margin-top: 0.5rem; width: 100%; padding: 0.3rem; font-size: 0.65rem; background: #333; border: 1px solid #555; color: #aaa; border-radius: 3px; cursor: pointer;">Restore Defaults</button>
           </div>
+          <label class="dropdown-item" id="click-filter-item">
+            <input type="checkbox" id="click-filter-check"> 🎯 Click Filter <span class="hotkey">F</span>
+          </label>
+          <label class="dropdown-item" id="stack-group-item">
+            <input type="checkbox" id="stack-group-check"> 📚 Stack Group <span class="hotkey">G</span>
+          </label>
+          <label class="dropdown-item" id="temporal-edges-item">
+            <input type="checkbox" id="temporal-edges-check"> ⏱️ Temporal Edges <span class="hotkey">E</span>
+          </label>
+          <label class="dropdown-item" id="hide-internal-item">
+            <input type="checkbox" id="hide-internal-check"> 🔒 Hide Internal <span class="hotkey">H</span>
+          </label>
+          <label class="dropdown-item" id="group-siblings-item" style="white-space: nowrap;">
+            <input type="checkbox" id="group-siblings-check"> 🔗 Group Siblings
+            <span id="sibling-expand-toggle" class="expand-toggle" style="margin-left: auto; cursor: pointer; font-size: 10px; color: #888; padding: 0 4px;">▶</span>
+            <span class="hotkey" style="margin-left: 0;">S</span>
+          </label>
+          <div id="sibling-proximity-section" style="padding-left: 24px; padding-right: 12px; margin: 2px 0; display: none;">
+            <div class="threshold-item">
+              <span>Proximity:</span>
+              <input type="range" id="threshold-sibling-proximity" min="1" max="5" value="1">
+              <span id="threshold-sibling-proximity-val">1ms</span>
+            </div>
+            <div class="threshold-item">
+              <span>Cousins:</span>
+              <input type="range" id="cousin-grouping-slider" min="0" max="1" value="0">
+              <span id="cousin-grouping-val">N</span>
+            </div>
+          </div>
+          <div class="dropdown-divider"></div>
+          <label class="dropdown-item" id="accessibility-item">
+            <input type="checkbox" id="accessibility-check"> ♿ High Contrast <span class="hotkey">A</span>
+          </label>
+          <div class="dropdown-divider"></div>
+          <button id="restore-thresholds-btn" style="margin: 4px 8px; width: calc(100% - 16px); padding: 0.3rem; font-size: 0.65rem; background: #333; border: 1px solid #555; color: #aaa; border-radius: 3px; cursor: pointer;">Restore Defaults</button>
         </div>
       </div>
       <button id="tutorial-btn" style="background: #e94560;">❓ Guide</button>
@@ -1772,6 +1787,36 @@ const userB = await fetch('/user/123');</pre>
         </div>
 
         <div class="guide-section">
+          <h3>Sibling &amp; Cousin Grouping</h3>
+          <p>Press <code>S</code> or enable <strong>🔗 Group Siblings</strong> to collapse repetitive resources in the Graph view.</p>
+          <p><strong>What are Siblings?</strong></p>
+          <p>Resources created from the <em>same code location</em>, by the <em>same parent</em>, within a short time window. Example: A loop creating 10 fetch requests produces 10 siblings.</p>
+          <p><strong>What are Cousins?</strong></p>
+          <p>Resources created from the <em>same code location</em>, but by <em>different parents that are themselves siblings</em>.</p>
+          <div class="guide-example" style="background: #1a1a2e; padding: 0.5rem; font-family: monospace; font-size: 0.75rem;">
+Parent #26 spawns siblings: #38, #39, #40, #41<br>
+&nbsp;&nbsp;└─ #38 spawns: #44, #45<br>
+&nbsp;&nbsp;└─ #39 spawns: #46, #47 &nbsp;← These 8 are "cousins"<br>
+&nbsp;&nbsp;└─ #40 spawns: #48, #50<br>
+&nbsp;&nbsp;└─ #41 spawns: #49, #51
+          </div>
+          <p><strong>Compound Nodes:</strong></p>
+          <ul>
+            <li><strong>Dashed blue ring</strong> + <strong>red badge</strong> (e.g., "×8") = collapsed group</li>
+            <li><strong>Click</strong> to expand and see individual members</li>
+            <li><strong>Click minus badge</strong> to collapse again</li>
+            <li><strong>Hover</strong> to see group type (Sibling/Cousin), count, and member types</li>
+          </ul>
+          <p><strong>Options</strong> (expand with ▶):</p>
+          <table class="guide-table">
+            <tr><th>Option</th><th>Effect</th></tr>
+            <tr><td>Proximity (1-5ms)</td><td>Time window for grouping when parent has no callback timing</td></tr>
+            <tr><td>Cousins (Y/N)</td><td>Whether to merge cousin groups into larger compound nodes</td></tr>
+          </table>
+          <p class="guide-tip">💡 Sibling grouping is most useful in the Graph view to reduce visual clutter from repetitive stream/promise patterns.</p>
+        </div>
+
+        <div class="guide-section">
           <h3>Recommended Workflow</h3>
           <ol>
             <li><strong>Overview</strong> → Start with Waterfall (1) to see timeline</li>
@@ -1869,6 +1914,10 @@ const userB = await fetch('/user/123');</pre>
     let showTemporalEdges = false;
     let hideInternal = false;
     let groupSiblings = false;
+    let siblingProximityMs = 1;  // Temporal proximity threshold for sibling grouping (ms)
+    let cousinGrouping = false;  // Whether to group cousins (children of sibling parents)
+    let patternThresholdsExpanded = false;  // Whether pattern thresholds section is expanded
+    let siblingOptionsExpanded = false;  // Whether sibling options section is expanded
     let clickFilterResourceId = null;  // Currently filtered resource
     let detectedBottlenecks = [];  // Top N slowest resources
     let detectedPatterns = [];  // Detected anti-patterns
@@ -1945,6 +1994,10 @@ const userB = await fetch('/user/123');</pre>
         showTemporalEdges,
         hideInternal,
         groupSiblings,
+        siblingProximityMs,
+        cousinGrouping,
+        patternThresholdsExpanded,
+        siblingOptionsExpanded,
         accessibilityMode,
         patternThresholds,
         sidebarCollapsed,
@@ -2008,6 +2061,28 @@ const userB = await fetch('/user/123');</pre>
         if (settings.groupSiblings !== undefined) {
           groupSiblings = settings.groupSiblings;
           document.getElementById('group-siblings-check').checked = groupSiblings;
+        }
+        if (settings.siblingProximityMs !== undefined) {
+          siblingProximityMs = settings.siblingProximityMs;
+          const slider = document.getElementById('threshold-sibling-proximity');
+          const valueSpan = document.getElementById('threshold-sibling-proximity-val');
+          if (slider) slider.value = siblingProximityMs;
+          if (valueSpan) valueSpan.textContent = siblingProximityMs + 'ms';
+        }
+        if (settings.cousinGrouping !== undefined) {
+          cousinGrouping = settings.cousinGrouping;
+          const slider = document.getElementById('cousin-grouping-slider');
+          const valueSpan = document.getElementById('cousin-grouping-val');
+          if (slider) slider.value = cousinGrouping ? 1 : 0;
+          if (valueSpan) valueSpan.textContent = cousinGrouping ? 'Y' : 'N';
+        }
+        if (settings.patternThresholdsExpanded !== undefined) {
+          patternThresholdsExpanded = settings.patternThresholdsExpanded;
+          updateExpandedSection('pattern');
+        }
+        if (settings.siblingOptionsExpanded !== undefined) {
+          siblingOptionsExpanded = settings.siblingOptionsExpanded;
+          updateExpandedSection('sibling');
         }
         if (settings.accessibilityMode !== undefined) {
           accessibilityMode = settings.accessibilityMode;
@@ -2341,6 +2416,78 @@ const userB = await fetch('/user/123');</pre>
       setupThresholdSlider('threshold-unbatched', 'unbatchedOps', '');
       setupThresholdSlider('threshold-fetch', 'fetchFlood', '');
 
+      // Sibling proximity slider handler
+      (function() {
+        const slider = document.getElementById('threshold-sibling-proximity');
+        const valueSpan = document.getElementById('threshold-sibling-proximity-val');
+        slider.addEventListener('input', () => {
+          siblingProximityMs = parseInt(slider.value);
+          valueSpan.textContent = slider.value + 'ms';
+          saveSettings();
+          if (groupSiblings && traceData) {
+            computeSiblingGroups();
+            render();
+          }
+        });
+      })();
+
+      // Cousin grouping slider handler
+      (function() {
+        const slider = document.getElementById('cousin-grouping-slider');
+        const valueSpan = document.getElementById('cousin-grouping-val');
+        const handler = () => {
+          cousinGrouping = slider.value === '1';
+          valueSpan.textContent = cousinGrouping ? 'Y' : 'N';
+          saveSettings();
+          if (traceData) {
+            dagNodes = [];  // Invalidate DAG layout when cousin grouping changes
+            expandedSiblingGroups.clear();  // Clear expanded state
+            if (groupSiblings) {
+              computeSiblingGroups();
+            }
+            render();
+          }
+        };
+        slider.addEventListener('input', handler);
+        slider.addEventListener('change', handler);
+      })();
+
+      // Helper to update expanded section UI
+      function updateExpandedSection(type) {
+        if (type === 'pattern') {
+          const section = document.getElementById('pattern-thresholds-section');
+          const toggle = document.getElementById('pattern-expand-toggle');
+          if (section && toggle) {
+            section.style.display = patternThresholdsExpanded ? 'block' : 'none';
+            toggle.textContent = patternThresholdsExpanded ? '▼' : '▶';
+          }
+        } else if (type === 'sibling') {
+          const section = document.getElementById('sibling-proximity-section');
+          const toggle = document.getElementById('sibling-expand-toggle');
+          if (section && toggle) {
+            section.style.display = siblingOptionsExpanded ? 'block' : 'none';
+            toggle.textContent = siblingOptionsExpanded ? '▼' : '▶';
+          }
+        }
+      }
+
+      // Expand/collapse toggle handlers
+      document.getElementById('pattern-expand-toggle').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        patternThresholdsExpanded = !patternThresholdsExpanded;
+        updateExpandedSection('pattern');
+        saveSettings();
+      });
+
+      document.getElementById('sibling-expand-toggle').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        siblingOptionsExpanded = !siblingOptionsExpanded;
+        updateExpandedSection('sibling');
+        saveSettings();
+      });
+
       // Restore defaults button for thresholds
       document.getElementById('restore-thresholds-btn').addEventListener('click', () => {
         patternThresholds = { ...DEFAULT_PATTERN_THRESHOLDS };
@@ -2358,9 +2505,23 @@ const userB = await fetch('/user/123');</pre>
           slider.value = patternThresholds[key];
           valueSpan.textContent = patternThresholds[key] + suffix;
         });
+        // Reset sibling options to default
+        siblingProximityMs = 1;
+        const siblingSlider = document.getElementById('threshold-sibling-proximity');
+        const siblingValueSpan = document.getElementById('threshold-sibling-proximity-val');
+        siblingSlider.value = 1;
+        siblingValueSpan.textContent = '1ms';
+        cousinGrouping = false;
+        document.getElementById('cousin-grouping-slider').value = 0;
+        document.getElementById('cousin-grouping-val').textContent = 'N';
+
         saveSettings();
         if (showPatterns && traceData) {
           detectPatterns();
+          render();
+        }
+        if (groupSiblings && traceData) {
+          computeSiblingGroups();
           render();
         }
       });
@@ -2827,6 +2988,36 @@ const userB = await fetch('/user/123');</pre>
               ? ((r.callbackEndedAt - r.callbackStartedAt) / 1e6).toFixed(2)
               : null;
 
+            // Sibling group info (for collapsed compound nodes)
+            let siblingGroupHTML = '';
+            if (groupSiblings) {
+              const group = getSiblingGroup(r.asyncId);
+              if (group && group.representative.asyncId === r.asyncId && !expandedSiblingGroups.has(group.key)) {
+                const memberCount = group.members.length;
+                const isCousin = group.isCousin || false;
+                const groupType = isCousin ? 'Cousin group' : 'Sibling group';
+
+                // Count members by type
+                const typeCounts = new Map();
+                group.members.forEach(asyncId => {
+                  const member = traceData.resources.find(res => res.asyncId === asyncId);
+                  if (member) {
+                    typeCounts.set(member.type, (typeCounts.get(member.type) || 0) + 1);
+                  }
+                });
+                const typeList = [...typeCounts.entries()]
+                  .map(([type, count]) => `${type}: ${count}`)
+                  .join(', ');
+
+                siblingGroupHTML = `
+                  <div style="margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid #444;">
+                    <div style="color: #4ecdc4; font-weight: bold;">${groupType} (${memberCount} resources)</div>
+                    <div style="color: #aaa; font-size: 0.7rem;">Types: ${typeList}</div>
+                  </div>
+                `;
+              }
+            }
+
             tooltip.innerHTML = `
               <div class="tooltip-title">${r.type} #${r.asyncId} <span style="color: #888; font-size: 0.7rem;">(${classLabel})</span></div>
               <div>Created: ${createdMs}ms</div>
@@ -2834,6 +3025,7 @@ const userB = await fetch('/user/123');</pre>
               ${syncTimeMs ? `<div>Sync time: ${syncTimeMs}ms</div>` : ''}
               <div>Children: ${(traceData.childrenMap.get(r.asyncId) || []).length}</div>
               ${stackPreview}
+              ${siblingGroupHTML}
               ${criticalPathHTML}
               ${patternHTML}
             `;
@@ -4195,45 +4387,33 @@ const userB = await fetch('/user/123');</pre>
       siblingGroups = new Map();
       if (!traceData) return;
 
-      // Build a map of triggerId -> trigger resource for callback window checks
-      const triggerMap = new Map();
-      traceData.resources.forEach(r => triggerMap.set(r.asyncId, r));
+      // Build a map of asyncId -> resource for lookups
+      const resourceMap = new Map();
+      traceData.resources.forEach(r => resourceMap.set(r.asyncId, r));
 
-      // Group resources by (stackTraceId, triggerId)
-      const candidates = new Map();
-      traceData.resources.forEach(r => {
-        // Skip root
-        if (r.triggerId === 0) return;
-
-        const key = `${r.stackTraceId}:${r.triggerId}`;
-        if (!candidates.has(key)) {
-          candidates.set(key, []);
+      // Helper to get stack grouping key for a resource
+      // Internal resources (empty stack or internal-only stack) use "internal" as their stack key
+      function getStackKey(r) {
+        if (r._classification === 'internal') {
+          return 'internal';
         }
-        candidates.get(key).push(r);
-      });
+        return String(r.stackTraceId);
+      }
 
-      // Filter to groups where resources were created during trigger's callback
-      // and have more than one member
-      candidates.forEach((resources, key) => {
-        if (resources.length < 2) return;
-
-        const triggerId = resources[0].triggerId;
-        const trigger = triggerMap.get(triggerId);
-
-        // Check if resources were created during trigger's callback execution
-        // or within a small time window of each other (for triggers without callback timing)
-        let validGroup = [];
+      // Helper to validate a group based on trigger callback timing or temporal proximity
+      function validateGroup(resources, triggerId) {
+        const trigger = resourceMap.get(triggerId);
 
         if (trigger && trigger.callbackStartedAt > 0 && trigger.callbackEndedAt > 0) {
           // Filter to resources created during trigger's callback
-          validGroup = resources.filter(r =>
+          return resources.filter(r =>
             r.createdAt >= trigger.callbackStartedAt &&
             r.createdAt <= trigger.callbackEndedAt
           );
         } else {
-          // No callback timing - use temporal proximity (within 1ms of each other)
+          // No callback timing - use temporal proximity
           const sorted = [...resources].sort((a, b) => a.createdAt - b.createdAt);
-          const timeWindow = 1_000_000; // 1ms in nanoseconds
+          const timeWindow = siblingProximityMs * 1_000_000; // Convert ms to nanoseconds
 
           // Find largest cluster within time window
           let bestCluster = [];
@@ -4250,22 +4430,100 @@ const userB = await fetch('/user/123');</pre>
               bestCluster = cluster;
             }
           }
-          validGroup = bestCluster;
+          return bestCluster;
         }
+      }
+
+      // PHASE 1: Compute initial sibling groups (direct siblings only)
+      // Group resources by (stackKey, triggerId)
+      const initialCandidates = new Map();
+      traceData.resources.forEach(r => {
+        // Skip root
+        if (r.triggerId === 0) return;
+
+        const key = `${getStackKey(r)}:${r.triggerId}`;
+        if (!initialCandidates.has(key)) {
+          initialCandidates.set(key, []);
+        }
+        initialCandidates.get(key).push(r);
+      });
+
+      // Build initial groups from candidates with 2+ members
+      const initialGroups = new Map();
+      initialCandidates.forEach((resources, key) => {
+        if (resources.length < 2) return;
+
+        const triggerId = resources[0].triggerId;
+        const validGroup = validateGroup(resources, triggerId);
 
         if (validGroup.length >= 2) {
-          // Create group with first resource as the "representative"
-          const groupKey = `sibling:${key}`;
-          siblingGroups.set(groupKey, {
-            key: groupKey,
-            members: validGroup.map(r => r.asyncId),
-            representative: validGroup[0],
-            stackTraceId: validGroup[0].stackTraceId,
-            triggerId: validGroup[0].triggerId,
-            types: [...new Set(validGroup.map(r => r.type))]
+          initialGroups.set(key, {
+            key: key,
+            members: validGroup,
+            stackKey: getStackKey(validGroup[0]),
+            triggerId: triggerId
           });
         }
       });
+
+      // Build a lookup: asyncId -> which initial group contains it as a member
+      const memberToGroup = new Map();
+      for (const [key, group] of initialGroups) {
+        for (const r of group.members) {
+          memberToGroup.set(r.asyncId, key);
+        }
+      }
+
+      // PHASE 2: If cousin grouping enabled, merge groups whose triggers are siblings
+      if (cousinGrouping) {
+        // For each group, find the "effective trigger" - if the trigger is in a sibling group,
+        // use that group's key as the trigger identifier
+        const cousinCandidates = new Map();
+
+        for (const [key, group] of initialGroups) {
+          const triggerGroupKey = memberToGroup.get(group.triggerId);
+          // Use trigger's sibling group key if it exists, otherwise use triggerId directly
+          const effectiveTrigger = triggerGroupKey || String(group.triggerId);
+          const cousinKey = `${group.stackKey}:${effectiveTrigger}`;
+
+          if (!cousinCandidates.has(cousinKey)) {
+            cousinCandidates.set(cousinKey, []);
+          }
+          cousinCandidates.get(cousinKey).push(group);
+        }
+
+        // Merge groups that share the same cousin key
+        for (const [cousinKey, groups] of cousinCandidates) {
+          const allMembers = groups.flatMap(g => g.members);
+          allMembers.sort((a, b) => a.createdAt - b.createdAt);
+
+          const isCousin = groups.length > 1;
+          const groupKey = isCousin ? `cousin:${cousinKey}` : `sibling:${groups[0].key}`;
+
+          siblingGroups.set(groupKey, {
+            key: groupKey,
+            members: allMembers.map(r => r.asyncId),
+            representative: allMembers[0],
+            stackTraceId: allMembers[0].stackTraceId,
+            triggerId: allMembers[0].triggerId,
+            types: [...new Set(allMembers.map(r => r.type))],
+            isCousin: isCousin
+          });
+        }
+      } else {
+        // No cousin grouping - convert initial groups to final format
+        for (const [key, group] of initialGroups) {
+          const groupKey = `sibling:${key}`;
+          siblingGroups.set(groupKey, {
+            key: groupKey,
+            members: group.members.map(r => r.asyncId),
+            representative: group.members[0],
+            stackTraceId: group.members[0].stackTraceId,
+            triggerId: group.triggerId,
+            types: [...new Set(group.members.map(r => r.type))]
+          });
+        }
+      }
     }
 
     // Get the sibling group a resource belongs to, if any
