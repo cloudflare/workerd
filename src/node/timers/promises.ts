@@ -23,6 +23,20 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import * as _default from 'node-internal:internal_timers_promises';
+import type promises from 'node:timers/promises';
+
+import {
+  setTimeout,
+  setImmediate,
+  setInterval,
+  scheduler,
+} from 'node-internal:internal_timers_promises';
+
 export * from 'node-internal:internal_timers_promises';
-export default _default;
+
+export default {
+  setTimeout,
+  setImmediate,
+  setInterval,
+  scheduler: scheduler as typeof promises.scheduler,
+} satisfies typeof promises;

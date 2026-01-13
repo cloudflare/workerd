@@ -4,7 +4,10 @@ load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 
 js_library(
     name = "base-eslint",
-    srcs = ["base.eslint.config.mjs"],
+    srcs = [
+        "base.eslint.config.mjs",
+        "custom-eslint-rules.mjs",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//:node_modules/@eslint/js",
