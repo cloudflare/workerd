@@ -244,10 +244,22 @@ function isDrawTransformer(input: unknown): input is DrawTransformer {
   return input instanceof DrawTransformer;
 }
 
-class ImagesBindingImpl implements ImagesBinding {
-  readonly #fetcher: Fetcher;
+interface ServiceEntrypointStub {
+  get(imageId: string): Promise<ImageMetadata | null>;
+  getImage(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
+  upload(
+    image: ReadableStream<Uint8Array> | ArrayBuffer,
+    options?: ImageUploadOptions
+  ): Promise<ImageMetadata>;
+  update(imageId: string, options: ImageUpdateOptions): Promise<ImageMetadata>;
+  delete(imageId: string): Promise<boolean>;
+  list(options?: ImageListOptions): Promise<ImageList>;
+}
 
-  constructor(fetcher: Fetcher) {
+class ImagesBindingImpl implements ImagesBinding {
+  readonly #fetcher: Fetcher & ServiceEntrypointStub;
+
+  constructor(fetcher: Fetcher & ServiceEntrypointStub) {
     this.#fetcher = fetcher;
   }
 
@@ -315,6 +327,52 @@ class ImagesBindingImpl implements ImagesBinding {
 
     return new ImageTransformerImpl(this.#fetcher, decodedStream);
   }
+
+  async get(imageId: string): Promise<ImageMetadata | null> {
+    return await this.#fetcher.get(imageId);
+  }
+
+  async getImage(imageId: string): Promise<ReadableStream<Uint8Array> | null> {
+    return await this.#fetcher.getImage(imageId);
+  }
+
+  async upload(
+    image: ReadableStream<Uint8Array> | ArrayBuffer,
+    options?: ImageUploadOptions
+  ): Promise<ImageMetadata> {
+    let processedImage: ReadableStream<Uint8Array> | ArrayBuffer = image;
+
+    if (options?.encoding === 'base64') {
+      const stream =
+        image instanceof ReadableStream
+          ? image
+          : new ReadableStream({
+              start(controller): void {
+                controller.enqueue(new Uint8Array(image));
+                controller.close();
+              },
+            });
+
+      processedImage = stream.pipeThrough(createBase64DecoderTransformStream());
+    }
+
+    return await this.#fetcher.upload(processedImage, options);
+  }
+
+  async update(
+    imageId: string,
+    options: ImageUpdateOptions
+  ): Promise<ImageMetadata> {
+    return await this.#fetcher.update(imageId, options);
+  }
+
+  async delete(imageId: string): Promise<boolean> {
+    return await this.#fetcher.delete(imageId);
+  }
+
+  async list(options?: ImageListOptions): Promise<ImageList> {
+    return await this.#fetcher.list(options || {});
+  }
 }
 
 class ImagesErrorImpl extends Error implements ImagesError {
@@ -356,5 +414,5 @@ async function throwErrorIfErrorResponse(
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): ImagesBinding {
-  return new ImagesBindingImpl(env.fetcher);
+  return new ImagesBindingImpl(env.fetcher as Fetcher & ServiceEntrypointStub);
 }
