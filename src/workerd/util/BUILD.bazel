@@ -337,6 +337,7 @@ kj_test(
 )
 
 kj_test(
+    size = "large",
     src = "sqlite-test.c++",
     deps = [
         ":sqlite",

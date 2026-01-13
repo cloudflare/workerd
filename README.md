@@ -121,6 +121,33 @@ version of workerd:
 bazel build --config=thin-lto //src/workerd/server:workerd
 ```
 
+### Code Coverage (Linux only)
+
+Code coverage is only supported on Linux. To generate code coverage reports, you need LLVM coverage tools (`llvm-profdata` and `llvm-cov`) installed:
+
+```sh
+sudo apt-get install llvm
+```
+
+If your distribution installs versioned binaries (e.g., `llvm-profdata-19`), create symlinks:
+
+```sh
+sudo ln -sf /usr/bin/llvm-profdata-19 /usr/local/bin/llvm-profdata
+sudo ln -sf /usr/bin/llvm-cov-19 /usr/local/bin/llvm-cov
+```
+
+Then run coverage with:
+
+```sh
+bazel coverage //...
+```
+
+Or use the just command which also generates an HTML report:
+
+```sh
+just coverage
+```
+
 ### Configuring `workerd`
 
 `workerd` is configured using a config file written in Cap'n Proto text format.
