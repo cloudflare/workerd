@@ -44,7 +44,7 @@ struct SpanContext {
   # For Hibernate and Mark this would be the span under which they were emitted.
   # This is only empty if:
   #  1. This is an Onset event
-  #  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+  #  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
   info :union {
     empty @1 :Void;
     spanId @2 :UInt64;

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { strictEqual } from 'node:assert';
+import { strictEqual, rejects, ok } from 'node:assert';
 
 // Test Response body methods with JS-backed BYOB ReadableStream
 export const responseBodyMethodsJsByob = {
@@ -327,6 +327,35 @@ export const bigEnqueueViaJsTransformAsync = {
   },
 };
 
+export const bigEnqueueViaJsTransformSplit = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('a'.repeat(4090)));
+      },
+      pull(c) {
+        c.enqueue(enc.encode('a'.repeat(4096 + 345)));
+        c.close();
+      },
+    });
+
+    const transform = new TransformStream({
+      transform(chunk, controller) {
+        controller.enqueue(enc.encode(dec.decode(chunk).toUpperCase()));
+      },
+    });
+
+    const response = new Response(rs.pipeThrough(transform));
+
+    const text = await response.text();
+    strictEqual(text.length, 4090 + 4096 + 345);
+    strictEqual(text, 'A'.repeat(4090 + 4096 + 345));
+  },
+};
+
 // Test enqueue same chunk multiple times (default stream)
 export const enqueueChunkMultipleTimes = {
   async test() {
@@ -368,6 +397,24 @@ export const enqueueChunkMultipleTimesBytes = {
 
     const response = new Response(rs);
     strictEqual(await response.text(), 'ping!');
+  },
+};
+
+export const bigEnqueueOddSize = {
+  async test() {
+    const a = 'a'.repeat(4096 * 2 + 345);
+    const enc = new TextEncoder();
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(a));
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    const text = await response.text();
+    strictEqual(text.length, 8537);
+    strictEqual(text, a);
   },
 };
 
@@ -427,5 +474,341 @@ export const multistepTransform = {
     strictEqual(text.startsWith('BBBB'), true);
     strictEqual(text.endsWith('BYE'), true);
     strictEqual(text.length, 4 + 4090 + 4096 + 345 + 3);
+  },
+};
+
+// In this test, we write data into an IdentityTransformStream
+// We then read from that in a JS ReadableStream
+// We then pipe that through a JS TransformStream with preventClose = true
+// When the pipe is done, we write a final chunk to the JS TransformStream
+// We then respond with the TransformStream's readable.
+export const multistepTransformPreventClose = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    const { readable, writable } = new IdentityTransformStream();
+    const reader = readable.getReader({ mode: 'byob' });
+
+    const detachesBuffer =
+      Cloudflare.compatibilityFlags.streams_byob_reader_detaches_buffer;
+
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode('bbbb'));
+      },
+      async pull(c) {
+        if (detachesBuffer) {
+          const buffer = new Uint8Array(4096);
+          const result = await reader.read(buffer);
+          if (result.done) {
+            c.enqueue(enc.encode('bye'));
+            c.close();
+          } else {
+            const view = c.byobRequest.view;
+            const toCopy = Math.min(result.value.byteLength, view.byteLength);
+            new Uint8Array(view.buffer, view.byteOffset, toCopy).set(
+              result.value.subarray(0, toCopy)
+            );
+            c.byobRequest.respond(toCopy);
+          }
+        } else {
+          const result = await reader.read(c.byobRequest.view);
+          if (result.done) {
+            c.enqueue(enc.encode('bye'));
+            c.close();
+          } else {
+            c.byobRequest.respondWithNewView(result.value);
+          }
+        }
+      },
+    });
+
+    const transform = new TransformStream({
+      transform(chunk, controller) {
+        controller.enqueue(enc.encode(dec.decode(chunk).toUpperCase()));
+      },
+    });
+
+    const promise = rs.pipeTo(transform.writable, { preventClose: true });
+
+    const writer = writable.getWriter();
+    const writePromise = (async () => {
+      await writer.write(enc.encode('a'.repeat(4090)));
+      await writer.write(enc.encode('a'.repeat(4096)));
+      await writer.write(enc.encode('a'.repeat(345)));
+      await writer.close();
+    })();
+
+    async function finishChunk() {
+      await promise;
+      const transformWriter = transform.writable.getWriter();
+      await transformWriter.write(enc.encode('all done'));
+      await transformWriter.close();
+    }
+
+    const response = new Response(transform.readable);
+
+    const [text] = await Promise.all([
+      response.text(),
+      writePromise,
+      finishChunk(),
+    ]);
+
+    strictEqual(text.startsWith('BBBB'), true);
+    strictEqual(text.endsWith('ALL DONE'), true);
+    // 4 (BBBB) + 4090 + 4096 + 345 (A's) + 3 (BYE) + 8 (ALL DONE)
+    strictEqual(text.length, 4 + 4090 + 4096 + 345 + 3 + 8);
+  },
+};
+
+export const jsSourceError = {
+  async test() {
+    const rs = new ReadableStream({
+      start(c) {
+        throw new Error('boom');
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsSourceErrorAsync = {
+  async test() {
+    const rs = new ReadableStream({
+      async pull(c) {
+        await scheduler.wait(10);
+        throw new Error('boom');
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsErroredSourceAsync = {
+  async test() {
+    const rs = new ReadableStream({
+      async start(c) {
+        throw new Error('boom');
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsErroredSourceAsyncDelayed = {
+  async test() {
+    const rs = new ReadableStream({
+      async start(c) {
+        await scheduler.wait(10);
+        throw new Error('boom');
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsNotBytesInPull = {
+  async test() {
+    const rs = new ReadableStream({
+      pull(c) {
+        c.enqueue('hello');
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), TypeError);
+  },
+};
+
+export const jsNotBytesInStart = {
+  async test() {
+    const rs = new ReadableStream({
+      start(c) {
+        c.enqueue('hello');
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    await rejects(response.text(), TypeError);
+  },
+};
+
+export const jsTeeError = {
+  async test() {
+    const rs = new ReadableStream({
+      pull(c) {
+        throw new Error('boom');
+      },
+    });
+
+    const [branch] = rs.tee();
+    const response = new Response(branch);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsTeeErrorByob = {
+  async test() {
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        if (c.byobRequest) throw new Error('boom');
+      },
+    });
+
+    const [branch] = rs.tee();
+    const response = new Response(branch);
+    await rejects(response.text(), { name: 'Error', message: 'boom' });
+  },
+};
+
+export const jsSourceTeed = {
+  async test() {
+    const enc = new TextEncoder();
+
+    const readable = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('hello'));
+      },
+      async pull(c) {
+        c.enqueue(enc.encode('a'.repeat(100)));
+        c.enqueue(enc.encode('b'.repeat(200)));
+        c.enqueue(enc.encode('c'.repeat(300)));
+        c.enqueue(enc.encode('d'.repeat(400)));
+        c.enqueue(enc.encode('e'.repeat(500)));
+        c.enqueue(enc.encode('f'.repeat(600)));
+        c.enqueue(enc.encode('g'.repeat(700)));
+        c.enqueue(enc.encode('h'.repeat(800)));
+        await scheduler.wait(10);
+        c.enqueue(enc.encode('i'.repeat(900)));
+        c.enqueue(enc.encode('j'.repeat(1000)));
+        c.enqueue(enc.encode('k'.repeat(1100)));
+        c.close();
+      },
+    });
+
+    const tee = readable.tee();
+
+    async function consume(branch) {
+      for await (const chunk of branch) {
+      }
+    }
+
+    const consumePromise = consume(tee[1]);
+
+    const response = new Response(tee[0]);
+    const text = await response.text();
+
+    await consumePromise;
+
+    strictEqual(text.startsWith('hello'), true);
+    strictEqual(text.endsWith('k'.repeat(1100)), true);
+    strictEqual(
+      text.length,
+      5 + 100 + 200 + 300 + 400 + 500 + 600 + 700 + 800 + 900 + 1000 + 1100
+    );
+  },
+};
+
+export const htmlRewriterStream = {
+  async test() {
+    const enc = new TextEncoder();
+
+    const readable = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(enc.encode('Hello World!'));
+        controller.close();
+      },
+    });
+
+    let response = new Response(readable, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    });
+
+    response = new HTMLRewriter().transform(response);
+
+    strictEqual(await response.text(), 'Hello World!');
+  },
+};
+
+export const jsByteSourceLargeData = {
+  async test() {
+    const largeData = 'x'.repeat(100000);
+    const enc = new TextEncoder();
+
+    const sourceReadable = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode(largeData));
+        c.close();
+      },
+    });
+
+    const reader = sourceReadable.getReader({ mode: 'byob' });
+
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        const request = c.byobRequest;
+        if (request != null) {
+          const chunk = await reader.read(request.view);
+          if (!chunk.done) {
+            request.respondWithNewView(chunk.value);
+          } else {
+            c.close();
+          }
+        }
+      },
+    });
+
+    const response = new Response(rs);
+    const text = await response.text();
+    strictEqual(text.length, 100000);
+    strictEqual(text, largeData);
+  },
+};
+
+export const jsByteSourceLargeDataEnqueue = {
+  async test() {
+    const largeData = 'x'.repeat(100000);
+    const enc = new TextEncoder();
+
+    const sourceReadable = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode(largeData));
+        c.close();
+      },
+    });
+
+    const rs = new ReadableStream({
+      type: 'bytes',
+      async pull(c) {
+        for await (const chunk of sourceReadable) {
+          c.enqueue(chunk);
+        }
+        c.close();
+      },
+    });
+
+    const response = new Response(rs);
+    const text = await response.text();
+    strictEqual(text.length, 100000);
+    strictEqual(text, largeData);
   },
 };

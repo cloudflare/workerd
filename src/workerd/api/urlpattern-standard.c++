@@ -16,21 +16,30 @@ std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatt
         flags | static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
   }
 
+  // std::string_view is not guaranteed to be null-terminated, but kj::StringPtr requires it.
+  // We need to create a null-terminated copy.
+  auto str = kj::str(kj::arrayPtr(pattern.data(), pattern.size()));
   return js.tryCatch([&]() -> std::optional<regex_type> {
-    return jsg::JsRef(js, js.regexp(kj::StringPtr(pattern.data(), pattern.size()), flags));
+    return jsg::JsRef(js, js.regexp(str, flags));
   }, [&](auto reason) -> std::optional<regex_type> { return std::nullopt; });
 }
 
 bool URLPattern::URLPatternRegexEngine::regex_match(
     std::string_view input, const regex_type& pattern) {
   auto& js = jsg::Lock::current();
-  return pattern.getHandle(js).match(js, kj::StringPtr(input.data(), input.size()));
+  // std::string_view is not guaranteed to be null-terminated, but kj::StringPtr requires it.
+  // We need to create a null-terminated copy.
+  auto str = kj::str(kj::arrayPtr(input.data(), input.size()));
+  return pattern.getHandle(js).match(js, str);
 }
 
 std::optional<std::vector<std::optional<std::string>>> URLPattern::URLPatternRegexEngine::
     regex_search(std::string_view input, const regex_type& pattern) {
   auto& js = jsg::Lock::current();
-  KJ_IF_SOME(matches, pattern.getHandle(js)(js, kj::StringPtr(input.data(), input.size()))) {
+  // std::string_view is not guaranteed to be null-terminated, but kj::StringPtr requires it.
+  // We need to create a null-terminated copy.
+  auto str = kj::str(kj::arrayPtr(input.data(), input.size()));
+  KJ_IF_SOME(matches, pattern.getHandle(js)(js, str)) {
     std::vector<std::optional<std::string>> results(matches.size() - 1);
     // The first value is always the input of the exec() command. Therefore
     // we should avoid it while constructing the returning vector.

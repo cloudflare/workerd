@@ -10,9 +10,6 @@ build --test_size_filters=-enormous
 # corresponds to small,medium,large,enormous tests (medium is default)
 build --test_timeout=3,15,60,240
 
-# We're only using bzlmod in a nominal capacity so far
-common --enable_workspace
-
 # As part of starlarkification, Bazel 8 removes a number of rules which now need to be imported from
 # other repositories. In the long term, load() statements will be needed to import these rules. For
 # now, we can still autoload the affected repositories when needed. Do this only for a remaining
@@ -41,6 +38,9 @@ build --incompatible_strict_action_env
 # Use compat repo mapping to avoid O(n^2) repo mapping size, speeding up bazel repo mapping phase
 # and conserving space
 build --incompatible_compact_repo_mapping_manifest
+
+# Continue building locally when remote cache entries fail to materialize
+build --incompatible_remote_local_fallback_for_remote_cache
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'

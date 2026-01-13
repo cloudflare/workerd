@@ -446,3 +446,56 @@ export const byobReadAtLeastTeeComplex3 = {
     strictEqual(res4.value[0], 0x06050403);
   },
 };
+
+export const requestCloneByob = {
+  async test() {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+    const chunks = [
+      enc.encode('hello'),
+      enc.encode('there'),
+      enc.encode('!!!!!'),
+    ];
+    const rs = new ReadableStream({
+      type: 'bytes',
+      pull(c) {
+        c.enqueue(chunks.shift());
+        if (chunks.length === 0) c.close();
+      },
+    });
+
+    const newRequest = new Request('http://example.org', {
+      method: 'POST',
+      body: rs,
+    });
+    const reader = newRequest.clone().body.getReader({ mode: 'byob' });
+
+    strictEqual(
+      dec.decode((await reader.readAtLeast(10, new Uint8Array(10))).value),
+      'hellothere'
+    );
+  },
+};
+
+export const textDecoderStreamRequest = {
+  async test() {
+    const enc = new TextEncoder();
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        c.enqueue(enc.encode('hello'));
+        c.close();
+      },
+    });
+
+    const request = new Request('http://example.org', {
+      method: 'POST',
+      body: rs,
+    });
+
+    const reader = request.body
+      .pipeThrough(new TextDecoderStream('utf-8'))
+      .getReader();
+    strictEqual(typeof (await reader.read()).value, 'string');
+  },
+};

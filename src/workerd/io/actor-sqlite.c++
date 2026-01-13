@@ -129,6 +129,7 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
       exp->hasChild = true;
       depth = exp->depth + 1;
       alarmDirty = exp->alarmDirty;
+      someWriteConfirmed = exp->someWriteConfirmed;
     }
   }
   actorSqlite.currentTxn = this;
@@ -172,6 +173,14 @@ void ActorSqlite::ExplicitTxn::setAlarmDirty() {
   alarmDirty = true;
 }
 
+void ActorSqlite::ExplicitTxn::setSomeWriteConfirmed(bool someWriteConfirmed) {
+  this->someWriteConfirmed = someWriteConfirmed;
+}
+
+bool ActorSqlite::ExplicitTxn::isSomeWriteConfirmed() const {
+  return someWriteConfirmed;
+}
+
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
   actorSqlite.requireNotBroken();
   KJ_REQUIRE(!hasChild,
@@ -192,6 +201,9 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     if (alarmDirty) {
       p->alarmDirty = true;
     }
+    if (someWriteConfirmed) {
+      p->someWriteConfirmed = true;
+    }
   } else {
     if (alarmDirty) {
       actorSqlite.haveDeferredDelete = false;
@@ -203,15 +215,24 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     // Unlike ImplicitTxn, which locks the output gate at the start of the first write that requires
     // confirmation, ExplicitTxn only locks when we're going to confirm the commit.  I think this
     // makes since given the explicit commit call.
-    auto commitPromise = actorSqlite.outputGate
-                             .lockWhile(kj::evalNow([this, &precommitAlarmState]() {
+    auto commitPromise = kj::evalNow([this, &precommitAlarmState]() {
       return actorSqlite.commitImpl(
           kj::mv(KJ_ASSERT_NONNULL(precommitAlarmState)), actorSqlite.currentCommitSpan.addRef());
-    }),
-                                 actorSqlite.currentCommitSpan.addRef())
-                             .fork();
-    actorSqlite.commitTasks.add(commitPromise.addBranch());
-    actorSqlite.lastCommit = kj::mv(commitPromise);
+    })
+                             .catch_([outputGate = &actorSqlite.outputGate,
+                                         spanParent = actorSqlite.currentCommitSpan.addRef()](
+                                         kj::Exception&& e) mutable {
+      // Unconditionally break the output gate if commit threw an error, no matter whether the
+      // commit was confirmed or unconfirmed.
+      return outputGate->lockWhile(kj::Promise<void>(kj::mv(e)), kj::mv(spanParent));
+    });
+    if (someWriteConfirmed) {
+      commitPromise = actorSqlite.outputGate.lockWhile(
+          kj::mv(commitPromise), actorSqlite.currentCommitSpan.addRef());
+    }
+    auto forkedPromise = commitPromise.fork();
+    actorSqlite.commitTasks.add(forkedPromise.addBranch());
+    actorSqlite.lastCommit = kj::mv(forkedPromise);
   }
 
   // No backpressure for SQLite.
@@ -236,8 +257,10 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
       {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_savepoint_", depth));
   KJ_IF_SOME(p, parent) {
     alarmDirty = p->alarmDirty;
+    someWriteConfirmed = p->someWriteConfirmed;
   } else {
     alarmDirty = false;
+    someWriteConfirmed = false;
   }
 }
 
@@ -312,12 +335,26 @@ void ActorSqlite::onWrite(bool allowUnconfirmed) {
   }
 
   // Update the status of the current transaction.
-  KJ_IF_SOME(implicitTxn, currentTxn.tryGet<ImplicitTxn*>()) {
-    if (!implicitTxn->isSomeWriteConfirmed() && !allowUnconfirmed) {
-      // This is adding a must-confirm write to the transaction, so we must ensure the outputGate
-      // locks for remainder of this transaction.
-      implicitTxn->setSomeWriteConfirmed(!allowUnconfirmed);
-      commitTasks.add(outputGate.lockWhile(lastCommit.addBranch(), currentCommitSpan.addRef()));
+  KJ_SWITCH_ONEOF(currentTxn) {
+    KJ_CASE_ONEOF(_, NoTxn) {
+      KJ_FAIL_REQUIRE("we must have a transaction at this point");
+    }
+    KJ_CASE_ONEOF(implicitTxn, ImplicitTxn*) {
+      if (!implicitTxn->isSomeWriteConfirmed() && !allowUnconfirmed) {
+        // This is adding a must-confirm write to the transaction, so we must ensure the outputGate
+        // locks for remainder of this transaction.
+        implicitTxn->setSomeWriteConfirmed(!allowUnconfirmed);
+        commitTasks.add(outputGate.lockWhile(lastCommit.addBranch(), currentCommitSpan.addRef()));
+      }
+    }
+    KJ_CASE_ONEOF(explicitTxn, ExplicitTxn*) {
+      if (!explicitTxn->isSomeWriteConfirmed() && !allowUnconfirmed) {
+        // This is adding a must-confirm write to the transaction, so we must ensure the outputGate
+        // locks for remainder of this transaction.
+        explicitTxn->setSomeWriteConfirmed(!allowUnconfirmed);
+        // ExplicitTxns don't have a pending commit and don't lock the output gate during the
+        // transaction, so there's nothing to do here.
+      }
     }
   }
 }
@@ -640,9 +677,6 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(
   requireNotBroken();
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
-  if (currentTxn.is<ExplicitTxn*>()) {
-    disableAllowUnconfirmed(options, "single put is using an already-existing ExplicitTxn");
-  }
   kv.put(key, value, {.allowUnconfirmed = options.allowUnconfirmed});
   return kj::none;
 }
@@ -660,10 +694,6 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(
 
   KJ_ASSERT(!currentTxn.is<NoTxn>());
 
-  if (currentTxn.is<ExplicitTxn*>()) {
-    disableAllowUnconfirmed(options, "multi put is using an already-existing ExplicitTxn");
-  }
-
   kv.put(pairs, {.allowUnconfirmed = options.allowUnconfirmed});
 
   return kj::none;
@@ -675,10 +705,6 @@ kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
 
-  if (currentTxn.is<ExplicitTxn*>()) {
-    disableAllowUnconfirmed(options, "single delete is using an already-existing ExplicitTxn");
-  }
-
   return kv.delete_(key, {.allowUnconfirmed = options.allowUnconfirmed});
 }
 
@@ -687,10 +713,6 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(
   requireNotBroken();
   // Capture trace span for the output gate lock hold trace.
   currentCommitSpan = kj::mv(traceSpan);
-
-  if (currentTxn.is<ExplicitTxn*>()) {
-    disableAllowUnconfirmed(options, "multi delete put is using an already-existing ExplicitTxn");
-  }
 
   uint count = 0;
   for (auto& key: keys) {
@@ -1053,27 +1075,22 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::put(
     Key key, Value value, WriteOptions options, SpanParent traceSpan) {
-  disableAllowUnconfirmed(options, "single put in ExplicitTxn not supported");
   return actorSqlite.put(kj::mv(key), kj::mv(value), options, kj::mv(traceSpan));
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::put(
     kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) {
-  disableAllowUnconfirmed(options, "multi put in ExplicitTxn not supported");
   return actorSqlite.put(kj::mv(pairs), options, kj::mv(traceSpan));
 }
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::ExplicitTxn::delete_(
     Key key, WriteOptions options, SpanParent traceSpan) {
-  disableAllowUnconfirmed(options, "single delete in ExplicitTxn not supported");
   return actorSqlite.delete_(kj::mv(key), options, kj::mv(traceSpan));
 }
 kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::ExplicitTxn::delete_(
     kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) {
-  disableAllowUnconfirmed(options, "multi delete in ExplicitTxn not supported");
   return actorSqlite.delete_(kj::mv(keys), options, kj::mv(traceSpan));
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) {
-  disableAllowUnconfirmed(options, "setAlarm in ExplicitTxn not supported");
   return actorSqlite.setAlarm(newAlarmTime, options, kj::mv(traceSpan));
 }
 

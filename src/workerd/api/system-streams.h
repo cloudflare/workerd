@@ -39,8 +39,8 @@ struct SystemMultiStream {
 };
 
 // A combo ReadableStreamSource and WritableStreamSink.
-SystemMultiStream newSystemMultiStream(
-    kj::Own<kj::AsyncIoStream> stream, IoContext& context = IoContext::current());
+SystemMultiStream newSystemMultiStream(kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>& stream,
+    IoContext& context = IoContext::current());
 
 struct ContentEncodingOptions {
   bool brotliEnabled = false;

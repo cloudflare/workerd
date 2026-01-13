@@ -868,12 +868,6 @@ export default {
       'terminate() should abort writable immediately after readable.cancel()',
     ],
   },
-  'transform-streams/invalid-realm.tentative.window.js': {
-    comment: 'document is not defined',
-    expectedFailures: [
-      'TransformStream: write in detached realm should succeed',
-    ],
-  },
   'transform-streams/lipfuzz.any.js': {},
   'transform-streams/patched-global.any.js': {
     runInGlobalScope: true,

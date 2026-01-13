@@ -18,7 +18,13 @@ pub enum DnsParserError {
 
 impl From<DnsParserError> for jsg::Error {
     fn from(val: DnsParserError) -> Self {
-        Self::new(jsg::ExceptionType::Error, val.to_string())
+        match val {
+            DnsParserError::InvalidHexString(msg) | DnsParserError::InvalidDnsResponse(msg) => {
+                Self::new_error(&msg)
+            }
+            DnsParserError::ParseIntError(msg) => Self::new_range_error(msg.to_string()),
+            DnsParserError::Unknown => Self::new_error("Unknown dns parser error"),
+        }
     }
 }
 
@@ -136,7 +142,7 @@ impl DnsUtil {
     /// `DnsParserError::InvalidHexString`
     /// `DnsParserError::ParseIntError`
     #[jsg_method]
-    pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
+    pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
         // Let's remove "\\#" and the length of data from the beginning of the record
         let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
         let critical = data[0].parse::<u8>()?;
@@ -191,7 +197,7 @@ impl DnsUtil {
     /// `DnsParserError::InvalidHexString`
     /// `DnsParserError::ParseIntError`
     #[jsg_method]
-    pub fn parse_naptr_record(&self, record: &str) -> jsg::Result<NaptrRecord, DnsParserError> {
+    pub fn parse_naptr_record(&self, record: String) -> jsg::Result<NaptrRecord, DnsParserError> {
         let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
 
         let order_str = data[1..3].to_vec();
@@ -262,7 +268,7 @@ mod tests {
             _state: ResourceState::default(),
         };
         let record = dns_util
-            .parse_caa_record("\\# 15 00 05 69 73 73 75 65 70 6b 69 2e 67 6f 6f 67")
+            .parse_caa_record("\\# 15 00 05 69 73 73 75 65 70 6b 69 2e 67 6f 6f 67".to_owned())
             .unwrap();
 
         assert_eq!(record.critical, 0);
@@ -277,7 +283,8 @@ mod tests {
         };
         let record = dns_util
             .parse_caa_record(
-                "\\# 21 00 09 69 73 73 75 65 77 69 6c 64 6c 65 74 73 65 6e 63 72 79 70 74",
+                "\\# 21 00 09 69 73 73 75 65 77 69 6c 64 6c 65 74 73 65 6e 63 72 79 70 74"
+                    .to_owned(),
             )
             .unwrap();
 
@@ -291,8 +298,9 @@ mod tests {
         let dns_util = DnsUtil {
             _state: ResourceState::default(),
         };
-        let result =
-            dns_util.parse_caa_record("\\# 15 00 05 69 6e 76 61 6c 69 64 70 6b 69 2e 67 6f 6f 67");
+        let result = dns_util.parse_caa_record(
+            "\\# 15 00 05 69 6e 76 61 6c 69 64 70 6b 69 2e 67 6f 6f 67".to_owned(),
+        );
 
         assert!(result.is_err());
     }
@@ -303,7 +311,7 @@ mod tests {
             _state: ResourceState::default(),
         };
         let record = dns_util
-            .parse_naptr_record("\\# 37 15 b3 08 ae 01 73 0a 6d 79 2d 73 65 72 76 69 63 65 06 72 65 67 65 78 70 0b 72 65 70 6c 61 63 65 6d 65 6e 74 00")
+            .parse_naptr_record("\\# 37 15 b3 08 ae 01 73 0a 6d 79 2d 73 65 72 76 69 63 65 06 72 65 67 65 78 70 0b 72 65 70 6c 61 63 65 6d 65 6e 74 00".to_owned())
             .unwrap();
 
         assert_eq!(record.flags, "s");

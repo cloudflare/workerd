@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any, Optional
 from xml.etree import ElementTree
 
+EXCLUDED_TESTS = {
+    # The WPT compliant implementation is in urlpattern-standard@
+    "urlpattern@"
+}
+
 
 @dataclass
 class Options:
@@ -66,12 +71,16 @@ class Log:
 def parse_logs(logs_dir: Path, options: Options) -> list[Log]:
     return [
         parse_log(log_file, options)
-        for log_file in sorted(logs_dir.glob("**/test.xml"))
+        for log_file in sorted(logs_dir.glob("**/src/wpt/**/*@/test.xml"))
     ]
 
 
 def parse_log(log_file: Path, options: Options) -> Log:
     log = Log()
+
+    if log_file.parent.name in EXCLUDED_TESTS:
+        return log
+
     parser = ElementTree.XMLParser(encoding="utf-8")
     root = ElementTree.parse(log_file, parser=parser)
     text = root.find("testsuite").find("system-out").text

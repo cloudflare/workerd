@@ -22,8 +22,8 @@ export default {
     ],
   },
   'Event-constructors.any.js': {
-    comment: 'TODO this is triggering a harness bug',
-    disabledTests: true,
+    comment: 'We force timeStamp to 0.0 to avoid timing side-channels',
+    expectedFailures: [/^$/],
   },
   'Event-dispatch-listener-order.window.js': {
     comment: 'Test requires DOM',

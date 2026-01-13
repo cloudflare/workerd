@@ -1,4 +1,5 @@
 mod eval;
+mod jsg_oneof;
 mod jsg_struct;
 mod non_coercible;
 mod resource_callback;

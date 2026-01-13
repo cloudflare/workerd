@@ -47,8 +47,8 @@ rust_library(
     deps = [
         "@crates_vendor__anyhow-1.0.100//:anyhow",
         "@crates_vendor__bytes-str-0.2.7//:bytes_str",
-        "@crates_vendor__indexmap-2.12.1//:indexmap",
+        "@crates_vendor__indexmap-2.13.0//:indexmap",
         "@crates_vendor__serde-1.0.228//:serde",
-        "@crates_vendor__serde_json-1.0.148//:serde_json",
+        "@crates_vendor__serde_json-1.0.149//:serde_json",
     ],
 )

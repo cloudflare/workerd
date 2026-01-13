@@ -523,12 +523,6 @@ kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
 // Constructs the path to a Python package in the package repository
 kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
 
-template <class Registry>
-void registerPyodideModules(Registry& registry, auto featureFlags) {
-  // We add `pyodide:` packages here including python-entrypoint-helper.js.
-  registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
-}
-
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \

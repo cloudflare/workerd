@@ -9,6 +9,8 @@
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/test.h>
 
+#include <sqlite3.h>
+
 #include <kj/debug.h>
 #include <kj/test.h>
 
@@ -2147,6 +2149,12 @@ KJ_TEST("unconfirmed setAlarm failure still breaks output gate") {
 
 KJ_TEST("sync() throws after critical error in explicit transaction") {
   ActorSqliteTest test({.monitorOutputGate = false});
+  auto heapLimit = [&]() {
+    auto row = test.db.run("PRAGMA hard_heap_limit");
+    return row.getInt(0);
+  }();
+  KJ_DBG(heapLimit);
+  KJ_DEFER(sqlite3_hard_heap_limit64(heapLimit););
 
   // Start an explicit transaction
   auto txn = test.actor.startTransaction();
@@ -2184,6 +2192,517 @@ KJ_TEST("sync() throws after critical error in explicit transaction") {
   // The transaction is now in a broken state due to the critical error.
   // Attempting to commit should fail.
   KJ_EXPECT_THROW_MESSAGE("broken", txn->commit());
+}
+
+KJ_TEST("allowUnconfirmed put in explicit transaction does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Do an unconfirmed put within the transaction
+  txn->put(
+      kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = true}, nullptr);
+
+  // Gate still isn't blocked during the transaction, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the transaction
+  txn->commit();
+
+  // Gate should still not be blocked during commit because all writes were unconfirmed
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("confirmed put in explicit transaction blocks output gate on commit") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Do a confirmed put (default behavior)
+  txn->put(kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = false},
+      nullptr);
+
+  // Gate should still not be blocked during the transaction - explicit txns only lock on commit
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the transaction
+  txn->commit();
+
+  // Now the gate should be blocked because we're committing a confirmed write
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("mixed confirmed and unconfirmed puts in explicit transaction use output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Do an unconfirmed put followed by a confirmed put
+  txn->put(
+      kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = true}, nullptr);
+  txn->put(kj::str("baz"), kj::heapArray(kj::str("quux").asBytes()), {.allowUnconfirmed = false},
+      nullptr);
+
+  // Gate should still not be blocked during the transaction
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the transaction
+  txn->commit();
+
+  // Since any write in the transaction needs confirmation, commit should use output gate
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Both writes should be committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("quux").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed delete in explicit transaction does not block output gate") {
+  ActorSqliteTest test;
+
+  // First set up some data
+  test.put("foo", "bar");
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Perform an unconfirmed delete
+  expectSync(txn->delete_(kj::str("foo"), {.allowUnconfirmed = true}, nullptr));
+
+  // Gate still isn't blocked during the transaction
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the transaction
+  txn->commit();
+
+  // Gate should still not be blocked during commit because the delete was unconfirmed
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify data was deleted
+  KJ_ASSERT(expectSync(test.get("foo")) == kj::none);
+}
+
+KJ_TEST("allowUnconfirmed putMultiple in explicit transaction does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Do an unconfirmed putMultiple
+  auto pairs = kj::heapArrayBuilder<ActorCacheOps::KeyValuePair>(2);
+  pairs.add(ActorCacheOps::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+  pairs.add(ActorCacheOps::KeyValuePair{kj::str("baz"), kj::heapArray(kj::str("quux").asBytes())});
+  txn->put(pairs.finish(), {.allowUnconfirmed = true}, nullptr);
+
+  // Gate still isn't blocked during the transaction
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the transaction
+  txn->commit();
+
+  // Gate should still not be blocked during commit
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("quux").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed deleteMultiple in explicit transaction does not block output gate") {
+  ActorSqliteTest test;
+
+  // First set up some data
+  test.put("foo", "bar");
+  test.put("baz", "quux");
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Perform an unconfirmed deleteMultiple
+  auto keys = kj::heapArrayBuilder<ActorCacheOps::Key>(2);
+  keys.add(kj::str("foo"));
+  keys.add(kj::str("baz"));
+  expectSync(txn->delete_(keys.finish(), {.allowUnconfirmed = true}, nullptr));
+
+  // Gate still isn't blocked during the transaction
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the transaction
+  txn->commit();
+
+  // Gate should still not be blocked during commit
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify data was deleted
+  KJ_ASSERT(expectSync(test.get("foo")) == kj::none);
+  KJ_ASSERT(expectSync(test.get("baz")) == kj::none);
+}
+
+KJ_TEST("allowUnconfirmed setAlarm in explicit transaction does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Set an alarm with allowUnconfirmed
+  txn->setAlarm(oneMs, {.allowUnconfirmed = true}, nullptr);
+
+  // Gate still isn't blocked during the transaction
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the transaction
+  txn->commit();
+
+  // Gate should still not be blocked during commit
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the scheduleRun and commit
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify alarm was set
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.getAlarm())) == oneMs);
+}
+
+KJ_TEST("nested transaction: unconfirmed child commit does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start a parent transaction
+  auto parentTxn = test.actor.startTransaction();
+
+  // Do an unconfirmed put in the parent
+  parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
+      {.allowUnconfirmed = true}, nullptr);
+
+  {
+    // Start a nested child transaction
+    auto childTxn = test.actor.startTransaction();
+
+    // Do an unconfirmed put in the child
+    childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
+        {.allowUnconfirmed = true}, nullptr);
+
+    // Gate still isn't blocked
+    KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+    // Commit the child transaction
+    childTxn->commit();
+  }
+
+  // Gate should still not be blocked after child commit
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the parent transaction
+  parentTxn->commit();
+
+  // Gate should still not be blocked during parent commit because all writes were unconfirmed
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify both writes were committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == kj::str("data").asBytes());
+}
+
+KJ_TEST("nested transaction: confirmed child propagates to parent commit") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start a parent transaction with unconfirmed write
+  auto parentTxn = test.actor.startTransaction();
+  parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
+      {.allowUnconfirmed = true}, nullptr);
+
+  {
+    // Start a nested child transaction
+    auto childTxn = test.actor.startTransaction();
+
+    // Do a confirmed put in the child
+    childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
+        {.allowUnconfirmed = false}, nullptr);
+
+    // Gate still isn't blocked during the transaction
+    KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+    // Commit the child transaction - this should propagate someWriteConfirmed to parent
+    childTxn->commit();
+  }
+
+  // Gate should still not be blocked after child commit (no real commit yet)
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the parent transaction
+  parentTxn->commit();
+
+  // Now the gate should be blocked because the child had a confirmed write
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify both writes were committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == kj::str("data").asBytes());
+}
+
+KJ_TEST("nested transaction: confirmed parent with unconfirmed child blocks output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start a parent transaction with confirmed write
+  auto parentTxn = test.actor.startTransaction();
+  parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
+      {.allowUnconfirmed = false}, nullptr);
+
+  {
+    // Start a nested child transaction
+    auto childTxn = test.actor.startTransaction();
+
+    // Do an unconfirmed put in the child
+    childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
+        {.allowUnconfirmed = true}, nullptr);
+
+    // Gate still isn't blocked during the transaction
+    KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+    // Commit the child transaction
+    childTxn->commit();
+  }
+
+  // Gate should still not be blocked after child commit
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the parent transaction
+  parentTxn->commit();
+
+  // Now the gate should be blocked because the parent had a confirmed write
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify both writes were committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("child"))) == kj::str("data").asBytes());
+}
+
+KJ_TEST("nested transaction: deeply nested confirmed write propagates to root") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start a parent transaction with unconfirmed write
+  auto txn1 = test.actor.startTransaction();
+  txn1->put(kj::str("level1"), kj::heapArray(kj::str("data").asBytes()), {.allowUnconfirmed = true},
+      nullptr);
+
+  {
+    // Start a second level nested transaction with unconfirmed write
+    auto txn2 = test.actor.startTransaction();
+    txn2->put(kj::str("level2"), kj::heapArray(kj::str("data").asBytes()),
+        {.allowUnconfirmed = true}, nullptr);
+
+    {
+      // Start a third level nested transaction with confirmed write
+      auto txn3 = test.actor.startTransaction();
+      txn3->put(kj::str("level3"), kj::heapArray(kj::str("data").asBytes()),
+          {.allowUnconfirmed = false}, nullptr);
+
+      // Gate still isn't blocked during the transaction
+      KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+      // Commit level 3 - should propagate someWriteConfirmed to level 2
+      txn3->commit();
+    }
+
+    KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+    // Commit level 2 - should propagate someWriteConfirmed to level 1
+    txn2->commit();
+  }
+
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit level 1 (root transaction)
+  txn1->commit();
+
+  // Now the gate should be blocked because level 3 had a confirmed write
+  KJ_ASSERT(!test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify all writes were committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level1"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level2"))) == kj::str("data").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("level3"))) == kj::str("data").asBytes());
+}
+
+KJ_TEST("nested transaction: rollback resets someWriteConfirmed flag") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start a parent transaction with unconfirmed write
+  auto parentTxn = test.actor.startTransaction();
+  parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
+      {.allowUnconfirmed = true}, nullptr);
+
+  {
+    // Start a nested child transaction
+    auto childTxn = test.actor.startTransaction();
+
+    // Do a confirmed put in the child
+    childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
+        {.allowUnconfirmed = false}, nullptr);
+
+    // Gate still isn't blocked during the transaction
+    KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+    // Rollback the child transaction instead of committing
+    childTxn->rollback().wait(test.ws);
+  }
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Commit the parent transaction
+  parentTxn->commit();
+
+  // Gate should still not be blocked because child was rolled back
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Complete the commit
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Verify only parent write was committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("parent"))) == kj::str("data").asBytes());
+  KJ_ASSERT(expectSync(test.get("child")) == kj::none);
+}
+
+KJ_TEST("explicit transaction: commit failure breaks output gate even for unconfirmed writes") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  auto promise = test.gate.onBroken();
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Do an unconfirmed put
+  txn->put(
+      kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = true}, nullptr);
+
+  // Commit the transaction
+  txn->commit();
+
+  // Gate should not be blocked yet because write was unconfirmed
+  KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
+
+  // Reject the commit to simulate failure
+  test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "commit failed"));
+
+  // Gate should now be broken due to commit failure, even though write was unconfirmed
+  KJ_EXPECT_THROW_MESSAGE("commit failed", promise.wait(test.ws));
 }
 
 }  // namespace

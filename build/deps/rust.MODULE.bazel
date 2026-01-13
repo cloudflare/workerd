@@ -1,5 +1,3 @@
-bazel_dep(name = "rules_rust", version = "0.68.1")
-
 RUST_STABLE_VERSION = "1.91.0"  # LLVM 21
 
 RUST_NIGHTLY_VERSION = "nightly/2025-10-30"

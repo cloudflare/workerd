@@ -1,7 +1,4 @@
 # rules_oci and rules_multirun are used to build Docker images
-bazel_dep(name = "rules_oci", version = "2.2.7")
-bazel_dep(name = "rules_multirun", version = "0.13.0")
-
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 
 # Base image for container-client-test. This is the smallest container image

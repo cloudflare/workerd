@@ -77,9 +77,7 @@ crates_vendor(
     ],
 )
 
-# Windows build fixes due to rust libraries missing symbols:
-# https://github.com/bazelbuild/rules_rust/blob/144d34fd/ffi/cc/global_allocator_library/BUILD.bazel#L3
-# `empty_lib` static library will bring all the symbols in.
+# Adds missing symbols following Rust mangling change, plus missing system library on Windows.
 cc_library(
     name = "runtime",
     linkopts = select({
@@ -108,9 +106,4 @@ rust_static_library(
     },
     stamp = -1,  # default to bazel --stamp flag
     tags = ["manual"],
-)
-
-cc_library(
-    name = "allocator",
-    visibility = ["//visibility:public"],
 )
