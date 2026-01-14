@@ -1,6 +1,8 @@
 common --enable_platform_specific_config
 build --verbose_failures
 build --build_tag_filters=-off-by-default,-requires-container-engine
+# block network access by default
+build --nosandbox_default_allow_network
 test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
