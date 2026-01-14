@@ -376,6 +376,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-no-auto-allocate-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-no-auto-allocate-test.js"],
+)
+
+wd_test(
     src = "streams-js-test.wd-test",
     args = ["--experimental"],
     data = ["streams-js-test.js"],
