@@ -419,7 +419,6 @@ build:coverage --test_env=BAZEL_LLVM_COV=llvm-cov
 # Enable optimizations to reduce coverage overhead while maintaining good coverage quality
 build:coverage --copt=-O2
 build:coverage --copt=-DNDEBUG
-build:coverage --combined_report=lcov
 build:coverage --experimental_use_llvm_covmap
 build:coverage --experimental_generate_llvm_lcov
 build:coverage --experimental_fetch_all_coverage_outputs
@@ -433,9 +432,10 @@ coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-contain
 # Coverage instrumentation slows down test execution, so extend timeouts
 # We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
 coverage --test_size_filters=-enormous
-coverage --test_timeout=60,240,240,240
+coverage --test_timeout=240,240,240,240
 coverage --build_tests_only
 coverage --config=coverage
+coverage --combined_report=lcov
 
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo

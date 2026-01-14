@@ -92,6 +92,7 @@ def wd_test(
         )
 
     # All compat flags variant: newest compat date
+    # Tagged with no-coverage to reduce coverage CI time
     if generate_all_compat_flags_variant:
         _wd_test(
             src = src,
@@ -99,10 +100,12 @@ def wd_test(
             data = data,
             args = base_args + newest_compat_args,
             python_snapshot_test = python_snapshot_test,
-            **kwargs
+            tags = kwargs.get("tags", []) + ["no-coverage"],
+            **{k: v for k, v in kwargs.items() if k != "tags"}
         )
 
     # All autogates variant: all autogates + oldest compat date
+    # Tagged with no-coverage to reduce coverage CI time
     if generate_all_autogates_variant:
         _wd_test(
             src = src,
@@ -110,7 +113,8 @@ def wd_test(
             data = data,
             args = base_args + default_compat_args + ["--all-autogates"],
             python_snapshot_test = python_snapshot_test,
-            **kwargs
+            tags = kwargs.get("tags", []) + ["no-coverage"],
+            **{k: v for k, v in kwargs.items() if k != "tags"}
         )
 
 WINDOWS_TEMPLATE = """
@@ -238,12 +242,12 @@ def _wd_test_impl(ctx):
     # to ensure its transitive dependencies (all the C++ source files) are
     # included in the coverage instrumentation. Without this, coverage data
     # won't be collected for the actual workerd implementation code.
+    # NOTE: source_attributes is intentionally empty - we don't want test files
+    # (.wd-test, .js, etc.) reported to coverage, only the source code they exercise.
     instrumented_files_info = coverage_common.instrumented_files_info(
         ctx,
-        source_attributes = ["src", "data"],
+        source_attributes = [],
         dependency_attributes = ["workerd", "sidecar", "sidecar_supervisor"],
-        # Include all file types that might contain testable code
-        extensions = ["cc", "c++", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc", "js", "ts", "mjs", "wd-test", "capnp"],
     )
     environment = dict(ctx.attr.env)
     if ctx.attr.python_snapshot_test:
@@ -282,11 +286,12 @@ _wd_test = rule(
         ),
         # Source file
         "src": attr.label(allow_single_file = True),
-        # The workerd executable is used to run all tests
+        # The workerd executable is used to run all tests.
+        # cfg="target" is needed for coverage instrumentation to be applied.
         "workerd": attr.label(
             allow_single_file = True,
             executable = True,
-            cfg = "exec",
+            cfg = "target",
             default = "//src/workerd/server:workerd_cross",
         ),
         # A list of files that this test requires to be present in order to run.

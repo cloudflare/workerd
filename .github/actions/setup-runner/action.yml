@@ -23,6 +23,8 @@ runs:
           libclang-rt-19-dev \
           llvm-19
         sudo ln -s /usr/bin/llvm-symbolizer-19 /usr/bin/llvm-symbolizer
+        sudo ln -s /usr/bin/llvm-profdata-19 /usr/bin/llvm-profdata
+        sudo ln -s /usr/bin/llvm-cov-19 /usr/bin/llvm-cov
         echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
         echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
         echo "build:linux --linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc

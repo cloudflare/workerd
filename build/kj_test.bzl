@@ -56,6 +56,8 @@ def kj_test(
         args = ["$(location " + cross_alias + ")"],
         tags = tags,
     )
+
+    # Tagged with no-coverage to reduce coverage CI time
     sh_test(
         name = test_name + "@all-autogates",
         size = size,
@@ -63,5 +65,5 @@ def kj_test(
         srcs = ["//build/fixtures:kj_test.sh"],
         data = [cross_alias] + data,
         args = ["$(location " + cross_alias + ")"],
-        tags = tags,
+        tags = tags + ["no-coverage"],
     )
