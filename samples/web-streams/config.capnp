@@ -15,4 +15,5 @@ const webStreams :Workerd.Worker = (
     (name = "streams-util", esModule = embed "streams-util.js")
   ],
   compatibilityDate = "2025-12-31",
+  compatibilityFlags = [ "streams_no_default_auto_allocate_chunk_size", "experimental" ],
 );
