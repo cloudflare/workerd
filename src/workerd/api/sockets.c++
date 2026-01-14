@@ -443,6 +443,13 @@ void Socket::handleProxyStatus(
       if (isDefaultFetchPort) {
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
+      } else if (remoteAddress.contains(".hyperdrive.local"_kj)) {
+        // No attempts to connect to Hyperdrive should end up here, since they go through the other
+        // version of handleProxyStatus. If they end up here somehow, log about it to get some
+        // context that can aid in debugging.
+        LOG_WARNING_PERIODICALLY(
+            "attempt to connect to Hyperdrive failed to trigger connectOverride", remoteAddress,
+            status.statusCode, status.statusText);
       }
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
