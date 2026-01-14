@@ -26,16 +26,17 @@
 // but don't want to actually implement, domain is the probably the
 // most least likely to ever be implemented.
 
-import { EventEmitter } from 'node-internal:events';
-EventEmitter.usingDomains = false;
+import { EventEmitter } from 'node-internal:events'
+
+EventEmitter.usingDomains = false
 
 export class Domain extends EventEmitter {
-  members: unknown[] | undefined = undefined;
+  members: unknown[] | undefined = undefined
 
   _errorHandler(_er: unknown): void {
     // Should never be called since we override everything that would call it.
     // But if it is, just throw the error that is passed in.
-    throw _er;
+    throw _er
   }
 
   enter(): void {
@@ -57,36 +58,36 @@ export class Domain extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   run(fn: Function, ...args: unknown[]): unknown {
     // This is non-operational. We end up just calling the function directly.
-    this.enter();
-    const ret: unknown = Reflect.apply(fn, this, args);
-    this.exit();
-    return ret;
+    this.enter()
+    const ret: unknown = Reflect.apply(fn, this, args)
+    this.exit()
+    return ret
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   intercept(cb: Function): Function {
     // This is non-operational. We end up just returning the callback directly.
-    return cb;
+    return cb
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   bind(cb: Function): Function {
     // This is non-operational. We end up just returning the callback directly.
-    return cb;
+    return cb
   }
 }
 
 export function createDomain(): Domain {
-  return new Domain();
+  return new Domain()
 }
-export const create = createDomain();
+export const create = createDomain()
 
 // The active domain is always the one that we're currently in.
-export const active: Domain | null = null;
+export const active: Domain | null = null
 
 export default {
   Domain,
   active,
   createDomain,
   create,
-};
+}

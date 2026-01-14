@@ -2,9 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
-import ts from "typescript";
-import { printNode } from "../print";
+import assert from 'node:assert'
+import ts from 'typescript'
+import { printNode } from '../print'
 
 // Replaces custom Iterator-like interfaces with built-in `Iterator` types:
 //
@@ -43,27 +43,27 @@ import { printNode } from "../print";
 // }
 // ```
 export function createIteratorTransformer(
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
 ): ts.TransformerFactory<ts.SourceFile> {
   return (ctx) => {
     return (node) => {
       const iteratorCtx: IteratorTransformContext = {
         types: new Map(),
         nextInterfaces: new Set(),
-      };
-      const v1 = createIteratorDeclarationsVisitor(ctx, checker, iteratorCtx);
-      const v2 = createIteratorUsagesVisitor(ctx, checker, iteratorCtx);
-      node = ts.visitEachChild(node, v1, ctx);
-      return ts.visitEachChild(node, v2, ctx);
-    };
-  };
+      }
+      const v1 = createIteratorDeclarationsVisitor(ctx, checker, iteratorCtx)
+      const v2 = createIteratorUsagesVisitor(ctx, checker, iteratorCtx)
+      node = ts.visitEachChild(node, v1, ctx)
+      return ts.visitEachChild(node, v2, ctx)
+    }
+  }
 }
 
 interface IteratorTransformContext {
   // Maps iterator-like interfaces to built-in `Iterator` types
-  types: Map<ts.Symbol, ts.TypeNode>;
+  types: Map<ts.Symbol, ts.TypeNode>
   // Set of iterator-next interfaces to remove
-  nextInterfaces: Set<ts.Symbol>;
+  nextInterfaces: Set<ts.Symbol>
 }
 
 // Find all interfaces extending `Iterator`, record their next value type,
@@ -71,25 +71,25 @@ interface IteratorTransformContext {
 function createIteratorDeclarationsVisitor(
   ctx: ts.TransformationContext,
   checker: ts.TypeChecker,
-  iteratorCtx: IteratorTransformContext
+  iteratorCtx: IteratorTransformContext,
 ): ts.Visitor {
   const visitor: ts.Visitor = (node) => {
     // Visit interfaces inside module declarations too
     if (ts.isModuleDeclaration(node) || ts.isModuleBody(node)) {
-      return ts.visitEachChild(node, visitor, ctx);
+      return ts.visitEachChild(node, visitor, ctx)
     }
 
     if (ts.isInterfaceDeclaration(node)) {
       // Check if interface extends `Iterator`
-      const extendsNode = node.heritageClauses?.[0];
+      const extendsNode = node.heritageClauses?.[0]
       if (
         extendsNode?.token === ts.SyntaxKind.ExtendsKeyword &&
         extendsNode.types.length === 1 &&
         ts.isIdentifier(extendsNode.types[0].expression) &&
-        (extendsNode.types[0].expression.text === "Iterator" ||
-          extendsNode.types[0].expression.text === "AsyncIterator")
+        (extendsNode.types[0].expression.text === 'Iterator' ||
+          extendsNode.types[0].expression.text === 'AsyncIterator')
       ) {
-        const isAsync = extendsNode.types[0].expression.text !== "Iterator";
+        const isAsync = extendsNode.types[0].expression.text !== 'Iterator'
         // Check `node` has one of the following shapes:
         // ```ts
         // export interface ThingIterator extends Iterator {
@@ -102,21 +102,21 @@ function createIteratorDeclarationsVisitor(
         //   [Symbol.asyncIterator](): any;
         // }
         // ```
-        let nextTypeNode: ts.TypeNode | undefined;
+        let nextTypeNode: ts.TypeNode | undefined
         for (const member of node.members) {
           if (
             ts.isMethodSignature(member) &&
             ts.isIdentifier(member.name) &&
-            member.name.text === "next" &&
+            member.name.text === 'next' &&
             member.type !== undefined
           ) {
-            nextTypeNode = member.type;
+            nextTypeNode = member.type
           }
         }
         assert(
           nextTypeNode !== undefined,
-          `Expected iterator-like interface, got "${printNode(node)}"`
-        );
+          `Expected iterator-like interface, got "${printNode(node)}"`,
+        )
 
         // Extract `IteratorBase_ThingIterator_...Next` type
         if (isAsync) {
@@ -124,11 +124,11 @@ function createIteratorDeclarationsVisitor(
           assert(
             ts.isTypeReferenceNode(nextTypeNode) &&
               ts.isIdentifier(nextTypeNode.typeName) &&
-              nextTypeNode.typeName.text === "Promise" &&
+              nextTypeNode.typeName.text === 'Promise' &&
               nextTypeNode.typeArguments?.length === 1,
-            `Expected Promise, got "${printNode(nextTypeNode)}"`
-          );
-          nextTypeNode = nextTypeNode.typeArguments[0];
+            `Expected Promise, got "${printNode(nextTypeNode)}"`,
+          )
+          nextTypeNode = nextTypeNode.typeArguments[0]
         }
 
         // Check `IteratorBase_ThingIterator_...Next` has the following shape,
@@ -139,43 +139,43 @@ function createIteratorDeclarationsVisitor(
         //   value?: string;
         // }
         // ```
-        const nextType = checker.getTypeFromTypeNode(nextTypeNode);
-        const nextTypeSymbol = nextType.getSymbol();
-        assert(nextTypeSymbol?.members !== undefined);
-        let nextValueSymbol: ts.Symbol | undefined;
+        const nextType = checker.getTypeFromTypeNode(nextTypeNode)
+        const nextTypeSymbol = nextType.getSymbol()
+        assert(nextTypeSymbol?.members !== undefined)
+        let nextValueSymbol: ts.Symbol | undefined
         nextTypeSymbol.members.forEach((value, key) => {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
-          if (key === "value") nextValueSymbol = value;
-        });
-        assert(nextValueSymbol !== undefined);
-        const nextValueDeclarations = nextValueSymbol.getDeclarations();
-        assert.strictEqual(nextValueDeclarations?.length, 1);
-        const nextValueDeclaration = nextValueDeclarations[0];
-        assert(ts.isPropertySignature(nextValueDeclaration));
+          if (key === 'value') nextValueSymbol = value
+        })
+        assert(nextValueSymbol !== undefined)
+        const nextValueDeclarations = nextValueSymbol.getDeclarations()
+        assert.strictEqual(nextValueDeclarations?.length, 1)
+        const nextValueDeclaration = nextValueDeclarations[0]
+        assert(ts.isPropertySignature(nextValueDeclaration))
         // Mark this interface for removal
-        iteratorCtx.nextInterfaces.add(nextTypeSymbol);
+        iteratorCtx.nextInterfaces.add(nextTypeSymbol)
 
         // Extract `value`'s type
-        const nextValueType = nextValueDeclaration.type;
-        assert(nextValueType !== undefined);
+        const nextValueType = nextValueDeclaration.type
+        assert(nextValueType !== undefined)
 
         // Record this iterator type...
-        const nodeType = checker.getTypeAtLocation(node);
-        const nodeSymbol = nodeType.getSymbol();
-        assert(nodeSymbol !== undefined);
+        const nodeType = checker.getTypeAtLocation(node)
+        const nodeSymbol = nodeType.getSymbol()
+        assert(nodeSymbol !== undefined)
         const iteratorType = ctx.factory.createTypeReferenceNode(
-          isAsync ? "AsyncIterableIterator" : "IterableIterator",
-          [nextValueType]
-        );
-        iteratorCtx.types.set(nodeSymbol, iteratorType);
+          isAsync ? 'AsyncIterableIterator' : 'IterableIterator',
+          [nextValueType],
+        )
+        iteratorCtx.types.set(nodeSymbol, iteratorType)
         // ...and remove the node by returning `undefined`
-        return;
+        return
       }
     }
 
-    return node;
-  };
-  return visitor;
+    return node
+  }
+  return visitor
 }
 
 // Replace uses of iterator interfaces with built-in iterator type.
@@ -183,7 +183,7 @@ function createIteratorDeclarationsVisitor(
 function createIteratorUsagesVisitor(
   ctx: ts.TransformationContext,
   checker: ts.TypeChecker,
-  iteratorCtx: IteratorTransformContext
+  iteratorCtx: IteratorTransformContext,
 ): ts.Visitor {
   // Find the built-in iterator type associated with a method's return type
   // or property's type
@@ -193,21 +193,21 @@ function createIteratorUsagesVisitor(
       | ts.MethodDeclaration
       | ts.PropertySignature
       | ts.PropertyDeclaration
-      | ts.GetAccessorDeclaration
+      | ts.GetAccessorDeclaration,
   ): ts.TypeNode | undefined {
-    if (node.type === undefined) return;
-    const type = checker.getTypeFromTypeNode(node.type);
-    const typeSymbol = type.getSymbol();
-    if (typeSymbol !== undefined) return iteratorCtx.types.get(typeSymbol);
+    if (node.type === undefined) return
+    const type = checker.getTypeFromTypeNode(node.type)
+    const typeSymbol = type.getSymbol()
+    if (typeSymbol !== undefined) return iteratorCtx.types.get(typeSymbol)
   }
 
   const visitor: ts.Visitor = (node) => {
     // Remove all next interfaces by returning `undefined`
     if (ts.isInterfaceDeclaration(node)) {
-      const type = checker.getTypeAtLocation(node);
-      const symbol = type.getSymbol();
+      const type = checker.getTypeAtLocation(node)
+      const symbol = type.getSymbol()
       if (symbol !== undefined && iteratorCtx.nextInterfaces.has(symbol)) {
-        return;
+        return
       }
     }
 
@@ -218,13 +218,13 @@ function createIteratorUsagesVisitor(
       ts.isModuleDeclaration(node) ||
       ts.isModuleBody(node)
     ) {
-      return ts.visitEachChild(node, visitor, ctx);
+      return ts.visitEachChild(node, visitor, ctx)
     }
 
     // Replace all method return types and property types referencing iterators
     // with the built-in type
     if (ts.isMethodSignature(node)) {
-      const iteratorType = findIteratorType(node);
+      const iteratorType = findIteratorType(node)
       if (iteratorType !== undefined) {
         return ctx.factory.updateMethodSignature(
           node,
@@ -233,12 +233,12 @@ function createIteratorUsagesVisitor(
           node.questionToken,
           node.typeParameters,
           node.parameters,
-          iteratorType
-        );
+          iteratorType,
+        )
       }
     }
     if (ts.isMethodDeclaration(node)) {
-      const iteratorType = findIteratorType(node);
+      const iteratorType = findIteratorType(node)
       if (iteratorType !== undefined) {
         return ctx.factory.updateMethodDeclaration(
           node,
@@ -249,24 +249,24 @@ function createIteratorUsagesVisitor(
           node.typeParameters,
           node.parameters,
           iteratorType,
-          node.body
-        );
+          node.body,
+        )
       }
     }
     if (ts.isPropertySignature(node)) {
-      const iteratorType = findIteratorType(node);
+      const iteratorType = findIteratorType(node)
       if (iteratorType !== undefined) {
         return ctx.factory.updatePropertySignature(
           node,
           node.modifiers,
           node.name,
           node.questionToken,
-          iteratorType
-        );
+          iteratorType,
+        )
       }
     }
     if (ts.isPropertyDeclaration(node)) {
-      const iteratorType = findIteratorType(node);
+      const iteratorType = findIteratorType(node)
       if (iteratorType !== undefined) {
         return ctx.factory.updatePropertyDeclaration(
           node,
@@ -274,12 +274,12 @@ function createIteratorUsagesVisitor(
           node.name,
           node.questionToken ?? node.exclamationToken,
           iteratorType,
-          node.initializer
-        );
+          node.initializer,
+        )
       }
     }
     if (ts.isGetAccessorDeclaration(node)) {
-      const iteratorType = findIteratorType(node);
+      const iteratorType = findIteratorType(node)
       if (iteratorType !== undefined) {
         return ctx.factory.updateGetAccessorDeclaration(
           node,
@@ -287,12 +287,12 @@ function createIteratorUsagesVisitor(
           node.name,
           node.parameters,
           iteratorType,
-          node.body
-        );
+          node.body,
+        )
       }
     }
 
-    return node;
-  };
-  return visitor;
+    return node
+  }
+  return visitor
 }

@@ -3,133 +3,133 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { _checkIsHttpToken as checkIsHttpToken } from 'node-internal:internal_http';
-import {
-  kOutHeaders,
-  kUniqueHeaders,
-  parseUniqueHeadersOption,
-} from 'node-internal:internal_http_outgoing';
-import { Buffer } from 'node-internal:internal_buffer';
-import { urlToHttpOptions, isURL } from 'node-internal:internal_url';
-import {
-  ERR_INVALID_ARG_TYPE,
-  ERR_INVALID_HTTP_TOKEN,
-  ERR_OPTION_NOT_IMPLEMENTED,
-  ERR_UNESCAPED_CHARACTERS,
-  ERR_INVALID_PROTOCOL,
-  ERR_INVALID_ARG_VALUE,
-  ERR_HTTP_HEADERS_SENT,
-  ERR_METHOD_NOT_IMPLEMENTED,
-} from 'node-internal:internal_errors';
-import {
-  validateInteger,
-  validateBoolean,
-  validateFunction,
-  validateString,
-  validateNumber,
-} from 'node-internal:validators';
-import { getTimerDuration } from 'node-internal:internal_net';
-import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
-import { Writable } from 'node-internal:streams_writable';
 import type {
   ClientRequest as _ClientRequest,
-  RequestOptions,
   OutgoingHttpHeaders,
-} from 'node:http';
+  RequestOptions,
+} from 'node:http'
+import type { Socket } from 'node:net'
+import { Buffer } from 'node-internal:internal_buffer'
+import {
+  ERR_HTTP_HEADERS_SENT,
+  ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
+  ERR_INVALID_HTTP_TOKEN,
+  ERR_INVALID_PROTOCOL,
+  ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_OPTION_NOT_IMPLEMENTED,
+  ERR_UNESCAPED_CHARACTERS,
+} from 'node-internal:internal_errors'
+import { _checkIsHttpToken as checkIsHttpToken } from 'node-internal:internal_http'
+import { type Agent, globalAgent } from 'node-internal:internal_http_agent'
 import {
   IncomingMessage,
   setIncomingMessageFetchResponse,
-} from 'node-internal:internal_http_incoming';
-import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
-import { Agent, globalAgent } from 'node-internal:internal_http_agent';
-import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
-import type { Socket } from 'node:net';
+} from 'node-internal:internal_http_incoming'
+import {
+  kOutHeaders,
+  kUniqueHeaders,
+  OutgoingMessage,
+  parseUniqueHeadersOption,
+} from 'node-internal:internal_http_outgoing'
+import type { IncomingMessageCallback } from 'node-internal:internal_http_util'
+import { getTimerDuration } from 'node-internal:internal_net'
+import { isURL, urlToHttpOptions } from 'node-internal:internal_url'
+import { addAbortSignal } from 'node-internal:streams_add_abort_signal'
+import { Writable } from 'node-internal:streams_writable'
+import {
+  validateBoolean,
+  validateFunction,
+  validateInteger,
+  validateNumber,
+  validateString,
+} from 'node-internal:validators'
 
-const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
+const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/
 
-type WriteCallback = (err?: Error) => void;
+type WriteCallback = (err?: Error) => void
 
 function validateHost(host: unknown, name: string): string {
   if (host != null && typeof host !== 'string') {
     throw new ERR_INVALID_ARG_TYPE(
       `options.${name}`,
       ['string', 'undefined', 'null'],
-      host
-    );
+      host,
+    )
   }
-  return host as string;
+  return host as string
 }
 
 // @ts-expect-error TS2720 Complaining due to "override req" being undefined.
 export class ClientRequest extends OutgoingMessage implements _ClientRequest {
-  #abortController = new AbortController();
-  #body: (Buffer | Uint8Array)[] = [];
-  #incomingMessage?: IncomingMessage;
-  #timer: number | null = null;
+  #abortController = new AbortController()
+  #body: (Buffer | Uint8Array)[] = []
+  #incomingMessage?: IncomingMessage
+  #timer: number | null = null
 
-  _ended: boolean = false;
+  _ended: boolean = false
 
-  timeout?: number;
-  method: string = 'GET';
-  path: string = '/';
-  host: string;
-  protocol: string = 'http:';
-  port: string = '80';
-  joinDuplicateHeaders: boolean | undefined;
-  agent: Agent | undefined;
+  timeout?: number
+  method: string = 'GET'
+  path: string = '/'
+  host: string
+  protocol: string = 'http:'
+  port: string = '80'
+  joinDuplicateHeaders: boolean | undefined
+  agent: Agent | undefined
 
   // Unused fields required to be Node.js compatible.
-  override aborted: boolean = false;
-  reusedSocket: boolean = false;
-  maxHeadersCount: number = Infinity;
-  connection: Socket | null = null;
+  override aborted: boolean = false
+  reusedSocket: boolean = false
+  maxHeadersCount: number = Infinity
+  connection: Socket | null = null
   socket: Socket | null = null;
 
-  [kUniqueHeaders]: Set<string> | null = null;
+  [kUniqueHeaders]: Set<string> | null = null
 
   constructor(
     input: string | URL | RequestOptions | null,
     options?: RequestOptions | IncomingMessageCallback,
-    cb?: IncomingMessageCallback
+    cb?: IncomingMessageCallback,
   ) {
-    super();
+    super()
 
     if (typeof input === 'string') {
-      input = urlToHttpOptions(new URL(input));
+      input = urlToHttpOptions(new URL(input))
     } else if (isURL(input)) {
       // url.URL instance
-      input = urlToHttpOptions(input);
+      input = urlToHttpOptions(input)
     } else {
-      cb = options as IncomingMessageCallback;
-      options = input as RequestOptions;
-      input = null;
+      cb = options as IncomingMessageCallback
+      options = input as RequestOptions
+      input = null
     }
 
     if (typeof options === 'function') {
-      cb = options;
-      options = input ?? {};
+      cb = options
+      options = input ?? {}
     } else {
-      options = Object.assign(input ?? {}, options);
+      options = Object.assign(input ?? {}, options)
     }
 
     if (options.path) {
       if (INVALID_PATH_REGEX.test(options.path)) {
-        throw new ERR_UNESCAPED_CHARACTERS('Request path');
+        throw new ERR_UNESCAPED_CHARACTERS('Request path')
       }
     }
 
-    type AgentLike = Agent | boolean | null | undefined;
-    let agent = options.agent as unknown as AgentLike;
+    type AgentLike = Agent | boolean | null | undefined
+    let agent = options.agent as unknown as AgentLike
     // TODO(soon): Rather than using RequestOptions use our own type that includes our own Agent class type.
     const defaultAgent =
-      (options._defaultAgent as unknown as AgentLike) || globalAgent;
+      (options._defaultAgent as unknown as AgentLike) || globalAgent
     if (agent === false) {
       // @ts-expect-error TS2351 This expression is not constructable.
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-call
-      agent = new defaultAgent.constructor();
+      agent = new defaultAgent.constructor()
     } else if (agent == null) {
       if (typeof options.createConnection !== 'function') {
-        agent = defaultAgent as Agent;
+        agent = defaultAgent as Agent
       }
     } else if (
       typeof agent === 'object' &&
@@ -138,197 +138,197 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       throw new ERR_INVALID_ARG_TYPE(
         'options.agent',
         ['Agent-like Object', 'undefined', 'false'],
-        agent
-      );
+        agent,
+      )
     }
-    this.agent = agent as Agent | undefined;
+    this.agent = agent as Agent | undefined
 
-    let expectedProtocol = (defaultAgent as Agent).protocol;
-    const protocol = options.protocol || expectedProtocol;
-    if (this.agent?.protocol) expectedProtocol = this.agent.protocol;
-    const defaultPort = options.defaultPort || this.agent?.defaultPort || 80;
+    let expectedProtocol = (defaultAgent as Agent).protocol
+    const protocol = options.protocol || expectedProtocol
+    if (this.agent?.protocol) expectedProtocol = this.agent.protocol
+    const defaultPort = options.defaultPort || this.agent?.defaultPort || 80
 
     if (protocol !== expectedProtocol) {
-      throw new ERR_INVALID_PROTOCOL(protocol, expectedProtocol);
+      throw new ERR_INVALID_PROTOCOL(protocol, expectedProtocol)
     }
-    this.protocol = protocol;
-    const port = (options.port = options.port || defaultPort || 80);
-    this.port = port.toString();
+    this.protocol = protocol
+    const port = (options.port = options.port || defaultPort || 80)
+    this.port = port.toString()
     const host = (options.host =
       validateHost(options.hostname, 'hostname') ||
       validateHost(options.host, 'host') ||
-      'localhost');
+      'localhost')
 
     const setHost =
       options.setHost !== undefined
         ? Boolean(options.setHost) // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
-        : options.setDefaultHeaders !== false;
+        : options.setDefaultHeaders !== false
     if (options.timeout !== undefined)
-      this.timeout = getTimerDuration(options.timeout, 'timeout');
+      this.timeout = getTimerDuration(options.timeout, 'timeout')
 
-    const signal = options.signal;
+    const signal = options.signal
     if (signal) {
-      addAbortSignal(signal, this as unknown as Writable);
+      addAbortSignal(signal, this as unknown as Writable)
     }
-    let method = options.method;
-    const methodIsString = typeof method === 'string';
+    let method = options.method
+    const methodIsString = typeof method === 'string'
     if (method != null && !methodIsString) {
-      throw new ERR_INVALID_ARG_TYPE('options.method', 'string', method);
+      throw new ERR_INVALID_ARG_TYPE('options.method', 'string', method)
     }
 
     if (methodIsString && method) {
       if (!checkIsHttpToken(method)) {
-        throw new ERR_INVALID_HTTP_TOKEN('Method', method);
+        throw new ERR_INVALID_HTTP_TOKEN('Method', method)
       }
-      method = this.method = method.toUpperCase();
+      method = this.method = method.toUpperCase()
     } else {
-      method = this.method = 'GET';
+      method = this.method = 'GET'
     }
 
-    const maxHeaderSize = options.maxHeaderSize;
+    const maxHeaderSize = options.maxHeaderSize
     if (maxHeaderSize !== undefined) {
       // This overrides the maximum length of response headers in bytes.
       // It doesn't make sense to override the maximum length for Workerd implementation
       // which is based on the original "fetch" API.
-      validateInteger(maxHeaderSize, 'maxHeaderSize', 0);
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.maxHeaderSize');
+      validateInteger(maxHeaderSize, 'maxHeaderSize', 0)
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.maxHeaderSize')
     }
 
     if (options.insecureHTTPParser !== undefined) {
       // If enabled it will use a HTTP parser with leniency flags enabled.
       // Since our implementation does not use any http parser, and uses "fetch" API,
       // it doesn't make sense to support this option.
-      validateBoolean(options.insecureHTTPParser, 'options.insecureHTTPParser');
+      validateBoolean(options.insecureHTTPParser, 'options.insecureHTTPParser')
     }
 
     if (options.createConnection !== undefined) {
       // Our implementation is based on the original "fetch" API, which doesn't support
       // custom socket creation. Therefore, this option is not applicable.
-      validateFunction(options.createConnection, 'options.createConnection');
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.createConnection');
+      validateFunction(options.createConnection, 'options.createConnection')
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.createConnection')
     }
 
     if (options.lookup !== undefined) {
       // Our implementation is based on the original "fetch" API, which doesn't support
       // custom DNS resolution. Therefore, this option is not applicable.
-      validateFunction(options.lookup, 'options.lookup');
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.lookup');
+      validateFunction(options.lookup, 'options.lookup')
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.lookup')
     }
 
     if (options.socketPath !== undefined) {
       // Unix domain socket. Cannot be used if one of host or port is specified, as those specify a TCP Socket.
       // This option is not applicable for our "fetch" based implementation.
-      validateString(options.socketPath, 'options.socketPath');
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.socketPath');
+      validateString(options.socketPath, 'options.socketPath')
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.socketPath')
     }
 
     if (options.joinDuplicateHeaders !== undefined) {
       validateBoolean(
         options.joinDuplicateHeaders,
-        'options.joinDuplicateHeaders'
-      );
+        'options.joinDuplicateHeaders',
+      )
     }
-    this.joinDuplicateHeaders = options.joinDuplicateHeaders;
+    this.joinDuplicateHeaders = options.joinDuplicateHeaders
 
-    this.path = options.path || '/';
+    this.path = options.path || '/'
     if (cb) {
-      this.once('response', cb);
+      this.once('response', cb)
     }
 
-    this.host = host;
+    this.host = host
 
-    const headers = options.headers;
+    const headers = options.headers
     if (!Array.isArray(headers)) {
       if (headers != null) {
         if ('host' in headers) {
-          validateString(headers.host, 'host');
+          validateString(headers.host, 'host')
         }
         for (const [key, value] of Object.entries(headers)) {
-          this.setHeader(key, value as unknown as string);
+          this.setHeader(key, value as unknown as string)
         }
       }
 
       if (host && !this.getHeader('host') && setHost) {
-        let hostHeader = host;
+        let hostHeader = host
 
         // For the Host header, ensure that IPv6 addresses are enclosed
         // in square brackets, as defined by URI formatting
         // https://tools.ietf.org/html/rfc3986#section-3.2.2
-        const posColon = hostHeader.indexOf(':');
+        const posColon = hostHeader.indexOf(':')
         if (
           posColon !== -1 &&
           hostHeader.includes(':', posColon + 1) &&
           hostHeader.charCodeAt(0) !== 91 /* '[' */
         ) {
-          hostHeader = `[${hostHeader}]`;
+          hostHeader = `[${hostHeader}]`
         }
 
         if (port && +port !== defaultPort) {
           // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
-          hostHeader += ':' + port;
+          hostHeader += `:${port}`
         }
-        this.setHeader('Host', hostHeader);
+        this.setHeader('Host', hostHeader)
       }
 
       if (options.auth && !this.getHeader('Authorization')) {
         this.setHeader(
           'Authorization',
-          'Basic ' + Buffer.from(options.auth).toString('base64')
-        );
+          `Basic ${Buffer.from(options.auth).toString('base64')}`,
+        )
       }
     } else {
       if (headers.length % 2 !== 0) {
-        throw new ERR_INVALID_ARG_VALUE('headers', headers);
+        throw new ERR_INVALID_ARG_VALUE('headers', headers)
       }
 
       for (let n = 0; n < headers.length; n += 2) {
-        this.setHeader(headers[n + 0] as string, headers[n + 1] as string);
+        this.setHeader(headers[n + 0] as string, headers[n + 1] as string)
       }
     }
 
     this.on('finish', () => {
-      this.#onFinish();
-    });
+      this.#onFinish()
+    })
 
-    this[kUniqueHeaders] = parseUniqueHeadersOption(options.uniqueHeaders);
+    this[kUniqueHeaders] = parseUniqueHeadersOption(options.uniqueHeaders)
   }
 
   #onFinish(): void {
-    if (this.destroyed) return;
+    if (this.destroyed) return
 
-    let body: BodyInit | null = null;
+    let body: BodyInit | null = null
     if (this.method !== 'GET' && this.method !== 'HEAD') {
       if (this.#body.length > 0) {
-        const value = this.getHeader('content-type') ?? '';
+        const value = this.getHeader('content-type') ?? ''
         body = new Blob(this.#body as BlobPart[], {
           type: Array.isArray(value) ? value.join(', ') : `${value}`,
-        });
+        })
       }
     }
 
-    const headers: [string, string][] = [];
+    const headers: [string, string][] = []
     for (const [_lowerCaseName, [originalName, value]] of Object.entries(
-      this[kOutHeaders] ?? {}
+      this[kOutHeaders] ?? {},
     )) {
       if (Array.isArray(value)) {
         if (this.joinDuplicateHeaders) {
-          headers.push([originalName, value.join(', ')]);
+          headers.push([originalName, value.join(', ')])
         } else {
           for (const item of value) {
-            headers.push([originalName, item]);
+            headers.push([originalName, item])
           }
         }
       } else {
-        headers.push([originalName, value]);
+        headers.push([originalName, value])
       }
     }
 
     if (this.timeout) {
       this.#timer = setTimeout(() => {
-        this.emit('timeout');
-        this.#incomingMessage?.emit('timeout');
-        this.#abortController.abort();
-      }, this.timeout) as unknown as number;
+        this.emit('timeout')
+        this.#incomingMessage?.emit('timeout')
+        this.#abortController.abort()
+      }, this.timeout) as unknown as number
     }
 
     if (
@@ -347,22 +347,22 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
             headers: {
               connection: 'close',
             },
-          })
-        );
-      });
-      return;
+          }),
+        )
+      })
+      return
     }
 
-    const host = this.getHeader('host') ?? this.host;
-    let url = new URL(`http://${host}`);
-    url.protocol = this.protocol;
-    url.port = this.port;
+    const host = this.getHeader('host') ?? this.host
+    let url = new URL(`http://${host}`)
+    url.protocol = this.protocol
+    url.port = this.port
 
     if (this.path.length > 0 && this.path !== '/') {
       // We pass `path` as the first argument since it can contain search and hash components.
       // Therefore, running the pathname setter will not work.
       // Since this is an extremely costly operation, we only do it if necessary.
-      url = new URL(this.path, url);
+      url = new URL(this.path, url)
     }
 
     // Our fetch implementation has the following limitations.
@@ -384,34 +384,34 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       redirect: 'manual',
     })
       .then(this.#handleFetchResponse.bind(this))
-      .catch(this.#handleFetchError.bind(this));
+      .catch(this.#handleFetchError.bind(this))
   }
 
   #handleFetchResponse(response: Response): void {
     // Sets headersSent
     this._header = Array.from(response.headers.keys())
       .map((key) => `${key}=${response.headers.get(key)}}`)
-      .join('\r\n');
-    const incoming = new IncomingMessage();
-    setIncomingMessageFetchResponse(incoming, response);
+      .join('\r\n')
+    const incoming = new IncomingMessage()
+    setIncomingMessageFetchResponse(incoming, response)
     incoming.on('error', (error) => {
-      this.emit('error', error);
-    });
+      this.emit('error', error)
+    })
 
-    this.emit('response', incoming);
+    this.emit('response', incoming)
     // @ts-expect-error TS2540 This is a read-only property.
-    this.req = this.#incomingMessage;
-    this.#incomingMessage = incoming;
+    this.req = this.#incomingMessage
+    this.#incomingMessage = incoming
   }
 
   #handleFetchError(error: Error): void {
     if (!this.destroyed) {
-      this.emit('error', error);
+      this.emit('error', error)
     } else {
-      console.log(error);
+      console.log(error)
     }
-    this.destroyed = true;
-    this._ended = true;
+    this.destroyed = true
+    this._ended = true
   }
 
   onSocket(_socket: Socket): void {
@@ -419,93 +419,93 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   }
 
   addTrailers(
-    _headers: OutgoingHttpHeaders | ReadonlyArray<[string, string]>
+    _headers: OutgoingHttpHeaders | ReadonlyArray<[string, string]>,
   ): void {
     // We don't support trailers.
-    throw new ERR_METHOD_NOT_IMPLEMENTED('addTrailers');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('addTrailers')
   }
 
   abort(error?: Error | null): void {
-    this.destroyed = true;
-    this.#resetTimers({ finished: true });
+    this.destroyed = true
+    this.#resetTimers({ finished: true })
     if (this.#incomingMessage) {
-      this.#incomingMessage.destroyed = true;
+      this.#incomingMessage.destroyed = true
     }
-    this.#abortController.abort();
+    this.#abortController.abort()
     if (error) {
-      this.emit('error', error);
+      this.emit('error', error)
     }
   }
 
   override _write(
     chunk: Buffer,
     _encoding: BufferEncoding,
-    callback: VoidFunction
+    callback: VoidFunction,
   ): boolean {
-    this.#body.push(chunk);
-    callback();
-    return true;
+    this.#body.push(chunk)
+    callback()
+    return true
   }
 
   setNoDelay(noDelay?: boolean): void {
-    validateBoolean(noDelay, 'noDelay');
+    validateBoolean(noDelay, 'noDelay')
     // Not implemented
   }
 
   setSocketKeepAlive(enable?: boolean, initialDelay?: number): void {
-    validateBoolean(enable, 'enable');
-    validateNumber(initialDelay, 'initialDelay');
+    validateBoolean(enable, 'enable')
+    validateNumber(initialDelay, 'initialDelay')
     // Not implemented
   }
 
   clearTimeout(cb?: VoidFunction): void {
-    this.setTimeout(0, cb);
+    this.setTimeout(0, cb)
   }
 
   setTimeout(msecs: number, callback?: VoidFunction): this {
     if (this.#timer) {
-      clearTimeout(this.#timer);
-      this.#timer = null;
+      clearTimeout(this.#timer)
+      this.#timer = null
     }
 
-    this.timeout = getTimerDuration(msecs, 'msecs');
-    this.#resetTimers({ finished: false });
+    this.timeout = getTimerDuration(msecs, 'msecs')
+    this.#resetTimers({ finished: false })
 
-    if (callback) this.once('timeout', callback);
+    if (callback) this.once('timeout', callback)
 
-    return this;
+    return this
   }
 
   override write(
     chunk: string | Buffer | Uint8Array,
     encoding?: BufferEncoding | WriteCallback | null,
-    callback?: WriteCallback
+    callback?: WriteCallback,
   ): boolean {
     // Capture the data for the request body
     if (this.method !== 'GET' && this.method !== 'HEAD' && chunk) {
       if (typeof chunk === 'string') {
         this.#body.push(
-          Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8')
-        );
+          Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8'),
+        )
       } else {
-        this.#body.push(chunk);
+        this.#body.push(chunk)
       }
     }
 
     // Call the parent write method
-    return super.write(chunk, encoding, callback);
+    return super.write(chunk, encoding, callback)
   }
 
   override end(
     data?: Buffer | string | VoidFunction,
     encoding?: BufferEncoding | VoidFunction,
-    callback?: VoidFunction
+    callback?: VoidFunction,
   ): this {
-    this._ended = true;
+    this._ended = true
 
     if (typeof data === 'function') {
-      callback = data as VoidFunction;
-      data = undefined;
+      callback = data as VoidFunction
+      data = undefined
     }
 
     // Don't duplicate data here - let the parent's end() call write() which will handle it
@@ -513,34 +513,34 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       this,
       data,
       encoding as BufferEncoding,
-      callback
-    );
-    return this;
+      callback,
+    )
+    return this
   }
 
   #resetTimers({ finished }: { finished: boolean }): void {
     if (finished) {
-      clearTimeout(this.#timer as number);
-      this.#timer = null;
+      clearTimeout(this.#timer as number)
+      this.#timer = null
     } else if (this.timeout) {
       if (this.#timer) {
-        clearTimeout(this.#timer);
+        clearTimeout(this.#timer)
       }
       this.#timer = setTimeout(() => {
-        this.emit('timeout');
-        this.#incomingMessage?.emit('timeout');
-        this.#abortController.abort();
-      }, this.timeout) as unknown as number;
+        this.emit('timeout')
+        this.#incomingMessage?.emit('timeout')
+        this.#abortController.abort()
+      }, this.timeout) as unknown as number
     }
   }
 
   override _implicitHeader(): void {
     if (this._header) {
-      throw new ERR_HTTP_HEADERS_SENT('render');
+      throw new ERR_HTTP_HEADERS_SENT('render')
     }
     this._storeHeader(
-      this.method + ' ' + this.path + ' HTTP/1.1\r\n',
-      this[kOutHeaders] as OutgoingHttpHeaders
-    );
+      `${this.method} ${this.path} HTTP/1.1\r\n`,
+      this[kOutHeaders] as OutgoingHttpHeaders,
+    )
   }
 }

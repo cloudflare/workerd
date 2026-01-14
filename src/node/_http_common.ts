@@ -4,20 +4,20 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 import {
-  _checkIsHttpToken,
   _checkInvalidHeaderChar,
+  _checkIsHttpToken,
   chunkExpression,
-} from 'node-internal:internal_http';
-import { METHODS } from 'node-internal:internal_http_constants';
-import { kIncomingMessage } from 'node-internal:internal_http_util';
+} from 'node-internal:internal_http'
+import { METHODS } from 'node-internal:internal_http_constants'
+import { kIncomingMessage } from 'node-internal:internal_http_util'
 export {
   _checkIsHttpToken,
   _checkInvalidHeaderChar,
   chunkExpression,
   kIncomingMessage,
-};
-export const continueExpression = /(?:^|\W)100-continue(?:$|\W)/i;
-export const methods = METHODS;
+}
+export const continueExpression = /(?:^|\W)100-continue(?:$|\W)/i
+export const methods = METHODS
 
 export default {
   _checkIsHttpToken,
@@ -26,4 +26,4 @@ export default {
   continueExpression,
   methods,
   kIncomingMessage,
-};
+}

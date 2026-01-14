@@ -23,46 +23,45 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { isIterable, isNodeStream } from 'node-internal:streams_util';
-import { finished } from 'node-internal:streams_end_of_stream';
+import { finished } from 'node-internal:streams_end_of_stream'
+import { pipelineImpl as pl } from 'node-internal:streams_pipeline'
+import { isIterable, isNodeStream } from 'node-internal:streams_util'
 
-import { pipelineImpl as pl } from 'node-internal:streams_pipeline';
-
-export { finished };
+export { finished }
 
 export function pipeline(...streams: unknown[]): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let signal: AbortSignal | undefined;
-    let end: boolean | undefined;
-    const lastArg = streams[streams.length - 1];
+    let signal: AbortSignal | undefined
+    let end: boolean | undefined
+    const lastArg = streams[streams.length - 1]
     if (
       lastArg &&
       typeof lastArg === 'object' &&
       !isNodeStream(lastArg) &&
       !isIterable(lastArg)
     ) {
-      const options = streams.pop() as { signal?: AbortSignal; end?: boolean };
-      signal = options.signal;
-      end = options.end;
+      const options = streams.pop() as { signal?: AbortSignal; end?: boolean }
+      signal = options.signal
+      end = options.end
     }
     pl(
       streams,
       (err: Error | null, value: unknown) => {
         if (err) {
-          reject(err);
+          reject(err)
         } else {
-          resolve(value);
+          resolve(value)
         }
       },
       {
         signal,
         end,
-      }
-    );
-  });
+      },
+    )
+  })
 }
 
 export const promises = {
   pipeline,
   finished,
-};
+}

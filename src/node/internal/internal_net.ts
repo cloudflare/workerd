@@ -25,87 +25,83 @@
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
-import inner from 'cloudflare-internal:sockets';
-
+import inner from 'cloudflare-internal:sockets'
+import type {
+  Socket as _Socket,
+  SocketAddress as _SocketAddress,
+  AddressInfo,
+  IPVersion,
+  IpcSocketConnectOpts,
+  OnReadOpts,
+  SocketAddressInitOptions,
+  SocketConnectOpts,
+  TcpSocketConnectOpts,
+} from 'node:net'
+import type { Writable } from 'node:stream'
+import type { InspectOptions } from 'node:util'
+import { Buffer } from 'node-internal:internal_buffer'
 import {
   AbortError,
-  ERR_INVALID_ARG_VALUE,
+  EPIPE,
+  ERR_INVALID_ADDRESS,
   ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
+  ERR_INVALID_IP_ADDRESS,
   ERR_MISSING_ARGS,
-  ERR_OUT_OF_RANGE,
   ERR_OPTION_NOT_IMPLEMENTED,
+  ERR_OUT_OF_RANGE,
   ERR_SOCKET_CLOSED,
   ERR_SOCKET_CLOSED_BEFORE_CONNECTION,
   ERR_SOCKET_CONNECTING,
-  ERR_INVALID_IP_ADDRESS,
-  ERR_INVALID_ADDRESS,
-  EPIPE,
-} from 'node-internal:internal_errors';
-
-import {
-  validateAbortSignal,
-  validateArray,
-  validateFunction,
-  validateInt32,
-  validateNumber,
-  validatePort,
-  validateObject,
-  validateOneOf,
-  validateBoolean,
-  validateString,
-  validateUint32,
-} from 'node-internal:validators';
-
-import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
-import { Duplex } from 'node-internal:streams_duplex';
-import { Buffer } from 'node-internal:internal_buffer';
+} from 'node-internal:internal_errors'
+import { inspect } from 'node-internal:internal_inspect'
+import type { JSStreamSocket } from 'node-internal:internal_tls_jsstream'
+import { isArrayBufferView, isUint8Array } from 'node-internal:internal_types'
+import type { FixedLengthArray } from 'node-internal:internal_utils'
+import { Duplex } from 'node-internal:streams_duplex'
 import {
   kDestroyed,
   kIsReadable,
   kIsWritable,
-} from 'node-internal:streams_util';
-import type {
-  IpcSocketConnectOpts,
-  SocketConnectOpts,
-  TcpSocketConnectOpts,
-  AddressInfo,
-  Socket as _Socket,
-  SocketAddress as _SocketAddress,
-  SocketAddressInitOptions,
-  IPVersion,
-  OnReadOpts,
-} from 'node:net';
-import type { InspectOptions } from 'node:util';
-import type { Writable } from 'node:stream';
-import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
+} from 'node-internal:streams_util'
+import {
+  validateAbortSignal,
+  validateArray,
+  validateBoolean,
+  validateFunction,
+  validateInt32,
+  validateNumber,
+  validateObject,
+  validateOneOf,
+  validatePort,
+  validateString,
+  validateUint32,
+} from 'node-internal:validators'
 
-import { inspect } from 'node-internal:internal_inspect';
-import type { FixedLengthArray } from 'node-internal:internal_utils';
+const kInspect = inspect.custom
 
-const kInspect = inspect.custom;
-
-const kLastWriteQueueSize = Symbol('kLastWriteQueueSize');
-const kTimeout = Symbol('kTimeout');
-const kBuffer = Symbol('kBuffer');
-const kBufferCb = Symbol('kBufferCb');
-const kBufferGen = Symbol('kBufferGen');
-const kBytesRead = Symbol('kBytesRead');
-const kBytesWritten = Symbol('kBytesWritten');
-const kUpdateTimer = Symbol('kUpdateTimer');
-export const normalizedArgsSymbol = Symbol('normalizedArgs');
-export const kReinitializeHandle = Symbol('kReinitializeHandle');
+const kLastWriteQueueSize = Symbol('kLastWriteQueueSize')
+const kTimeout = Symbol('kTimeout')
+const kBuffer = Symbol('kBuffer')
+const kBufferCb = Symbol('kBufferCb')
+const kBufferGen = Symbol('kBufferGen')
+const kBytesRead = Symbol('kBytesRead')
+const kBytesWritten = Symbol('kBytesWritten')
+const kUpdateTimer = Symbol('kUpdateTimer')
+export const normalizedArgsSymbol = Symbol('normalizedArgs')
+export const kReinitializeHandle = Symbol('kReinitializeHandle')
 
 // Once the socket has been opened, the socket info provided by the
 // socket.opened promise will be stored here.
-const kSocketInfo = Symbol('kSocketInfo');
+const kSocketInfo = Symbol('kSocketInfo')
 
 // IPv4 Segment
-const v4Seg = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])';
-const v4Str = `(?:${v4Seg}\\.){3}${v4Seg}`;
-const IPv4Reg = new RegExp(`^${v4Str}$`);
+const v4Seg = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])'
+const v4Str = `(?:${v4Seg}\\.){3}${v4Seg}`
+const IPv4Reg = new RegExp(`^${v4Str}$`)
 
 // IPv6 Segment
-const v6Seg = '(?:[0-9a-fA-F]{1,4})';
+const v6Seg = '(?:[0-9a-fA-F]{1,4})'
 const IPv6Reg = new RegExp(
   '^(?:' +
     `(?:${v6Seg}:){7}(?:${v6Seg}|:)|` +
@@ -116,59 +112,59 @@ const IPv6Reg = new RegExp(
     `(?:${v6Seg}:){2}(?:(?::${v6Seg}){0,3}:${v4Str}|(?::${v6Seg}){1,5}|:)|` +
     `(?:${v6Seg}:){1}(?:(?::${v6Seg}){0,4}:${v4Str}|(?::${v6Seg}){1,6}|:)|` +
     `(?::(?:(?::${v6Seg}){0,5}:${v4Str}|(?::${v6Seg}){1,7}|:))` +
-    ')(?:%[0-9a-zA-Z-.:]{1,})?$'
-);
+    ')(?:%[0-9a-zA-Z-.:]{1,})?$',
+)
 
-const TIMEOUT_MAX = 2 ** 31 - 1;
+const TIMEOUT_MAX = 2 ** 31 - 1
 
 // ======================================================================================
 
 export type SocketOptions = {
-  timeout?: number;
-  writable?: boolean;
-  readable?: boolean;
-  decodeStrings?: boolean;
-  autoDestroy?: boolean;
-  objectMode?: boolean;
-  readableObjectMode?: boolean;
-  writableObjectMode?: boolean;
-  keepAliveInitialDelay?: number;
-  fd?: number;
-  handle?: Socket['_handle'];
-  noDelay?: boolean;
-  keepAlive?: boolean;
-  allowHalfOpen?: boolean;
-  emitClose?: boolean;
-  signal?: AbortSignal;
+  timeout?: number
+  writable?: boolean
+  readable?: boolean
+  decodeStrings?: boolean
+  autoDestroy?: boolean
+  objectMode?: boolean
+  readableObjectMode?: boolean
+  writableObjectMode?: boolean
+  keepAliveInitialDelay?: number
+  fd?: number
+  handle?: Socket['_handle']
+  noDelay?: boolean
+  keepAlive?: boolean
+  allowHalfOpen?: boolean
+  emitClose?: boolean
+  signal?: AbortSignal
   onread?:
     | ({ callback?: () => Uint8Array; buffer?: Uint8Array } & OnReadOpts)
-    | null;
-};
+    | null
+}
 
 export function Server(): void {
-  throw new Error('Server is not implemented');
+  throw new Error('Server is not implemented')
 }
 
 export type SocketWriteData = Array<{
-  chunk: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-  encoding: BufferEncoding;
-}>;
+  chunk: any // eslint-disable-line @typescript-eslint/no-explicit-any
+  encoding: BufferEncoding
+}>
 
 // @ts-expect-error TS2323 Redeclare error.
 export declare class Socket extends _Socket {
-  timeout: number;
-  connecting: boolean;
-  _aborted: boolean;
-  _hadError: boolean;
-  _parent: null | Socket['_handle'];
-  _parentWrap: null | Socket | JSStreamSocket;
-  _host: null | string;
-  _peername: null | string;
+  timeout: number
+  connecting: boolean
+  _aborted: boolean
+  _hadError: boolean
+  _parent: null | Socket['_handle']
+  _parentWrap: null | Socket | JSStreamSocket
+  _host: null | string
+  _peername: null | string
   _getsockname(): {
-    address?: string;
-    port?: number;
-    family?: string;
-  };
+    address?: string
+    port?: number
+    family?: string
+  }
   [kLastWriteQueueSize]: number | null | undefined;
   [kTimeout]: Socket | null | undefined;
   [kBuffer]: null | boolean | Uint8Array;
@@ -178,113 +174,113 @@ export declare class Socket extends _Socket {
     | ((len?: number, buf?: Buffer) => boolean | Uint8Array);
   [kBufferGen]: null | (() => undefined | Uint8Array);
   [kSocketInfo]: null | {
-    address?: string;
-    port?: number;
-    family?: number | string;
-    remoteAddress?: Record<string, unknown>;
+    address?: string
+    port?: number
+    family?: number | string
+    remoteAddress?: Record<string, unknown>
   };
   [kBytesRead]: number;
   [kBytesWritten]: number;
-  [kReinitializeHandle](handle: Socket['_handle']): void;
-  _closeAfterHandlingError: boolean;
+  [kReinitializeHandle](handle: Socket['_handle']): void
+  _closeAfterHandlingError: boolean
   _handle: null | {
-    writeQueueSize?: number;
-    lastWriteQueueSize?: number;
-    reading: boolean | undefined;
-    bytesRead: number;
-    bytesWritten: number;
-    socket: ReturnType<typeof inner.connect>;
-    reader: ReadableStreamBYOBReader;
-    writer: WritableStreamDefaultWriter<unknown>;
+    writeQueueSize?: number
+    lastWriteQueueSize?: number
+    reading: boolean | undefined
+    bytesRead: number
+    bytesWritten: number
+    socket: ReturnType<typeof inner.connect>
+    reader: ReadableStreamBYOBReader
+    writer: WritableStreamDefaultWriter<unknown>
     options: {
-      host: string;
-      port: number;
-      addressType: number;
-    };
-  };
-  _sockname?: null | AddressInfo;
-  _onTimeout(): void;
-  _unrefTimer(): void;
+      host: string
+      port: number
+      addressType: number
+    }
+  }
+  _sockname?: null | AddressInfo
+  _onTimeout(): void
+  _unrefTimer(): void
   _writeGeneric(
     writev: boolean,
     data: SocketWriteData,
     encoding: string,
-    cb: (err?: Error) => void
-  ): void;
-  _final(cb: (err?: Error) => void): void;
-  _read(n: number): void;
-  _reset(): void;
-  _getpeername(): Record<string, unknown>;
-  _readableState: undefined;
-  _closed: boolean;
-  writableErrored: boolean;
+    cb: (err?: Error) => void,
+  ): void
+  _final(cb: (err?: Error) => void): void
+  _read(n: number): void
+  _reset(): void
+  _getpeername(): Record<string, unknown>
+  _readableState: undefined
+  _closed: boolean
+  writableErrored: boolean
   readableErrored: boolean;
   [kIsReadable]: boolean;
   [kIsWritable]: boolean;
-  [kDestroyed]: boolean;
-  _writableState: undefined;
-  _bytesDispatched: number;
-  _pendingData: SocketWriteData | null;
-  _pendingEncoding: string;
-  _undestroy(): void;
+  [kDestroyed]: boolean
+  _writableState: undefined
+  _bytesDispatched: number
+  _pendingData: SocketWriteData | null
+  _pendingEncoding: string
+  _undestroy(): void
   // This should have existed in _Socket type but it's not...
   writableBuffer?: Writable & {
-    allBuffers: boolean;
-    length: number;
-  };
+    allBuffers: boolean
+    length: number
+  }
 
   // Defined by TLSSocket
-  encrypted?: boolean;
-  _finishInit(): void;
+  encrypted?: boolean
+  _finishInit(): void
 
-  constructor(options?: SocketOptions);
-  prototype: Socket;
-  resetAndClosing?: boolean;
+  constructor(options?: SocketOptions)
+  prototype: Socket
+  resetAndClosing?: boolean
 }
 
 // @ts-expect-error TS2323 Redeclare error.
 export function Socket(this: Socket, options?: SocketOptions): Socket {
   if (!(this instanceof Socket)) {
-    return new Socket(options);
+    return new Socket(options)
   }
 
   if (options?.objectMode) {
     throw new ERR_INVALID_ARG_VALUE(
       'options.objectMode',
       options.objectMode,
-      'is not supported'
-    );
+      'is not supported',
+    )
   } else if (options?.readableObjectMode || options?.writableObjectMode) {
     throw new ERR_INVALID_ARG_VALUE(
       `options.${
         options.readableObjectMode ? 'readableObjectMode' : 'writableObjectMode'
       }`,
       options.readableObjectMode || options.writableObjectMode,
-      'is not supported'
-    );
+      'is not supported',
+    )
   }
   if (options?.keepAliveInitialDelay !== undefined) {
     validateNumber(
       options.keepAliveInitialDelay,
-      'options.keepAliveInitialDelay'
-    );
+      'options.keepAliveInitialDelay',
+    )
 
     if (options.keepAliveInitialDelay < 0) {
-      options.keepAliveInitialDelay = 0;
+      options.keepAliveInitialDelay = 0
     }
   }
 
   if (typeof options === 'number') {
-    options = { fd: options as number };
+    options = { fd: options as number }
   } else {
-    options = { ...options };
+    options = { ...options }
   }
 
   if (options.fd !== undefined) {
     // We are not supporting the options.fd option for now. This is the option
     // that allows users to pass in a file descriptor to an existing socket.
     // Workers doesn't have file descriptors and does not use them in any way.
-    throw new ERR_OPTION_NOT_IMPLEMENTED('options.fd');
+    throw new ERR_OPTION_NOT_IMPLEMENTED('options.fd')
   }
 
   // We do not support the noDelay and keepAlive options at this
@@ -301,59 +297,59 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   //   throw new ERR_OPTION_NOT_IMPLEMENTED('truthy options.keepAlive');
   // }
 
-  options.allowHalfOpen = Boolean(options.allowHalfOpen);
+  options.allowHalfOpen = Boolean(options.allowHalfOpen)
   // TODO(now): Match behavior with Node.js
   // In Node.js, emitClose and autoDestroy are false by default so that
   // the socket must handle those itself, including emitting the close
   // event with the hadError argument. We should match that behavior.
-  options.emitClose = false;
-  options.autoDestroy = true;
-  options.decodeStrings = false;
+  options.emitClose = false
+  options.autoDestroy = true
+  options.decodeStrings = false
 
   // In Node.js, these are meaningful when the options.fd is used.
   // We do not support options.fd so we just ignore whatever value
   // is given and always pass true.
-  options.readable = true;
-  options.writable = true;
+  options.readable = true
+  options.writable = true
 
-  this._handle = null;
-  this.connecting = false;
-  this._hadError = false;
-  this._parent = null;
-  this._parentWrap = null;
-  this._host = null;
-  this[kLastWriteQueueSize] = 0;
-  this[kTimeout] = null;
-  this[kBuffer] = null;
-  this[kBufferCb] = null;
-  this[kBufferGen] = null;
-  this[kSocketInfo] = null;
-  this[kBytesRead] = 0;
-  this[kBytesWritten] = 0;
-  this._closeAfterHandlingError = false;
+  this._handle = null
+  this.connecting = false
+  this._hadError = false
+  this._parent = null
+  this._parentWrap = null
+  this._host = null
+  this[kLastWriteQueueSize] = 0
+  this[kTimeout] = null
+  this[kBuffer] = null
+  this[kBufferCb] = null
+  this[kBufferGen] = null
+  this[kSocketInfo] = null
+  this[kBytesRead] = 0
+  this[kBytesWritten] = 0
+  this._closeAfterHandlingError = false
   // @ts-expect-error TS2540 Required due to types
-  this.autoSelectFamilyAttemptedAddresses = [];
+  this.autoSelectFamilyAttemptedAddresses = []
 
-  this._undestroy();
-  this._sockname = null;
-  this._pendingData = null;
-  this._pendingEncoding = '';
+  this._undestroy()
+  this._sockname = null
+  this._pendingData = null
+  this._pendingEncoding = ''
 
   // Call Duplex constructor before setting up the abort signal
   // This ensures the stream methods are properly set up before
   // any abort handling that might call destroy()
-  Duplex.call(this, options);
+  Duplex.call(this, options)
 
   if (options.handle) {
-    validateObject(options.handle, 'options.handle');
-    this._handle = options.handle;
+    validateObject(options.handle, 'options.handle')
+    this._handle = options.handle
   }
 
   // We explicitly listen for all 'end' events, not only for once
   // because Socket class supports reconnection through s.connect();
-  this.on('end', onReadableStreamEnd);
+  this.on('end', onReadableStreamEnd)
 
-  const onread = options.onread;
+  const onread = options.onread
   if (
     onread != null &&
     typeof onread === 'object' &&
@@ -365,26 +361,26 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     typeof onread.callback === 'function'
   ) {
     if (typeof onread.buffer === 'function') {
-      this[kBuffer] = true;
-      this[kBufferGen] = onread.buffer;
+      this[kBuffer] = true
+      this[kBufferGen] = onread.buffer
     } else {
-      this[kBuffer] = onread.buffer;
-      this[kBufferGen] = (): Uint8Array | undefined => onread.buffer;
+      this[kBuffer] = onread.buffer
+      this[kBufferGen] = (): Uint8Array | undefined => onread.buffer
     }
-    this[kBufferCb] = onread.callback;
+    this[kBufferCb] = onread.callback
   } else {
-    this[kBuffer] = true;
-    this[kBufferGen] = (): Uint8Array => new Uint8Array(4096);
-    this[kBufferCb] = undefined;
+    this[kBuffer] = true
+    this[kBufferGen] = (): Uint8Array => new Uint8Array(4096)
+    this[kBufferCb] = undefined
   }
 
   // Now set up abort signal handling after the Duplex constructor
   if (options.signal) {
-    addClientAbortSignalOption(this, options.signal);
+    addClientAbortSignalOption(this, options.signal)
   }
 
-  this[kBytesRead] = 0;
-  this[kBytesWritten] = 0;
+  this[kBytesRead] = 0
+  this[kBytesWritten] = 0
 
   // TODO(soon): Enable this once blockList is implemented.
   // if (options.blockList) {
@@ -394,99 +390,99 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   //     this.blockList = options.blockList;
   //   }
 
-  return this;
+  return this
 }
 
-Object.setPrototypeOf(Socket.prototype, Duplex.prototype);
-Object.setPrototypeOf(Socket, Duplex);
+Object.setPrototypeOf(Socket.prototype, Duplex.prototype)
+Object.setPrototypeOf(Socket, Duplex)
 
 Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   for (let s: Socket | null = this; s != null; s = s._parentWrap) {
     if (s[kTimeout] != null) {
-      clearTimeout(s[kTimeout] as unknown as number);
+      clearTimeout(s[kTimeout] as unknown as number)
       s[kTimeout] = this.setTimeout(s.timeout, (): void => {
-        s._onTimeout();
-      });
+        s._onTimeout()
+      })
     }
   }
-};
+}
 
 Socket.prototype.setTimeout = function (
   this: Socket,
   msecs: number,
-  callback?: () => void
+  callback?: () => void,
 ): Socket {
-  if (this.destroyed) return this;
+  if (this.destroyed) return this
 
-  this.timeout = msecs;
+  this.timeout = msecs
 
   // Type checking identical to timers.enroll()
-  msecs = getTimerDuration(msecs, 'msecs');
+  msecs = getTimerDuration(msecs, 'msecs')
 
   // Attempt to clear an existing timer in both cases -
   // even if it will be rescheduled we don't want to leak an existing timer.
-  clearTimeout(this[kTimeout] as unknown as number);
+  clearTimeout(this[kTimeout] as unknown as number)
 
   if (msecs === 0) {
     if (callback !== undefined) {
-      validateFunction(callback, 'callback');
-      this.removeListener('timeout', callback);
+      validateFunction(callback, 'callback')
+      this.removeListener('timeout', callback)
     }
   } else {
     // @ts-expect-error TS2740 Required to not overcomplicate types
     this[kTimeout] = setTimeout((): void => {
-      this._onTimeout();
-    }, msecs);
+      this._onTimeout()
+    }, msecs)
     if (callback !== undefined) {
-      validateFunction(callback, 'callback');
-      this.once('timeout', callback);
+      validateFunction(callback, 'callback')
+      this.once('timeout', callback)
     }
   }
-  return this;
-};
+  return this
+}
 
 Socket.prototype._onTimeout = function (this: Socket): void {
-  const handle = this._handle;
-  const lastWriteQueueSize = this[kLastWriteQueueSize] as number;
+  const handle = this._handle
+  const lastWriteQueueSize = this[kLastWriteQueueSize] as number
   if (lastWriteQueueSize > 0 && handle) {
     // `lastWriteQueueSize !== writeQueueSize` means there is
     // an active write in progress, so we suppress the timeout.
-    const { writeQueueSize } = handle;
+    const { writeQueueSize } = handle
     if (lastWriteQueueSize !== writeQueueSize) {
-      this[kLastWriteQueueSize] = writeQueueSize;
-      this._unrefTimer();
-      return;
+      this[kLastWriteQueueSize] = writeQueueSize
+      this._unrefTimer()
+      return
     }
   }
-  this.emit('timeout');
-};
+  this.emit('timeout')
+}
 
 Socket.prototype._getpeername = function (
-  this: Socket
+  this: Socket,
 ): Record<string, unknown> {
   if (this._handle == null || this[kSocketInfo] == null) {
-    return {};
+    return {}
   }
 
-  return { ...this[kSocketInfo].remoteAddress };
-};
+  return { ...this[kSocketInfo].remoteAddress }
+}
 
 Socket.prototype._getsockname = function (this: Socket): AddressInfo | {} {
   if (this._handle == null) {
-    return {};
+    return {}
   }
   this._sockname ??= {
     address: '0.0.0.0',
     port: 0,
     family: 'IPv4',
-  };
-  return this._sockname;
-};
+  }
+  return this._sockname
+}
 
 Socket.prototype.address = function (this: Socket): {} | AddressInfo {
-  return this._getsockname();
-};
+  return this._getsockname()
+}
 
 // ======================================================================================
 // Writable side ...
@@ -496,38 +492,38 @@ Socket.prototype._writeGeneric = function (
   writev: boolean,
   data: SocketWriteData,
   encoding: string,
-  cb: (err?: Error) => void
+  cb: (err?: Error) => void,
   // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
-): false | void {
+): false | undefined {
   // If we are still connecting, buffer this for later.
   // The writable logic will buffer up any more writes while
   // waiting for this one to be done.
   try {
     if (this.connecting) {
-      this._pendingData = data;
-      this._pendingEncoding = encoding;
+      this._pendingData = data
+      this._pendingEncoding = encoding
       function onClose(): void {
-        cb(new ERR_SOCKET_CLOSED_BEFORE_CONNECTION());
+        cb(new ERR_SOCKET_CLOSED_BEFORE_CONNECTION())
       }
       this.once('connect', () => {
-        this.off('close', onClose);
-        this._writeGeneric(writev, data, encoding, cb);
-      });
-      this.once('close', onClose);
-      return;
+        this.off('close', onClose)
+        this._writeGeneric(writev, data, encoding, cb)
+      })
+      this.once('close', onClose)
+      return
     }
 
-    this._pendingData = null;
-    this._pendingEncoding = '';
+    this._pendingData = null
+    this._pendingEncoding = ''
 
     if (this._handle?.writer === undefined) {
-      cb(new ERR_SOCKET_CLOSED());
-      return false;
+      cb(new ERR_SOCKET_CLOSED())
+      return false
     }
 
-    this._unrefTimer();
+    this._unrefTimer()
 
-    let lastWriteSize = 0;
+    let lastWriteSize = 0
     if (writev) {
       // data is an array of strings or ArrayBufferViews. We're going to concat
       // them all together into a single buffer so we can write all at once. This
@@ -535,69 +531,69 @@ Socket.prototype._writeGeneric = function (
       // through the write loop in the stream. Since the write loops involve bouncing
       // back and forth across the kj event loop boundary and requires reacquiring the
       // isolate lock after each write, this should be more efficient in the long run.
-      const buffers = [];
+      const buffers = []
       for (const d of data) {
         if (typeof d.chunk === 'string') {
-          const buf = Buffer.from(d.chunk, d.encoding);
-          buffers.push(buf);
-          lastWriteSize += buf.byteLength;
+          const buf = Buffer.from(d.chunk, d.encoding)
+          buffers.push(buf)
+          lastWriteSize += buf.byteLength
         } else if (isArrayBufferView(d.chunk)) {
           buffers.push(
             new Uint8Array(
               d.chunk.buffer,
               d.chunk.byteOffset,
-              d.chunk.byteLength
-            )
-          );
-          lastWriteSize += d.chunk.byteLength;
+              d.chunk.byteLength,
+            ),
+          )
+          lastWriteSize += d.chunk.byteLength
         } else {
           throw new ERR_INVALID_ARG_TYPE(
             'chunk',
             ['string', 'ArrayBufferView'],
-            d.chunk
-          );
+            d.chunk,
+          )
         }
       }
-      this._unrefTimer();
+      this._unrefTimer()
 
       this._handle.writer.write(Buffer.concat(buffers)).then(
         () => {
           if (this._handle != null) {
-            this._handle.bytesWritten += this[kLastWriteQueueSize] ?? 0;
+            this._handle.bytesWritten += this[kLastWriteQueueSize] ?? 0
           } else {
-            this[kBytesWritten] += this[kLastWriteQueueSize] ?? 0;
+            this[kBytesWritten] += this[kLastWriteQueueSize] ?? 0
           }
-          this[kLastWriteQueueSize] = 0;
-          this._unrefTimer();
-          cb();
+          this[kLastWriteQueueSize] = 0
+          this._unrefTimer()
+          cb()
         },
         (err: unknown): void => {
-          this[kLastWriteQueueSize] = 0;
-          this._unrefTimer();
-          cb(err as Error);
-        }
-      );
+          this[kLastWriteQueueSize] = 0
+          this._unrefTimer()
+          cb(err as Error)
+        },
+      )
     } else {
-      let bufferData: Buffer;
+      let bufferData: Buffer
       if (typeof data === 'string') {
-        bufferData = Buffer.from(data, encoding);
+        bufferData = Buffer.from(data, encoding)
       } else {
-        bufferData = data as unknown as Buffer;
+        bufferData = data as unknown as Buffer
       }
       this._handle.writer.write(bufferData).then(
         () => {
           if (this._handle != null) {
-            this._handle.bytesWritten += this[kLastWriteQueueSize] ?? 0;
+            this._handle.bytesWritten += this[kLastWriteQueueSize] ?? 0
           } else {
-            this[kBytesWritten] += this[kLastWriteQueueSize] ?? 0;
+            this[kBytesWritten] += this[kLastWriteQueueSize] ?? 0
           }
-          this[kLastWriteQueueSize] = 0;
-          this._unrefTimer();
-          cb();
+          this[kLastWriteQueueSize] = 0
+          this._unrefTimer()
+          cb()
         },
         (err: unknown): void => {
-          this[kLastWriteQueueSize] = 0;
-          this._unrefTimer();
+          this[kLastWriteQueueSize] = 0
+          this._unrefTimer()
 
           // Think of the following code:
           //
@@ -613,75 +609,75 @@ Socket.prototype._writeGeneric = function (
           if (
             (err as Error).message !== 'This WritableStream has been closed.'
           ) {
-            cb(err as Error);
+            cb(err as Error)
           } else {
-            cb();
+            cb()
           }
-        }
-      );
-      lastWriteSize = (data as unknown as Buffer).byteLength;
+        },
+      )
+      lastWriteSize = (data as unknown as Buffer).byteLength
     }
-    this[kLastWriteQueueSize] = lastWriteSize;
+    this[kLastWriteQueueSize] = lastWriteSize
   } catch (err) {
-    this.destroy(err as Error);
+    this.destroy(err as Error)
   }
-};
+}
 
 Socket.prototype._writev = function (
   this: Socket,
   chunks: SocketWriteData,
-  cb: () => void
+  cb: () => void,
 ): void {
-  this._writeGeneric(true, chunks, '', cb);
-};
+  this._writeGeneric(true, chunks, '', cb)
+}
 
 Socket.prototype._write = function (
   this: Socket,
   data: SocketWriteData,
   encoding: string,
-  cb: (err?: Error) => void
+  cb: (err?: Error) => void,
 ): void {
-  this._writeGeneric(false, data, encoding, cb);
-};
+  this._writeGeneric(false, data, encoding, cb)
+}
 
 Socket.prototype._final = function (
   this: Socket,
-  cb: (err?: Error) => void
+  cb: (err?: Error) => void,
 ): void {
   if (this.connecting) {
     this.once('connect', () => {
-      this._final(cb);
-    });
-    return;
+      this._final(cb)
+    })
+    return
   }
 
   // If there is no writer, then there's really nothing left to do here.
   if (this._handle == null) {
-    cb();
-    return;
+    cb()
+    return
   }
 
   this._handle.writer.close().then(
     (): void => {
-      cb();
+      cb()
     },
     (err: unknown): void => {
-      cb(err as Error);
-    }
-  );
-};
+      cb(err as Error)
+    },
+  )
+}
 
 Socket.prototype.end = function (
   this: Socket,
   // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   data?: string | Uint8Array | NodeJS.BufferEncoding | VoidFunction,
   encoding?: NodeJS.BufferEncoding | VoidFunction,
-  cb?: VoidFunction
+  cb?: VoidFunction,
 ): Socket {
   // @ts-expect-error this fails after upgrading to @types/node@22.14
-  Duplex.prototype.end.call(this, data, encoding, cb);
-  return this;
-};
+  Duplex.prototype.end.call(this, data, encoding, cb)
+  return this
+}
 
 // ======================================================================================
 // Readable side
@@ -691,11 +687,11 @@ Socket.prototype.pause = function (this: Socket): Socket {
     // If the read loop is already running, setting reading to false
     // will interrupt it after the current read completes (if any)
     if (!this.destroyed) {
-      this._handle.reading = false;
+      this._handle.reading = false
     }
   }
-  return Duplex.prototype.pause.call(this) as unknown as Socket;
-};
+  return Duplex.prototype.pause.call(this) as unknown as Socket
+}
 
 Socket.prototype.resume = function (this: Socket): Socket {
   if (
@@ -704,14 +700,14 @@ Socket.prototype.resume = function (this: Socket): Socket {
     this._handle &&
     !this._handle.reading
   ) {
-    tryReadStart(this);
+    tryReadStart(this)
   }
-  return Duplex.prototype.resume.call(this) as unknown as Socket;
-};
+  return Duplex.prototype.resume.call(this) as unknown as Socket
+}
 
 Socket.prototype.read = function (
   this: Socket,
-  n: number
+  n: number,
 ): ReturnType<typeof Duplex.prototype.read> {
   if (
     this[kBuffer] &&
@@ -719,29 +715,29 @@ Socket.prototype.read = function (
     this._handle &&
     !this._handle.reading
   ) {
-    tryReadStart(this);
+    tryReadStart(this)
   }
 
-  return Duplex.prototype.read.call(this, n);
-};
+  return Duplex.prototype.read.call(this, n)
+}
 
 Socket.prototype._read = function (this: Socket, n: number): void {
   if (this.connecting || !this._handle) {
     this.once('connect', () => {
-      this._read(n);
-    });
+      this._read(n)
+    })
   } else if (!this._handle.reading) {
-    tryReadStart(this);
+    tryReadStart(this)
   }
-};
+}
 
 // ======================================================================================
 // Destroy and reset
 
 Socket.prototype._reset = function (this: Socket): Socket {
-  this.resetAndClosing = true;
-  return this.destroy();
-};
+  this.resetAndClosing = true
+  return this.destroy()
+}
 
 Socket.prototype.resetAndDestroy = function (this: Socket): Socket {
   // In Node.js, the resetAndDestroy method is used to "[close] the TCP connection by
@@ -756,57 +752,57 @@ Socket.prototype.resetAndDestroy = function (this: Socket): Socket {
   if (this._handle) {
     if (this.connecting) {
       this.once('connect', () => {
-        this._reset();
-      });
+        this._reset()
+      })
     } else {
-      this._reset();
+      this._reset()
     }
   } else {
-    this.destroy(new ERR_SOCKET_CLOSED());
+    this.destroy(new ERR_SOCKET_CLOSED())
   }
-  return this;
-};
+  return this
+}
 
 Socket.prototype.destroySoon = function (this: Socket): void {
   if (this.writable) {
-    this.end();
+    this.end()
   }
 
   if (this.writableFinished) {
-    this.destroy();
+    this.destroy()
   } else {
     this.once('finish', () => {
       // Do not call this.destroy.bind(this) since user can override it.
-      this.destroy();
-    });
+      this.destroy()
+    })
   }
-};
+}
 
 Socket.prototype._destroy = function (
   this: Socket,
   exception: Error,
-  cb: (err?: Error) => void
+  cb: (err?: Error) => void,
 ): void {
-  this.connecting = false;
+  this.connecting = false
 
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   for (let s: Socket | null = this; s !== null; s = s._parentWrap) {
-    clearTimeout(s[kTimeout] as unknown as number);
+    clearTimeout(s[kTimeout] as unknown as number)
   }
 
   if (this._handle != null) {
     this._handle.socket.close().then(
       () => {
-        cleanupAfterDestroy(this, cb, exception);
+        cleanupAfterDestroy(this, cb, exception)
       },
       (err: unknown) => {
-        cleanupAfterDestroy(this, cb, (err || exception) as Error);
-      }
-    );
+        cleanupAfterDestroy(this, cb, (err || exception) as Error)
+      },
+    )
   } else {
-    cleanupAfterDestroy(this, cb, exception);
+    cleanupAfterDestroy(this, cb, exception)
   }
-};
+}
 
 // ======================================================================================
 // Connection
@@ -816,53 +812,53 @@ Socket.prototype.connect = function (
   this: Socket,
   ...args: unknown[]
 ): Socket | undefined {
-  let normalized;
+  let normalized
   // @ts-expect-error TS7015 Required not to overcomplicate types
   if (Array.isArray(args[0]) && args[0][normalizedArgsSymbol]) {
-    normalized = args[0];
+    normalized = args[0]
   } else {
-    normalized = _normalizeArgs(args);
+    normalized = _normalizeArgs(args)
   }
-  const options = normalized[0] as TcpSocketConnectOpts & IpcSocketConnectOpts;
-  const cb = normalized[1] as ((err: Error | null) => void) | null;
+  const options = normalized[0] as TcpSocketConnectOpts & IpcSocketConnectOpts
+  const cb = normalized[1] as ((err: Error | null) => void) | null
 
   if (this.connecting) {
-    throw new ERR_SOCKET_CONNECTING();
+    throw new ERR_SOCKET_CONNECTING()
   }
   if (this._aborted) {
     if (cb) {
-      cb(new AbortError());
+      cb(new AbortError())
     } else {
-      throw new AbortError();
+      throw new AbortError()
     }
-    return undefined;
+    return undefined
   }
 
   if (cb !== null) {
-    this.once('connect', cb);
+    this.once('connect', cb)
   }
 
   if (this._parentWrap?.connecting) {
-    return this;
+    return this
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (options.port === undefined && options.path == null) {
-    throw new ERR_MISSING_ARGS(['options', 'port', 'path']);
+    throw new ERR_MISSING_ARGS(['options', 'port', 'path'])
   }
 
   if (this.write !== Socket.prototype.write) {
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    this.write = Socket.prototype.write;
+    this.write = Socket.prototype.write
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (options.path != null) {
-    throw new ERR_INVALID_ARG_VALUE('path', options.path, 'is not supported');
+    throw new ERR_INVALID_ARG_VALUE('path', options.path, 'is not supported')
   }
 
-  this[kBytesRead] = 0;
-  this[kBytesWritten] = 0;
+  this[kBytesRead] = 0
+  this[kBytesWritten] = 0
 
   // This is required for "reconnection".
   // Previous connected handle needs to emit "close" event.
@@ -870,82 +866,82 @@ Socket.prototype.connect = function (
   if (this._handle) {
     this._handle.socket.close().then(
       () => {
-        initializeConnection(this, options);
+        initializeConnection(this, options)
       },
       () => {
-        initializeConnection(this, options);
-      }
-    );
+        initializeConnection(this, options)
+      },
+    )
   } else {
-    initializeConnection(this, options);
+    initializeConnection(this, options)
   }
 
-  return this;
-};
+  return this
+}
 
 Socket.prototype[kReinitializeHandle] = function reinitializeHandle(
-  handle: Socket['_handle']
+  handle: Socket['_handle'],
 ): void {
   this._handle?.socket.close().then(
     () => {
-      cleanupAfterDestroy(this);
+      cleanupAfterDestroy(this)
     },
     (err: unknown) => {
-      cleanupAfterDestroy(this, null, err as Error);
-    }
-  );
+      cleanupAfterDestroy(this, null, err as Error)
+    },
+  )
 
-  this._handle = handle;
-  this._undestroy();
-  this._sockname = null;
-};
+  this._handle = handle
+  this._undestroy()
+  this._sockname = null
+}
 
 // ======================================================================================
 // Socket methods that are not no-ops or nominal impls
 
 Socket.prototype.setNoDelay = function (
   this: Socket,
-  _enable?: boolean
+  _enable?: boolean,
 ): Socket {
   // Ignore this for now.
   // Cloudflare connect() does not support this.
-  return this;
-};
+  return this
+}
 
 Socket.prototype.setKeepAlive = function (
   this: Socket,
   _enable?: boolean,
-  _initialDelay?: number
+  _initialDelay?: number,
 ): Socket {
   // Ignore this for now.
   // This is used by services like mySQL.
   // TODO(soon): Investigate supporting this.
-  return this;
-};
+  return this
+}
 
 // @ts-expect-error TS2322 Intentionally no-op
 Socket.prototype.ref = function (this: Socket): void {
   // Intentional no-op
-};
+}
 
 // @ts-expect-error TS2322 Intentionally no-op
 Socket.prototype.unref = function (this: Socket): void {
   // Intentional no-op
-};
+}
 
 Object.defineProperties(Socket.prototype, {
   _connecting: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
     get(this: Socket): boolean {
-      return this.connecting;
+      return this.connecting
     },
   },
   pending: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
     get(this: Socket): boolean {
-      return !this._handle || this.connecting;
+      return !this._handle || this.connecting
     },
     configurable: true,
   },
@@ -954,15 +950,15 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     get(this: Socket): string {
       if (this.connecting) {
-        return 'opening';
+        return 'opening'
       } else if (this.readable && this.writable) {
-        return 'open';
+        return 'open'
       } else if (this.readable && !this.writable) {
-        return 'readOnly';
+        return 'readOnly'
       } else if (!this.readable && this.writable) {
-        return 'writeOnly';
+        return 'writeOnly'
       }
-      return 'closed';
+      return 'closed'
     },
   },
   bufferSize: {
@@ -970,9 +966,9 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     get(this: Socket): number | undefined {
       if (this._handle) {
-        return this.writableLength;
+        return this.writableLength
       }
-      return undefined;
+      return undefined
     },
   },
   [kUpdateTimer]: {
@@ -980,7 +976,7 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     get(this: Socket): VoidFunction {
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      return this._unrefTimer;
+      return this._unrefTimer
     },
   },
   bytesRead: {
@@ -989,7 +985,7 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): number {
-      return this._handle ? this._handle.bytesRead : this[kBytesRead];
+      return this._handle ? this._handle.bytesRead : this[kBytesRead]
     },
   },
   _bytesDispatched: {
@@ -998,7 +994,7 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): number {
-      return this._handle ? this._handle.bytesWritten : this[kBytesWritten];
+      return this._handle ? this._handle.bytesWritten : this[kBytesWritten]
     },
   },
   bytesWritten: {
@@ -1007,49 +1003,47 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): number | undefined {
-      let bytes = this._bytesDispatched;
-      const data = this._pendingData as unknown as Buffer | string | null;
-      const encoding = this._pendingEncoding;
-      const writableBuffer = this.writableBuffer;
+      let bytes = this._bytesDispatched
+      const data = this._pendingData as unknown as Buffer | string | null
+      const encoding = this._pendingEncoding
+      const writableBuffer = this.writableBuffer
 
-      if (!writableBuffer) return undefined;
+      if (!writableBuffer) return undefined
 
       if (Array.isArray(data)) {
         // Was a writev, iterate over chunks to get total length
         for (let i = 0; i < data.length; i++) {
-          const chunk = data[i] as Buffer | null;
+          const chunk = data[i] as Buffer | null
 
           if (chunk == null) {
-            continue;
+            continue
           }
 
           // @ts-expect-error TS2339 allBuffers doesn't exist on type.
-          if (chunk instanceof Buffer || data.allBuffers) bytes += chunk.length;
+          if (chunk instanceof Buffer || data.allBuffers) bytes += chunk.length
           else {
             bytes += Buffer.byteLength(
               // @ts-expect-error TS2339 TODO(soon): Use correct type here.
               chunk.chunk as Buffer,
               // @ts-expect-error TS2339 TODO(soon): Use correct type here.
-              chunk.encoding as string
-            );
+              chunk.encoding as string,
+            )
           }
         }
       } else if (data) {
         // Writes are either a string or a Buffer.
         if (typeof data !== 'string') {
-          bytes += data.length;
+          bytes += data.length
         } else {
-          bytes += Buffer.byteLength(data, encoding);
+          bytes += Buffer.byteLength(data, encoding)
         }
       } else {
         const flushed =
-          this._handle != null
-            ? this._handle.bytesWritten
-            : this[kBytesWritten];
-        return this.writableLength + flushed;
+          this._handle != null ? this._handle.bytesWritten : this[kBytesWritten]
+        return this.writableLength + flushed
       }
 
-      return bytes;
+      return bytes
     },
   },
   remoteAddress: {
@@ -1058,7 +1052,7 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): unknown {
-      return this._getpeername().address;
+      return this._getpeername().address
     },
   },
   remoteFamily: {
@@ -1067,7 +1061,7 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): unknown {
-      return this._getpeername().family;
+      return this._getpeername().family
     },
   },
   remotePort: {
@@ -1076,7 +1070,7 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): unknown {
-      return this._getpeername().port;
+      return this._getpeername().port
     },
   },
   localAddress: {
@@ -1085,7 +1079,7 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): string | undefined {
-      return this._getsockname().address;
+      return this._getsockname().address
     },
   },
   localPort: {
@@ -1094,7 +1088,7 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): number | undefined {
-      return this._getsockname().port;
+      return this._getsockname().port
     },
   },
   localFamily: {
@@ -1103,10 +1097,10 @@ Object.defineProperties(Socket.prototype, {
     configurable: false,
     enumerable: true,
     get(this: Socket): string | undefined {
-      return this._getsockname().family;
+      return this._getsockname().family
     },
   },
-});
+})
 
 // ======================================================================================
 // Helper/utility methods
@@ -1114,29 +1108,29 @@ Object.defineProperties(Socket.prototype, {
 function cleanupAfterDestroy(
   socket: Socket,
   cb?: ((err?: Error) => void) | null,
-  error?: Error
+  error?: Error,
 ): void {
-  const isException = error != null;
+  const isException = error != null
   if (socket._handle != null) {
-    socket[kBytesRead] = socket._handle.bytesRead;
-    socket[kBytesWritten] = socket._handle.bytesWritten;
-    socket.resetAndClosing = false;
+    socket[kBytesRead] = socket._handle.bytesRead
+    socket[kBytesWritten] = socket._handle.bytesWritten
+    socket.resetAndClosing = false
   }
-  socket[kLastWriteQueueSize] = 0;
-  socket[kSocketInfo] = null;
+  socket[kLastWriteQueueSize] = 0
+  socket[kSocketInfo] = null
 
   // If there's an error, emit it before the close event
   if (error != null) {
-    socket.emit('error', error);
+    socket.emit('error', error)
   }
 
-  cb?.(error);
-  socket.emit('close', isException);
+  cb?.(error)
+  socket.emit('close', isException)
 }
 
 function initializeConnection(
   socket: Socket,
-  options: TcpSocketConnectOpts
+  options: TcpSocketConnectOpts,
 ): void {
   const {
     host = 'localhost',
@@ -1147,27 +1141,27 @@ function initializeConnection(
     lookup,
     localAddress,
     localPort,
-  } = options;
-  let { port = 0 } = options;
+  } = options
+  let { port = 0 } = options
   if (localAddress && !isIP(localAddress)) {
-    throw new ERR_INVALID_IP_ADDRESS(localAddress);
+    throw new ERR_INVALID_IP_ADDRESS(localAddress)
   }
 
   if (localPort) {
-    validateNumber(localPort, 'options.localPort');
+    validateNumber(localPort, 'options.localPort')
   }
 
   if (typeof port !== 'number' && typeof port !== 'string') {
-    throw new ERR_INVALID_ARG_TYPE('options.port', ['number', 'string'], port);
+    throw new ERR_INVALID_ARG_TYPE('options.port', ['number', 'string'], port)
   }
-  validatePort(port);
-  port |= 0;
+  validatePort(port)
+  port |= 0
 
   if (autoSelectFamily != null) {
     // We don't support this option.
     // We shouldn't throw this because services like mongodb depends on it.
     // TODO(soon): Investigate supporting this.
-    validateBoolean(autoSelectFamily, 'options.autoSelectFamily');
+    validateBoolean(autoSelectFamily, 'options.autoSelectFamily')
   }
 
   if (autoSelectFamilyAttemptTimeout != null) {
@@ -1177,17 +1171,17 @@ function initializeConnection(
     validateInt32(
       autoSelectFamilyAttemptTimeout,
       'options.autoSelectFamilyAttemptTimeout',
-      1
-    );
+      1,
+    )
   }
 
-  socket._unrefTimer();
-  socket.connecting = true;
+  socket._unrefTimer()
+  socket.connecting = true
 
   const continueConnection = (
     host: unknown,
     port: number,
-    family: number | string
+    family: number | string,
   ): void => {
     socket[kSocketInfo] = {
       remoteAddress: {
@@ -1195,19 +1189,19 @@ function initializeConnection(
         port,
         family: family === 4 ? 'IPv4' : family === 6 ? 'IPv6' : undefined,
       },
-    };
+    }
 
     if (family === 6) {
       // The host is an IPv6 address. We need to wrap it in square brackets.
-      host = `[${host}]`;
+      host = `[${host}]`
     }
 
     // @ts-expect-error TS2540 Unnecessary error due to using @types/node
-    socket.autoSelectFamilyAttemptedAddresses = [`${host}:${port}`];
+    socket.autoSelectFamilyAttemptedAddresses = [`${host}:${port}`]
 
-    socket.emit('connectionAttempt', host, port, addressType);
+    socket.emit('connectionAttempt', host, port, addressType)
 
-    socket._host = `${host}`;
+    socket._host = `${host}`
 
     try {
       const handle = inner.connect(`${host}:${port}`, {
@@ -1216,7 +1210,7 @@ function initializeConnection(
         secureTransport: socket.encrypted ? 'on' : 'starttls',
         // We are not going to pass the high water-mark here. The outer Node.js
         // stream will implement the appropriate backpressure for us.
-      });
+      })
 
       // Our version of the socket._handle is necessarily different from Node.js'.
       // It serves the same purpose but any code that may exist that is depending
@@ -1233,34 +1227,34 @@ function initializeConnection(
           port,
           addressType,
         },
-      };
+      }
 
       // We need to undestroy the stream to connect to it.
-      socket._undestroy();
-      socket._sockname = null;
+      socket._undestroy()
+      socket._sockname = null
 
       handle.opened.then(onConnectionOpened.bind(socket), (err: unknown) => {
-        socket.emit('connectionAttemptFailed', host, port, addressType, err);
-        socket.destroy(err as Error);
-      });
+        socket.emit('connectionAttemptFailed', host, port, addressType, err)
+        socket.destroy(err as Error)
+      })
 
       handle.closed.then(
         onConnectionClosed.bind(socket),
         (error: unknown): void => {
           // Do not call socket.destroy.bind(socket) since user can override it.
-          socket.destroy(error as Error);
-        }
-      );
+          socket.destroy(error as Error)
+        },
+      )
     } catch (err) {
-      socket.destroy(err as Error);
+      socket.destroy(err as Error)
     }
-  };
-
-  if (lookup != null) {
-    validateFunction(lookup, 'options.lookup');
   }
 
-  const addressType = isIP(host);
+  if (lookup != null) {
+    validateFunction(lookup, 'options.lookup')
+  }
+
+  const addressType = isIP(host)
 
   // The host is not an IP address. That's allowed in our implementation, but let's
   // see if the user provided a lookup function. If not, we'll skip.
@@ -1270,18 +1264,18 @@ function initializeConnection(
     // that is given. How that is done is left entirely up to the application code.
     // The connection attempt will continue once the lookup function invokes the
     // given callback.
-    const lookupOptions = { family: family || addressType, hints };
+    const lookupOptions = { family: family || addressType, hints }
     lookup(
       host,
       lookupOptions,
       (err: Error | null, address: string, family: number | string): void => {
-        socket.emit('lookup', err, address, family, host);
+        socket.emit('lookup', err, address, family, host)
         if (err) {
-          socket.destroy(err);
-          return;
+          socket.destroy(err)
+          return
         }
         if (isIP(address) === 0) {
-          throw new ERR_INVALID_IP_ADDRESS(address);
+          throw new ERR_INVALID_IP_ADDRESS(address)
         }
         if (
           family !== 4 &&
@@ -1289,29 +1283,29 @@ function initializeConnection(
           family !== 'IPv4' &&
           family !== 'IPv6'
         ) {
-          throw new ERR_INVALID_ARG_VALUE('family', family, 'must be 4 or 6');
+          throw new ERR_INVALID_ARG_VALUE('family', family, 'must be 4 or 6')
         }
-        continueConnection(address, port, family);
-      }
-    );
+        continueConnection(address, port, family)
+      },
+    )
   } else {
-    continueConnection(host, port, addressType);
+    continueConnection(host, port, addressType)
   }
 }
 
 export function onConnectionOpened(this: Socket): void {
   // Callback may come after call to destroy
   if (this.destroyed) {
-    return;
+    return
   }
 
-  this.connecting = false;
-  this._sockname = null;
-  this._unrefTimer();
-  this.emit('connect');
-  this.emit('ready');
+  this.connecting = false
+  this._sockname = null
+  this._unrefTimer()
+  this.emit('connect')
+  this.emit('ready')
   if (!this.isPaused()) {
-    tryReadStart(this);
+    tryReadStart(this)
   }
 }
 
@@ -1319,26 +1313,26 @@ export function onConnectionClosed(this: Socket): void {
   if (this._handle?.socket.upgraded) {
     // The socket is being upgraded from insecure to TLS.
     // No need to handle this particular close event.
-    return;
+    return
   }
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   for (let s: Socket | null = this; s !== null; s = s._parentWrap) {
-    clearTimeout(s[kTimeout] as unknown as number);
+    clearTimeout(s[kTimeout] as unknown as number)
   }
 
   if (!this.destroyed) {
     // We have to manually trigger an 'end' event because we are using
     // BYOB buffers with Socket class.
-    this.emit('end');
+    this.emit('end')
   }
 }
 
 async function startRead(socket: Socket): Promise<void> {
-  if (!socket._handle) return;
-  const reader = socket._handle.reader;
+  if (!socket._handle) return
+  const reader = socket._handle.reader
   try {
     while (socket._handle.reading === true) {
-      const generatedBuffer = socket[kBufferGen]?.();
+      const generatedBuffer = socket[kBufferGen]?.()
 
       // Let's be extra cautious here and handle nullish values.
       if (generatedBuffer == null || generatedBuffer.length === 0) {
@@ -1349,12 +1343,12 @@ async function startRead(socket: Socket): Promise<void> {
         // Workerd throws the following exception when reading empty buffers
         // TypeError: You must call read() on a "byob" reader with a positive-sized TypedArray object.
         // Therefore, let's skip calling read operation and stop reading here.
-        break;
+        break
       }
 
       // The [kBufferGen] function should always be a function that returns
       // a Uint8Array we can read into.
-      const { value, done } = await reader.read(generatedBuffer);
+      const { value, done } = await reader.read(generatedBuffer)
 
       // Make sure the socket was not destroyed while we were waiting.
       // If it was, we're going to throw away the chunk of data we just
@@ -1362,41 +1356,41 @@ async function startRead(socket: Socket): Promise<void> {
       if (socket.destroyed) {
         // Doh! Well, this is awkward. Let's just stop reading and return.
         // There's really nothing else we should try to do here.
-        break;
+        break
       }
 
       // Reset the timeout timer since we received data.
-      socket._unrefTimer();
+      socket._unrefTimer()
 
       if (done) {
         // All done! If allowHalfOpen is true, then this will just end the
         // readable side of the socket. If allowHalfOpen is false, then this
         // should allow the current write queue to drain but not allow any
         // further writes to be queued.
-        socket.push(null);
-        break;
+        socket.push(null)
+        break
       }
 
       // If the byteLength is zero, skip the push.
       if (value.byteLength === 0) {
-        continue;
+        continue
       }
-      socket._handle.bytesRead += value.byteLength;
+      socket._handle.bytesRead += value.byteLength
 
       // The socket API is expected to produce Buffer instances, not Uint8Arrays
       const buffer = Buffer.from(
         value.buffer,
         value.byteOffset,
-        value.byteLength
-      );
+        value.byteLength,
+      )
 
       if (typeof socket[kBufferCb] === 'function') {
         if (socket[kBufferCb](buffer.byteLength, buffer) === false) {
           // If the callback returns explicitly false (not falsy) then
           // we're being asked to stop reading for now.
-          break;
+          break
         }
-        continue;
+        continue
       }
 
       // Because we're pushing the buffer onto the stream we can't use the shared
@@ -1405,7 +1399,7 @@ async function startRead(socket: Socket): Promise<void> {
       if (!socket.push(Buffer.from(buffer))) {
         // If push returns false, we've hit the high water mark and should stop
         // reading until the stream requests to start reading again.
-        break;
+        break
       }
     }
   } catch (_err) {
@@ -1416,350 +1410,350 @@ async function startRead(socket: Socket): Promise<void> {
     // Disable eslint to match Node.js behavior
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (socket._handle != null) {
-      socket._handle.reading = false;
+      socket._handle.reading = false
     }
   }
 }
 
 export function tryReadStart(socket: Socket): void {
   if (socket._handle != null) {
-    socket._handle.reading = true;
+    socket._handle.reading = true
   }
-  startRead(socket).catch((err: unknown) => socket.destroy(err as Error));
+  startRead(socket).catch((err: unknown) => socket.destroy(err as Error))
 }
 
 function writeAfterFIN(
   this: Socket,
   chunk: Uint8Array | string,
   encoding?: NodeJS.BufferEncoding | null | ((err?: Error) => void),
-  cb?: (err?: Error) => void
+  cb?: (err?: Error) => void,
 ): boolean {
   if (!this.writableEnded) {
     // @ts-expect-error TS2554 Required due to @types/node
-    return Duplex.prototype.write.call(this, chunk, encoding, cb);
+    return Duplex.prototype.write.call(this, chunk, encoding, cb)
   }
 
   if (typeof encoding === 'function') {
-    cb = encoding;
-    encoding = null;
+    cb = encoding
+    encoding = null
   }
 
-  const er = new EPIPE();
+  const er = new EPIPE()
 
   if (cb != null && typeof cb === 'function') {
     queueMicrotask(() => {
-      cb(er);
-    });
+      cb(er)
+    })
   }
-  this.destroy(er);
+  this.destroy(er)
 
-  return false;
+  return false
 }
 
 function onReadableStreamEnd(this: Socket): void {
   if (!this.allowHalfOpen) {
-    this.write = writeAfterFIN;
+    this.write = writeAfterFIN
   }
 }
 
 export function getTimerDuration(msecs: unknown, name: string): number {
-  validateNumber(msecs, name);
+  validateNumber(msecs, name)
   if (msecs < 0 || !Number.isFinite(msecs)) {
-    throw new ERR_OUT_OF_RANGE(name, 'a non-negative finite number', msecs);
+    throw new ERR_OUT_OF_RANGE(name, 'a non-negative finite number', msecs)
   }
 
   // Ensure that msecs fits into signed int32
   if (msecs > TIMEOUT_MAX) {
-    return TIMEOUT_MAX;
+    return TIMEOUT_MAX
   }
 
-  return msecs;
+  return msecs
 }
 
 export function toNumber(x: unknown): number | false {
-  return (x = Number(x)) >= 0 ? (x as number) : false;
+  return (x = Number(x)) >= 0 ? (x as number) : false
 }
 
 export function isPipeName(s: unknown): boolean {
-  return typeof s === 'string' && toNumber(s) === false;
+  return typeof s === 'string' && toNumber(s) === false
 }
 
 export type NormalizedArgs = [
   {
-    path?: string;
-    port?: number;
-    host?: string;
+    path?: string
+    port?: number
+    host?: string
   },
   ((...args: unknown[]) => void) | null,
-];
+]
 
 export function _normalizeArgs(args: unknown[]): NormalizedArgs {
-  let arr: NormalizedArgs;
+  let arr: NormalizedArgs
 
   if (args.length === 0) {
-    arr = [{}, null];
+    arr = [{}, null]
     // @ts-expect-error TS2554 Required due to @types/node
-    arr[normalizedArgsSymbol] = true;
-    return arr;
+    arr[normalizedArgsSymbol] = true
+    return arr
   }
 
-  const arg0 = args[0];
+  const arg0 = args[0]
   let options: {
-    path?: string;
-    port?: number;
-    host?: string;
-  } = {};
+    path?: string
+    port?: number
+    host?: string
+  } = {}
   if (typeof arg0 === 'object' && arg0 !== null) {
     // (options[...][, cb])
-    options = arg0;
+    options = arg0
   } else if (isPipeName(arg0)) {
     // (path[...][, cb])
-    options.path = arg0 as string;
+    options.path = arg0 as string
   } else {
     // ([port][, host][...][, cb])
-    options.port = arg0 as number;
+    options.port = arg0 as number
     if (args.length > 1 && typeof args[1] === 'string') {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-      options.host = args[1] as string;
+      options.host = args[1] as string
     }
   }
 
-  const cb = args[args.length - 1];
-  if (typeof cb !== 'function') arr = [options, null];
-  else arr = [options, cb as (...args: unknown[]) => unknown];
+  const cb = args[args.length - 1]
+  if (typeof cb !== 'function') arr = [options, null]
+  else arr = [options, cb as (...args: unknown[]) => unknown]
 
   // @ts-expect-error TS2554 Required due to @types/node
-  arr[normalizedArgsSymbol] = true;
-  return arr;
+  arr[normalizedArgsSymbol] = true
+  return arr
 }
 
 function addClientAbortSignalOption(self: Socket, signal: AbortSignal): void {
-  validateAbortSignal(signal, 'options.signal');
-  let disposable: Disposable | undefined;
+  validateAbortSignal(signal, 'options.signal')
+  let disposable: Disposable | undefined
 
   function onAbort(): void {
-    disposable?.[Symbol.dispose]();
-    self._aborted = true;
+    disposable?.[Symbol.dispose]()
+    self._aborted = true
   }
 
   if (signal.aborted) {
-    queueMicrotask(onAbort);
+    queueMicrotask(onAbort)
   } else {
     queueMicrotask(() => {
-      disposable = addAbortListener(signal, onAbort);
-    });
+      disposable = addAbortListener(signal, onAbort)
+    })
   }
 }
 
 function addAbortListener(
   signal: AbortSignal | undefined,
-  listener: VoidFunction
+  listener: VoidFunction,
 ): Disposable {
   if (signal === undefined) {
-    throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+    throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal)
   }
-  validateAbortSignal(signal, 'signal');
-  validateFunction(listener, 'listener');
+  validateAbortSignal(signal, 'signal')
+  validateFunction(listener, 'listener')
 
-  let removeEventListener: undefined | (() => void);
+  let removeEventListener: undefined | (() => void)
   if (signal.aborted) {
     queueMicrotask(() => {
-      listener();
-    });
+      listener()
+    })
   } else {
-    signal.addEventListener('abort', listener, { once: true });
+    signal.addEventListener('abort', listener, { once: true })
     removeEventListener = (): void => {
-      signal.removeEventListener('abort', listener);
-    };
+      signal.removeEventListener('abort', listener)
+    }
   }
   return {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
     [Symbol.dispose](): void {
-      removeEventListener?.();
+      removeEventListener?.()
     },
-  };
+  }
 }
 
 // ======================================================================================
 // The rest of the exports
 
 export function connect(...args: unknown[]): Socket {
-  const normalized = _normalizeArgs(args);
-  const options = normalized[0] as SocketOptions;
-  const socket: Socket = new Socket(options);
+  const normalized = _normalizeArgs(args)
+  const options = normalized[0] as SocketOptions
+  const socket: Socket = new Socket(options)
   if (options.timeout) {
-    socket.setTimeout(options.timeout);
+    socket.setTimeout(options.timeout)
   }
   if (socket.destroyed) {
-    return socket;
+    return socket
   }
-  return socket.connect(normalized as unknown as SocketConnectOpts);
+  return socket.connect(normalized as unknown as SocketConnectOpts)
 }
 
-export const createConnection = connect;
+export const createConnection = connect
 
 export function createServer(): void {
-  throw new Error('createServer() is not implemented');
+  throw new Error('createServer() is not implemented')
 }
 
 export function getDefaultAutoSelectFamily(): boolean {
   // This is the only value we support.
-  return false;
+  return false
 }
 
 export function setDefaultAutoSelectFamily(val: unknown): void {
-  if (!val) return;
-  throw new ERR_INVALID_ARG_VALUE('val', val);
+  if (!val) return
+  throw new ERR_INVALID_ARG_VALUE('val', val)
 }
 
 // We don't actually make use of this. It's here only for compatibility.
 // The value is not used anywhere.
-let autoSelectFamilyAttemptTimeout: number = 10;
+let autoSelectFamilyAttemptTimeout: number = 10
 
 export function getDefaultAutoSelectFamilyAttemptTimeout(): number {
-  return autoSelectFamilyAttemptTimeout;
+  return autoSelectFamilyAttemptTimeout
 }
 
 export function setDefaultAutoSelectFamilyAttemptTimeout(val: unknown): void {
-  validateInt32(val, 'val', 1);
-  if (val < 10) val = 10;
-  autoSelectFamilyAttemptTimeout = val as number;
+  validateInt32(val, 'val', 1)
+  if (val < 10) val = 10
+  autoSelectFamilyAttemptTimeout = val as number
 }
 
 export function isIP(input: unknown): number {
-  if (isIPv4(input)) return 4;
-  if (isIPv6(input)) return 6;
-  return 0;
+  if (isIPv4(input)) return 4
+  if (isIPv6(input)) return 6
+  return 0
 }
 
 export function isIPv4(input: unknown): boolean {
-  input = typeof input !== 'string' ? `${input}` : input;
-  return IPv4Reg.test(input as string);
+  input = typeof input !== 'string' ? `${input}` : input
+  return IPv4Reg.test(input as string)
 }
 
 export function isIPv6(input: unknown): boolean {
-  input = typeof input !== 'string' ? `${input}` : input;
-  return IPv6Reg.test(input as string);
+  input = typeof input !== 'string' ? `${input}` : input
+  return IPv6Reg.test(input as string)
 }
 
 // ======================================================================================
 
 export class SocketAddress implements _SocketAddress {
-  #address: string;
-  #port: number;
-  #family: IPVersion;
-  #flowlabel: number;
+  #address: string
+  #port: number
+  #family: IPVersion
+  #flowlabel: number
 
   static isSocketAddress(value: unknown): value is SocketAddress {
-    return value instanceof SocketAddress;
+    return value instanceof SocketAddress
   }
 
   constructor(options: SocketAddressInitOptions = {}) {
-    validateObject(options, 'options');
-    this.#family = options.family || 'ipv4';
+    validateObject(options, 'options')
+    this.#family = options.family || 'ipv4'
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (typeof this.#family?.toLowerCase === 'function')
-      this.#family = this.#family.toLowerCase() as IPVersion;
-    validateOneOf(this.#family, 'options.family', ['ipv4', 'ipv6']);
+      this.#family = this.#family.toLowerCase() as IPVersion
+    validateOneOf(this.#family, 'options.family', ['ipv4', 'ipv6'])
 
     const {
       address = this.#family === 'ipv4' ? '127.0.0.1' : '::',
       port = 0,
       flowlabel = 0,
-    } = options;
+    } = options
 
-    validateString(address, 'options.address');
-    const _port = validatePort(port, 'options.port');
-    validateUint32(flowlabel, 'options.flowlabel', false);
+    validateString(address, 'options.address')
+    const _port = validatePort(port, 'options.port')
+    validateUint32(flowlabel, 'options.flowlabel', false)
 
     switch (this.#family) {
       case 'ipv4':
         if (!isIPv4(address)) {
-          throw new ERR_INVALID_ADDRESS();
+          throw new ERR_INVALID_ADDRESS()
         }
-        break;
+        break
       case 'ipv6':
         if (!isIPv6(address)) {
-          throw new ERR_INVALID_ADDRESS();
+          throw new ERR_INVALID_ADDRESS()
         }
-        break;
+        break
     }
 
     // Node.js' implementation is a bit more complicated since it is backed
     // by a C++ class wrapping an actual socket address structure. We don't
     // need that here, so we keep things simple.
 
-    this.#address = address;
-    this.#port = _port;
-    this.#flowlabel = flowlabel;
+    this.#address = address
+    this.#port = _port
+    this.#flowlabel = flowlabel
   }
 
   get address(): string {
-    return this.#address;
+    return this.#address
   }
 
   get port(): number {
-    return this.#port;
+    return this.#port
   }
 
   get family(): IPVersion {
-    return this.#family;
+    return this.#family
   }
 
   get flowlabel(): number {
-    return this.#flowlabel;
+    return this.#flowlabel
   }
 
   [kInspect](depth: number, options: InspectOptions): string | this {
-    if (depth < 0) return this;
+    if (depth < 0) return this
 
     const opts: InspectOptions = {
       ...options,
       depth: options.depth == null ? null : options.depth - 1,
-    };
+    }
 
     // @ts-expect-error TS2769 not all the overloads are compatible
-    return `SocketAddress ${inspect(this.toJSON(), opts)}`;
+    return `SocketAddress ${inspect(this.toJSON(), opts)}`
   }
 
   toJSON(): {
-    address: string;
-    port: number;
-    family: IPVersion;
-    flowlabel: number;
+    address: string
+    port: number
+    family: IPVersion
+    flowlabel: number
   } {
     return {
       address: this.address,
       port: this.port,
       family: this.family,
       flowlabel: this.flowlabel,
-    };
+    }
   }
 
   static parse(input: string): SocketAddress | undefined {
-    validateString(input, 'input');
+    validateString(input, 'input')
     try {
-      const parsed = URL.parse(`http://${input}`);
+      const parsed = URL.parse(`http://${input}`)
       if (parsed == null) {
-        return undefined;
+        return undefined
       }
-      const { hostname: address, port } = parsed;
+      const { hostname: address, port } = parsed
       if (address.startsWith('[') && address.endsWith(']')) {
         return new SocketAddress({
           address: address.slice(1, -1),
           // @ts-expect-error TS2362 port will be a string, this converts it
           port: port | 0,
           family: 'ipv6',
-        });
+        })
       }
       // @ts-expect-error TS2362 port will be a string, this converts it
-      return new SocketAddress({ address, port: port | 0 });
+      return new SocketAddress({ address, port: port | 0 })
     } catch {
       // Ignore errors here. Return undefined if the input cannot
       // be successfully parsed or is not a proper socket address.
     }
-    return undefined;
+    return undefined
   }
 }
 
@@ -1770,41 +1764,40 @@ export class SocketAddress implements _SocketAddress {
 // Here we do the entire implementation as TypeScript simply because
 // we don't need the C++ parts at all.
 
-const kIpv6Regex = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i;
-const kIpv6RangeRegex =
-  /Range: IPv6 ([0-9a-fA-F:]{1,39})-([0-9a-fA-F:]{1,39})/i;
-const kIpv6AddressRegex = /Address: IPv6 ([0-9a-fA-F:]{1,39})/i;
-const kIpv6SubnetRegex = /Subnet: IPv6 ([0-9a-fA-F:]{1,39})\/(\d{1,3})/i;
+const kIpv6Regex = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i
+const kIpv6RangeRegex = /Range: IPv6 ([0-9a-fA-F:]{1,39})-([0-9a-fA-F:]{1,39})/i
+const kIpv6AddressRegex = /Address: IPv6 ([0-9a-fA-F:]{1,39})/i
+const kIpv6SubnetRegex = /Subnet: IPv6 ([0-9a-fA-F:]{1,39})\/(\d{1,3})/i
 const kIpv4RangeRegex =
-  /Range: IPv4 (\d{1,3}(?:\.\d{1,3}){3})-(\d{1,3}(?:\.\d{1,3}){3})/;
-const kIpv4AddressRegex = /Address: IPv4 (\d{1,3}(?:\.\d{1,3}){3})/;
-const kIpv4SubnetRegex = /Subnet: IPv4 (\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})/;
+  /Range: IPv4 (\d{1,3}(?:\.\d{1,3}){3})-(\d{1,3}(?:\.\d{1,3}){3})/
+const kIpv4AddressRegex = /Address: IPv4 (\d{1,3}(?:\.\d{1,3}){3})/
+const kIpv4SubnetRegex = /Subnet: IPv4 (\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})/
 
 // IPv4/IPv6 CIDR network utilities
 function parseIPv4(ip: string): FixedLengthArray<number, 4> | undefined {
   // When the input is not a valid IPv4 address, return an empty array.
-  const parts = ip.split('.');
-  if (parts.length !== 4) return undefined;
+  const parts = ip.split('.')
+  if (parts.length !== 4) return undefined
 
-  const nums = [0, 0, 0, 0] as FixedLengthArray<number, 4>;
+  const nums = [0, 0, 0, 0] as FixedLengthArray<number, 4>
 
   for (let n = 0; n < parts.length; n++) {
-    const part = parts[n];
-    if (part === undefined) return undefined;
-    const num = parseInt(part, 10);
-    if (isNaN(num) || num < 0 || num > 255) return undefined;
-    nums[n] = num;
+    const part = parts[n]
+    if (part === undefined) return undefined
+    const num = parseInt(part, 10)
+    if (Number.isNaN(num) || num < 0 || num > 255) return undefined
+    nums[n] = num
   }
 
-  return nums;
+  return nums
 }
 
 function parseIPv6(ip: string): FixedLengthArray<number, 8> | undefined {
   // Handle IPv4-mapped IPv6 addresses
   if (ip.includes('.')) {
-    const match = ip.match(kIpv6Regex);
-    if (match != null && match[1]) {
-      const ipv4Parts = parseIPv4(match[1]);
+    const match = ip.match(kIpv6Regex)
+    if (match?.[1]) {
+      const ipv4Parts = parseIPv4(match[1])
       if (ipv4Parts !== undefined) {
         return [
           0,
@@ -1815,75 +1808,75 @@ function parseIPv6(ip: string): FixedLengthArray<number, 8> | undefined {
           0xffff,
           (ipv4Parts[0] << 8) | ipv4Parts[1],
           (ipv4Parts[2] << 8) | ipv4Parts[3],
-        ];
+        ]
       }
     }
   }
 
   // Expand :: notation
-  let expanded = ip;
+  let expanded = ip
   if (ip.includes('::')) {
-    const parts = ip.split('::');
+    const parts = ip.split('::')
     if (parts.length === 2) {
-      const left = parts[0]?.split(':') ?? [];
-      const right = parts[1]?.split(':') ?? [];
-      const missing = 8 - left.length - right.length;
-      const middle = Array.from({ length: missing }).fill('0');
-      expanded = [...left, ...middle, ...right].join(':');
+      const left = parts[0]?.split(':') ?? []
+      const right = parts[1]?.split(':') ?? []
+      const missing = 8 - left.length - right.length
+      const middle = Array.from({ length: missing }).fill('0')
+      expanded = [...left, ...middle, ...right].join(':')
     }
   }
 
-  const parts = expanded.split(':');
-  if (parts.length !== 8) return undefined;
+  const parts = expanded.split(':')
+  if (parts.length !== 8) return undefined
 
   const nums = parts.map((p) => {
-    const num = parseInt(p || '0', 16);
-    return num >= 0 && num <= 0xffff ? num : -1;
-  }) as FixedLengthArray<number, 8>;
+    const num = parseInt(p || '0', 16)
+    return num >= 0 && num <= 0xffff ? num : -1
+  }) as FixedLengthArray<number, 8>
 
-  return nums.includes(-1) ? undefined : nums;
+  return nums.includes(-1) ? undefined : nums
 }
 
 function ipv4ToNumber(ip: string): number {
-  const parts = parseIPv4(ip);
+  const parts = parseIPv4(ip)
   if (parts === undefined)
-    throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address');
-  return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
+    throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address')
+  return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
 }
 
 function ipv6ToBigInt(ip: string): bigint {
-  const parts = parseIPv6(ip);
+  const parts = parseIPv6(ip)
   if (parts === undefined)
-    throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address');
+    throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address')
 
-  let result = 0n;
+  let result = 0n
   for (let i = 0; i < 8; i++) {
-    const part = parts[i];
-    result = (result << 16n) | BigInt(part as number);
+    const part = parts[i]
+    result = (result << 16n) | BigInt(part as number)
   }
-  return result;
+  return result
 }
 
 function isInIPv4Subnet(ip: string, network: string, prefix: number): boolean {
-  if (prefix < 0 || prefix > 32) return false;
-  if (prefix === 0) return true;
+  if (prefix < 0 || prefix > 32) return false
+  if (prefix === 0) return true
 
-  const ipNum = ipv4ToNumber(ip);
-  const netNum = ipv4ToNumber(network);
+  const ipNum = ipv4ToNumber(ip)
+  const netNum = ipv4ToNumber(network)
   // Create a subnet mask by shifting all 1s left by (32 - prefix) bits
   // This creates a mask with 'prefix' number of leading 1s followed by 0s
   // For example, prefix=24 creates mask 0xffffff00 (255.255.255.0)
-  const mask = (0xffffffff << (32 - prefix)) >>> 0;
+  const mask = (0xffffffff << (32 - prefix)) >>> 0
 
-  return (ipNum & mask) === (netNum & mask);
+  return (ipNum & mask) === (netNum & mask)
 }
 
 function isInIPv6Subnet(ip: string, network: string, prefix: number): boolean {
-  if (prefix < 0 || prefix > 128) return false;
-  if (prefix === 0) return true;
+  if (prefix < 0 || prefix > 128) return false
+  if (prefix === 0) return true
 
-  const ipBig = ipv6ToBigInt(ip);
-  const netBig = ipv6ToBigInt(network);
+  const ipBig = ipv6ToBigInt(ip)
+  const netBig = ipv6ToBigInt(network)
 
   // Create a 128-bit subnet mask for IPv6 by shifting all 1s left by (128 - prefix) bits
   // This creates a mask with 'prefix' number of leading 1s followed by 0s
@@ -1891,46 +1884,46 @@ function isInIPv6Subnet(ip: string, network: string, prefix: number): boolean {
   // For example, prefix=64 creates a mask with 64 leading 1s and 64 trailing 0s
   const mask =
     (0xffffffffffffffffffffffffffffffffn << BigInt(128 - prefix)) &
-    0xffffffffffffffffffffffffffffffffn;
+    0xffffffffffffffffffffffffffffffffn
 
-  return (ipBig & mask) === (netBig & mask);
+  return (ipBig & mask) === (netBig & mask)
 }
 
 function compareIPv4(a: string, b: string): number {
-  const aNum = ipv4ToNumber(a);
-  const bNum = ipv4ToNumber(b);
-  return aNum - bNum;
+  const aNum = ipv4ToNumber(a)
+  const bNum = ipv4ToNumber(b)
+  return aNum - bNum
 }
 
 function compareIPv6(a: string, b: string): number {
-  const aBig = ipv6ToBigInt(a);
-  const bBig = ipv6ToBigInt(b);
-  return aBig < bBig ? -1 : aBig > bBig ? 1 : 0;
+  const aBig = ipv6ToBigInt(a)
+  const bBig = ipv6ToBigInt(b)
+  return aBig < bBig ? -1 : aBig > bBig ? 1 : 0
 }
 
 function formatIPFamily(family: 'ipv4' | 'ipv6'): 'IPv4' | 'IPv6' {
-  return family === 'ipv4' ? 'IPv4' : 'IPv6';
+  return family === 'ipv4' ? 'IPv4' : 'IPv6'
 }
 
 interface BlockListRule {
-  type: 'address' | 'range' | 'subnet';
-  family: 'ipv4' | 'ipv6';
-  toString(): string;
-  check(address: string, family: 'ipv4' | 'ipv6'): boolean;
+  type: 'address' | 'range' | 'subnet'
+  family: 'ipv4' | 'ipv6'
+  toString(): string
+  check(address: string, family: 'ipv4' | 'ipv6'): boolean
 }
 
 class AddressRule implements BlockListRule {
-  type = 'address' as const;
-  address: string;
-  family: 'ipv4' | 'ipv6';
+  type = 'address' as const
+  address: string
+  family: 'ipv4' | 'ipv6'
 
   constructor(address: string, family: 'ipv4' | 'ipv6') {
-    this.address = address;
-    this.family = family;
+    this.address = address
+    this.family = family
   }
 
   toString(): string {
-    return `Address: ${formatIPFamily(this.family)} ${this.address}`;
+    return `Address: ${formatIPFamily(this.family)} ${this.address}`
   }
 
   check(address: string, family: 'ipv4' | 'ipv6'): boolean {
@@ -1941,29 +1934,29 @@ class AddressRule implements BlockListRule {
         family === 'ipv6' &&
         address.startsWith('::ffff:')
       ) {
-        const ipv4Part = address.substring(7);
-        return this.address === ipv4Part;
+        const ipv4Part = address.substring(7)
+        return this.address === ipv4Part
       }
-      return false;
+      return false
     }
-    return this.address === address;
+    return this.address === address
   }
 }
 
 class RangeRule implements BlockListRule {
-  type = 'range' as const;
-  start: string;
-  end: string;
-  family: 'ipv4' | 'ipv6';
+  type = 'range' as const
+  start: string
+  end: string
+  family: 'ipv4' | 'ipv6'
 
   constructor(start: string, end: string, family: 'ipv4' | 'ipv6') {
-    this.start = start;
-    this.end = end;
-    this.family = family;
+    this.start = start
+    this.end = end
+    this.family = family
   }
 
   toString(): string {
-    return `Range: ${formatIPFamily(this.family)} ${this.start}-${this.end}`;
+    return `Range: ${formatIPFamily(this.family)} ${this.start}-${this.end}`
   }
 
   check(address: string, family: 'ipv4' | 'ipv6'): boolean {
@@ -1974,40 +1967,40 @@ class RangeRule implements BlockListRule {
         family === 'ipv6' &&
         address.startsWith('::ffff:')
       ) {
-        const ipv4Part = address.substring(7);
-        const cmpStart = compareIPv4(ipv4Part, this.start);
-        const cmpEnd = compareIPv4(ipv4Part, this.end);
-        return cmpStart >= 0 && cmpEnd <= 0;
+        const ipv4Part = address.substring(7)
+        const cmpStart = compareIPv4(ipv4Part, this.start)
+        const cmpEnd = compareIPv4(ipv4Part, this.end)
+        return cmpStart >= 0 && cmpEnd <= 0
       }
-      return false;
+      return false
     }
 
     if (family === 'ipv4') {
-      const cmpStart = compareIPv4(address, this.start);
-      const cmpEnd = compareIPv4(address, this.end);
-      return cmpStart >= 0 && cmpEnd <= 0;
+      const cmpStart = compareIPv4(address, this.start)
+      const cmpEnd = compareIPv4(address, this.end)
+      return cmpStart >= 0 && cmpEnd <= 0
     } else {
-      const cmpStart = compareIPv6(address, this.start);
-      const cmpEnd = compareIPv6(address, this.end);
-      return cmpStart >= 0 && cmpEnd <= 0;
+      const cmpStart = compareIPv6(address, this.start)
+      const cmpEnd = compareIPv6(address, this.end)
+      return cmpStart >= 0 && cmpEnd <= 0
     }
   }
 }
 
 class SubnetRule implements BlockListRule {
-  type = 'subnet' as const;
-  network: string;
-  prefix: number;
-  family: 'ipv4' | 'ipv6';
+  type = 'subnet' as const
+  network: string
+  prefix: number
+  family: 'ipv4' | 'ipv6'
 
   constructor(network: string, prefix: number, family: 'ipv4' | 'ipv6') {
-    this.network = network;
-    this.prefix = prefix;
-    this.family = family;
+    this.network = network
+    this.prefix = prefix
+    this.family = family
   }
 
   toString(): string {
-    return `Subnet: ${formatIPFamily(this.family)} ${this.network}/${this.prefix}`;
+    return `Subnet: ${formatIPFamily(this.family)} ${this.network}/${this.prefix}`
   }
 
   check(address: string, family: 'ipv4' | 'ipv6'): boolean {
@@ -2018,299 +2011,298 @@ class SubnetRule implements BlockListRule {
         family === 'ipv6' &&
         address.startsWith('::ffff:')
       ) {
-        const ipv4Part = address.substring(7);
-        return isInIPv4Subnet(ipv4Part, this.network, this.prefix);
+        const ipv4Part = address.substring(7)
+        return isInIPv4Subnet(ipv4Part, this.network, this.prefix)
       }
-      return false;
+      return false
     }
 
     if (family === 'ipv4') {
-      return isInIPv4Subnet(address, this.network, this.prefix);
+      return isInIPv4Subnet(address, this.network, this.prefix)
     } else {
-      return isInIPv6Subnet(address, this.network, this.prefix);
+      return isInIPv6Subnet(address, this.network, this.prefix)
     }
   }
 }
 
 export class BlockList {
-  #rules: BlockListRule[] = [];
+  #rules: BlockListRule[] = []
 
   static isBlockList(value: unknown): value is BlockList {
-    return value instanceof BlockList;
+    return value instanceof BlockList
   }
 
   addAddress(
     address: string | SocketAddress,
-    family: 'ipv4' | 'ipv6' = 'ipv4'
+    family: 'ipv4' | 'ipv6' = 'ipv4',
   ): void {
     if (SocketAddress.isSocketAddress(address)) {
-      this.#rules.push(new AddressRule(address.address, address.family));
+      this.#rules.push(new AddressRule(address.address, address.family))
     } else {
-      validateString(address, 'address');
-      validateOneOf(family, 'family', ['ipv4', 'ipv6']);
+      validateString(address, 'address')
+      validateOneOf(family, 'family', ['ipv4', 'ipv6'])
 
       // Validate the address format
       if (family === 'ipv4' && !isIPv4(address)) {
-        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address');
+        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address')
       }
       if (family === 'ipv6' && !isIPv6(address)) {
-        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address');
+        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address')
       }
 
-      this.#rules.push(new AddressRule(address, family));
+      this.#rules.push(new AddressRule(address, family))
     }
   }
 
   addRange(
     start: string | SocketAddress,
     end: string | SocketAddress,
-    family: 'ipv4' | 'ipv6' = 'ipv4'
+    family: 'ipv4' | 'ipv6' = 'ipv4',
   ): void {
-    let startAddr: string;
-    let endAddr: string;
-    let addrFamily: 'ipv4' | 'ipv6';
+    let startAddr: string
+    let endAddr: string
+    let addrFamily: 'ipv4' | 'ipv6'
 
     if (SocketAddress.isSocketAddress(start)) {
-      startAddr = start.address;
-      addrFamily = start.family;
+      startAddr = start.address
+      addrFamily = start.family
     } else {
-      validateString(start, 'start');
-      validateOneOf(family, 'family', ['ipv4', 'ipv6']);
-      startAddr = start;
-      addrFamily = family;
+      validateString(start, 'start')
+      validateOneOf(family, 'family', ['ipv4', 'ipv6'])
+      startAddr = start
+      addrFamily = family
     }
 
     if (SocketAddress.isSocketAddress(end)) {
-      endAddr = end.address;
+      endAddr = end.address
       if (SocketAddress.isSocketAddress(start) && end.family !== addrFamily) {
         throw new ERR_INVALID_ARG_VALUE(
           'end',
           end,
-          'must be same family as start'
-        );
+          'must be same family as start',
+        )
       }
     } else {
-      validateString(end, 'end');
-      endAddr = end;
+      validateString(end, 'end')
+      endAddr = end
     }
 
     // Validate addresses
     if (addrFamily === 'ipv4') {
       if (!isIPv4(startAddr) || !isIPv4(endAddr)) {
-        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address');
+        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address')
       }
       if (compareIPv4(startAddr, endAddr) > 0) {
         throw new ERR_INVALID_ARG_VALUE(
           'start',
           startAddr,
-          'must come before end'
-        );
+          'must come before end',
+        )
       }
     } else {
       if (!isIPv6(startAddr) || !isIPv6(endAddr)) {
-        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address');
+        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address')
       }
       if (compareIPv6(startAddr, endAddr) > 0) {
         throw new ERR_INVALID_ARG_VALUE(
           'start',
           startAddr,
-          'must come before end'
-        );
+          'must come before end',
+        )
       }
     }
 
-    this.#rules.push(new RangeRule(startAddr, endAddr, addrFamily));
+    this.#rules.push(new RangeRule(startAddr, endAddr, addrFamily))
   }
 
   addSubnet(
     network: string | SocketAddress,
     prefix: number,
-    family: 'ipv4' | 'ipv6' = 'ipv4'
+    family: 'ipv4' | 'ipv6' = 'ipv4',
   ): void {
-    let networkAddr: string;
-    let addrFamily: 'ipv4' | 'ipv6';
+    let networkAddr: string
+    let addrFamily: 'ipv4' | 'ipv6'
 
     if (SocketAddress.isSocketAddress(network)) {
-      networkAddr = network.address;
-      addrFamily = network.family;
+      networkAddr = network.address
+      addrFamily = network.family
     } else {
-      validateString(network, 'network');
-      validateOneOf(family, 'family', ['ipv4', 'ipv6']);
-      networkAddr = network;
-      addrFamily = family;
+      validateString(network, 'network')
+      validateOneOf(family, 'family', ['ipv4', 'ipv6'])
+      networkAddr = network
+      addrFamily = family
     }
 
-    validateInt32(prefix, 'prefix');
+    validateInt32(prefix, 'prefix')
 
     // Validate prefix range
     if (addrFamily === 'ipv4') {
       if (prefix < 0 || prefix > 32) {
-        throw new ERR_OUT_OF_RANGE('prefix', 'between 0 and 32', prefix);
+        throw new ERR_OUT_OF_RANGE('prefix', 'between 0 and 32', prefix)
       }
       if (!isIPv4(networkAddr)) {
-        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address');
+        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv4 address')
       }
     } else {
       if (prefix < 0 || prefix > 128) {
-        throw new ERR_OUT_OF_RANGE('prefix', 'between 0 and 128', prefix);
+        throw new ERR_OUT_OF_RANGE('prefix', 'between 0 and 128', prefix)
       }
       if (!isIPv6(networkAddr)) {
-        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address');
+        throw new ERR_INVALID_IP_ADDRESS('Invalid IPv6 address')
       }
     }
 
-    this.#rules.push(new SubnetRule(networkAddr, prefix, addrFamily));
+    this.#rules.push(new SubnetRule(networkAddr, prefix, addrFamily))
   }
 
   check(
     address: string | SocketAddress,
-    family: 'ipv4' | 'ipv6' = 'ipv4'
+    family: 'ipv4' | 'ipv6' = 'ipv4',
   ): boolean {
-    let checkAddr: string;
-    let checkFamily: 'ipv4' | 'ipv6';
+    let checkAddr: string
+    let checkFamily: 'ipv4' | 'ipv6'
 
     if (SocketAddress.isSocketAddress(address)) {
-      checkAddr = address.address;
-      checkFamily = address.family;
+      checkAddr = address.address
+      checkFamily = address.family
     } else {
-      validateString(address, 'address');
-      validateOneOf(family, 'family', ['ipv4', 'ipv6']);
-      checkAddr = address;
-      checkFamily = family.toLowerCase() as 'ipv4' | 'ipv6';
+      validateString(address, 'address')
+      validateOneOf(family, 'family', ['ipv4', 'ipv6'])
+      checkAddr = address
+      checkFamily = family.toLowerCase() as 'ipv4' | 'ipv6'
     }
 
     // Validate address format
     try {
       if (checkFamily === 'ipv4' && !isIPv4(checkAddr)) {
-        return false;
+        return false
       }
       if (checkFamily === 'ipv6' && !isIPv6(checkAddr)) {
-        return false;
+        return false
       }
     } catch {
-      return false;
+      return false
     }
 
     // Check against all rules
     for (const rule of this.#rules) {
       if (rule.check(checkAddr, checkFamily)) {
-        return true;
+        return true
       }
     }
 
-    return false;
+    return false
   }
 
   get rules(): string[] {
-    return this.#rules.map((rule) => rule.toString());
+    return this.#rules.map((rule) => rule.toString())
   }
 
   [kInspect](depth: number, options: InspectOptions): string {
-    if (depth < 0) return '[BlockList]';
+    if (depth < 0) return '[BlockList]'
 
     const opts: InspectOptions = {
       ...options,
       depth: options.depth == null ? null : options.depth - 1,
-    };
+    }
 
     // @ts-expect-error TS2769 not all the overloads are compatible
-    return `BlockList {\n  rules: ${inspect(this.rules, opts)}\n}`;
+    return `BlockList {\n  rules: ${inspect(this.rules, opts)}\n}`
   }
 
   toJSON(): string[] {
-    return this.rules;
+    return this.rules
   }
 
   fromJSON(data: string | string[]): void {
-    let rules: string[];
+    let rules: string[]
 
     if (typeof data === 'string') {
       try {
-        rules = JSON.parse(data) as string[];
+        rules = JSON.parse(data) as string[]
       } catch {
-        throw new ERR_INVALID_ARG_VALUE('data', data, 'must be valid JSON');
+        throw new ERR_INVALID_ARG_VALUE('data', data, 'must be valid JSON')
       }
     } else {
-      rules = data;
+      rules = data
     }
 
-    validateArray(rules, 'data');
+    validateArray(rules, 'data')
 
     for (const item of data) {
       if (item.includes('IPv4')) {
         // IPv4 subnet pattern
-        const subnetMatch = item.match(kIpv4SubnetRegex);
+        const subnetMatch = item.match(kIpv4SubnetRegex)
         if (subnetMatch) {
-          const [, network, prefix] = subnetMatch;
+          const [, network, prefix] = subnetMatch
           if (network === undefined || prefix === undefined) {
             // Skip the rule if parsing failed.
-            continue;
+            continue
           }
-          this.addSubnet(network, parseInt(prefix, 10));
-          continue;
+          this.addSubnet(network, parseInt(prefix, 10))
+          continue
         }
 
         // IPv4 address pattern
-        const addressMatch = item.match(kIpv4AddressRegex);
+        const addressMatch = item.match(kIpv4AddressRegex)
 
         if (addressMatch) {
-          const [, address] = addressMatch;
+          const [, address] = addressMatch
           if (address === undefined) {
             // Skip the rule if parsing failed.
-            continue;
+            continue
           }
-          this.addAddress(address);
-          continue;
+          this.addAddress(address)
+          continue
         }
 
         // IPv4 range pattern
-        const rangeMatch = item.match(kIpv4RangeRegex);
+        const rangeMatch = item.match(kIpv4RangeRegex)
         if (rangeMatch) {
-          const [, start, end] = rangeMatch;
+          const [, start, end] = rangeMatch
           if (start === undefined || end === undefined) {
             // Skip the rule if parsing failed.
-            continue;
+            continue
           }
-          this.addRange(start, end);
-          continue;
+          this.addRange(start, end)
+          continue
         }
       }
 
       if (item.includes('IPv6')) {
         // IPv6 subnet pattern
-        const ipv6SubnetMatch = item.match(kIpv6SubnetRegex);
+        const ipv6SubnetMatch = item.match(kIpv6SubnetRegex)
         if (ipv6SubnetMatch) {
-          const [, network, prefix] = ipv6SubnetMatch;
+          const [, network, prefix] = ipv6SubnetMatch
           if (network === undefined || prefix === undefined) {
             // Skip the rule if parsing failed.
-            continue;
+            continue
           }
-          this.addSubnet(network, parseInt(prefix, 10), 'ipv6');
-          continue;
+          this.addSubnet(network, parseInt(prefix, 10), 'ipv6')
+          continue
         }
 
         // IPv6 address pattern
-        const ipv6AddressMatch = item.match(kIpv6AddressRegex);
+        const ipv6AddressMatch = item.match(kIpv6AddressRegex)
         if (ipv6AddressMatch) {
-          const [, address] = ipv6AddressMatch;
+          const [, address] = ipv6AddressMatch
           if (address === undefined) {
             // Skip the rule if parsing failed.
-            continue;
+            continue
           }
-          this.addAddress(address, 'ipv6');
-          continue;
+          this.addAddress(address, 'ipv6')
+          continue
         }
 
         // IPv6 range pattern
-        const ipv6RangeMatch = item.match(kIpv6RangeRegex);
+        const ipv6RangeMatch = item.match(kIpv6RangeRegex)
         if (ipv6RangeMatch) {
-          const [, start, end] = ipv6RangeMatch;
+          const [, start, end] = ipv6RangeMatch
           if (start === undefined || end === undefined) {
             // Skip the rule if parsing failed.
-            continue;
+            continue
           }
-          this.addRange(start, end, 'ipv6');
-          continue;
+          this.addRange(start, end, 'ipv6')
         }
       }
     }

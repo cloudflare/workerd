@@ -1,8 +1,7 @@
 import asgi
 import js
-from workers import Request, WorkerEntrypoint
-
 from pyodide.ffi import to_js
+from workers import Request, WorkerEntrypoint
 
 
 def check_encoding(byte_str, encoding="utf-8"):

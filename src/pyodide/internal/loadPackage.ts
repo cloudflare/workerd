@@ -9,44 +9,44 @@
  * that contains all the packages ready to go.
  */
 
+import { default as ArtifactBundler } from 'pyodide-internal:artifacts'
 import {
   LOCKFILE,
   PACKAGES_VERSION,
   USING_OLDEST_PACKAGES_VERSION,
-} from 'pyodide-internal:metadata';
+} from 'pyodide-internal:metadata'
 import {
-  VIRTUALIZED_DIR,
   STDLIB_PACKAGES,
-} from 'pyodide-internal:setupPackages';
-import { parseTarInfo } from 'pyodide-internal:tar';
-import { createTarFS } from 'pyodide-internal:tarfs';
-import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
+  VIRTUALIZED_DIR,
+} from 'pyodide-internal:setupPackages'
+import { parseTarInfo } from 'pyodide-internal:tar'
+import { createTarFS } from 'pyodide-internal:tarfs'
 import {
   PythonUserError,
   PythonWorkersInternalError,
-} from 'pyodide-internal:util';
+} from 'pyodide-internal:util'
 
 function getPackageMetadata(requirement: string): PackageDeclaration {
-  const obj = LOCKFILE['packages'][requirement];
+  const obj = LOCKFILE.packages[requirement]
   if (!obj) {
     throw new PythonUserError(
-      'Requirement ' + requirement + ' not found in lockfile'
-    );
+      `Requirement ${requirement} not found in lockfile`,
+    )
   }
 
-  return obj;
+  return obj
 }
 
 function loadBundleFromArtifactBundler(requirement: string): Reader {
-  const filename = getPackageMetadata(requirement).file_name;
-  const fullPath = `python-package-bucket/${PACKAGES_VERSION}/${filename}`;
-  const reader = ArtifactBundler.getPackage(fullPath);
+  const filename = getPackageMetadata(requirement).file_name
+  const fullPath = `python-package-bucket/${PACKAGES_VERSION}/${filename}`
+  const reader = ArtifactBundler.getPackage(fullPath)
   if (!reader) {
     throw new PythonWorkersInternalError(
-      'Failed to get package ' + fullPath + ' from ArtifactBundler'
-    );
+      `Failed to get package ${fullPath} from ArtifactBundler`,
+    )
   }
-  return reader;
+  return reader
 }
 
 /**
@@ -55,28 +55,28 @@ function loadBundleFromArtifactBundler(requirement: string): Reader {
  * `getTransitiveRequirements` for the code that deals with this.
  */
 export function loadPackages(Module: Module, requirements: Set<string>): void {
-  let pkgsToLoad = requirements;
+  let pkgsToLoad = requirements
   // TODO: Package snapshot created with '20240829.4' needs the stdlib packages to be added here.
   // We should remove this check once the next Python and packages versions are rolled
   // out.
   if (USING_OLDEST_PACKAGES_VERSION) {
-    pkgsToLoad = pkgsToLoad.union(new Set(STDLIB_PACKAGES));
+    pkgsToLoad = pkgsToLoad.union(new Set(STDLIB_PACKAGES))
   }
 
   for (const req of pkgsToLoad) {
     if (req === 'test') {
-      continue; // Skip the test package, it is only useful for internal Python regression testing.
+      continue // Skip the test package, it is only useful for internal Python regression testing.
     }
     if (VIRTUALIZED_DIR.hasRequirementLoaded(req)) {
-      continue;
+      continue
     }
 
-    const reader = loadBundleFromArtifactBundler(req);
-    const [tarInfo, soFiles] = parseTarInfo(reader);
-    const pkg = getPackageMetadata(req);
-    VIRTUALIZED_DIR.addSmallBundle(tarInfo, soFiles, req, pkg.install_dir);
+    const reader = loadBundleFromArtifactBundler(req)
+    const [tarInfo, soFiles] = parseTarInfo(reader)
+    const pkg = getPackageMetadata(req)
+    VIRTUALIZED_DIR.addSmallBundle(tarInfo, soFiles, req, pkg.install_dir)
   }
 
-  const tarFS = createTarFS(Module);
-  VIRTUALIZED_DIR.mount(Module, tarFS);
+  const tarFS = createTarFS(Module)
+  VIRTUALIZED_DIR.mount(Module, tarFS)
 }

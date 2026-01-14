@@ -2,28 +2,28 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage } from 'node:http'
 
-export type IncomingMessageCallback = (req: IncomingMessage) => void;
+export type IncomingMessageCallback = (req: IncomingMessage) => void
 
 export function once<RT>(
   this: unknown,
   callback: (...allArgs: unknown[]) => RT,
-  { preserveReturnValue = false } = {}
+  { preserveReturnValue = false } = {},
 ): (...all: unknown[]) => RT {
-  let called = false;
-  let returnValue: RT;
+  let called = false
+  let returnValue: RT
   return function (this: unknown, ...args: unknown[]): RT {
-    if (called) return returnValue;
-    called = true;
-    const result = Reflect.apply(callback, this, args);
-    returnValue = preserveReturnValue ? result : (undefined as RT);
-    return result;
-  };
+    if (called) return returnValue
+    called = true
+    const result = Reflect.apply(callback, this, args)
+    returnValue = preserveReturnValue ? result : (undefined as RT)
+    return result
+  }
 }
 
-export const kServerResponse = Symbol('ServerResponse');
-export const kIncomingMessage = Symbol('IncomingMessage');
+export const kServerResponse = Symbol('ServerResponse')
+export const kIncomingMessage = Symbol('IncomingMessage')
 
 // RFC 7230 compliant header value splitting that respects quoted-string constructions
 // Returns only the first value up to the first comma (outside of quoted strings)
@@ -35,20 +35,20 @@ export const kIncomingMessage = Symbol('IncomingMessage');
 // - Whitespace before commas: 'value1 \t , value2' -> 'value1'
 // - No commas: 'single-value' -> 'single-value'
 export function splitHeaderValue(value: string): string {
-  let inQuotes = false;
+  let inQuotes = false
 
   for (let i = 0; i < value.length; i++) {
-    const char = value[i];
+    const char = value[i]
 
     if (char === '"') {
-      inQuotes = !inQuotes;
+      inQuotes = !inQuotes
     } else if (char === '\\' && inQuotes) {
-      i++; // Skip next character (it's escaped)
+      i++ // Skip next character (it's escaped)
     } else if (!inQuotes && char === ',') {
       // Found unquoted comma, return
-      return value.slice(0, i);
+      return value.slice(0, i)
     }
   }
 
-  return value;
+  return value
 }

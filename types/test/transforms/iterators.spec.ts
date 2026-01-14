@@ -2,15 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
-import { test } from "node:test";
-import path from "path";
-import ts from "typescript";
-import { printer } from "../../src/print";
-import { createMemoryProgram } from "../../src/program";
-import { createIteratorTransformer } from "../../src/transforms";
+import assert from 'node:assert'
+import path from 'node:path'
+import { test } from 'node:test'
+import ts from 'typescript'
+import { printer } from '../../src/print'
+import { createMemoryProgram } from '../../src/program'
+import { createIteratorTransformer } from '../../src/transforms'
 
-test("createIteratorTransformer: replaces Iterator-like interfaces with built-in Iterators", () => {
+test('createIteratorTransformer: replaces Iterator-like interfaces with built-in Iterators', () => {
   const source = `export class Thing {
     readonly thingsProperty: ThingIterator;
     readonly asyncThingsProperty: AsyncThingIterator;
@@ -36,18 +36,18 @@ export interface AsyncThingIteratorNext {
   done: boolean;
   value?: number;
 }
-`;
-  const sourcePath = path.resolve(__dirname, "source.ts");
-  const sources = new Map([[sourcePath, source]]);
-  const program = createMemoryProgram(sources);
-  const checker = program.getTypeChecker();
-  const sourceFile = program.getSourceFile(sourcePath);
-  assert(sourceFile !== undefined);
+`
+  const sourcePath = path.resolve(__dirname, 'source.ts')
+  const sources = new Map([[sourcePath, source]])
+  const program = createMemoryProgram(sources)
+  const checker = program.getTypeChecker()
+  const sourceFile = program.getSourceFile(sourcePath)
+  assert(sourceFile !== undefined)
 
-  const result = ts.transform(sourceFile, [createIteratorTransformer(checker)]);
-  assert.strictEqual(result.transformed.length, 1);
+  const result = ts.transform(sourceFile, [createIteratorTransformer(checker)])
+  assert.strictEqual(result.transformed.length, 1)
 
-  const output = printer.printFile(result.transformed[0]);
+  const output = printer.printFile(result.transformed[0])
   assert.strictEqual(
     output,
     `export class Thing {
@@ -58,6 +58,6 @@ export interface AsyncThingIteratorNext {
     [Symbol.iterator](): IterableIterator<string>;
     [Symbol.asyncIterator](): AsyncIterableIterator<number>;
 }
-`
-  );
-});
+`,
+  )
+})

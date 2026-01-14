@@ -4,13 +4,13 @@
 //
 
 import {
+  from,
+  fromWeb,
   Readable,
   ReadableState,
   toWeb,
-  fromWeb,
-  from,
   wrap,
-} from 'node-internal:streams_readable';
+} from 'node-internal:streams_readable'
 
-export { Readable, ReadableState, toWeb, fromWeb, from, wrap };
-export default Readable;
+export { Readable, ReadableState, toWeb, fromWeb, from, wrap }
+export default Readable

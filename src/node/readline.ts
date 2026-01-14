@@ -23,33 +23,33 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import * as promises from 'node-internal:internal_readline_promises';
-import { Interface } from 'node-internal:internal_readline';
-import type Readline from 'node:readline';
+import type Readline from 'node:readline'
+import { Interface } from 'node-internal:internal_readline'
+import * as promises from 'node-internal:internal_readline_promises'
 
-export { promises, Interface };
+export { promises, Interface }
 
 export function clearLine(): boolean {
-  return false;
+  return false
 }
 
 export function clearScreenDown(): boolean {
-  return false;
+  return false
 }
 
 export function createInterface(): Readline.Interface {
-  return new Interface();
+  return new Interface()
 }
 
 export function cursorTo(): boolean {
-  return false;
+  return false
 }
 
 export function emitKeypressEvents(): void {
   // Acts as a no-op.
 }
 export function moveCursor(): boolean {
-  return false;
+  return false
 }
 
 export default {
@@ -61,4 +61,4 @@ export default {
   moveCursor,
   Interface,
   promises,
-};
+}

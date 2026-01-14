@@ -1,5 +1,5 @@
-import { default as internalJaeger } from 'pyodide-internal:internalJaeger';
-import { IS_TRACING } from 'pyodide-internal:metadata';
+import { default as internalJaeger } from 'pyodide-internal:internalJaeger'
+import { IS_TRACING } from 'pyodide-internal:metadata'
 
 /**
  * Used for tracing via Jaeger.
@@ -7,8 +7,8 @@ import { IS_TRACING } from 'pyodide-internal:metadata';
 export function enterJaegerSpan<T>(span: string, callback: () => T): T {
   if (!IS_TRACING || !internalJaeger.traceId) {
     // Jaeger tracing not enabled or traceId is not present in request.
-    return callback();
+    return callback()
   }
 
-  return internalJaeger.enterSpan(span, callback);
+  return internalJaeger.enterSpan(span, callback)
 }

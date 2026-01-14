@@ -23,22 +23,22 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { Buffer } from 'node-internal:internal_buffer';
-import { normalizeEncoding } from 'node-internal:internal_utils';
+import type { StringDecoder as _StringDecoder } from 'node:string_decoder'
+import { default as bufferUtil } from 'node-internal:buffer'
+import { Buffer } from 'node-internal:internal_buffer'
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_THIS,
   ERR_UNKNOWN_ENCODING,
-} from 'node-internal:internal_errors';
-import { default as bufferUtil } from 'node-internal:buffer';
-import type { StringDecoder as _StringDecoder } from 'node:string_decoder';
+} from 'node-internal:internal_errors'
+import { normalizeEncoding } from 'node-internal:internal_utils'
 
-const kIncompleteCharactersStart = 0;
-const kIncompleteCharactersEnd = 4;
-const kMissingBytes = 4;
-const kBufferedBytes = 5;
-const kEncoding = 6;
-const kSize = 7;
+const kIncompleteCharactersStart = 0
+const kIncompleteCharactersEnd = 4
+const kMissingBytes = 4
+const kBufferedBytes = 5
+const kEncoding = 6
+const kSize = 7
 
 // The order of this array should be in sync with i18n.h
 // Encoding enum. Index of this array defines the uint8_t
@@ -51,135 +51,135 @@ const encodings = [
   'base64',
   'base64url',
   'hex',
-];
+]
 
-const kNativeDecoder = Symbol('kNativeDecoder');
+const kNativeDecoder = Symbol('kNativeDecoder')
 
 // @ts-expect-error TS2323 Cannot redeclare exported variable
 export declare class StringDecoder extends _StringDecoder {
   [kNativeDecoder]?: Buffer & {
-    [kBufferedBytes]?: number;
-    [kMissingBytes]?: number;
-    [kEncoding]?: number;
-  };
+    [kBufferedBytes]?: number
+    [kMissingBytes]?: number
+    [kEncoding]?: number
+  }
 
-  constructor(encoding?: string);
+  constructor(encoding?: string)
 
-  encoding: string;
-  readonly lastChar: Uint8Array;
-  readonly lastNeed: number;
-  readonly lastTotal: number;
-  write(buf: ArrayBufferView | DataView | string): string;
-  end(buf?: ArrayBufferView | DataView | string): string;
-  text(buf: ArrayBufferView | DataView | string, offset?: number): string;
+  encoding: string
+  readonly lastChar: Uint8Array
+  readonly lastNeed: number
+  readonly lastTotal: number
+  write(buf: ArrayBufferView | DataView | string): string
+  end(buf?: ArrayBufferView | DataView | string): string
+  text(buf: ArrayBufferView | DataView | string, offset?: number): string
 }
 
 // @ts-expect-error TS2323 Cannot redeclare exported variable
 export function StringDecoder(
   this: StringDecoder,
-  encoding: string = 'utf8'
+  encoding: string = 'utf8',
 ): StringDecoder {
-  const normalizedEncoding = normalizeEncoding(encoding);
+  const normalizedEncoding = normalizeEncoding(encoding)
   if (normalizedEncoding === undefined) {
-    throw new ERR_UNKNOWN_ENCODING(encoding);
+    throw new ERR_UNKNOWN_ENCODING(encoding)
   }
-  this[kNativeDecoder] = Buffer.alloc(kSize);
-  this[kNativeDecoder][kEncoding] = normalizedEncoding;
-  this.encoding = encodings[normalizedEncoding] as string;
-  return this;
+  this[kNativeDecoder] = Buffer.alloc(kSize)
+  this[kNativeDecoder][kEncoding] = normalizedEncoding
+  this.encoding = encodings[normalizedEncoding] as string
+  return this
 }
 
 function write(
   this: StringDecoder,
-  buf: ArrayBufferView | DataView | string
+  buf: ArrayBufferView | DataView | string,
 ): string {
   if (this[kNativeDecoder] === undefined) {
-    throw new ERR_INVALID_THIS('StringDecoder');
+    throw new ERR_INVALID_THIS('StringDecoder')
   }
   if (typeof buf === 'string') {
-    return buf;
+    return buf
   }
   if (!ArrayBuffer.isView(buf)) {
     throw new ERR_INVALID_ARG_TYPE(
       'buf',
       ['Buffer', 'TypedArray', 'DataView', 'string'],
-      buf
-    );
+      buf,
+    )
   }
-  const buffer = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-  return bufferUtil.decode(buffer, this[kNativeDecoder]);
+  const buffer = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+  return bufferUtil.decode(buffer, this[kNativeDecoder])
 }
 
 function end(
   this: StringDecoder,
-  buf?: ArrayBufferView | DataView | string
+  buf?: ArrayBufferView | DataView | string,
 ): string {
   if (this[kNativeDecoder] === undefined) {
-    throw new ERR_INVALID_THIS('StringDecoder');
+    throw new ERR_INVALID_THIS('StringDecoder')
   }
-  let ret = '';
+  let ret = ''
   if (buf !== undefined) {
-    ret = this.write(buf);
+    ret = this.write(buf)
   }
   if ((this[kNativeDecoder][kBufferedBytes] as number) > 0) {
-    ret += bufferUtil.flush(this[kNativeDecoder]);
+    ret += bufferUtil.flush(this[kNativeDecoder])
   }
-  return ret;
+  return ret
 }
 
 function text(
   this: StringDecoder,
   buf: NodeJS.TypedArray | string,
-  offset?: number
+  offset?: number,
 ): string {
   if (this[kNativeDecoder] === undefined) {
-    throw new ERR_INVALID_THIS('StringDecoder');
+    throw new ERR_INVALID_THIS('StringDecoder')
   }
-  this[kNativeDecoder][kMissingBytes] = 0;
-  this[kNativeDecoder][kBufferedBytes] = 0;
-  return this.write(buf.slice(offset));
+  this[kNativeDecoder][kMissingBytes] = 0
+  this[kNativeDecoder][kBufferedBytes] = 0
+  return this.write(buf.slice(offset))
 }
 
-StringDecoder.prototype.write = write;
-StringDecoder.prototype.end = end;
-StringDecoder.prototype.text = text;
+StringDecoder.prototype.write = write
+StringDecoder.prototype.end = end
+StringDecoder.prototype.text = text
 
 Object.defineProperties(StringDecoder.prototype, {
   lastChar: {
     enumerable: true,
     get(this: StringDecoder): Buffer {
       if (this[kNativeDecoder] === undefined) {
-        throw new ERR_INVALID_THIS('StringDecoder');
+        throw new ERR_INVALID_THIS('StringDecoder')
       }
       return this[kNativeDecoder].subarray(
         kIncompleteCharactersStart,
-        kIncompleteCharactersEnd
-      ) as Buffer;
+        kIncompleteCharactersEnd,
+      ) as Buffer
     },
   },
   lastNeed: {
     enumerable: true,
     get(this: StringDecoder): number {
       if (this[kNativeDecoder] === undefined) {
-        throw new ERR_INVALID_THIS('StringDecoder');
+        throw new ERR_INVALID_THIS('StringDecoder')
       }
-      return this[kNativeDecoder][kMissingBytes] as number;
+      return this[kNativeDecoder][kMissingBytes] as number
     },
   },
   lastTotal: {
     enumerable: true,
     get(this: StringDecoder): number {
       if (this[kNativeDecoder] === undefined) {
-        throw new ERR_INVALID_THIS('StringDecoder');
+        throw new ERR_INVALID_THIS('StringDecoder')
       }
       return (
         (this[kNativeDecoder][kBufferedBytes] ?? 0) +
         (this[kNativeDecoder][kMissingBytes] ?? 0)
-      );
+      )
     },
   },
-});
+})
 
 export default {
   StringDecoder,
-};
+}

@@ -3,10 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { Agent, globalAgent } from 'node-internal:internal_http_agent';
+import { Agent, globalAgent } from 'node-internal:internal_http_agent'
 
-export { Agent, globalAgent };
+export { Agent, globalAgent }
 export default {
   Agent,
   globalAgent,
-};
+}

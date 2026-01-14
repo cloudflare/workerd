@@ -23,43 +23,44 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
-import { EventEmitter } from 'node-internal:events';
+import type { Readable, Writable } from 'node:stream'
+import type { HeapInfo } from 'node:v8'
+import type { Context } from 'node:vm'
 import type {
+  Worker as _Worker,
   ResourceLimits,
   Serializable,
-  Worker as _Worker,
-} from 'node:worker_threads';
-import type { Context } from 'node:vm';
-import type { Readable, Writable } from 'node:stream';
-import type { Transferable, WorkerPerformance } from 'node:worker_threads';
-import type { HeapInfo } from 'node:v8';
+  Transferable,
+  WorkerPerformance,
+} from 'node:worker_threads'
+import { EventEmitter } from 'node-internal:events'
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors'
 
-export const MessageChannel = globalThis.MessageChannel;
-export const MessagePort = globalThis.MessagePort;
+export const MessageChannel = globalThis.MessageChannel
+export const MessagePort = globalThis.MessagePort
 
 // TODO(soon): Use globalThis.BroadcastChannel once it's available.
 export class BroadcastChannel {
   constructor() {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('BroadcastChannel');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('BroadcastChannel')
   }
 }
 
 export class Worker extends EventEmitter implements _Worker {
-  stdin: Writable | null = null;
-  stderr: Readable;
-  stdout: Readable;
-  threadId: number;
-  threadName: string = 'workerd';
-  performance: WorkerPerformance;
+  stdin: Writable | null = null
+  stderr: Readable
+  stdout: Readable
+  threadId: number
+  threadName: string = 'workerd'
+  performance: WorkerPerformance
 
   constructor() {
-    super();
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker');
+    super()
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker')
   }
 
   cpuUsage(_prev?: NodeJS.CpuUsage): Promise<NodeJS.CpuUsage> {
-    return Promise.reject(new ERR_METHOD_NOT_IMPLEMENTED('Worker.cpuUsage'));
+    return Promise.reject(new ERR_METHOD_NOT_IMPLEMENTED('Worker.cpuUsage'))
   }
 
   postMessage(_value: unknown, _transferList?: readonly Transferable[]): void {
@@ -70,7 +71,7 @@ export class Worker extends EventEmitter implements _Worker {
     _threadId: unknown,
     _value: unknown,
     _transferList?: unknown,
-    _timeout?: unknown
+    _timeout?: unknown,
   ): Promise<void> {
     // Acts as a noop.
   }
@@ -85,17 +86,17 @@ export class Worker extends EventEmitter implements _Worker {
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async terminate(): Promise<number> {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.terminate');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.terminate')
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async getHeapSnapshot(): Promise<Readable> {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.getHeapSnapshot');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.getHeapSnapshot')
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async getHeapStatistics(): Promise<HeapInfo> {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.getHeapStatistics');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.getHeapStatistics')
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
@@ -103,19 +104,19 @@ export class Worker extends EventEmitter implements _Worker {
   }
 }
 
-const environmentData = new Map<string, Serializable>();
+const environmentData = new Map<string, Serializable>()
 export function getEnvironmentData(key: string): Serializable | undefined {
-  return environmentData.get(key);
+  return environmentData.get(key)
 }
 
 export function setEnvironmentData(key: string, value: Serializable): void {
-  environmentData.set(key, value);
+  environmentData.set(key, value)
 }
 
-export const isMainThread = true;
+export const isMainThread = true
 
 export function isMarkedAsUntransferable(_value: unknown): boolean {
-  return false;
+  return false
 }
 
 export function markAsUntransferable(_value: unknown): void {
@@ -128,42 +129,42 @@ export function markAsUncloneable(_value: unknown): void {
 
 export function moveMessagePortToContext(
   _port: MessagePort,
-  _contextifiedSandbox: Context
+  _contextifiedSandbox: Context,
 ): MessagePort {
-  return new MessagePort();
+  return new MessagePort()
 }
 
-export const parentPort: number | null = null;
+export const parentPort: number | null = null
 
 export function receiveMessageOnPort(
-  _port: MessagePort
+  _port: MessagePort,
 ): undefined | { message: unknown } {
-  return undefined;
+  return undefined
 }
 
-export const SHARE_ENV = Symbol.for('nodejs.worker_threads.SHARE_ENV');
+export const SHARE_ENV = Symbol.for('nodejs.worker_threads.SHARE_ENV')
 
-export const resourceLimits: ResourceLimits = {};
+export const resourceLimits: ResourceLimits = {}
 
-export const threadId: number = 0;
+export const threadId: number = 0
 
-export const workerData: Record<string, unknown> | null = null;
+export const workerData: Record<string, unknown> | null = null
 
 export function postMessageToThread(
   threadId: number,
   value: unknown,
-  timeout?: number
-): Promise<void>;
+  timeout?: number,
+): Promise<void>
 export function postMessageToThread(
   _threadId: number,
   _value: unknown,
   _transferList?: number | readonly Transferable[],
-  _timeout?: number
+  _timeout?: number,
 ): Promise<void> {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('postMessageToThread');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('postMessageToThread')
 }
 
-export const isInternalThread = false;
+export const isInternalThread = false
 
 export default {
   BroadcastChannel,
@@ -185,4 +186,4 @@ export default {
   threadId,
   workerData,
   isInternalThread,
-};
+}

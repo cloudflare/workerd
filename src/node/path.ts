@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 /* eslint-disable @typescript-eslint/unbound-method */
-import { posix, win32 } from 'node-internal:internal_path';
+import { posix, win32 } from 'node-internal:internal_path'
 
 const {
   resolve,
@@ -20,7 +20,7 @@ const {
   sep,
   delimiter,
   matchesGlob,
-} = posix;
+} = posix
 
 export {
   resolve,
@@ -39,6 +39,6 @@ export {
   posix,
   win32,
   matchesGlob,
-};
+}
 
-export { default } from 'node-internal:internal_path';
+export { default } from 'node-internal:internal_path'

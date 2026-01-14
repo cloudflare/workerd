@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'algorithm-discards-context.https.window.js': {
@@ -433,4 +433,4 @@ export default {
 
   'wrapKey_unwrapKey/wrapKey_unwrapKey.https.any.js': {},
   'wrapKey_unwrapKey/wrapKey_unwrapKey_vectors.js': {},
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

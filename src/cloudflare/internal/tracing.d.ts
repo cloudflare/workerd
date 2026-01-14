@@ -1,8 +1,8 @@
 export class Span {
   // Sets an attribute on this span. If value is undefined, the attribute is not set.
-  setAttribute(key: string, value: string | number | boolean | undefined): void;
+  setAttribute(key: string, value: string | number | boolean | undefined): void
   // Closes the span
-  end(): void;
+  end(): void
 }
 
-function startSpan(name: string): Span;
+function startSpan(name: string): Span

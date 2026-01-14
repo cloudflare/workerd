@@ -1,22 +1,22 @@
-import assert from 'node:assert';
-import { StructureGroups } from '@workerd/jsg/rtti';
-import ts from 'typescript';
-import { generateDefinitions } from './generator';
-import { printNodeList, printer } from './print';
-import { SourcesMap, createMemoryProgram } from './program';
+import assert from 'node:assert'
+import type { StructureGroups } from '@workerd/jsg/rtti'
+import ts from 'typescript'
+import { generateDefinitions } from './generator'
+import { printer, printNodeList } from './print'
+import { createMemoryProgram, SourcesMap } from './program'
 import {
-  CommentsData,
+  type CommentsData,
   compileOverridesDefines,
   createAmbientTransformer,
   createCommentsTransformer,
   createGlobalScopeTransformer,
-  createImportResolveTransformer,
   createImportableTransformer,
+  createImportResolveTransformer,
   createIteratorTransformer,
   createOverrideDefineTransformer,
-} from './transforms';
-import { createClassToInterfaceTransformer } from './transforms/class-to-interface';
-import { createAddOnMessageDeclarationTransformer } from './transforms/onmessage-declaration';
+} from './transforms'
+import { createClassToInterfaceTransformer } from './transforms/class-to-interface'
+import { createAddOnMessageDeclarationTransformer } from './transforms/onmessage-declaration'
 
 const definitionsHeader = `/*! *****************************************************************************
 Copyright (c) Cloudflare. All rights reserved.
@@ -34,39 +34,39 @@ and limitations under the License.
 ***************************************************************************** */
 /* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-`;
+`
 
 function transform(
   sources: SourcesMap,
   sourcePath: string,
   transforms: (
     program: ts.Program,
-    checker: ts.TypeChecker
-  ) => ts.TransformerFactory<ts.SourceFile>[]
+    checker: ts.TypeChecker,
+  ) => ts.TransformerFactory<ts.SourceFile>[],
 ): string {
-  const program = createMemoryProgram(sources);
-  const checker = program.getTypeChecker();
-  const sourceFile = program.getSourceFile(sourcePath);
-  assert(sourceFile !== undefined);
-  const result = ts.transform(sourceFile, transforms(program, checker));
-  assert.strictEqual(result.transformed.length, 1);
-  return printer.printFile(result.transformed[0]);
+  const program = createMemoryProgram(sources)
+  const checker = program.getTypeChecker()
+  const sourceFile = program.getSourceFile(sourcePath)
+  assert(sourceFile !== undefined)
+  const result = ts.transform(sourceFile, transforms(program, checker))
+  assert.strictEqual(result.transformed.length, 1)
+  return printer.printFile(result.transformed[0])
 }
 
 export function printDefinitions(
   root: StructureGroups,
   commentData: CommentsData,
-  extraDefinitions: string
+  extraDefinitions: string,
 ): { ambient: string; importable: string } {
   // Generate TypeScript nodes from capnp request
-  const { nodes } = generateDefinitions(root);
+  const { nodes } = generateDefinitions(root)
 
   // Assemble partial overrides and defines to valid TypeScript source files
-  const [sources, replacements] = compileOverridesDefines(root);
+  const [sources, replacements] = compileOverridesDefines(root)
   // Add source file containing generated nodes
-  const sourcePath = '/$virtual/source.ts';
-  let source = printNodeList(nodes);
-  sources.set(sourcePath, printNodeList(nodes));
+  const sourcePath = '/$virtual/source.ts'
+  let source = printNodeList(nodes)
+  sources.set(sourcePath, printNodeList(nodes))
 
   // Run post-processing transforms on program
   source = transform(sources, sourcePath, (program, checker) => [
@@ -82,11 +82,11 @@ export function printDefinitions(
     // createInternalNamespaceTransformer(root, structureMap),
     createCommentsTransformer(commentData),
     createAddOnMessageDeclarationTransformer(),
-  ]);
+  ])
 
   // TODO: enable this once we've figured out how not to expose internal modules
   // source += collectTypeScriptModules(root) + extraDefinitions;
-  source += extraDefinitions;
+  source += extraDefinitions
 
   // We need the type checker to respect our updated definitions after applying
   // overrides (e.g. to find the correct nodes when traversing heritage), so
@@ -95,17 +95,17 @@ export function printDefinitions(
   source = transform(new SourcesMap([[sourcePath, source]]), sourcePath, () => [
     createImportResolveTransformer(),
     createAmbientTransformer(),
-  ]);
+  ])
 
   const importable = transform(
     new SourcesMap([[sourcePath, source]]),
     sourcePath,
-    () => [createImportableTransformer()]
-  );
+    () => [createImportableTransformer()],
+  )
 
   // Print program to string
   return {
     ambient: definitionsHeader + source,
     importable: definitionsHeader + importable,
-  };
+  }
 }

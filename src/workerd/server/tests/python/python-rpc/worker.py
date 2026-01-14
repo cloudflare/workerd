@@ -10,9 +10,8 @@ from http import HTTPMethod
 from unittest import TestCase
 
 import js
-from workers import Blob, Request, Response, WorkerEntrypoint, handler
-
 from pyodide.ffi import JsException, JsProxy, to_js
+from workers import Blob, Request, Response, WorkerEntrypoint, handler
 
 assertRaises = TestCase().assertRaises
 assertRaisesRegex = TestCase().assertRaisesRegex

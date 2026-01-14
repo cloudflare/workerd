@@ -3,22 +3,22 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import {
-  constants,
-  kMaxLength,
-  kStringMaxLength,
   Buffer,
-  SlowBuffer,
+  constants,
+  INSPECT_MAX_BYTES,
   isAscii,
   isUtf8,
-  transcode,
-  INSPECT_MAX_BYTES,
+  kMaxLength,
+  kStringMaxLength,
   resolveObjectURL,
-} from 'node-internal:internal_buffer';
+  SlowBuffer,
+  transcode,
+} from 'node-internal:internal_buffer'
 
-const atob = globalThis.atob.bind(globalThis);
-const btoa = globalThis.btoa.bind(globalThis);
-const Blob = globalThis.Blob;
-const File = globalThis.File;
+const atob = globalThis.atob.bind(globalThis)
+const btoa = globalThis.btoa.bind(globalThis)
+const Blob = globalThis.Blob
+const File = globalThis.File
 
 export {
   atob,
@@ -35,7 +35,7 @@ export {
   transcode,
   INSPECT_MAX_BYTES,
   resolveObjectURL,
-};
+}
 
 export default {
   atob,
@@ -52,4 +52,4 @@ export default {
   transcode,
   INSPECT_MAX_BYTES,
   resolveObjectURL,
-};
+}

@@ -1,21 +1,21 @@
 declare namespace ArtifactBundler {
-  type SnapshotType = 'baseline' | 'dedicated' | 'package';
+  type SnapshotType = 'baseline' | 'dedicated' | 'package'
   type MemorySnapshotResult = {
-    snapshot: Uint8Array;
-    importedModulesList: string[];
-    snapshotType: SnapshotType;
-  };
+    snapshot: Uint8Array
+    importedModulesList: string[]
+    snapshotType: SnapshotType
+  }
 
-  const hasMemorySnapshot: () => boolean;
-  const isEwValidating: () => boolean;
+  const hasMemorySnapshot: () => boolean
+  const isEwValidating: () => boolean
   const readMemorySnapshot: (
     offset: number,
-    buf: Uint32Array | Uint8Array
-  ) => void;
-  const getMemorySnapshotSize: () => number;
-  const disposeMemorySnapshot: () => void;
-  const storeMemorySnapshot: (snap: MemorySnapshotResult) => void;
-  const getPackage: (path: string) => Reader | null;
+    buf: Uint32Array | Uint8Array,
+  ) => void
+  const getMemorySnapshotSize: () => number
+  const disposeMemorySnapshot: () => void
+  const storeMemorySnapshot: (snap: MemorySnapshotResult) => void
+  const getPackage: (path: string) => Reader | null
 }
 
-export default ArtifactBundler;
+export default ArtifactBundler

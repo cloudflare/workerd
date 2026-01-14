@@ -4,22 +4,22 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 import {
-  ERR_INVALID_HTTP_TOKEN,
-  ERR_INVALID_CHAR,
   ERR_HTTP_INVALID_HEADER_VALUE,
-} from 'node-internal:internal_errors';
+  ERR_INVALID_CHAR,
+  ERR_INVALID_HTTP_TOKEN,
+} from 'node-internal:internal_errors'
 
-const tokenRegExp = /^[\^_`a-zA-Z\-0-9!#$%&'*+.|~]+$/;
+const tokenRegExp = /^[\^_`a-zA-Z\-0-9!#$%&'*+.|~]+$/
 /**
  * Verifies that the given val is a valid HTTP token
  * per the rules defined in RFC 7230
  * See https://tools.ietf.org/html/rfc7230#section-3.2.6
  */
 export function _checkIsHttpToken(val: string): boolean {
-  return tokenRegExp.test(val);
+  return tokenRegExp.test(val)
 }
 
-const headerCharRegex = /[^\t\x20-\x7e\x80-\xff]/;
+const headerCharRegex = /[^\t\x20-\x7e\x80-\xff]/
 /**
  * True if val contains an invalid field-vchar
  *  field-value    = *( field-content / obs-fold )
@@ -27,37 +27,37 @@ const headerCharRegex = /[^\t\x20-\x7e\x80-\xff]/;
  *  field-vchar    = VCHAR / obs-text
  */
 export function _checkInvalidHeaderChar(
-  val: number | string | ReadonlyArray<string>
+  val: number | string | ReadonlyArray<string>,
 ): boolean {
   if (Array.isArray(val)) {
-    return val.some((v: string) => headerCharRegex.test(v));
+    return val.some((v: string) => headerCharRegex.test(v))
   }
-  return headerCharRegex.test(`${val}`);
+  return headerCharRegex.test(`${val}`)
 }
 
 export function validateHeaderName(
   name: string,
-  label: string = 'Header name'
+  label: string = 'Header name',
 ): void {
   if (typeof name !== 'string' || !name || !_checkIsHttpToken(name)) {
-    throw new ERR_INVALID_HTTP_TOKEN(label, name);
+    throw new ERR_INVALID_HTTP_TOKEN(label, name)
   }
 }
 
 export function validateHeaderValue(
   name: string,
-  value: number | string | ReadonlyArray<string> | undefined
+  value: number | string | ReadonlyArray<string> | undefined,
 ): asserts value is string {
   if (value === undefined) {
-    throw new ERR_HTTP_INVALID_HEADER_VALUE(value, name);
+    throw new ERR_HTTP_INVALID_HEADER_VALUE(value, name)
   }
   if (_checkInvalidHeaderChar(value)) {
-    throw new ERR_INVALID_CHAR('header content', name);
+    throw new ERR_INVALID_CHAR('header content', name)
   }
 }
 
 export function utcDate(): string {
-  return new Date().toUTCString();
+  return new Date().toUTCString()
 }
 
-export const chunkExpression = /(?:^|\W)chunked(?:$|\W)/i;
+export const chunkExpression = /(?:^|\W)chunked(?:$|\W)/i

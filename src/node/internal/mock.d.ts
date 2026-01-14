@@ -1,7 +1,7 @@
 export declare class MockTracker {
-  constructor();
+  constructor()
 }
 
 export declare class MockFunctionContext {
-  constructor();
+  constructor()
 }

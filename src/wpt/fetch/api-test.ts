@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'abort/cache.https.any.js': {
@@ -976,4 +976,4 @@ export default {
       'Attempt to inject 8.2 via Object.prototype.then.',
     ],
   },
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

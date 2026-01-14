@@ -3,25 +3,25 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 interface Fetcher {
-  fetch: typeof fetch;
+  fetch: typeof fetch
 }
 
 export class BrowserRendering {
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
-  private readonly fetcher: Fetcher;
+  private readonly fetcher: Fetcher
 
   constructor(fetcher: Fetcher) {
-    this.fetcher = fetcher;
+    this.fetcher = fetcher
   }
 
   async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    return this.fetcher.fetch(input, init);
+    return this.fetcher.fetch(input, init)
   }
 }
 
 export default function makeBinding(env: {
-  fetcher: Fetcher;
+  fetcher: Fetcher
 }): BrowserRendering {
-  return new BrowserRendering(env.fetcher);
+  return new BrowserRendering(env.fetcher)
 }

@@ -1,9 +1,9 @@
 interface ErrorConstructor {
-  prepareStackTrace: ((_error: Error, stack: StackItem[]) => void) | undefined;
-  stackTraceLimit: number;
+  prepareStackTrace: ((_error: Error, stack: StackItem[]) => void) | undefined
+  stackTraceLimit: number
 }
 
 interface StackItem {
-  getFunctionName: () => string;
-  getFileName: () => string;
+  getFunctionName: () => string
+  getFileName: () => string
 }

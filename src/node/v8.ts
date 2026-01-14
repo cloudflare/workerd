@@ -15,43 +15,39 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-'use strict';
-
-import { Buffer } from 'node-internal:internal_buffer';
-import {
-  validateObject,
-  validateFunction,
-  validateBoolean,
-  validateString,
-  validateUint32,
-  validateOneOf,
-} from 'node-internal:validators';
-
+import type { Readable } from 'node:stream'
 import type {
-  HeapSnapshotOptions,
-  HeapInfo,
-  HeapSpaceStatistics,
-  HeapCodeStatistics,
-  Init,
-  Before,
   After,
-  Settled,
+  Before,
+  HeapCodeStatistics,
+  HeapInfo,
+  HeapSnapshotOptions,
+  HeapSpaceStatistics,
   HookCallbacks,
-} from 'node:v8';
-import type { Readable } from 'node:stream';
-
+  Init,
+  Settled,
+} from 'node:v8'
+import type { Buffer } from 'node-internal:internal_buffer'
 import {
   ERR_INVALID_ARG_VALUE,
   ERR_METHOD_NOT_IMPLEMENTED,
-} from 'node-internal:internal_errors';
+} from 'node-internal:internal_errors'
+import {
+  validateBoolean,
+  validateFunction,
+  validateObject,
+  validateOneOf,
+  validateString,
+  validateUint32,
+} from 'node-internal:validators'
 
-export const cachedDataVersionTag = 0;
+export const cachedDataVersionTag = 0
 
 function getHeapSnapshotOptions(options: HeapSnapshotOptions = {}): void {
-  validateObject(options, 'options');
-  const { exposeInternals = false, exposeNumericValues = false } = options;
-  validateBoolean(exposeInternals, 'options.exposeInternals');
-  validateBoolean(exposeNumericValues, 'options.exposeNumericValues');
+  validateObject(options, 'options')
+  const { exposeInternals = false, exposeNumericValues = false } = options
+  validateBoolean(exposeInternals, 'options.exposeInternals')
+  validateBoolean(exposeNumericValues, 'options.exposeNumericValues')
 }
 
 // Other than the Serializer/Deserializer classes, most of the API here is not
@@ -59,29 +55,29 @@ function getHeapSnapshotOptions(options: HeapSnapshotOptions = {}): void {
 
 export function writeHeapSnapshot(
   filename?: string,
-  options: HeapSnapshotOptions = {}
+  options: HeapSnapshotOptions = {},
 ): void {
   if (filename !== undefined) {
-    validateString(filename, 'filename');
+    validateString(filename, 'filename')
   }
-  getHeapSnapshotOptions(options);
-  throw new ERR_METHOD_NOT_IMPLEMENTED('writeHeapSnapshot');
+  getHeapSnapshotOptions(options)
+  throw new ERR_METHOD_NOT_IMPLEMENTED('writeHeapSnapshot')
 }
 
 export function getHeapSnapshot(options: HeapSnapshotOptions = {}): Readable {
-  getHeapSnapshotOptions(options);
-  throw new ERR_METHOD_NOT_IMPLEMENTED('getHeapSnapshot');
+  getHeapSnapshotOptions(options)
+  throw new ERR_METHOD_NOT_IMPLEMENTED('getHeapSnapshot')
 }
 
 export function setFlagsFromString(flags: string): void {
-  validateString(flags, 'flags');
-  throw new ERR_METHOD_NOT_IMPLEMENTED('setFlagsFromString');
+  validateString(flags, 'flags')
+  throw new ERR_METHOD_NOT_IMPLEMENTED('setFlagsFromString')
 }
 
 export function isStringOneByteRepresentation(content: string): boolean {
   // TODO(later): We can implement this later
-  validateString(content, 'content');
-  throw new ERR_METHOD_NOT_IMPLEMENTED('isStringOneByteRepresentation');
+  validateString(content, 'content')
+  throw new ERR_METHOD_NOT_IMPLEMENTED('isStringOneByteRepresentation')
 }
 
 export function getHeapStatistics(): HeapInfo {
@@ -100,11 +96,11 @@ export function getHeapStatistics(): HeapInfo {
     total_global_handles_size: 0,
     used_global_handles_size: 0,
     external_memory: 0,
-  };
+  }
 }
 
 export function getHeapSpaceStatistics(): HeapSpaceStatistics[] {
-  return [];
+  return []
 }
 
 export function getHeapCodeStatistics(): HeapCodeStatistics {
@@ -114,16 +110,16 @@ export function getHeapCodeStatistics(): HeapCodeStatistics {
     external_script_source_size: 0,
     // @ts-expect-error TS2353 cpu_profiler_metadata_size is not in node/types yet
     cpu_profiler_metadata_size: 0,
-  };
+  }
 }
 
 export function setHeapSnapshotNearHeapLimit(limit: number): void {
-  validateUint32(limit, 'limit', true);
-  throw new ERR_METHOD_NOT_IMPLEMENTED('setHeapSnapshotNearHeapLimit');
+  validateUint32(limit, 'limit', true)
+  throw new ERR_METHOD_NOT_IMPLEMENTED('setHeapSnapshotNearHeapLimit')
 }
 
 export function getCppHeapStatistics(type = 'detailed'): object {
-  validateOneOf(type, 'type', ['brief', 'detailed']);
+  validateOneOf(type, 'type', ['brief', 'detailed'])
   return {
     committed_size_bytes: 0,
     resident_size_bytes: 0,
@@ -131,205 +127,203 @@ export function getCppHeapStatistics(type = 'detailed'): object {
     space_statistics: [],
     type_names: [],
     detail_level: type,
-  };
+  }
 }
 
 // TODO(later): Implement Serializer/Deserializer later
 export class Serializer {
   constructor() {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Serializer');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Serializer')
   }
 
   writeHeader(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('writeHeader');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeHeader')
   }
   writeValue(_value: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('writeValue');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeValue')
   }
   releaseBuffer(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('releaseBuffer');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('releaseBuffer')
   }
   transferArrayBuffer(_id: number, _arrayBuffer: ArrayBuffer): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('transferArrayBuffer');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('transferArrayBuffer')
   }
   writeUint32(_value: number): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('writeUint32');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeUint32')
   }
   writeUint64(_hi: number, _lo: number): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('writeUint64');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeUint64')
   }
   writeDouble(_value: number): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('writeDouble');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeDouble')
   }
   writeRawBytes(_buffer: NodeJS.TypedArray | Buffer): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('writeRawBytes');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeRawBytes')
   }
   _getDataCloneError(_message: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('_getDataCloneError');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('_getDataCloneError')
   }
   _getSharedArrayBufferId(_sharedArrayBuffer: SharedArrayBuffer): number {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('_getSharedArrayBufferId');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('_getSharedArrayBufferId')
   }
   _setTreatArrayBufferViewsAsHostObjects(_flag: boolean): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED(
-      '_setTreatArrayBufferViewsAsHostObjects'
-    );
+      '_setTreatArrayBufferViewsAsHostObjects',
+    )
   }
 
   _writeHostObject(_abView: NodeJS.TypedArray | Buffer): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('_writeHostObject');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('_writeHostObject')
   }
 }
 
 export class Deserializer {
   constructor(_buffer: NodeJS.TypedArray | Buffer) {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Deserializer');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Deserializer')
   }
   readHeader(): boolean {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('readHeader');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('readHeader')
   }
 
   readValue(): unknown {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('readValue');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('readValue')
   }
 
   transferArrayBuffer(_id: number, _arrayBuffer: ArrayBuffer): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('transferArrayBuffer');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('transferArrayBuffer')
   }
 
   getWireFormatVersion(): number {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('getWireFormatVersion');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('getWireFormatVersion')
   }
 
   readUint32(): number {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('readUint32');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('readUint32')
   }
 
   readUint64(): [number, number] {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('readUint64');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('readUint64')
   }
 
   readDouble(): number {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('readDouble');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('readDouble')
   }
   readRawBytes(_length: number): Buffer {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('readRawBytes');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('readRawBytes')
   }
 
   _readHostObject(): object {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('_readHostObject');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('_readHostObject')
   }
 }
 
 export class DefaultSerializer extends Serializer {
   constructor() {
-    super();
-    throw new ERR_METHOD_NOT_IMPLEMENTED('DefaultSerializer');
+    super()
+    throw new ERR_METHOD_NOT_IMPLEMENTED('DefaultSerializer')
   }
 }
 
 export class DefaultDeserializer extends Deserializer {
   constructor(buffer: NodeJS.TypedArray | Buffer) {
-    super(buffer);
-    throw new ERR_METHOD_NOT_IMPLEMENTED('DefaultDeserializer');
+    super(buffer)
+    throw new ERR_METHOD_NOT_IMPLEMENTED('DefaultDeserializer')
   }
 }
 
 export function serialize(_value: unknown): Buffer {
   // TODO(later): This is one that we can implement later.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('serialize');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('serialize')
 }
 
 export function deserialize(_buffer: NodeJS.TypedArray | Buffer): unknown {
   // TODO(;later): This is one that we can implement later.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('deserialize');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('deserialize')
 }
 
 export class GCProfiler {
   start(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('GCProfiler.start');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('GCProfiler.start')
   }
 
   stop(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('GCProfiler.stop');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('GCProfiler.stop')
   }
 }
 
 export const promiseHooks = {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   createHook(_: HookCallbacks): Function {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.createHook');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.createHook')
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   onInit(_: Init): Function {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.onInit');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.onInit')
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   onBefore(_: Before): Function {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.onBefore');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.onBefore')
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   onAfter(_: After): Function {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.onAfter');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.onAfter')
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   onSettled(_: Settled): Function {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.onSettled');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('promiseHooks.onSettled')
   },
-};
+}
 
 export function queryObjects(
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   ctor: Function,
-  options: { format?: 'count' | 'summary' } = {}
+  options: { format?: 'count' | 'summary' } = {},
 ): number | string[] {
-  validateFunction(ctor, 'constructor');
-  validateObject(options, 'options');
-  const format = options.format || 'count';
+  validateFunction(ctor, 'constructor')
+  validateObject(options, 'options')
+  const format = options.format || 'count'
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (format !== 'count' && format !== 'summary') {
-    throw new ERR_INVALID_ARG_VALUE('options.format', format);
+    throw new ERR_INVALID_ARG_VALUE('options.format', format)
   }
-  throw new ERR_METHOD_NOT_IMPLEMENTED('queryObjects');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('queryObjects')
 }
 
 export function takeCoverage(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('takeCoverage');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('takeCoverage')
 }
 
 export function stopCoverage(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('stopCoverage');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('stopCoverage')
 }
 
 export const startupSnapshot = {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   addSerializeCallback(_callback: Function, _data: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED(
-      'startupSnapshot.addSerializeCallback'
-    );
+    throw new ERR_METHOD_NOT_IMPLEMENTED('startupSnapshot.addSerializeCallback')
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   addDeserializeCallback(_callback: Function, _data: unknown): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED(
-      'startupSnapshot.addDeserializeCallback'
-    );
+      'startupSnapshot.addDeserializeCallback',
+    )
   },
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   setDeserializeMainFunction(_callback: Function, _data: unknown): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED(
-      'startupSnapshot.setDeserializeMainFunction'
-    );
+      'startupSnapshot.setDeserializeMainFunction',
+    )
   },
   isBuildingSnapshot(): boolean {
-    return false;
+    return false
   },
-};
+}
 
 export default {
   cachedDataVersionTag,
@@ -354,4 +348,4 @@ export default {
   setHeapSnapshotNearHeapLimit,
   GCProfiler,
   isStringOneByteRepresentation,
-};
+}

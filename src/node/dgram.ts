@@ -23,43 +23,42 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { validateObject, validateFunction } from 'node-internal:validators';
-import { Buffer } from 'node-internal:internal_buffer';
-import { EventEmitter } from 'node-internal:events';
-
 import type {
+  Socket as DgramSocket,
+  RemoteInfo,
   SocketOptions,
   SocketType,
-  RemoteInfo,
-  Socket as DgramSocket,
-} from 'node:dgram';
+} from 'node:dgram'
+import { EventEmitter } from 'node-internal:events'
+import type { Buffer } from 'node-internal:internal_buffer'
+import { validateFunction, validateObject } from 'node-internal:validators'
 
-type SocketClassType = typeof DgramSocket;
+type SocketClassType = typeof DgramSocket
 
 export function Socket(
   this: SocketClassType,
   type?: SocketType | SocketOptions,
-  callback?: (msg: Buffer, rinfo: RemoteInfo) => void
+  callback?: (msg: Buffer, rinfo: RemoteInfo) => void,
 ): SocketClassType {
-  EventEmitter.call(this as unknown as EventEmitter);
+  EventEmitter.call(this as unknown as EventEmitter)
   if (typeof type === 'string') {
-    type = { type };
+    type = { type }
   }
-  validateObject(type, 'type');
+  validateObject(type, 'type')
   if (callback !== undefined) {
-    validateFunction(callback, 'callback');
+    validateFunction(callback, 'callback')
   }
-  return this;
+  return this
 }
-Object.setPrototypeOf(Socket.prototype, EventEmitter.prototype);
-Object.setPrototypeOf(Socket, EventEmitter);
+Object.setPrototypeOf(Socket.prototype, EventEmitter.prototype)
+Object.setPrototypeOf(Socket, EventEmitter)
 
 export function createSocket(
   type?: SocketType | SocketOptions,
-  callback?: (msg: Buffer, rinfo: RemoteInfo) => void
+  callback?: (msg: Buffer, rinfo: RemoteInfo) => void,
 ): SocketClassType {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call
-  return new (Socket as any)(type, callback) as SocketClassType;
+  return new (Socket as any)(type, callback) as SocketClassType
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -67,144 +66,128 @@ Socket.prototype.bind = function (
   this: SocketClassType,
   _1: unknown,
   _2: unknown,
-  _3: unknown
+  _3: unknown,
 ): SocketClassType {
-  return this;
-};
+  return this
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.connect = function (
-  _1: unknown,
-  _2: unknown,
-  _3: unknown
-): void {
+Socket.prototype.connect = (_1: unknown, _2: unknown, _3: unknown): void => {
   // no-op
-};
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.disconnect = function (): void {
+Socket.prototype.disconnect = (): void => {
   // no-op
-};
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.sendto = function (
+Socket.prototype.sendto = (
   _1: unknown,
   _2: unknown,
   _3: unknown,
   _4: unknown,
   _5: unknown,
-  _6: unknown
-): void {
+  _6: unknown,
+): void => {
   // no-op
-};
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.send = function (
+Socket.prototype.send = (
   _1: unknown,
   _2: unknown,
   _3: unknown,
   _4: unknown,
   _5: unknown,
-  _6: unknown
-): void {
+  _6: unknown,
+): void => {
   // no-op
-};
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 Socket.prototype.close = function (
   this: SocketClassType,
-  _1: unknown
+  _1: unknown,
 ): SocketClassType {
-  return this;
-};
+  return this
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype[Symbol.asyncDispose] = async function (): Promise<void> {
+Socket.prototype[Symbol.asyncDispose] = async (): Promise<void> => {
   // no-op
-};
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.address = function (): object {
-  return {};
-};
+Socket.prototype.address = (): object => ({})
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.remoteAddress = function (): object {
-  return {};
-};
+Socket.prototype.remoteAddress = (): object => ({})
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.setBroadcast = function (_: unknown): void {};
+Socket.prototype.setBroadcast = (_: unknown): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.setTTL = function (_: unknown): void {};
+Socket.prototype.setTTL = (_: unknown): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.setMulticastTTL = function (_: unknown): void {};
+Socket.prototype.setMulticastTTL = (_: unknown): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.setMulticastLoopback = function (_: unknown): void {};
+Socket.prototype.setMulticastLoopback = (_: unknown): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.setMulticastInterface = function (_: unknown): void {};
+Socket.prototype.setMulticastInterface = (_: unknown): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.addMembership = function (_1: unknown, _2: unknown): void {};
+Socket.prototype.addMembership = (_1: unknown, _2: unknown): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.dropMembership = function (_1: unknown, _2: unknown): void {};
+Socket.prototype.dropMembership = (_1: unknown, _2: unknown): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.addSourceSpecificMembership = function (
+Socket.prototype.addSourceSpecificMembership = (
   _1: unknown,
   _2: unknown,
-  _3: unknown
-): void {};
+  _3: unknown,
+): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.dropSourceSpecificMembership = function (
+Socket.prototype.dropSourceSpecificMembership = (
   _1: unknown,
   _2: unknown,
-  _3: unknown
-): void {};
+  _3: unknown,
+): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 Socket.prototype.ref = function (this: SocketClassType): SocketClassType {
-  return this;
-};
+  return this
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 Socket.prototype.unref = function (this: SocketClassType): SocketClassType {
-  return this;
-};
+  return this
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.setRecvBufferSize = function (_: number): void {};
+Socket.prototype.setRecvBufferSize = (_: number): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.setSendBufferSize = function (_: number): void {};
+Socket.prototype.setSendBufferSize = (_: number): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.getRecvBufferSize = function (): number {
-  return 0;
-};
+Socket.prototype.getRecvBufferSize = (): number => 0
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.getSendBufferSize = function (): number {
-  return 0;
-};
+Socket.prototype.getSendBufferSize = (): number => 0
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.getSendQueueSize = function (): number {
-  return 0;
-};
+Socket.prototype.getSendQueueSize = (): number => 0
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Socket.prototype.getSendQueueCount = function (): number {
-  return 0;
-};
+Socket.prototype.getSendQueueCount = (): number => 0
 
 export default {
   createSocket,
   Socket,
-};
+}

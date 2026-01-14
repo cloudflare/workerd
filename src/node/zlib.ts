@@ -3,11 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import * as zlib from 'node-internal:internal_zlib';
-import { crc32 } from 'node-internal:internal_zlib';
-import { constants, codes } from 'node-internal:internal_zlib_constants';
+import * as zlib from 'node-internal:internal_zlib'
+import { crc32 } from 'node-internal:internal_zlib'
+import { codes, constants } from 'node-internal:internal_zlib_constants'
 
-const nodeJsZlib = !!Cloudflare.compatibilityFlags['nodejs_zlib'];
+const nodeJsZlib = !!Cloudflare.compatibilityFlags.nodejs_zlib
 const {
   Z_NO_FLUSH,
   Z_PARTIAL_FLUSH,
@@ -120,62 +120,61 @@ const {
   BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2,
   BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES,
   BROTLI_DECODER_ERROR_UNREACHABLE,
-} = constants;
+} = constants
 
 function protectMethod(method: unknown): unknown {
   if (!nodeJsZlib) {
     return function notImplemented() {
-      throw new Error('Compatibility flag "nodejs_zlib" is not enabled');
-    };
+      throw new Error('Compatibility flag "nodejs_zlib" is not enabled')
+    }
   }
 
-  return method;
+  return method
 }
 
-const Gzip = protectMethod(zlib.Gzip);
-const Gunzip = protectMethod(zlib.Gunzip);
-const Deflate = protectMethod(zlib.Deflate);
-const DeflateRaw = protectMethod(zlib.DeflateRaw);
-const Inflate = protectMethod(zlib.Inflate);
-const InflateRaw = protectMethod(zlib.InflateRaw);
-const Unzip = protectMethod(zlib.Unzip);
-const BrotliCompress = protectMethod(zlib.BrotliCompress);
-const BrotliDecompress = protectMethod(zlib.BrotliDecompress);
+const Gzip = protectMethod(zlib.Gzip)
+const Gunzip = protectMethod(zlib.Gunzip)
+const Deflate = protectMethod(zlib.Deflate)
+const DeflateRaw = protectMethod(zlib.DeflateRaw)
+const Inflate = protectMethod(zlib.Inflate)
+const InflateRaw = protectMethod(zlib.InflateRaw)
+const Unzip = protectMethod(zlib.Unzip)
+const BrotliCompress = protectMethod(zlib.BrotliCompress)
+const BrotliDecompress = protectMethod(zlib.BrotliDecompress)
 
-const createGzip = protectMethod(zlib.createGzip);
-const createGunzip = protectMethod(zlib.createGunzip);
-const createDeflate = protectMethod(zlib.createDeflate);
-const createDeflateRaw = protectMethod(zlib.createDeflateRaw);
-const createInflate = protectMethod(zlib.createInflate);
-const createInflateRaw = protectMethod(zlib.createInflateRaw);
-const createUnzip = protectMethod(zlib.createUnzip);
-const createBrotliCompress = protectMethod(zlib.createBrotliCompress);
-const createBrotliDecompress = protectMethod(zlib.createBrotliDecompress);
+const createGzip = protectMethod(zlib.createGzip)
+const createGunzip = protectMethod(zlib.createGunzip)
+const createDeflate = protectMethod(zlib.createDeflate)
+const createDeflateRaw = protectMethod(zlib.createDeflateRaw)
+const createInflate = protectMethod(zlib.createInflate)
+const createInflateRaw = protectMethod(zlib.createInflateRaw)
+const createUnzip = protectMethod(zlib.createUnzip)
+const createBrotliCompress = protectMethod(zlib.createBrotliCompress)
+const createBrotliDecompress = protectMethod(zlib.createBrotliDecompress)
 
-const inflate = protectMethod(zlib.inflate);
-const inflateSync = protectMethod(zlib.inflateSync);
-const deflate = protectMethod(zlib.deflate);
-const deflateSync = protectMethod(zlib.deflateSync);
-const inflateRaw = protectMethod(zlib.inflateRaw);
-const inflateRawSync = protectMethod(zlib.inflateRawSync);
-const deflateRaw = protectMethod(zlib.deflateRaw);
-const deflateRawSync = protectMethod(zlib.deflateRawSync);
-const gzip = protectMethod(zlib.gzip);
-const gzipSync = protectMethod(zlib.gzipSync);
-const gunzip = protectMethod(zlib.gunzip);
-const gunzipSync = protectMethod(zlib.gunzipSync);
-const unzip = protectMethod(zlib.unzip);
-const unzipSync = protectMethod(zlib.unzipSync);
-const brotliCompress = protectMethod(zlib.brotliCompress);
-const brotliCompressSync = protectMethod(zlib.brotliCompressSync);
-const brotliDecompress = protectMethod(zlib.brotliDecompress);
-const brotliDecompressSync = protectMethod(zlib.brotliDecompressSync);
+const inflate = protectMethod(zlib.inflate)
+const inflateSync = protectMethod(zlib.inflateSync)
+const deflate = protectMethod(zlib.deflate)
+const deflateSync = protectMethod(zlib.deflateSync)
+const inflateRaw = protectMethod(zlib.inflateRaw)
+const inflateRawSync = protectMethod(zlib.inflateRawSync)
+const deflateRaw = protectMethod(zlib.deflateRaw)
+const deflateRawSync = protectMethod(zlib.deflateRawSync)
+const gzip = protectMethod(zlib.gzip)
+const gzipSync = protectMethod(zlib.gzipSync)
+const gunzip = protectMethod(zlib.gunzip)
+const gunzipSync = protectMethod(zlib.gunzipSync)
+const unzip = protectMethod(zlib.unzip)
+const unzipSync = protectMethod(zlib.unzipSync)
+const brotliCompress = protectMethod(zlib.brotliCompress)
+const brotliCompressSync = protectMethod(zlib.brotliCompressSync)
+const brotliDecompress = protectMethod(zlib.brotliDecompress)
+const brotliDecompressSync = protectMethod(zlib.brotliDecompressSync)
 
 export {
   crc32,
   codes,
   constants,
-
   // Classes
   Gzip,
   Gunzip,
@@ -186,7 +185,6 @@ export {
   Unzip,
   BrotliCompress,
   BrotliDecompress,
-
   // Convenience methods to create classes
   createGzip,
   createGunzip,
@@ -197,7 +195,6 @@ export {
   createUnzip,
   createBrotliCompress,
   createBrotliDecompress,
-
   // One-shot methods
   inflate,
   inflateSync,
@@ -217,7 +214,6 @@ export {
   brotliDecompressSync,
   brotliCompress,
   brotliCompressSync,
-
   // NodeJS also exports all constants directly under zlib, but this is deprecated
   Z_NO_FLUSH,
   Z_PARTIAL_FLUSH,
@@ -325,7 +321,7 @@ export {
   BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2,
   BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES,
   BROTLI_DECODER_ERROR_UNREACHABLE,
-};
+}
 
 export default {
   crc32,
@@ -375,4 +371,4 @@ export default {
   brotliDecompressSync,
   brotliCompress,
   brotliCompressSync,
-};
+}

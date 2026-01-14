@@ -98,5 +98,5 @@ export const builtinModules = [
   'wasi',
   'worker_threads',
   'zlib',
-];
-Object.freeze(builtinModules);
+]
+Object.freeze(builtinModules)

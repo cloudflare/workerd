@@ -9,7 +9,6 @@ from httpx._types import AsyncByteStream
 from httpx._utils import Timer
 from js import Headers as js_Headers
 from js import fetch
-
 from pyodide.ffi import create_proxy
 
 

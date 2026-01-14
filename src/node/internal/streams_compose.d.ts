@@ -1,1 +1,1 @@
-export { compose } from 'node:stream';
+export { compose } from 'node:stream'

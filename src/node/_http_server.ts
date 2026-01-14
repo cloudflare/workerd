@@ -3,20 +3,20 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
+import { STATUS_CODES } from 'node-internal:internal_http_constants'
 import {
+  _connectionListener,
+  httpServerPreClose,
+  kConnectionsCheckingInterval,
   Server,
   ServerResponse,
   setupConnectionsTracking,
   storeHTTPOptions,
-  _connectionListener,
-  httpServerPreClose,
-  kConnectionsCheckingInterval,
-} from 'node-internal:internal_http_server';
-import { kServerResponse } from 'node-internal:internal_http_util';
-import { STATUS_CODES } from 'node-internal:internal_http_constants';
+} from 'node-internal:internal_http_server'
+import { kServerResponse } from 'node-internal:internal_http_util'
 
-export { STATUS_CODES, kServerResponse };
-export * from 'node-internal:internal_http_server';
+export { STATUS_CODES, kServerResponse }
+export * from 'node-internal:internal_http_server'
 
 export default {
   STATUS_CODES,
@@ -28,4 +28,4 @@ export default {
   kServerResponse,
   httpServerPreClose,
   kConnectionsCheckingInterval,
-};
+}

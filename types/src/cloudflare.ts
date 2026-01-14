@@ -1,7 +1,7 @@
 // This file extends `standards.ts` with specific comments overrides for Cloudflare Workers APIs
 // that aren't adequately described by a standard .d.ts file
 
-import { CommentsData } from "./transforms";
+import type { CommentsData } from './transforms'
 export default {
   caches: {
     $: `*
@@ -77,4 +77,4 @@ export default {
   WorkerGlobalScope: {
     $: undefined,
   },
-} satisfies CommentsData;
+} satisfies CommentsData

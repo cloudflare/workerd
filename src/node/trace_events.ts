@@ -22,68 +22,68 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import type * as TraceEvents from 'node:trace_events';
-import { ERR_TRACE_EVENTS_CATEGORY_REQUIRED } from 'node-internal:internal_errors';
-import { validateObject, validateStringArray } from 'node-internal:validators';
-import { format, customInspectSymbol } from 'node-internal:internal_inspect';
+import type * as TraceEvents from 'node:trace_events'
+import { ERR_TRACE_EVENTS_CATEGORY_REQUIRED } from 'node-internal:internal_errors'
+import { customInspectSymbol, format } from 'node-internal:internal_inspect'
+import { validateObject, validateStringArray } from 'node-internal:validators'
 
 // TODO(soon): It is conceivable that we might implement this as part of
 // the workers observability features in the future. For now it's a non
 // functional stub.
 
 class Tracing implements TraceEvents.Tracing {
-  #categories: string[];
-  #enabled = false;
+  #categories: string[]
+  #enabled = false
 
   constructor(categories: string[]) {
-    this.#categories = categories;
+    this.#categories = categories
   }
 
   enable(): void {
-    this.#enabled = true;
+    this.#enabled = true
     // non-op
   }
 
   disable(): void {
-    this.#enabled = false;
+    this.#enabled = false
     // non-op
   }
 
   get enabled(): boolean {
-    return this.#enabled;
+    return this.#enabled
   }
 
   get categories(): string {
-    return this.#categories.join(',');
+    return this.#categories.join(',')
   }
 
   [customInspectSymbol](depth?: number, _: object = {}): string | object {
-    if (typeof depth === 'number' && depth < 0) return this;
+    if (typeof depth === 'number' && depth < 0) return this
 
     const obj = {
       enabled: this.enabled,
       categories: this.categories,
-    };
-    return `Tracing ${format(obj)}`;
+    }
+    return `Tracing ${format(obj)}`
   }
 }
 
 export function createTracing(
-  options: TraceEvents.CreateTracingOptions
+  options: TraceEvents.CreateTracingOptions,
 ): Tracing {
-  validateObject(options, 'options');
-  validateStringArray(options.categories, 'options.categories');
+  validateObject(options, 'options')
+  validateStringArray(options.categories, 'options.categories')
   if (options.categories.length <= 0) {
-    throw new ERR_TRACE_EVENTS_CATEGORY_REQUIRED();
+    throw new ERR_TRACE_EVENTS_CATEGORY_REQUIRED()
   }
-  return new Tracing(options.categories);
+  return new Tracing(options.categories)
 }
 
 export function getEnabledCategories(): string | undefined {
-  return undefined;
+  return undefined
 }
 
 export default {
   createTracing,
   getEnabledCategories,
-} satisfies typeof TraceEvents;
+} satisfies typeof TraceEvents

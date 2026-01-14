@@ -25,20 +25,20 @@
 
 /* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 
-import { notStrictEqual } from 'node-internal:internal_assert';
-import { Socket } from 'node-internal:internal_net';
-import { ERR_STREAM_WRAP } from 'node-internal:internal_errors';
-import { Duplex, toBYOBWeb } from 'node-internal:streams_duplex';
+import { notStrictEqual } from 'node-internal:internal_assert'
+import { ERR_STREAM_WRAP } from 'node-internal:internal_errors'
+import { Socket } from 'node-internal:internal_net'
 import type {
+  Socket as CloudflareSocket,
   SocketInfo,
   Writer,
-  Socket as CloudflareSocket,
-} from 'node-internal:sockets';
+} from 'node-internal:sockets'
+import { type Duplex, toBYOBWeb } from 'node-internal:streams_duplex'
 
-const kCurrentWriteRequest = Symbol('kCurrentWriteRequest');
-const kCurrentShutdownRequest = Symbol('kCurrentShutdownRequest');
-const kPendingShutdownRequest = Symbol('kPendingShutdownRequest');
-const kPendingClose = Symbol('kPendingClose');
+const kCurrentWriteRequest = Symbol('kCurrentWriteRequest')
+const kCurrentShutdownRequest = Symbol('kCurrentShutdownRequest')
+const kPendingShutdownRequest = Symbol('kPendingShutdownRequest')
+const kPendingClose = Symbol('kPendingClose')
 
 /* This class serves as a wrapper for when the C++ side of Node wants access
  * to a standard JS stream. For example, TLS or HTTP do not operate on network
@@ -57,40 +57,38 @@ export class JSStreamSocket extends Socket {
   [kCurrentWriteRequest]: null | unknown;
   [kCurrentShutdownRequest]: null | unknown;
   [kPendingShutdownRequest]: null | unknown;
-  [kPendingClose]: boolean;
+  [kPendingClose]: boolean
 
   constructor(stream: Duplex) {
     // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
-    const closePromise = Promise.withResolvers<void>();
-    const openPromise = Promise.withResolvers<SocketInfo>();
+    const closePromise = Promise.withResolvers<void>()
+    const openPromise = Promise.withResolvers<SocketInfo>()
 
-    const webStream = toBYOBWeb(stream);
+    const webStream = toBYOBWeb(stream)
     Object.assign(webStream.writable, {
       // eslint-disable-next-line @typescript-eslint/require-await
       write: async (data: string | ArrayBufferView): Promise<void> => {
-        stream.write(data);
+        stream.write(data)
       },
       closed: closePromise.promise,
       releaseLock: async (): Promise<void> => {},
-    });
+    })
     const handle: Socket['_handle'] = {
       reading: true,
       bytesRead: 0,
       bytesWritten: 0,
       socket: {
         startTls(): CloudflareSocket {
-          throw new Error(
-            'startTls() should not be called for a duplex stream'
-          );
+          throw new Error('startTls() should not be called for a duplex stream')
         },
         upgraded: false,
         secureTransport: 'off',
         closed: closePromise.promise,
         close: async (): Promise<void> => {
           queueMicrotask(() => {
-            closePromise.resolve();
-          });
-          return closePromise.promise;
+            closePromise.resolve()
+          })
+          return closePromise.promise
         },
         opened: openPromise.promise,
         readable: webStream.readable,
@@ -104,66 +102,66 @@ export class JSStreamSocket extends Socket {
         port: 0,
         addressType: 4,
       },
-    };
+    }
 
-    stream.pause();
-    stream.on('error', (err) => this.emit('error', err));
+    stream.pause()
+    stream.on('error', (err) => this.emit('error', err))
     const ondata = (chunk: string | Buffer): void => {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
       if (typeof chunk === 'string' || stream.readableObjectMode === true) {
         // Make sure that no further `data` events will happen.
-        stream.pause();
-        stream.removeListener('data', ondata);
+        stream.pause()
+        stream.removeListener('data', ondata)
 
-        this.emit('error', new ERR_STREAM_WRAP());
-        return;
+        this.emit('error', new ERR_STREAM_WRAP())
+        return
       }
 
       // TODO(soon): We need to trigger read() result for _handle.reader.read(buf) call
       // in node:net.
-    };
-    stream.on('data', ondata);
+    }
+    stream.on('data', ondata)
     stream.once('end', () => {
-      closePromise.resolve();
-    });
+      closePromise.resolve()
+    })
     // Some `Stream` don't pass `hasError` parameters when closed.
     stream.once('close', () => {
       // Errors emitted from `stream` have also been emitted to this instance
       // so that we don't pass errors to `destroy()` again.
-      this.destroy();
-    });
+      this.destroy()
+    })
 
-    super({ handle });
-    this.stream = stream;
-    this[kCurrentWriteRequest] = null;
-    this[kCurrentShutdownRequest] = null;
-    this[kPendingShutdownRequest] = null;
-    this[kPendingClose] = false;
-    this.readable = stream.readable;
+    super({ handle })
+    this.stream = stream
+    this[kCurrentWriteRequest] = null
+    this[kCurrentShutdownRequest] = null
+    this[kPendingShutdownRequest] = null
+    this[kPendingClose] = false
+    this.readable = stream.readable
     // @ts-expect-error TS2540 Read-only property.
-    this.writable = stream.writable;
+    this.writable = stream.writable
 
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    handle.socket.closed.then(this.doClose.bind(this));
+    handle.socket.closed.then(this.doClose.bind(this))
 
-    openPromise.resolve({});
+    openPromise.resolve({})
 
     // Start reading.
-    this.read(0);
+    this.read(0)
   }
 
   isClosing(): boolean {
-    return !this.readable || !this.writable;
+    return !this.readable || !this.writable
   }
 
   readStart(): number {
-    this.stream.resume();
-    return 0;
+    this.stream.resume()
+    return 0
   }
 
   readStop(): number {
-    this.stream.pause();
-    return 0;
+    this.stream.pause()
+    return 0
   }
 
   doShutdown(req: unknown): number {
@@ -177,32 +175,32 @@ export class JSStreamSocket extends Socket {
     // so for now that is supported here.
 
     if (this[kCurrentWriteRequest] !== null) {
-      this[kPendingShutdownRequest] = req;
-      return 0;
+      this[kPendingShutdownRequest] = req
+      return 0
     }
 
-    this[kCurrentShutdownRequest] = req;
+    this[kCurrentShutdownRequest] = req
 
     if (this[kPendingClose]) {
       // If doClose is pending, the stream & this._handle are gone. We can't do
       // anything. doClose will call finishShutdown with ECANCELED for us shortly.
-      return 0;
+      return 0
     }
 
-    const handle = this._handle;
-    notStrictEqual(handle, null);
+    const handle = this._handle
+    notStrictEqual(handle, null)
 
     queueMicrotask(() => {
       // Ensure that write is dispatched asynchronously.
-      this.stream.end();
-    });
-    return 0;
+      this.stream.end()
+    })
+    return 0
   }
 
   doClose(): void {
-    this[kPendingClose] = true;
+    this[kPendingClose] = true
 
-    const handle = this._handle;
+    const handle = this._handle
 
     // When sockets of the "net" module destroyed, they will call
     // `this._handle.close()` which will also emit EOF if not emitted before.
@@ -210,11 +208,11 @@ export class JSStreamSocket extends Socket {
     // even though we haven't called `end()`. As `stream` are likely to be
     // instances of `net.Socket`, calling `stream.destroy()` manually will
     // avoid issues that don't properly close wrapped connections.
-    this.stream.destroy();
+    this.stream.destroy()
 
     queueMicrotask(() => {
-      notStrictEqual(handle, null);
-      this[kPendingClose] = false;
-    });
+      notStrictEqual(handle, null)
+      this[kPendingClose] = false
+    })
   }
 }

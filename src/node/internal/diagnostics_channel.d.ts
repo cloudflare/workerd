@@ -3,6 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 
-export * from 'node:diagnostics_channel';
-export type TransformCallback = (value: unknown) => unknown;
-export type MessageCallback = (message: unknown, name: string | symbol) => void;
+export * from 'node:diagnostics_channel'
+export type TransformCallback = (value: unknown) => unknown
+export type MessageCallback = (message: unknown, name: string | symbol) => void

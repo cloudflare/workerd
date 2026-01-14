@@ -6,118 +6,118 @@
 // Generally all stubs that return empty or default values since we don't
 // ever expose any actual OS information to the user.
 
-import { validateNumber, validateObject } from 'node-internal:validators';
-import { Buffer } from 'node-internal:internal_buffer';
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
-import type { ValidEncoding } from 'node-internal:internal_fs_utils';
-import type { UserInfo, CpuInfo, NetworkInterfaceInfo } from 'node:os';
+import type { CpuInfo, NetworkInterfaceInfo, UserInfo } from 'node:os'
+import { Buffer } from 'node-internal:internal_buffer'
+import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors'
+import type { ValidEncoding } from 'node-internal:internal_fs_utils'
+import { validateNumber, validateObject } from 'node-internal:validators'
 
 // We always assume POSIX in the workers environment
-export const EOL = '\n';
-export const devNull = '/dev/null';
+export const EOL = '\n'
+export const devNull = '/dev/null'
 
 export function availableParallelism(): number {
-  return 1;
+  return 1
 }
 
 // While Workers does support arm in production, that fact is not exposed
 // to the user. Let's just always report x64.
 export function arch(): string {
-  return 'x64';
+  return 'x64'
 }
 
 // We do not expose CPU information to Workers.
 export function cpus(): CpuInfo[] {
-  return [];
+  return []
 }
 
 export function endianness(): 'LE' | 'BE' {
-  return 'LE';
+  return 'LE'
 }
 
 export function freemem(): number {
   // We do not currently expose memory information to Workers. We might
   // be able to in the future.
-  return 0;
+  return 0
 }
 
 export function getPriority(pid?: number): number {
   // Workers does not support process priority.
-  if (pid !== undefined) validateNumber(pid, 'pid');
-  return 0;
+  if (pid !== undefined) validateNumber(pid, 'pid')
+  return 0
 }
 
 export function homedir(): string {
   // Workers really does not have a home directory. Return /tmp
   // in preparation for the availability of node:fs in the future.
-  return '/tmp/';
+  return '/tmp/'
 }
 
 export function hostname(): string {
   // Workers does not have a hostname. Return 'localhost' for compatibility.
-  return 'localhost';
+  return 'localhost'
 }
 
 export function loadavg(): number[] {
   // Workers does not expose load average information.
-  return [0, 0, 0];
+  return [0, 0, 0]
 }
 
 export function machine(): string {
   // Workers does not expose the machine architecture.
-  return 'x86_64';
+  return 'x86_64'
 }
 
 export function networkInterfaces(): NetworkInterfaceInfo[] {
   // Workers does not expose network interfaces.
   // @ts-expect-error TS2740 We don't export properties here.
-  return {};
+  return {}
 }
 
 export function platform(): NodeJS.Platform {
   // Workers only supports POSIX platforms.
-  return 'linux';
+  return 'linux'
 }
 
 export function release(): string {
   // Workers does not expose the OS release information.
-  return '';
+  return ''
 }
 
 export function setPriority(pid: number, priority: number): void {
   // Workers does not support process priority.
   // Just ignore.
-  validateNumber(pid, 'pid');
-  validateNumber(priority, 'priority');
+  validateNumber(pid, 'pid')
+  validateNumber(priority, 'priority')
 }
 
 export function tmpdir(): string {
-  return '/tmp/';
+  return '/tmp/'
 }
 
 export function totalmem(): number {
   // We do not currently expose memory information to Workers. We might
   // be able to in the future.
-  return 0;
+  return 0
 }
 
 export function type(): string {
-  return 'Linux';
+  return 'Linux'
 }
 
 export function uptime(): number {
   // For now, we do not report uptime in Workers as it is not clear
   // exactly what it should be. We might be able to in the future
   // but we'll need to define what it means first.
-  return 0;
+  return 0
 }
 
 export function userInfo(
-  options: { encoding?: ValidEncoding | undefined } = {}
+  options: { encoding?: ValidEncoding | undefined } = {},
 ): UserInfo<unknown> {
   // We really do not have user information to share.
-  validateObject(options, 'options');
-  const { encoding = null } = options;
+  validateObject(options, 'options')
+  const { encoding = null } = options
   if (
     encoding !== null &&
     encoding !== 'buffer' &&
@@ -126,16 +126,16 @@ export function userInfo(
     throw new ERR_INVALID_ARG_VALUE(
       'options.encoding',
       encoding,
-      'must be a valid encoding'
-    );
+      'must be a valid encoding',
+    )
   }
   // @ts-expect-error TS2739 We don't export properties here.
-  return {};
+  return {}
 }
 
 export function version(): string {
   // Workers does not expose the OS version.
-  return '';
+  return ''
 }
 
 export const constants = {
@@ -276,12 +276,12 @@ export const constants = {
     PRIORITY_HIGH: -14,
     PRIORITY_HIGHEST: -20,
   },
-};
-Object.freeze(constants);
-Object.freeze(constants.dlopen);
-Object.freeze(constants.errno);
-Object.freeze(constants.signals);
-Object.freeze(constants.priority);
+}
+Object.freeze(constants)
+Object.freeze(constants.dlopen)
+Object.freeze(constants.errno)
+Object.freeze(constants.signals)
+Object.freeze(constants.priority)
 
 export default {
   EOL,
@@ -307,4 +307,4 @@ export default {
   uptime,
   userInfo,
   version,
-};
+}

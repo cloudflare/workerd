@@ -23,10 +23,8 @@ from typing import Any, Never, Protocol, TypedDict, Unpack
 # Get globals modules and import function from the entrypoint-helper
 import _pyodide_entrypoint_helper
 import js
-from js import Object
-
 import pyodide.http
-from pyodide import __version__ as pyodide_version
+from js import Object
 from pyodide.ffi import (
     JsBuffer,
     JsException,
@@ -36,6 +34,8 @@ from pyodide.ffi import (
     to_js,
 )
 from pyodide.http import pyfetch
+
+from pyodide import __version__ as pyodide_version
 from workers.workflows import NonRetryableError
 
 

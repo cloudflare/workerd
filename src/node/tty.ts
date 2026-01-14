@@ -22,103 +22,96 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { Socket } from 'node-internal:internal_net';
-
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
-
+import type { SocketConstructorOpts } from 'node:net'
 import type {
   ReadStream as ReadStreamType,
   WriteStream as WriteStreamType,
-} from 'node:tty';
-
-import type { SocketConstructorOpts } from 'node:net';
+} from 'node:tty'
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors'
+import { Socket } from 'node-internal:internal_net'
 
 export function isatty(_fd: number): boolean {
-  return false;
+  return false
 }
 
 export function ReadStream(
   this: ReadStreamType,
   _fd: number,
-  _options: SocketConstructorOpts = {}
+  _options: SocketConstructorOpts = {},
 ): ReadStreamType {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('ReadStream');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('ReadStream')
 }
 
-Object.setPrototypeOf(ReadStream.prototype, Socket.prototype);
-Object.setPrototypeOf(ReadStream, Socket);
+Object.setPrototypeOf(ReadStream.prototype, Socket.prototype)
+Object.setPrototypeOf(ReadStream, Socket)
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 ReadStream.prototype.setRawMode = function (_flag: boolean): ReadStreamType {
   // no-op.. really no reason to throw here.
-  return this as ReadStreamType;
-};
+  return this as ReadStreamType
+}
 
 export function WriteStream(
   this: WriteStreamType,
   _fd: number,
-  _options: SocketConstructorOpts = {}
+  _options: SocketConstructorOpts = {},
 ): WriteStreamType {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('WriteStream');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('WriteStream')
 }
 
-Object.setPrototypeOf(WriteStream.prototype, Socket.prototype);
-Object.setPrototypeOf(WriteStream, Socket);
+Object.setPrototypeOf(WriteStream.prototype, Socket.prototype)
+Object.setPrototypeOf(WriteStream, Socket)
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype.isTTY = true;
+WriteStream.prototype.isTTY = true
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype.getColorDepth = function (): number {
-  return 8; // In Node.js, this means 256 colors, but we don't support colors at all.
-};
+WriteStream.prototype.getColorDepth = (): number => {
+  return 8 // In Node.js, this means 256 colors, but we don't support colors at all.
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype.hasColors = function (): boolean {
-  return false;
-};
+WriteStream.prototype.hasColors = (): boolean => false
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype._refreshSize = function (): void {
+WriteStream.prototype._refreshSize = (): void => {
   // no-op
-};
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype.cursorTo = function (
+WriteStream.prototype.cursorTo = (
   _x: number,
   _y: number,
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-  _callback: Function
-): boolean {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('cursorTo');
-};
+  _callback: Function,
+): boolean => {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('cursorTo')
+}
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype.moveCursor = function (
+WriteStream.prototype.moveCursor = (
   _dx: number,
   _dy: number,
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-  _callback: Function
-): boolean {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('moveCursor');
-};
+  _callback: Function,
+): boolean => {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('moveCursor')
+}
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype.clearLine = function (
+WriteStream.prototype.clearLine = (
   _dir: number,
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-  _callback: Function
-): boolean {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('clearLine');
-};
+  _callback: Function,
+): boolean => {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('clearLine')
+}
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype.clearScreenDown = function (
+WriteStream.prototype.clearScreenDown = (
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-  _callback: Function
-): boolean {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('clearScreenDown');
-};
+  _callback: Function,
+): boolean => {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('clearScreenDown')
+}
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-WriteStream.prototype.getWindowSize = function (): [number, number] {
-  return [0, 0];
-};
+WriteStream.prototype.getWindowSize = (): [number, number] => [0, 0]
 
-export default { isatty, ReadStream, WriteStream };
+export default { isatty, ReadStream, WriteStream }

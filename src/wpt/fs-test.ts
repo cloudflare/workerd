@@ -2,17 +2,17 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
-const root = await navigator.storage.getDirectory();
-const tmp = await root.getDirectoryHandle('tmp');
+const root = await navigator.storage.getDirectory()
+const tmp = await root.getDirectoryHandle('tmp')
 // The root is read-only, so we need to use a writable subdirectory
 // to actually run the tests.
 navigator.storage.getDirectory =
   async (): Promise<FileSystemDirectoryHandle> => {
     // Let's create a new random tmp subdirectory for each test run to avoid interference
-    return tmp.getDirectoryHandle(crypto.randomUUID(), { create: true });
-  };
+    return tmp.getDirectoryHandle(crypto.randomUUID(), { create: true })
+  }
 
 export default {
   'FileSystemBaseHandle-IndexedDB.https.any.js': {
@@ -347,4 +347,4 @@ export default {
     comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

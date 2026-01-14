@@ -23,62 +23,57 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { default as cryptoImpl } from 'node-internal:crypto';
-
+import { default as cryptoImpl } from 'node-internal:crypto'
+import { KeyObject } from 'node-internal:crypto_keys'
 import {
   validateFunction,
   validateInteger,
   validateString,
-} from 'node-internal:validators';
+} from 'node-internal:validators'
 
-import { KeyObject } from 'node-internal:crypto_keys';
+type ArrayLike = cryptoImpl.ArrayLike
 
-type ArrayLike = cryptoImpl.ArrayLike;
-
-import { kMaxLength } from 'node-internal:internal_buffer';
-
-import { toBuf, validateByteSource } from 'node-internal:crypto_util';
-
-import {
-  isAnyArrayBuffer,
-  isArrayBufferView,
-} from 'node-internal:internal_types';
-
+import { toBuf, validateByteSource } from 'node-internal:crypto_util'
+import { kMaxLength } from 'node-internal:internal_buffer'
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_OUT_OF_RANGE,
-} from 'node-internal:internal_errors';
+} from 'node-internal:internal_errors'
+import {
+  isAnyArrayBuffer,
+  isArrayBufferView,
+} from 'node-internal:internal_types'
 
 function validateParameters(
   hash: string,
   key: ArrayLike | KeyObject,
   salt: ArrayLike,
   info: ArrayLike,
-  length: number
+  length: number,
 ): {
-  hash: string;
-  key: ArrayLike;
-  salt: ArrayLike;
-  info: ArrayLike;
-  length: number;
+  hash: string
+  key: ArrayLike
+  salt: ArrayLike
+  info: ArrayLike
+  length: number
 } {
   if (key instanceof KeyObject) {
-    key = key.export() as ArrayLike;
+    key = key.export() as ArrayLike
   }
 
-  validateString(hash, 'digest');
-  key = prepareKey(key as unknown as ArrayLike);
-  salt = validateByteSource(salt, 'salt');
-  info = validateByteSource(info, 'info');
+  validateString(hash, 'digest')
+  key = prepareKey(key as unknown as ArrayLike)
+  salt = validateByteSource(salt, 'salt')
+  info = validateByteSource(info, 'info')
 
-  validateInteger(length, 'length', 0, kMaxLength);
+  validateInteger(length, 'length', 0, kMaxLength)
 
   if (info.byteLength > 1024) {
     throw new ERR_OUT_OF_RANGE(
       'info',
       'must not contain more than 1024 bytes',
-      info.byteLength
-    );
+      info.byteLength,
+    )
   }
 
   return {
@@ -87,11 +82,11 @@ function validateParameters(
     salt,
     info,
     length,
-  };
+  }
 }
 
 function prepareKey(key: ArrayLike): ArrayLike {
-  key = toBuf(key);
+  key = toBuf(key)
 
   if (!isAnyArrayBuffer(key) && !isArrayBufferView(key)) {
     throw new ERR_INVALID_ARG_TYPE(
@@ -104,11 +99,11 @@ function prepareKey(key: ArrayLike): ArrayLike {
         'DataView',
         'Buffer',
       ],
-      key
-    );
+      key,
+    )
   }
 
-  return key;
+  return key
 }
 
 export function hkdf(
@@ -117,32 +112,32 @@ export function hkdf(
   salt: ArrayLike,
   info: ArrayLike,
   length: number,
-  callback: (err: Error | null, derivedKey?: ArrayBuffer) => void
+  callback: (err: Error | null, derivedKey?: ArrayBuffer) => void,
 ): void {
-  ({ hash, key, salt, info, length } = validateParameters(
+  ;({ hash, key, salt, info, length } = validateParameters(
     hash,
     key,
     salt,
     info,
-    length
-  ));
+    length,
+  ))
 
-  validateFunction(callback, 'callback');
+  validateFunction(callback, 'callback')
 
   new Promise<ArrayBuffer>((res, rej) => {
     try {
-      res(cryptoImpl.getHkdf(hash, key, salt, info, length));
+      res(cryptoImpl.getHkdf(hash, key, salt, info, length))
     } catch (err) {
-      rej(err as Error);
+      rej(err as Error)
     }
   }).then(
     (val: ArrayBuffer): void => {
-      callback(null, val);
+      callback(null, val)
     },
     (err: unknown): void => {
-      callback(err);
-    }
-  );
+      callback(err)
+    },
+  )
 }
 
 export function hkdfSync(
@@ -150,15 +145,15 @@ export function hkdfSync(
   key: ArrayLike | KeyObject,
   salt: ArrayLike,
   info: ArrayLike,
-  length: number
+  length: number,
 ): ArrayBuffer {
-  ({ hash, key, salt, info, length } = validateParameters(
+  ;({ hash, key, salt, info, length } = validateParameters(
     hash,
     key,
     salt,
     info,
-    length
-  ));
+    length,
+  ))
 
-  return cryptoImpl.getHkdf(hash, key, salt, info, length);
+  return cryptoImpl.getHkdf(hash, key, salt, info, length)
 }

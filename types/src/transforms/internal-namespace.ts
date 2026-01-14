@@ -2,13 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from 'node:assert';
-import { Structure, StructureGroups } from '@workerd/jsg/rtti';
-import ts from 'typescript';
-import { StructureMap, getTypeName } from '../generator';
-import { maybeExtractGlobalNode } from './globals';
-import { ensureStatementModifiers } from './helpers';
-import { createRenameVisitor } from './overrides';
+import assert from 'node:assert'
+import type { Structure, StructureGroups } from '@workerd/jsg/rtti'
+import ts from 'typescript'
+import { getTypeName, type StructureMap } from '../generator'
+import { maybeExtractGlobalNode } from './globals'
+import { ensureStatementModifiers } from './helpers'
+import { createRenameVisitor } from './overrides'
 
 // Moves all members (excluding imports) of internal `declare module` blocks
 // into namespaces that are then `export default`ed:
@@ -67,38 +67,38 @@ import { createRenameVisitor } from './overrides';
 // becomes `Channel`, with `T`s becoming `unknown`).
 export function createInternalNamespaceTransformer(
   root: StructureGroups,
-  structureMap: StructureMap
+  structureMap: StructureMap,
 ): ts.TransformerFactory<ts.SourceFile> {
   return (ctx) => {
     return (node) => {
       const moduleStructures = collectInternalModuleStructures(
         root,
-        structureMap
-      );
-      const visitor = createInternalNamespaceVisitor(moduleStructures, ctx);
-      return ts.visitEachChild(node, visitor, ctx);
-    };
-  };
+        structureMap,
+      )
+      const visitor = createInternalNamespaceVisitor(moduleStructures, ctx)
+      return ts.visitEachChild(node, visitor, ctx)
+    }
+  }
 }
 
 function collectInternalModuleStructures(
   root: StructureGroups,
-  structureMap: StructureMap
+  structureMap: StructureMap,
 ): Map<string, Structure> {
-  const moduleRoots = new Map</* specifier */ string, Structure>(); // TODO: add members here as well?
+  const moduleRoots = new Map</* specifier */ string, Structure>() // TODO: add members here as well?
   root.modules.forEach((module) => {
-    if (!module._isStructureName) return;
-    const structure = structureMap.get(module.structureName);
-    assert(structure !== undefined, 'Structure is undefined');
-    const specifier = module.specifier;
-    moduleRoots.set(specifier, structure);
-  });
-  return moduleRoots;
+    if (!module._isStructureName) return
+    const structure = structureMap.get(module.structureName)
+    assert(structure !== undefined, 'Structure is undefined')
+    const specifier = module.specifier
+    moduleRoots.set(specifier, structure)
+  })
+  return moduleRoots
 }
 
 function createInternalNamespaceVisitor(
   moduleRoots: ReturnType<typeof collectInternalModuleStructures>,
-  ctx: ts.TransformationContext
+  ctx: ts.TransformationContext,
 ): ts.Visitor {
   const visitor: ts.Visitor = (node) => {
     if (
@@ -110,39 +110,39 @@ function createInternalNamespaceVisitor(
     ) {
       // This transformer should only be called on types generated from C++.
       // Therefore, all `declare modules` represent internal modules.
-      const moduleRoot = moduleRoots.get(node.name.text);
+      const moduleRoot = moduleRoots.get(node.name.text)
       assert(
         moduleRoot !== undefined,
-        `Expected "${node.name.text}" to be an internal module`
-      );
-      const moduleRootName = getTypeName(moduleRoot);
+        `Expected "${node.name.text}" to be an internal module`,
+      )
+      const moduleRootName = getTypeName(moduleRoot)
 
       // Ensure all nested types have the correct name. We do this after
       // overrides as some module members would otherwise have the same name as
       // global types (e.g. `cloudflare:workers` `DurableObjectBase` and
       // `DurableObject`)
-      const renames = new Map</* from */ string, /* to */ string>();
+      const renames = new Map</* from */ string, /* to */ string>()
       moduleRoot.members.forEach((member) => {
         if (member._isNested) {
-          const nested = member.nested;
-          const generatedName = getTypeName(nested.structure);
-          const actualName = nested.name;
+          const nested = member.nested
+          const generatedName = getTypeName(nested.structure)
+          const actualName = nested.name
           if (generatedName !== actualName) {
-            renames.set(generatedName, actualName);
+            renames.set(generatedName, actualName)
           }
         }
-      });
+      })
 
       // Filter array of statements to keep at the top-level of the module, and
       // build array of statements to include in default namespace export
-      const namespaceStatements: ts.Statement[] = [];
+      const namespaceStatements: ts.Statement[] = []
       const moduleStatements = node.body.statements.filter((statement) => {
         if (
           ts.isImportDeclaration(statement) ||
           ts.isImportEqualsDeclaration(statement)
         ) {
           // Keep import statements at top-level of module
-          return true;
+          return true
         } else if (
           ts.isInterfaceDeclaration(statement) &&
           statement.name.text === moduleRootName
@@ -153,57 +153,57 @@ function createInternalNamespaceVisitor(
           // never have type parameters too, so we don't need to worry about
           // inlining type arguments, unlike the global scope visitor.
           for (const member of statement.members) {
-            const maybeNode = maybeExtractGlobalNode(ctx, member);
-            if (maybeNode !== undefined) namespaceStatements.push(maybeNode);
+            const maybeNode = maybeExtractGlobalNode(ctx, member)
+            if (maybeNode !== undefined) namespaceStatements.push(maybeNode)
           }
           // Remove the root type from the module top-level
-          return false;
+          return false
         } else {
           // Assume all other class/interface definitions are nested types that
           // should be included in the default namespace export...
           namespaceStatements.push(
-            ensureStatementModifiers(ctx, statement, { declare: false })
-          );
+            ensureStatementModifiers(ctx, statement, { declare: false }),
+          )
           // ...and removed from the module top-level
-          return false;
+          return false
         }
-      });
+      })
 
       // Add default namespace export to top-level statements
-      const defaultIdentifier = ctx.factory.createIdentifier('_default');
-      const namespaceBody = ctx.factory.createModuleBlock(namespaceStatements);
+      const defaultIdentifier = ctx.factory.createIdentifier('_default')
+      const namespaceBody = ctx.factory.createModuleBlock(namespaceStatements)
       const namespaceDeclaration = ctx.factory.createModuleDeclaration(
         /* modifiers */ undefined,
         defaultIdentifier,
         namespaceBody,
-        ts.NodeFlags.Namespace
-      );
+        ts.NodeFlags.Namespace,
+      )
       const exportStatement = ctx.factory.createExportAssignment(
         /* modifiers */ undefined,
         /* isExportEquals */ undefined,
-        defaultIdentifier
-      );
-      moduleStatements.push(namespaceDeclaration, exportStatement);
+        defaultIdentifier,
+      )
+      moduleStatements.push(namespaceDeclaration, exportStatement)
 
       // Return updated module declaration with new top-level statements
-      let body = ctx.factory.updateModuleBlock(node.body, moduleStatements);
+      let body = ctx.factory.updateModuleBlock(node.body, moduleStatements)
       if (renames.size > 0) {
         const renameVisitor = createRenameVisitor(
           ctx,
           renames,
-          /* renameClassesInterfaces */ true
-        );
-        body = ts.visitEachChild(body, renameVisitor, ctx);
+          /* renameClassesInterfaces */ true,
+        )
+        body = ts.visitEachChild(body, renameVisitor, ctx)
       }
       return ctx.factory.updateModuleDeclaration(
         node,
         node.modifiers,
         node.name,
-        body
-      );
+        body,
+      )
     }
 
-    return node;
-  };
-  return visitor;
+    return node
+  }
+  return visitor
 }

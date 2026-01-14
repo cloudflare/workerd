@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
-import ts from "typescript";
+import assert from 'node:assert'
+import ts from 'typescript'
 
 // Copies all properties of `ServiceWorkerGlobalScope` and its superclasses into
 // the global scope:
@@ -36,37 +36,37 @@ import ts from "typescript";
 // export declare const crypto: Crypto;
 // ```
 export function createGlobalScopeTransformer(
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
 ): ts.TransformerFactory<ts.SourceFile> {
   return (ctx) => {
     return (node) => {
-      const visitor = createGlobalScopeVisitor(ctx, checker);
-      return ts.visitEachChild(node, visitor, ctx);
-    };
-  };
+      const visitor = createGlobalScopeVisitor(ctx, checker)
+      return ts.visitEachChild(node, visitor, ctx)
+    }
+  }
 }
 
 // Copy type nodes everywhere they are referenced
 function createInlineVisitor(
   ctx: ts.TransformationContext,
-  inlines: Map<string, ts.TypeNode>
+  inlines: Map<string, ts.TypeNode>,
 ): ts.Visitor<ts.Node, ts.Node> {
   // If there's nothing to inline, just return identity visitor
-  if (inlines.size === 0) return (node) => node;
+  if (inlines.size === 0) return (node) => node
 
   const visitor: ts.Visitor<ts.Node, ts.Node> = (node) => {
     // Recursively visit all nodes
-    node = ts.visitEachChild(node, visitor, ctx);
+    node = ts.visitEachChild(node, visitor, ctx)
 
     // Inline all matching type references
     if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
-      const inline = inlines.get(node.typeName.text);
-      if (inline !== undefined) return inline;
+      const inline = inlines.get(node.typeName.text)
+      if (inline !== undefined) return inline
     }
 
-    return node;
-  };
-  return visitor;
+    return node
+  }
+  return visitor
 }
 
 // Call with each potential method/property that could be extracted into a
@@ -74,7 +74,7 @@ function createInlineVisitor(
 export function maybeExtractGlobalNode(
   ctx: ts.TransformationContext,
   node: ts.Node,
-  modifiers?: readonly ts.ModifierLike[]
+  modifiers?: readonly ts.ModifierLike[],
 ): ts.Statement | undefined {
   if (
     (ts.isMethodSignature(node) || ts.isMethodDeclaration(node)) &&
@@ -87,8 +87,8 @@ export function maybeExtractGlobalNode(
       node.typeParameters,
       node.parameters,
       node.type,
-      /* body */ undefined
-    );
+      /* body */ undefined,
+    )
   }
   if (
     (ts.isPropertySignature(node) ||
@@ -96,48 +96,48 @@ export function maybeExtractGlobalNode(
       ts.isGetAccessorDeclaration(node)) &&
     ts.isIdentifier(node.name)
   ) {
-    assert(node.type !== undefined);
+    assert(node.type !== undefined)
     // Don't create global nodes for nested types, they'll already be there
     if (!ts.isTypeQueryNode(node.type)) {
       const varDeclaration = ctx.factory.createVariableDeclaration(
         node.name,
         /* exclamationToken */ undefined,
-        node.type
-      );
+        node.type,
+      )
       const varDeclarationList = ctx.factory.createVariableDeclarationList(
         [varDeclaration],
-        ts.NodeFlags.Const // Use `const` instead of `var`
-      );
-      return ctx.factory.createVariableStatement(modifiers, varDeclarationList);
+        ts.NodeFlags.Const, // Use `const` instead of `var`
+      )
+      return ctx.factory.createVariableStatement(modifiers, varDeclarationList)
     }
   }
 }
 
 function createGlobalScopeVisitor(
   ctx: ts.TransformationContext,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
 ): ts.Visitor {
   // Called with each class/interface that should have its methods/properties
   // extracted into global functions/consts. Recursively visits superclasses.
   function extractGlobalNodes(
     node: ts.InterfaceDeclaration | ts.ClassDeclaration,
-    typeArgs?: ts.NodeArray<ts.TypeNode>
+    typeArgs?: ts.NodeArray<ts.TypeNode>,
   ): ts.Node[] {
-    const nodes: ts.Node[] = [];
+    const nodes: ts.Node[] = []
 
     // If this declaration has type parameters, we'll need to inline them when
     // extracting members.
-    const typeArgInlines = new Map<string, ts.TypeNode>();
+    const typeArgInlines = new Map<string, ts.TypeNode>()
     if (node.typeParameters) {
       assert(
         node.typeParameters.length === typeArgs?.length,
-        `Expected ${node.typeParameters.length} type argument(s), got ${typeArgs?.length}`
-      );
+        `Expected ${node.typeParameters.length} type argument(s), got ${typeArgs?.length}`,
+      )
       node.typeParameters.forEach((typeParam, index) => {
-        typeArgInlines.set(typeParam.name.text, typeArgs[index]);
-      });
+        typeArgInlines.set(typeParam.name.text, typeArgs[index])
+      })
     }
-    const inlineVisitor = createInlineVisitor(ctx, typeArgInlines);
+    const inlineVisitor = createInlineVisitor(ctx, typeArgInlines)
 
     // Recursively extract from all superclasses
     if (node.heritageClauses !== undefined) {
@@ -148,25 +148,28 @@ function createGlobalScopeVisitor(
         // class B<T> extends A<T> {}
         // class C extends B<string> {}
         // ```
-        clause = ts.visitNode(clause, inlineVisitor, ts.isHeritageClause);
+        clause = ts.visitNode(clause, inlineVisitor, ts.isHeritageClause)
 
         for (const superType of clause.types) {
           const superTypeSymbol = checker.getSymbolAtLocation(
-            superType.expression
-          );
-          assert(superTypeSymbol !== undefined);
-          const superTypeDeclarations = superTypeSymbol.getDeclarations();
-          assert.strictEqual(superTypeDeclarations?.length, 1);
-          const superTypeDeclaration = superTypeDeclarations[0];
+            superType.expression,
+          )
+          assert(superTypeSymbol !== undefined)
+          const superTypeDeclarations = superTypeSymbol.getDeclarations()
+          assert.strictEqual(superTypeDeclarations?.length, 1)
+          const superTypeDeclaration = superTypeDeclarations[0]
           assert(
             ts.isInterfaceDeclaration(superTypeDeclaration) ||
-              ts.isClassDeclaration(superTypeDeclaration)
-          );
+              ts.isClassDeclaration(superTypeDeclaration),
+          )
           nodes.push(
             // Pass any defined type arguments for inlining in extracted nodes
             // (e.g. `...extends EventTarget<WorkerGlobalScopeEventMap>`).
-            ...extractGlobalNodes(superTypeDeclaration, superType.typeArguments)
-          );
+            ...extractGlobalNodes(
+              superTypeDeclaration,
+              superType.typeArguments,
+            ),
+          )
         }
       }
     }
@@ -174,15 +177,15 @@ function createGlobalScopeVisitor(
     // Extract methods/properties
     const modifiers: ts.Modifier[] = [
       ctx.factory.createToken(ts.SyntaxKind.DeclareKeyword),
-    ];
+    ]
     for (const member of node.members) {
-      const maybeNode = maybeExtractGlobalNode(ctx, member, modifiers);
+      const maybeNode = maybeExtractGlobalNode(ctx, member, modifiers)
       if (maybeNode !== undefined) {
-        nodes.push(ts.visitNode(maybeNode, inlineVisitor));
+        nodes.push(ts.visitNode(maybeNode, inlineVisitor))
       }
     }
 
-    return nodes;
+    return nodes
   }
 
   // Finds the `ServiceWorkerGlobalScope` declaration, calls
@@ -191,11 +194,11 @@ function createGlobalScopeVisitor(
     if (
       (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) &&
       node.name !== undefined &&
-      node.name.text === "ServiceWorkerGlobalScope"
+      node.name.text === 'ServiceWorkerGlobalScope'
     ) {
-      return [node, ...extractGlobalNodes(node)];
+      return [node, ...extractGlobalNodes(node)]
     }
-    return node;
-  };
-  return serviceWorkerGlobalScopeVisitor;
+    return node
+  }
+  return serviceWorkerGlobalScopeVisitor
 }

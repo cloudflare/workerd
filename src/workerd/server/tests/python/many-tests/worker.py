@@ -4,10 +4,10 @@ import os
 from pathlib import Path
 
 from js import Date, Reflect, setTimeout
+from pyodide.ffi import create_once_callable, create_proxy, to_js
 from workers import WorkerEntrypoint, env, import_from_javascript, patch_env
 
 from pyodide import __version__
-from pyodide.ffi import create_once_callable, create_proxy, to_js
 
 
 def use(x):
@@ -43,7 +43,6 @@ def top_level_test():
         )
 
     from js import setTimeout
-
     from pyodide.ffi import create_once_callable
 
     # Checks for the patch to top level setTimeout() that is needed for top level

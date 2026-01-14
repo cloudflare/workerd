@@ -23,42 +23,39 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { default as cryptoImpl } from 'node-internal:crypto';
-
+import { default as cryptoImpl } from 'node-internal:crypto'
+import { Buffer } from 'node-internal:internal_buffer'
 import {
   validateFunction,
   validateInteger,
   validateUint32,
-} from 'node-internal:validators';
+} from 'node-internal:validators'
 
-import { Buffer } from 'node-internal:internal_buffer';
+type ArrayLike = cryptoImpl.ArrayLike
 
-type ArrayLike = cryptoImpl.ArrayLike;
+import { getArrayBufferOrView } from 'node-internal:crypto_util'
+import { kMaxLength } from 'node-internal:internal_buffer'
 
-import { kMaxLength } from 'node-internal:internal_buffer';
-
-import { getArrayBufferOrView } from 'node-internal:crypto_util';
-
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors'
 
 export interface ValidatedScryptOptions {
-  password: ArrayLike;
-  salt: ArrayLike;
-  keylen: number;
-  N: number;
-  r: number;
-  p: number;
-  maxmem: number;
+  password: ArrayLike
+  salt: ArrayLike
+  keylen: number
+  N: number
+  r: number
+  p: number
+  maxmem: number
 }
 
 export interface ScryptOptions {
-  N?: number;
-  r?: number;
-  p?: number;
-  maxmem?: number;
-  cost?: number;
-  blockSize?: number;
-  parallelization?: number;
+  N?: number
+  r?: number
+  p?: number
+  maxmem?: number
+  cost?: number
+  blockSize?: number
+  parallelization?: number
 }
 
 const defaults: ScryptOptions = {
@@ -66,72 +63,71 @@ const defaults: ScryptOptions = {
   r: 8,
   p: 1,
   maxmem: 32 << 20,
-};
+}
 
 function validateParameters(
   password: ArrayLike,
   salt: ArrayLike,
   keylen: number,
-  options?: ScryptOptions
+  options?: ScryptOptions,
 ): ValidatedScryptOptions {
   // TODO(soon): Add support for KeyObject input.
-  password = getArrayBufferOrView(password, 'password');
-  salt = getArrayBufferOrView(salt, 'salt');
+  password = getArrayBufferOrView(password, 'password')
+  salt = getArrayBufferOrView(salt, 'salt')
 
   if (password.byteLength >= kMaxLength) {
-    throw new ERR_INVALID_ARG_VALUE('password', password, 'is too big');
+    throw new ERR_INVALID_ARG_VALUE('password', password, 'is too big')
   }
   if (salt.byteLength >= kMaxLength) {
-    throw new ERR_INVALID_ARG_VALUE('salt', salt, 'is too big');
+    throw new ERR_INVALID_ARG_VALUE('salt', salt, 'is too big')
   }
 
-  validateInteger(keylen, 'keylen', 0, kMaxLength);
+  validateInteger(keylen, 'keylen', 0, kMaxLength)
 
-  let { N, r, p, maxmem } = defaults;
+  let { N, r, p, maxmem } = defaults
   if (options && options !== defaults) {
-    const has_N = options.N !== undefined;
+    const has_N = options.N !== undefined
     if (has_N) {
-      N = options.N;
-      validateUint32(N, 'N');
+      N = options.N
+      validateUint32(N, 'N')
     }
     if (options.cost !== undefined) {
-      if (has_N) throw new ERR_INVALID_ARG_VALUE('cost', options.cost);
-      N = options.cost;
-      validateUint32(N, 'cost');
+      if (has_N) throw new ERR_INVALID_ARG_VALUE('cost', options.cost)
+      N = options.cost
+      validateUint32(N, 'cost')
     }
-    const has_r = options.r !== undefined;
+    const has_r = options.r !== undefined
     if (has_r) {
-      r = options.r;
-      validateUint32(r, 'r');
+      r = options.r
+      validateUint32(r, 'r')
     }
     if (options.blockSize !== undefined) {
-      if (has_r)
-        throw new ERR_INVALID_ARG_VALUE('blockSize', options.blockSize);
-      r = options.blockSize;
-      validateUint32(r, 'blockSize');
+      if (has_r) throw new ERR_INVALID_ARG_VALUE('blockSize', options.blockSize)
+      r = options.blockSize
+      validateUint32(r, 'blockSize')
     }
-    const has_p = options.p !== undefined;
+    const has_p = options.p !== undefined
     if (has_p) {
-      p = options.p;
-      validateUint32(p, 'p');
+      p = options.p
+      validateUint32(p, 'p')
     }
     if (options.parallelization !== undefined) {
       if (has_p)
         throw new ERR_INVALID_ARG_VALUE(
           'parallelization',
-          options.parallelization
-        );
-      p = options.parallelization;
-      validateUint32(p, 'parallelization');
+          options.parallelization,
+        )
+      p = options.parallelization
+      validateUint32(p, 'parallelization')
     }
     if (options.maxmem !== undefined) {
-      maxmem = options.maxmem;
-      validateInteger(maxmem, 'maxmem', 0);
+      maxmem = options.maxmem
+      validateInteger(maxmem, 'maxmem', 0)
     }
-    if (N === 0) N = defaults.N;
-    if (r === 0) r = defaults.r;
-    if (p === 0) p = defaults.p;
-    if (maxmem === 0) maxmem = defaults.maxmem;
+    if (N === 0) N = defaults.N
+    if (r === 0) r = defaults.r
+    if (p === 0) p = defaults.p
+    if (maxmem === 0) maxmem = defaults.maxmem
   }
 
   return {
@@ -142,71 +138,71 @@ function validateParameters(
     r: r as number,
     p: p as number,
     maxmem: maxmem as number,
-  };
+  }
 }
 
-type Callback = (err: Error | null, derivedKey?: Buffer) => void;
-type OptionsOrCallback = ScryptOptions | Callback;
+type Callback = (err: Error | null, derivedKey?: Buffer) => void
+type OptionsOrCallback = ScryptOptions | Callback
 
 export function scrypt(
   password: ArrayLike,
   salt: ArrayLike,
   keylen: number,
   options: OptionsOrCallback,
-  callback: OptionsOrCallback = defaults
+  callback: OptionsOrCallback = defaults,
 ): void {
   if (callback === defaults) {
-    callback = options;
-    options = defaults;
+    callback = options
+    options = defaults
   }
 
-  let N: number;
-  let r: number;
-  let p: number;
-  let maxmem: number;
-  ({ password, salt, keylen, N, r, p, maxmem } = validateParameters(
+  let N: number
+  let r: number
+  let p: number
+  let maxmem: number
+  ;({ password, salt, keylen, N, r, p, maxmem } = validateParameters(
     password,
     salt,
     keylen,
-    options as ScryptOptions
-  ));
+    options as ScryptOptions,
+  ))
 
-  validateFunction(callback, 'callback');
+  validateFunction(callback, 'callback')
 
   new Promise<ArrayBuffer>((res, rej) => {
     try {
-      res(cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen));
+      res(cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen))
     } catch (err) {
-      rej(err as Error);
+      rej(err as Error)
     }
   }).then(
     (val: ArrayBuffer) => {
-      (callback as Callback)(null, Buffer.from(val));
+      ;(callback as Callback)(null, Buffer.from(val))
     },
     (err: unknown) => {
-      (callback as Callback)(err as Error);
-    }
-  );
+      ;(callback as Callback)(err as Error)
+    },
+  )
 }
 
 export function scryptSync(
   password: ArrayLike,
   salt: ArrayLike,
   keylen: number,
-  options: ScryptOptions
+  options: ScryptOptions,
 ): Buffer {
-  let N: number;
-  let r: number;
-  let p: number;
-  let maxmem: number;
-  ({ password, salt, keylen, N, r, p, maxmem } = validateParameters(
+  let N: number
+  let r: number
+  let p: number
+  let maxmem: number
+  ;({ password, salt, keylen, N, r, p, maxmem } = validateParameters(
     password,
     salt,
     keylen,
-    options
-  ));
+    options,
+  ))
 
   return Buffer.from(
-    cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen)
-  );
+    cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen),
+  )
 }

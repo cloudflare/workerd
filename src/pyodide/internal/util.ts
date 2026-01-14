@@ -5,7 +5,7 @@
  */
 export class PythonWorkersInternalError extends Error {
   override get name(): string {
-    return this.constructor.name;
+    return this.constructor.name
   }
 }
 
@@ -15,7 +15,7 @@ export class PythonWorkersInternalError extends Error {
  */
 export class PythonUserError extends Error {
   override get name(): string {
-    return this.constructor.name;
+    return this.constructor.name
   }
 }
 
@@ -24,9 +24,9 @@ export class PythonUserError extends Error {
 // very hard to read.
 export function reportError(e: Error): never {
   e.stack?.split('\n').forEach((s: string) => {
-    console.warn(s);
-  });
-  throw e;
+    console.warn(s)
+  })
+  throw e
 }
 
 /**
@@ -56,35 +56,35 @@ export function reportError(e: Error): never {
  */
 export function simpleRunPython(
   emscriptenModule: Module,
-  code: string
+  code: string,
 ): string {
-  const [status, cause] = emscriptenModule.API.rawRun(code);
+  const [status, cause] = emscriptenModule.API.rawRun(code)
   // status 0: Ok
   // status -1: Error
   if (status === -1) {
     // PyRun_SimpleString will have written a Python traceback to stderr.
-    console.warn('Command failed:', code);
-    console.warn(cause);
+    console.warn('Command failed:', code)
+    console.warn(cause)
     throw new PythonWorkersInternalError(
-      'Failed to run Python code:\n' + code + '\n\nError:\n' + cause
-    );
+      `Failed to run Python code:\n${code}\n\nError:\n${cause}`,
+    )
   }
-  return cause;
+  return cause
 }
 
 export function invalidateCaches(Module: Module): void {
   simpleRunPython(
     Module,
-    `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`
-  );
+    `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`,
+  )
 }
 
 export function unreachable(
   obj: never,
-  msg: string | undefined = undefined
+  msg: string | undefined = undefined,
 ): never {
   if (msg === undefined) {
-    msg = obj;
+    msg = obj
   }
-  throw new PythonWorkersInternalError(`Unreachable: ${msg}`);
+  throw new PythonWorkersInternalError(`Unreachable: ${msg}`)
 }

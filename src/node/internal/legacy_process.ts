@@ -3,27 +3,26 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 
+import {
+  _setEventsProcess,
+  env,
+  features,
+  nextTick,
+  platform,
+} from 'node-internal:internal_process'
 // Legacy process wrapper only exports limited process exports.
 // This is used when the enable_nodejs_process_v2 compat flag is disabled.
 // node:process re-mapping for this flag is done via module resolution.
-import { default as processImpl } from 'node-internal:process';
+import { default as processImpl } from 'node-internal:process'
 
-import {
-  platform,
-  nextTick,
-  env,
-  features,
-  _setEventsProcess,
-} from 'node-internal:internal_process';
-
-export { platform, nextTick, env, features };
+export { platform, nextTick, env, features }
 
 export function getBuiltinModule(id: string): object {
-  return processImpl.getBuiltinModule(id);
+  return processImpl.getBuiltinModule(id)
 }
 
 export function exit(code: number): void {
-  processImpl.exitImpl(code);
+  processImpl.exitImpl(code)
 }
 
 const process = {
@@ -33,8 +32,8 @@ const process = {
   getBuiltinModule,
   platform,
   features,
-};
+}
 
-_setEventsProcess(process);
+_setEventsProcess(process)
 
-export default process;
+export default process

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'idlharness.any.js': {
@@ -996,4 +996,4 @@ export default {
     ],
   },
   'writable-streams/write.any.js': {},
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

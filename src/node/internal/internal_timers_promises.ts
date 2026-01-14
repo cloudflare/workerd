@@ -23,192 +23,192 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import * as timers from 'node-internal:internal_timers';
-import { ERR_INVALID_THIS, AbortError } from 'node-internal:internal_errors';
+import { AbortError, ERR_INVALID_THIS } from 'node-internal:internal_errors'
+import * as timers from 'node-internal:internal_timers'
 import {
-  validateNumber,
   validateAbortSignal,
   validateBoolean,
+  validateNumber,
   validateObject,
-} from 'node-internal:validators';
+} from 'node-internal:validators'
 
-const kScheduler = Symbol.for('kScheduler');
+const kScheduler = Symbol.for('kScheduler')
 
-type OnCancelCallback = (() => void) | undefined;
+type OnCancelCallback = (() => void) | undefined
 
 export async function setTimeout<T = void>(
   delay?: number,
   value?: T,
-  options: { signal?: AbortSignal | undefined; ref?: boolean | undefined } = {}
+  options: { signal?: AbortSignal | undefined; ref?: boolean | undefined } = {},
 ): Promise<T> {
   if (delay !== undefined) {
-    validateNumber(delay, 'delay');
+    validateNumber(delay, 'delay')
   }
 
-  validateObject(options, 'options');
+  validateObject(options, 'options')
 
   // Ref options is a no-op.
-  const { signal, ref } = options;
+  const { signal, ref } = options
 
   if (signal !== undefined) {
-    validateAbortSignal(signal, 'options.signal');
+    validateAbortSignal(signal, 'options.signal')
   }
 
   // This is required due to consistency/compat reasons, even if it's a no-op.
   if (ref !== undefined) {
-    validateBoolean(ref, 'options.ref');
+    validateBoolean(ref, 'options.ref')
   }
 
   if (signal?.aborted) {
-    throw new AbortError(undefined, { cause: signal.reason });
+    throw new AbortError(undefined, { cause: signal.reason })
   }
 
-  const { promise, resolve, reject } = Promise.withResolvers<T>();
-  let onCancel: OnCancelCallback;
+  const { promise, resolve, reject } = Promise.withResolvers<T>()
+  let onCancel: OnCancelCallback
 
   const timer = timers.setTimeout(() => {
-    resolve(value as T);
+    resolve(value as T)
     if (onCancel) {
-      signal?.removeEventListener('abort', onCancel);
+      signal?.removeEventListener('abort', onCancel)
     }
-  }, delay ?? 1);
+  }, delay ?? 1)
 
   if (signal) {
     onCancel = (): void => {
-      timers.clearTimeout(timer);
-      reject(new AbortError(undefined, { cause: signal.reason }));
-    };
-    signal.addEventListener('abort', onCancel, { once: true });
+      timers.clearTimeout(timer)
+      reject(new AbortError(undefined, { cause: signal.reason }))
+    }
+    signal.addEventListener('abort', onCancel, { once: true })
   }
 
-  return promise;
+  return promise
 }
 
 export async function setImmediate<T = void>(
   value?: T,
-  options: { signal?: AbortSignal | undefined; ref?: boolean | undefined } = {}
+  options: { signal?: AbortSignal | undefined; ref?: boolean | undefined } = {},
 ): Promise<T> {
-  validateObject(options, 'options');
+  validateObject(options, 'options')
 
   // Ref options is a no-op.
-  const { signal, ref } = options;
+  const { signal, ref } = options
 
   if (signal !== undefined) {
-    validateAbortSignal(signal, 'options.signal');
+    validateAbortSignal(signal, 'options.signal')
   }
 
   // This is required due to consistency/compat reasons, even if it's a no-op.
   if (ref !== undefined) {
-    validateBoolean(ref, 'options.ref');
+    validateBoolean(ref, 'options.ref')
   }
 
   if (signal?.aborted) {
-    throw new AbortError(undefined, { cause: signal.reason });
+    throw new AbortError(undefined, { cause: signal.reason })
   }
 
-  const { promise, resolve, reject } = Promise.withResolvers<T>();
-  let onCancel: OnCancelCallback;
+  const { promise, resolve, reject } = Promise.withResolvers<T>()
+  let onCancel: OnCancelCallback
 
   const timer = timers.setImmediate(() => {
-    resolve(value as T);
+    resolve(value as T)
     if (onCancel) {
-      signal?.removeEventListener('abort', onCancel);
+      signal?.removeEventListener('abort', onCancel)
     }
-  });
+  })
 
   if (signal) {
     onCancel = (): void => {
-      timers.clearImmediate(timer);
-      reject(new AbortError(undefined, { cause: signal.reason }));
-    };
-    signal.addEventListener('abort', onCancel, { once: true });
+      timers.clearImmediate(timer)
+      reject(new AbortError(undefined, { cause: signal.reason }))
+    }
+    signal.addEventListener('abort', onCancel, { once: true })
   }
 
-  return promise;
+  return promise
 }
 
 export async function* setInterval<T = void>(
   delay?: number,
   value?: T,
   options: {
-    signal?: AbortSignal | undefined;
-    ref?: boolean | undefined;
-  } = {}
+    signal?: AbortSignal | undefined
+    ref?: boolean | undefined
+  } = {},
 ): AsyncGenerator<T, undefined> {
   if (delay !== undefined) {
-    validateNumber(delay, 'delay');
+    validateNumber(delay, 'delay')
   }
 
-  validateObject(options, 'options');
+  validateObject(options, 'options')
 
   // Ref options is a no-op.
-  const { signal, ref } = options;
+  const { signal, ref } = options
 
   if (signal !== undefined) {
-    validateAbortSignal(signal, 'options.signal');
+    validateAbortSignal(signal, 'options.signal')
   }
 
   if (ref !== undefined) {
-    validateBoolean(ref, 'options.ref');
+    validateBoolean(ref, 'options.ref')
   }
 
   if (signal?.aborted) {
-    throw new AbortError(undefined, { cause: signal.reason });
+    throw new AbortError(undefined, { cause: signal.reason })
   }
 
-  let onCancel: OnCancelCallback;
-  let interval: timers.Timeout;
+  let onCancel: OnCancelCallback
+  let interval: timers.Timeout
   try {
-    let notYielded = 0;
-    let callback: ((promise?: Promise<void>) => void) | undefined;
+    let notYielded = 0
+    let callback: ((promise?: Promise<void>) => void) | undefined
     interval = new timers.Timeout(
       () => {
-        notYielded++;
-        callback?.();
-        callback = undefined;
+        notYielded++
+        callback?.()
+        callback = undefined
       },
       delay,
       undefined,
       true,
-      ref
-    );
+      ref,
+    )
 
     if (signal) {
       onCancel = (): void => {
-        timers.clearInterval(interval);
+        timers.clearInterval(interval)
         callback?.(
-          Promise.reject(new AbortError(undefined, { cause: signal.reason }))
-        );
-        callback = undefined;
-      };
-      signal.addEventListener('abort', onCancel, { once: true });
+          Promise.reject(new AbortError(undefined, { cause: signal.reason })),
+        )
+        callback = undefined
+      }
+      signal.addEventListener('abort', onCancel, { once: true })
     }
 
     while (!signal?.aborted) {
       if (notYielded === 0) {
-        await new Promise((resolve) => (callback = resolve));
+        await new Promise((resolve) => (callback = resolve))
       }
       for (; notYielded > 0; notYielded--) {
-        yield value as T;
+        yield value as T
       }
     }
-    throw new AbortError(undefined, { cause: signal.reason });
+    throw new AbortError(undefined, { cause: signal.reason })
   } finally {
     // @ts-expect-error TS2454 TS detects invalid use before assignment.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (interval) {
-      timers.clearInterval(interval);
+      timers.clearInterval(interval)
     }
     if (onCancel) {
-      signal?.removeEventListener('abort', onCancel);
+      signal?.removeEventListener('abort', onCancel)
     }
   }
 }
 
 declare global {
   var scheduler: {
-    wait: (delay: number, options?: { signal?: AbortSignal }) => Promise<void>;
-  };
+    wait: (delay: number, options?: { signal?: AbortSignal }) => Promise<void>
+  }
 }
 
 // TODO(@jasnell): Scheduler is an API currently being discussed by WICG
@@ -219,17 +219,17 @@ declare global {
 // finalized. Note, also, that Scheduler is expected to be defined as a global,
 // but while the API is experimental we shouldn't expose it as such.
 class Scheduler {
-  [kScheduler] = true;
+  [kScheduler] = true
 
   yield(): Promise<void> {
-    if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler');
-    return setImmediate();
+    if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler')
+    return setImmediate()
   }
 
   wait(...args: Parameters<typeof globalThis.scheduler.wait>): Promise<void> {
-    if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler');
-    return globalThis.scheduler.wait(...args);
+    if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler')
+    return globalThis.scheduler.wait(...args)
   }
 }
 
-export const scheduler = new Scheduler();
+export const scheduler = new Scheduler()

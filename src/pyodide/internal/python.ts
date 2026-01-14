@@ -1,43 +1,38 @@
-import { enterJaegerSpan } from 'pyodide-internal:jaeger';
-import {
-  adjustSysPath,
-  mountWorkerFiles,
-} from 'pyodide-internal:setupPackages';
-import {
-  maybeCollectSnapshot,
-  maybeRestoreSnapshot,
-  finalizeBootstrap,
-  isRestoringSnapshot,
-  type CustomSerializedObjects,
-} from 'pyodide-internal:snapshot';
-import {
-  entropyMountFiles,
-  entropyAfterRuntimeInit,
-  entropyBeforeTopLevel,
-  getRandomValues,
-  entropyBeforeRequest,
-} from 'pyodide-internal:topLevelEntropy/lib';
-import {
-  LEGACY_VENDOR_PATH,
-  setCpuLimitNearlyExceededCallback,
-} from 'pyodide-internal:metadata';
-
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
  * emscripten seperately from this code in another context.
  * The underlying code for it can be found in pool/emscriptenSetup.ts.
  */
-import { default as SetupEmscripten } from 'internal:setup-emscripten';
-
-import { default as UnsafeEval } from 'internal:unsafe-eval';
+import { default as SetupEmscripten } from 'internal:setup-emscripten'
+import { default as UnsafeEval } from 'internal:unsafe-eval'
+import { enterJaegerSpan } from 'pyodide-internal:jaeger'
+import { loadPackages } from 'pyodide-internal:loadPackage'
+import {
+  LEGACY_VENDOR_PATH,
+  setCpuLimitNearlyExceededCallback,
+  TRANSITIVE_REQUIREMENTS,
+} from 'pyodide-internal:metadata'
+import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata'
+import { adjustSysPath, mountWorkerFiles } from 'pyodide-internal:setupPackages'
+import {
+  type CustomSerializedObjects,
+  finalizeBootstrap,
+  isRestoringSnapshot,
+  maybeCollectSnapshot,
+  maybeRestoreSnapshot,
+} from 'pyodide-internal:snapshot'
+import {
+  entropyAfterRuntimeInit,
+  entropyBeforeRequest,
+  entropyBeforeTopLevel,
+  entropyMountFiles,
+  getRandomValues,
+} from 'pyodide-internal:topLevelEntropy/lib'
 import {
   PythonWorkersInternalError,
   reportError,
   unreachable,
-} from 'pyodide-internal:util';
-import { loadPackages } from 'pyodide-internal:loadPackage';
-import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
-import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
+} from 'pyodide-internal:util'
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -47,21 +42,21 @@ import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
  */
 function prepareWasmLinearMemory(
   Module: Module,
-  customSerializedObjects: CustomSerializedObjects
+  customSerializedObjects: CustomSerializedObjects,
 ): void {
-  maybeRestoreSnapshot(Module);
+  maybeRestoreSnapshot(Module)
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
-  entropyAfterRuntimeInit(Module);
+  entropyAfterRuntimeInit(Module)
   if (!isRestoringSnapshot()) {
     // The effects of these are purely in Python state so they only need to be run
     // if we didn't restore a snapshot.
-    entropyBeforeTopLevel(Module);
+    entropyBeforeTopLevel(Module)
     // Note that setupPythonSearchPath runs after adjustSysPath and rearranges where
     // the /session/metadata path is added.
-    adjustSysPath(Module);
+    adjustSysPath(Module)
   }
   if (Module.API.version !== '0.26.0a2') {
-    finalizeBootstrap(Module, customSerializedObjects);
+    finalizeBootstrap(Module, customSerializedObjects)
   }
 }
 
@@ -102,7 +97,7 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
 
     _tmp()
     del _tmp
-  `);
+  `)
 }
 
 /**
@@ -111,49 +106,49 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
  * we expect.
  */
 function validatePyodideVersion(pyodide: Pyodide): void {
-  const expectedPyodideVersion = MetadataReader.getPyodideVersion();
-  if (expectedPyodideVersion == 'dev') {
-    return;
+  const expectedPyodideVersion = MetadataReader.getPyodideVersion()
+  if (expectedPyodideVersion === 'dev') {
+    return
   }
   if (pyodide.version !== expectedPyodideVersion) {
     throw new PythonWorkersInternalError(
-      `Pyodide version mismatch, expected '${expectedPyodideVersion}'`
-    );
+      `Pyodide version mismatch, expected '${expectedPyodideVersion}'`,
+    )
   }
 }
 
-const origSetTimeout = globalThis.setTimeout.bind(this);
+const origSetTimeout = globalThis.setTimeout.bind(this)
 
 function makeSetTimeout(Module: Module): typeof setTimeout {
   return function setTimeoutTopLevelPatch(
     handler: () => void,
-    timeout: number | undefined
+    timeout: number | undefined,
   ): number {
     // Redirect top level setTimeout(cb, 0) to queueMicrotask().
     // If we don't know how to handle it, call normal setTimeout() to force failure.
     if (typeof handler === 'string') {
-      return origSetTimeout(handler, timeout);
+      return origSetTimeout(handler, timeout)
     }
     function wrappedHandler(): void {
       // In case an Exceeded CPU occurred just as Python was exiting, there may be one waiting that
       // will interrupt the wrong task. Clear signals before entering the task.
       // This is covered by cpu-limit-exceeded.ew-test "async_trip" test.
-      clearSignals(Module);
-      handler();
+      clearSignals(Module)
+      handler()
     }
     if (timeout) {
-      return origSetTimeout(wrappedHandler, timeout);
+      return origSetTimeout(wrappedHandler, timeout)
     }
-    queueMicrotask(wrappedHandler);
-    return 0;
-  } as typeof setTimeout;
+    queueMicrotask(wrappedHandler)
+    return 0
+  } as typeof setTimeout
 }
 
 function getSignalClockAddr(Module: Module): number {
   if (Module.API.version !== '0.28.2') {
     throw new PythonWorkersInternalError(
-      'getSignalClockAddr only supported in 0.28.2'
-    );
+      'getSignalClockAddr only supported in 0.28.2',
+    )
   }
   // This is the address here:
   // https://github.com/python/cpython/blob/main/Python/emscripten_signal.c#L42
@@ -163,15 +158,15 @@ function getSignalClockAddr(Module: Module): number {
   // the assembly code.
   //
   // TODO: Export this symbol in the next Pyodide release so we can stop using the magic number.
-  const emscripten_signal_clock_offset = 3171536;
-  return Module.___memory_base.value + emscripten_signal_clock_offset;
+  const emscripten_signal_clock_offset = 3171536
+  return Module.___memory_base.value + emscripten_signal_clock_offset
 }
 
 function setupRuntimeSignalHandling(Module: Module): void {
-  Module.Py_EmscriptenSignalBuffer = new Uint8Array(1);
-  const version = Module.API.version;
+  Module.Py_EmscriptenSignalBuffer = new Uint8Array(1)
+  const version = Module.API.version
   if (version === '0.26.0a2') {
-    return;
+    return
   }
   if (version === '0.28.2') {
     // The callback sets signal_clock to 0 and signal_handling to 1. It has to be in C++ because we
@@ -183,14 +178,14 @@ function setupRuntimeSignalHandling(Module: Module): void {
     setCpuLimitNearlyExceededCallback(
       Module.HEAP8,
       getSignalClockAddr(Module),
-      Module._Py_EMSCRIPTEN_SIGNAL_HANDLING
-    );
-    return;
+      Module._Py_EMSCRIPTEN_SIGNAL_HANDLING,
+    )
+    return
   }
-  unreachable(version);
+  unreachable(version)
 }
 
-const SIGXCPU = 24;
+const SIGXCPU = 24
 
 export function clearSignals(Module: Module): void {
   if (Module.API.version === '0.28.2') {
@@ -200,9 +195,9 @@ export function clearSignals(Module: Module): void {
     //
     // We will turn signal handling on as part of triggering the interrupt, having it on otherwise
     // just wastes cycles.
-    Module.Py_EmscriptenSignalBuffer[0] = SIGXCPU;
-    Module.HEAPU32[getSignalClockAddr(Module)] = 1;
-    Module.HEAPU32[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING / 4] = 0;
+    Module.Py_EmscriptenSignalBuffer[0] = SIGXCPU
+    Module.HEAPU32[getSignalClockAddr(Module)] = 1
+    Module.HEAPU32[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING / 4] = 0
   }
 }
 
@@ -210,73 +205,73 @@ export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
   indexURL: string,
-  customSerializedObjects: CustomSerializedObjects
+  customSerializedObjects: CustomSerializedObjects,
 ): Pyodide {
   try {
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
-      SetupEmscripten.getModule()
-    );
-    Module.API.config.jsglobals = globalThis;
+      SetupEmscripten.getModule(),
+    )
+    Module.API.config.jsglobals = globalThis
     if (isWorkerd) {
-      Module.API.config.indexURL = indexURL;
-      Module.API.config.resolveLockFilePromise!(lockfile);
+      Module.API.config.indexURL = indexURL
+      Module.API.config.resolveLockFilePromise?.(lockfile)
     }
-    Module.setUnsafeEval(UnsafeEval);
-    Module.setGetRandomValues(getRandomValues);
+    Module.setUnsafeEval(UnsafeEval)
+    Module.setGetRandomValues(getRandomValues)
     Module.setSetTimeout(
       makeSetTimeout(Module),
       clearTimeout,
       setInterval,
-      clearInterval
-    );
+      clearInterval,
+    )
 
-    entropyMountFiles(Module);
+    entropyMountFiles(Module)
     enterJaegerSpan('load_packages', () => {
       // NB. loadPackages adds the packages to the `VIRTUALIZED_DIR` global which then gets used in
       // preloadDynamicLibs.
-      loadPackages(Module, TRANSITIVE_REQUIREMENTS);
-    });
+      loadPackages(Module, TRANSITIVE_REQUIREMENTS)
+    })
 
     enterJaegerSpan('prepare_wasm_linear_memory', () => {
-      prepareWasmLinearMemory(Module, customSerializedObjects);
-    });
+      prepareWasmLinearMemory(Module, customSerializedObjects)
+    })
 
-    maybeCollectSnapshot(Module, customSerializedObjects);
+    maybeCollectSnapshot(Module, customSerializedObjects)
     // Mount worker files after doing snapshot upload so we ensure that data from the files is never
     // present in snapshot memory.
-    mountWorkerFiles(Module);
+    mountWorkerFiles(Module)
 
     if (Module.API.version === '0.26.0a2') {
       // Finish setting up Pyodide's ffi so we can use the nice Python interface
       // In newer versions we already did this in prepareWasmLinearMemory.
-      finalizeBootstrap(Module, customSerializedObjects);
+      finalizeBootstrap(Module, customSerializedObjects)
     }
-    const pyodide = Module.API.public_api;
+    const pyodide = Module.API.public_api
 
-    validatePyodideVersion(pyodide);
+    validatePyodideVersion(pyodide)
 
     // Need to set these here so that the logs go to the right context. If we don't they will go
     // to SetupEmscripten's context and end up being KJ_LOG'd, which we do not want.
     Module.API.initializeStreams(
       null,
       (msg) => {
-        console.log(msg);
+        console.log(msg)
       },
       (msg) => {
-        console.error(msg);
-      }
-    );
-    setupPythonSearchPath(pyodide);
-    setupRuntimeSignalHandling(Module);
-    return pyodide;
+        console.error(msg)
+      },
+    )
+    setupPythonSearchPath(pyodide)
+    setupRuntimeSignalHandling(Module)
+    return pyodide
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception
     // but no traceback. This gives us a full traceback.
-    reportError(e as Error);
+    reportError(e as Error)
   }
 }
 
 export function beforeRequest(Module: Module): void {
-  entropyBeforeRequest(Module);
-  Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
+  entropyBeforeRequest(Module)
+  Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval)
 }

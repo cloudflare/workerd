@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'urlpattern-hasregexpgroups.any.js': {},
@@ -11,4 +11,4 @@ export default {
     comment: 'Test cases are identical to urlpattern.any.js.',
     omittedTests: true,
   },
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

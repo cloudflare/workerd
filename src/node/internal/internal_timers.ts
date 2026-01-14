@@ -23,8 +23,8 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { validateFunction } from 'node-internal:validators';
-import { default as timersUtil } from 'node-internal:timers';
+import { default as timersUtil } from 'node-internal:timers'
+import { validateFunction } from 'node-internal:validators'
 
 // Capture original global timer functions at module load time, before they might be
 // overridden by the enable_nodejs_global_timers compat flag. This avoids circular
@@ -35,100 +35,100 @@ const originalSetTimeout = globalThis.setTimeout.bind(globalThis) as (
   callback: (...args: unknown[]) => unknown,
   ms?: number,
   ...args: unknown[]
-) => number;
+) => number
 const originalSetInterval = globalThis.setInterval.bind(globalThis) as (
   callback: (...args: unknown[]) => unknown,
   ms?: number,
   ...args: unknown[]
-) => number;
+) => number
 const originalClearTimeout = globalThis.clearTimeout.bind(globalThis) as (
-  id?: number
-) => void;
+  id?: number,
+) => void
 const originalClearInterval = globalThis.clearInterval.bind(globalThis) as (
-  id?: number
-) => void;
+  id?: number,
+) => void
 
-let clearTimeoutImpl: (obj: Timeout) => void;
+let clearTimeoutImpl: (obj: Timeout) => void
 
 export class Timeout {
-  #timer: number;
-  #callback: (...args: unknown[]) => unknown;
-  #after: number;
-  #args: unknown[];
-  #isRepeat: boolean;
-  #isRefed: boolean;
+  #timer: number
+  #callback: (...args: unknown[]) => unknown
+  #after: number
+  #args: unknown[]
+  #isRepeat: boolean
+  #isRefed: boolean
 
   constructor(
     callback: (...args: unknown[]) => unknown,
     after: number = 1,
     args: unknown[] = [],
     isRepeat: boolean = false,
-    isRefed: boolean = false
+    isRefed: boolean = false,
   ) {
-    this.#callback = callback;
+    this.#callback = callback
     // Left it as multiply by 1 due to make the behavior as similar to Node.js
     // as possible.
-    this.#after = after * 1;
-    this.#args = args;
-    this.#isRepeat = isRepeat;
-    this.#isRefed = isRefed;
-    this.#timer = this.#constructTimer();
+    this.#after = after * 1
+    this.#args = args
+    this.#isRepeat = isRepeat
+    this.#isRefed = isRefed
+    this.#timer = this.#constructTimer()
   }
 
   #constructTimer(): number {
     this.#timer = this.#isRepeat
       ? originalSetInterval(this.#callback, this.#after, ...this.#args)
-      : originalSetTimeout(this.#callback, this.#after, ...this.#args);
-    return this.#timer;
+      : originalSetTimeout(this.#callback, this.#after, ...this.#args)
+    return this.#timer
   }
 
   #clearTimeout(): void {
     if (this.#isRepeat) {
-      originalClearInterval(this.#timer);
+      originalClearInterval(this.#timer)
     } else {
-      originalClearTimeout(this.#timer);
+      originalClearTimeout(this.#timer)
     }
   }
 
   refresh(): this {
-    this.#clearTimeout();
-    this.#constructTimer();
-    return this;
+    this.#clearTimeout()
+    this.#constructTimer()
+    return this
   }
 
   unref(): this {
     // Intentionally left as no-op.
-    this.#isRefed = false;
-    return this;
+    this.#isRefed = false
+    return this
   }
 
   ref(): this {
     // Intentionally left as no-op.
-    this.#isRefed = true;
-    return this;
+    this.#isRefed = true
+    return this
   }
 
   hasRef(): boolean {
-    return this.#isRefed;
+    return this.#isRefed
   }
 
   close(): this {
-    this.#clearTimeout();
-    return this;
+    this.#clearTimeout()
+    return this
   }
 
   [Symbol.dispose](): void {
-    this.#clearTimeout();
+    this.#clearTimeout()
   }
 
   [Symbol.toPrimitive](): number {
-    return this.#timer;
+    return this.#timer
   }
 
   static {
     clearTimeoutImpl = (obj: Timeout): void => {
-      obj.#clearTimeout();
-    };
+      obj.#clearTimeout()
+    }
   }
 }
 
@@ -137,53 +137,53 @@ export function setTimeout<TArgs extends unknown[]>(
   delay?: number,
   ...args: TArgs
 ): Timeout {
-  validateFunction(callback, 'callback');
+  validateFunction(callback, 'callback')
 
   return new Timeout(
     callback,
     delay,
     args,
     /* isRepeat */ false,
-    /* isRefed */ true
-  );
+    /* isRefed */ true,
+  )
 }
 
 export function clearTimeout(
-  timer: Timeout | string | number | undefined
+  timer: Timeout | string | number | undefined,
 ): void {
   if (timer instanceof Timeout) {
-    clearTimeoutImpl(timer);
+    clearTimeoutImpl(timer)
   } else if (typeof timer === 'number') {
-    originalClearTimeout(timer);
+    originalClearTimeout(timer)
   }
 }
 
-export const setImmediate = timersUtil.setImmediate.bind(timersUtil);
+export const setImmediate = timersUtil.setImmediate.bind(timersUtil)
 
-export const clearImmediate = timersUtil.clearImmediate.bind(timersUtil);
+export const clearImmediate = timersUtil.clearImmediate.bind(timersUtil)
 
 export function setInterval<TArgs extends unknown[]>(
   callback: (...args: TArgs) => void,
   repeat?: number,
   ...args: TArgs
 ): Timeout {
-  validateFunction(callback, 'callback');
+  validateFunction(callback, 'callback')
   return new Timeout(
     callback,
     repeat,
     args,
     /* isRepeat */ true,
-    /* isRefed */ true
-  );
+    /* isRefed */ true,
+  )
 }
 
 export function clearInterval(
-  timer: Timeout | string | number | undefined
+  timer: Timeout | string | number | undefined,
 ): void {
   if (timer instanceof Timeout) {
-    clearTimeoutImpl(timer);
+    clearTimeoutImpl(timer)
   } else if (typeof timer === 'number') {
-    originalClearInterval(timer);
+    originalClearInterval(timer)
   }
 }
 
@@ -192,7 +192,7 @@ export function clearInterval(
  */
 export function active(timer: Timeout | string | number | undefined): void {
   if (timer instanceof Timeout) {
-    timer.refresh();
+    timer.refresh()
   }
 }
 
@@ -201,9 +201,9 @@ export function active(timer: Timeout | string | number | undefined): void {
  */
 export function unenroll(timer: unknown): void {
   if (timer instanceof Timeout) {
-    clearTimeoutImpl(timer);
+    clearTimeoutImpl(timer)
   } else if (typeof timer === 'number') {
-    originalClearTimeout(timer);
+    originalClearTimeout(timer)
   }
 }
 
@@ -211,5 +211,5 @@ export function unenroll(timer: unknown): void {
  * @deprecated Please use setTimeout instead.
  */
 export function enroll(_item: unknown, _msecs: number): void {
-  throw new Error('Not implemented. Please use setTimeout() instead.');
+  throw new Error('Not implemented. Please use setTimeout() instead.')
 }

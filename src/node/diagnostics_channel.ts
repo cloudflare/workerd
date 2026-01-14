@@ -26,116 +26,115 @@
 // unsubscribe and subscribe is deprecated on types/node.
 /* eslint-disable @typescript-eslint/no-deprecated */
 
-import { default as diagnosticsChannel } from 'node-internal:diagnostics_channel';
-
 import type {
   Channel as ChannelType,
   MessageCallback,
-} from 'node-internal:diagnostics_channel';
+} from 'node-internal:diagnostics_channel'
+import { default as diagnosticsChannel } from 'node-internal:diagnostics_channel'
 
-import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
+import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors'
 
-import { validateObject } from 'node-internal:validators';
+import { validateObject } from 'node-internal:validators'
 
-export const { Channel } = diagnosticsChannel;
+export const { Channel } = diagnosticsChannel
 
 export function hasSubscribers(name: string | symbol): boolean {
-  return diagnosticsChannel.hasSubscribers(name);
+  return diagnosticsChannel.hasSubscribers(name)
 }
 
 export function channel(name: string | symbol): ChannelType {
-  return diagnosticsChannel.channel(name);
+  return diagnosticsChannel.channel(name)
 }
 
 export function subscribe(
   name: string | symbol,
-  callback: MessageCallback
+  callback: MessageCallback,
 ): void {
-  diagnosticsChannel.subscribe(name, callback);
+  diagnosticsChannel.subscribe(name, callback)
 }
 
 export function unsubscribe(
   name: string | symbol,
-  callback: MessageCallback
+  callback: MessageCallback,
 ): void {
-  diagnosticsChannel.unsubscribe(name, callback);
+  diagnosticsChannel.unsubscribe(name, callback)
 }
 
 export interface TracingChannelSubscriptions {
-  start?: MessageCallback;
-  end?: MessageCallback;
-  asyncStart?: MessageCallback;
-  asyncEnd?: MessageCallback;
-  error?: MessageCallback;
+  start?: MessageCallback
+  end?: MessageCallback
+  asyncStart?: MessageCallback
+  asyncEnd?: MessageCallback
+  error?: MessageCallback
 }
 
 export interface TracingChannels {
-  start: ChannelType;
-  end: ChannelType;
-  asyncStart: ChannelType;
-  asyncEnd: ChannelType;
-  error: ChannelType;
+  start: ChannelType
+  end: ChannelType
+  asyncStart: ChannelType
+  asyncEnd: ChannelType
+  error: ChannelType
 }
 
-const kStart = Symbol('kStart');
-const kEnd = Symbol('kEnd');
-const kAsyncStart = Symbol('kAsyncStart');
-const kAsyncEnd = Symbol('kAsyncEnd');
-const kError = Symbol('kError');
+const kStart = Symbol('kStart')
+const kEnd = Symbol('kEnd')
+const kAsyncStart = Symbol('kAsyncStart')
+const kAsyncEnd = Symbol('kAsyncEnd')
+const kError = Symbol('kError')
 
 export class TracingChannel {
-  private [kStart]?: ChannelType;
-  private [kEnd]?: ChannelType;
-  private [kAsyncStart]?: ChannelType;
-  private [kAsyncEnd]?: ChannelType;
-  private [kError]?: ChannelType;
+  private [kStart]?: ChannelType
+  private [kEnd]?: ChannelType
+  private [kAsyncStart]?: ChannelType
+  private [kAsyncEnd]?: ChannelType
+  private [kError]?: ChannelType
 
   constructor() {
     throw new Error(
-      'Use diagnostic_channel.tracingChannels() to create TracingChannel'
-    );
+      'Use diagnostic_channel.tracingChannels() to create TracingChannel',
+    )
   }
 
   get start(): ChannelType | undefined {
-    return this[kStart];
+    return this[kStart]
   }
   get end(): ChannelType | undefined {
-    return this[kEnd];
+    return this[kEnd]
   }
   get asyncStart(): ChannelType | undefined {
-    return this[kAsyncStart];
+    return this[kAsyncStart]
   }
   get asyncEnd(): ChannelType | undefined {
-    return this[kAsyncEnd];
+    return this[kAsyncEnd]
   }
   get error(): ChannelType | undefined {
-    return this[kError];
+    return this[kError]
   }
 
   subscribe(subscriptions: TracingChannelSubscriptions): void {
     if (subscriptions.start !== undefined)
-      this[kStart]?.subscribe(subscriptions.start);
+      this[kStart]?.subscribe(subscriptions.start)
     if (subscriptions.end !== undefined)
-      this[kEnd]?.subscribe(subscriptions.end);
+      this[kEnd]?.subscribe(subscriptions.end)
     if (subscriptions.asyncStart !== undefined)
-      this[kAsyncStart]?.subscribe(subscriptions.asyncStart);
+      this[kAsyncStart]?.subscribe(subscriptions.asyncStart)
     if (subscriptions.asyncEnd !== undefined)
-      this[kAsyncEnd]?.subscribe(subscriptions.asyncEnd);
+      this[kAsyncEnd]?.subscribe(subscriptions.asyncEnd)
     if (subscriptions.error !== undefined)
-      this[kError]?.subscribe(subscriptions.error);
+      this[kError]?.subscribe(subscriptions.error)
   }
 
   unsubscribe(subscriptions: TracingChannelSubscriptions): void {
     if (subscriptions.start !== undefined)
-      this[kStart]?.unsubscribe(subscriptions.start);
+      this[kStart]?.unsubscribe(subscriptions.start)
     if (subscriptions.end !== undefined)
-      this[kEnd]?.unsubscribe(subscriptions.end);
+      this[kEnd]?.unsubscribe(subscriptions.end)
     if (subscriptions.asyncStart !== undefined)
-      this[kAsyncStart]?.unsubscribe(subscriptions.asyncStart);
+      this[kAsyncStart]?.unsubscribe(subscriptions.asyncStart)
     if (subscriptions.asyncEnd !== undefined)
-      this[kAsyncEnd]?.unsubscribe(subscriptions.asyncEnd);
+      this[kAsyncEnd]?.unsubscribe(subscriptions.asyncEnd)
     if (subscriptions.error !== undefined)
-      this[kError]?.unsubscribe(subscriptions.error);
+      this[kError]?.unsubscribe(subscriptions.error)
   }
 
   traceSync(
@@ -144,25 +143,25 @@ export class TracingChannel {
     thisArg: unknown = globalThis,
     ...args: unknown[]
   ): unknown {
-    const { start, end, error } = this;
+    const { start, end, error } = this
 
     return start?.runStores(
       context,
       () => {
         try {
-          const result = Reflect.apply(fn, thisArg, args);
-          context.result = result;
-          return result;
+          const result = Reflect.apply(fn, thisArg, args)
+          context.result = result
+          return result
         } catch (err) {
-          context.error = err;
-          error?.publish(context);
-          throw err;
+          context.error = err
+          error?.publish(context)
+          throw err
         } finally {
-          end?.publish(context);
+          end?.publish(context)
         }
       },
-      thisArg
-    );
+      thisArg,
+    )
   }
 
   tracePromise(
@@ -171,43 +170,43 @@ export class TracingChannel {
     thisArg: unknown = globalThis,
     ...args: unknown[]
   ): unknown {
-    const { start, end, asyncStart, asyncEnd, error } = this;
+    const { start, end, asyncStart, asyncEnd, error } = this
 
     function reject(err: Error): Promise<unknown> {
-      context.error = err;
-      error?.publish(context);
-      asyncStart?.publish(context);
-      asyncEnd?.publish(context);
-      return Promise.reject(err);
+      context.error = err
+      error?.publish(context)
+      asyncStart?.publish(context)
+      asyncEnd?.publish(context)
+      return Promise.reject(err)
     }
 
     function resolve(result: unknown): unknown {
-      context.result = result;
-      asyncStart?.publish(context);
-      asyncEnd?.publish(context);
-      return result;
+      context.result = result
+      asyncStart?.publish(context)
+      asyncEnd?.publish(context)
+      return result
     }
 
     return start?.runStores(
       context,
       () => {
         try {
-          let promise = Reflect.apply(fn, thisArg, args) as Promise<unknown>;
+          let promise = Reflect.apply(fn, thisArg, args) as Promise<unknown>
           // Convert thenables to native promises
           if (!(promise instanceof Promise)) {
-            promise = Promise.resolve(promise);
+            promise = Promise.resolve(promise)
           }
-          return promise.then(resolve, reject);
+          return promise.then(resolve, reject)
         } catch (err) {
-          context.error = err;
-          error?.publish(context);
-          throw err;
+          context.error = err
+          error?.publish(context)
+          throw err
         } finally {
-          end?.publish(context);
+          end?.publish(context)
         }
       },
-      thisArg
-    );
+      thisArg,
+    )
   }
 
   traceCallback(
@@ -217,14 +216,14 @@ export class TracingChannel {
     thisArg: unknown = globalThis,
     ...args: unknown[]
   ): unknown {
-    const { start, end, asyncStart, asyncEnd, error } = this;
+    const { start, end, asyncStart, asyncEnd, error } = this
 
     function wrappedCallback(this: unknown, err: unknown, res: unknown): void {
       if (err) {
-        context.error = err;
-        error?.publish(context);
+        context.error = err
+        error?.publish(context)
       } else {
-        context.result = res;
+        context.result = res
       }
 
       // Using runStores here enables manual context failure recovery
@@ -234,76 +233,76 @@ export class TracingChannel {
           try {
             if (callback) {
               // eslint-disable-next-line prefer-rest-params
-              Reflect.apply(callback, this, arguments);
+              Reflect.apply(callback, this, arguments)
             }
           } finally {
-            asyncEnd?.publish(context);
+            asyncEnd?.publish(context)
           }
         },
-        thisArg
-      );
+        thisArg,
+      )
     }
 
-    const callback = args[position] as VoidFunction | undefined;
+    const callback = args[position] as VoidFunction | undefined
     if (typeof callback !== 'function') {
-      throw new ERR_INVALID_ARG_TYPE('callback', ['function'], callback);
+      throw new ERR_INVALID_ARG_TYPE('callback', ['function'], callback)
     }
-    args.splice(position, 1, wrappedCallback);
+    args.splice(position, 1, wrappedCallback)
 
     return start?.runStores(
       context,
       () => {
         try {
-          return Reflect.apply(fn, thisArg, args);
+          return Reflect.apply(fn, thisArg, args)
         } catch (err) {
-          context.error = err;
-          error?.publish(context);
-          throw err;
+          context.error = err
+          error?.publish(context)
+          throw err
         } finally {
-          end?.publish(context);
+          end?.publish(context)
         }
       },
-      thisArg
-    );
+      thisArg,
+    )
   }
 }
 
 function validateChannel(channel: unknown, name: string): ChannelType {
   if (!(channel instanceof Channel)) {
-    throw new ERR_INVALID_ARG_TYPE(name, 'Channel', channel);
+    throw new ERR_INVALID_ARG_TYPE(name, 'Channel', channel)
   }
-  return channel;
+  return channel
 }
 
 export function tracingChannel(
-  nameOrChannels: string | TracingChannels
+  nameOrChannels: string | TracingChannels,
 ): TracingChannel {
   return Reflect.construct(
     function (this: TracingChannel) {
       if (typeof nameOrChannels === 'string') {
-        this[kStart] = channel(`tracing:${nameOrChannels}:start`);
-        this[kEnd] = channel(`tracing:${nameOrChannels}:end`);
-        this[kAsyncStart] = channel(`tracing:${nameOrChannels}:asyncStart`);
-        this[kAsyncEnd] = channel(`tracing:${nameOrChannels}:asyncEnd`);
-        this[kError] = channel(`tracing:${nameOrChannels}:error`);
+        this[kStart] = channel(`tracing:${nameOrChannels}:start`)
+        this[kEnd] = channel(`tracing:${nameOrChannels}:end`)
+        this[kAsyncStart] = channel(`tracing:${nameOrChannels}:asyncStart`)
+        this[kAsyncEnd] = channel(`tracing:${nameOrChannels}:asyncEnd`)
+        this[kError] = channel(`tracing:${nameOrChannels}:error`)
       } else {
-        validateObject(nameOrChannels, 'channels');
-        this[kStart] = validateChannel(nameOrChannels.start, 'channels.start');
-        this[kEnd] = validateChannel(nameOrChannels.end, 'channels.end');
+        validateObject(nameOrChannels, 'channels')
+        this[kStart] = validateChannel(nameOrChannels.start, 'channels.start')
+        this[kEnd] = validateChannel(nameOrChannels.end, 'channels.end')
         this[kAsyncStart] = validateChannel(
           nameOrChannels.asyncStart,
-          'channels.asyncStart'
-        );
+          'channels.asyncStart',
+        )
         this[kAsyncEnd] = validateChannel(
           nameOrChannels.asyncEnd,
-          'channels.asyncEnd'
-        );
-        this[kError] = validateChannel(nameOrChannels.error, 'channels.error');
+          'channels.asyncEnd',
+        )
+        this[kError] = validateChannel(nameOrChannels.error, 'channels.error')
       }
     },
     [],
-    TracingChannel
-  ) as TracingChannel;
+    TracingChannel,
+  ) as TracingChannel
 }
 
 export default {
@@ -313,4 +312,4 @@ export default {
   unsubscribe,
   tracingChannel,
   Channel,
-};
+}

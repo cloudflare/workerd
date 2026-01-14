@@ -24,123 +24,122 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import {
-  strictEqual,
-  notStrictEqual,
-  deepStrictEqual,
-  ok,
-  throws,
-  fail,
-  rejects,
-  match,
   type AssertPredicate,
-} from 'node:assert';
-
-import { type Test } from './test';
-import { sanitize_unpaired_surrogates } from './common';
+  deepStrictEqual,
+  fail,
+  match,
+  notStrictEqual,
+  ok,
+  rejects,
+  strictEqual,
+  throws,
+} from 'node:assert'
+import { sanitize_unpaired_surrogates } from './common'
+import type { Test } from './test'
 
 declare global {
-  var AssertionError: unknown;
+  var AssertionError: unknown
 
-  function assert_equals(a: unknown, b: unknown, message?: string): void;
-  function assert_not_equals(a: unknown, b: unknown, message?: string): void;
-  function assert_true(val: unknown, message?: string): void;
-  function assert_false(val: unknown, message?: string): void;
+  function assert_equals(a: unknown, b: unknown, message?: string): void
+  function assert_not_equals(a: unknown, b: unknown, message?: string): void
+  function assert_true(val: unknown, message?: string): void
+  function assert_false(val: unknown, message?: string): void
   function assert_array_equals(
     actual: unknown[],
     expected: unknown[],
-    description?: string
-  ): void;
-  function assert_object_equals(a: unknown, b: unknown, message?: string): void;
-  function assert_implements(condition: unknown, description?: string): void;
+    description?: string,
+  ): void
+  function assert_object_equals(a: unknown, b: unknown, message?: string): void
+  function assert_implements(condition: unknown, description?: string): void
   function assert_implements_optional(
     condition: unknown,
-    description?: string
-  ): void;
-  function assert_unreached(description?: string): void;
+    description?: string,
+  ): void
+  function assert_unreached(description?: string): void
   function assert_throws_js(
     constructor: AssertPredicate,
     func: ThrowingFn,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
   function assert_throws_exactly(
     exception: AssertPredicate,
     fn: ThrowingFn,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
   function assert_throws_dom(
     type: number | string,
     funcOrConstructor: ThrowingFn | typeof DOMException,
     descriptionOrFunc: string | ThrowingFn,
-    maybeDescription?: string
-  ): void;
+    maybeDescription?: string,
+  ): void
   function promise_rejects_dom(
     test: Test,
     type: number | string,
     promiseOrConstructor: Promise<unknown> | typeof DOMException,
     descriptionOrPromise: Promise<unknown> | string,
-    maybeDescription?: string
-  ): Promise<unknown>;
+    maybeDescription?: string,
+  ): Promise<unknown>
 
   function assert_own_property(
     object: object,
     property_name: string | symbol,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
   function assert_not_own_property(
     object: object,
     property_name: string | symbol,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
   function promise_rejects_js(
     test: Test,
     constructor: typeof Error,
     promise: Promise<unknown>,
-    description?: string
-  ): Promise<void>;
+    description?: string,
+  ): Promise<void>
   function assert_regexp_match(
     actual: string,
     expected: RegExp,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
   function assert_greater_than(
     actual: number,
     expected: number,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
 
   function assert_greater_than_equal(
     actual: number,
     expected: number,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
 
   function assert_less_than(
     actual: number,
     expected: number,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
 
   function assert_less_than_equal(
     actual: number,
     expected: number,
-    description?: string
-  ): void;
+    description?: string,
+  ): void
 
   function promise_rejects_exactly(
     test: Test,
     exception: typeof Error,
     promise: Promise<unknown>,
-    description?: string
-  ): Promise<void>;
+    description?: string,
+  ): Promise<void>
 
   function assert_in_array(
     actual: unknown,
     expected: unknown[],
-    description?: string
-  ): void;
+    description?: string,
+  ): void
 }
 
-type ThrowingFn = () => unknown;
+type ThrowingFn = () => unknown
 
 /**
  * Exception type that represents a failing assert.
@@ -150,45 +149,45 @@ type ThrowingFn = () => unknown;
 declare class AssertionError extends Error {}
 
 function AssertionError(this: AssertionError, message: string): void {
-  if (typeof message == 'string') {
-    message = sanitize_unpaired_surrogates(message);
+  if (typeof message === 'string') {
+    message = sanitize_unpaired_surrogates(message)
   }
-  this.message = message;
+  this.message = message
 }
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
-AssertionError.prototype = Object.create(Error.prototype);
+AssertionError.prototype = Object.create(Error.prototype)
 
-globalThis.AssertionError = AssertionError;
+globalThis.AssertionError = AssertionError
 
 declare class OptionalFeatureUnsupportedError extends AssertionError {}
 function OptionalFeatureUnsupportedError(
   this: OptionalFeatureUnsupportedError,
-  message: string
+  message: string,
 ): void {
-  AssertionError.call(this, message);
+  AssertionError.call(this, message)
 }
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
 OptionalFeatureUnsupportedError.prototype = Object.create(
-  AssertionError.prototype
-);
+  AssertionError.prototype,
+)
 
 globalThis.assert_equals = (a, b, message): void => {
-  strictEqual(a, b, message);
-};
+  strictEqual(a, b, message)
+}
 
 globalThis.assert_not_equals = (a, b, message): void => {
-  notStrictEqual(a, b, message);
-};
+  notStrictEqual(a, b, message)
+}
 
 globalThis.assert_true = (val, message): void => {
-  strictEqual(val, true, message);
-};
+  strictEqual(val, true, message)
+}
 
 globalThis.assert_false = (val, message): void => {
-  strictEqual(val, false, message);
-};
+  strictEqual(val, false, message)
+}
 
 /**
  * Assert that ``actual`` and ``expected`` are both arrays, and that the array properties of
@@ -199,21 +198,21 @@ globalThis.assert_false = (val, message): void => {
  * @param [description] - Description of the condition being tested.
  */
 globalThis.assert_array_equals = (actual, expected, description): void => {
-  strictEqual(actual.length, expected.length, description);
+  strictEqual(actual.length, expected.length, description)
 
   for (let i = 0; i < actual.length; i++) {
     strictEqual(
-      Object.prototype.hasOwnProperty.call(actual, i),
-      Object.prototype.hasOwnProperty.call(expected, i),
-      description
-    );
-    strictEqual(actual[i], expected[i], description);
+      Object.hasOwn(actual, i),
+      Object.hasOwn(expected, i),
+      description,
+    )
+    strictEqual(actual[i], expected[i], description)
   }
-};
+}
 
 globalThis.assert_object_equals = (a, b, message): void => {
-  deepStrictEqual(a, b, message);
-};
+  deepStrictEqual(a, b, message)
+}
 
 /**
  * Assert that a feature is implemented, based on a 'truthy' condition.
@@ -228,8 +227,8 @@ globalThis.assert_object_equals = (a, b, message): void => {
  * @param [description] Error description for the case that the condition is not truthy.
  */
 globalThis.assert_implements = (condition, description): void => {
-  ok(!!condition, description);
-};
+  ok(!!condition, description)
+}
 
 /**
  * Assert that an optional feature is implemented, based on a 'truthy' condition.
@@ -246,9 +245,9 @@ globalThis.assert_implements = (condition, description): void => {
  */
 globalThis.assert_implements_optional = (condition, description): void => {
   if (!condition) {
-    throw new OptionalFeatureUnsupportedError(description ?? '');
+    throw new OptionalFeatureUnsupportedError(description ?? '')
   }
-};
+}
 
 /**
  * Asserts if called. Used to ensure that a specific code path is
@@ -257,8 +256,8 @@ globalThis.assert_implements_optional = (condition, description): void => {
  * @param [description] - Description of the condition being tested.
  */
 globalThis.assert_unreached = (description): void => {
-  ok(false, `Reached unreachable code: ${description ?? 'undefined'}`);
-};
+  ok(false, `Reached unreachable code: ${description ?? 'undefined'}`)
+}
 
 /**
  * Assert a JS Error with the expected constructor is thrown.
@@ -270,12 +269,12 @@ globalThis.assert_unreached = (description): void => {
 globalThis.assert_throws_js = (constructor, func, description): void => {
   throws(
     () => {
-      func.call(this);
+      func.call(this)
     },
     constructor,
-    description
-  );
-};
+    description,
+  )
+}
 
 /**
  * Assert the provided value is thrown.
@@ -286,18 +285,18 @@ globalThis.assert_throws_js = (constructor, func, description): void => {
  */
 globalThis.assert_throws_exactly = (exception, fn, description): void => {
   try {
-    fn.call(this);
+    fn.call(this)
   } catch (err) {
     strictEqual(
       err,
       exception,
-      description ?? "Thrown exception doesn't match expected value"
-    );
-    return;
+      description ?? "Thrown exception doesn't match expected value",
+    )
+    return
   }
 
-  fail(description ?? 'No exception was thrown');
-};
+  fail(description ?? 'No exception was thrown')
+}
 
 /**
  * Assert a DOMException with the expected type is thrown.
@@ -333,44 +332,44 @@ globalThis.assert_throws_dom = (
   type,
   funcOrConstructor,
   descriptionOrFunc,
-  maybeDescription
+  maybeDescription,
 ): void => {
-  let constructor: typeof DOMException;
-  let func: ThrowingFn;
-  let description: string;
+  let constructor: typeof DOMException
+  let func: ThrowingFn
+  let description: string
 
   if (funcOrConstructor.name === 'DOMException') {
-    constructor = funcOrConstructor as typeof DOMException;
-    func = descriptionOrFunc as ThrowingFn;
-    description = maybeDescription as string;
+    constructor = funcOrConstructor as typeof DOMException
+    func = descriptionOrFunc as ThrowingFn
+    description = maybeDescription as string
   } else {
-    constructor = DOMException;
-    func = funcOrConstructor as ThrowingFn;
-    description = descriptionOrFunc as string;
+    constructor = DOMException
+    func = funcOrConstructor as ThrowingFn
+    description = descriptionOrFunc as string
     ok(
       maybeDescription === undefined,
-      'Too many args passed to no-constructor version of assert_throws_dom'
-    );
+      'Too many args passed to no-constructor version of assert_throws_dom',
+    )
   }
 
   throws(
     () => {
-      func.call(this);
+      func.call(this)
     },
     (err: DOMException) => {
-      strictEqual(err.constructor, constructor);
+      strictEqual(err.constructor, constructor)
       if (typeof type === 'string') {
-        strictEqual(err.name, type, description);
+        strictEqual(err.name, type, description)
       } else {
         // eslint-disable-next-line @typescript-eslint/no-deprecated -- WPT allows tests to check the deprecated 'code' property so we must support this
-        strictEqual(err.code, type, description);
+        strictEqual(err.code, type, description)
       }
 
-      return true;
+      return true
     },
-    `Failed to throw: ${description}`
-  );
-};
+    `Failed to throw: ${description}`,
+  )
+}
 
 /**
  * Assert that a Promise is rejected with the right DOMException.
@@ -407,42 +406,42 @@ globalThis.promise_rejects_dom = (
   type,
   promiseOrConstructor,
   descriptionOrPromise,
-  maybeDescription
+  maybeDescription,
 ): Promise<unknown> => {
-  let constructor, promise, description;
+  let constructor, promise, description
   if (
     typeof promiseOrConstructor === 'function' &&
     promiseOrConstructor.name === 'DOMException'
   ) {
-    constructor = promiseOrConstructor;
-    promise = descriptionOrPromise as Promise<unknown>;
-    description = maybeDescription as string;
+    constructor = promiseOrConstructor
+    promise = descriptionOrPromise as Promise<unknown>
+    description = maybeDescription as string
   } else {
-    constructor = DOMException;
-    promise = promiseOrConstructor as Promise<unknown>;
-    description = descriptionOrPromise as string;
+    constructor = DOMException
+    promise = promiseOrConstructor as Promise<unknown>
+    description = descriptionOrPromise as string
     strictEqual(
       maybeDescription,
       undefined,
-      'Too many args passed to no-constructor version of promise_rejects_dom, or accidentally explicitly passed undefined'
-    );
+      'Too many args passed to no-constructor version of promise_rejects_dom, or accidentally explicitly passed undefined',
+    )
   }
 
   return promise
     .then(() => {
-      assert_unreached('Should have rejected: ' + description);
+      assert_unreached(`Should have rejected: ${description}`)
     })
-    .catch(function (e: unknown) {
+    .catch((e: unknown) => {
       assert_throws_dom(
         type,
         constructor,
-        function () {
-          throw e;
+        () => {
+          throw e
         },
-        description
-      );
-    });
-};
+        description,
+      )
+    })
+}
 
 /**
  * Assert that ``object`` has an own property with name ``property_name``.
@@ -453,11 +452,11 @@ globalThis.promise_rejects_dom = (
  */
 globalThis.assert_own_property = (object, property_name, description): void => {
   ok(
-    Object.prototype.hasOwnProperty.call(object, property_name),
+    Object.hasOwn(object, property_name),
     `expected property ${String(property_name)} missing on object: ` +
-      (description ?? '')
-  );
-};
+      (description ?? ''),
+  )
+}
 
 /**
  * Assert that ``object`` does not have an own property with name ``property_name``.
@@ -469,14 +468,14 @@ globalThis.assert_own_property = (object, property_name, description): void => {
 globalThis.assert_not_own_property = (
   object,
   property_name,
-  description
+  description,
 ): void => {
   ok(
-    !Object.prototype.hasOwnProperty.call(object, property_name),
+    !Object.hasOwn(object, property_name),
     `unexpected property ${String(property_name)} is found on object: ` +
-      (description ?? '')
-  );
-};
+      (description ?? ''),
+  )
+}
 
 /**
  * Assert that a Promise is rejected with the right ECMAScript exception.
@@ -492,10 +491,10 @@ globalThis.promise_rejects_js = async (
   _test,
   constructor,
   promise,
-  description
+  description,
 ): Promise<void> => {
-  return rejects(promise, constructor, description);
-};
+  return rejects(promise, constructor, description)
+}
 
 /**
  * Assert that ``actual`` matches the RegExp ``expected``.
@@ -505,8 +504,8 @@ globalThis.promise_rejects_js = async (
  * @param [description] - Description of the condition being tested.
  */
 globalThis.assert_regexp_match = (actual, expected, description): void => {
-  match(actual, expected, description);
-};
+  match(actual, expected, description)
+}
 
 /**
  * Assert that ``actual`` is a number greater than ``expected``.
@@ -516,8 +515,8 @@ globalThis.assert_regexp_match = (actual, expected, description): void => {
  * @param [description] - Description of the condition being tested.
  */
 globalThis.assert_greater_than = (actual, expected, description): void => {
-  ok(actual > expected, description);
-};
+  ok(actual > expected, description)
+}
 
 /**
  * Assert that ``actual`` is a number greater than or equal to ``expected``.
@@ -529,10 +528,10 @@ globalThis.assert_greater_than = (actual, expected, description): void => {
 globalThis.assert_greater_than_equal = (
   actual,
   expected,
-  description
+  description,
 ): void => {
-  ok(actual >= expected, description);
-};
+  ok(actual >= expected, description)
+}
 
 /**
  * Assert that ``actual`` is a number less than ``expected``.
@@ -542,8 +541,8 @@ globalThis.assert_greater_than_equal = (
  * @param [description] - Description of the condition being tested.
  */
 globalThis.assert_less_than = (actual, expected, description): void => {
-  ok(actual < expected, description);
-};
+  ok(actual < expected, description)
+}
 
 /**
  * Assert that ``actual`` is a number less than or equal to ``expected``.
@@ -553,8 +552,8 @@ globalThis.assert_less_than = (actual, expected, description): void => {
  * @param [description] - Description of the condition being tested.
  */
 globalThis.assert_less_than_equal = (actual, expected, description): void => {
-  ok(actual <= expected, description);
-};
+  ok(actual <= expected, description)
+}
 
 /**
  * Assert that a Promise is rejected with the provided value.
@@ -570,22 +569,22 @@ globalThis.promise_rejects_exactly = (
   _test,
   exception,
   promise,
-  description
+  description,
 ): Promise<void> => {
   return promise
     .then(() => {
-      assert_unreached(`Should have rejected: ${description}`);
+      assert_unreached(`Should have rejected: ${description}`)
     })
     .catch((exc: unknown) => {
       assert_throws_exactly(
         exception,
         () => {
-          throw exc;
+          throw exc
         },
-        description
-      );
-    });
-};
+        description,
+      )
+    })
+}
 
 /**
  * Assert that ``expected`` is an array and ``actual`` is one of the members.
@@ -600,6 +599,6 @@ globalThis.assert_in_array = (actual, expected, description): void => {
   notStrictEqual(
     expected.indexOf(actual),
     -1,
-    `assert_in_array ${description}: value ${actual} not in array ${expected}`
-  );
-};
+    `assert_in_array ${description}: value ${actual} not in array ${expected}`,
+  )
+}

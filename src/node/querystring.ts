@@ -9,12 +9,12 @@ import {
   stringify,
   unescape,
   unescapeBuffer,
-} from 'node-internal:internal_querystring';
+} from 'node-internal:internal_querystring'
 
-export const encode = stringify;
-export const decode = parse;
+export const encode = stringify
+export const decode = parse
 
-export { escape, parse, stringify, unescape, unescapeBuffer };
+export { escape, parse, stringify, unescape, unescapeBuffer }
 
 export default {
   decode,
@@ -24,4 +24,4 @@ export default {
   stringify,
   unescape,
   unescapeBuffer,
-};
+}

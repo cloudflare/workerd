@@ -1,1 +1,1 @@
-export const portMapper: Map<number, { fetch: typeof fetch }>;
+export const portMapper: Map<number, { fetch: typeof fetch }>

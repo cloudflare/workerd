@@ -2,44 +2,41 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 //
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors'
 
-export const getRandomValues = crypto.getRandomValues.bind(crypto);
-export const subtle = crypto.subtle;
-export const webcrypto = crypto;
+export const getRandomValues = crypto.getRandomValues.bind(crypto)
+export const subtle = crypto.subtle
+export const webcrypto = crypto
 
 export function timingSafeEqual(
   a: NodeJS.ArrayBufferView,
-  b: NodeJS.ArrayBufferView
+  b: NodeJS.ArrayBufferView,
 ): boolean {
-  return (subtle as any).timingSafeEqual(a, b); // eslint-disable-line
+  return (subtle as any).timingSafeEqual(a, b) // eslint-disable-line
 }
 
 import {
-  DiffieHellman,
-  DiffieHellmanGroup,
+  Cipheriv,
+  createCipheriv,
+  createDecipheriv,
+  Decipheriv,
+  getCipherInfo,
+  getCiphers,
+  privateDecrypt,
+  privateEncrypt,
+  publicDecrypt,
+  publicEncrypt,
+} from 'node-internal:crypto_cipher'
+import {
   createDiffieHellman,
   createDiffieHellmanGroup,
-  getDiffieHellman,
-  diffieHellman,
   createECDH,
+  DiffieHellman,
+  DiffieHellmanGroup,
+  diffieHellman,
   ECDH,
-} from 'node-internal:crypto_dh';
-
-import {
-  randomBytes,
-  randomFillSync,
-  randomFill,
-  randomInt,
-  randomUUID,
-  type PrimeNum,
-  type GeneratePrimeOptions,
-  type CheckPrimeOptions,
-  generatePrime,
-  generatePrimeSync,
-  checkPrime,
-  checkPrimeSync,
-} from 'node-internal:crypto_random';
+  getDiffieHellman,
+} from 'node-internal:crypto_dh'
 
 import {
   createHash,
@@ -48,57 +45,50 @@ import {
   type HashOptions,
   Hmac,
   hash,
-} from 'node-internal:crypto_hash';
-
+} from 'node-internal:crypto_hash'
+import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf'
 import {
-  createSign,
-  createVerify,
-  sign,
-  verify,
-  Sign,
-  Verify,
-} from 'node-internal:crypto_sign';
-
-import {
-  Cipheriv,
-  Decipheriv,
-  createCipheriv,
-  createDecipheriv,
-  publicDecrypt,
-  publicEncrypt,
-  privateDecrypt,
-  privateEncrypt,
-  getCipherInfo,
-  getCiphers,
-} from 'node-internal:crypto_cipher';
-
-import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf';
-
-import {
-  pbkdf2,
-  pbkdf2Sync,
-  type ArrayLike,
-} from 'node-internal:crypto_pbkdf2';
-
-import { scrypt, scryptSync } from 'node-internal:crypto_scrypt';
-
-import {
-  KeyObject,
-  PublicKeyObject,
-  PrivateKeyObject,
-  SecretKeyObject,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
   generateKey,
   generateKeyPair,
   generateKeyPairSync,
   generateKeySync,
-  createPrivateKey,
-  createPublicKey,
-  createSecretKey,
-} from 'node-internal:crypto_keys';
+  KeyObject,
+  PrivateKeyObject,
+  PublicKeyObject,
+  SecretKeyObject,
+} from 'node-internal:crypto_keys'
+import { type ArrayLike, pbkdf2, pbkdf2Sync } from 'node-internal:crypto_pbkdf2'
+import {
+  type CheckPrimeOptions,
+  checkPrime,
+  checkPrimeSync,
+  type GeneratePrimeOptions,
+  generatePrime,
+  generatePrimeSync,
+  type PrimeNum,
+  randomBytes,
+  randomFill,
+  randomFillSync,
+  randomInt,
+  randomUUID,
+} from 'node-internal:crypto_random'
 
-import { Certificate } from 'node-internal:crypto_spkac';
+import { scrypt, scryptSync } from 'node-internal:crypto_scrypt'
+import {
+  createSign,
+  createVerify,
+  Sign,
+  sign,
+  Verify,
+  verify,
+} from 'node-internal:crypto_sign'
 
-import { X509Certificate } from 'node-internal:crypto_x509';
+import { Certificate } from 'node-internal:crypto_spkac'
+
+import { X509Certificate } from 'node-internal:crypto_x509'
 
 export {
   // DH
@@ -175,14 +165,14 @@ export {
   privateEncrypt,
   getCipherInfo,
   getCiphers,
-};
+}
 
 export function getCurves(): string[] {
   // Hardcoded list of supported curves. Note that prime256v1 is equivalent to secp256r1, we follow
   // OpenSSL's and bssl's nomenclature here.
 
   // prettier-ignore
-  return ['secp224r1', 'prime256v1', 'secp384r1', 'secp521r1'];
+  return ['secp224r1', 'prime256v1', 'secp384r1', 'secp521r1']
 }
 
 export function getHashes(): string[] {
@@ -190,9 +180,25 @@ export function getHashes(): string[] {
   // expected to change infrequently based of bssl's stability-focused approach.
 
   // prettier-ignore
-  return ['md4', 'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'md5-sha1', 'RSA-MD5',
-          'RSA-SHA1', 'RSA-SHA224', 'RSA-SHA256', 'RSA-SHA384', 'RSA-SHA512', 'DSA-SHA',
-          'DSA-SHA1', 'ecdsa-with-SHA1'];
+  return [
+    'md4',
+    'md5',
+    'sha1',
+    'sha224',
+    'sha256',
+    'sha384',
+    'sha512',
+    'md5-sha1',
+    'RSA-MD5',
+    'RSA-SHA1',
+    'RSA-SHA224',
+    'RSA-SHA256',
+    'RSA-SHA384',
+    'RSA-SHA512',
+    'DSA-SHA',
+    'DSA-SHA1',
+    'ecdsa-with-SHA1',
+  ]
 }
 
 // We do not implement the openssl secure heap.
@@ -202,28 +208,28 @@ export function secureHeapUsed(): Record<string, unknown> {
     used: 0,
     utilization: 0,
     min: 0,
-  };
+  }
 }
 
 // We do not allow users to set the engine used.
 export function setEngine(_1: string, _2?: number): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('setEngine');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('setEngine')
 }
 
 // We do not allow users to modify the FIPS enablement.
 export function setFips(_: boolean): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('setFips');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('setFips')
 }
 
 // We always run in FIPS mode.
-export const fips = true;
+export const fips = true
 export function getFips(): boolean {
-  return fips;
+  return fips
 }
 
 export const constants: Record<string, number | string> = Object.create(
-  null
-) as Record<string, number | string>;
+  null,
+) as Record<string, number | string>
 Object.defineProperties(constants, {
   DH_CHECK_P_NOT_SAFE_PRIME: {
     value: 2,
@@ -526,31 +532,31 @@ Object.defineProperties(constants, {
     configurable: true,
     writable: true,
   },
-});
+})
 
 // Deprecated but required for backwards compatibility.
-export const pseudoRandomBytes = randomBytes;
+export const pseudoRandomBytes = randomBytes
 
-export const CryptoKey = globalThis.CryptoKey;
+export const CryptoKey = globalThis.CryptoKey
 
-export let createCipher: (() => void) | undefined = undefined;
-export let createDecipher: (() => void) | undefined = undefined;
-export let Cipher: (() => void) | undefined = undefined;
-export let Decipher: (() => void) | undefined = undefined;
+export let createCipher: (() => void) | undefined = undefined
+export let createDecipher: (() => void) | undefined = undefined
+export let Cipher: (() => void) | undefined = undefined
+export let Decipher: (() => void) | undefined = undefined
 
 if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v22) {
   createCipher = (): void => {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('createCipher');
-  };
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createCipher')
+  }
   createDecipher = (): void => {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('createDecipher');
-  };
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createDecipher')
+  }
   Cipher = (): void => {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Cipher');
-  };
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Cipher')
+  }
   Decipher = (): void => {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Decipher');
-  };
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Decipher')
+  }
 }
 export default {
   constants,
@@ -612,10 +618,10 @@ export default {
   getFips,
   setFips,
   get fips(): boolean {
-    return getFips();
+    return getFips()
   },
   set fips(_: boolean) {
-    setFips(_);
+    setFips(_)
   },
   // WebCrypto
   subtle,
@@ -648,7 +654,7 @@ export default {
   createDecipher,
   Cipher,
   Decipher,
-};
+}
 
 // Classes
 //   * [x] crypto.Certificate

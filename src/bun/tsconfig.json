@@ -1,0 +1,16 @@
+{
+  "extends": "../../tools/base.tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "dom", "Webworker.Iterable"],
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": false,
+    "types": ["node"],
+    "paths": {
+      "bun-internal:*": ["./internal/*"]
+    }
+  },
+  "include": ["*.ts", "internal/*.ts"],
+  "exclude": ["node_modules"]
+}

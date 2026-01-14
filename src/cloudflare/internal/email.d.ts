@@ -5,7 +5,7 @@
 // Type definitions for c++ implementation.
 
 export class EmailMessage {
-  constructor(from: string, to: string, raw: ReadableStream | string);
-  readonly from: string;
-  readonly to: string;
+  constructor(from: string, to: string, raw: ReadableStream | string)
+  readonly from: string
+  readonly to: string
 }

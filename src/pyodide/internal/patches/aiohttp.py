@@ -196,7 +196,6 @@ async def _request(
                 session=req._session,
             )
             from js import Headers, fetch
-
             from pyodide.ffi import to_js
 
             body = None

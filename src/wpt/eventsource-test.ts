@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'dedicated-worker/eventsource-close.js': {
@@ -248,4 +248,4 @@ export default {
     comment: 'SharedWorker tests are not applicable to workerd',
     omittedTests: true,
   },
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

@@ -2,95 +2,98 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
+import { enterJaegerSpan } from 'pyodide-internal:jaeger'
+import { default as Limiter } from 'pyodide-internal:limiter'
 import {
-  beforeRequest,
-  loadPyodide,
-  clearSignals,
-} from 'pyodide-internal:python';
-import { enterJaegerSpan } from 'pyodide-internal:jaeger';
-import { patchLoadPackage } from 'pyodide-internal:setupPackages';
-import {
+  COMPATIBILITY_FLAGS,
   IS_WORKERD,
-  LOCKFILE,
-  TRANSITIVE_REQUIREMENTS,
-  MAIN_MODULE_NAME,
-  WORKERD_INDEX_URL,
-  SHOULD_SNAPSHOT_TO_DISK,
-  WORKFLOWS_ENABLED,
   LEGACY_GLOBAL_HANDLERS,
   LEGACY_INCLUDE_SDK,
-  COMPATIBILITY_FLAGS,
-} from 'pyodide-internal:metadata';
-import { default as Limiter } from 'pyodide-internal:limiter';
+  LOCKFILE,
+  MAIN_MODULE_NAME,
+  SHOULD_SNAPSHOT_TO_DISK,
+  TRANSITIVE_REQUIREMENTS,
+  WORKERD_INDEX_URL,
+  WORKFLOWS_ENABLED,
+} from 'pyodide-internal:metadata'
 import {
-  PythonWorkersInternalError,
+  beforeRequest,
+  clearSignals,
+  loadPyodide,
+} from 'pyodide-internal:python'
+import { patchLoadPackage } from 'pyodide-internal:setupPackages'
+import { LOADED_SNAPSHOT_TYPE } from 'pyodide-internal:snapshot'
+import {
   PythonUserError,
+  PythonWorkersInternalError,
   reportError,
-} from 'pyodide-internal:util';
-import { LOADED_SNAPSHOT_TYPE } from 'pyodide-internal:snapshot';
-export { createImportProxy } from 'pyodide-internal:serializeJsModule';
-import { patch_env_helper } from 'pyodide-internal:envHelpers';
+} from 'pyodide-internal:util'
 
-type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
+export { createImportProxy } from 'pyodide-internal:serializeJsModule'
 
-const waitUntilPatched = new WeakSet();
+import { patch_env_helper } from 'pyodide-internal:envHelpers'
+
+type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void }
+
+const waitUntilPatched = new WeakSet()
 
 function patchWaitUntil(ctx: {
-  waitUntil: (p: Promise<void> | PyFuture<void>) => void;
+  waitUntil: (p: Promise<void> | PyFuture<void>) => void
 }): void {
-  let tag;
+  let tag
   try {
-    tag = Object.prototype.toString.call(ctx);
+    tag = Object.prototype.toString.call(ctx)
   } catch (_e) {}
   if (tag !== '[object ExecutionContext]') {
-    return;
+    return
   }
   if (waitUntilPatched.has(ctx)) {
-    return;
+    return
   }
-  const origWaitUntil: (p: Promise<void>) => void = ctx.waitUntil.bind(ctx);
+  const origWaitUntil: (p: Promise<void>) => void = ctx.waitUntil.bind(ctx)
   function waitUntil(p: Promise<void> | PyFuture<void>): void {
     origWaitUntil(
-      (async function (): Promise<void> {
+      (async (): Promise<void> => {
         if ('copy' in p) {
-          p = p.copy();
+          p = p.copy()
         }
-        await p;
+        await p
         if ('destroy' in p) {
-          p.destroy();
+          p.destroy()
         }
-      })()
-    );
+      })(),
+    )
   }
-  ctx.waitUntil = waitUntil;
-  waitUntilPatched.add(ctx);
+  ctx.waitUntil = waitUntil
+  waitUntilPatched.add(ctx)
 }
 
 export type PyodideEntrypointHelper = {
-  doAnImport: (mod: string) => Promise<any>;
-  cloudflareWorkersModule: { env: any };
-  cloudflareSocketsModule: any;
-  workerEntrypoint: any;
-  patchWaitUntil: typeof patchWaitUntil;
-  patch_env_helper: (patch: unknown) => Generator<void>;
-};
-import { maybeCollectDedicatedSnapshot } from 'pyodide-internal:snapshot';
+  doAnImport: (mod: string) => Promise<any>
+  cloudflareWorkersModule: { env: any }
+  cloudflareSocketsModule: any
+  workerEntrypoint: any
+  patchWaitUntil: typeof patchWaitUntil
+  patch_env_helper: (patch: unknown) => Generator<void>
+}
+
+import { maybeCollectDedicatedSnapshot } from 'pyodide-internal:snapshot'
 
 // Function to import JavaScript modules from Python
-let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
+let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null
 
 function get_pyodide_entrypoint_helper(): PyodideEntrypointHelper {
   if (!_pyodide_entrypoint_helper) {
     throw new PythonWorkersInternalError(
-      'pyodide_entrypoint_helper is not initialized'
-    );
+      'pyodide_entrypoint_helper is not initialized',
+    )
   }
-  return _pyodide_entrypoint_helper;
+  return _pyodide_entrypoint_helper
 }
 
 export async function setDoAnImport(
   doAnImport: (mod: string) => Promise<any>,
-  workerEntrypoint: any
+  workerEntrypoint: any,
 ): Promise<void> {
   _pyodide_entrypoint_helper = {
     doAnImport,
@@ -99,7 +102,7 @@ export async function setDoAnImport(
     workerEntrypoint,
     patchWaitUntil,
     patch_env_helper,
-  };
+  }
 }
 
 function handleSrcImport(pyodide: Pyodide, e: any): never {
@@ -118,43 +121,43 @@ function handleSrcImport(pyodide: Pyodide, e: any): never {
         raise exc
       finally:
         del exc
-    `);
+    `)
   }
-  throw e;
+  throw e
 }
 
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
   if (!MAIN_MODULE_NAME.endsWith('.py')) {
     throw new PythonUserError(
-      'Main module needs to end with a .py file extension'
-    );
+      'Main module needs to end with a .py file extension',
+    )
   }
-  const mainModuleName = MAIN_MODULE_NAME.slice(0, -3);
+  const mainModuleName = MAIN_MODULE_NAME.slice(0, -3)
   if (pyodide.version === '0.26.0a2') {
-    return pyodide.pyimport(mainModuleName);
+    return pyodide.pyimport(mainModuleName)
   } else {
     return await pyodide._module.API.pyodide_base.pyimport_impl.callPromising(
-      mainModuleName
-    );
+      mainModuleName,
+    )
   }
 }
 
-let pyodidePromise: Promise<Pyodide> | undefined;
+let pyodidePromise: Promise<Pyodide> | undefined
 async function getPyodide(): Promise<Pyodide> {
   return await enterJaegerSpan('get_pyodide', () => {
     if (pyodidePromise) {
-      return pyodidePromise;
+      return pyodidePromise
     }
-    pyodidePromise = (async function (): Promise<Pyodide> {
+    pyodidePromise = (async (): Promise<Pyodide> => {
       const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL, {
         pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
         cloudflare_compat_flags: COMPATIBILITY_FLAGS,
-      });
-      await setupPatches(pyodide);
-      return pyodide;
-    })();
-    return pyodidePromise;
-  });
+      })
+      await setupPatches(pyodide)
+      return pyodide
+    })()
+    return pyodidePromise
+  })
 }
 
 /**
@@ -164,14 +167,14 @@ async function getPyodide(): Promise<Pyodide> {
 async function injectSitePackagesModule(
   pyodide: Pyodide,
   jsModName: string,
-  pyModName: string
+  pyModName: string,
 ): Promise<void> {
-  const mod = await import(`pyodide-internal:${jsModName}.py`);
+  const mod = await import(`pyodide-internal:${jsModName}.py`)
   pyodide.FS.writeFile(
     `${pyodide.FS.sitePackages}/${pyModName}.py`,
     new Uint8Array(mod.default),
-    { canOwn: true }
-  );
+    { canOwn: true },
+  )
 }
 
 /**
@@ -184,146 +187,143 @@ async function applyPatch(pyodide: Pyodide, patchName: string): Promise<void> {
   await injectSitePackagesModule(
     pyodide,
     `patches/${patchName}`,
-    patchName + '_patch'
-  );
-  pyodide.pyimport(patchName + '_patch');
+    `${patchName}_patch`,
+  )
+  pyodide.pyimport(`${patchName}_patch`)
 }
 
 async function injectWorkersApi(pyodide: Pyodide): Promise<void> {
-  const sitePackages = pyodide.FS.sitePackages;
+  const sitePackages = pyodide.FS.sitePackages
   if (pyodide.version === '0.26.0a2') {
     // Inject at cloudflare.workers for backwards compatibility
-    pyodide.FS.mkdirTree(`${sitePackages}/cloudflare/workers`);
+    pyodide.FS.mkdirTree(`${sitePackages}/cloudflare/workers`)
     await injectSitePackagesModule(
       pyodide,
       'workers-api/src/workers/__init__',
-      'cloudflare/workers/__init__'
-    );
+      'cloudflare/workers/__init__',
+    )
     await injectSitePackagesModule(
       pyodide,
       'workers-api/src/workers/_workers',
-      'cloudflare/workers/_workers'
-    );
+      'cloudflare/workers/_workers',
+    )
   }
   // The SDK was moved from `cloudflare.workers` to just `workers`.
   // Create workers package structure with workflows submodule
-  pyodide.FS.mkdir(`${sitePackages}/workers`);
+  pyodide.FS.mkdir(`${sitePackages}/workers`)
   await injectSitePackagesModule(
     pyodide,
     'workers-api/src/workers/__init__',
-    'workers/__init__'
-  );
+    'workers/__init__',
+  )
   await injectSitePackagesModule(
     pyodide,
     'workers-api/src/workers/_workers',
-    'workers/_workers'
-  );
+    'workers/_workers',
+  )
   await injectSitePackagesModule(
     pyodide,
     'workers-api/src/workers/workflows',
-    'workers/workflows'
-  );
-  await injectSitePackagesModule(pyodide, 'workers-api/src/asgi', 'asgi');
+    'workers/workflows',
+  )
+  await injectSitePackagesModule(pyodide, 'workers-api/src/asgi', 'asgi')
 }
 
 async function setupPatches(pyodide: Pyodide): Promise<void> {
   await enterJaegerSpan('setup_patches', async () => {
-    patchLoadPackage(pyodide);
+    patchLoadPackage(pyodide)
 
     // install any extra packages into the site-packages directory
     // Expose the doAnImport function and global modules to Python globals
     pyodide.registerJsModule(
       '_pyodide_entrypoint_helper',
-      get_pyodide_entrypoint_helper()
-    );
+      get_pyodide_entrypoint_helper(),
+    )
 
-    pyodide.registerJsModule('_cloudflare_compat_flags', COMPATIBILITY_FLAGS);
+    pyodide.registerJsModule('_cloudflare_compat_flags', COMPATIBILITY_FLAGS)
 
     // Inject modules that enable JS features to be used idiomatically from Python.
     if (LEGACY_INCLUDE_SDK) {
-      await injectWorkersApi(pyodide);
+      await injectWorkersApi(pyodide)
     }
 
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
-      await applyPatch(pyodide, 'aiohttp');
+      await applyPatch(pyodide, 'aiohttp')
     }
     // Other than the oldest version of httpx, we apply the patch at the build step.
     if (
       pyodide._module.API.version === '0.26.0a2' &&
       TRANSITIVE_REQUIREMENTS.has('httpx')
     ) {
-      await applyPatch(pyodide, 'httpx');
+      await applyPatch(pyodide, 'httpx')
     }
-  });
+  })
 }
 
-let mainModulePromise: Promise<PyModule> | undefined;
+let mainModulePromise: Promise<PyModule> | undefined
 function getMainModule(): Promise<PyModule> {
   return enterJaegerSpan('get_main_module', async () => {
     if (mainModulePromise) {
-      return mainModulePromise;
+      return mainModulePromise
     }
-    mainModulePromise = (async function (): Promise<PyModule> {
-      const pyodide = await getPyodide();
-      Limiter.beginStartup();
+    mainModulePromise = (async (): Promise<PyModule> => {
+      const pyodide = await getPyodide()
+      Limiter.beginStartup()
       try {
         return await enterJaegerSpan('pyimport_main_module', () =>
-          pyimportMainModule(pyodide)
-        );
+          pyimportMainModule(pyodide),
+        )
       } catch (e: any) {
-        handleSrcImport(pyodide, e);
+        handleSrcImport(pyodide, e)
       } finally {
-        Limiter.finishStartup(LOADED_SNAPSHOT_TYPE);
+        Limiter.finishStartup(LOADED_SNAPSHOT_TYPE)
       }
-    })();
-    return mainModulePromise;
-  });
+    })()
+    return mainModulePromise
+  })
 }
 
 async function preparePython(): Promise<PyModule> {
   try {
-    const pyodide = await getPyodide();
-    const mainModule = await getMainModule();
-    beforeRequest(pyodide._module);
-    return mainModule;
+    const pyodide = await getPyodide()
+    const mainModule = await getMainModule()
+    beforeRequest(pyodide._module)
+    return mainModule
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception
     // but no traceback. This gives us a full traceback.
-    reportError(e as Error);
+    reportError(e as Error)
   }
 }
 
 async function doPyCallHelper(
   relaxed: boolean,
   pyfunc: PyCallable,
-  args: any[]
+  args: any[],
 ): Promise<any> {
-  const pyodide = await getPyodide();
-  clearSignals(pyodide._module);
+  const pyodide = await getPyodide()
+  clearSignals(pyodide._module)
   try {
     if (pyfunc.callWithOptions) {
-      return await pyfunc.callWithOptions(
-        { relaxed, promising: true },
-        ...args
-      );
+      return await pyfunc.callWithOptions({ relaxed, promising: true }, ...args)
     }
     if (relaxed) {
-      return await pyfunc.callRelaxed(...args);
+      return await pyfunc.callRelaxed(...args)
     }
-    return await pyfunc(...args);
+    return await pyfunc(...args)
   } catch (e: any) {
-    const pyodide = await getPyodide();
-    handleSrcImport(pyodide, e);
+    const pyodide = await getPyodide()
+    handleSrcImport(pyodide, e)
   }
 }
 
 function doPyCall(pyfunc: PyCallable, args: any[]): any {
-  return doPyCallHelper(false, pyfunc, args);
+  return doPyCallHelper(false, pyfunc, args)
 }
 
 function doRelaxedPyCall(pyfunc: PyCallable, args: any[]): any {
-  return doPyCallHelper(true, pyfunc, args);
+  return doPyCallHelper(true, pyfunc, args)
 }
 
 function makeHandler(pyHandlerName: string): Handler {
@@ -332,75 +332,75 @@ function makeHandler(pyHandlerName: string): Handler {
     SHOULD_SNAPSHOT_TO_DISK &&
     LEGACY_GLOBAL_HANDLERS
   ) {
-    return async function () {
-      await getPyodide();
-      console.log('Stored snapshot to disk; quitting without running test');
-    };
+    return async () => {
+      await getPyodide()
+      console.log('Stored snapshot to disk; quitting without running test')
+    }
   }
-  return async function (...args: any[]) {
+  return async (...args: any[]) => {
     const mainModule = await enterJaegerSpan(
       'prep_python',
-      async () => await preparePython()
-    );
-    const handler = mainModule[pyHandlerName];
+      async () => await preparePython(),
+    )
+    const handler = mainModule[pyHandlerName]
     if (!handler) {
       throw new PythonUserError(
-        `Python entrypoint "${MAIN_MODULE_NAME}" does not export a handler named "${pyHandlerName}"`
-      );
+        `Python entrypoint "${MAIN_MODULE_NAME}" does not export a handler named "${pyHandlerName}"`,
+      )
     }
     const result = await enterJaegerSpan('python_code', () => {
-      return doRelaxedPyCall(handler, args);
-    });
+      return doRelaxedPyCall(handler, args)
+    })
 
     // Support returning a pyodide.ffi.FetchResponse.
-    return result?.js_response ?? result;
-  };
+    return result?.js_response ?? result
+  }
 }
 
 async function initPyInstance(
   className: string,
-  args: any[]
+  args: any[],
 ): Promise<PyModule> {
-  const mainModule = await preparePython();
-  const pyClassConstructor = mainModule[className];
+  const mainModule = await preparePython()
+  const pyClassConstructor = mainModule[className]
   if (typeof pyClassConstructor !== 'function') {
     throw new TypeError(
-      `There is no '${className}' class defined in the Python Worker's main module`
-    );
+      `There is no '${className}' class defined in the Python Worker's main module`,
+    )
   }
-  const res = await doPyCall(pyClassConstructor, args);
-  return res as PyModule;
+  const res = await doPyCall(pyClassConstructor, args)
+  return res as PyModule
 }
 
 // https://developers.cloudflare.com/workers/runtime-apis/rpc/reserved-methods/
-const SPECIAL_HANDLER_NAMES = ['fetch', 'connect'];
+const SPECIAL_HANDLER_NAMES = ['fetch', 'connect']
 const SPECIAL_DO_HANDLER_NAMES = [
   'alarm',
   'webSocketMessage',
   'webSocketClose',
   'webSocketError',
-];
+]
 
 function makeEntrypointProxyHandler(
   pyInstancePromise: Promise<PyModule>,
-  className: string
+  className: string,
 ): ProxyHandler<any> {
   return {
     get(target, prop, receiver): any {
       if (typeof prop !== 'string') {
-        return Reflect.get(target, prop, receiver);
+        return Reflect.get(target, prop, receiver)
       }
-      const isDurableObject = className === 'DurableObject';
-      const isWorkflow = className === 'WorkflowEntrypoint';
+      const isDurableObject = className === 'DurableObject'
+      const isWorkflow = className === 'WorkflowEntrypoint'
 
       // Proxy calls to `fetch` to methods named `on_fetch` (and the same for other handlers.)
-      const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop);
+      const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop)
       const isKnownDoHandler =
-        isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
-      const isFetch = prop === 'fetch';
-      const isWorkflowHandler = isWorkflow && prop === 'run';
+        isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop)
+      const isFetch = prop === 'fetch'
+      const isWorkflowHandler = isWorkflow && prop === 'run'
       if ((isKnownHandler || isKnownDoHandler) && LEGACY_GLOBAL_HANDLERS) {
-        prop = 'on_' + prop;
+        prop = `on_${prop}`
       }
 
       if (
@@ -408,26 +408,26 @@ function makeEntrypointProxyHandler(
         prop === 'test' &&
         SHOULD_SNAPSHOT_TO_DISK
       ) {
-        return async function () {
-          await getPyodide();
-          console.log('Stored snapshot to disk; quitting without running test');
-        };
+        return async () => {
+          await getPyodide()
+          console.log('Stored snapshot to disk; quitting without running test')
+        }
       }
 
-      return async function (...args: any[]): Promise<any> {
+      return async (...args: any[]): Promise<any> => {
         // Check if the requested method exists and if so, call it.
-        const pyInstance = await pyInstancePromise;
+        const pyInstance = await pyInstancePromise
 
         if (typeof pyInstance[prop] !== 'function') {
-          throw new TypeError(`Method ${prop} does not exist`);
+          throw new TypeError(`Method ${prop} does not exist`)
         }
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
           return await doPyCallHelper(
             true,
             pyInstance[prop] as PyCallable,
-            args
-          );
+            args,
+          )
         }
 
         if (WORKFLOWS_ENABLED && isWorkflowHandler) {
@@ -435,42 +435,42 @@ function makeEntrypointProxyHandler(
           return await doPyCallHelper(
             true,
             pyInstance[prop] as PyCallable,
-            args
-          );
+            args,
+          )
         }
 
-        const introspectionMod = await getIntrospectionMod();
+        const introspectionMod = await getIntrospectionMod()
 
-        const isRelaxed = isFetch || prop === 'test';
+        const isRelaxed = isFetch || prop === 'test'
         return await doPyCall(introspectionMod.wrapper_func, [
           isRelaxed,
           pyInstance,
           prop,
           ...args,
-        ]);
-      };
+        ])
+      }
     },
-  };
+  }
 }
 
 function makeEntrypointClass(
   className: string,
   classKind: AnyClass,
-  methods: string[]
+  methods: string[],
 ): any {
   const result = class EntrypointWrapper extends classKind {
     constructor(...args: any[]) {
-      super(...args);
+      super(...args)
       // Initialise a Python instance of the class.
-      const pyInstancePromise = initPyInstance(className, args);
+      const pyInstancePromise = initPyInstance(className, args)
       // We do not know the methods that are defined on the RPC class, so we need a proxy to
       // support any possible method name.
       return new Proxy(
         this,
-        makeEntrypointProxyHandler(pyInstancePromise, classKind.name)
-      );
+        makeEntrypointProxyHandler(pyInstancePromise, classKind.name),
+      )
     }
-  };
+  }
 
   // Add dummy functions to the class so that the validator can detect them. These will never get
   // accessed because of the proxy at runtime.
@@ -480,42 +480,42 @@ function makeEntrypointClass(
       LEGACY_GLOBAL_HANDLERS
     ) {
       // Remove the "on_" prefix.
-      method = method.slice(3);
+      method = method.slice(3)
     }
-    result.prototype[method] = function (): void {};
+    result.prototype[method] = (): void => {}
   }
-  return result;
+  return result
 }
 
 type IntrospectionMod = {
-  __dict__: PyDict;
-  collect_entrypoint_classes: (mod: PyModule) => PythonEntrypointClasses;
-  wrapper_func: PyCallable;
-};
+  __dict__: PyDict
+  collect_entrypoint_classes: (mod: PyModule) => PythonEntrypointClasses
+  wrapper_func: PyCallable
+}
 
-let introspectionModPromise: Promise<IntrospectionMod> | null = null;
+let introspectionModPromise: Promise<IntrospectionMod> | null = null
 async function loadIntrospectionMod(
-  pyodide: Pyodide
+  pyodide: Pyodide,
 ): Promise<IntrospectionMod> {
-  const introspectionSource = await import('pyodide-internal:introspection.py');
+  const introspectionSource = await import('pyodide-internal:introspection.py')
   const introspectionMod = pyodide.runPython(
-    "from types import ModuleType; ModuleType('introspection')"
-  ) as IntrospectionMod;
-  const decoder = new TextDecoder();
+    "from types import ModuleType; ModuleType('introspection')",
+  ) as IntrospectionMod
+  const decoder = new TextDecoder()
   pyodide.runPython(decoder.decode(introspectionSource.default), {
     globals: introspectionMod.__dict__,
     filename: 'introspection.py',
-  });
+  })
 
-  return introspectionMod;
+  return introspectionMod
 }
 
 async function getIntrospectionMod(): Promise<IntrospectionMod> {
   if (introspectionModPromise === null) {
-    introspectionModPromise = getPyodide().then(loadIntrospectionMod);
+    introspectionModPromise = getPyodide().then(loadIntrospectionMod)
   }
 
-  return introspectionModPromise;
+  return introspectionModPromise
 }
 
 const SUPPORTED_HANDLER_NAMES = [
@@ -525,97 +525,97 @@ const SUPPORTED_HANDLER_NAMES = [
   'trace',
   'queue',
   'pubsub',
-];
+]
 
 type ExporterClassInfo = {
-  className: string;
-  methodNames: string[];
-};
+  className: string
+  methodNames: string[]
+}
 
 type PythonEntrypointClasses = {
-  durableObjects: ExporterClassInfo[];
-  workerEntrypoints: ExporterClassInfo[];
-  workflowEntrypoints: ExporterClassInfo[];
-};
+  durableObjects: ExporterClassInfo[]
+  workerEntrypoints: ExporterClassInfo[]
+  workflowEntrypoints: ExporterClassInfo[]
+}
 
 type PythonInitResult = {
-  handlers: { [handlerName: string]: Handler };
-  pythonEntrypointClasses: PythonEntrypointClasses;
-  makeEntrypointClass: typeof makeEntrypointClass;
-};
+  handlers: { [handlerName: string]: Handler }
+  pythonEntrypointClasses: PythonEntrypointClasses
+  makeEntrypointClass: typeof makeEntrypointClass
+}
 
 function handleDefaultClass(
   handlers: PythonInitResult['handlers'],
-  workerEntrypoints: ExporterClassInfo[]
+  workerEntrypoints: ExporterClassInfo[],
 ): void {
   const index = workerEntrypoints.findIndex(
-    (cls) => cls.className === 'Default'
-  );
+    (cls) => cls.className === 'Default',
+  )
   if (index === -1) {
-    return;
+    return
   }
-  const cls = workerEntrypoints[index]!;
+  const cls = workerEntrypoints[index]!
 
   // Disallow defining a `Default` WorkerEntrypoint and other "default" top-level handlers.
   if (Object.keys(handlers).length > 0) {
-    throw new TypeError('Cannot define multiple default entrypoints');
+    throw new TypeError('Cannot define multiple default entrypoints')
   }
 
-  handlers['default'] = makeEntrypointClass(
+  handlers.default = makeEntrypointClass(
     'Default',
     get_pyodide_entrypoint_helper().workerEntrypoint,
-    cls.methodNames
-  );
+    cls.methodNames,
+  )
   // Remove the default entrypoint from the list of workerEntrypoints to avoid duplication.
-  workerEntrypoints.splice(index, 1);
+  workerEntrypoints.splice(index, 1)
 }
 
 export async function initPython(): Promise<PythonInitResult> {
   const handlers: {
-    [handlerName: string]: Handler;
-  } = {};
+    [handlerName: string]: Handler
+  } = {}
 
   let pythonEntrypointClasses: PythonEntrypointClasses = {
     durableObjects: [],
     workerEntrypoints: [],
     workflowEntrypoints: [],
-  };
+  }
 
-  const mainModule = await getMainModule();
+  const mainModule = await getMainModule()
 
   // In order to get the entrypoint classes exported by the worker, we use a Python module
   // to introspect the user's main module. So we are effectively using Python to analyse the
   // classes exported by the user worker here. The class names are then exported from here and
   // used to create the equivalent JS classes via makeEntrypointClass.
-  const introspectionMod = await getIntrospectionMod();
+  const introspectionMod = await getIntrospectionMod()
   pythonEntrypointClasses =
-    introspectionMod.collect_entrypoint_classes(mainModule);
-  handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints);
+    introspectionMod.collect_entrypoint_classes(mainModule)
+  handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints)
 
   if (LEGACY_GLOBAL_HANDLERS) {
     // We add all handlers when running in workerd, so that we can handle the case where the
     // handler is not defined in our own code and throw a more helpful error. See
     // undefined-handler.wd-test.
-    const addAllHandlers = IS_WORKERD && !handlers['default'];
+    const addAllHandlers = IS_WORKERD && !handlers.default
     for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-      const pyHandlerName = 'on_' + handlerName;
+      const pyHandlerName = `on_${handlerName}`
       if (addAllHandlers || typeof mainModule[pyHandlerName] === 'function') {
-        handlers[handlerName] = makeHandler(pyHandlerName);
+        handlers[handlerName] = makeHandler(pyHandlerName)
       }
     }
 
     if (typeof mainModule.test === 'function') {
-      handlers.test = makeHandler('test');
+      handlers.test = makeHandler('test')
     }
   }
 
   // Collect a dedicated snapshot at the very end.
-  const pyodide = await getPyodide();
+  const pyodide = await getPyodide()
   const customSerializedObjects = {
     pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
     cloudflare_compat_flags: COMPATIBILITY_FLAGS,
-  };
-  maybeCollectDedicatedSnapshot(pyodide._module, customSerializedObjects);
+  }
+  maybeCollectDedicatedSnapshot(pyodide._module, customSerializedObjects)
 
-  return { handlers, pythonEntrypointClasses, makeEntrypointClass };
+  return { handlers, pythonEntrypointClasses, makeEntrypointClass }
 }

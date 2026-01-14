@@ -3,130 +3,130 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 interface Fetcher {
-  fetch: typeof fetch;
+  fetch: typeof fetch
 }
 
 export class AutoRAGInternalError extends Error {
   constructor(message: string, name = 'AutoRAGInternalError') {
-    super(message);
-    this.name = name;
+    super(message)
+    this.name = name
   }
 }
 
 export class AutoRAGNotFoundError extends Error {
   constructor(message: string, name = 'AutoRAGNotFoundError') {
-    super(message);
-    this.name = name;
+    super(message)
+    this.name = name
   }
 }
 
 export class AutoRAGUnauthorizedError extends Error {
   constructor(message: string, name = 'AutoRAGUnauthorizedError') {
-    super(message);
-    this.name = name;
+    super(message)
+    this.name = name
   }
 }
 
 export class AutoRAGNameNotSetError extends Error {
   constructor(message: string, name = 'AutoRAGNameNotSetError') {
-    super(message);
-    this.name = name;
+    super(message)
+    this.name = name
   }
 }
 
 async function parseError(
   res: Response,
   defaultMsg = 'Internal Error',
-  errorCls = AutoRAGInternalError
+  errorCls = AutoRAGInternalError,
 ): Promise<Error> {
-  const content = await res.text();
+  const content = await res.text()
 
   try {
     const parsedContent = JSON.parse(content) as {
-      errors: { message: string }[];
-    };
+      errors: { message: string }[]
+    }
 
-    return new errorCls(parsedContent.errors.at(0)?.message || defaultMsg);
+    return new errorCls(parsedContent.errors.at(0)?.message || defaultMsg)
   } catch {
-    return new AutoRAGInternalError(content);
+    return new AutoRAGInternalError(content)
   }
 }
 
 export type ComparisonFilter = {
-  key: string;
-  type: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte';
-  value: string | number | boolean;
-};
+  key: string
+  type: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte'
+  value: string | number | boolean
+}
 
 export type CompoundFilter = {
-  type: 'and' | 'or';
-  filters: ComparisonFilter[];
-};
+  type: 'and' | 'or'
+  filters: ComparisonFilter[]
+}
 
 export type AutoRagSearchRequest = {
-  query: string;
-  filters?: CompoundFilter | ComparisonFilter;
-  max_num_results?: number;
+  query: string
+  filters?: CompoundFilter | ComparisonFilter
+  max_num_results?: number
   ranking_options?: {
-    ranker?: string;
-    score_threshold?: number;
-  };
+    ranker?: string
+    score_threshold?: number
+  }
   reranking?: {
-    enabled?: boolean;
-    model?: string;
-  };
-  rewrite_query?: boolean;
-};
+    enabled?: boolean
+    model?: string
+  }
+  rewrite_query?: boolean
+}
 
 export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
-  stream?: boolean;
-  system_prompt?: string;
-};
+  stream?: boolean
+  system_prompt?: string
+}
 export type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
   'stream'
 > & {
-  stream: true;
-};
+  stream: true
+}
 
 export type AutoRagSearchResponse = {
-  object: 'vector_store.search_results.page';
-  search_query: string;
+  object: 'vector_store.search_results.page'
+  search_query: string
   data: {
-    file_id: string;
-    filename: string;
-    score: number;
-    attributes: Record<string, string | number | boolean | null>;
+    file_id: string
+    filename: string
+    score: number
+    attributes: Record<string, string | number | boolean | null>
     content: {
-      type: 'text';
-      text: string;
-    }[];
-  }[];
-  has_more: boolean;
-  next_page: string | null;
-};
+      type: 'text'
+      text: string
+    }[]
+  }[]
+  has_more: boolean
+  next_page: string | null
+}
 
 export type AutoRagListResponse = {
-  id: string;
-  enable: boolean;
-  type: string;
-  source: string;
-  vectorize_name: string;
-  paused: boolean;
-  status: string;
-}[];
+  id: string
+  enable: boolean
+  type: string
+  source: string
+  vectorize_name: string
+  paused: boolean
+  status: string
+}[]
 
 export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
-  response: string;
-};
+  response: string
+}
 
 export class AutoRAG {
-  readonly #fetcher: Fetcher;
-  readonly #autoragId: string | null;
+  readonly #fetcher: Fetcher
+  readonly #autoragId: string | null
 
   constructor(fetcher: Fetcher, autoragId?: string) {
-    this.#fetcher = fetcher;
-    this.#autoragId = autoragId || null;
+    this.#fetcher = fetcher
+    this.#autoragId = autoragId || null
   }
 
   async list(): Promise<AutoRagListResponse> {
@@ -137,21 +137,21 @@ export class AutoRAG {
         headers: {
           'content-type': 'application/json',
         },
-      }
-    );
+      },
+    )
 
     if (!res.ok) {
-      throw await parseError(res);
+      throw await parseError(res)
     }
 
-    const data = (await res.json()) as { result: AutoRagListResponse };
+    const data = (await res.json()) as { result: AutoRagListResponse }
 
-    return data.result;
+    return data.result
   }
 
   async search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse> {
     if (!this.#autoragId) {
-      throw new AutoRAGNameNotSetError('AutoRAG name not defined');
+      throw new AutoRAGNameNotSetError('AutoRAG name not defined')
     }
 
     const res = await this.#fetcher.fetch(
@@ -162,36 +162,36 @@ export class AutoRAG {
         headers: {
           'content-type': 'application/json',
         },
-      }
-    );
+      },
+    )
 
     if (!res.ok) {
       if (res.status === 401) {
         throw await parseError(
           res,
           "You don't have access to this AutoRAG",
-          AutoRAGUnauthorizedError
-        );
+          AutoRAGUnauthorizedError,
+        )
       } else if (res.status === 404) {
-        throw await parseError(res, 'AutoRAG not found', AutoRAGNotFoundError);
+        throw await parseError(res, 'AutoRAG not found', AutoRAGNotFoundError)
       }
-      throw await parseError(res);
+      throw await parseError(res)
     }
 
-    const data = (await res.json()) as { result: AutoRagSearchResponse };
+    const data = (await res.json()) as { result: AutoRagSearchResponse }
 
-    return data.result;
+    return data.result
   }
 
-  async aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
+  async aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>
   async aiSearch(
-    params: AutoRagAiSearchRequest
-  ): Promise<AutoRagAiSearchResponse>;
+    params: AutoRagAiSearchRequest,
+  ): Promise<AutoRagAiSearchResponse>
   async aiSearch(
-    params: AutoRagAiSearchRequest
+    params: AutoRagAiSearchRequest,
   ): Promise<AutoRagAiSearchResponse | Response> {
     if (!this.#autoragId) {
-      throw new AutoRAGNameNotSetError('AutoRAG name not defined');
+      throw new AutoRAGNameNotSetError('AutoRAG name not defined')
     }
 
     const res = await this.#fetcher.fetch(
@@ -202,28 +202,28 @@ export class AutoRAG {
         headers: {
           'content-type': 'application/json',
         },
-      }
-    );
+      },
+    )
 
     if (!res.ok) {
       if (res.status === 401) {
         throw await parseError(
           res,
           "You don't have access to this AutoRAG",
-          AutoRAGUnauthorizedError
-        );
+          AutoRAGUnauthorizedError,
+        )
       } else if (res.status === 404) {
-        throw await parseError(res, 'AutoRAG not found', AutoRAGNotFoundError);
+        throw await parseError(res, 'AutoRAG not found', AutoRAGNotFoundError)
       }
-      throw await parseError(res);
+      throw await parseError(res)
     }
 
     if (params.stream === true) {
-      return res;
+      return res
     }
 
-    const data = (await res.json()) as { result: AutoRagAiSearchResponse };
+    const data = (await res.json()) as { result: AutoRagAiSearchResponse }
 
-    return data.result;
+    return data.result
   }
 }

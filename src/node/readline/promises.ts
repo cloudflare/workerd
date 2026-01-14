@@ -24,15 +24,15 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import {
+  createInterface,
   Interface,
   Readline,
-  createInterface,
-} from 'node-internal:internal_readline_promises';
+} from 'node-internal:internal_readline_promises'
 
-export * from 'node-internal:internal_readline_promises';
+export * from 'node-internal:internal_readline_promises'
 
 export default {
   Interface,
   Readline,
   createInterface,
-};
+}

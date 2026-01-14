@@ -2,13 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 // The WPT WebSocket tests use addEventListener with useCapture=true, which workerd
 // doesn't support. This function removes the useCapture argument from those calls.
 // Pattern: addEventListener('event', handler, true) -> addEventListener('event', handler)
 function removeUseCapture(code: string): string {
-  return code.replace(/,\s*true\s*\)/g, ')');
+  return code.replace(/,\s*true\s*\)/g, ')')
 }
 
 export default {
@@ -453,4 +453,4 @@ export default {
     comment: 'WebSocketStream is not yet implemented',
     omittedTests: true,
   },
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

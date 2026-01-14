@@ -1,15 +1,15 @@
 // A typescript declaration file for the internal Limiter JSG class
 // see src/workerd/api/pyodide/pyodide.h (SimplePythonLimiter)
 
-import ArtifactBundler from './artifacts.js';
+import ArtifactBundler from './artifacts.js'
 
 interface Limiter {
-  beginStartup: () => void;
+  beginStartup: () => void
   finishStartup: (
-    snapshotType: ArtifactBundler.SnapshotType | undefined
-  ) => void;
+    snapshotType: ArtifactBundler.SnapshotType | undefined,
+  ) => void
 }
 
-declare const limiter: Limiter;
+declare const limiter: Limiter
 
-export default limiter;
+export default limiter

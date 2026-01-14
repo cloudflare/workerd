@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'AddEventListenerOptions-once.any.js': {},
@@ -83,4 +83,4 @@ export default {
     comment: 'Only used by HTML files',
     omittedTests: true,
   },
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

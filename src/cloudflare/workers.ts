@@ -5,32 +5,32 @@
 // TODO(cleanup): C++ built-in modules do not yet support named exports, so we must define this
 //   wrapper module that simply re-exports the classes from the built-in module.
 
-import entrypoints from 'cloudflare-internal:workers';
-import innerEnv from 'cloudflare-internal:env';
+import innerEnv from 'cloudflare-internal:env'
+import entrypoints from 'cloudflare-internal:workers'
 
-export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
-export const DurableObject = entrypoints.DurableObject;
-export const RpcStub = entrypoints.RpcStub;
-export const RpcPromise = entrypoints.RpcPromise;
-export const RpcProperty = entrypoints.RpcProperty;
-export const RpcTarget = entrypoints.RpcTarget;
-export const ServiceStub = entrypoints.ServiceStub;
-export const WorkflowEntrypoint = entrypoints.WorkflowEntrypoint;
+export const WorkerEntrypoint = entrypoints.WorkerEntrypoint
+export const DurableObject = entrypoints.DurableObject
+export const RpcStub = entrypoints.RpcStub
+export const RpcPromise = entrypoints.RpcPromise
+export const RpcProperty = entrypoints.RpcProperty
+export const RpcTarget = entrypoints.RpcTarget
+export const ServiceStub = entrypoints.ServiceStub
+export const WorkflowEntrypoint = entrypoints.WorkflowEntrypoint
 
 export function withEnv(newEnv: unknown, fn: () => unknown): unknown {
-  return innerEnv.withEnv(newEnv, fn);
+  return innerEnv.withEnv(newEnv, fn)
 }
 
 export function withExports(newExports: unknown, fn: () => unknown): unknown {
-  return innerEnv.withExports(newExports, fn);
+  return innerEnv.withExports(newExports, fn)
 }
 
 export function withEnvAndExports(
   newEnv: unknown,
   newExports: unknown,
-  fn: () => unknown
+  fn: () => unknown,
 ): unknown {
-  return innerEnv.withEnvAndExports(newEnv, newExports, fn);
+  return innerEnv.withEnvAndExports(newEnv, newExports, fn)
 }
 
 // A proxy for the workers env/bindings. Since env is imported as a module-level
@@ -42,69 +42,69 @@ export const env = new Proxy(
   {},
   {
     get(_: unknown, prop: string | symbol): unknown {
-      const inner = innerEnv.getCurrentEnv();
+      const inner = innerEnv.getCurrentEnv()
       if (inner) {
-        return Reflect.get(inner, prop);
+        return Reflect.get(inner, prop)
       }
-      return undefined;
+      return undefined
     },
 
     set(_: unknown, prop: string | symbol, newValue: unknown): boolean {
-      const inner = innerEnv.getCurrentEnv();
+      const inner = innerEnv.getCurrentEnv()
       if (inner) {
-        return Reflect.set(inner, prop, newValue);
+        return Reflect.set(inner, prop, newValue)
       }
-      return true;
+      return true
     },
 
     has(_: unknown, prop: string | symbol): boolean {
-      const inner = innerEnv.getCurrentEnv();
+      const inner = innerEnv.getCurrentEnv()
       if (inner) {
-        return Reflect.has(inner, prop);
+        return Reflect.has(inner, prop)
       }
-      return false;
+      return false
     },
 
     ownKeys(_: unknown): ArrayLike<string | symbol> {
-      const inner = innerEnv.getCurrentEnv();
+      const inner = innerEnv.getCurrentEnv()
       if (inner) {
-        return Reflect.ownKeys(inner);
+        return Reflect.ownKeys(inner)
       }
-      return [];
+      return []
     },
 
     deleteProperty(_: unknown, prop: string | symbol): boolean {
-      const inner = innerEnv.getCurrentEnv();
+      const inner = innerEnv.getCurrentEnv()
       if (inner) {
-        return Reflect.deleteProperty(inner, prop);
+        return Reflect.deleteProperty(inner, prop)
       }
-      return true;
+      return true
     },
 
     defineProperty(
       _: unknown,
       prop: string | symbol,
-      attr: PropertyDescriptor
+      attr: PropertyDescriptor,
     ): boolean {
-      const inner = innerEnv.getCurrentEnv();
+      const inner = innerEnv.getCurrentEnv()
       if (inner) {
-        return Reflect.defineProperty(inner, prop, attr);
+        return Reflect.defineProperty(inner, prop, attr)
       }
-      return true;
+      return true
     },
 
     getOwnPropertyDescriptor(
       _: unknown,
-      prop: string | symbol
+      prop: string | symbol,
     ): PropertyDescriptor | undefined {
-      const inner = innerEnv.getCurrentEnv();
+      const inner = innerEnv.getCurrentEnv()
       if (inner) {
-        return Reflect.getOwnPropertyDescriptor(inner, prop);
+        return Reflect.getOwnPropertyDescriptor(inner, prop)
       }
-      return undefined;
+      return undefined
     },
-  }
-);
+  },
+)
 
 // A proxy for the worker exports. Since exports is imported as a module-level
 // reference, the object identity cannot be changed. The proxy provides indirection,
@@ -114,40 +114,40 @@ export const exports = new Proxy(
   {},
   {
     get(_: unknown, prop: string | symbol): unknown {
-      const inner = innerEnv.getCurrentExports();
+      const inner = innerEnv.getCurrentExports()
       if (inner) {
-        return Reflect.get(inner, prop);
+        return Reflect.get(inner, prop)
       }
-      return undefined;
+      return undefined
     },
 
     has(_: unknown, prop: string | symbol): boolean {
-      const inner = innerEnv.getCurrentExports();
+      const inner = innerEnv.getCurrentExports()
       if (inner) {
-        return Reflect.has(inner, prop);
+        return Reflect.has(inner, prop)
       }
-      return false;
+      return false
     },
 
     ownKeys(_: unknown): ArrayLike<string | symbol> {
-      const inner = innerEnv.getCurrentExports();
+      const inner = innerEnv.getCurrentExports()
       if (inner) {
-        return Reflect.ownKeys(inner);
+        return Reflect.ownKeys(inner)
       }
-      return [];
+      return []
     },
 
     getOwnPropertyDescriptor(
       _: unknown,
-      prop: string | symbol
+      prop: string | symbol,
     ): PropertyDescriptor | undefined {
-      const inner = innerEnv.getCurrentExports();
+      const inner = innerEnv.getCurrentExports()
       if (inner) {
-        return Reflect.getOwnPropertyDescriptor(inner, prop);
+        return Reflect.getOwnPropertyDescriptor(inner, prop)
       }
-      return undefined;
+      return undefined
     },
-  }
-);
+  },
+)
 
-export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
+export const waitUntil = entrypoints.waitUntil.bind(entrypoints)

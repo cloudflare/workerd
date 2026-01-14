@@ -5,4 +5,4 @@
 // This binding is managed by the browser rendering team (aka brapi)
 // https://developers.cloudflare.com/browser-rendering/
 
-export { BrowserRendering } from 'cloudflare-internal:br-api';
+export { BrowserRendering } from 'cloudflare-internal:br-api'

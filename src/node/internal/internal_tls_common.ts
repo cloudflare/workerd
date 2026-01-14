@@ -23,18 +23,18 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import type tls from 'node:tls';
-import { validateInteger } from 'node-internal:validators';
+import type tls from 'node:tls'
+import { validateInteger } from 'node-internal:validators'
 
 // @ts-expect-error TS2323 Redeclare error.
 export declare class SecureContext {
-  context: unknown;
+  context: unknown
   constructor(
     _secureProtocol?: string,
     secureOptions?: number,
     minVersion?: string,
-    maxVersion?: string
-  );
+    maxVersion?: string,
+  )
 }
 
 // This is intentionally not fully compatible with Node.js implementation
@@ -45,15 +45,15 @@ export function SecureContext(
   secureProtocol?: string,
   secureOptions?: number,
   minVersion?: string,
-  maxVersion?: string
+  maxVersion?: string,
 ): SecureContext {
   if (!(this instanceof SecureContext)) {
     return new SecureContext(
       secureProtocol,
       secureOptions,
       minVersion,
-      maxVersion
-    );
+      maxVersion,
+    )
   }
   // We do not support the minVersion and maxVersion options at this
   // time and will just ignore them if they are passed.
@@ -67,43 +67,43 @@ export function SecureContext(
   // }
 
   if (secureOptions !== undefined) {
-    validateInteger(secureOptions, 'secureOptions');
+    validateInteger(secureOptions, 'secureOptions')
   }
 
-  this.context = undefined;
-  return this;
+  this.context = undefined
+  return this
 }
 
 export function createSecureContext(
-  options: tls.SecureContextOptions = {}
+  options: tls.SecureContextOptions = {},
 ): SecureContext {
   return new SecureContext(
     options.secureProtocol,
     options.secureOptions,
     options.minVersion,
-    options.maxVersion
-  );
+    options.maxVersion,
+  )
 }
 
 // Translate some fields from the handle's C-friendly format into more idiomatic
 // javascript object representations before passing them back to the user.  Can
 // be used on any cert object, but changing the name would be semver-major.
 export function translatePeerCertificate(
-  c?: tls.DetailedPeerCertificate
+  c?: tls.DetailedPeerCertificate,
 ): null | tls.DetailedPeerCertificate {
-  if (!c) return null;
+  if (!c) return null
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (c.issuerCertificate != null && c.issuerCertificate !== c) {
     c.issuerCertificate = translatePeerCertificate(
-      c.issuerCertificate
-    ) as tls.DetailedPeerCertificate;
+      c.issuerCertificate,
+    ) as tls.DetailedPeerCertificate
   }
   if (c.infoAccess != null) {
     // Type is ignored due to @types/node inconsistency
-    const info = c.infoAccess as unknown as string;
+    const info = c.infoAccess as unknown as string
     // @ts-expect-error TS2322 Ignored due to missing __proto__ type.
-    c.infoAccess = { __proto__: null };
+    c.infoAccess = { __proto__: null }
 
     // XXX: More key validation?
     info.replace(
@@ -116,14 +116,14 @@ export function translatePeerCertificate(
           // objects, and any value that contains a quote
           // will always be a valid JSON string literal,
           // so this should never throw.
-          val = JSON.parse(val) as string;
+          val = JSON.parse(val) as string
         }
         if (c.infoAccess != null) {
-          c.infoAccess[key] ??= [];
-          c.infoAccess[key].push(val);
+          c.infoAccess[key] ??= []
+          c.infoAccess[key].push(val)
         }
-      }
-    );
+      },
+    )
   }
-  return c;
+  return c
 }

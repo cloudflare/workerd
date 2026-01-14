@@ -6,14 +6,15 @@
  * entropy_patches.py. setupShouldAllowBadEntropy reads out the address of the
  * byte that we use to control calls to crypto.getRandomValues from Python.
  */
-import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py';
-import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py';
-import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
-import { default as allowEntropy } from 'pyodide-internal:topLevelEntropy/allow_entropy.py';
-import { simpleRunPython, PythonUserError } from 'pyodide-internal:util';
-import { CHECK_RNG_STATE } from 'pyodide-internal:metadata';
 
-let allowed_entropy_calls_addr: number;
+import { CHECK_RNG_STATE } from 'pyodide-internal:metadata'
+import { default as allowEntropy } from 'pyodide-internal:topLevelEntropy/allow_entropy.py'
+import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py'
+import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py'
+import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py'
+import { PythonUserError, simpleRunPython } from 'pyodide-internal:util'
+
+let allowed_entropy_calls_addr: number
 
 /**
  * Set up a byte for communication between JS and Python.
@@ -28,21 +29,21 @@ function setupShouldAllowBadEntropy(Module: Module): void {
     Module,
     'from _cloudflare.entropy_import_context import get_bad_entropy_flag;' +
       'get_bad_entropy_flag();' +
-      'del get_bad_entropy_flag'
-  );
-  allowed_entropy_calls_addr = Number(res);
+      'del get_bad_entropy_flag',
+  )
+  allowed_entropy_calls_addr = Number(res)
 }
 
 function shouldAllowBadEntropy(Module: Module): boolean {
-  const val = Module.HEAP8[allowed_entropy_calls_addr];
+  const val = Module.HEAP8[allowed_entropy_calls_addr]
   if (val) {
-    Module.HEAP8[allowed_entropy_calls_addr]!--;
-    return true;
+    Module.HEAP8[allowed_entropy_calls_addr]!--
+    return true
   }
-  return false;
+  return false
 }
 
-let IN_REQUEST_CONTEXT = false;
+let IN_REQUEST_CONTEXT = false
 
 /**
  * Some packages need hash or random seeds at import time. We carefully track
@@ -57,21 +58,19 @@ let IN_REQUEST_CONTEXT = false;
  */
 export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
   if (IN_REQUEST_CONTEXT) {
-    return crypto.getRandomValues(arr);
+    return crypto.getRandomValues(arr)
   }
   if (!shouldAllowBadEntropy(Module)) {
-    console.log('Entropy call failed');
-    console.log('JS stack:', new Error().stack);
-    console.log('Python stack:');
-    Module._dump_traceback();
-    throw new PythonUserError(
-      'Disallowed operation called within global scope'
-    );
+    console.log('Entropy call failed')
+    console.log('JS stack:', new Error().stack)
+    console.log('Python stack:')
+    Module._dump_traceback()
+    throw new PythonUserError('Disallowed operation called within global scope')
   }
   // "entropy" in the test suite is a bunch of 42's. Good to use a readily identifiable pattern
   // here which is different than the test suite.
-  arr.fill(43);
-  return arr;
+  arr.fill(43)
+  return arr
 }
 
 /**
@@ -80,31 +79,31 @@ export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
  * Hypothetically, we could skip it for new dedicated snapshots.
  */
 export function entropyMountFiles(Module: Module): void {
-  const cloudflareDir = Module.FS.sitePackages + '/_cloudflare';
-  Module.FS.mkdir(cloudflareDir);
-  Module.FS.writeFile(cloudflareDir + '/__init__.py', new Uint8Array(0), {
+  const cloudflareDir = `${Module.FS.sitePackages}/_cloudflare`
+  Module.FS.mkdir(cloudflareDir)
+  Module.FS.writeFile(`${cloudflareDir}/__init__.py`, new Uint8Array(0), {
     canOwn: true,
-  });
+  })
   Module.FS.writeFile(
-    cloudflareDir + '/entropy_patches.py',
+    `${cloudflareDir}/entropy_patches.py`,
     new Uint8Array(entropyPatches),
-    { canOwn: true }
-  );
+    { canOwn: true },
+  )
   Module.FS.writeFile(
-    cloudflareDir + '/entropy_import_context.py',
+    `${cloudflareDir}/entropy_import_context.py`,
     new Uint8Array(entropyImportContext),
-    { canOwn: true }
-  );
+    { canOwn: true },
+  )
   Module.FS.writeFile(
-    cloudflareDir + '/import_patch_manager.py',
+    `${cloudflareDir}/import_patch_manager.py`,
     new Uint8Array(importPatchManager),
-    { canOwn: true }
-  );
+    { canOwn: true },
+  )
   Module.FS.writeFile(
-    cloudflareDir + '/allow_entropy.py',
+    `${cloudflareDir}/allow_entropy.py`,
     new Uint8Array(allowEntropy),
-    { canOwn: true }
-  );
+    { canOwn: true },
+  )
 }
 
 /**
@@ -114,7 +113,7 @@ export function entropyMountFiles(Module: Module): void {
  * branch and after entropyMountFiles in the no-snapshot branch.
  */
 export function entropyAfterRuntimeInit(Module: Module): void {
-  setupShouldAllowBadEntropy(Module);
+  setupShouldAllowBadEntropy(Module)
 }
 
 /**
@@ -128,8 +127,8 @@ export function entropyBeforeTopLevel(Module: Module): void {
 from _cloudflare.entropy_patches import before_top_level
 before_top_level()
 del before_top_level
-`
-  );
+`,
+  )
 }
 
 /**
@@ -138,7 +137,7 @@ del before_top_level
  */
 export function entropyAfterSnapshot(Module: Module): void {
   if (!CHECK_RNG_STATE) {
-    return;
+    return
   }
   simpleRunPython(
     Module,
@@ -146,27 +145,27 @@ export function entropyAfterSnapshot(Module: Module): void {
 from _cloudflare.entropy_patches import after_snapshot
 after_snapshot()
 del after_snapshot
-    `
-  );
+    `,
+  )
 }
 
-let isReady = false;
+let isReady = false
 /**
  * Called to reseed rngs and turn off blocks that prevent access to rng APIs.
  */
 export function entropyBeforeRequest(Module: Module): void {
   if (isReady) {
     // I think this is only ever called once, but we guard it just to be sure.
-    return;
+    return
   }
-  IN_REQUEST_CONTEXT = true;
-  isReady = true;
+  IN_REQUEST_CONTEXT = true
+  isReady = true
   simpleRunPython(
     Module,
     `
 from _cloudflare.entropy_patches import before_first_request
 before_first_request()
 del before_first_request
-    `
-  );
+    `,
+  )
 }

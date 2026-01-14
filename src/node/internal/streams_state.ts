@@ -23,42 +23,40 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { validateInteger } from 'node-internal:validators';
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors'
+import { validateInteger } from 'node-internal:validators'
 
-let defaultHighWaterMarkBytes = 64 * 1024;
-let defaultHighWaterMarkObjectMode = 16;
+let defaultHighWaterMarkBytes = 64 * 1024
+let defaultHighWaterMarkObjectMode = 16
 
-export type HighWaterMarkFromOptions = { highWaterMark?: number };
+export type HighWaterMarkFromOptions = { highWaterMark?: number }
 
 function highWaterMarkFrom(
   options: HighWaterMarkFromOptions,
   isDuplex: boolean,
-  duplexKey: string
+  duplexKey: string,
 ): number | null {
   return options.highWaterMark != null
     ? options.highWaterMark
     : isDuplex
       ? // @ts-expect-error TS7053 Fix this soon.
         (options[duplexKey] as number)
-      : null;
+      : null
 }
 
 export function getDefaultHighWaterMark(objectMode?: boolean): number {
-  return objectMode
-    ? defaultHighWaterMarkObjectMode
-    : defaultHighWaterMarkBytes;
+  return objectMode ? defaultHighWaterMarkObjectMode : defaultHighWaterMarkBytes
 }
 
 export function setDefaultHighWaterMark(
   objectMode: boolean,
-  value: unknown
+  value: unknown,
 ): void {
-  validateInteger(value, 'value', 0);
+  validateInteger(value, 'value', 0)
   if (objectMode) {
-    defaultHighWaterMarkObjectMode = value;
+    defaultHighWaterMarkObjectMode = value
   } else {
-    defaultHighWaterMarkBytes = value;
+    defaultHighWaterMarkBytes = value
   }
 }
 
@@ -66,17 +64,17 @@ export function getHighWaterMark(
   state: { objectMode?: boolean },
   options: HighWaterMarkFromOptions,
   duplexKey: string,
-  isDuplex: boolean
+  isDuplex: boolean,
 ): number {
-  const hwm = highWaterMarkFrom(options, isDuplex, duplexKey);
+  const hwm = highWaterMarkFrom(options, isDuplex, duplexKey)
   if (hwm != null) {
     if (!Number.isInteger(hwm) || hwm < 0) {
-      const name = isDuplex ? `options.${duplexKey}` : 'options.highWaterMark';
-      throw new ERR_INVALID_ARG_VALUE(name, hwm);
+      const name = isDuplex ? `options.${duplexKey}` : 'options.highWaterMark'
+      throw new ERR_INVALID_ARG_VALUE(name, hwm)
     }
-    return Math.floor(hwm);
+    return Math.floor(hwm)
   }
 
   // Default value
-  return getDefaultHighWaterMark(state.objectMode);
+  return getDefaultHighWaterMark(state.objectMode)
 }

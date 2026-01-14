@@ -23,36 +23,35 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { default as cryptoImpl } from 'node-internal:crypto';
-import { Buffer } from 'node-internal:internal_buffer';
-
-import { getArrayBufferOrView } from 'node-internal:crypto_util';
+import { default as cryptoImpl } from 'node-internal:crypto'
+import { getArrayBufferOrView } from 'node-internal:crypto_util'
+import { Buffer } from 'node-internal:internal_buffer'
 
 export function verifySpkac(
   spkac: Buffer | ArrayBuffer | ArrayBufferView | string,
-  encoding?: string
+  encoding?: string,
 ): boolean {
-  return cryptoImpl.verifySpkac(getArrayBufferOrView(spkac, 'spkac', encoding));
+  return cryptoImpl.verifySpkac(getArrayBufferOrView(spkac, 'spkac', encoding))
 }
 
 export function exportPublicKey(
   spkac: Buffer | ArrayBuffer | ArrayBufferView | string,
-  encoding?: string
+  encoding?: string,
 ): Buffer {
   const ret = cryptoImpl.exportPublicKey(
-    getArrayBufferOrView(spkac, 'spkac', encoding)
-  );
-  return ret ? Buffer.from(ret) : Buffer.alloc(0);
+    getArrayBufferOrView(spkac, 'spkac', encoding),
+  )
+  return ret ? Buffer.from(ret) : Buffer.alloc(0)
 }
 
 export function exportChallenge(
   spkac: Buffer | ArrayBuffer | ArrayBufferView | string,
-  encoding?: string
+  encoding?: string,
 ): Buffer {
   const ret = cryptoImpl.exportChallenge(
-    getArrayBufferOrView(spkac, 'spkac', encoding)
-  );
-  return ret ? Buffer.from(ret) : Buffer.alloc(0);
+    getArrayBufferOrView(spkac, 'spkac', encoding),
+  )
+  return ret ? Buffer.from(ret) : Buffer.alloc(0)
 }
 
 // The legacy implementation of this exposed the Certificate
@@ -62,28 +61,28 @@ export function exportChallenge(
 // rely on any object state.
 
 export declare class Certificate {
-  constructor();
-  verifySpkac: typeof verifySpkac;
-  exportPublicKey: typeof exportPublicKey;
-  exportChallenge: typeof exportChallenge;
-  static verifySpkac: typeof verifySpkac;
-  static exportPublicKey: typeof exportPublicKey;
-  static exportChallenge: typeof exportChallenge;
+  constructor()
+  verifySpkac: typeof verifySpkac
+  exportPublicKey: typeof exportPublicKey
+  exportChallenge: typeof exportChallenge
+  static verifySpkac: typeof verifySpkac
+  static exportPublicKey: typeof exportPublicKey
+  static exportChallenge: typeof exportChallenge
 }
 
 // For backwards compatibility reasons, this cannot be converted into a
 // ES6 Class.
 export function Certificate(this: unknown): Certificate {
   if (!(this instanceof Certificate)) {
-    return new Certificate();
+    return new Certificate()
   }
-  return this;
+  return this
 }
 
-Certificate.prototype.verifySpkac = verifySpkac;
-Certificate.prototype.exportPublicKey = exportPublicKey;
-Certificate.prototype.exportChallenge = exportChallenge;
+Certificate.prototype.verifySpkac = verifySpkac
+Certificate.prototype.exportPublicKey = exportPublicKey
+Certificate.prototype.exportChallenge = exportChallenge
 
-Certificate.exportChallenge = exportChallenge;
-Certificate.exportPublicKey = exportPublicKey;
-Certificate.verifySpkac = verifySpkac;
+Certificate.exportChallenge = exportChallenge
+Certificate.exportPublicKey = exportPublicKey
+Certificate.verifySpkac = verifySpkac

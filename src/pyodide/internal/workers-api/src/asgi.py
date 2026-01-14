@@ -111,7 +111,6 @@ async def process_request(
     app: Any, req: "Request | js.Request", env: Any, ctx: Context
 ) -> js.Response:
     from js import Object, Response, TransformStream
-
     from pyodide.ffi import create_proxy
 
     status = None

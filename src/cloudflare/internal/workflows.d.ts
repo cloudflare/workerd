@@ -19,7 +19,7 @@ declare abstract class NonRetryableError extends Error {
    * `__brand` is used to differentiate between `NonRetryableError` and `Error`
    * and is omitted from the constructor because users should not set it
    */
-  constructor(message: string, name?: string);
+  constructor(message: string, name?: string)
 }
 
 declare abstract class Workflow<PARAMS = unknown> {
@@ -28,7 +28,7 @@ declare abstract class Workflow<PARAMS = unknown> {
    * @param id Id for the instance of this Workflow
    * @returns A promise that resolves with a handle for the Instance
    */
-  get(id: string): Promise<WorkflowInstance>;
+  get(id: string): Promise<WorkflowInstance>
 
   /**
    * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
@@ -36,8 +36,8 @@ declare abstract class Workflow<PARAMS = unknown> {
    * @returns A promise that resolves with a handle for the Instance
    */
   create(
-    options?: WorkflowInstanceCreateOptions<PARAMS>
-  ): Promise<WorkflowInstance>;
+    options?: WorkflowInstanceCreateOptions<PARAMS>,
+  ): Promise<WorkflowInstance>
 
   /**
    * Create a batch of instances and return handle for all of them. If a provided id exists, an error will be thrown.
@@ -46,8 +46,8 @@ declare abstract class Workflow<PARAMS = unknown> {
    * @returns A promise that resolves with a list of handles for the created instances.
    */
   createBatch(
-    batch: WorkflowInstanceCreateOptions<PARAMS>[]
-  ): Promise<WorkflowInstance[]>;
+    batch: WorkflowInstanceCreateOptions<PARAMS>[],
+  ): Promise<WorkflowInstance[]>
 }
 
 type WorkflowDurationLabel =
@@ -57,32 +57,32 @@ type WorkflowDurationLabel =
   | 'day'
   | 'week'
   | 'month'
-  | 'year';
+  | 'year'
 
 type WorkflowSleepDuration =
   | `${number} ${WorkflowDurationLabel}${'s' | ''}`
-  | number;
+  | number
 
-type WorkflowRetentionDuration = WorkflowSleepDuration;
+type WorkflowRetentionDuration = WorkflowSleepDuration
 
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
    * This is automatically generated if not passed in.
    */
-  id?: string;
+  id?: string
   /**
    * The event payload the Workflow instance is triggered with
    */
-  params?: PARAMS;
+  params?: PARAMS
   /**
    * The retention policy for the Workflow instance.
    * Defaults to the maximum retention period available for the owner's account.
    */
   retention?: {
-    successRetention?: WorkflowRetentionDuration;
-    errorRetention?: WorkflowRetentionDuration;
-  };
+    successRetention?: WorkflowRetentionDuration
+    errorRetention?: WorkflowRetentionDuration
+  }
 }
 
 type InstanceStatus = {
@@ -95,46 +95,46 @@ type InstanceStatus = {
     | 'complete'
     | 'waiting' // instance is hibernating and waiting for sleep or event to finish
     | 'waitingForPause' // instance is finishing the current work to pause
-    | 'unknown';
+    | 'unknown'
   error?: {
-    name: string;
-    message: string;
-  };
-  output?: unknown;
-};
+    name: string
+    message: string
+  }
+  output?: unknown
+}
 
 interface WorkflowError {
-  code?: number;
-  message: string;
+  code?: number
+  message: string
 }
 
 declare abstract class WorkflowInstance {
-  id: string;
+  id: string
 
   /**
    * Pause the instance.
    */
-  pause(): Promise<void>;
+  pause(): Promise<void>
 
   /**
    * Resume the instance. If it is already running, an error will be thrown.
    */
-  resume(): Promise<void>;
+  resume(): Promise<void>
 
   /**
    * Terminate the instance. If it is errored, terminated or complete, an error will be thrown.
    */
-  terminate(): Promise<void>;
+  terminate(): Promise<void>
 
   /**
    * Restart the instance.
    */
-  restart(): Promise<void>;
+  restart(): Promise<void>
 
   /**
    * Returns the current status of the instance.
    */
-  status(): Promise<InstanceStatus>;
+  status(): Promise<InstanceStatus>
 
   /**
    * Send an event to this instance.
@@ -143,7 +143,7 @@ declare abstract class WorkflowInstance {
     type,
     payload,
   }: {
-    type: string;
-    payload: unknown;
-  }): Promise<void>;
+    type: string
+    payload: unknown
+  }): Promise<void>
 }

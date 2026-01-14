@@ -30,11 +30,9 @@
 import {
   AssertionError,
   type AssertionErrorConstructorOptions,
-} from 'node-internal:internal_assertionerror';
-
-import { diffstr, diff, buildMessage } from 'node-internal:internal_diffs';
-
-import { isDeepStrictEqual } from 'node-internal:internal_comparisons';
+} from 'node-internal:internal_assertionerror'
+import { isDeepStrictEqual } from 'node-internal:internal_comparisons'
+import { buildMessage, diff, diffstr } from 'node-internal:internal_diffs'
 
 import {
   ERR_AMBIGUOUS_ARGUMENT,
@@ -42,23 +40,23 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_INVALID_RETURN_VALUE,
   ERR_MISSING_ARGS,
-} from 'node-internal:internal_errors';
+} from 'node-internal:internal_errors'
 
-import { inspect } from 'node-internal:internal_inspect';
+import { inspect } from 'node-internal:internal_inspect'
 
 interface ExtendedAssertionErrorConstructorOptions
   extends AssertionErrorConstructorOptions {
-  generatedMessage?: boolean;
+  generatedMessage?: boolean
 }
 
 function createAssertionError(
-  options: ExtendedAssertionErrorConstructorOptions
+  options: ExtendedAssertionErrorConstructorOptions,
 ): AssertionError {
-  const error = new AssertionError(options);
+  const error = new AssertionError(options)
   if (options.generatedMessage) {
-    (error as any).generatedMessage = true;
+    ;(error as any).generatedMessage = true
   }
-  return error;
+  return error
 }
 
 // Note: Intentionally not exported, use assert.ok() instead.
@@ -66,7 +64,7 @@ function assert(actual: unknown, message?: string | Error): asserts actual {
   if (arguments.length === 0) {
     throw new AssertionError({
       message: 'No value argument passed to `assert.ok()`',
-    });
+    })
   }
   if (!actual) {
     throw new AssertionError({
@@ -74,21 +72,21 @@ function assert(actual: unknown, message?: string | Error): asserts actual {
       actual,
       expected: true,
       operator: '==',
-    } as AssertionErrorConstructorOptions);
+    } as AssertionErrorConstructorOptions)
   }
 }
 
-type Assert = (actual: unknown, message?: string | Error) => asserts actual;
-export const ok: Assert = assert;
+type Assert = (actual: unknown, message?: string | Error) => asserts actual
+export const ok: Assert = assert
 
 export function throws(
   fn: () => void,
   error?: RegExp | Function | Error,
-  message?: string
+  message?: string,
 ) {
   // Check arg types
   if (typeof fn !== 'function') {
-    throw new ERR_INVALID_ARG_TYPE('fn', 'function', fn);
+    throw new ERR_INVALID_ARG_TYPE('fn', 'function', fn)
   }
   if (
     typeof error === 'object' &&
@@ -100,8 +98,8 @@ export function throws(
     throw new ERR_INVALID_ARG_VALUE(
       'error',
       error,
-      'may not be an empty object'
-    );
+      'may not be an empty object',
+    )
   }
   if (typeof message === 'string') {
     if (
@@ -113,8 +111,8 @@ export function throws(
       throw new ERR_INVALID_ARG_TYPE(
         'error',
         ['Function', 'Error', 'RegExp', 'Object'],
-        error
-      );
+        error,
+      )
     }
   } else {
     if (
@@ -128,34 +126,34 @@ export function throws(
       throw new ERR_INVALID_ARG_TYPE(
         'error',
         ['Function', 'Error', 'RegExp', 'Object'],
-        error
-      );
+        error,
+      )
     }
   }
 
   // Checks test function
   try {
-    fn();
+    fn()
   } catch (e) {
     if (
       validateThrownError(e, error, message, {
         operator: throws,
       })
     ) {
-      return;
+      return
     }
   }
   if (message) {
-    let msg = `Missing expected exception: ${message}`;
+    let msg = `Missing expected exception: ${message}`
     if (typeof error === 'function' && error?.name) {
-      msg = `Missing expected exception (${error.name}): ${message}`;
+      msg = `Missing expected exception (${error.name}): ${message}`
     }
     throw new AssertionError({
       message: msg,
       operator: 'throws',
       actual: undefined,
       expected: error,
-    });
+    })
   } else if (typeof error === 'string') {
     // Use case of throws(fn, message)
     throw new AssertionError({
@@ -163,112 +161,112 @@ export function throws(
       operator: 'throws',
       actual: undefined,
       expected: undefined,
-    });
+    })
   } else if (typeof error === 'function' && error?.prototype !== undefined) {
     throw new AssertionError({
       message: `Missing expected exception (${error.name}).`,
       operator: 'throws',
       actual: undefined,
       expected: error,
-    });
+    })
   } else {
     throw new AssertionError({
       message: 'Missing expected exception.',
       operator: 'throws',
       actual: undefined,
       expected: error,
-    });
+    })
   }
 }
 
-export function doesNotThrow(fn: () => void, message?: string): void;
+export function doesNotThrow(fn: () => void, message?: string): void
 export function doesNotThrow(
   fn: () => void,
   error?: Function,
-  message?: string | Error
-): void;
+  message?: string | Error,
+): void
 export function doesNotThrow(
   fn: () => void,
   error?: RegExp,
-  message?: string
-): void;
+  message?: string,
+): void
 export function doesNotThrow(
   fn: () => void,
   expected?: Function | RegExp | string,
-  message?: string | Error
+  message?: string | Error,
 ) {
   // Check arg type
   if (typeof fn !== 'function') {
-    throw new ERR_INVALID_ARG_TYPE('fn', 'function', fn);
+    throw new ERR_INVALID_ARG_TYPE('fn', 'function', fn)
   } else if (
     !(expected instanceof RegExp) &&
     typeof expected !== 'function' &&
     typeof expected !== 'string' &&
     typeof expected !== 'undefined'
   ) {
-    throw new ERR_INVALID_ARG_TYPE('expected', ['Function', 'RegExp'], fn);
+    throw new ERR_INVALID_ARG_TYPE('expected', ['Function', 'RegExp'], fn)
   }
 
   // Checks test function
   try {
-    fn();
+    fn()
   } catch (e) {
-    gotUnwantedException(e, expected, message, doesNotThrow);
+    gotUnwantedException(e, expected, message, doesNotThrow)
   }
 }
 
 export function equal(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ) {
-  return strictEqual(actual, expected, message);
+  return strictEqual(actual, expected, message)
 }
 
 export function notEqual(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ) {
-  return notStrictEqual(actual, expected, message);
+  return notStrictEqual(actual, expected, message)
 }
 
 export function strictEqual(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ) {
   if (arguments.length < 2) {
-    throw new ERR_MISSING_ARGS('actual', 'expected');
+    throw new ERR_MISSING_ARGS('actual', 'expected')
   }
 
   if (Object.is(actual, expected)) {
-    return;
+    return
   }
 
   if (message) {
-    message = `${message}`;
+    message = `${message}`
   } else {
-    const actualString = inspect(actual);
-    const expectedString = inspect(expected);
+    const actualString = inspect(actual)
+    const expectedString = inspect(expected)
 
     if (actualString === expectedString) {
       const withOffset = actualString
         .split('\n')
         .map((l) => `    ${l}`)
-        .join('\n');
-      message = `Values have the same structure but are not reference-equal:\n\n${withOffset}\n`;
+        .join('\n')
+      message = `Values have the same structure but are not reference-equal:\n\n${withOffset}\n`
     } else {
       try {
         const stringDiff =
-          typeof actual === 'string' && typeof expected === 'string';
+          typeof actual === 'string' && typeof expected === 'string'
         const diffResult = stringDiff
           ? diffstr(actual as string, expected as string)
-          : diff(actualString.split('\n'), expectedString.split('\n'));
-        const diffMsg = buildMessage(diffResult, { stringDiff }).join('\n');
-        message = `Values are not strictly equal:\n${diffMsg}`;
+          : diff(actualString.split('\n'), expectedString.split('\n'))
+        const diffMsg = buildMessage(diffResult, { stringDiff }).join('\n')
+        message = `Values are not strictly equal:\n${diffMsg}`
       } catch {
-        message = '\n$[Cannot display] + \n\n';
+        message = '\n$[Cannot display] + \n\n'
       }
     }
   }
@@ -278,26 +276,26 @@ export function strictEqual(
     actual,
     expected,
     operator: 'strictEqual',
-  });
+  })
 }
 
 export function notStrictEqual(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ) {
   if (arguments.length < 2) {
-    throw new ERR_MISSING_ARGS('actual', 'expected');
+    throw new ERR_MISSING_ARGS('actual', 'expected')
   }
 
   if (!Object.is(actual, expected)) {
-    return;
+    return
   }
 
   if (message) {
-    message = `${message}`;
+    message = `${message}`
   } else {
-    message = 'Expected actual to be strictly unequal to expected';
+    message = 'Expected actual to be strictly unequal to expected'
   }
 
   throw new AssertionError({
@@ -305,40 +303,40 @@ export function notStrictEqual(
     actual,
     expected,
     operator: 'notStrictEqual',
-  });
+  })
 }
 
 export function deepEqual(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ) {
-  return deepStrictEqual(actual, expected, message);
+  return deepStrictEqual(actual, expected, message)
 }
 
 export function notDeepEqual(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ) {
-  return notDeepStrictEqual(actual, expected, message);
+  return notDeepStrictEqual(actual, expected, message)
 }
 
 export function deepStrictEqual(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ) {
   if (arguments.length < 2) {
-    throw new ERR_MISSING_ARGS('actual', 'expected');
+    throw new ERR_MISSING_ARGS('actual', 'expected')
   }
 
   if (isDeepStrictEqual(actual, expected)) {
-    return;
+    return
   }
 
   if (message) {
-    message = `${message}`;
+    message = `${message}`
   }
 
   throw new AssertionError({
@@ -346,23 +344,23 @@ export function deepStrictEqual(
     actual,
     expected,
     operator: 'deepStrictEqual',
-  });
+  })
 }
 
 export function notDeepStrictEqual(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ) {
   if (arguments.length < 2) {
-    throw new ERR_MISSING_ARGS('actual', 'expected');
+    throw new ERR_MISSING_ARGS('actual', 'expected')
   }
 
   if (isDeepStrictEqual(actual, expected)) {
     if (message) {
-      message = `${message}`;
+      message = `${message}`
     } else {
-      message = 'Expected actual to not be deeply strictly equal to expected';
+      message = 'Expected actual to not be deeply strictly equal to expected'
     }
 
     throw new AssertionError({
@@ -370,7 +368,7 @@ export function notDeepStrictEqual(
       actual,
       expected,
       operator: 'notDeepStrictEqual',
-    });
+    })
   }
 }
 
@@ -378,36 +376,36 @@ export function notDeepStrictEqual(
 function isPartialDeepStrictEqual(
   actual: unknown,
   expected: unknown,
-  memo?: Map<unknown, Set<unknown>>
+  memo?: Map<unknown, Set<unknown>>,
 ): boolean {
   // Handle primitive cases first
   if (expected === null || typeof expected !== 'object') {
-    return Object.is(actual, expected);
+    return Object.is(actual, expected)
   }
 
   if (actual === null || typeof actual !== 'object') {
-    return false;
+    return false
   }
 
   // Initialize memo for cycle detection on first call
-  memo ??= new Map();
+  memo ??= new Map()
 
   // Cycle detection: check if we're already comparing this pair
   if (memo.has(actual)) {
-    const actualSet = memo.get(actual)!;
+    const actualSet = memo.get(actual)!
     if (actualSet.has(expected)) {
       // We're already comparing this pair, assume they match to avoid infinite recursion
-      return true;
+      return true
     }
-    actualSet.add(expected);
+    actualSet.add(expected)
   } else {
-    memo.set(actual, new Set([expected]));
+    memo.set(actual, new Set([expected]))
   }
 
   try {
     // Handle Date objects
     if (expected instanceof Date) {
-      return actual instanceof Date && actual.getTime() === expected.getTime();
+      return actual instanceof Date && actual.getTime() === expected.getTime()
     }
 
     // Handle RegExp objects
@@ -417,7 +415,7 @@ function isPartialDeepStrictEqual(
         actual.source === expected.source &&
         actual.flags === expected.flags &&
         actual.lastIndex === expected.lastIndex
-      );
+      )
     }
 
     // Handle Error objects
@@ -426,13 +424,13 @@ function isPartialDeepStrictEqual(
         actual instanceof Error &&
         actual.name === expected.name &&
         actual.message === expected.message
-      );
+      )
     }
 
     // Handle arrays
     if (Array.isArray(expected)) {
       if (!Array.isArray(actual)) {
-        return false;
+        return false
       }
 
       // For arrays, check if all expected elements are present in actual
@@ -443,86 +441,86 @@ function isPartialDeepStrictEqual(
             !(i in actual) ||
             !isPartialDeepStrictEqual(actual[i], expected[i], memo)
           ) {
-            return false;
+            return false
           }
         }
       }
-      return true;
+      return true
     }
 
     // Handle Sets
     if (expected instanceof Set) {
       if (!(actual instanceof Set)) {
-        return false;
+        return false
       }
 
       // Check if all expected values are in actual set
       for (const expectedValue of expected) {
-        let found = false;
+        let found = false
         for (const actualValue of actual) {
           if (isDeepStrictEqual(expectedValue, actualValue)) {
-            found = true;
-            break;
+            found = true
+            break
           }
         }
         if (!found) {
-          return false;
+          return false
         }
       }
-      return true;
+      return true
     }
 
     // Handle Maps
     if (expected instanceof Map) {
       if (!(actual instanceof Map)) {
-        return false;
+        return false
       }
 
       // Check if all expected key-value pairs are in actual map
       for (const [expectedKey, expectedValue] of expected) {
-        let found = false;
+        let found = false
         for (const [actualKey, actualValue] of actual) {
           if (isDeepStrictEqual(expectedKey, actualKey)) {
             if (!isPartialDeepStrictEqual(actualValue, expectedValue, memo)) {
-              return false;
+              return false
             }
-            found = true;
-            break;
+            found = true
+            break
           }
         }
         if (!found) {
-          return false;
+          return false
         }
       }
-      return true;
+      return true
     }
 
     // Check prototypes are the same (required for deepStrictEqual behavior)
     if (Object.getPrototypeOf(actual) !== Object.getPrototypeOf(expected)) {
-      return false;
+      return false
     }
 
     // Handle regular objects
-    const expectedKeys = Object.keys(expected);
+    const expectedKeys = Object.keys(expected)
 
     for (const key of expectedKeys) {
       if (!(key in actual)) {
-        return false;
+        return false
       }
 
       if (
         !isPartialDeepStrictEqual(
           (actual as any)[key],
           (expected as any)[key],
-          memo
+          memo,
         )
       ) {
-        return false;
+        return false
       }
     }
 
     // Handle symbol properties
-    const expectedSymbols = Object.getOwnPropertySymbols(expected);
+    const expectedSymbols = Object.getOwnPropertySymbols(expected)
     for (const symbol of expectedSymbols) {
       if (expected.propertyIsEnumerable(symbol)) {
         if (
@@ -530,22 +528,22 @@ function isPartialDeepStrictEqual(
           !isPartialDeepStrictEqual(
             (actual as any)[symbol],
             (expected as any)[symbol],
-            memo
+            memo,
           )
         ) {
-          return false;
+          return false
         }
       }
     }
 
-    return true;
+    return true
   } finally {
     // Clean up memo to prevent memory leaks
     if (memo.has(actual)) {
-      const actualSet = memo.get(actual)!;
-      actualSet.delete(expected);
+      const actualSet = memo.get(actual)!
+      actualSet.delete(expected)
       if (actualSet.size === 0) {
-        memo.delete(actual);
+        memo.delete(actual)
       }
     }
   }
@@ -554,21 +552,21 @@ function isPartialDeepStrictEqual(
 export function partialDeepStrictEqual(
   actual: unknown,
   expected: unknown,
-  message?: string | Error
+  message?: string | Error,
 ): void {
   if (arguments.length < 2) {
-    throw new ERR_MISSING_ARGS('actual', 'expected');
+    throw new ERR_MISSING_ARGS('actual', 'expected')
   }
 
   if (isPartialDeepStrictEqual(actual, expected)) {
-    return;
+    return
   }
 
   if (message) {
-    message = `${message}`;
+    message = `${message}`
   } else {
     message =
-      'Expected actual to be partially deeply strictly equal to expected';
+      'Expected actual to be partially deeply strictly equal to expected'
   }
 
   throw new AssertionError({
@@ -576,7 +574,7 @@ export function partialDeepStrictEqual(
     actual,
     expected,
     operator: 'partialDeepStrictEqual',
-  });
+  })
 }
 
 export function fail(message?: string | Error): never {
@@ -585,114 +583,114 @@ export function fail(message?: string | Error): never {
       message: message ?? 'Failed',
       operator: 'fail',
       generatedMessage: message == null,
-    });
+    })
   } else {
-    throw message;
+    throw message
   }
 }
 
 export function match(
   actual: string,
   regexp: RegExp,
-  message?: string | Error
+  message?: string | Error,
 ) {
   if (arguments.length < 2) {
-    throw new ERR_MISSING_ARGS('actual', 'regexp');
+    throw new ERR_MISSING_ARGS('actual', 'regexp')
   }
   if (!(regexp instanceof RegExp)) {
-    throw new ERR_INVALID_ARG_TYPE('regexp', 'RegExp', regexp);
+    throw new ERR_INVALID_ARG_TYPE('regexp', 'RegExp', regexp)
   }
 
   if (!regexp.test(actual)) {
     if (!message) {
-      message = `actual: "${actual}" expected to match: "${regexp}"`;
+      message = `actual: "${actual}" expected to match: "${regexp}"`
     } else {
-      message = `${message}`;
+      message = `${message}`
     }
     throw new AssertionError({
       message,
       actual,
       expected: regexp,
       operator: 'match',
-    });
+    })
   }
 }
 
 export function doesNotMatch(
   string: string,
   regexp: RegExp,
-  message?: string | Error
+  message?: string | Error,
 ) {
   if (arguments.length < 2) {
-    throw new ERR_MISSING_ARGS('string', 'regexp');
+    throw new ERR_MISSING_ARGS('string', 'regexp')
   }
   if (!(regexp instanceof RegExp)) {
-    throw new ERR_INVALID_ARG_TYPE('regexp', 'RegExp', regexp);
+    throw new ERR_INVALID_ARG_TYPE('regexp', 'RegExp', regexp)
   }
   if (typeof string !== 'string') {
     if (message instanceof Error) {
-      throw message;
+      throw message
     }
     throw new AssertionError({
       message:
         message ||
         `The "string" argument must be of type string. Received type ${typeof string} (${inspect(
-          string
+          string,
         )})`,
       actual: string,
       expected: regexp,
       operator: 'doesNotMatch',
-    });
+    })
   }
 
   if (regexp.test(string)) {
     if (!message) {
-      message = `actual: "${string}" expected to not match: "${regexp}"`;
+      message = `actual: "${string}" expected to not match: "${regexp}"`
     } else {
-      message = `${message}`;
+      message = `${message}`
     }
     throw new AssertionError({
       message,
       actual: string,
       expected: regexp,
       operator: 'doesNotMatch',
-    });
+    })
   }
 }
 
 export function strict(
   actual: unknown,
-  message?: string | Error
+  message?: string | Error,
 ): asserts actual {
   if (arguments.length === 0) {
     throw new AssertionError({
       message: 'No value argument passed to `assert.ok()`',
-    });
+    })
   }
-  assert(actual, message);
+  assert(actual, message)
 }
 
 export function rejects(
   asyncFn: Promise<any> | (() => Promise<any>),
-  error?: RegExp | Function | Error
-): Promise<void>;
+  error?: RegExp | Function | Error,
+): Promise<void>
 
 export function rejects(
   asyncFn: Promise<any> | (() => Promise<any>),
-  message?: string
-): Promise<void>;
+  message?: string,
+): Promise<void>
 
 export function rejects(
   asyncFn: Promise<any> | (() => Promise<any>),
   error?: RegExp | Function | Error | string,
-  message?: string
+  message?: string,
 ) {
-  let promise: Promise<void>;
+  let promise: Promise<void>
   if (typeof asyncFn === 'function') {
     try {
-      promise = asyncFn();
+      promise = asyncFn()
     } catch (err) {
-      return Promise.reject(err);
+      return Promise.reject(err)
     }
 
     if (!isValidThenable(promise)) {
@@ -700,34 +698,34 @@ export function rejects(
         new ERR_INVALID_RETURN_VALUE(
           'instance of Promise',
           'promiseFn',
-          promise
-        )
-      );
+          promise,
+        ),
+      )
     }
   } else if (!isValidThenable(asyncFn)) {
     return Promise.reject(
-      new ERR_INVALID_ARG_TYPE('promiseFn', ['function', 'Promise'], asyncFn)
-    );
+      new ERR_INVALID_ARG_TYPE('promiseFn', ['function', 'Promise'], asyncFn),
+    )
   } else {
-    promise = asyncFn;
+    promise = asyncFn
   }
 
   function onFulfilled() {
-    let message = 'Missing expected rejection';
+    let message = 'Missing expected rejection'
     if (typeof error === 'string') {
-      message += `: ${error}`;
+      message += `: ${error}`
     } else if (typeof error === 'function' && error.prototype !== undefined) {
-      message += ` (${error.name}).`;
+      message += ` (${error.name}).`
     } else {
-      message += '.';
+      message += '.'
     }
     return Promise.reject(
       createAssertionError({
         message,
         operator: 'rejects',
         generatedMessage: true,
-      })
-    );
+      }),
+    )
   }
 
   function rejects_onRejected(e: Error) {
@@ -737,101 +735,101 @@ export function rejects(
         validationFunctionName: 'validate',
       })
     ) {
-      return;
+      return
     }
   }
 
-  return promise.then(onFulfilled, rejects_onRejected);
+  return promise.then(onFulfilled, rejects_onRejected)
 }
 
 export function doesNotReject(
   asyncFn: Promise<any> | (() => Promise<any>),
-  error?: RegExp | Function
-): Promise<void>;
+  error?: RegExp | Function,
+): Promise<void>
 
 export function doesNotReject(
   asyncFn: Promise<any> | (() => Promise<any>),
-  message?: string
-): Promise<void>;
+  message?: string,
+): Promise<void>
 
 export function doesNotReject(
   asyncFn: Promise<any> | (() => Promise<any>),
   error?: RegExp | Function | string,
-  message?: string
+  message?: string,
 ) {
-  let promise: Promise<any>;
+  let promise: Promise<any>
   if (typeof asyncFn === 'function') {
     try {
-      const value = asyncFn();
+      const value = asyncFn()
       if (!isValidThenable(value)) {
         return Promise.reject(
           new ERR_INVALID_RETURN_VALUE(
             'instance of Promise',
             'promiseFn',
-            value
-          )
-        );
+            value,
+          ),
+        )
       }
-      promise = value;
+      promise = value
     } catch (e) {
-      return Promise.reject(e);
+      return Promise.reject(e)
     }
   } else if (!isValidThenable(asyncFn)) {
     return Promise.reject(
-      new ERR_INVALID_ARG_TYPE('promiseFn', ['function', 'Promise'], asyncFn)
-    );
+      new ERR_INVALID_ARG_TYPE('promiseFn', ['function', 'Promise'], asyncFn),
+    )
   } else {
-    promise = asyncFn;
+    promise = asyncFn
   }
 
   return promise.then(
     () => {},
-    (e) => gotUnwantedException(e, error, message, doesNotReject)
-  );
+    (e) => gotUnwantedException(e, error, message, doesNotReject),
+  )
 }
 
 function gotUnwantedException(
   e: any,
   expected: RegExp | Function | string | null | undefined,
   message: string | Error | null | undefined,
-  operator: Function
+  operator: Function,
 ): never {
   if (typeof expected === 'string') {
     // The use case of doesNotThrow(fn, message);
     throw new AssertionError({
       message: `Got unwanted exception: ${expected}\nActual message: "${e.message}"`,
       operator: operator.name,
-    });
+    })
   } else if (
     typeof expected === 'function' &&
     expected.prototype !== undefined
   ) {
     // The use case of doesNotThrow(fn, Error, message);
     if (e instanceof expected) {
-      let msg = `Got unwanted exception: ${e.constructor?.name}`;
+      let msg = `Got unwanted exception: ${e.constructor?.name}`
       if (message) {
-        msg += ` ${String(message)}`;
+        msg += ` ${String(message)}`
       }
       throw new AssertionError({
         message: msg,
         operator: operator.name,
-      });
+      })
     } else if (expected.prototype instanceof Error) {
-      throw e;
+      throw e
     } else {
-      const result = expected(e);
+      const result = expected(e)
       if (result === true) {
-        let msg = `Got unwanted rejection.\nActual message: "${e.message}"`;
+        let msg = `Got unwanted rejection.\nActual message: "${e.message}"`
         if (message) {
-          msg += ` ${String(message)}`;
+          msg += ` ${String(message)}`
         }
         throw new AssertionError({
           message: msg,
           operator: operator.name,
-        });
+        })
       }
     }
-    throw e;
+    throw e
   } else {
     if (message) {
       throw new AssertionError({
@@ -839,29 +837,29 @@ function gotUnwantedException(
           e ? e.message : String(e)
         }"`,
         operator: operator.name,
-      });
+      })
     }
     throw new AssertionError({
       message: `Got unwanted exception.\nActual message: "${
         e ? e.message : String(e)
       }"`,
       operator: operator.name,
-    });
+    })
   }
 }
 
 export function ifError(err: any) {
   if (err !== null && err !== undefined) {
-    let message = 'ifError got unwanted exception: ';
+    let message = 'ifError got unwanted exception: '
 
     if (typeof err === 'object' && typeof err.message === 'string') {
       if (err.message.length === 0 && err.constructor) {
-        message += err.constructor.name;
+        message += err.constructor.name
       } else {
-        message += err.message;
+        message += err.message
       }
     } else {
-      message += inspect(err);
+      message += inspect(err)
     }
 
     const newErr = new AssertionError({
@@ -870,66 +868,66 @@ export function ifError(err: any) {
       operator: 'ifError',
       message,
       stackStartFn: ifError,
-    });
+    })
 
     // Make sure we actually have a stack trace!
-    const origStack = err.stack;
+    const origStack = err.stack
 
     if (typeof origStack === 'string') {
-      const tmp2 = origStack.split('\n');
-      tmp2.shift();
-      let tmp1 = newErr!.stack?.split('\n');
+      const tmp2 = origStack.split('\n')
+      tmp2.shift()
+      let tmp1 = newErr?.stack?.split('\n')
 
       for (const errFrame of tmp2) {
-        const pos = tmp1?.indexOf(errFrame);
+        const pos = tmp1?.indexOf(errFrame)
 
         if (pos !== -1) {
-          tmp1 = tmp1?.slice(0, pos);
+          tmp1 = tmp1?.slice(0, pos)
 
-          break;
+          break
         }
       }
 
-      newErr.stack = `${tmp1?.join('\n')}\n${tmp2.join('\n')}`;
+      newErr.stack = `${tmp1?.join('\n')}\n${tmp2.join('\n')}`
     }
 
-    throw newErr;
+    throw newErr
   }
 }
 
 interface ValidateThrownErrorOptions {
-  operator: Function;
-  validationFunctionName?: string;
+  operator: Function
+  validationFunctionName?: string
 }
 
 function validateThrownError(
   e: any,
   error: RegExp | Function | Error | string | null | undefined,
   message: string | undefined | null,
-  options: ValidateThrownErrorOptions
+  options: ValidateThrownErrorOptions,
 ): boolean {
   if (typeof error === 'string') {
     if (message != null) {
       throw new ERR_INVALID_ARG_TYPE(
         'error',
         ['Object', 'Error', 'Function', 'RegExp'],
-        error
-      );
+        error,
+      )
     } else if (typeof e === 'object' && e !== null) {
       if (e.message === error) {
         throw new ERR_AMBIGUOUS_ARGUMENT(
           'error/message',
-          `The error message "${e.message}" is identical to the message.`
-        );
+          `The error message "${e.message}" is identical to the message.`,
+        )
       }
     } else if (e === error) {
       throw new ERR_AMBIGUOUS_ARGUMENT(
         'error/message',
-        `The error "${e}" is identical to the message.`
-      );
+        `The error "${e}" is identical to the message.`,
+      )
     }
-    message = error;
-    error = undefined;
+    message = error
+    error = undefined
   }
   if (
     error instanceof Function &&
@@ -938,7 +936,7 @@ function validateThrownError(
   ) {
     // error is a constructor (Error itself or a subclass of Error)
     if (e instanceof error) {
-      return true;
+      return true
     }
     throw createAssertionError({
       message: `The error is expected to be an instance of "${error.name}". Received "${e?.constructor?.name}"\n\nError message:\n\n${e?.message}`,
@@ -946,12 +944,12 @@ function validateThrownError(
       expected: error,
       operator: options.operator.name,
       generatedMessage: true,
-    });
+    })
   }
   if (error instanceof Function) {
-    const received = error(e);
+    const received = error(e)
     if (received === true) {
-      return true;
+      return true
     }
     throw createAssertionError({
       message: `The ${
@@ -959,32 +957,32 @@ function validateThrownError(
           ? `"${options.validationFunctionName}" validation`
           : 'validation'
       } function is expected to return "true". Received ${inspect(
-        received
+        received,
       )}\n\nCaught error:\n\n${e}`,
       actual: e,
       expected: error,
       operator: options.operator.name,
       generatedMessage: true,
-    });
+    })
   }
   if (error instanceof RegExp) {
     if (error.test(String(e))) {
-      return true;
+      return true
     }
     throw createAssertionError({
       message: `The input did not match the regular expression ${error.toString()}. Input:\n\n'${String(
-        e
+        e,
       )}'\n`,
       actual: e,
       expected: error,
       operator: options.operator.name,
       generatedMessage: true,
-    });
+    })
   }
   if (typeof error === 'object' && error !== null) {
-    const keys = Object.keys(error);
+    const keys = Object.keys(error)
     if (error instanceof Error) {
-      keys.push('name', 'message');
+      keys.push('name', 'message')
     }
     for (const k of keys) {
       if (e == null) {
@@ -994,7 +992,7 @@ function validateThrownError(
           expected: error,
           operator: options.operator.name,
           generatedMessage: message == null,
-        });
+        })
       }
 
       if (typeof e === 'string') {
@@ -1005,7 +1003,7 @@ function validateThrownError(
           expected: error,
           operator: options.operator.name,
           generatedMessage: message == null,
-        });
+        })
       }
       if (typeof e === 'number') {
         throw createAssertionError({
@@ -1015,7 +1013,7 @@ function validateThrownError(
           expected: error,
           operator: options.operator.name,
           generatedMessage: message == null,
-        });
+        })
       }
       if (!(k in e)) {
         throw createAssertionError({
@@ -1024,42 +1022,42 @@ function validateThrownError(
           expected: error,
           operator: options.operator.name,
           generatedMessage: message == null,
-        });
+        })
       }
-      const actual = e[k];
+      const actual = e[k]
 
-      const expected = (error as any)[k];
+      const expected = (error as any)[k]
       if (typeof actual === 'string' && expected instanceof RegExp) {
-        match(actual, expected);
+        match(actual, expected)
       } else {
-        deepStrictEqual(actual, expected);
+        deepStrictEqual(actual, expected)
       }
     }
-    return true;
+    return true
   }
   if (typeof error === 'undefined') {
-    return true;
+    return true
   }
   throw createAssertionError({
     message: `Invalid expectation: ${error}`,
     operator: options.operator.name,
     generatedMessage: true,
-  });
+  })
 }
 
 function isValidThenable(maybeThennable: any): boolean {
   if (!maybeThennable) {
-    return false;
+    return false
   }
 
   if (maybeThennable instanceof Promise) {
-    return true;
+    return true
   }
 
-  return typeof maybeThennable.then === 'function';
+  return typeof maybeThennable.then === 'function'
 }
 
-export { AssertionError };
+export { AssertionError }
 
 Object.assign(strict, {
   AssertionError,
@@ -1082,7 +1080,7 @@ Object.assign(strict, {
   strict,
   strictEqual,
   throws,
-});
+})
 
 export default Object.assign(assert, {
   AssertionError,
@@ -1105,4 +1103,4 @@ export default Object.assign(assert, {
   strict,
   strictEqual,
   throws,
-});
+})

@@ -1,4 +1,4 @@
-import ts from "typescript";
+import ts from 'typescript'
 
 /**
  * Transforms an array of classes to an interface/variable pair, preserving the ability to construct the class
@@ -30,7 +30,7 @@ import ts from "typescript";
  *   2. Static methods are added to the var declaration instead of the interface.
  */
 export function createClassToInterfaceTransformer(
-  classNames: string[]
+  classNames: string[],
 ): ts.TransformerFactory<ts.SourceFile> {
   return (context) => {
     const visitor: ts.Visitor = (node) => {
@@ -39,17 +39,17 @@ export function createClassToInterfaceTransformer(
         node.name &&
         classNames.includes(node.name.text)
       ) {
-        return transformClassToInterface(node, context);
+        return transformClassToInterface(node, context)
       }
-      return ts.visitEachChild(node, visitor, context);
-    };
+      return ts.visitEachChild(node, visitor, context)
+    }
 
     return (sourceFile) => {
-      const transformedNodes = ts.visitNodes(sourceFile.statements, visitor);
-      const filteredNodes = transformedNodes.filter(ts.isStatement);
-      return context.factory.updateSourceFile(sourceFile, filteredNodes);
-    };
-  };
+      const transformedNodes = ts.visitNodes(sourceFile.statements, visitor)
+      const filteredNodes = transformedNodes.filter(ts.isStatement)
+      return context.factory.updateSourceFile(sourceFile, filteredNodes)
+    }
+  }
 }
 
 /**
@@ -59,11 +59,11 @@ export function createClassToInterfaceTransformer(
  */
 function transformClassToInterface(
   node: ts.ClassDeclaration,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.Statement[] {
-  const interfaceDeclaration = createInterfaceDeclaration(node, context);
-  const varDeclaration = createVariableDeclaration(node, context);
-  return [varDeclaration, interfaceDeclaration];
+  const interfaceDeclaration = createInterfaceDeclaration(node, context)
+  const varDeclaration = createVariableDeclaration(node, context)
+  return [varDeclaration, interfaceDeclaration]
 }
 
 /**
@@ -73,16 +73,16 @@ function transformClassToInterface(
  */
 function createInterfaceDeclaration(
   node: ts.ClassDeclaration,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.InterfaceDeclaration {
-  const interfaceMembers = transformClassMembers(node.members, context, false);
+  const interfaceMembers = transformClassMembers(node.members, context, false)
   return context.factory.createInterfaceDeclaration(
     getAccessModifiers(ts.getModifiers(node)),
     node.name,
     node.typeParameters,
     node.heritageClauses,
-    interfaceMembers
-  );
+    interfaceMembers,
+  )
 }
 
 /**
@@ -93,13 +93,13 @@ function createInterfaceDeclaration(
 function transformClassMembers(
   members: ts.NodeArray<ts.ClassElement>,
   context: ts.TransformationContext,
-  includeStatic: boolean
+  includeStatic: boolean,
 ): ts.TypeElement[] {
   return members
     .map((member) =>
-      transformClassMemberToInterface(member, context, includeStatic)
+      transformClassMemberToInterface(member, context, includeStatic),
     )
-    .filter((member): member is ts.TypeElement => member !== undefined);
+    .filter((member): member is ts.TypeElement => member !== undefined)
 }
 
 /**
@@ -122,40 +122,39 @@ function transformClassMembers(
 function transformClassMemberToInterface(
   member: ts.ClassElement,
   context: ts.TransformationContext,
-  includeStatic: boolean
+  includeStatic: boolean,
 ): ts.TypeElement | undefined {
   const modifiers = ts.canHaveModifiers(member)
     ? ts.getModifiers(member)
-    : undefined;
+    : undefined
   const isStatic =
-    modifiers?.some((mod) => mod.kind === ts.SyntaxKind.StaticKeyword) ?? false;
+    modifiers?.some((mod) => mod.kind === ts.SyntaxKind.StaticKeyword) ?? false
 
   if (isStatic !== includeStatic) {
-    return undefined;
+    return undefined
   }
 
   const isPrivate =
-    modifiers?.some((mod) => mod.kind === ts.SyntaxKind.PrivateKeyword) ??
-    false;
+    modifiers?.some((mod) => mod.kind === ts.SyntaxKind.PrivateKeyword) ?? false
 
   if (isPrivate) {
-    return undefined;
+    return undefined
   }
 
-  const accessModifiers = getAccessModifiers(modifiers);
+  const accessModifiers = getAccessModifiers(modifiers)
 
   if (ts.isPropertyDeclaration(member)) {
-    return createPropertySignature(member, accessModifiers, context);
+    return createPropertySignature(member, accessModifiers, context)
   } else if (ts.isMethodDeclaration(member)) {
-    return createMethodSignature(member, accessModifiers, context);
+    return createMethodSignature(member, accessModifiers, context)
   } else if (ts.isGetAccessor(member)) {
-    return createGetAccessorSignature(member, accessModifiers, context);
+    return createGetAccessorSignature(member, accessModifiers, context)
   } else if (ts.isSetAccessor(member) || ts.isConstructorDeclaration(member)) {
-    return undefined;
+    return undefined
   }
 
-  console.warn(`Unhandled member type: ${ts.SyntaxKind[member.kind]}`);
-  return undefined;
+  console.warn(`Unhandled member type: ${ts.SyntaxKind[member.kind]}`)
+  return undefined
 }
 
 /**
@@ -174,14 +173,14 @@ function transformClassMemberToInterface(
 function createPropertySignature(
   member: ts.PropertyDeclaration,
   modifiers: ts.Modifier[] | undefined,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.PropertySignature {
   return context.factory.createPropertySignature(
     modifiers,
     member.name,
     member.questionToken,
-    member.type
-  );
+    member.type,
+  )
 }
 
 /**
@@ -202,7 +201,7 @@ function createPropertySignature(
 function createMethodSignature(
   member: ts.MethodDeclaration,
   modifiers: ts.Modifier[] | undefined,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.MethodSignature {
   return context.factory.createMethodSignature(
     modifiers,
@@ -210,8 +209,8 @@ function createMethodSignature(
     member.questionToken,
     member.typeParameters,
     member.parameters,
-    member.type
-  );
+    member.type,
+  )
 }
 
 /**
@@ -232,14 +231,14 @@ function createMethodSignature(
 function createGetAccessorSignature(
   member: ts.GetAccessorDeclaration,
   modifiers: ts.Modifier[] | undefined,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.PropertySignature {
   return context.factory.createPropertySignature(
     modifiers,
     member.name,
     undefined,
-    member.type
-  );
+    member.type,
+  )
 }
 
 /**
@@ -264,7 +263,7 @@ function createGetAccessorSignature(
  */
 function createVariableDeclaration(
   node: ts.ClassDeclaration,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.VariableStatement {
   return context.factory.createVariableStatement(
     [context.factory.createModifier(ts.SyntaxKind.DeclareKeyword)],
@@ -273,12 +272,12 @@ function createVariableDeclaration(
         context.factory.createVariableDeclaration(
           node.name,
           undefined,
-          createClassType(node, context)
+          createClassType(node, context),
         ),
       ],
-      ts.NodeFlags.None
-    )
-  );
+      ts.NodeFlags.None,
+    ),
+  )
 }
 
 /**
@@ -303,14 +302,14 @@ function createVariableDeclaration(
  */
 function createClassType(
   node: ts.ClassDeclaration,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.TypeLiteralNode {
-  const staticMembers = transformClassMembers(node.members, context, true);
+  const staticMembers = transformClassMembers(node.members, context, true)
   return context.factory.createTypeLiteralNode([
     createPrototypeProperty(node, context),
     createConstructSignature(node, context),
     ...staticMembers,
-  ]);
+  ])
 }
 
 /**
@@ -330,23 +329,23 @@ function createClassType(
  */
 function createConstructSignature(
   node: ts.ClassDeclaration,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.ConstructSignatureDeclaration {
-  const constructorDeclaration = node.members.find(ts.isConstructorDeclaration);
-  const typeParameters = node.typeParameters;
+  const constructorDeclaration = node.members.find(ts.isConstructorDeclaration)
+  const typeParameters = node.typeParameters
 
   const returnType = context.factory.createTypeReferenceNode(
     node.name,
     typeParameters?.map((param) =>
-      context.factory.createTypeReferenceNode(param.name, undefined)
-    )
-  );
+      context.factory.createTypeReferenceNode(param.name, undefined),
+    ),
+  )
 
   return context.factory.createConstructSignature(
     typeParameters,
     constructorDeclaration?.parameters ?? [],
-    returnType
-  );
+    returnType,
+  )
 }
 
 /**
@@ -364,14 +363,14 @@ function createConstructSignature(
  */
 function createPrototypeProperty(
   node: ts.ClassDeclaration,
-  context: ts.TransformationContext
+  context: ts.TransformationContext,
 ): ts.PropertySignature {
   return context.factory.createPropertySignature(
     undefined,
-    "prototype",
+    'prototype',
     undefined,
-    context.factory.createTypeReferenceNode(node.name, undefined)
-  );
+    context.factory.createTypeReferenceNode(node.name, undefined),
+  )
 }
 
 /**
@@ -379,13 +378,13 @@ function createPrototypeProperty(
  * Extracts modifiers such as readonly, public, protected, and private.
  */
 function getAccessModifiers(
-  modifiers: readonly ts.Modifier[] | undefined
+  modifiers: readonly ts.Modifier[] | undefined,
 ): ts.Modifier[] | undefined {
   return modifiers?.filter(
     (mod) =>
       mod.kind === ts.SyntaxKind.ReadonlyKeyword ||
       mod.kind === ts.SyntaxKind.PublicKeyword ||
       mod.kind === ts.SyntaxKind.ProtectedKeyword ||
-      mod.kind === ts.SyntaxKind.PrivateKeyword
-  );
+      mod.kind === ts.SyntaxKind.PrivateKeyword,
+  )
 }

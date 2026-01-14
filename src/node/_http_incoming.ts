@@ -3,9 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { IncomingMessage } from 'node-internal:internal_http_incoming';
+import { IncomingMessage } from 'node-internal:internal_http_incoming'
 
-export { IncomingMessage };
+export { IncomingMessage }
 export default {
   IncomingMessage,
-};
+}

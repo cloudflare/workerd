@@ -4,7 +4,7 @@ declare module 'cloudflare:workflows' {
    * that makes a Workflow instance fail immediately without triggering a retry
    */
   export class NonRetryableError extends Error {
-    public constructor(message: string, name?: string);
+    public constructor(message: string, name?: string)
   }
 }
 
@@ -14,7 +14,7 @@ declare abstract class Workflow<PARAMS = unknown> {
    * @param id Id for the instance of this Workflow
    * @returns A promise that resolves with a handle for the Instance
    */
-  public get(id: string): Promise<WorkflowInstance>;
+  public get(id: string): Promise<WorkflowInstance>
 
   /**
    * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
@@ -22,8 +22,8 @@ declare abstract class Workflow<PARAMS = unknown> {
    * @returns A promise that resolves with a handle for the Instance
    */
   public create(
-    options?: WorkflowInstanceCreateOptions<PARAMS>
-  ): Promise<WorkflowInstance>;
+    options?: WorkflowInstanceCreateOptions<PARAMS>,
+  ): Promise<WorkflowInstance>
 
   /**
    * Create a batch of instances and return handle for all of them. If a provided id exists, an error will be thrown.
@@ -32,8 +32,8 @@ declare abstract class Workflow<PARAMS = unknown> {
    * @returns A promise that resolves with a list of handles for the created instances.
    */
   public createBatch(
-    batch: WorkflowInstanceCreateOptions<PARAMS>[]
-  ): Promise<WorkflowInstance[]>;
+    batch: WorkflowInstanceCreateOptions<PARAMS>[],
+  ): Promise<WorkflowInstance[]>
 }
 
 type WorkflowDurationLabel =
@@ -43,31 +43,31 @@ type WorkflowDurationLabel =
   | 'day'
   | 'week'
   | 'month'
-  | 'year';
+  | 'year'
 
 type WorkflowSleepDuration =
   | `${number} ${WorkflowDurationLabel}${'s' | ''}`
-  | number;
+  | number
 
-type WorkflowRetentionDuration = WorkflowSleepDuration;
+type WorkflowRetentionDuration = WorkflowSleepDuration
 
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
    */
-  id?: string;
+  id?: string
   /**
    * The event payload the Workflow instance is triggered with
    */
-  params?: PARAMS;
+  params?: PARAMS
   /**
    * The retention policy for Workflow instance.
    * Defaults to the maximum retention period available for the owner's account.
    */
   retention?: {
-    successRetention?: WorkflowRetentionDuration,
-    errorRetention?: WorkflowRetentionDuration,
-  };
+    successRetention?: WorkflowRetentionDuration
+    errorRetention?: WorkflowRetentionDuration
+  }
 }
 
 type InstanceStatus = {
@@ -80,46 +80,46 @@ type InstanceStatus = {
     | 'complete'
     | 'waiting' // instance is hibernating and waiting for sleep or event to finish
     | 'waitingForPause' // instance is finishing the current work to pause
-    | 'unknown';
+    | 'unknown'
   error?: {
-    name: string;
-    message: string;
-  };
-  output?: unknown;
-};
+    name: string
+    message: string
+  }
+  output?: unknown
+}
 
 interface WorkflowError {
-  code?: number;
-  message: string;
+  code?: number
+  message: string
 }
 
 declare abstract class WorkflowInstance {
-  public id: string;
+  public id: string
 
   /**
    * Pause the instance.
    */
-  public pause(): Promise<void>;
+  public pause(): Promise<void>
 
   /**
    * Resume the instance. If it is already running, an error will be thrown.
    */
-  public resume(): Promise<void>;
+  public resume(): Promise<void>
 
   /**
    * Terminate the instance. If it is errored, terminated or complete, an error will be thrown.
    */
-  public terminate(): Promise<void>;
+  public terminate(): Promise<void>
 
   /**
    * Restart the instance.
    */
-  public restart(): Promise<void>;
+  public restart(): Promise<void>
 
   /**
    * Returns the current status of the instance.
    */
-  public status(): Promise<InstanceStatus>;
+  public status(): Promise<InstanceStatus>
 
   /**
    * Send an event to this instance.
@@ -128,7 +128,7 @@ declare abstract class WorkflowInstance {
     type,
     payload,
   }: {
-    type: string;
-    payload: unknown;
-  }): Promise<void>;
+    type: string
+    payload: unknown
+  }): Promise<void>
 }

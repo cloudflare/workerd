@@ -1,4 +1,4 @@
-import { default as zlibUtil } from 'node-internal:zlib';
+import { default as zlibUtil } from 'node-internal:zlib'
 
 const {
   CONST_Z_OK,
@@ -10,10 +10,10 @@ const {
   CONST_Z_MEM_ERROR,
   CONST_Z_BUF_ERROR,
   CONST_Z_VERSION_ERROR,
-} = zlibUtil;
+} = zlibUtil
 
-const constPrefix = 'CONST_';
-export const constants: Record<string, number> = {};
+const constPrefix = 'CONST_'
+export const constants: Record<string, number> = {}
 
 Object.defineProperties(
   constants,
@@ -29,9 +29,9 @@ Object.defineProperties(
           configurable: false,
           enumerable: true,
         },
-      ])
-  )
-);
+      ]),
+  ),
+)
 
 // Translation table for return codes.
 const rawCodes: Record<string, number | string> = {
@@ -44,10 +44,10 @@ const rawCodes: Record<string, number | string> = {
   Z_MEM_ERROR: CONST_Z_MEM_ERROR,
   Z_BUF_ERROR: CONST_Z_BUF_ERROR,
   Z_VERSION_ERROR: CONST_Z_VERSION_ERROR,
-};
-
-for (const key of Object.keys(rawCodes)) {
-  rawCodes[rawCodes[key] as number] = key;
 }
 
-export const codes = Object.freeze(rawCodes);
+for (const key of Object.keys(rawCodes)) {
+  rawCodes[rawCodes[key] as number] = key
+}
+
+export const codes = Object.freeze(rawCodes)

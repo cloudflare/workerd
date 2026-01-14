@@ -23,141 +23,141 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import path from 'node:path';
-import { getBindingPath } from './common';
+import path from 'node:path'
+import { getBindingPath } from './common'
 
 // @ts-expect-error We're just exposing enough stuff for the tests to pass; it's not a perfect match
-globalThis.self = globalThis;
+globalThis.self = globalThis
 
 // WPT tests use self.URL which requires URL to be an own property of globalThis
-globalThis.URL = URL;
+globalThis.URL = URL
 
 // Some WPT tests reference addEventListener at the top level during file evaluation.
 // workerd doesn't have addEventListener on the global (it uses module exports instead),
 // so we provide a no-op stub to allow test files to load without throwing.
 // Tests that actually need addEventListener functionality should be marked as omitted.
-globalThis.addEventListener = (): void => {};
+globalThis.addEventListener = (): void => {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access --  We're just exposing enough stuff for the tests to pass; it's not a perfect match
-globalThis.Window = Object.getPrototypeOf(globalThis).constructor;
+globalThis.Window = Object.getPrototypeOf(globalThis).constructor
 
-const realFetch = globalThis.fetch;
-const realRequest = globalThis.Request;
+const realFetch = globalThis.fetch
+const realRequest = globalThis.Request
 
 function relativizeUrl(input: URL | string): string {
-  return new URL(input, globalThis.state.testUrl).href;
+  return new URL(input, globalThis.state.testUrl).href
 }
 
 function relativizeRequest(
   input: RequestInfo | URL,
-  init?: RequestInit
+  init?: RequestInit,
 ): Request {
   if (input instanceof Request) {
     return new realRequest(
       relativizeRequest(input.url),
-      new realRequest(input, init)
-    );
+      new realRequest(input, init),
+    )
   } else if (input instanceof URL) {
-    return new realRequest(relativizeUrl(input), init);
+    return new realRequest(relativizeUrl(input), init)
   } else {
-    return new realRequest(relativizeUrl(input), init);
+    return new realRequest(relativizeUrl(input), init)
   }
 }
 
 globalThis.Request = class _Request extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
-    super(relativizeRequest(input, init));
+    super(relativizeRequest(input, init))
   }
-};
+}
 
 globalThis.Response = class _Response extends Response {
   static override redirect(url: string | URL, status?: number): Response {
-    return super.redirect(relativizeUrl(url), status);
+    return Response.redirect(relativizeUrl(url), status)
   }
-};
+}
 
 globalThis.fetch = async (
   input: RequestInfo | URL,
-  init?: RequestInit
+  init?: RequestInit,
 ): Promise<Response> => {
   if (typeof input === 'string' && input.endsWith('.json')) {
     const relativePath = getBindingPath(
       path.dirname(globalThis.state.testFileName),
-      input
-    );
+      input,
+    )
     // WPT sometimes uses fetch to load a resource file, we "serve" this from the bindings
-    const exports: unknown = globalThis.state.env[relativePath];
+    const exports: unknown = globalThis.state.env[relativePath]
     if (exports === undefined) {
-      throw new Error(`Unable to load resources file ${input} from bindings`);
+      throw new Error(`Unable to load resources file ${input} from bindings`)
     }
 
-    return new Response(JSON.stringify(exports));
+    return new Response(JSON.stringify(exports))
   }
-  return realFetch(relativizeRequest(input, init));
-};
+  return realFetch(relativizeRequest(input, init))
+}
 
 class _Location {
   get ancestorOrigins(): DOMStringList {
     return {
       length: 0,
       item(_index: number): string | null {
-        return null;
+        return null
       },
       contains(_string: string): boolean {
-        return false;
+        return false
       },
-    };
+    }
   }
 
   get hash(): string {
-    return globalThis.state.testUrl.hash;
+    return globalThis.state.testUrl.hash
   }
 
   get host(): string {
-    return globalThis.state.testUrl.host;
+    return globalThis.state.testUrl.host
   }
 
   get hostname(): string {
-    return globalThis.state.testUrl.hostname;
+    return globalThis.state.testUrl.hostname
   }
 
   get href(): string {
-    return globalThis.state.testUrl.href;
+    return globalThis.state.testUrl.href
   }
 
   get origin(): string {
-    return globalThis.state.testUrl.origin;
+    return globalThis.state.testUrl.origin
   }
 
   get pathname(): string {
-    return globalThis.state.testUrl.pathname;
+    return globalThis.state.testUrl.pathname
   }
 
   get port(): string {
-    return globalThis.state.testUrl.port;
+    return globalThis.state.testUrl.port
   }
 
   get protocol(): string {
-    return globalThis.state.testUrl.protocol;
+    return globalThis.state.testUrl.protocol
   }
 
   get search(): string {
-    return globalThis.state.testUrl.search;
+    return globalThis.state.testUrl.search
   }
 
   assign(url: string): void {
-    globalThis.state.testUrl = new URL(url);
+    globalThis.state.testUrl = new URL(url)
   }
 
   reload(): void {}
 
   replace(url: string): void {
-    globalThis.state.testUrl = new URL(url);
+    globalThis.state.testUrl = new URL(url)
   }
 
   toString(): string {
-    return globalThis.state.testUrl.href;
+    return globalThis.state.testUrl.href
   }
 }
 
-globalThis.location = new _Location();
+globalThis.location = new _Location()

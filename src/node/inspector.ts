@@ -3,19 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { EventEmitter } from 'node-internal:events';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import type {
-  InspectorConsole,
-  Session as _Session,
   Network as _Network,
-} from 'node:inspector';
+  Session as _Session,
+  InspectorConsole,
+} from 'node:inspector'
+import { EventEmitter } from 'node-internal:events'
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors'
 
 export function close(): void {
   // Acts as a no-op.
 }
 
-const noop: VoidFunction = () => {};
+const noop: VoidFunction = () => {}
 
 export const console: InspectorConsole = {
   debug: noop,
@@ -39,22 +39,22 @@ export const console: InspectorConsole = {
   time: noop,
   timeLog: noop,
   timeStamp: noop,
-};
+}
 
 export function open(
   _port?: number,
   _host?: string,
-  _wait?: boolean
+  _wait?: boolean,
 ): Disposable {
   return {
     [Symbol.dispose](): Promise<void> {
-      return Promise.resolve();
+      return Promise.resolve()
     },
-  };
+  }
 }
 
 export function url(): string | undefined {
-  return undefined;
+  return undefined
 }
 
 export function waitForDebugger(): void {
@@ -63,60 +63,60 @@ export function waitForDebugger(): void {
 
 export class Session extends EventEmitter implements _Session {
   constructor() {
-    super();
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session');
+    super()
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session')
   }
 
   connect(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.connect');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.connect')
   }
 
   connectToMainThread(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.connectToMainThread');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.connectToMainThread')
   }
 
   disconnect(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.disconnect');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.disconnect')
   }
 
   post(_method: unknown, _params?: unknown, _callback?: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.post');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.post')
   }
 }
 
 export const Network: typeof _Network = {
   requestWillBeSent(_params: _Network.RequestWillBeSentEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.requestWillBeSent');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.requestWillBeSent')
   },
   dataReceived(_params: _Network.DataReceivedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataReceived');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataReceived')
   },
   dataSent(_params: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataSent');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataSent')
   },
   responseReceived(_params: _Network.ResponseReceivedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.responseReceived');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.responseReceived')
   },
   loadingFinished(_params: _Network.LoadingFinishedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFinished');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFinished')
   },
   loadingFailed(_params: _Network.LoadingFailedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFailed');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFailed')
   },
   webSocketCreated(_params: _Network.WebSocketCreatedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketCreated');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketCreated')
   },
   webSocketHandshakeResponseReceived(
-    _params: _Network.WebSocketHandshakeResponseReceivedEventDataType
+    _params: _Network.WebSocketHandshakeResponseReceivedEventDataType,
   ): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED(
-      'Network.webSocketHandshakeResponseReceived'
-    );
+      'Network.webSocketHandshakeResponseReceived',
+    )
   },
   webSocketClosed(_params: _Network.WebSocketClosedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketClosed');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketClosed')
   },
-};
+}
 
 export default {
   Session,
@@ -126,4 +126,4 @@ export default {
   url,
   waitForDebugger,
   Network,
-};
+}

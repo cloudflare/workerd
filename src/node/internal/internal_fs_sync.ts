@@ -24,69 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* eslint-disable @typescript-eslint/no-unused-vars,@typescript-eslint/no-unnecessary-condition */
 
-import {
-  stringToFlags,
-  getValidatedFd,
-  validateBufferArray,
-  normalizePath,
-  getDate,
-  Stats,
-  kBadge,
-  type FilePath,
-  type Position,
-  type RawTime,
-  type SymlinkType,
-  type ReadDirOptions,
-  type WriteSyncOptions,
-  type ValidEncoding,
-  validatePosition,
-  validateAccessArgs,
-  validateChownArgs,
-  validateChmodArgs,
-  validateStatArgs,
-  validateMkDirArgs,
-  validateRmArgs,
-  validateRmDirArgs,
-  validateReaddirArgs,
-  validateReadArgs,
-  validateWriteArgs,
-  validateWriteFileArgs,
-  validateOpendirArgs,
-} from 'node-internal:internal_fs_utils';
-import {
-  parseFileMode,
-  validateBoolean,
-  validateObject,
-  validateOneOf,
-  validateString,
-  validateUint32,
-} from 'node-internal:validators';
-import {
-  ERR_INVALID_ARG_TYPE,
-  ERR_INVALID_ARG_VALUE,
-  ERR_ENOENT,
-  ERR_EBADF,
-  ERR_EINVAL,
-  ERR_EEXIST,
-  ERR_UNSUPPORTED_OPERATION,
-} from 'node-internal:internal_errors';
-
-import {
-  F_OK,
-  X_OK,
-  W_OK,
-  O_WRONLY,
-  O_RDWR,
-  O_APPEND,
-  O_EXCL,
-  COPYFILE_EXCL,
-  COPYFILE_FICLONE,
-  COPYFILE_FICLONE_FORCE,
-} from 'node-internal:internal_fs_constants';
-import { Dir, Dirent } from 'node-internal:internal_fs';
-import { default as cffs } from 'cloudflare-internal:filesystem';
-
-import { Buffer } from 'node-internal:internal_buffer';
+import { default as cffs } from 'cloudflare-internal:filesystem'
 import type {
   BigIntStatsFs,
   CopySyncOptions,
@@ -96,32 +34,92 @@ import type {
   MakeDirectoryOptions,
   OpenDirOptions,
   ReadSyncOptions,
-  RmOptions,
   RmDirOptions,
+  RmOptions,
   StatsFs,
   WriteFileOptions,
-} from 'node:fs';
+} from 'node:fs'
+import { Buffer } from 'node-internal:internal_buffer'
+import {
+  ERR_EBADF,
+  ERR_EEXIST,
+  ERR_EINVAL,
+  ERR_ENOENT,
+  ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
+  ERR_UNSUPPORTED_OPERATION,
+} from 'node-internal:internal_errors'
+import { Dir, Dirent } from 'node-internal:internal_fs'
+import {
+  COPYFILE_EXCL,
+  COPYFILE_FICLONE,
+  COPYFILE_FICLONE_FORCE,
+  F_OK,
+  O_APPEND,
+  O_EXCL,
+  O_RDWR,
+  O_WRONLY,
+  W_OK,
+  X_OK,
+} from 'node-internal:internal_fs_constants'
+import {
+  type FilePath,
+  getDate,
+  getValidatedFd,
+  kBadge,
+  normalizePath,
+  type Position,
+  type RawTime,
+  type ReadDirOptions,
+  Stats,
+  type SymlinkType,
+  stringToFlags,
+  type ValidEncoding,
+  validateAccessArgs,
+  validateBufferArray,
+  validateChmodArgs,
+  validateChownArgs,
+  validateMkDirArgs,
+  validateOpendirArgs,
+  validatePosition,
+  validateReadArgs,
+  validateReaddirArgs,
+  validateRmArgs,
+  validateRmDirArgs,
+  validateStatArgs,
+  validateWriteArgs,
+  validateWriteFileArgs,
+  type WriteSyncOptions,
+} from 'node-internal:internal_fs_utils'
+import {
+  parseFileMode,
+  validateBoolean,
+  validateObject,
+  validateOneOf,
+  validateString,
+  validateUint32,
+} from 'node-internal:validators'
 
 export function accessSyncImpl(
   path: URL,
   mode: number,
-  followSymlinks: boolean
+  followSymlinks: boolean,
 ): void {
   // Input validation should have already been done by the caller.
 
   // If the X_OK flag is set we will always throw because we don't
   // support executable files.
   if (mode & X_OK) {
-    throw new ERR_ENOENT(path.pathname, { syscall: 'access' });
+    throw new ERR_ENOENT(path.pathname, { syscall: 'access' })
   }
 
-  const stat = cffs.stat(path, { followSymlinks });
+  const stat = cffs.stat(path, { followSymlinks })
 
   // Similar to node.js, we make no differentiation between the file
   // not existing and the file existing but not being accessible.
   if (stat == null || (mode & W_OK && !stat.writable)) {
     // Not found... or not writable
-    throw new ERR_ENOENT(path.pathname, { syscall: 'access' });
+    throw new ERR_ENOENT(path.pathname, { syscall: 'access' })
   }
 
   // We always assume that files are readable, so if we get here the
@@ -129,32 +127,32 @@ export function accessSyncImpl(
 }
 
 export function accessSync(path: FilePath, mode: number = F_OK): void {
-  const { path: actualPath, mode: actualMode } = validateAccessArgs(path, mode);
-  accessSyncImpl(actualPath, actualMode, true);
+  const { path: actualPath, mode: actualMode } = validateAccessArgs(path, mode)
+  accessSyncImpl(actualPath, actualMode, true)
 }
 
 export function appendFileSync(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: ValidEncoding | WriteFileOptions = {}
+  options: ValidEncoding | WriteFileOptions = {},
 ): number {
   if (typeof options === 'string' || options == null) {
-    options = { encoding: options as BufferEncoding };
+    options = { encoding: options as BufferEncoding }
   }
   const {
     encoding = 'utf8',
     mode = 0o666,
     flag = 'a',
     flush = false,
-  } = options ?? {};
+  } = options ?? {}
   // We defer to writeFileSync for the actual implementation and validation
-  return writeFileSync(path, data, { encoding, mode, flag, flush });
+  return writeFileSync(path, data, { encoding, mode, flag, flush })
 }
 
 export function chmodSync(path: FilePath, mode: string | number): void {
-  const { pathOrFd } = validateChmodArgs(path, mode);
+  const { pathOrFd } = validateChmodArgs(path, mode)
   if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
-    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chmod' });
+    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chmod' })
   }
   // We do not implement chmod in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
@@ -164,9 +162,9 @@ export function chmodSync(path: FilePath, mode: string | number): void {
 }
 
 export function chownSync(path: FilePath, uid: number, gid: number): void {
-  const { pathOrFd } = validateChownArgs(path, uid, gid);
+  const { pathOrFd } = validateChownArgs(path, uid, gid)
   if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
-    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chown' });
+    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chown' })
   }
   // We do not implement chown in any meaningful way as our filesystem
   // has no concept of ownership. Once we validate the inputs we just
@@ -176,38 +174,38 @@ export function chownSync(path: FilePath, uid: number, gid: number): void {
 }
 
 export function closeSync(fd: number): void {
-  cffs.close(getValidatedFd(fd));
+  cffs.close(getValidatedFd(fd))
 }
 
 export function copyFileSync(
   src: FilePath,
   dest: FilePath,
-  mode: number = 0
+  mode: number = 0,
 ): void {
   validateOneOf(mode, 'mode', [
     0,
     COPYFILE_EXCL,
     COPYFILE_FICLONE_FORCE,
     COPYFILE_FICLONE,
-  ]);
+  ])
   if (mode & COPYFILE_FICLONE_FORCE) {
-    throw new ERR_UNSUPPORTED_OPERATION();
+    throw new ERR_UNSUPPORTED_OPERATION()
   }
   if (mode & COPYFILE_EXCL && existsSync(dest)) {
     throw new ERR_EEXIST({
       syscall: 'copyFile',
       path: normalizePath(dest).pathname,
-    });
+    })
   }
-  cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
+  cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true })
 }
 
 export function cpSync(
   src: FilePath,
   dest: FilePath,
-  options: CopySyncOptions = {}
+  options: CopySyncOptions = {},
 ): void {
-  validateObject(options, 'options');
+  validateObject(options, 'options')
   const {
     dereference = false,
     errorOnExist = false,
@@ -216,21 +214,21 @@ export function cpSync(
     preserveTimestamps = false,
     recursive = false,
     verbatimSymlinks = false,
-  } = options;
+  } = options
 
-  validateBoolean(dereference, 'options.dereference');
-  validateBoolean(errorOnExist, 'options.errorOnExist');
-  validateBoolean(force, 'options.force');
-  validateBoolean(preserveTimestamps, 'options.preserveTimestamps');
-  validateBoolean(recursive, 'options.recursive');
-  validateBoolean(verbatimSymlinks, 'options.verbatimSymlinks');
-  validateUint32(mode, 'options.mode');
+  validateBoolean(dereference, 'options.dereference')
+  validateBoolean(errorOnExist, 'options.errorOnExist')
+  validateBoolean(force, 'options.force')
+  validateBoolean(preserveTimestamps, 'options.preserveTimestamps')
+  validateBoolean(recursive, 'options.recursive')
+  validateBoolean(verbatimSymlinks, 'options.verbatimSymlinks')
+  validateUint32(mode, 'options.mode')
 
   if (mode & COPYFILE_FICLONE_FORCE) {
     throw new ERR_INVALID_ARG_VALUE(
       'options.mode',
-      'COPYFILE_FICLONE_FORCE is not supported'
-    );
+      'COPYFILE_FICLONE_FORCE is not supported',
+    )
   }
 
   // We do not implement the filter option currently. There's a bug in the Node.js
@@ -245,16 +243,16 @@ export function cpSync(
       throw new ERR_INVALID_ARG_TYPE(
         'options.filter',
         'function',
-        options.filter
-      );
+        options.filter,
+      )
     }
-    throw new ERR_UNSUPPORTED_OPERATION();
+    throw new ERR_UNSUPPORTED_OPERATION()
   }
 
-  const exclusive = Boolean(mode & COPYFILE_EXCL);
+  const exclusive = Boolean(mode & COPYFILE_EXCL)
   // We're not current implementing the exclusive flag. We're validating
   // it here just to use it so the compiler doesn't complain.
-  validateBoolean(exclusive, '');
+  validateBoolean(exclusive, '')
 
   // We're not currently implementing verbatimSymlinks in any meaningful way.
   // Our symlinks are always fully qualfied. That is, they always point to
@@ -274,28 +272,28 @@ export function cpSync(
     recursive,
     force,
     errorOnExist,
-  });
+  })
 }
 
 export function existsSync(path: FilePath): boolean {
   try {
     // The existsSync function follows symlinks. If the symlink is broken,
     // it will return false.
-    accessSync(path);
-    return true;
+    accessSync(path)
+    return true
   } catch {
     // It's always odd to swallow errors but this is how Node.js does it.
     // The existsSync function never throws and returns false if any error
     // occurs.
-    return false;
+    return false
   }
 }
 
 export function fchmodSync(fd: number, mode: string | number): void {
-  fd = getValidatedFd(fd);
-  parseFileMode(mode, 'mode');
+  fd = getValidatedFd(fd)
+  parseFileMode(mode, 'mode')
   if (cffs.stat(fd, { followSymlinks: true }) == null) {
-    throw new ERR_EBADF({ syscall: 'fchmod' });
+    throw new ERR_EBADF({ syscall: 'fchmod' })
   }
   // We do not implement chmod in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
@@ -305,9 +303,9 @@ export function fchmodSync(fd: number, mode: string | number): void {
 }
 
 export function fchownSync(fd: number, uid: number, gid: number): void {
-  const { pathOrFd } = validateChownArgs(fd, uid, gid);
+  const { pathOrFd } = validateChownArgs(fd, uid, gid)
   if (cffs.stat(pathOrFd as number, { followSymlinks: true }) == null) {
-    throw new ERR_EBADF({ syscall: 'fchown' });
+    throw new ERR_EBADF({ syscall: 'fchown' })
   }
   // We do not implement chown in any meaningful way as our filesystem
   // has no concept of ownership. Once we validate the inputs we just
@@ -317,62 +315,62 @@ export function fchownSync(fd: number, uid: number, gid: number): void {
 }
 
 export function fdatasyncSync(fd: number): void {
-  fd = getValidatedFd(fd);
+  fd = getValidatedFd(fd)
   // We do not implement fdatasync in any meaningful way. At most we
   // will validate that the fd is valid and would otherwise be accessible.
   if (cffs.stat(fd, { followSymlinks: true }) == null) {
-    throw new ERR_EBADF({ syscall: 'datasync' });
+    throw new ERR_EBADF({ syscall: 'datasync' })
   }
 }
 
 export type FStatOptions = {
-  bigint?: boolean | undefined;
-};
+  bigint?: boolean | undefined
+}
 
 export function fstatSync(fd: number, options: FStatOptions = {}): Stats {
-  validateObject(options, 'options');
+  validateObject(options, 'options')
   const { pathOrFd: validatedFd, bigint } = validateStatArgs(
     fd,
     options,
-    true /* is fstat */
-  );
-  const stat = cffs.stat(validatedFd as number, { followSymlinks: true });
+    true /* is fstat */,
+  )
+  const stat = cffs.stat(validatedFd as number, { followSymlinks: true })
   if (stat == null) {
-    throw new ERR_EBADF({ syscall: 'stat' });
+    throw new ERR_EBADF({ syscall: 'stat' })
   }
-  return new Stats(kBadge, stat, { bigint });
+  return new Stats(kBadge, stat, { bigint })
 }
 
 export function fsyncSync(fd: number): void {
-  fd = getValidatedFd(fd);
+  fd = getValidatedFd(fd)
   // We do not implement fdatasync in any meaningful way. At most we
   // will validate that the fd is valid and would otherwise be accessible.
   if (cffs.stat(fd, { followSymlinks: true }) == null) {
-    throw new ERR_EBADF({ syscall: 'sync' });
+    throw new ERR_EBADF({ syscall: 'sync' })
   }
 }
 
 export function ftruncateSync(fd: number, len: number = 0): void {
-  validateUint32(len, 'len');
-  cffs.truncate(getValidatedFd(fd), len);
+  validateUint32(len, 'len')
+  cffs.truncate(getValidatedFd(fd), len)
 }
 
 export function futimesSync(
   fd: number,
   atime: RawTime | Date,
-  mtime: RawTime | Date
+  mtime: RawTime | Date,
 ): void {
   // We do not actually make use of access time in our filesystem. We just
   // validate the inputs here.
-  atime = getDate(atime);
-  mtime = getDate(mtime);
-  cffs.setLastModified(getValidatedFd(fd), mtime, {});
+  atime = getDate(atime)
+  mtime = getDate(mtime)
+  cffs.setLastModified(getValidatedFd(fd), mtime, {})
 }
 
 export function lchmodSync(path: FilePath, mode: string | number): void {
-  const { pathOrFd } = validateChmodArgs(path, mode);
+  const { pathOrFd } = validateChmodArgs(path, mode)
   if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
-    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'lchmod' });
+    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'lchmod' })
   }
   // We do not implement chmod in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
@@ -382,9 +380,9 @@ export function lchmodSync(path: FilePath, mode: string | number): void {
 }
 
 export function lchownSync(path: FilePath, uid: number, gid: number): void {
-  const { pathOrFd } = validateChownArgs(path, uid, gid);
+  const { pathOrFd } = validateChownArgs(path, uid, gid)
   if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
-    throw new ERR_ENOENT((path as URL).pathname, { syscall: 'lchown' });
+    throw new ERR_ENOENT((path as URL).pathname, { syscall: 'lchown' })
   }
   // We do not implement chown in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
@@ -396,86 +394,86 @@ export function lchownSync(path: FilePath, uid: number, gid: number): void {
 export function lutimesSync(
   path: FilePath,
   atime: RawTime | Date,
-  mtime: RawTime | Date
+  mtime: RawTime | Date,
 ): void {
   // We do not actually make use of access time in our filesystem. We just
   // validate the inputs here.
-  atime = getDate(atime);
-  mtime = getDate(mtime);
-  cffs.setLastModified(normalizePath(path), mtime, { followSymlinks: false });
+  atime = getDate(atime)
+  mtime = getDate(mtime)
+  cffs.setLastModified(normalizePath(path), mtime, { followSymlinks: false })
 }
 
 export function linkSync(existingPath: FilePath, newPath: FilePath): void {
   cffs.link(normalizePath(newPath), normalizePath(existingPath), {
     symbolic: false,
-  });
+  })
 }
 
 // We could use the StatSyncOptions from @types:node here but the definition
 // of that in @types:node is bit overly complex for our use here.
 export type StatOptions = {
-  bigint?: boolean | undefined;
-  throwIfNoEntry?: boolean | undefined;
-};
+  bigint?: boolean | undefined
+  throwIfNoEntry?: boolean | undefined
+}
 
 export function lstatSync(
   path: FilePath,
-  options: StatOptions = {}
+  options: StatOptions = {},
 ): Stats | undefined {
   const {
     pathOrFd: validatedPath,
     bigint,
     throwIfNoEntry,
-  } = validateStatArgs(path, options);
-  const stat = cffs.stat(validatedPath as URL, { followSymlinks: false });
+  } = validateStatArgs(path, options)
+  const stat = cffs.stat(validatedPath as URL, { followSymlinks: false })
   if (stat == null) {
     if (throwIfNoEntry) {
       throw new ERR_ENOENT((validatedPath as URL).pathname, {
         syscall: 'lstat',
-      });
+      })
     }
-    return undefined;
+    return undefined
   }
-  return new Stats(kBadge, stat, { bigint });
+  return new Stats(kBadge, stat, { bigint })
 }
 
 export function mkdirSync(
   path: FilePath,
-  options: number | MakeDirectoryOptions = {}
+  options: number | MakeDirectoryOptions = {},
 ): string | undefined {
-  const { path: normalizedPath, recursive } = validateMkDirArgs(path, options);
+  const { path: normalizedPath, recursive } = validateMkDirArgs(path, options)
 
-  return cffs.mkdir(normalizedPath, { recursive, tmp: false });
+  return cffs.mkdir(normalizedPath, { recursive, tmp: false })
 }
 
 export type MkdirTempSyncOptions = {
-  encoding?: ValidEncoding | undefined;
-};
+  encoding?: ValidEncoding | undefined
+}
 
 export function mkdtempSync(
   prefix: FilePath,
-  options: ValidEncoding | MkdirTempSyncOptions = {}
+  options: ValidEncoding | MkdirTempSyncOptions = {},
 ): string {
   if (typeof options === 'string' || options == null) {
-    options = { encoding: options };
+    options = { encoding: options }
   }
-  validateObject(options, 'options');
-  const { encoding = 'utf8' } = options;
+  validateObject(options, 'options')
+  const { encoding = 'utf8' } = options
   if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
-    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding)
   }
-  prefix = normalizePath(prefix, encoding);
+  prefix = normalizePath(prefix, encoding)
   const ret = cffs.mkdir(normalizePath(prefix), {
     recursive: false,
     tmp: true,
-  });
+  })
   if (ret === undefined) {
     // If mkdir failed it should throw a meaningful error. If we get
     // here, it means something else went wrong and we're just going
     // to throw a generic EINVAL error.
-    throw new ERR_EINVAL({ syscall: 'mkdtemp' });
+    throw new ERR_EINVAL({ syscall: 'mkdtemp' })
   }
-  return ret;
+  return ret
 }
 
 export function opendirSync(path: FilePath, options: OpenDirOptions = {}): Dir {
@@ -483,26 +481,26 @@ export function opendirSync(path: FilePath, options: OpenDirOptions = {}): Dir {
     path: validatedPath,
     encoding,
     recursive,
-  } = validateOpendirArgs(path, options);
+  } = validateOpendirArgs(path, options)
 
-  const handles = cffs.readdir(validatedPath, { recursive });
-  return new Dir(handles, path, { encoding });
+  const handles = cffs.readdir(validatedPath, { recursive })
+  return new Dir(handles, path, { encoding })
 }
 
 export function openSync(
   path: FilePath,
   flags: string | number = 'r',
-  mode: string | number = 0o666
+  mode: string | number = 0o666,
 ): number {
   // We don't actually the the mode in any meaningful way. We just validate it.
-  parseFileMode(mode, 'mode', 0o666);
-  const newFlags = stringToFlags(flags);
+  parseFileMode(mode, 'mode', 0o666)
+  const newFlags = stringToFlags(flags)
 
-  const read = !(newFlags & O_WRONLY) || Boolean(newFlags & O_RDWR);
-  const write = Boolean(newFlags & O_WRONLY) || Boolean(newFlags & O_RDWR);
-  const append = Boolean(newFlags & O_APPEND);
-  const exclusive = Boolean(newFlags & O_EXCL);
-  const followSymlinks = true;
+  const read = !(newFlags & O_WRONLY) || Boolean(newFlags & O_RDWR)
+  const write = Boolean(newFlags & O_WRONLY) || Boolean(newFlags & O_RDWR)
+  const append = Boolean(newFlags & O_APPEND)
+  const exclusive = Boolean(newFlags & O_EXCL)
+  const followSymlinks = true
 
   return cffs.open(normalizePath(path), {
     read,
@@ -510,26 +508,26 @@ export function openSync(
     append,
     exclusive,
     followSymlinks,
-  });
+  })
 }
 
-export type ReadDirResult = string[] | Buffer[] | Dirent[];
+export type ReadDirResult = string[] | Buffer[] | Dirent[]
 
 export function readdirSync(
   path: FilePath,
-  options: ValidEncoding | ReadDirOptions = {}
+  options: ValidEncoding | ReadDirOptions = {},
 ): ReadDirResult {
   if (typeof options === 'string' || options == null) {
-    options = { encoding: options };
+    options = { encoding: options }
   }
   const {
     path: normalizedPath,
     encoding,
     withFileTypes,
     recursive,
-  } = validateReaddirArgs(path, options);
+  } = validateReaddirArgs(path, options)
 
-  const handles = cffs.readdir(normalizedPath, { recursive });
+  const handles = cffs.readdir(normalizedPath, { recursive })
 
   if (withFileTypes) {
     if ((encoding as string) === 'buffer') {
@@ -537,88 +535,88 @@ export function readdirSync(
         return new Dirent(
           Buffer.from(handle.name),
           handle.type,
-          handle.parentPath
-        );
-      });
+          handle.parentPath,
+        )
+      })
     }
     return handles.map((handle) => {
-      return new Dirent(handle.name, handle.type, handle.parentPath);
-    });
+      return new Dirent(handle.name, handle.type, handle.parentPath)
+    })
   }
 
   if ((encoding as string) === 'buffer') {
     return handles.map((handle) => {
-      return Buffer.from(handle.name);
-    });
+      return Buffer.from(handle.name)
+    })
   }
 
   return handles.map((handle) => {
-    return Buffer.from(handle.name).toString(encoding as string);
-  });
+    return Buffer.from(handle.name).toString(encoding as string)
+  })
 }
 
 export type ReadFileSyncOptions = {
-  encoding?: ValidEncoding | undefined;
-  flag?: string | number | undefined;
-};
+  encoding?: ValidEncoding | undefined
+  flag?: string | number | undefined
+}
 
 export function readFileSync(
   pathOrFd: number | FilePath,
-  options: ValidEncoding | ReadFileSyncOptions = {}
+  options: ValidEncoding | ReadFileSyncOptions = {},
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
-    options = { encoding: options };
+    options = { encoding: options }
   }
-  validateObject(options, 'options');
-  const { encoding = null, flag = 'r' } = options;
+  validateObject(options, 'options')
+  const { encoding = null, flag = 'r' } = options
   if (
     encoding !== null &&
     encoding !== 'buffer' &&
     !Buffer.isEncoding(encoding)
   ) {
-    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding)
   }
-  stringToFlags(flag);
+  stringToFlags(flag)
 
   // TODO(node:fs): We are currently ignoring flags on readFileSync.
 
   const u8 = ((): Uint8Array => {
     if (typeof pathOrFd === 'number') {
-      return cffs.readAll(getValidatedFd(pathOrFd));
+      return cffs.readAll(getValidatedFd(pathOrFd))
     }
-    return cffs.readAll(normalizePath(pathOrFd));
-  })();
+    return cffs.readAll(normalizePath(pathOrFd))
+  })()
 
-  const buf = Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
+  const buf = Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength)
   if (typeof encoding === 'string') {
-    return buf.toString(encoding);
+    return buf.toString(encoding)
   }
-  return buf;
+  return buf
 }
 
 export type ReadLinkSyncOptions = {
-  encoding?: ValidEncoding | undefined;
-};
+  encoding?: ValidEncoding | undefined
+}
 
 export function readlinkSync(
   path: FilePath,
-  options: ValidEncoding | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {},
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
-    options = { encoding: options };
+    options = { encoding: options }
   }
-  validateObject(options, 'options');
-  const { encoding = 'utf8' } = options;
+  validateObject(options, 'options')
+  const { encoding = 'utf8' } = options
   if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
-    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding)
   }
   const dest = Buffer.from(
-    cffs.readLink(normalizePath(path), { failIfNotSymlink: true })
-  );
+    cffs.readLink(normalizePath(path), { failIfNotSymlink: true }),
+  )
   if (typeof encoding === 'string') {
-    return dest.toString(encoding);
+    return dest.toString(encoding)
   }
-  return dest;
+  return dest
 }
 
 // readSync is overloaded to support two different signatures:
@@ -632,68 +630,68 @@ export function readSync(
   buffer: NodeJS.ArrayBufferView,
   offsetOrOptions: ReadSyncOptions | number = {},
   length?: number,
-  position: Position = null
+  position: Position = null,
 ): number {
   const {
     fd: validatedFd,
     buffer: actualBuffer,
     length: actualLength,
     position: actualPosition,
-  } = validateReadArgs(fd, buffer, offsetOrOptions, length, position);
+  } = validateReadArgs(fd, buffer, offsetOrOptions, length, position)
 
   if (actualLength === 0 || buffer.byteLength === 0) {
-    return 0;
+    return 0
   }
 
-  return readvSync(validatedFd, actualBuffer, actualPosition);
+  return readvSync(validatedFd, actualBuffer, actualPosition)
 }
 
 export function readvSync(
   fd: number,
   buffers: NodeJS.ArrayBufferView[],
-  position: Position = null
+  position: Position = null,
 ): number {
-  fd = getValidatedFd(fd);
-  validateBufferArray(buffers);
-  validatePosition(position, 'position');
+  fd = getValidatedFd(fd)
+  validateBufferArray(buffers)
+  validatePosition(position, 'position')
 
   if (buffers.length === 0) {
-    return 0;
+    return 0
   }
-  return cffs.read(fd, buffers, { position });
+  return cffs.read(fd, buffers, { position })
 }
 
 export function realpathSync(
   p: FilePath,
-  options: ValidEncoding | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {},
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
-    options = { encoding: options };
+    options = { encoding: options }
   }
-  validateObject(options, 'options');
-  const { encoding = 'utf8' } = options;
+  validateObject(options, 'options')
+  const { encoding = 'utf8' } = options
   if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
-    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding)
   }
   const dest = Buffer.from(
-    cffs.readLink(normalizePath(p), { failIfNotSymlink: false })
-  );
+    cffs.readLink(normalizePath(p), { failIfNotSymlink: false }),
+  )
   if (typeof encoding === 'string') {
-    return dest.toString(encoding);
+    return dest.toString(encoding)
   }
-  return dest;
+  return dest
 }
 
-realpathSync.native = realpathSync;
+realpathSync.native = realpathSync
 
 export function renameSync(src: FilePath, dest: FilePath): void {
-  cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: false });
+  cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: false })
 }
 
 export function rmdirSync(path: FilePath, options: RmDirOptions = {}): void {
-  const { path: normalizedPath, recursive } = validateRmDirArgs(path, options);
+  const { path: normalizedPath, recursive } = validateRmDirArgs(path, options)
 
-  cffs.rm(normalizedPath, { recursive, force: false, dironly: true });
+  cffs.rm(normalizedPath, { recursive, force: false, dironly: true })
 }
 
 export function rmSync(path: FilePath, options: RmOptions = {}): void {
@@ -701,40 +699,40 @@ export function rmSync(path: FilePath, options: RmOptions = {}): void {
     path: normalizedPath,
     recursive,
     force,
-  } = validateRmArgs(path, options);
+  } = validateRmArgs(path, options)
 
-  cffs.rm(normalizedPath, { recursive, force, dironly: false });
+  cffs.rm(normalizedPath, { recursive, force, dironly: false })
 }
 
 export function statSync(
   path: FilePath,
-  options: StatOptions = {}
+  options: StatOptions = {},
 ): Stats | undefined {
   const {
     pathOrFd: validatedPath,
     bigint,
     throwIfNoEntry,
-  } = validateStatArgs(path, options);
-  const stat = cffs.stat(validatedPath as URL, { followSymlinks: true });
+  } = validateStatArgs(path, options)
+  const stat = cffs.stat(validatedPath as URL, { followSymlinks: true })
   if (stat == null) {
     if (throwIfNoEntry) {
       throw new ERR_ENOENT((validatedPath as URL).pathname, {
         syscall: 'stat',
-      });
+      })
     }
-    return undefined;
+    return undefined
   }
-  return new Stats(kBadge, stat, { bigint });
+  return new Stats(kBadge, stat, { bigint })
 }
 
 export function statfsSync(
   path: FilePath,
-  options: { bigint?: boolean | undefined } = {}
+  options: { bigint?: boolean | undefined } = {},
 ): StatsFs | BigIntStatsFs {
-  normalizePath(path);
-  validateObject(options, 'options');
-  const { bigint = false } = options;
-  validateBoolean(bigint, 'options.bigint');
+  normalizePath(path)
+  validateObject(options, 'options')
+  const { bigint = false } = options
+  validateBoolean(bigint, 'options.bigint')
   // We don't implement statfs in any meaningful way. Nor will we actually
   // validate that the path exists. We just return a non-op dummy object.
   if (bigint) {
@@ -746,7 +744,7 @@ export function statfsSync(
       bavail: 0n,
       files: 0n,
       ffree: 0n,
-    };
+    }
   } else {
     return {
       type: 0,
@@ -756,54 +754,54 @@ export function statfsSync(
       bavail: 0,
       files: 0,
       ffree: 0,
-    };
+    }
   }
 }
 
 export function symlinkSync(
   target: FilePath,
   path: FilePath,
-  type: SymlinkType = null
+  type: SymlinkType = null,
 ): void {
   // We don't implement type in any meaningful way but we do validate it.
-  validateOneOf(type, 'type', ['dir', 'file', 'junction', null]);
-  cffs.link(normalizePath(path), normalizePath(target), { symbolic: true });
+  validateOneOf(type, 'type', ['dir', 'file', 'junction', null])
+  cffs.link(normalizePath(path), normalizePath(target), { symbolic: true })
 }
 
 export function truncateSync(path: FilePath, len: number = 0): void {
-  validateUint32(len, 'len');
-  cffs.truncate(normalizePath(path), len);
+  validateUint32(len, 'len')
+  cffs.truncate(normalizePath(path), len)
 }
 
 export function unlinkSync(path: FilePath): void {
-  cffs.unlink(normalizePath(path));
+  cffs.unlink(normalizePath(path))
 }
 
 export function utimesSync(
   path: FilePath,
   atime: RawTime | Date,
-  mtime: RawTime | Date
+  mtime: RawTime | Date,
 ): void {
   // We do not actually make use of access time in our filesystem. We just
   // validate the inputs here.
-  atime = getDate(atime);
-  mtime = getDate(mtime);
-  cffs.setLastModified(normalizePath(path), mtime, { followSymlinks: true });
+  atime = getDate(atime)
+  mtime = getDate(mtime)
+  cffs.setLastModified(normalizePath(path), mtime, { followSymlinks: true })
 }
 
 export function writeFileSync(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: ValidEncoding | WriteFileOptions = {}
+  options: ValidEncoding | WriteFileOptions = {},
 ): number {
   const {
     path: validatedPath,
     data: actualData,
     append,
     exclusive,
-  } = validateWriteFileArgs(path, data, options);
+  } = validateWriteFileArgs(path, data, options)
 
-  return cffs.writeAll(validatedPath, actualData, { append, exclusive });
+  return cffs.writeAll(validatedPath, actualData, { append, exclusive })
 }
 
 export function writeSync(
@@ -811,31 +809,31 @@ export function writeSync(
   buffer: NodeJS.ArrayBufferView | string,
   offsetOrOptions: WriteSyncOptions | Position = null,
   length?: number | ValidEncoding,
-  position?: Position
+  position?: Position,
 ): number {
   const {
     fd: validatedFd,
     buffer: actualBuffer,
     position: actualPosition,
-  } = validateWriteArgs(fd, buffer, offsetOrOptions, length, position);
+  } = validateWriteArgs(fd, buffer, offsetOrOptions, length, position)
 
-  return writevSync(validatedFd, actualBuffer, actualPosition);
+  return writevSync(validatedFd, actualBuffer, actualPosition)
 }
 
 export function writevSync(
   fd: number,
   buffers: NodeJS.ArrayBufferView[],
-  position: Position = null
+  position: Position = null,
 ): number {
-  fd = getValidatedFd(fd);
-  validateBufferArray(buffers);
-  validatePosition(position, 'position');
+  fd = getValidatedFd(fd)
+  validateBufferArray(buffers)
+  validatePosition(position, 'position')
 
   if (buffers.length === 0) {
-    return 0;
+    return 0
   }
 
-  return cffs.write(fd, buffers, { position });
+  return cffs.write(fd, buffers, { position })
 }
 
 export function globSync(
@@ -843,30 +841,30 @@ export function globSync(
   _options:
     | GlobOptions
     | GlobOptionsWithFileTypes
-    | GlobOptionsWithoutFileTypes = {}
+    | GlobOptionsWithoutFileTypes = {},
 ): string[] {
   // We do not yet implement the globSync function. In Node.js, this
   // function depends heavily on the third party minimatch library
   // which is not yet available in the workers runtime. This will be
   // explored for implementation separately in the future.
-  throw new ERR_UNSUPPORTED_OPERATION();
+  throw new ERR_UNSUPPORTED_OPERATION()
 }
 
 export interface OpenAsBlobOptions {
-  type?: string | undefined;
+  type?: string | undefined
 }
 export function openAsBlob(
   path: FilePath,
-  options: OpenAsBlobOptions = {}
+  options: OpenAsBlobOptions = {},
 ): Blob {
   // TODO(node-fs): We do not yet implement the openAsBlob API. We will implement
   // this soon.
-  normalizePath(path);
-  validateObject(options, 'options');
-  const { type = '' } = options;
-  validateString(type, 'options.type');
+  normalizePath(path)
+  validateObject(options, 'options')
+  const { type = '' } = options
+  validateString(type, 'options.type')
 
-  return cffs.openAsBlob(normalizePath(path), { type });
+  return cffs.openAsBlob(normalizePath(path), { type })
 }
 
 // An API is considered stubbed if it is not implemented by the function

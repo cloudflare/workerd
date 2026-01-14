@@ -3,21 +3,21 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import * as _promises from 'node-internal:internal_timers_promises';
 import {
-  setTimeout,
-  clearTimeout,
-  setImmediate,
-  clearImmediate,
-  setInterval,
-  clearInterval,
   active,
-  unenroll,
+  clearImmediate,
+  clearInterval,
+  clearTimeout,
   enroll,
-} from 'node-internal:internal_timers';
+  setImmediate,
+  setInterval,
+  setTimeout,
+  unenroll,
+} from 'node-internal:internal_timers'
+import * as _promises from 'node-internal:internal_timers_promises'
 
-export * from 'node-internal:internal_timers';
-export const promises = _promises;
+export * from 'node-internal:internal_timers'
+export const promises = _promises
 
 export default {
   promises: _promises,
@@ -30,4 +30,4 @@ export default {
   active,
   unenroll,
   enroll,
-};
+}

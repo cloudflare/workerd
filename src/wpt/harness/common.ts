@@ -23,80 +23,80 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import path from 'node:path';
+import path from 'node:path'
 
-export type UnknownFunc = (...args: unknown[]) => unknown;
-export type TestFn = UnknownFunc;
-export type PromiseTestFn = () => Promise<unknown>;
+export type UnknownFunc = (...args: unknown[]) => unknown
+export type TestFn = UnknownFunc
+export type PromiseTestFn = () => Promise<unknown>
 
 export class FilterList {
   // Matches any input
-  #matchesAll: boolean = false;
+  #matchesAll: boolean = false
 
   // List of strings to match exactly
-  #strings: Set<string> = new Set();
+  #strings: Set<string> = new Set()
 
   // List of regexps to match against
-  #regexps: RegExp[] = [];
+  #regexps: RegExp[] = []
 
   // Regexes which never matched any of the inputs
   // We keep this set so we can warn the user about this.
-  #unmatchedRegexps: Set<RegExp> = new Set();
+  #unmatchedRegexps: Set<RegExp> = new Set()
 
   constructor(filters: (string | RegExp)[] | true | undefined) {
     if (filters === undefined) {
-      return;
+      return
     }
 
     if (filters === true) {
-      this.#matchesAll = true;
-      return;
+      this.#matchesAll = true
+      return
     }
 
     for (const filter of filters) {
       if (typeof filter === 'string') {
-        this.#strings.add(filter);
+        this.#strings.add(filter)
       } else {
-        this.#regexps.push(filter);
+        this.#regexps.push(filter)
       }
     }
 
-    this.#unmatchedRegexps = new Set(this.#regexps);
+    this.#unmatchedRegexps = new Set(this.#regexps)
   }
 
   has(input: string): boolean {
     if (this.#matchesAll) {
-      return true;
+      return true
     }
 
     if (this.#strings.has(input)) {
-      return true;
+      return true
     }
 
-    return this.#regexps.some((r) => r.test(input));
+    return this.#regexps.some((r) => r.test(input))
   }
 
   delete(input: string): boolean {
     if (this.#matchesAll) {
-      return true;
+      return true
     }
 
     if (this.#strings.delete(input)) {
-      return true;
+      return true
     }
 
-    const maybeMatch = this.#regexps.find((r) => r.test(input));
+    const maybeMatch = this.#regexps.find((r) => r.test(input))
 
     if (maybeMatch !== undefined) {
-      this.#unmatchedRegexps.delete(maybeMatch);
-      return true;
+      this.#unmatchedRegexps.delete(maybeMatch)
+      return true
     }
 
-    return false;
+    return false
   }
 
   getUnmatched(): Set<string | RegExp> {
-    return this.#strings.union(this.#unmatchedRegexps);
+    return this.#strings.union(this.#unmatchedRegexps)
   }
 }
 
@@ -109,52 +109,52 @@ export function sanitize_unpaired_surrogates(str: string): string {
   return str
     .replace(
       /([\ud800-\udbff]+)(?![\udc00-\udfff])|(^|[^\ud800-\udbff])([\udc00-\udfff]+)/g,
-      function (_, low?: string, prefix?: string, high?: string) {
-        let output = prefix || ''; // prefix may be undefined
-        const string: string = low || high || ''; // only one of these alternates can match
+      (_, low?: string, prefix?: string, high?: string) => {
+        let output = prefix || '' // prefix may be undefined
+        const string: string = low || high || '' // only one of these alternates can match
 
         for (const ch of string) {
-          output += code_unit_str(ch);
+          output += code_unit_str(ch)
         }
-        return output;
-      }
+        return output
+      },
     )
-    .replace(/(\uffff|\ufffe)/g, function (_, invalid_chars?: string) {
-      let output = '';
+    .replace(/(\uffff|\ufffe)/g, (_, invalid_chars?: string) => {
+      let output = ''
 
       for (const ch of invalid_chars || '') {
-        output += code_unit_str(ch);
+        output += code_unit_str(ch)
       }
-      return output;
-    });
+      return output
+    })
 }
 
 function code_unit_str(char: string): string {
-  return 'U+' + char.charCodeAt(0).toString(16);
+  return `U+${char.charCodeAt(0).toString(16)}`
 }
 
 export type HostInfo = {
-  REMOTE_HOST: string;
-  HTTP_ORIGIN: string;
-  HTTP_REMOTE_ORIGIN: string;
-  HTTPS_ORIGIN: string;
-  ORIGIN: string;
-  HTTPS_REMOTE_ORIGIN: string;
-  HTTP_PORT: string;
-  HTTPS_PORT: string;
-  WS_PORT: string;
-  WSS_PORT: string;
-};
+  REMOTE_HOST: string
+  HTTP_ORIGIN: string
+  HTTP_REMOTE_ORIGIN: string
+  HTTPS_ORIGIN: string
+  ORIGIN: string
+  HTTPS_REMOTE_ORIGIN: string
+  HTTP_PORT: string
+  HTTPS_PORT: string
+  WS_PORT: string
+  WSS_PORT: string
+}
 
 export function getHostInfo(): HostInfo {
-  const httpUrl = globalThis.state.testUrl;
+  const httpUrl = globalThis.state.testUrl
 
-  const httpsUrl = new URL(httpUrl);
-  httpsUrl.protocol = 'https';
+  const httpsUrl = new URL(httpUrl)
+  httpsUrl.protocol = 'https'
 
   // If the environment variable HTTPS_PORT is set, the wpt server is running as a sidecar.
   // Update the URL's port so we can connect to it
-  httpsUrl.port = globalThis.state.env.HTTPS_PORT ?? '';
+  httpsUrl.port = globalThis.state.env.HTTPS_PORT ?? ''
 
   return {
     REMOTE_HOST: httpUrl.hostname,
@@ -167,13 +167,13 @@ export function getHostInfo(): HostInfo {
     HTTPS_PORT: httpsUrl.port,
     WS_PORT: (globalThis.state.env.WS_PORT as string | undefined) ?? '',
     WSS_PORT: (globalThis.state.env.WSS_PORT as string | undefined) ?? '',
-  };
+  }
 }
 
 export function getBindingPath(base: string, rawPath: string): string {
   if (path.isAbsolute(rawPath)) {
-    return rawPath;
+    return rawPath
   }
 
-  return path.relative('/', path.resolve(base, rawPath));
+  return path.relative('/', path.resolve(base, rawPath))
 }

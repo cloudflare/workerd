@@ -3,57 +3,58 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { EventEmitter } from 'node-internal:events';
-import { Readable } from 'node-internal:streams_readable';
-import { isIPv4, Socket } from 'node-internal:internal_net';
 import type {
   IncomingMessage as _IncomingMessage,
   IncomingHttpHeaders,
-} from 'node:http';
-const kHeaders = Symbol('kHeaders');
-const kHeadersDistinct = Symbol('kHeadersDistinct');
-const kHeadersCount = Symbol('kHeadersCount');
+} from 'node:http'
+import { EventEmitter } from 'node-internal:events'
+import { isIPv4, type Socket } from 'node-internal:internal_net'
+import { Readable } from 'node-internal:streams_readable'
+
+const kHeaders = Symbol('kHeaders')
+const kHeadersDistinct = Symbol('kHeadersDistinct')
+const kHeadersCount = Symbol('kHeadersCount')
 
 export let setIncomingMessageFetchResponse: (
   incoming: IncomingMessage,
   response: Response,
-  resetTimers?: (opts: { finished: boolean }) => void
-) => void;
+  resetTimers?: (opts: { finished: boolean }) => void,
+) => void
 
 export let setIncomingMessageSocket: (
   incoming: IncomingMessage,
   options: {
-    headers: Headers;
-    localPort: number;
-  }
-) => void;
+    headers: Headers
+    localPort: number
+  },
+) => void
 
 export let setIncomingRequestBody: (
   incoming: IncomingMessage,
-  body: ReadableStream | null
-) => void;
+  body: ReadableStream | null,
+) => void
 
 export class IncomingMessage extends Readable implements _IncomingMessage {
-  #response?: Response;
-  #reader?: ReadableStreamDefaultReader<Uint8Array>;
-  #reading = false;
-  #socket: unknown;
-  #stream: ReadableStream | null = null;
+  #response?: Response
+  #reader?: ReadableStreamDefaultReader<Uint8Array>
+  #reading = false
+  #socket: unknown
+  #stream: ReadableStream | null = null
 
-  override aborted = false;
-  url: string = '';
+  override aborted = false
+  url: string = ''
   // @ts-expect-error TS2416 Type-inconsistencies
-  method: string | null = null;
+  method: string | null = null
   // @ts-expect-error TS2416 Type-inconsistencies
-  statusCode: number | null = null;
+  statusCode: number | null = null
   // @ts-expect-error TS2416 Type-inconsistencies
-  statusMessage: string | null = null;
-  httpVersionMajor = 1;
-  httpVersionMinor = 1;
-  httpVersion: string = '1.1';
-  complete = false;
-  rawHeaders: string[] = [];
-  joinDuplicateHeaders = false;
+  statusMessage: string | null = null
+  httpVersionMajor = 1
+  httpVersionMinor = 1
+  httpVersion: string = '1.1'
+  complete = false
+  rawHeaders: string[] = []
+  joinDuplicateHeaders = false
 
   // The cloudflare property is currently only used on the server-side
   // to access properties like `req.cf`, and the `env` and `ctx`
@@ -61,28 +62,28 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   cloudflare: {
     // Technically, the type should be IncomingRequestCfProperties but
     // we don't have that type in the workerd runtime at the moment.
-    cf?: Record<string, unknown> | undefined;
-    env?: unknown;
-    ctx?: unknown;
+    cf?: Record<string, unknown> | undefined
+    env?: unknown
+    ctx?: unknown
   } = { cf: undefined, env: undefined, ctx: undefined };
 
   [kHeaders]: IncomingHttpHeaders | null = null;
   [kHeadersDistinct]: Record<string, string[]> | null = null;
-  [kHeadersCount]: number = 0;
+  [kHeadersCount]: number = 0
 
   // Flag for when we decide that this message cannot possibly be
   // read by the user, so there's no point continuing to handle it.
-  _dumped = false;
-  _consuming = false;
-  _paused = false;
+  _dumped = false
+  _consuming = false
+  _paused = false
 
   static {
     setIncomingMessageFetchResponse = (
       incoming: IncomingMessage,
-      response: Response
+      response: Response,
     ): void => {
-      incoming.#setFetchResponse(response);
-    };
+      incoming.#setFetchResponse(response)
+    }
 
     // This method sets the socket property of the IncomingMessage object.
     // Please rest assured that this method implements a subset of Socket since
@@ -90,17 +91,17 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     // implementation since our implementation is based on Request and Response objects.
     setIncomingMessageSocket = (
       incoming: IncomingMessage,
-      { headers, localPort }: { headers: Headers; localPort: number }
+      { headers, localPort }: { headers: Headers; localPort: number },
     ): void => {
-      const connectingIp = headers.get('cf-connecting-ip');
-      const isConnectingIpIpv4 = connectingIp ? isIPv4(connectingIp) : true;
+      const connectingIp = headers.get('cf-connecting-ip')
+      const isConnectingIpIpv4 = connectingIp ? isIPv4(connectingIp) : true
       // Return a port number between 2^15 and 2^16.
-      const remotePort = (Math.random() * 0x8000) | 0x8000;
+      const remotePort = (Math.random() * 0x8000) | 0x8000
 
       // Some libraries such as on-finished (which Express.js depends on)
       // Ref: https://github.com/jshttp/on-finished/blob/d2974f5a18f468ea56f58acb2f6d402f4b5142f0/index.js
       // calls EventEmitter events on socket attribute.
-      const socket = new EventEmitter();
+      const socket = new EventEmitter()
 
       Object.defineProperties(socket, {
         encrypted: {
@@ -110,16 +111,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
         },
         readable: {
           get: () => {
-            return incoming.readable;
+            return incoming.readable
           },
           configurable: true,
         },
         remoteFamily: {
           get: () => {
             if (incoming.destroyed) {
-              return undefined;
+              return undefined
             }
-            return isConnectingIpIpv4 ? 'IPv4' : 'IPv6';
+            return isConnectingIpIpv4 ? 'IPv4' : 'IPv6'
           },
           configurable: true,
         },
@@ -129,7 +130,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
             // where request headers does not contain cf-connecting-ip.
             return incoming.destroyed
               ? undefined
-              : (connectingIp ?? '127.0.0.1');
+              : (connectingIp ?? '127.0.0.1')
           },
           configurable: true,
         },
@@ -137,7 +138,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           get: () => {
             // Return a port in the ephemeral range (32768-65535) as clients would use,
             // and undefined if the socket is destroyed.
-            return incoming.destroyed ? undefined : remotePort;
+            return incoming.destroyed ? undefined : remotePort
           },
           configurable: true,
         },
@@ -159,80 +160,80 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           writable: false,
           configurable: true,
         },
-      });
+      })
 
-      incoming.#socket = socket;
-    };
+      incoming.#socket = socket
+    }
 
     setIncomingRequestBody = (
       incoming: IncomingMessage,
-      stream: ReadableStream | null
+      stream: ReadableStream | null,
     ): void => {
-      incoming.#stream = stream;
-    };
+      incoming.#stream = stream
+    }
   }
 
   constructor() {
-    super({});
-    this._readableState.readingMore = true;
+    super({})
+    this._readableState.readingMore = true
   }
 
   #setFetchResponse(response: Response): void {
-    this[kHeaders] = {};
-    this[kHeadersDistinct] = {};
+    this[kHeaders] = {}
+    this[kHeadersDistinct] = {}
     for (const header of response.headers.keys()) {
-      const value = response.headers.get(header) as string;
-      this[kHeaders][header] = value;
-      this[kHeadersDistinct][header] = [value];
-      this[kHeadersCount]++;
+      const value = response.headers.get(header) as string
+      this[kHeaders][header] = value
+      this[kHeadersDistinct][header] = [value]
+      this[kHeadersCount]++
     }
 
-    this.#response = response;
-    this._readableState.readingMore = true;
+    this.#response = response
+    this._readableState.readingMore = true
 
-    this.url = response.url;
-    this.statusCode = response.status;
-    this.statusMessage = response.statusText;
+    this.url = response.url
+    this.statusCode = response.status
+    this.statusMessage = response.statusText
 
     this.once('end', () => {
       // We need to emit close in a queueMicrotask because
       // this is the only way we can ensure that the close event is emitted after destroy.
-      queueMicrotask(() => this.emit('close'));
-    });
+      queueMicrotask(() => this.emit('close'))
+    })
 
     this.on('timeout', () => {
-      this._consuming = false;
-    });
+      this._consuming = false
+    })
 
-    this.#stream = this.#response.body;
+    this.#stream = this.#response.body
   }
 
   async #tryRead(): Promise<void> {
-    if (this.#stream == null || this.#reading) return;
+    if (this.#stream == null || this.#reading) return
 
-    this.#reading = true;
+    this.#reading = true
 
     try {
-      this.#reader ??= this.#stream.getReader();
+      this.#reader ??= this.#stream.getReader()
 
       while (!this.destroyed) {
-        const data = await this.#reader.read();
+        const data = await this.#reader.read()
         if (data.done) {
-          this.complete = true;
-          this.push(null);
-          break;
+          this.complete = true
+          this.push(null)
+          break
         }
 
         // Backpressure - stop reading until _read() is called again
         if (!this.push(data.value)) {
-          break;
+          break
         }
       }
     } catch (e) {
-      this.destroy(e as Error);
+      this.destroy(e as Error)
     } finally {
-      this.#reading = false;
-      this.#reader?.releaseLock();
+      this.#reading = false
+      this.#reader?.releaseLock()
     }
   }
 
@@ -240,8 +241,8 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   // function that pumps the next chunk out of the underlying ReadableStream.
   override _read(_n: number): void {
     if (!this._consuming) {
-      this._readableState.readingMore = false;
-      this._consuming = true;
+      this._readableState.readingMore = false
+      this._consuming = true
     }
 
     // Difference from Node.js -
@@ -251,36 +252,36 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     if (this.#stream == null) {
       // For GET and HEAD requests, the stream would be empty.
       // Simply signal that we're done.
-      this.complete = true;
-      this.push(null);
-      return;
+      this.complete = true
+      this.push(null)
+      return
     }
 
-    this.#tryRead(); // eslint-disable-line @typescript-eslint/no-floating-promises
+    this.#tryRead() // eslint-disable-line @typescript-eslint/no-floating-promises
   }
 
   #onError(error: Error | null, cb: (err?: Error | null) => void): void {
     // This is to keep backward compatible behavior.
     // An error is emitted only if there are listeners attached to the event.
     if (this.listenerCount('error') === 0) {
-      cb();
+      cb()
     } else {
-      cb(error);
+      cb(error)
     }
   }
 
   override _destroy(
     error: Error | null,
-    callback: (error?: Error | null) => void
+    callback: (error?: Error | null) => void,
   ): void {
     if (!this.readableEnded || !this.complete) {
-      this.aborted = true;
-      this.emit('aborted');
+      this.aborted = true
+      this.emit('aborted')
     }
 
     queueMicrotask(() => {
-      this.#onError(error, callback);
-    });
+      this.#onError(error, callback)
+    })
   }
 
   // Add the given (field, value) pair to the message
@@ -295,25 +296,25 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   _addHeaderLine(
     field: string,
     value: string,
-    dest: IncomingHttpHeaders
+    dest: IncomingHttpHeaders,
   ): void {
-    field = matchKnownFields(field);
-    const flag = field.charCodeAt(0);
+    field = matchKnownFields(field)
+    const flag = field.charCodeAt(0)
     if (flag === 0 || flag === 2) {
-      field = field.slice(1);
+      field = field.slice(1)
       // Make a delimited list
       if (typeof dest[field] === 'string') {
         // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
-        dest[field] += (flag === 0 ? ', ' : '; ') + value;
+        dest[field] += (flag === 0 ? ', ' : '; ') + value
       } else {
-        dest[field] = value;
+        dest[field] = value
       }
     } else if (flag === 1) {
       // Array header -- only Set-Cookie at the moment
       if (dest['set-cookie'] !== undefined) {
-        dest['set-cookie'].push(value);
+        dest['set-cookie'].push(value)
       } else {
-        dest['set-cookie'] = [value];
+        dest['set-cookie'] = [value]
       }
     } else if (this.joinDuplicateHeaders) {
       // RFC 9110 https://www.rfc-editor.org/rfc/rfc9110#section-5.2
@@ -321,29 +322,29 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       // allow authorization multiple fields
       // Make a delimited list
       if (dest[field] === undefined) {
-        dest[field] = value;
+        dest[field] = value
       } else {
         // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
-        dest[field] += ', ' + value;
+        dest[field] += `, ${value}`
       }
     } else if (dest[field] === undefined) {
       // Drop duplicates
-      dest[field] = value;
+      dest[field] = value
     }
   }
 
   _addHeaderLines(headers: string[] | null, n: number): void {
     if (Array.isArray(headers) && !this.complete) {
-      this.rawHeaders = headers;
-      this[kHeadersCount] = n;
+      this.rawHeaders = headers
+      this[kHeadersCount] = n
 
       if (this[kHeaders]) {
         for (let i = 0; i < n; i += 2) {
           this._addHeaderLine(
             headers[i] as string,
             headers[i + 1] as string,
-            this[kHeaders]
-          );
+            this[kHeaders],
+          )
         }
       }
     }
@@ -351,46 +352,42 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 
   get headers(): Record<string, string | string[] | undefined> {
     if (!this[kHeaders]) {
-      this[kHeaders] = {};
+      this[kHeaders] = {}
 
-      const src = this.rawHeaders;
-      const dst = this[kHeaders];
+      const src = this.rawHeaders
+      const dst = this[kHeaders]
 
       for (let n = 0; n < this[kHeadersCount]; n += 2) {
-        this._addHeaderLine(src[n] as string, src[n + 1] as string, dst);
+        this._addHeaderLine(src[n] as string, src[n + 1] as string, dst)
       }
     }
-    return this[kHeaders];
+    return this[kHeaders]
   }
 
   set headers(val: IncomingHttpHeaders) {
-    this[kHeaders] = val;
+    this[kHeaders] = val
   }
 
   get headersDistinct(): Record<string, string[]> {
     if (!this[kHeadersDistinct]) {
-      this[kHeadersDistinct] = {};
+      this[kHeadersDistinct] = {}
 
-      const src = this.rawHeaders;
-      const dst = this[kHeadersDistinct];
+      const src = this.rawHeaders
+      const dst = this[kHeadersDistinct]
 
       for (let n = 0; n < this[kHeadersCount]; n += 2) {
-        this._addHeaderLineDistinct(
-          src[n] as string,
-          src[n + 1] as string,
-          dst
-        );
+        this._addHeaderLineDistinct(src[n] as string, src[n + 1] as string, dst)
       }
     }
-    return this[kHeadersDistinct];
+    return this[kHeadersDistinct]
   }
 
   set headersDistinct(val: Record<string, string[]>) {
-    this[kHeadersDistinct] = val;
+    this[kHeadersDistinct] = val
   }
 
   get trailers(): Record<string, string | undefined> {
-    return {};
+    return {}
   }
 
   set trailers(_val: NodeJS.Dict<string>) {
@@ -398,7 +395,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   }
 
   get trailersDistinct(): Record<string, string[]> {
-    return {};
+    return {}
   }
 
   set trailersDistinct(_val: Record<string, string[]>) {
@@ -408,13 +405,13 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   _addHeaderLineDistinct(
     field: string,
     value: string,
-    dest: Record<string, string[]>
+    dest: Record<string, string[]>,
   ): void {
-    field = field.toLowerCase();
+    field = field.toLowerCase()
     if (!dest[field]) {
-      dest[field] = [value];
+      dest[field] = [value]
     } else {
-      dest[field]?.push(value);
+      dest[field]?.push(value)
     }
   }
 
@@ -422,58 +419,58 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   // dump all the data to /dev/null
   _dump(): void {
     if (!this._dumped) {
-      this._dumped = true;
+      this._dumped = true
       // If there is buffered data, it may trigger 'data' events.
       // Remove 'data' event listeners explicitly.
-      this.removeAllListeners('data');
-      this.resume();
+      this.removeAllListeners('data')
+      this.resume()
     }
   }
 
   setTimeout(_msecs: number, callback?: () => void): this {
     if (callback) {
-      this.on('timeout', callback);
+      this.on('timeout', callback)
     }
-    return this;
+    return this
   }
 
   override pipe<T extends NodeJS.WritableStream>(
     destination: T,
-    options?: { end?: boolean }
+    options?: { end?: boolean },
   ): T {
-    const shouldEnd = options?.end !== false;
+    const shouldEnd = options?.end !== false
 
     // Handle the piping manually for better control
     this.on('data', (chunk: string | Uint8Array) => {
-      destination.write(chunk);
-    });
+      destination.write(chunk)
+    })
 
     this.once('end', () => {
       if (shouldEnd) {
-        destination.end();
+        destination.end()
       }
-    });
+    })
 
     this.once('error', (err: unknown) => {
-      destination.emit('error', err);
-    });
+      destination.emit('error', err)
+    })
 
     // Always ensure reading starts - call resume to trigger the stream
-    this.resume();
+    this.resume()
 
-    return destination;
+    return destination
   }
 
   set connection(value: unknown) {
-    this.#socket = value;
+    this.#socket = value
   }
 
   get connection(): Socket {
-    return this.#socket as Socket;
+    return this.#socket as Socket
   }
 
   get socket(): Socket {
-    return this.#socket as Socket;
+    return this.#socket as Socket
   }
 }
 
@@ -490,92 +487,92 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 function matchKnownFields(field: string, lowercased: boolean = false): string {
   switch (field.length) {
     case 3:
-      if (field === 'Age' || field === 'age') return 'age';
-      break;
+      if (field === 'Age' || field === 'age') return 'age'
+      break
     case 4:
-      if (field === 'Host' || field === 'host') return 'host';
-      if (field === 'From' || field === 'from') return 'from';
-      if (field === 'ETag' || field === 'etag') return 'etag';
-      if (field === 'Date' || field === 'date') return '\u0000date';
-      if (field === 'Vary' || field === 'vary') return '\u0000vary';
-      break;
+      if (field === 'Host' || field === 'host') return 'host'
+      if (field === 'From' || field === 'from') return 'from'
+      if (field === 'ETag' || field === 'etag') return 'etag'
+      if (field === 'Date' || field === 'date') return '\u0000date'
+      if (field === 'Vary' || field === 'vary') return '\u0000vary'
+      break
     case 6:
-      if (field === 'Server' || field === 'server') return 'server';
-      if (field === 'Cookie' || field === 'cookie') return '\u0002cookie';
-      if (field === 'Origin' || field === 'origin') return '\u0000origin';
-      if (field === 'Expect' || field === 'expect') return '\u0000expect';
-      if (field === 'Accept' || field === 'accept') return '\u0000accept';
-      break;
+      if (field === 'Server' || field === 'server') return 'server'
+      if (field === 'Cookie' || field === 'cookie') return '\u0002cookie'
+      if (field === 'Origin' || field === 'origin') return '\u0000origin'
+      if (field === 'Expect' || field === 'expect') return '\u0000expect'
+      if (field === 'Accept' || field === 'accept') return '\u0000accept'
+      break
     case 7:
-      if (field === 'Referer' || field === 'referer') return 'referer';
-      if (field === 'Expires' || field === 'expires') return 'expires';
-      if (field === 'Upgrade' || field === 'upgrade') return '\u0000upgrade';
-      break;
+      if (field === 'Referer' || field === 'referer') return 'referer'
+      if (field === 'Expires' || field === 'expires') return 'expires'
+      if (field === 'Upgrade' || field === 'upgrade') return '\u0000upgrade'
+      break
     case 8:
-      if (field === 'Location' || field === 'location') return 'location';
-      if (field === 'If-Match' || field === 'if-match') return '\u0000if-match';
-      break;
+      if (field === 'Location' || field === 'location') return 'location'
+      if (field === 'If-Match' || field === 'if-match') return '\u0000if-match'
+      break
     case 10:
-      if (field === 'User-Agent' || field === 'user-agent') return 'user-agent';
-      if (field === 'Set-Cookie' || field === 'set-cookie') return '\u0001';
+      if (field === 'User-Agent' || field === 'user-agent') return 'user-agent'
+      if (field === 'Set-Cookie' || field === 'set-cookie') return '\u0001'
       if (field === 'Connection' || field === 'connection')
-        return '\u0000connection';
-      break;
+        return '\u0000connection'
+      break
     case 11:
       if (field === 'Retry-After' || field === 'retry-after')
-        return 'retry-after';
-      break;
+        return 'retry-after'
+      break
     case 12:
       if (field === 'Content-Type' || field === 'content-type')
-        return 'content-type';
+        return 'content-type'
       if (field === 'Max-Forwards' || field === 'max-forwards')
-        return 'max-forwards';
-      break;
+        return 'max-forwards'
+      break
     case 13:
       if (field === 'Authorization' || field === 'authorization')
-        return 'authorization';
+        return 'authorization'
       if (field === 'Last-Modified' || field === 'last-modified')
-        return 'last-modified';
+        return 'last-modified'
       if (field === 'Cache-Control' || field === 'cache-control')
-        return '\u0000cache-control';
+        return '\u0000cache-control'
       if (field === 'If-None-Match' || field === 'if-none-match')
-        return '\u0000if-none-match';
-      break;
+        return '\u0000if-none-match'
+      break
     case 14:
       if (field === 'Content-Length' || field === 'content-length')
-        return 'content-length';
-      break;
+        return 'content-length'
+      break
     case 15:
       if (field === 'Accept-Encoding' || field === 'accept-encoding')
-        return '\u0000accept-encoding';
+        return '\u0000accept-encoding'
       if (field === 'Accept-Language' || field === 'accept-language')
-        return '\u0000accept-language';
+        return '\u0000accept-language'
       if (field === 'X-Forwarded-For' || field === 'x-forwarded-for')
-        return '\u0000x-forwarded-for';
-      break;
+        return '\u0000x-forwarded-for'
+      break
     case 16:
       if (field === 'Content-Encoding' || field === 'content-encoding')
-        return '\u0000content-encoding';
+        return '\u0000content-encoding'
       if (field === 'X-Forwarded-Host' || field === 'x-forwarded-host')
-        return '\u0000x-forwarded-host';
-      break;
+        return '\u0000x-forwarded-host'
+      break
     case 17:
       if (field === 'If-Modified-Since' || field === 'if-modified-since')
-        return 'if-modified-since';
+        return 'if-modified-since'
       if (field === 'Transfer-Encoding' || field === 'transfer-encoding')
-        return '\u0000transfer-encoding';
+        return '\u0000transfer-encoding'
       if (field === 'X-Forwarded-Proto' || field === 'x-forwarded-proto')
-        return '\u0000x-forwarded-proto';
-      break;
+        return '\u0000x-forwarded-proto'
+      break
     case 19:
       if (field === 'Proxy-Authorization' || field === 'proxy-authorization')
-        return 'proxy-authorization';
+        return 'proxy-authorization'
       if (field === 'If-Unmodified-Since' || field === 'if-unmodified-since')
-        return 'if-unmodified-since';
-      break;
+        return 'if-unmodified-since'
+      break
   }
   if (lowercased) {
-    return '\u0000' + field;
+    return `\u0000${field}`
   }
-  return matchKnownFields(field.toLowerCase(), true);
+  return matchKnownFields(field.toLowerCase(), true)
 }

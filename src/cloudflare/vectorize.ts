@@ -12,7 +12,7 @@ export const KnownModel = {
   '@cf/baai/bge-small-en-v1.5': '@cf/baai/bge-small-en-v1.5',
   '@cf/baai/bge-base-en-v1.5': '@cf/baai/bge-base-en-v1.5',
   '@cf/baai/bge-large-en-v1.5': '@cf/baai/bge-large-en-v1.5',
-} as const;
+} as const
 
 /**
  * Supported distance metrics for an index.
@@ -22,7 +22,7 @@ export const DistanceMetric = {
   EUCLIDEAN: 'euclidean',
   COSINE: 'cosine',
   DOT_PRODUCT: 'dot-product',
-} as const;
+} as const
 
 /**
  * Supported metadata return levels for a Vectorize query.
@@ -43,4 +43,4 @@ export const MetadataRetrievalLevel = {
   INDEXED: 'indexed',
   /** No indexed metadata will be returned. */
   NONE: 'none',
-} as const;
+} as const

@@ -2,28 +2,29 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import * as promises from 'node-internal:internal_fs_promises';
-import * as constants from 'node-internal:internal_fs_constants';
-import * as callbackMethods from 'node-internal:internal_fs_callback';
-import { Dirent, Dir } from 'node-internal:internal_fs';
-import { Stats } from 'node-internal:internal_fs_utils';
+import { Dir, Dirent } from 'node-internal:internal_fs'
+import * as callbackMethods from 'node-internal:internal_fs_callback'
+import * as constants from 'node-internal:internal_fs_constants'
+import * as promises from 'node-internal:internal_fs_promises'
+import { Stats } from 'node-internal:internal_fs_utils'
 
-export * from 'node-internal:internal_fs_callback';
+export * from 'node-internal:internal_fs_callback'
+
 import {
-  ReadStream,
-  WriteStream,
   createReadStream,
   createWriteStream,
-} from 'node-internal:internal_fs_streams';
+  ReadStream,
+  WriteStream,
+} from 'node-internal:internal_fs_streams'
 import {
   accessSync,
-  existsSync,
   appendFileSync,
   chmodSync,
   chownSync,
   closeSync,
   copyFileSync,
   cpSync,
+  existsSync,
   fchmodSync,
   fchownSync,
   fdatasyncSync,
@@ -34,11 +35,12 @@ import {
   globSync,
   lchmodSync,
   lchownSync,
-  lutimesSync,
   linkSync,
   lstatSync,
+  lutimesSync,
   mkdirSync,
   mkdtempSync,
+  openAsBlob,
   opendirSync,
   openSync,
   readdirSync,
@@ -50,8 +52,8 @@ import {
   renameSync,
   rmdirSync,
   rmSync,
-  statSync,
   statfsSync,
+  statSync,
   symlinkSync,
   truncateSync,
   unlinkSync,
@@ -59,14 +61,13 @@ import {
   writeFileSync,
   writeSync,
   writevSync,
-  openAsBlob,
-} from 'node-internal:internal_fs_sync';
+} from 'node-internal:internal_fs_sync'
 
-const { F_OK, R_OK, W_OK, X_OK } = constants;
+const { F_OK, R_OK, W_OK, X_OK } = constants
 
 // Node.js exports these as aliases
-export const FileWriteStream = WriteStream;
-export const FileReadStream = ReadStream;
+export const FileWriteStream = WriteStream
+export const FileReadStream = ReadStream
 
 export {
   constants,
@@ -126,7 +127,7 @@ export {
   createReadStream,
   createWriteStream,
   openAsBlob,
-};
+}
 
 export default {
   constants,
@@ -189,4 +190,4 @@ export default {
   createReadStream,
   createWriteStream,
   openAsBlob,
-};
+}

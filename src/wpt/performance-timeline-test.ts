@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'buffered-flag-after-timeout.any.js': {
@@ -189,4 +189,4 @@ export default {
       'Verifies the resolution of entry.startTime is at least 5 microseconds.',
     ],
   },
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

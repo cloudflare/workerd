@@ -6,88 +6,89 @@
 //     Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 //     The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 //     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-import fs from "fs";
-import os from "os";
-import path from "path";
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
-declare const WORKERD_VERSION: string;
+declare const WORKERD_VERSION: string
 
 export const knownPackages: Record<string, string> = {
-  "darwin arm64 LE": "@cloudflare/workerd-darwin-arm64",
-  "darwin x64 LE": "@cloudflare/workerd-darwin-64",
-  "linux arm64 LE": "@cloudflare/workerd-linux-arm64",
-  "linux x64 LE": "@cloudflare/workerd-linux-64",
-  "win32 x64 LE": "@cloudflare/workerd-windows-64",
-};
+  'darwin arm64 LE': '@cloudflare/workerd-darwin-arm64',
+  'darwin x64 LE': '@cloudflare/workerd-darwin-64',
+  'linux arm64 LE': '@cloudflare/workerd-linux-arm64',
+  'linux x64 LE': '@cloudflare/workerd-linux-64',
+  'win32 x64 LE': '@cloudflare/workerd-windows-64',
+}
 
-const maybeExeExtension = process.platform === "win32" ? ".exe" : "";
+const maybeExeExtension = process.platform === 'win32' ? '.exe' : ''
 
 export function pkgAndSubpathForCurrentPlatform(): {
-  pkg: string;
-  subpath: string;
+  pkg: string
+  subpath: string
 } {
-  let pkg: string;
-  let subpath: string;
-  let platformKey = `${process.platform} ${os.arch()} ${os.endianness()}`;
+  let pkg: string
+  let subpath: string
+  const platformKey = `${process.platform} ${os.arch()} ${os.endianness()}`
 
   if (platformKey in knownPackages) {
-    pkg = knownPackages[platformKey];
-    subpath = `bin/workerd${maybeExeExtension}`;
+    pkg = knownPackages[platformKey]
+    subpath = `bin/workerd${maybeExeExtension}`
   } else {
-    throw new Error(`Unsupported platform: ${platformKey}`);
+    throw new Error(`Unsupported platform: ${platformKey}`)
   }
 
-  return { pkg, subpath };
+  return { pkg, subpath }
 }
 
 function pkgForSomeOtherPlatform(): string | null {
-  const libMain = require.resolve("workerd");
-  const nodeModulesDirectory = path.dirname(
-    path.dirname(path.dirname(libMain))
-  );
+  const libMain = require.resolve('workerd')
+  const nodeModulesDirectory = path.dirname(path.dirname(path.dirname(libMain)))
 
-  if (path.basename(nodeModulesDirectory) === "node_modules") {
+  if (path.basename(nodeModulesDirectory) === 'node_modules') {
     for (const unixKey in knownPackages) {
       try {
-        const pkg = knownPackages[unixKey];
-        if (fs.existsSync(path.join(nodeModulesDirectory, pkg))) return pkg;
+        const pkg = knownPackages[unixKey]
+        if (fs.existsSync(path.join(nodeModulesDirectory, pkg))) return pkg
       } catch {}
     }
   }
 
-  return null;
+  return null
 }
 
 export function downloadedBinPath(pkg: string, subpath: string): string {
-  const libDir = path.dirname(require.resolve("workerd"));
-  return path.join(libDir, `downloaded-${pkg.replace("/", "-")}-${path.basename(subpath)}${maybeExeExtension}`);
+  const libDir = path.dirname(require.resolve('workerd'))
+  return path.join(
+    libDir,
+    `downloaded-${pkg.replace('/', '-')}-${path.basename(subpath)}${maybeExeExtension}`,
+  )
 }
 
 export function generateBinPath(): { binPath: string } {
-  const { pkg, subpath } = pkgAndSubpathForCurrentPlatform();
-  let binPath: string;
+  const { pkg, subpath } = pkgAndSubpathForCurrentPlatform()
+  let binPath: string
 
   try {
     // First check for the binary package from our "optionalDependencies". This
     // package should have been installed alongside this package at install time.
-    binPath = require.resolve(`${pkg}/${subpath}`);
+    binPath = require.resolve(`${pkg}/${subpath}`)
   } catch (e) {
     // If that didn't work, then someone probably installed workerd with the
     // "--no-optional" flag. Our install script attempts to compensate for this
     // by manually downloading the package instead. Check for that next.
-    binPath = downloadedBinPath(pkg, subpath);
+    binPath = downloadedBinPath(pkg, subpath)
     if (!fs.existsSync(binPath)) {
       // If that didn't work too, check to see whether the package is even there
       // at all. It may not be (for a few different reasons).
       try {
-        require.resolve(pkg);
+        require.resolve(pkg)
       } catch {
         // If we can't find the package for this platform, then it's possible
         // that someone installed this for some other platform and is trying
         // to use it without reinstalling. That won't work of course, but
         // people do this all the time with systems like Docker. Try to be
         // helpful in that case.
-        const otherPkg = pkgForSomeOtherPlatform();
+        const otherPkg = pkgForSomeOtherPlatform()
         if (otherPkg) {
           throw new Error(`
 You installed workerd on another platform than the one you're currently using.
@@ -109,7 +110,7 @@ If you are installing with yarn, you can try listing both this platform and the
 other platform in your ".yarnrc.yml" file using the "supportedArchitectures"
 feature: https://yarnpkg.com/configuration/yarnrc/#supportedArchitectures
 Keep in mind that this means multiple copies of workerd will be present.
-`);
+`)
         }
 
         // If that didn't work too, then maybe someone installed workerd with
@@ -123,9 +124,9 @@ Keep in mind that this means multiple copies of workerd will be present.
 
 If you are installing workerd with npm, make sure that you don't specify the
 "--no-optional" flag. The "optionalDependencies" package.json feature is used
-by workerd to install the correct binary executable for your current platform.`);
+by workerd to install the correct binary executable for your current platform.`)
       }
-      throw e;
+      throw e
     }
   }
 
@@ -151,26 +152,26 @@ by workerd to install the correct binary executable for your current platform.`)
   //   automatically unzip packages containing ".exe" files, and we don't want
   //   our Windows-specific packages to be unzipped either.
   //
-  let pnpapi: any;
+  let pnpapi: any
   try {
-    pnpapi = require("pnpapi");
-  } catch (e) {}
+    pnpapi = require('pnpapi')
+  } catch (_e) {}
   if (pnpapi) {
-    const root = pnpapi.getPackageInformation(pnpapi.topLevel).packageLocation;
+    const root = pnpapi.getPackageInformation(pnpapi.topLevel).packageLocation
     const binTargetPath = path.join(
       root,
-      "node_modules",
-      ".cache",
-      "workerd",
-      `pnpapi-${pkg.replace("/", "-")}-${WORKERD_VERSION}-${path.basename(subpath)}`
-    );
+      'node_modules',
+      '.cache',
+      'workerd',
+      `pnpapi-${pkg.replace('/', '-')}-${WORKERD_VERSION}-${path.basename(subpath)}`,
+    )
     if (!fs.existsSync(binTargetPath)) {
-      fs.mkdirSync(path.dirname(binTargetPath), { recursive: true });
-      fs.copyFileSync(binPath, binTargetPath);
-      fs.chmodSync(binTargetPath, 0o755);
+      fs.mkdirSync(path.dirname(binTargetPath), { recursive: true })
+      fs.copyFileSync(binPath, binTargetPath)
+      fs.chmodSync(binTargetPath, 0o755)
     }
-    return { binPath: binTargetPath };
+    return { binPath: binTargetPath }
   }
 
-  return { binPath };
+  return { binPath }
 }

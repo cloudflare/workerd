@@ -10,35 +10,34 @@
 // provide the non-op stubs so that polyfills are not necessary for modules that
 // unconditionally import 'http2'.
 
-import type H2 from 'node:http2';
-import type H1 from 'node:http';
+import type H1 from 'node:http'
+import type H2 from 'node:http2'
+import { Buffer } from 'node-internal:internal_buffer'
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors'
 
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
-import { Buffer } from 'node-internal:internal_buffer';
+import { constants } from 'node-internal:internal_http2_constants'
 
-import { constants } from 'node-internal:internal_http2_constants';
-
-export { constants };
+export { constants }
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
 function notImplementedClass<T = unknown>(name: string): T {
   return class {
     constructor() {
-      throw new ERR_METHOD_NOT_IMPLEMENTED(name);
+      throw new ERR_METHOD_NOT_IMPLEMENTED(name)
     }
-  } as T;
+  } as T
 }
 
 export function createSecureServer(..._args: unknown[]): H2.Http2SecureServer {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('http2.createSecureServer');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('http2.createSecureServer')
 }
 
 export function createServer(..._args: unknown[]): H2.Http2Server {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('http2.createServer');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('http2.createServer')
 }
 
 export function connect(..._args: unknown[]): H2.ClientHttp2Session {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('http2.connect');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('http2.connect')
 }
 
 export function performServerHandshake<
@@ -59,16 +58,16 @@ export function performServerHandshake<
   Http2Request,
   Http2Response
 > {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('http2.performServerHandshake');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('http2.performServerHandshake')
 }
 
 export const Http2ServerRequest: H2.Http2ServerRequest = notImplementedClass(
-  'http2.Http2ServerRequest'
-);
+  'http2.Http2ServerRequest',
+)
 
 export const Http2ServerResponse: H2.Http2ServerResponse = notImplementedClass(
-  'http2.Http2ServerResponse'
-);
+  'http2.Http2ServerResponse',
+)
 
 export function getDefaultSettings(..._args: unknown[]): H2.Settings {
   // We really ought to throw here but the unenv polyfill returns an object
@@ -82,18 +81,18 @@ export function getDefaultSettings(..._args: unknown[]): H2.Settings {
     maxHeaderSize: 65_535,
     maxHeaderListSize: 65_535,
     enableConnectProtocol: false,
-  }) as H2.Settings;
+  }) as H2.Settings
 }
 
 export function getPackedSettings(..._args: unknown[]): Buffer {
-  return Buffer.alloc(0);
+  return Buffer.alloc(0)
 }
 
 export function getUnpackedSettings(..._args: unknown[]): H2.Settings {
-  return {};
+  return {}
 }
 
-export const sensitiveHeaders = Symbol('nodejs.http2.sensitiveHeaders');
+export const sensitiveHeaders = Symbol('nodejs.http2.sensitiveHeaders')
 
 export default {
   constants,
@@ -107,4 +106,4 @@ export default {
   getUnpackedSettings,
   performServerHandshake,
   sensitiveHeaders,
-};
+}

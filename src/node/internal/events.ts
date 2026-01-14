@@ -27,90 +27,91 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* eslint-disable */
 
+import type {
+  EventEmitter as _EventEmitter,
+  EventEmitterAsyncResource as _EventEmitterAsyncResource,
+} from 'node:events'
+import { default as async_hooks } from 'node-internal:async_hooks'
 import {
   AbortError,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_THIS,
   ERR_OUT_OF_RANGE,
   ERR_UNHANDLED_ERROR,
-} from 'node-internal:internal_errors';
-import type {
-  EventEmitterAsyncResource as _EventEmitterAsyncResource,
-  EventEmitter as _EventEmitter,
-} from 'node:events';
+} from 'node-internal:internal_errors'
+import { emitWarning, nextTick } from 'node-internal:internal_process'
+import { spliceOne } from 'node-internal:internal_utils'
 import {
   validateAbortSignal,
   validateBoolean,
   validateFunction,
   validateObject,
-} from 'node-internal:validators';
-import { spliceOne } from 'node-internal:internal_utils';
-import { nextTick, emitWarning } from 'node-internal:internal_process';
-import { default as async_hooks } from 'node-internal:async_hooks';
-const { AsyncResource } = async_hooks;
+} from 'node-internal:validators'
 
-import { inspect } from 'node-internal:internal_inspect';
+const { AsyncResource } = async_hooks
+
+import { inspect } from 'node-internal:internal_inspect'
 
 const enableNodejsProcessV2 =
-  !!Cloudflare.compatibilityFlags['enable_nodejs_process_v2'];
+  !!Cloudflare.compatibilityFlags.enable_nodejs_process_v2
 
-const kRejection = Symbol.for('nodejs.rejection');
-const kCapture = Symbol('kCapture');
-const kErrorMonitor = Symbol('events.errorMonitor');
-const kMaxEventTargetListeners = Symbol('events.maxEventTargetListeners');
+const kRejection = Symbol.for('nodejs.rejection')
+const kCapture = Symbol('kCapture')
+const kErrorMonitor = Symbol('events.errorMonitor')
+const kMaxEventTargetListeners = Symbol('events.maxEventTargetListeners')
 const kMaxEventTargetListenersWarned = Symbol(
-  'events.maxEventTargetListenersWarned'
-);
+  'events.maxEventTargetListenersWarned',
+)
 
 export interface EventEmitterOptions {
-  captureRejections?: boolean;
+  captureRejections?: boolean
 }
 
-export type EventName = string | symbol | number;
+export type EventName = string | symbol | number
 export type EventCallback = ((...args: any[]) => unknown) & {
-  listener?: EventCallback;
-};
+  listener?: EventCallback
+}
 // @ts-expect-error TS2417 Unrelated error.
 export declare class EventEmitter extends _EventEmitter {
-  constructor(opts?: EventEmitterOptions);
-  listenerCount(eventName: EventName): number;
-  emit(eventName: EventName, ...args: any[]): boolean;
-  on(eventName: EventName, listener: EventCallback): this;
-  once(eventName: EventName, listener: EventCallback): this;
-  addEventListener(eventName: EventName, listener: EventCallback): this;
-  removeEventListener(eventName: EventName, listener: EventCallback): this;
+  constructor(opts?: EventEmitterOptions)
+  listenerCount(eventName: EventName): number
+  emit(eventName: EventName, ...args: any[]): boolean
+  on(eventName: EventName, listener: EventCallback): this
+  once(eventName: EventName, listener: EventCallback): this
+  addEventListener(eventName: EventName, listener: EventCallback): this
+  removeEventListener(eventName: EventName, listener: EventCallback): this
 
-  [kRejection](err: unknown, eventName: EventName, ...args: unknown[]): void;
-  [kCapture]: boolean;
+  [kRejection](err: unknown, eventName: EventName, ...args: unknown[]): void
+  [kCapture]: boolean
 
-  _events: undefined | Record<EventName, EventCallback[]>;
-  _eventsCount: number;
-  _maxListeners: undefined | number;
+  _events: undefined | Record<EventName, EventCallback[]>
+  _eventsCount: number
+  _maxListeners: undefined | number
 }
 
-type AsyncResource = typeof AsyncResource;
+type AsyncResource = typeof AsyncResource
 
-declare var EventTarget: Function;
+declare var EventTarget: Function
 
 export function EventEmitter(
   this: EventEmitter,
-  opts?: EventEmitterOptions
+  opts?: EventEmitterOptions,
 ): EventEmitter {
-  EventEmitter.init.call(this, opts);
-  return this;
+  EventEmitter.init.call(this, opts)
+  return this
 }
 
 class EventEmitterReferencingAsyncResource extends AsyncResource {
-  #eventEmitter: EventEmitter;
+  #eventEmitter: EventEmitter
   constructor(emitter: EventEmitter) {
-    super('');
-    this.#eventEmitter = emitter;
+    super('')
+    this.#eventEmitter = emitter
   }
 
   get eventEmitter() {
     if (this.#eventEmitter === undefined)
-      throw new ERR_INVALID_THIS('EventEmitterReferencingAsyncResource');
-    return this.#eventEmitter;
+      throw new ERR_INVALID_THIS('EventEmitterReferencingAsyncResource')
+    return this.#eventEmitter
   }
 }
 
@@ -118,107 +119,107 @@ export class EventEmitterAsyncResource
   extends EventEmitter
   implements _EventEmitterAsyncResource
 {
-  #asyncResource: EventEmitterReferencingAsyncResource;
+  #asyncResource: EventEmitterReferencingAsyncResource
 
   constructor(options?: EventEmitterOptions) {
-    super(options);
-    this.#asyncResource = new EventEmitterReferencingAsyncResource(this);
+    super(options)
+    this.#asyncResource = new EventEmitterReferencingAsyncResource(this)
   }
 
   // @ts-expect-error TS2416 Not assignable to base type
   get asyncResource(): AsyncResource {
     if (this.#asyncResource === undefined)
-      throw new ERR_INVALID_THIS('EventEmitterAsyncResource');
+      throw new ERR_INVALID_THIS('EventEmitterAsyncResource')
     // @ts-expect-error TS2741 Prototype is missing from type.
-    return this.#asyncResource;
+    return this.#asyncResource
   }
 
   override emit(event: string | symbol, ...args: any[]): boolean {
     if (this.#asyncResource === undefined)
-      throw new ERR_INVALID_THIS('EventEmitterAsyncResource');
-    args.unshift(super.emit, this, event);
+      throw new ERR_INVALID_THIS('EventEmitterAsyncResource')
+    args.unshift(super.emit, this, event)
     Reflect.apply(
       this.#asyncResource.runInAsyncScope,
       this.#asyncResource,
-      args
-    );
-    return true;
+      args,
+    )
+    return true
   }
 }
 
 export function addAbortListener(
   signal: AbortSignal | undefined,
-  listener: any
+  listener: any,
 ) {
   if (signal === undefined) {
-    throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+    throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal)
   }
-  validateAbortSignal(signal, 'signal');
-  validateFunction(listener, 'listener');
+  validateAbortSignal(signal, 'signal')
+  validateFunction(listener, 'listener')
 
-  let removeEventListener: Function;
+  let removeEventListener: Function
   if (signal.aborted) {
-    queueMicrotask(() => listener());
+    queueMicrotask(() => listener())
   } else {
-    signal.addEventListener('abort', listener, { once: true });
+    signal.addEventListener('abort', listener, { once: true })
     removeEventListener = () => {
-      signal.removeEventListener('abort', listener);
-    };
+      signal.removeEventListener('abort', listener)
+    }
   }
   return {
     __proto__: null,
     [Symbol.dispose]() {
-      removeEventListener?.();
+      removeEventListener?.()
     },
-  };
+  }
 }
 
-export default EventEmitter;
+export default EventEmitter
 
-EventEmitter.on = on;
-EventEmitter.once = once;
-EventEmitter.getEventListeners = getEventListeners;
-EventEmitter.getMaxListeners = _getMaxListeners;
-EventEmitter.setMaxListeners = setMaxListeners;
-EventEmitter.listenerCount = listenerCount;
-EventEmitter.EventEmitter = EventEmitter;
-EventEmitter.usingDomains = false;
-EventEmitter.captureRejectionSymbol = kRejection;
-EventEmitter.errorMonitor = kErrorMonitor;
-EventEmitter.EventEmitterAsyncResource = EventEmitterAsyncResource;
+EventEmitter.on = on
+EventEmitter.once = once
+EventEmitter.getEventListeners = getEventListeners
+EventEmitter.getMaxListeners = _getMaxListeners
+EventEmitter.setMaxListeners = setMaxListeners
+EventEmitter.listenerCount = listenerCount
+EventEmitter.EventEmitter = EventEmitter
+EventEmitter.usingDomains = false
+EventEmitter.captureRejectionSymbol = kRejection
+EventEmitter.errorMonitor = kErrorMonitor
+EventEmitter.EventEmitterAsyncResource = EventEmitterAsyncResource
 
-export const captureRejectionSymbol = EventEmitter.captureRejectionSymbol;
-export const errorMonitor = EventEmitter.errorMonitor;
-export const getMaxListeners = _getMaxListeners;
-export const usingDomains = EventEmitter.usingDomains;
-export let defaultMaxListeners = 10;
+export const captureRejectionSymbol = EventEmitter.captureRejectionSymbol
+export const errorMonitor = EventEmitter.errorMonitor
+export const getMaxListeners = _getMaxListeners
+export const usingDomains = EventEmitter.usingDomains
+export let defaultMaxListeners = 10
 
 Object.defineProperties(EventEmitter, {
   captureRejections: {
     get(this: EventEmitter) {
-      return EventEmitter.prototype[kCapture];
+      return EventEmitter.prototype[kCapture]
     },
     set(this: EventEmitter, value: unknown): void {
-      validateBoolean(value, 'EventEmitter.captureRejections');
+      validateBoolean(value, 'EventEmitter.captureRejections')
 
-      EventEmitter.prototype[kCapture] = value;
+      EventEmitter.prototype[kCapture] = value
     },
     enumerable: true,
   },
   defaultMaxListeners: {
     enumerable: true,
     get: function (this: EventEmitter): number {
-      return defaultMaxListeners;
+      return defaultMaxListeners
     },
     set: function (this: EventEmitter, arg: unknown): void {
       if (typeof arg !== 'number' || arg < 0 || Number.isNaN(arg)) {
         throw new ERR_OUT_OF_RANGE(
           'defaultMaxListeners',
           'a non-negative number',
-          arg
-        );
+          arg,
+        )
       }
-      defaultMaxListeners = arg;
+      defaultMaxListeners = arg
     },
   },
   kMaxEventTargetListeners: {
@@ -233,93 +234,93 @@ Object.defineProperties(EventEmitter, {
     configurable: false,
     writable: false,
   },
-});
+})
 
 // The default for captureRejections is false
 Object.defineProperty(EventEmitter.prototype, kCapture, {
   value: false,
   writable: true,
   enumerable: false,
-});
+})
 
 EventEmitter.init = function (this: EventEmitter, opts?: EventEmitterOptions) {
   if (
     this._events === undefined ||
     this._events === Object.getPrototypeOf(this)._events
   ) {
-    this._events = Object.create(null);
-    this._eventsCount = 0;
+    this._events = Object.create(null)
+    this._eventsCount = 0
   }
 
-  (this as any)._maxListeners ??= undefined;
+  ;(this as any)._maxListeners ??= undefined
 
   if (opts?.captureRejections) {
-    validateBoolean(opts.captureRejections, 'options.captureRejections');
-    (this as any)[kCapture] = Boolean(opts.captureRejections);
+    validateBoolean(opts.captureRejections, 'options.captureRejections')
+    ;(this as any)[kCapture] = Boolean(opts.captureRejections)
   } else {
     // Assigning the kCapture property directly saves an expensive
     // prototype lookup in a very sensitive hot path.
-    (this as any)[kCapture] = EventEmitter.prototype[kCapture];
+    ;(this as any)[kCapture] = EventEmitter.prototype[kCapture]
   }
-};
+}
 
 export function setMaxListeners(
   n = defaultMaxListeners,
   ...eventTargets: any[]
 ) {
   if (typeof n !== 'number' || n < 0 || Number.isNaN(n)) {
-    throw new ERR_OUT_OF_RANGE('n', 'a non-negative number', n);
+    throw new ERR_OUT_OF_RANGE('n', 'a non-negative number', n)
   }
   if (eventTargets.length === 0) {
-    defaultMaxListeners = n;
+    defaultMaxListeners = n
   } else {
     for (let i = 0; i < eventTargets.length; i++) {
-      const target = eventTargets[i];
+      const target = eventTargets[i]
       if (target instanceof EventTarget) {
-        (target as any)[kMaxEventTargetListeners] = n;
-        (target as any)[kMaxEventTargetListenersWarned] = false;
+        ;(target as any)[kMaxEventTargetListeners] = n
+        ;(target as any)[kMaxEventTargetListenersWarned] = false
       } else if (typeof target.setMaxListeners === 'function') {
-        target.setMaxListeners(n);
+        target.setMaxListeners(n)
       } else {
         throw new ERR_INVALID_ARG_TYPE(
           'eventTargets',
           ['EventEmitter', 'EventTarget'],
-          target
-        );
+          target,
+        )
       }
     }
   }
 }
 
-EventEmitter.prototype._events = undefined;
-EventEmitter.prototype._eventsCount = 0;
-EventEmitter.prototype._maxListeners = undefined;
-EventEmitter.addAbortListener = addAbortListener;
+EventEmitter.prototype._events = undefined
+EventEmitter.prototype._eventsCount = 0
+EventEmitter.prototype._maxListeners = undefined
+EventEmitter.addAbortListener = addAbortListener
 
 function addCatch(
   that: any,
   promise: Promise<unknown>,
   type: string | symbol,
-  args: any[]
+  args: any[],
 ) {
   if (!that[kCapture]) {
-    return;
+    return
   }
 
   // Handle Promises/A+ spec, then could be a getter
   // that throws on second use.
   try {
-    const then = promise.then;
+    const then = promise.then
 
     if (typeof then === 'function') {
-      then.call(promise, undefined, function (err) {
+      then.call(promise, undefined, (err) => {
         // The callback is called with nextTick to avoid a follow-up
         // rejection from this promise.
-        nextTick(emitUnhandledRejectionOrErr, that, err, type, args);
-      });
+        nextTick(emitUnhandledRejectionOrErr, that, err, type, args)
+      })
     }
   } catch (err) {
-    that.emit('error', err);
+    that.emit('error', err)
   }
 }
 
@@ -327,118 +328,118 @@ function emitUnhandledRejectionOrErr(
   ee: any,
   err: any,
   type: string | symbol,
-  args: any[]
+  args: any[],
 ) {
   if (typeof ee[kRejection] === 'function') {
-    ee[kRejection](err, type, ...args);
+    ee[kRejection](err, type, ...args)
   } else {
     // We have to disable the capture rejections mechanism, otherwise
     // we might end up in an infinite loop.
-    const prev = ee[kCapture];
+    const prev = ee[kCapture]
 
     // If the error handler throws, it is not catchable and it
     // will end up in 'uncaughtException'. We restore the previous
     // value of kCapture in case the uncaughtException is present
     // and the exception is handled.
     try {
-      ee[kCapture] = false;
-      ee.emit('error', err);
+      ee[kCapture] = false
+      ee.emit('error', err)
     } finally {
-      ee[kCapture] = prev;
+      ee[kCapture] = prev
     }
   }
 }
 
 EventEmitter.prototype.setMaxListeners = function setMaxListeners(n: number) {
   if (typeof n !== 'number' || n < 0 || Number.isNaN(n)) {
-    throw new ERR_OUT_OF_RANGE('n', 'a non-negative number', n);
+    throw new ERR_OUT_OF_RANGE('n', 'a non-negative number', n)
   }
-  this._maxListeners = n;
-  return this;
-};
+  this._maxListeners = n
+  return this
+}
 
 function _getMaxListeners(that: any) {
   if (that._maxListeners === undefined) {
-    return (EventEmitter as any).defaultMaxListeners;
+    return (EventEmitter as any).defaultMaxListeners
   }
-  return that._maxListeners;
+  return that._maxListeners
 }
 
 EventEmitter.prototype.getMaxListeners = function getMaxListeners(
-  this: EventEmitter
+  this: EventEmitter,
 ): number {
-  return _getMaxListeners(this);
-};
+  return _getMaxListeners(this)
+}
 
 EventEmitter.prototype.emit = function emit(
   this: EventEmitter,
   type: string | symbol,
   ...args: any[]
 ): boolean {
-  let doError = type === 'error';
+  let doError = type === 'error'
 
-  const events = this._events;
+  const events = this._events
   if (events !== undefined) {
     if (doError && events[kErrorMonitor] !== undefined) {
-      this.emit(kErrorMonitor, ...args);
+      this.emit(kErrorMonitor, ...args)
     }
-    doError = doError && events.error === undefined;
+    doError = doError && events.error === undefined
   } else if (!doError) {
-    return false;
+    return false
   }
 
   // If there is no 'error' event listener then throw.
   if (doError) {
-    let er;
+    let er
     if (args.length > 0) {
-      er = args[0];
+      er = args[0]
     }
     if (er instanceof Error) {
       try {
-        const capture = {};
-        (Error as any).captureStackTrace(capture, EventEmitter.prototype.emit);
+        const capture = {}
+        ;(Error as any).captureStackTrace(capture, EventEmitter.prototype.emit)
       } catch {
         // pass
       }
 
       // Note: The comments on the `throw` lines are intentional, they show
       // up in Node's output if this results in an unhandled exception.
-      throw er; // Unhandled 'error' event
+      throw er // Unhandled 'error' event
     }
 
-    let stringifiedEr;
+    let stringifiedEr
     try {
-      stringifiedEr = inspect(er);
+      stringifiedEr = inspect(er)
     } catch {
-      stringifiedEr = er;
+      stringifiedEr = er
     }
 
     // At least give some kind of context to the user
-    const err = new ERR_UNHANDLED_ERROR(stringifiedEr);
-    (err as any).context = er;
-    throw err; // Unhandled 'error' event
+    const err = new ERR_UNHANDLED_ERROR(stringifiedEr)
+    ;(err as any).context = er
+    throw err // Unhandled 'error' event
   }
 
-  const handler = events?.[type];
+  const handler = events?.[type]
 
   if (handler === undefined) {
-    return false;
+    return false
   }
 
   if (typeof handler === 'function') {
-    const result = (handler as Function).apply(this, args);
+    const result = (handler as Function).apply(this, args)
 
     // We check if result is undefined first because that
     // is the most common case so we do not pay any perf
     // penalty
     if (result !== undefined && result !== null) {
-      addCatch(this, result, type, args);
+      addCatch(this, result, type, args)
     }
   } else {
-    const len = handler.length;
-    const listeners = arrayClone(handler);
+    const len = handler.length
+    const listeners = arrayClone(handler)
     for (let i = 0; i < len; ++i) {
-      const result = listeners[i].apply(this, args);
+      const result = listeners[i].apply(this, args)
 
       // We check if result is undefined first because that
       // is the most common case so we do not pay any perf
@@ -446,462 +447,462 @@ EventEmitter.prototype.emit = function emit(
       // This code is duplicated because extracting it away
       // would make it non-inlineable.
       if (result !== undefined && result !== null) {
-        addCatch(this, result, type, args);
+        addCatch(this, result, type, args)
       }
     }
   }
 
-  return true;
-};
+  return true
+}
 
 function _addListener(
   target: any,
   type: string | symbol,
   listener: unknown,
-  prepend: boolean
+  prepend: boolean,
 ) {
-  let m;
-  let events;
-  let existing;
+  let m
+  let events
+  let existing
 
-  validateFunction(listener, 'listener');
+  validateFunction(listener, 'listener')
 
-  events = target._events;
+  events = target._events
   if (events === undefined) {
-    events = target._events = Object.create(null);
-    target._eventsCount = 0;
+    events = target._events = Object.create(null)
+    target._eventsCount = 0
   } else {
     // To avoid recursion in the case that type === "newListener"! Before
     // adding it to the listeners, first emit "newListener".
     if (events.newListener !== undefined) {
-      target.emit('newListener', type, (listener as any).listener ?? listener);
+      target.emit('newListener', type, (listener as any).listener ?? listener)
 
       // Re-assign `events` because a newListener handler could have caused the
       // this._events to be assigned to a new object
-      events = target._events;
+      events = target._events
     }
-    existing = events[type];
+    existing = events[type]
   }
 
   if (existing === undefined) {
     // Optimize the case of one listener. Don't need the extra array object.
-    events[type] = listener;
-    ++target._eventsCount;
+    events[type] = listener
+    ++target._eventsCount
   } else {
     if (typeof existing === 'function') {
       // Adding the second element, need to change to array.
       existing = events[type] = prepend
         ? [listener, existing]
-        : [existing, listener];
+        : [existing, listener]
       // If we've already got an array, just append.
     } else if (prepend) {
-      existing.unshift(listener);
+      existing.unshift(listener)
     } else {
-      existing.push(listener);
+      existing.push(listener)
     }
 
     // Check for listener leak
-    m = _getMaxListeners(target);
+    m = _getMaxListeners(target)
     if (m > 0 && existing.length > m && !existing.warned) {
-      existing.warned = true;
+      existing.warned = true
       console.log(
         'Possible EventEmitter memory leak detected. ' +
           `${existing.length} ${String(type)} listeners ` +
           `added to an EventEmitter. Use ` +
-          'emitter.setMaxListeners() to increase limit'
-      );
+          'emitter.setMaxListeners() to increase limit',
+      )
       const w: EventEmitterError = Object.assign(
         new Error(
           'Possible EventEmitter memory leak detected. ' +
             `${existing.length} ${String(type)} listeners ` +
             `added to ${inspect(target, { depth: -1 })}. Use ` +
-            'emitter.setMaxListeners() to increase limit'
+            'emitter.setMaxListeners() to increase limit',
         ),
         {
           name: 'MaxListenersExceededWarning',
           emitter: target,
           type: type,
           count: existing.length,
-        }
-      );
+        },
+      )
       // Only the newer process version compat adds process.emitWarning support.
-      if (enableNodejsProcessV2) emitWarning(w);
+      if (enableNodejsProcessV2) emitWarning(w)
     }
   }
 
-  return target;
+  return target
 }
 
 interface EventEmitterError extends Error {
-  name: string;
-  emitter: unknown;
-  type: string | symbol;
-  count: number;
+  name: string
+  emitter: unknown
+  type: string | symbol
+  count: number
 }
 
 EventEmitter.prototype.addListener = function addListener(
   this: EventEmitter,
   type: string | symbol,
-  listener: unknown
+  listener: unknown,
 ) {
-  return _addListener(this, type, listener, false);
-};
+  return _addListener(this, type, listener, false)
+}
 
-EventEmitter.prototype.on = EventEmitter.prototype.addListener;
+EventEmitter.prototype.on = EventEmitter.prototype.addListener
 
 EventEmitter.prototype.prependListener = function prependListener(
   type: string | symbol,
-  listener: unknown
+  listener: unknown,
 ) {
-  return _addListener(this, type, listener, true);
-};
+  return _addListener(this, type, listener, true)
+}
 
 function onceWrapper(this: any) {
   if (!this.fired) {
-    this.target.removeListener(this.type, this.wrapFn);
-    this.fired = true;
+    this.target.removeListener(this.type, this.wrapFn)
+    this.fired = true
     if (arguments.length === 0) {
-      return this.listener.call(this.target);
+      return this.listener.call(this.target)
     }
-    return this.listener.apply(this.target, arguments);
+    return this.listener.apply(this.target, arguments)
   }
 }
 
 function _onceWrap(target: any, type: string | symbol, listener: unknown) {
-  const state = { fired: false, wrapFn: undefined, target, type, listener };
-  const wrapped = onceWrapper.bind(state);
-  (wrapped as any).listener = listener;
-  (state as any).wrapFn = wrapped;
-  return wrapped;
+  const state = { fired: false, wrapFn: undefined, target, type, listener }
+  const wrapped = onceWrapper.bind(state)
+  ;(wrapped as any).listener = listener
+  ;(state as any).wrapFn = wrapped
+  return wrapped
 }
 
 EventEmitter.prototype.once = function once(
   type: string | symbol,
-  listener: unknown
+  listener: unknown,
 ) {
-  validateFunction(listener, 'listener');
+  validateFunction(listener, 'listener')
 
-  this.on(type, _onceWrap(this, type, listener));
-  return this;
-};
+  this.on(type, _onceWrap(this, type, listener))
+  return this
+}
 
 EventEmitter.prototype.prependOnceListener = function prependOnceListener(
   type: string | symbol,
-  listener: unknown
+  listener: unknown,
 ) {
-  validateFunction(listener, 'listener');
+  validateFunction(listener, 'listener')
 
-  this.prependListener(type, _onceWrap(this, type, listener));
-  return this;
-};
+  this.prependListener(type, _onceWrap(this, type, listener))
+  return this
+}
 
 EventEmitter.prototype.removeListener = function removeListener(
   type: string | symbol,
-  listener: unknown
+  listener: unknown,
 ) {
-  validateFunction(listener, 'listener');
+  validateFunction(listener, 'listener')
 
-  const events = this._events;
+  const events = this._events
   if (events === undefined) {
-    return this;
+    return this
   }
 
-  const list = events[type] as EventCallback | EventCallback[] | undefined;
+  const list = events[type] as EventCallback | EventCallback[] | undefined
   if (list === undefined) {
-    return this;
+    return this
   }
 
   if (list === listener || ('listener' in list && list.listener === listener)) {
     if (--this._eventsCount === 0) {
-      this._events = Object.create(null);
+      this._events = Object.create(null)
     } else {
-      delete events[type];
+      delete events[type]
       if (events.removeListener) {
-        this.emit('removeListener', type, list.listener || listener);
+        this.emit('removeListener', type, list.listener || listener)
       }
     }
   } else if (typeof list !== 'function') {
-    let position = -1;
+    let position = -1
 
     for (let i = list.length - 1; i >= 0; i--) {
       if (
         list[i] === listener ||
         (list[i] as EventCallback).listener === listener
       ) {
-        position = i;
-        break;
+        position = i
+        break
       }
     }
 
     if (position < 0) {
-      return this;
+      return this
     }
 
     if (position === 0) {
-      list.shift();
+      list.shift()
     } else {
-      spliceOne(list, position);
+      spliceOne(list, position)
     }
 
     if (list.length === 1) {
-      events[type] = list.at(0) as unknown as EventCallback[];
+      events[type] = list.at(0) as unknown as EventCallback[]
     }
 
     if (events.removeListener !== undefined) {
-      this.emit('removeListener', type, listener);
+      this.emit('removeListener', type, listener)
     }
   }
 
-  return this;
-};
+  return this
+}
 
-EventEmitter.prototype.off = EventEmitter.prototype.removeListener;
+EventEmitter.prototype.off = EventEmitter.prototype.removeListener
 
 EventEmitter.prototype.removeAllListeners = function removeAllListeners(
-  type: string | symbol
+  type: string | symbol,
 ) {
-  const events = this._events;
+  const events = this._events
   if (events === undefined) {
-    return this;
+    return this
   }
 
   // Not listening for removeListener, no need to emit
   if (events.removeListener === undefined) {
     if (arguments.length === 0) {
-      this._events = Object.create(null);
-      this._eventsCount = 0;
+      this._events = Object.create(null)
+      this._eventsCount = 0
     } else if (events[type] !== undefined) {
       if (--this._eventsCount === 0) {
-        this._events = Object.create(null);
+        this._events = Object.create(null)
       } else {
-        delete events[type];
+        delete events[type]
       }
     }
-    return this;
+    return this
   }
 
   // Emit removeListener for all listeners on all events
   if (arguments.length === 0) {
     for (const key of Reflect.ownKeys(events)) {
-      if (key === 'removeListener') continue;
-      this.removeAllListeners(key);
+      if (key === 'removeListener') continue
+      this.removeAllListeners(key)
     }
-    this.removeAllListeners('removeListener');
-    this._events = Object.create(null);
-    this._eventsCount = 0;
-    return this;
+    this.removeAllListeners('removeListener')
+    this._events = Object.create(null)
+    this._eventsCount = 0
+    return this
   }
 
-  const listeners = events[type];
+  const listeners = events[type]
 
   if (typeof listeners === 'function') {
-    this.removeListener(type, listeners);
+    this.removeListener(type, listeners)
   } else if (listeners !== undefined) {
     // LIFO order
     for (let i = listeners.length - 1; i >= 0; i--) {
-      this.removeListener(type, listeners[i] as EventListener);
+      this.removeListener(type, listeners[i] as EventListener)
     }
   }
 
-  return this;
-};
+  return this
+}
 
 function _listeners(target: any, type: string | symbol, unwrap: boolean) {
-  const events = target._events;
+  const events = target._events
 
   if (events === undefined) {
-    return [];
+    return []
   }
 
-  const evlistener = events[type];
+  const evlistener = events[type]
   if (evlistener === undefined) {
-    return [];
+    return []
   }
 
   if (typeof evlistener === 'function') {
-    return unwrap ? [evlistener.listener || evlistener] : [evlistener];
+    return unwrap ? [evlistener.listener || evlistener] : [evlistener]
   }
 
-  return unwrap ? unwrapListeners(evlistener) : arrayClone(evlistener);
+  return unwrap ? unwrapListeners(evlistener) : arrayClone(evlistener)
 }
 
 EventEmitter.prototype.listeners = function listeners(type: string | symbol) {
-  return _listeners(this, type, true);
-};
+  return _listeners(this, type, true)
+}
 
 EventEmitter.prototype.rawListeners = function rawListeners(
-  type: string | symbol
+  type: string | symbol,
 ) {
-  return _listeners(this, type, false);
-};
+  return _listeners(this, type, false)
+}
 
 const _listenerCount = function listenerCount(
   this: any,
-  type: string | symbol
+  type: string | symbol,
 ) {
-  const events = this._events;
+  const events = this._events
 
   if (events !== undefined) {
-    const evlistener = events[type];
+    const evlistener = events[type]
 
     if (typeof evlistener === 'function') {
-      return 1;
+      return 1
     } else if (evlistener !== undefined) {
-      return evlistener.length;
+      return evlistener.length
     }
   }
 
-  return 0;
-};
+  return 0
+}
 
-EventEmitter.prototype.listenerCount = _listenerCount;
+EventEmitter.prototype.listenerCount = _listenerCount
 
 export function listenerCount(emitter: any, type: string | symbol) {
   if (typeof emitter.listenerCount === 'function') {
-    return emitter.listenerCount(type);
+    return emitter.listenerCount(type)
   }
-  return _listenerCount.call(emitter, type);
+  return _listenerCount.call(emitter, type)
 }
 
 EventEmitter.prototype.eventNames = function eventNames() {
-  return this._eventsCount > 0 ? Reflect.ownKeys(this._events || {}) : [];
-};
+  return this._eventsCount > 0 ? Reflect.ownKeys(this._events || {}) : []
+}
 
 function arrayClone(arr: any[]) {
   // At least since V8 8.3, this implementation is faster than the previous
   // which always used a simple for-loop
   switch (arr.length) {
     case 2:
-      return [arr[0], arr[1]];
+      return [arr[0], arr[1]]
     case 3:
-      return [arr[0], arr[1], arr[2]];
+      return [arr[0], arr[1], arr[2]]
     case 4:
-      return [arr[0], arr[1], arr[2], arr[3]];
+      return [arr[0], arr[1], arr[2], arr[3]]
     case 5:
-      return [arr[0], arr[1], arr[2], arr[3], arr[4]];
+      return [arr[0], arr[1], arr[2], arr[3], arr[4]]
     case 6:
-      return [arr[0], arr[1], arr[2], arr[3], arr[4], arr[5]];
+      return [arr[0], arr[1], arr[2], arr[3], arr[4], arr[5]]
   }
-  return arr.slice();
+  return arr.slice()
 }
 
 function unwrapListeners(arr: any[]) {
-  const ret = arrayClone(arr);
+  const ret = arrayClone(arr)
   for (let i = 0; i < ret.length; ++i) {
-    const orig = ret[i].listener;
+    const orig = ret[i].listener
     if (typeof orig === 'function') {
-      ret[i] = orig;
+      ret[i] = orig
     }
   }
-  return ret;
+  return ret
 }
 
 export function getEventListeners(emitterOrTarget: any, type: string | symbol) {
   // First check if EventEmitter
   if (typeof emitterOrTarget.listeners === 'function') {
-    return emitterOrTarget.listeners(type);
+    return emitterOrTarget.listeners(type)
   }
   if (emitterOrTarget instanceof EventTarget) {
     // Workers does not implement the ability to get the event listeners on an
     // EventTarget the way that Node.js does. We simply return empty here.
-    return [];
+    return []
   }
   throw new ERR_INVALID_ARG_TYPE(
     'emitter',
     ['EventEmitter', 'EventTarget'],
-    emitterOrTarget
-  );
+    emitterOrTarget,
+  )
 }
 
 export interface OnceOptions {
-  signal?: AbortSignal;
+  signal?: AbortSignal
 }
 
 export async function once(
   emitter: any,
   name: string | symbol,
-  options: OnceOptions = {}
+  options: OnceOptions = {},
 ) {
-  validateObject(options, 'options');
-  const { signal } = options;
-  validateAbortSignal(signal, 'options.signal');
+  validateObject(options, 'options')
+  const { signal } = options
+  validateAbortSignal(signal, 'options.signal')
   if (signal?.aborted) {
-    throw new AbortError(undefined, { cause: signal.reason });
+    throw new AbortError(undefined, { cause: signal.reason })
   }
   return new Promise((resolve, reject) => {
     const errorListener = (err: any) => {
-      emitter.removeListener(name, resolver);
+      emitter.removeListener(name, resolver)
       if (signal != null) {
-        eventTargetAgnosticRemoveListener(signal, 'abort', abortListener);
+        eventTargetAgnosticRemoveListener(signal, 'abort', abortListener)
       }
-      reject(err);
-    };
+      reject(err)
+    }
     const resolver = (...args: any[]) => {
       if (typeof emitter.removeListener === 'function') {
-        emitter.removeListener('error', errorListener);
+        emitter.removeListener('error', errorListener)
       }
       if (signal != null) {
-        eventTargetAgnosticRemoveListener(signal, 'abort', abortListener);
+        eventTargetAgnosticRemoveListener(signal, 'abort', abortListener)
       }
-      resolve(args);
-    };
-    eventTargetAgnosticAddListener(emitter, name, resolver, { once: true });
+      resolve(args)
+    }
+    eventTargetAgnosticAddListener(emitter, name, resolver, { once: true })
     if (name !== 'error' && typeof emitter.once === 'function') {
       // EventTarget does not have `error` event semantics like Node
       // EventEmitters, we listen to `error` events only on EventEmitters.
-      emitter.once('error', errorListener);
+      emitter.once('error', errorListener)
     }
     function abortListener() {
-      eventTargetAgnosticRemoveListener(emitter, name, resolver);
-      eventTargetAgnosticRemoveListener(emitter, 'error', errorListener);
-      reject(new AbortError());
+      eventTargetAgnosticRemoveListener(emitter, name, resolver)
+      eventTargetAgnosticRemoveListener(emitter, 'error', errorListener)
+      reject(new AbortError())
     }
     if (signal != null) {
       eventTargetAgnosticAddListener(signal, 'abort', abortListener, {
         once: true,
-      });
+      })
     }
-  });
+  })
 }
 
 const AsyncIteratorPrototype = Object.getPrototypeOf(
-  Object.getPrototypeOf(async function* () {}).prototype
-);
+  Object.getPrototypeOf(async function* () {}).prototype,
+)
 
 function createIterResult(value: any, done: boolean) {
-  return { value, done };
+  return { value, done }
 }
 
 function eventTargetAgnosticRemoveListener(
   emitter: any,
   name: string | symbol,
   listener: unknown,
-  flags: unknown = undefined
+  flags: unknown = undefined,
 ) {
   if (typeof emitter.removeListener === 'function') {
-    emitter.removeListener(name, listener);
+    emitter.removeListener(name, listener)
   } else if (typeof emitter.removeEventListener === 'function') {
-    emitter.removeEventListener(name, listener, flags);
+    emitter.removeEventListener(name, listener, flags)
   } else {
-    throw new ERR_INVALID_ARG_TYPE('emitter', 'EventEmitter', emitter);
+    throw new ERR_INVALID_ARG_TYPE('emitter', 'EventEmitter', emitter)
   }
 }
 
 interface AddListenerFlags {
-  once?: boolean;
+  once?: boolean
 }
 
 function eventTargetAgnosticAddListener(
   emitter: any,
   name: string | symbol,
   listener: unknown,
-  flags: AddListenerFlags = {}
+  flags: AddListenerFlags = {},
 ) {
   if (typeof emitter.on === 'function') {
     if (flags?.once) {
-      emitter.once(name, listener);
+      emitter.once(name, listener)
     } else {
-      emitter.on(name, listener);
+      emitter.on(name, listener)
     }
   } else if (typeof emitter.addEventListener === 'function') {
     // EventTarget does not have `error` event semantics like Node
@@ -909,82 +910,82 @@ function eventTargetAgnosticAddListener(
     emitter.addEventListener(
       name,
       (arg: unknown) => {
-        (listener as any)(arg);
+        ;(listener as any)(arg)
       },
-      flags
-    );
+      flags,
+    )
   } else {
-    throw new ERR_INVALID_ARG_TYPE('emitter', 'EventEmitter', emitter);
+    throw new ERR_INVALID_ARG_TYPE('emitter', 'EventEmitter', emitter)
   }
 }
 
 interface OnOptions {
-  signal?: AbortSignal;
+  signal?: AbortSignal
 }
 
 export function on(
   emitter: any,
   event: string | symbol,
-  options: OnOptions = {}
+  options: OnOptions = {},
 ) {
-  const signal = options?.signal;
-  validateAbortSignal(signal, 'options.signal');
+  const signal = options?.signal
+  validateAbortSignal(signal, 'options.signal')
   if (signal?.aborted) {
-    throw new AbortError();
+    throw new AbortError()
   }
 
-  const unconsumedEvents: any[] = [];
-  const unconsumedPromises: any[] = [];
-  let error: any = null;
-  let finished = false;
+  const unconsumedEvents: any[] = []
+  const unconsumedPromises: any[] = []
+  let error: any = null
+  let finished = false
 
   const iterator = Object.setPrototypeOf(
     {
       next() {
         // First, we consume all unread events
-        const value = unconsumedEvents.shift();
+        const value = unconsumedEvents.shift()
         if (value) {
-          return Promise.resolve(createIterResult(value, false));
+          return Promise.resolve(createIterResult(value, false))
         }
 
         // Then we error, if an error happened
         // This happens one time if at all, because after 'error'
         // we stop listening
         if (error) {
-          const p = Promise.reject(error);
+          const p = Promise.reject(error)
           // Only the first element errors
-          error = null;
-          return p;
+          error = null
+          return p
         }
 
         // If the iterator is finished, resolve to done
         if (finished) {
-          return Promise.resolve(createIterResult(undefined, true));
+          return Promise.resolve(createIterResult(undefined, true))
         }
 
         // Wait until an event happens
-        return new Promise(function (resolve, reject) {
-          unconsumedPromises.push({ resolve, reject });
-        });
+        return new Promise((resolve, reject) => {
+          unconsumedPromises.push({ resolve, reject })
+        })
       },
 
       return() {
-        eventTargetAgnosticRemoveListener(emitter, event, eventHandler);
-        eventTargetAgnosticRemoveListener(emitter, 'error', errorHandler);
+        eventTargetAgnosticRemoveListener(emitter, event, eventHandler)
+        eventTargetAgnosticRemoveListener(emitter, 'error', errorHandler)
 
         if (signal) {
           eventTargetAgnosticRemoveListener(signal, 'abort', abortListener, {
             once: true,
-          });
+          })
         }
 
-        finished = true;
+        finished = true
 
         for (const promise of unconsumedPromises) {
-          promise.resolve(createIterResult(undefined, true));
+          promise.resolve(createIterResult(undefined, true))
         }
 
-        return Promise.resolve(createIterResult(undefined, true));
+        return Promise.resolve(createIterResult(undefined, true))
       },
 
       throw(err: any) {
@@ -992,59 +993,59 @@ export function on(
           throw new ERR_INVALID_ARG_TYPE(
             'EventEmitter.AsyncIterator',
             'Error',
-            err
-          );
+            err,
+          )
         }
-        error = err;
-        eventTargetAgnosticRemoveListener(emitter, event, eventHandler);
-        eventTargetAgnosticRemoveListener(emitter, 'error', errorHandler);
+        error = err
+        eventTargetAgnosticRemoveListener(emitter, event, eventHandler)
+        eventTargetAgnosticRemoveListener(emitter, 'error', errorHandler)
       },
 
       [Symbol.asyncIterator]() {
-        return this;
+        return this
       },
     },
-    AsyncIteratorPrototype
-  );
+    AsyncIteratorPrototype,
+  )
 
-  eventTargetAgnosticAddListener(emitter, event, eventHandler);
+  eventTargetAgnosticAddListener(emitter, event, eventHandler)
   if (event !== 'error' && typeof emitter.on === 'function') {
-    emitter.on('error', errorHandler);
+    emitter.on('error', errorHandler)
   }
 
   if (signal) {
     eventTargetAgnosticAddListener(signal, 'abort', abortListener, {
       once: true,
-    });
+    })
   }
 
-  return iterator;
+  return iterator
 
   function abortListener() {
-    errorHandler(new AbortError());
+    errorHandler(new AbortError())
   }
 
   function eventHandler(...args: any[]) {
-    const promise = unconsumedPromises.shift();
+    const promise = unconsumedPromises.shift()
     if (promise) {
-      promise.resolve(createIterResult(args, false));
+      promise.resolve(createIterResult(args, false))
     } else {
-      unconsumedEvents.push(args);
+      unconsumedEvents.push(args)
     }
   }
 
   function errorHandler(err: any) {
-    finished = true;
+    finished = true
 
-    const toError = unconsumedPromises.shift();
+    const toError = unconsumedPromises.shift()
 
     if (toError) {
-      toError.reject(err);
+      toError.reject(err)
     } else {
       // The next time we call next()
-      error = err;
+      error = err
     }
 
-    iterator.return();
+    iterator.return()
   }
 }

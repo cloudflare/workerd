@@ -2,17 +2,17 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
-import ts from "typescript";
-import { printNode } from "../print";
+import assert from 'node:assert'
+import ts from 'typescript'
+import { printNode } from '../print'
 
 // Checks whether the modifiers array contains a modifier of the specified kind
 export function hasModifier(
   modifiers: ReadonlyArray<ts.Modifier> | undefined,
-  kind: ts.Modifier["kind"]
+  kind: ts.Modifier['kind'],
 ): boolean {
-  if (modifiers === undefined) return false;
-  return modifiers.some((modifier) => modifier.kind === kind);
+  if (modifiers === undefined) return false
+  return modifiers.some((modifier) => modifier.kind === kind)
 }
 
 // Ensure a modifiers array has the specified modifier, inserting it at the
@@ -20,56 +20,56 @@ export function hasModifier(
 export function ensureModifier(
   ctx: ts.TransformationContext,
   modifiers: ReadonlyArray<ts.Modifier> | undefined,
-  ensure: ts.SyntaxKind.ExportKeyword | ts.SyntaxKind.DeclareKeyword
+  ensure: ts.SyntaxKind.ExportKeyword | ts.SyntaxKind.DeclareKeyword,
 ): ReadonlyArray<ts.Modifier> {
   // If modifiers already contains the required modifier, return it as is...
   if (modifiers !== undefined && hasModifier(modifiers, ensure)) {
-    return modifiers;
+    return modifiers
   }
   // ...otherwise, add the modifier to the start of the array
-  return [ctx.factory.createToken(ensure), ...(modifiers ?? [])];
+  return [ctx.factory.createToken(ensure), ...(modifiers ?? [])]
 }
 
 // Ensure a modifiers array doesn't have the specified modifier
 export function ensureNoModifier(
   _ctx: ts.TransformationContext,
   modifiers: ReadonlyArray<ts.Modifier> | undefined,
-  ensure: ts.SyntaxKind.ExportKeyword | ts.SyntaxKind.DeclareKeyword
+  ensure: ts.SyntaxKind.ExportKeyword | ts.SyntaxKind.DeclareKeyword,
 ): ReadonlyArray<ts.Modifier> {
   // If modifiers already doesn't contain the required modifier, return it as is...
   if (modifiers !== undefined && !hasModifier(modifiers, ensure)) {
-    return modifiers;
+    return modifiers
   }
   // ...otherwise, remove the modifier
-  return modifiers?.filter((m) => m.kind !== ensure) ?? [];
+  return modifiers?.filter((m) => m.kind !== ensure) ?? []
 }
 
 export interface ModifierRequirements {
-  export?: boolean;
-  declare?: boolean;
+  export?: boolean
+  declare?: boolean
 }
 // Ensures a node satisfies the specified modifier requirements
 function ensureModifierRequirements(
   ctx: ts.TransformationContext,
   node: ts.HasModifiers,
-  reqs: ModifierRequirements
+  reqs: ModifierRequirements,
 ): ReadonlyArray<ts.Modifier> | undefined {
-  let modifiers = ts.getModifiers(node);
+  let modifiers = ts.getModifiers(node)
   if (reqs.declare !== undefined) {
     modifiers = (reqs.declare ? ensureModifier : ensureNoModifier)(
       ctx,
       modifiers,
-      ts.SyntaxKind.DeclareKeyword
-    );
+      ts.SyntaxKind.DeclareKeyword,
+    )
   }
   if (reqs.export !== undefined) {
     modifiers = (reqs.export ? ensureModifier : ensureNoModifier)(
       ctx,
       modifiers,
-      ts.SyntaxKind.ExportKeyword
-    );
+      ts.SyntaxKind.ExportKeyword,
+    )
   }
-  return modifiers;
+  return modifiers
 }
 
 // Make sure replacement node is `export`ed, with the `declare` modifier if it's
@@ -78,7 +78,7 @@ function ensureModifierRequirements(
 export function ensureStatementModifiers(
   ctx: ts.TransformationContext,
   node: ts.Node,
-  reqs: ModifierRequirements
+  reqs: ModifierRequirements,
 ): ts.Statement {
   if (ts.isClassDeclaration(node)) {
     return ctx.factory.updateClassDeclaration(
@@ -87,8 +87,8 @@ export function ensureStatementModifiers(
       node.name,
       node.typeParameters,
       node.heritageClauses,
-      node.members
-    );
+      node.members,
+    )
   }
   if (ts.isInterfaceDeclaration(node)) {
     return ctx.factory.updateInterfaceDeclaration(
@@ -97,16 +97,16 @@ export function ensureStatementModifiers(
       node.name,
       node.typeParameters,
       node.heritageClauses,
-      node.members
-    );
+      node.members,
+    )
   }
   if (ts.isEnumDeclaration(node)) {
     return ctx.factory.updateEnumDeclaration(
       node,
       ensureModifierRequirements(ctx, node, reqs),
       node.name,
-      node.members
-    );
+      node.members,
+    )
   }
   if (ts.isTypeAliasDeclaration(node)) {
     return ctx.factory.updateTypeAliasDeclaration(
@@ -114,15 +114,15 @@ export function ensureStatementModifiers(
       ensureModifierRequirements(ctx, node, { ...reqs, declare: undefined }),
       node.name,
       node.typeParameters,
-      node.type
-    );
+      node.type,
+    )
   }
   if (ts.isVariableStatement(node)) {
     return ctx.factory.updateVariableStatement(
       node,
       ensureModifierRequirements(ctx, node, reqs),
-      node.declarationList
-    );
+      node.declarationList,
+    )
   }
   if (ts.isFunctionDeclaration(node)) {
     return ctx.factory.updateFunctionDeclaration(
@@ -133,16 +133,16 @@ export function ensureStatementModifiers(
       node.typeParameters,
       node.parameters,
       node.type,
-      node.body
-    );
+      node.body,
+    )
   }
   if (ts.isModuleDeclaration(node)) {
     return ctx.factory.updateModuleDeclaration(
       node,
       ensureModifierRequirements(ctx, node, reqs),
       node.name,
-      node.body
-    );
+      node.body,
+    )
   }
   if (
     ts.isImportDeclaration(node) ||
@@ -150,7 +150,7 @@ export function ensureStatementModifiers(
     ts.isExportDeclaration(node) ||
     ts.isExportAssignment(node)
   ) {
-    return node;
+    return node
   }
-  assert.fail(`Expected statement, got "${printNode(node)}"`);
+  assert.fail(`Expected statement, got "${printNode(node)}"`)
 }

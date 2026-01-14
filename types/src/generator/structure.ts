@@ -5,214 +5,209 @@
 // TODO(soon): Fallthrough have false positives here. Investigate this.
 /* eslint-disable no-fallthrough */
 
-import assert from 'node:assert';
+import assert from 'node:assert'
 import {
-  Constant,
-  Member,
-  Member_Nested,
+  type Constant,
+  type Member,
+  type Member_Nested,
   Member_Which,
-  Method,
-  Property,
-  Structure,
-} from '@workerd/jsg/rtti';
-import ts, { factory as f } from 'typescript';
-import { printNode } from '../print';
+  type Method,
+  type Property,
+  type Structure,
+} from '@workerd/jsg/rtti'
+import ts, { factory as f } from 'typescript'
+import { printNode } from '../print'
 import {
   createParamDeclarationNodes,
   createTypeNode,
   getTypeName,
   isUnsatisfiable,
   maybeUnwrapOptional,
-} from './type';
+} from './type'
 
-export const FULLY_QUALIFIED_NAME_PREFIX = 'fqn$';
+export const FULLY_QUALIFIED_NAME_PREFIX = 'fqn$'
 
 export function createMethodPartial(
   fullyQualifiedParentName: string,
-  method: Method
+  method: Method,
 ): [ts.Modifier[], string, ts.ParameterDeclaration[], ts.TypeNode] {
-  const modifiers: ts.Modifier[] = [];
+  const modifiers: ts.Modifier[] = []
   if (method.static) {
-    modifiers.push(f.createToken(ts.SyntaxKind.StaticKeyword));
+    modifiers.push(f.createToken(ts.SyntaxKind.StaticKeyword))
   }
-  const name = method.name;
+  const name = method.name
   const params = createParamDeclarationNodes(
     fullyQualifiedParentName,
     name,
     method.args.toArray(),
-    /* forMethod */ true
-  );
-  const result = createTypeNode(method.returnType);
-  return [modifiers, name, params, result];
+    /* forMethod */ true,
+  )
+  const result = createTypeNode(method.returnType)
+  return [modifiers, name, params, result]
 }
 
 function createIteratorMethodPartial(
   fullyQualifiedParentName: string,
   method: Method,
-  isAsync: boolean
+  isAsync: boolean,
 ): [ts.Modifier[], ts.PropertyName, ts.ParameterDeclaration[], ts.TypeNode] {
   const [modifiers, , params, result] = createMethodPartial(
     fullyQualifiedParentName,
-    method
-  );
+    method,
+  )
   const symbolIteratorExpression = f.createPropertyAccessExpression(
     f.createIdentifier('Symbol'),
-    isAsync ? 'asyncIterator' : 'iterator'
-  );
-  const name = f.createComputedPropertyName(symbolIteratorExpression);
-  return [modifiers, name, params, result];
+    isAsync ? 'asyncIterator' : 'iterator',
+  )
+  const name = f.createComputedPropertyName(symbolIteratorExpression)
+  return [modifiers, name, params, result]
 }
 
 function createInstancePropertyPartial(
-  prop: Property
+  prop: Property,
 ): [ts.Modifier[], string, ts.QuestionToken | undefined, ts.TypeNode] {
-  assert(!prop.prototype);
-  const modifiers: ts.Modifier[] = [];
+  assert(!prop.prototype)
+  const modifiers: ts.Modifier[] = []
   if (prop.readonly) {
-    modifiers.push(f.createToken(ts.SyntaxKind.ReadonlyKeyword));
+    modifiers.push(f.createToken(ts.SyntaxKind.ReadonlyKeyword))
   }
-  const name = prop.name;
-  let value = createTypeNode(prop.type);
+  const name = prop.name
+  let value = createTypeNode(prop.type)
 
   // If this is an optional type, use an optional property with a `?`
-  let questionToken: ts.QuestionToken | undefined;
-  const unwrappedValue = maybeUnwrapOptional(value);
+  let questionToken: ts.QuestionToken | undefined
+  const unwrappedValue = maybeUnwrapOptional(value)
   if (unwrappedValue !== undefined) {
-    value = unwrappedValue;
-    questionToken = f.createToken(ts.SyntaxKind.QuestionToken);
+    value = unwrappedValue
+    questionToken = f.createToken(ts.SyntaxKind.QuestionToken)
   }
 
-  return [modifiers, name, questionToken, value];
+  return [modifiers, name, questionToken, value]
 }
 
 function createPrototypeProperty(
-  prop: Property
+  prop: Property,
 ):
   | ts.GetAccessorDeclaration
   | [ts.GetAccessorDeclaration, ts.SetAccessorDeclaration] {
-  assert(prop.prototype);
-  const name = prop.name;
-  const value = createTypeNode(prop.type);
+  assert(prop.prototype)
+  const name = prop.name
+  const value = createTypeNode(prop.type)
 
   const getter = f.createGetAccessorDeclaration(
     /* modifiers */ undefined,
     name,
     /* params */ [],
     value,
-    /* body */ undefined
-  );
+    /* body */ undefined,
+  )
 
   if (prop.readonly) {
-    return getter;
+    return getter
   } else {
     const param = f.createParameterDeclaration(
       /* modifiers */ undefined,
       /* dotDotToken */ undefined,
       'value',
       /* questionToken */ undefined,
-      value
-    );
+      value,
+    )
     const setter = f.createSetAccessorDeclaration(
       /* modifiers */ undefined,
       name,
       [param],
-      /* body */ undefined
-    );
-    return [getter, setter];
+      /* body */ undefined,
+    )
+    return [getter, setter]
   }
 }
 
 function createNestedPartial(nested: Member_Nested): [string, ts.TypeNode] {
-  const name = nested.name;
-  const targetName = getTypeName(nested.structure);
-  const value = f.createTypeQueryNode(f.createIdentifier(targetName));
+  const name = nested.name
+  const targetName = getTypeName(nested.structure)
+  const value = f.createTypeQueryNode(f.createIdentifier(targetName))
   // Custom `name` will be empty string if omitted, so `??` wouldn't work here
-  return [name || targetName, value];
+  return [name || targetName, value]
 }
 
 function createConstantPartial(
-  constant: Constant
+  constant: Constant,
 ): [ts.Modifier[], string, ts.TypeNode] {
   const modifiers: ts.Modifier[] = [
     f.createToken(ts.SyntaxKind.StaticKeyword),
     f.createToken(ts.SyntaxKind.ReadonlyKeyword),
-  ];
-  const name = constant.name;
+  ]
+  const name = constant.name
   // Rather than using the constant value as a literal type here, just type them
   // as `number` to encourage people to use them as constants. This is also what
   // TypeScript does in its official lib types.
-  const valueNode = f.createTypeReferenceNode('number');
-  return [modifiers, name, valueNode];
+  const valueNode = f.createTypeReferenceNode('number')
+  return [modifiers, name, valueNode]
 }
 
 function createInterfaceMemberNode(
   fullyQualifiedInterfaceName: string,
-  member: Member
+  member: Member,
 ): ts.TypeElement | ts.TypeElement[] {
-  let modifiers: ts.Modifier[];
-  let name: string;
-  let params: ts.ParameterDeclaration[];
-  let result: ts.TypeNode;
-  let questionToken: ts.QuestionToken | undefined;
+  let modifiers: ts.Modifier[]
+  let name: string
+  let params: ts.ParameterDeclaration[]
+  let result: ts.TypeNode
+  let questionToken: ts.QuestionToken | undefined
 
-  const which = member.which();
+  const which = member.which()
   // noinspection FallThroughInSwitchStatementJS
   switch (which) {
     case Member_Which.METHOD: {
-      const method = member.method;
-      [modifiers, name, params, result] = createMethodPartial(
+      const method = member.method
+      ;[modifiers, name, params, result] = createMethodPartial(
         fullyQualifiedInterfaceName,
-        method
-      );
+        method,
+      )
       return f.createMethodSignature(
         modifiers,
         name,
         /* questionToken */ undefined,
         /* typeParams */ undefined,
         params,
-        result
-      );
+        result,
+      )
     }
     case Member_Which.PROPERTY: {
-      const prop = member.property;
+      const prop = member.property
       if (prop.prototype) {
-        return createPrototypeProperty(prop);
+        return createPrototypeProperty(prop)
       } else {
-        [modifiers, name, questionToken, result] =
-          createInstancePropertyPartial(prop);
-        return f.createPropertySignature(
-          modifiers,
-          name,
-          questionToken,
-          result
-        );
+        ;[modifiers, name, questionToken, result] =
+          createInstancePropertyPartial(prop)
+        return f.createPropertySignature(modifiers, name, questionToken, result)
       }
     }
     case Member_Which.NESTED: {
-      const nested = member.nested;
-      [name, result] = createNestedPartial(nested);
+      const nested = member.nested
+      ;[name, result] = createNestedPartial(nested)
       return f.createPropertySignature(
         /* modifiers */ undefined,
         name,
         /* questionToken */ undefined,
-        result
-      );
+        result,
+      )
     }
     case Member_Which.CONSTANT: {
-      const constant = member.constant;
-      [modifiers, name, result] = createConstantPartial(constant);
+      const constant = member.constant
+      ;[modifiers, name, result] = createConstantPartial(constant)
       return f.createPropertySignature(
         [f.createToken(ts.SyntaxKind.ReadonlyKeyword)],
         name,
         /* questionToken */ undefined,
-        result
-      );
+        result,
+      )
     }
     case Member_Which.CONSTRUCTOR: {
-      assert.fail('Unexpected constructor member inside interface');
+      assert.fail('Unexpected constructor member inside interface')
     }
     default: {
-      assert.fail(`Unknown member: ${which satisfies never}`);
+      assert.fail(`Unknown member: ${which satisfies never}`)
     }
   }
 }
@@ -220,41 +215,41 @@ function createInterfaceMemberNode(
 function createIteratorInterfaceMemberNode(
   fullyQualifiedInterfaceName: string,
   method: Method,
-  isAsync: boolean
+  isAsync: boolean,
 ): ts.TypeElement {
   const [modifiers, name, params, result] = createIteratorMethodPartial(
     fullyQualifiedInterfaceName,
     method,
-    isAsync
-  );
+    isAsync,
+  )
   return f.createMethodSignature(
     modifiers,
     name,
     /* questionToken */ undefined,
     /* typeParams */ undefined,
     params,
-    result
-  );
+    result,
+  )
 }
 
 function createClassMemberNode(
   fullyQualifiedClassName: string,
-  member: Member
+  member: Member,
 ): ts.ClassElement | ts.ClassElement[] {
-  let modifiers: ts.Modifier[];
-  let name: string;
-  let params: ts.ParameterDeclaration[];
-  let result: ts.TypeNode;
-  let questionToken: ts.QuestionToken | undefined;
+  let modifiers: ts.Modifier[]
+  let name: string
+  let params: ts.ParameterDeclaration[]
+  let result: ts.TypeNode
+  let questionToken: ts.QuestionToken | undefined
 
-  const which = member.which();
+  const which = member.which()
   switch (which) {
     case Member_Which.METHOD: {
-      const method = member.method;
-      [modifiers, name, params, result] = createMethodPartial(
+      const method = member.method
+      ;[modifiers, name, params, result] = createMethodPartial(
         fullyQualifiedClassName,
-        method
-      );
+        method,
+      )
       return f.createMethodDeclaration(
         modifiers,
         /* asteriskToken */ undefined,
@@ -263,76 +258,76 @@ function createClassMemberNode(
         /* typeParameters */ undefined,
         params,
         result,
-        /* body */ undefined
-      );
+        /* body */ undefined,
+      )
     }
     case Member_Which.PROPERTY: {
-      const prop = member.property;
+      const prop = member.property
       if (prop.prototype) {
-        return createPrototypeProperty(prop);
+        return createPrototypeProperty(prop)
       } else {
-        [modifiers, name, questionToken, result] =
-          createInstancePropertyPartial(prop);
+        ;[modifiers, name, questionToken, result] =
+          createInstancePropertyPartial(prop)
         return f.createPropertyDeclaration(
           modifiers,
           name,
           questionToken,
           result,
-          /* initializer */ undefined
-        );
+          /* initializer */ undefined,
+        )
       }
     }
     case Member_Which.NESTED: {
-      const nested = member.nested;
-      [name, result] = createNestedPartial(nested);
+      const nested = member.nested
+      ;[name, result] = createNestedPartial(nested)
       return f.createPropertyDeclaration(
         /* modifiers */ undefined,
         name,
         /* questionToken */ undefined,
         result,
-        /* initializer */ undefined
-      );
+        /* initializer */ undefined,
+      )
     }
     case Member_Which.CONSTANT: {
-      const constant = member.constant;
-      [modifiers, name, result] = createConstantPartial(constant);
+      const constant = member.constant
+      ;[modifiers, name, result] = createConstantPartial(constant)
       return f.createPropertyDeclaration(
         modifiers,
         name,
         /* questionToken */ undefined,
         result,
-        /* initializer */ undefined
-      );
+        /* initializer */ undefined,
+      )
     }
     case Member_Which.CONSTRUCTOR: {
-      const constructor = member.$constructor;
+      const constructor = member.$constructor
       params = createParamDeclarationNodes(
         fullyQualifiedClassName,
         'constructor',
         constructor.args.toArray(),
-        /* forMethod */ true
-      );
+        /* forMethod */ true,
+      )
       return f.createConstructorDeclaration(
         /* modifiers */ undefined,
         params,
-        /* body */ undefined
-      );
+        /* body */ undefined,
+      )
     }
     default:
-      assert.fail(`Unknown member: ${which satisfies never}`);
+      assert.fail(`Unknown member: ${which satisfies never}`)
   }
 }
 
 function createIteratorClassMemberNode(
   fullyQualifiedClassName: string,
   method: Method,
-  isAsync: boolean
+  isAsync: boolean,
 ): ts.ClassElement {
   const [modifiers, name, params, result] = createIteratorMethodPartial(
     fullyQualifiedClassName,
     method,
-    isAsync
-  );
+    isAsync,
+  )
   return f.createMethodDeclaration(
     modifiers,
     /* asteriskToken */ undefined,
@@ -341,8 +336,8 @@ function createIteratorClassMemberNode(
     /* typeParams */ undefined,
     params,
     result,
-    /* body */ undefined
-  );
+    /* body */ undefined,
+  )
 }
 
 // Remove all properties with type `never` and methods with return type `never`
@@ -360,77 +355,77 @@ function filterUnimplementedProperties<
       ts.isMethodDeclaration(member)
     ) {
       if (member.type !== undefined && isUnsatisfiable(member.type)) {
-        return false;
+        return false
       }
     }
-    return true;
-  });
+    return true
+  })
 }
 
 export interface CreateStructureNodeOptions {
-  asClass: boolean;
-  ambientContext?: boolean;
+  asClass: boolean
+  ambientContext?: boolean
 }
 export function createStructureNode(
   structure: Structure,
-  opts: CreateStructureNodeOptions
+  opts: CreateStructureNodeOptions,
 ): ts.InterfaceDeclaration | ts.ClassDeclaration {
-  const { asClass, ambientContext = false } = opts;
-  const modifiers: ts.Modifier[] = [];
-  const name = getTypeName(structure);
-  const fullyQualifiedName = structure.fullyQualifiedName;
+  const { asClass, ambientContext = false } = opts
+  const modifiers: ts.Modifier[] = []
+  const name = getTypeName(structure)
+  const fullyQualifiedName = structure.fullyQualifiedName
 
-  const heritage: ts.HeritageClause[] = [];
+  const heritage: ts.HeritageClause[] = []
   if (structure._hasExtends()) {
-    const typeNode = createTypeNode(structure.extends);
+    const typeNode = createTypeNode(structure.extends)
     assert(
       ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName),
-      `Expected type reference, got "${printNode(typeNode)}"`
-    );
+      `Expected type reference, got "${printNode(typeNode)}"`,
+    )
     const expr = f.createExpressionWithTypeArguments(
       typeNode.typeName,
-      typeNode.typeArguments
-    );
-    heritage.push(f.createHeritageClause(ts.SyntaxKind.ExtendsKeyword, [expr]));
+      typeNode.typeArguments,
+    )
+    heritage.push(f.createHeritageClause(ts.SyntaxKind.ExtendsKeyword, [expr]))
   }
 
-  const members = structure.members;
+  const members = structure.members
   if (asClass) {
     // Should only add `declare` if we're not already in an ambient context
     if (!ambientContext) {
-      modifiers.push(f.createToken(ts.SyntaxKind.DeclareKeyword));
+      modifiers.push(f.createToken(ts.SyntaxKind.DeclareKeyword))
     }
 
     // Can't use `flatMap()` here as `members` is a `capnp.List`
-    const classMembers = members
-      .map((member) => createClassMemberNode(fullyQualifiedName, member))
-      .flat();
+    const classMembers = members.flatMap((member) =>
+      createClassMemberNode(fullyQualifiedName, member),
+    )
 
     const constructorIndex = classMembers.findIndex((member) =>
-      ts.isConstructorDeclaration(member)
-    );
+      ts.isConstructorDeclaration(member),
+    )
     if (constructorIndex === -1) {
       // If this class doesn't have a constructor, it must be `abstract`, as we
       // never rely on the implicit default constructor. If a class can be
       // constructed using the empty constructor, it always defines it.
-      modifiers.push(f.createToken(ts.SyntaxKind.AbstractKeyword));
+      modifiers.push(f.createToken(ts.SyntaxKind.AbstractKeyword))
     } else {
       // Otherwise, ensure that the constructor always comes first
-      classMembers.unshift(...classMembers.splice(constructorIndex, 1));
+      classMembers.unshift(...classMembers.splice(constructorIndex, 1))
     }
 
     // Add iterator members
     if (structure._hasIterator()) {
-      const iterator = structure.iterator;
+      const iterator = structure.iterator
       classMembers.push(
-        createIteratorClassMemberNode(fullyQualifiedName, iterator, false)
-      );
+        createIteratorClassMemberNode(fullyQualifiedName, iterator, false),
+      )
     }
     if (structure._hasAsyncIterator()) {
-      const iterator = structure.asyncIterator;
+      const iterator = structure.asyncIterator
       classMembers.push(
-        createIteratorClassMemberNode(fullyQualifiedName, iterator, true)
-      );
+        createIteratorClassMemberNode(fullyQualifiedName, iterator, true),
+      )
     }
 
     return f.createClassDeclaration(
@@ -438,26 +433,26 @@ export function createStructureNode(
       name,
       /* typeParams */ undefined,
       heritage,
-      filterUnimplementedProperties(classMembers)
-    );
+      filterUnimplementedProperties(classMembers),
+    )
   } else {
     // Can't use `flatMap()` here as `members` is a `capnp.List`
-    const interfaceMembers = members
-      .map((member) => createInterfaceMemberNode(fullyQualifiedName, member))
-      .flat();
+    const interfaceMembers = members.flatMap((member) =>
+      createInterfaceMemberNode(fullyQualifiedName, member),
+    )
 
     // Add iterator members
     if (structure._hasIterator()) {
-      const iterator = structure.iterator;
+      const iterator = structure.iterator
       interfaceMembers.push(
-        createIteratorInterfaceMemberNode(fullyQualifiedName, iterator, false)
-      );
+        createIteratorInterfaceMemberNode(fullyQualifiedName, iterator, false),
+      )
     }
     if (structure._hasAsyncIterator()) {
-      const iterator = structure.asyncIterator;
+      const iterator = structure.asyncIterator
       interfaceMembers.push(
-        createIteratorInterfaceMemberNode(fullyQualifiedName, iterator, true)
-      );
+        createIteratorInterfaceMemberNode(fullyQualifiedName, iterator, true),
+      )
     }
 
     return f.createInterfaceDeclaration(
@@ -465,7 +460,7 @@ export function createStructureNode(
       name,
       /* typeParams */ undefined,
       heritage,
-      filterUnimplementedProperties(interfaceMembers)
-    );
+      filterUnimplementedProperties(interfaceMembers),
+    )
   }
 }

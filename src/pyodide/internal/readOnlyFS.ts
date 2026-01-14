@@ -1,33 +1,33 @@
 export function createReadonlyFS<Info>(
   FSOps: FSOps<Info>,
-  Module: Module
+  Module: Module,
 ): EmscriptenFS<Info> {
-  const FS = Module.FS;
+  const FS = Module.FS
   const ReadOnlyFS: EmscriptenFS<Info> = {
     mount(mount) {
-      return ReadOnlyFS.createNode(null, '/', mount.opts.info);
+      return ReadOnlyFS.createNode(null, '/', mount.opts.info)
     },
     createNode(parent, name, info): FSNode<Info> {
       // eslint-disable-next-line prefer-const
-      let { permissions: mode, isDir } = FSOps.getNodeMode(parent, name, info);
+      let { permissions: mode, isDir } = FSOps.getNodeMode(parent, name, info)
       if (isDir) {
-        mode |= 1 << 14; // set S_IFDIR
+        mode |= 1 << 14 // set S_IFDIR
       } else {
-        mode |= 1 << 15; // set S_IFREG
+        mode |= 1 << 15 // set S_IFREG
       }
-      const node = FS.createNode(parent, name, mode);
-      node.node_ops = ReadOnlyFS.node_ops;
-      node.stream_ops = ReadOnlyFS.stream_ops;
-      FSOps.setNodeAttributes(node, info, isDir);
-      return node;
+      const node = FS.createNode(parent, name, mode)
+      node.node_ops = ReadOnlyFS.node_ops
+      node.stream_ops = ReadOnlyFS.stream_ops
+      FSOps.setNodeAttributes(node, info, isDir)
+      return node
     },
     node_ops: {
       getattr(node) {
-        const size = node.usedBytes;
-        const mode = node.mode;
-        const t = new Date(node.modtime);
-        const blksize = 4096;
-        const blocks = ((size + blksize - 1) / blksize) | 0;
+        const size = node.usedBytes
+        const mode = node.mode
+        const t = new Date(node.modtime)
+        const blksize = 4096
+        const blocks = ((size + blksize - 1) / blksize) | 0
         return {
           dev: 1,
           ino: node.id,
@@ -42,40 +42,40 @@ export function createReadonlyFS<Info>(
           ctime: t,
           blksize,
           blocks,
-        };
+        }
       },
       readdir(node) {
-        return FSOps.readdir(node);
+        return FSOps.readdir(node)
       },
       lookup(parent, name) {
-        const child = FSOps.lookup(parent, name);
+        const child = FSOps.lookup(parent, name)
         if (child === undefined) {
-          throw FS.genericErrors?.[44] ?? new FS.ErrnoError(44); // ENOENT
+          throw FS.genericErrors?.[44] ?? new FS.ErrnoError(44) // ENOENT
         }
-        return ReadOnlyFS.createNode(parent, name, child);
+        return ReadOnlyFS.createNode(parent, name, child)
       },
     },
     stream_ops: {
       llseek(stream, offset, whence) {
-        let position = offset;
+        let position = offset
         if (whence === 1) {
           // SEEK_CUR
-          position += stream.position;
+          position += stream.position
         } else if (whence === 2) {
           // SEEK_END
           if (FS.isFile(stream.node.mode)) {
-            position += stream.node.usedBytes;
+            position += stream.node.usedBytes
           }
         }
-        return position;
+        return position
       },
       read(stream, buffer, offset, length, position) {
-        if (position >= stream.node.usedBytes) return 0;
-        const size = Math.min(stream.node.usedBytes - position, length);
-        buffer = buffer.subarray(offset, offset + size);
-        return FSOps.read(stream, position, buffer);
+        if (position >= stream.node.usedBytes) return 0
+        const size = Math.min(stream.node.usedBytes - position, length)
+        buffer = buffer.subarray(offset, offset + size)
+        return FSOps.read(stream, position, buffer)
       },
     },
-  };
-  return ReadOnlyFS;
+  }
+  return ReadOnlyFS
 }

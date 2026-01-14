@@ -25,18 +25,18 @@
 /* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import { format, formatWithOptions } from 'node-internal:internal_inspect';
+import { format, formatWithOptions } from 'node-internal:internal_inspect'
 
-let debugImpls: object = {};
+const debugImpls: object = {}
 
 function debuglogImpl(set: string) {
   if ((debugImpls as any)[set] === undefined) {
-    (debugImpls as any)[set] = function debug(...args: any[]) {
-      const msg = formatWithOptions({}, ...args);
-      console.log(format('%s: %s\n', set, msg));
-    };
+    ;(debugImpls as any)[set] = function debug(...args: any[]) {
+      const msg = formatWithOptions({}, ...args)
+      console.log(format('%s: %s\n', set, msg))
+    }
   }
-  return (debugImpls as any)[set];
+  return (debugImpls as any)[set]
 }
 
 // In Node.js' implementation, debuglog availability is determined by the NODE_DEBUG
@@ -44,42 +44,42 @@ function debuglogImpl(set: string) {
 // in the same way. Instead, we'll just always enable debuglog on the requested sets.
 export function debuglog(
   set: string,
-  cb?: (debug: (...args: any[]) => void) => void
+  cb?: (debug: (...args: any[]) => void) => void,
 ): any {
   function init() {
-    set = set.toUpperCase();
+    set = set.toUpperCase()
   }
   let debug = (...args: any[]): void => {
-    init();
-    debug = debuglogImpl(set);
+    init()
+    debug = debuglogImpl(set)
     if (typeof cb === 'function') {
-      cb(debug);
+      cb(debug)
     }
     switch (args.length) {
       case 1:
-        return debug(args[0]);
+        return debug(args[0])
       case 2:
-        return debug(args[0], args[1]);
+        return debug(args[0], args[1])
       default:
-        return debug(...args);
+        return debug(...args)
     }
-  };
+  }
   const logger = (...args: any[]) => {
     switch (args.length) {
       case 1:
-        return debug(args[0]);
+        return debug(args[0])
       case 2:
-        return debug(args[0], args[1]);
+        return debug(args[0], args[1])
       default:
-        return debug(...args);
+        return debug(...args)
     }
-  };
+  }
   Object.defineProperty(logger, 'enabled', {
     get() {
-      return true;
+      return true
     },
     configurable: true,
     enumerable: true,
-  });
-  return logger;
+  })
+  return logger
 }

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'ecmascript-binding/builtin-function-properties.any.js': {},
@@ -245,4 +245,4 @@ export default {
       'DOMException interface: new DOMException("my message", "myName") must inherit property "DATA_CLONE_ERR" with the proper type',
     ],
   },
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig

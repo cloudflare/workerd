@@ -4,9 +4,9 @@
  */
 export type WorkerVersionMetadata = {
   /** The ID of the Worker Version using this binding */
-  id: string;
+  id: string
   /** The tag of the Worker Version using this binding */
-  tag: string;
+  tag: string
   /** The timestamp of when the Worker Version was uploaded */
-  timestamp: string;
+  timestamp: string
 }

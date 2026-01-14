@@ -24,24 +24,24 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import {
+  _normalizeArgs,
   BlockList,
-  SocketAddress,
-  Server,
-  Socket,
   connect,
   createConnection,
   createServer,
   getDefaultAutoSelectFamily,
-  setDefaultAutoSelectFamily,
   getDefaultAutoSelectFamilyAttemptTimeout,
-  setDefaultAutoSelectFamilyAttemptTimeout,
   isIP,
   isIPv4,
   isIPv6,
-  _normalizeArgs,
-} from 'node-internal:internal_net';
+  Server,
+  Socket,
+  SocketAddress,
+  setDefaultAutoSelectFamily,
+  setDefaultAutoSelectFamilyAttemptTimeout,
+} from 'node-internal:internal_net'
 
-export const Stream = Socket;
+export const Stream = Socket
 
 export {
   BlockList,
@@ -59,7 +59,7 @@ export {
   isIPv4,
   isIPv6,
   _normalizeArgs,
-};
+}
 
 export default {
   BlockList,
@@ -78,4 +78,4 @@ export default {
   isIPv4,
   isIPv6,
   _normalizeArgs,
-};
+}

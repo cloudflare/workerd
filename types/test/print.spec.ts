@@ -2,46 +2,46 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from 'assert';
-import { test } from 'node:test';
-import ts, { factory as f } from 'typescript';
-import { printNode, printNodeList } from '../src/print';
+import assert from 'node:assert'
+import { test } from 'node:test'
+import ts, { factory as f } from 'typescript'
+import { printNode, printNodeList } from '../src/print'
 
 test('printNode: prints type', () => {
   const type = f.createTypeReferenceNode('Promise', [
     f.createTypeReferenceNode('void'),
-  ]);
-  assert.strictEqual(printNode(type), 'Promise<void>');
-});
+  ])
+  assert.strictEqual(printNode(type), 'Promise<void>')
+})
 
 test('printNode: prints interface', () => {
   const property = f.createPropertySignature(
     [f.createToken(ts.SyntaxKind.ReadonlyKeyword)],
     'thing',
     f.createToken(ts.SyntaxKind.QuestionToken),
-    f.createTypeReferenceNode('T')
-  );
+    f.createTypeReferenceNode('T'),
+  )
 
   const typeParam = f.createTypeParameterDeclaration(
     /* modifiers */ undefined,
     'T',
-    f.createTypeReferenceNode('string')
-  );
+    f.createTypeReferenceNode('string'),
+  )
   const declaration = f.createInterfaceDeclaration(
     [f.createToken(ts.SyntaxKind.ExportKeyword)],
     'Test',
     [typeParam],
     /* heritageClauses */ undefined,
-    [property]
-  );
+    [property],
+  )
 
   assert.strictEqual(
     printNode(declaration),
     `export interface Test<T extends string> {
     readonly thing?: T;
-}`
-  );
-});
+}`,
+  )
+})
 
 test('printNodeList: prints statements', () => {
   const interfaceDeclaration = f.createInterfaceDeclaration(
@@ -49,22 +49,22 @@ test('printNodeList: prints statements', () => {
     'Interface',
     /* typeParams */ undefined,
     /* heritageClauses */ undefined,
-    []
-  );
+    [],
+  )
   const classDeclaration = f.createClassDeclaration(
     /* modifiers */ undefined,
     'Class',
     /* typeParams */ undefined,
     /* heritageClauses */ undefined,
-    []
-  );
-  const printed = printNodeList([interfaceDeclaration, classDeclaration]);
+    [],
+  )
+  const printed = printNodeList([interfaceDeclaration, classDeclaration])
   assert.strictEqual(
     printed,
     `interface Interface {
 }
 class Class {
 }
-`
-  );
-});
+`,
+  )
+})

@@ -6,13 +6,13 @@
 import {
   validateHeaderName,
   validateHeaderValue,
-} from 'node-internal:internal_http';
+} from 'node-internal:internal_http'
 import {
-  kUniqueHeaders,
   kHighWaterMark,
-  parseUniqueHeadersOption,
+  kUniqueHeaders,
   OutgoingMessage,
-} from 'node-internal:internal_http_outgoing';
+  parseUniqueHeadersOption,
+} from 'node-internal:internal_http_outgoing'
 
 export {
   validateHeaderName,
@@ -21,7 +21,7 @@ export {
   kHighWaterMark,
   parseUniqueHeadersOption,
   OutgoingMessage,
-};
+}
 export default {
   validateHeaderName,
   validateHeaderValue,
@@ -29,4 +29,4 @@ export default {
   kHighWaterMark,
   parseUniqueHeadersOption,
   OutgoingMessage,
-};
+}

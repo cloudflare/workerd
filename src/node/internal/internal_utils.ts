@@ -26,15 +26,15 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { default as bufferUtil } from 'node-internal:buffer';
-import type { Encoding } from 'node-internal:buffer';
-import { validateFunction, validateString } from 'node-internal:validators';
+import type { Encoding } from 'node-internal:buffer'
+import { default as bufferUtil } from 'node-internal:buffer'
 import {
   ERR_FALSY_VALUE_REJECTION,
   type Falsy,
-} from 'node-internal:internal_errors';
+} from 'node-internal:internal_errors'
+import { validateFunction, validateString } from 'node-internal:validators'
 
-const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
+const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil
 
 export function normalizeEncoding(enc?: string): Encoding | undefined {
   if (
@@ -44,261 +44,261 @@ export function normalizeEncoding(enc?: string): Encoding | undefined {
     enc === 'UTF8' ||
     enc === 'UTF-8'
   )
-    return UTF8;
-  return getEncodingOps(enc);
+    return UTF8
+  return getEncodingOps(enc)
 }
 
 export function getEncodingOps(enc: unknown): Encoding | undefined {
-  if (enc === undefined) return UTF8;
+  if (enc === undefined) return UTF8
   // eslint-disable-next-line @typescript-eslint/no-base-to-string
-  let encoding = `${enc}`;
+  let encoding = `${enc}`
   switch (encoding.length) {
     case 4:
-      if (encoding === 'UTF8') return UTF8;
-      if (encoding === 'ucs2' || encoding === 'UCS2') return UTF16LE;
-      encoding = encoding.toLowerCase();
-      if (encoding === 'utf8') return UTF8;
-      if (encoding === 'ucs2') return UTF16LE;
-      break;
+      if (encoding === 'UTF8') return UTF8
+      if (encoding === 'ucs2' || encoding === 'UCS2') return UTF16LE
+      encoding = encoding.toLowerCase()
+      if (encoding === 'utf8') return UTF8
+      if (encoding === 'ucs2') return UTF16LE
+      break
     case 3:
       if (
         encoding === 'hex' ||
         encoding === 'HEX' ||
         encoding.toLowerCase() === 'hex'
       ) {
-        return HEX;
+        return HEX
       }
-      break;
+      break
     case 5:
-      if (encoding === 'ascii') return ASCII;
-      if (encoding === 'ucs-2') return UTF16LE;
-      if (encoding === 'UTF-8') return UTF8;
-      if (encoding === 'ASCII') return ASCII;
-      if (encoding === 'UCS-2') return UTF16LE;
-      encoding = encoding.toLowerCase();
-      if (encoding === 'utf-8') return UTF8;
-      if (encoding === 'ascii') return ASCII;
-      if (encoding === 'ucs-2') return UTF16LE;
-      break;
+      if (encoding === 'ascii') return ASCII
+      if (encoding === 'ucs-2') return UTF16LE
+      if (encoding === 'UTF-8') return UTF8
+      if (encoding === 'ASCII') return ASCII
+      if (encoding === 'UCS-2') return UTF16LE
+      encoding = encoding.toLowerCase()
+      if (encoding === 'utf-8') return UTF8
+      if (encoding === 'ascii') return ASCII
+      if (encoding === 'ucs-2') return UTF16LE
+      break
     case 6:
-      if (encoding === 'base64') return BASE64;
-      if (encoding === 'latin1' || encoding === 'binary') return LATIN1;
-      if (encoding === 'BASE64') return BASE64;
-      if (encoding === 'LATIN1' || encoding === 'BINARY') return LATIN1;
-      encoding = encoding.toLowerCase();
-      if (encoding === 'base64') return BASE64;
-      if (encoding === 'latin1' || encoding === 'binary') return LATIN1;
-      break;
+      if (encoding === 'base64') return BASE64
+      if (encoding === 'latin1' || encoding === 'binary') return LATIN1
+      if (encoding === 'BASE64') return BASE64
+      if (encoding === 'LATIN1' || encoding === 'BINARY') return LATIN1
+      encoding = encoding.toLowerCase()
+      if (encoding === 'base64') return BASE64
+      if (encoding === 'latin1' || encoding === 'binary') return LATIN1
+      break
     case 7:
       if (
         encoding === 'utf16le' ||
         encoding === 'UTF16LE' ||
         encoding.toLowerCase() === 'utf16le'
       ) {
-        return UTF16LE;
+        return UTF16LE
       }
-      break;
+      break
     case 8:
       if (
         encoding === 'utf-16le' ||
         encoding === 'UTF-16LE' ||
         encoding.toLowerCase() === 'utf-16le'
       ) {
-        return UTF16LE;
+        return UTF16LE
       }
-      break;
+      break
     case 9:
       if (
         encoding === 'base64url' ||
         encoding === 'BASE64URL' ||
         encoding.toLowerCase() === 'base64url'
       ) {
-        return BASE64URL;
+        return BASE64URL
       }
-      break;
+      break
     default:
-      if (encoding === '') return UTF8;
+      if (encoding === '') return UTF8
   }
-  return undefined;
+  return undefined
 }
 
 export function spliceOne(list: unknown[], index: number): void {
-  for (; index + 1 < list.length; index++) list[index] = list[index + 1];
-  list.pop();
+  for (; index + 1 < list.length; index++) list[index] = list[index + 1]
+  list.pop()
 }
 
-export const ALL_PROPERTIES = 0;
-export const ONLY_WRITABLE = 1;
-export const ONLY_ENUMERABLE = 2;
-export const ONLY_CONFIGURABLE = 4;
-export const ONLY_ENUM_WRITABLE = 6;
-export const SKIP_STRINGS = 8;
-export const SKIP_SYMBOLS = 16;
+export const ALL_PROPERTIES = 0
+export const ONLY_WRITABLE = 1
+export const ONLY_ENUMERABLE = 2
+export const ONLY_CONFIGURABLE = 4
+export const ONLY_ENUM_WRITABLE = 6
+export const SKIP_STRINGS = 8
+export const SKIP_SYMBOLS = 16
 
-const isNumericLookup: Record<string, boolean> = {};
+const isNumericLookup: Record<string, boolean> = {}
 export function isArrayIndex(value: unknown): value is number | string {
   switch (typeof value) {
     case 'number':
-      return value >= 0 && (value | 0) === value;
+      return value >= 0 && (value | 0) === value
     case 'string': {
-      const result = isNumericLookup[value];
+      const result = isNumericLookup[value]
       if (result !== void 0) {
-        return result;
+        return result
       }
-      const length = value.length;
+      const length = value.length
       if (length === 0) {
-        return (isNumericLookup[value] = false);
+        return (isNumericLookup[value] = false)
       }
-      let ch = 0;
-      let i = 0;
+      let ch = 0
+      let i = 0
       for (; i < length; ++i) {
-        ch = value.charCodeAt(i);
+        ch = value.charCodeAt(i)
         if (
           (i === 0 && ch === 0x30 && length > 1) /* must not start with 0 */ ||
           ch < 0x30 /* 0 */ ||
           ch > 0x39 /* 9 */
         ) {
-          return (isNumericLookup[value] = false);
+          return (isNumericLookup[value] = false)
         }
       }
-      return (isNumericLookup[value] = true);
+      return (isNumericLookup[value] = true)
     }
     default:
-      return false;
+      return false
   }
 }
 
 export function getOwnNonIndexProperties(
   // deno-lint-ignore ban-types
   obj: object,
-  filter: number
+  filter: number,
 ): (string | symbol)[] {
   let allProperties = [
     ...Object.getOwnPropertyNames(obj),
     ...Object.getOwnPropertySymbols(obj),
-  ];
+  ]
 
   if (Array.isArray(obj)) {
-    allProperties = allProperties.filter((k) => !isArrayIndex(k));
+    allProperties = allProperties.filter((k) => !isArrayIndex(k))
   }
 
   if (filter === ALL_PROPERTIES) {
-    return allProperties;
+    return allProperties
   }
 
-  const result: (string | symbol)[] = [];
+  const result: (string | symbol)[] = []
   for (const key of allProperties) {
-    const desc = Object.getOwnPropertyDescriptor(obj, key);
+    const desc = Object.getOwnPropertyDescriptor(obj, key)
     if (desc === undefined) {
-      continue;
+      continue
     }
     if (filter & ONLY_WRITABLE && !desc.writable) {
-      continue;
+      continue
     }
     if (filter & ONLY_ENUMERABLE && !desc.enumerable) {
-      continue;
+      continue
     }
     if (filter & ONLY_CONFIGURABLE && !desc.configurable) {
-      continue;
+      continue
     }
     if (filter & SKIP_STRINGS && typeof key === 'string') {
-      continue;
+      continue
     }
     if (filter & SKIP_SYMBOLS && typeof key === 'symbol') {
-      continue;
+      continue
     }
-    result.push(key);
+    result.push(key)
   }
-  return result;
+  return result
 }
 
 function callbackifyOnRejected(
   reason: unknown,
-  cb: (error?: unknown) => void
+  cb: (error?: unknown) => void,
 ): void {
   // `!reason` guard inspired by bluebird (https://github.com/petkaantonov/bluebird/blob/2207fae3572f03b089bc92d3a6cefdd278cff7ab/src/nodeify.js#L30-L43).
   // Because `null` is a special error value in callbacks which means "no error
   // occurred", we error-wrap so the callback consumer can distinguish between
   // "the promise rejected with null" or "the promise fulfilled with undefined".
   if (!reason) {
-    reason = new ERR_FALSY_VALUE_REJECTION(reason as Falsy);
+    reason = new ERR_FALSY_VALUE_REJECTION(reason as Falsy)
   }
-  cb(reason);
+  cb(reason)
 }
 
 // Types are taken from @types/node package
 // https://github.com/DefinitelyTyped/DefinitelyTyped/blob/dccb0e78c4d3265ae06985789156451bd73312c0/types/node/util.d.ts#L1054
 export function callbackify(
-  fn: () => Promise<void>
-): (callback: (err: Error) => void) => void;
+  fn: () => Promise<void>,
+): (callback: (err: Error) => void) => void
 export function callbackify<TResult>(
-  fn: () => Promise<TResult>
-): (callback: (err: Error, result: TResult) => void) => void;
+  fn: () => Promise<TResult>,
+): (callback: (err: Error, result: TResult) => void) => void
 export function callbackify<T1>(
-  fn: (arg1: T1) => Promise<void>
-): (arg1: T1, callback: (err: Error) => void) => void;
+  fn: (arg1: T1) => Promise<void>,
+): (arg1: T1, callback: (err: Error) => void) => void
 export function callbackify<T1, TResult>(
-  fn: (arg1: T1) => Promise<TResult>
-): (arg1: T1, callback: (err: Error, result: TResult) => void) => void;
+  fn: (arg1: T1) => Promise<TResult>,
+): (arg1: T1, callback: (err: Error, result: TResult) => void) => void
 export function callbackify<T1, T2>(
-  fn: (arg1: T1, arg2: T2) => Promise<void>
-): (arg1: T1, arg2: T2, callback: (err: Error) => void) => void;
+  fn: (arg1: T1, arg2: T2) => Promise<void>,
+): (arg1: T1, arg2: T2, callback: (err: Error) => void) => void
 export function callbackify<T1, T2, TResult>(
-  fn: (arg1: T1, arg2: T2) => Promise<TResult>
+  fn: (arg1: T1, arg2: T2) => Promise<TResult>,
 ): (
   arg1: T1,
   arg2: T2,
-  callback: (err: Error | null, result: TResult) => void
-) => void;
+  callback: (err: Error | null, result: TResult) => void,
+) => void
 export function callbackify<T1, T2, T3>(
-  fn: (arg1: T1, arg2: T2, arg3: T3) => Promise<void>
-): (arg1: T1, arg2: T2, arg3: T3, callback: (err: Error) => void) => void;
+  fn: (arg1: T1, arg2: T2, arg3: T3) => Promise<void>,
+): (arg1: T1, arg2: T2, arg3: T3, callback: (err: Error) => void) => void
 export function callbackify<T1, T2, T3, TResult>(
-  fn: (arg1: T1, arg2: T2, arg3: T3) => Promise<TResult>
+  fn: (arg1: T1, arg2: T2, arg3: T3) => Promise<TResult>,
 ): (
   arg1: T1,
   arg2: T2,
   arg3: T3,
-  callback: (err: Error | null, result: TResult) => void
-) => void;
+  callback: (err: Error | null, result: TResult) => void,
+) => void
 export function callbackify<T1, T2, T3, T4>(
-  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4) => Promise<void>
+  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4) => Promise<void>,
 ): (
   arg1: T1,
   arg2: T2,
   arg3: T3,
   arg4: T4,
-  callback: (err: Error) => void
-) => void;
+  callback: (err: Error) => void,
+) => void
 export function callbackify<T1, T2, T3, T4, TResult>(
-  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4) => Promise<TResult>
+  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4) => Promise<TResult>,
 ): (
   arg1: T1,
   arg2: T2,
   arg3: T3,
   arg4: T4,
-  callback: (err: Error | null, result: TResult) => void
-) => void;
+  callback: (err: Error | null, result: TResult) => void,
+) => void
 export function callbackify<T1, T2, T3, T4, T5>(
-  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4, arg5: T5) => Promise<void>
+  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4, arg5: T5) => Promise<void>,
 ): (
   arg1: T1,
   arg2: T2,
   arg3: T3,
   arg4: T4,
   arg5: T5,
-  callback: (err: Error) => void
-) => void;
+  callback: (err: Error) => void,
+) => void
 export function callbackify<T1, T2, T3, T4, T5, TResult>(
-  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4, arg5: T5) => Promise<TResult>
+  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4, arg5: T5) => Promise<TResult>,
 ): (
   arg1: T1,
   arg2: T2,
   arg3: T3,
   arg4: T4,
   arg5: T5,
-  callback: (err: Error | null, result: TResult) => void
-) => void;
+  callback: (err: Error | null, result: TResult) => void,
+) => void
 export function callbackify<T1, T2, T3, T4, T5, T6>(
   fn: (
     arg1: T1,
@@ -306,8 +306,8 @@ export function callbackify<T1, T2, T3, T4, T5, T6>(
     arg3: T3,
     arg4: T4,
     arg5: T5,
-    arg6: T6
-  ) => Promise<void>
+    arg6: T6,
+  ) => Promise<void>,
 ): (
   arg1: T1,
   arg2: T2,
@@ -315,8 +315,8 @@ export function callbackify<T1, T2, T3, T4, T5, T6>(
   arg4: T4,
   arg5: T5,
   arg6: T6,
-  callback: (err: Error) => void
-) => void;
+  callback: (err: Error) => void,
+) => void
 export function callbackify<T1, T2, T3, T4, T5, T6, TResult>(
   fn: (
     arg1: T1,
@@ -324,8 +324,8 @@ export function callbackify<T1, T2, T3, T4, T5, T6, TResult>(
     arg3: T3,
     arg4: T4,
     arg5: T5,
-    arg6: T6
-  ) => Promise<TResult>
+    arg6: T6,
+  ) => Promise<TResult>,
 ): (
   arg1: T1,
   arg2: T2,
@@ -333,113 +333,113 @@ export function callbackify<T1, T2, T3, T4, T5, T6, TResult>(
   arg4: T4,
   arg5: T5,
   arg6: T6,
-  callback: (err: Error | null, result: TResult) => void
-) => void;
+  callback: (err: Error | null, result: TResult) => void,
+) => void
 export function callbackify<T extends (...args: unknown[]) => Promise<unknown>>(
-  original: T
+  original: T,
 ): T extends (...args: infer TArgs) => Promise<infer TReturn>
   ? (...params: [...TArgs, (err: Error, ret: TReturn) => unknown]) => void
   : never {
-  validateFunction(original, 'original');
+  validateFunction(original, 'original')
 
   function callbackified(
     this: unknown,
     ...args: [...unknown[], (err: unknown, ret: unknown) => void]
   ): void {
-    const maybeCb = args.pop();
-    validateFunction(maybeCb, 'last argument');
-    const cb = maybeCb.bind(this);
+    const maybeCb = args.pop()
+    validateFunction(maybeCb, 'last argument')
+    const cb = maybeCb.bind(this)
     Reflect.apply(original, this, args).then(
       (ret: unknown) => {
-        queueMicrotask(() => cb(null, ret));
+        queueMicrotask(() => cb(null, ret))
       },
       (rej: unknown) => {
         queueMicrotask(() => {
-          callbackifyOnRejected(rej, cb);
-        });
-      }
-    );
+          callbackifyOnRejected(rej, cb)
+        })
+      },
+    )
   }
 
-  const descriptors = Object.getOwnPropertyDescriptors(original);
+  const descriptors = Object.getOwnPropertyDescriptors(original)
   if (typeof descriptors.length?.value === 'number') {
-    descriptors.length.value++;
+    descriptors.length.value++
   }
   if (typeof descriptors.name?.value === 'string') {
-    descriptors.name.value += 'Callbackified';
+    descriptors.name.value += 'Callbackified'
   }
-  const propertiesValues = Object.values(descriptors);
+  const propertiesValues = Object.values(descriptors)
   for (let i = 0; i < propertiesValues.length; i++) {
-    Object.setPrototypeOf(propertiesValues[i], null);
+    Object.setPrototypeOf(propertiesValues[i], null)
   }
-  Object.defineProperties(callbackified, descriptors);
+  Object.defineProperties(callbackified, descriptors)
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-expect-error
-  return callbackified;
+  return callbackified
 }
 
 export function parseEnv(content: string): Record<string, string> {
-  validateString(content, 'content');
+  validateString(content, 'content')
 
-  const result: Record<string, string> = {};
-  const lines = content.split('\n');
+  const result: Record<string, string> = {}
+  const lines = content.split('\n')
 
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    if (line === undefined) continue;
+    let line = lines[i]
+    if (line === undefined) continue
 
-    if (!line.trim()) continue;
-    if (line.trimStart().startsWith('#')) continue;
+    if (!line.trim()) continue
+    if (line.trimStart().startsWith('#')) continue
     if (line.trimStart().startsWith('export '))
-      line = line.substring(line.indexOf('export ') + 7);
+      line = line.substring(line.indexOf('export ') + 7)
 
-    const equalIndex = line.indexOf('=');
-    if (equalIndex === -1) continue;
+    const equalIndex = line.indexOf('=')
+    if (equalIndex === -1) continue
 
-    const key = line.substring(0, equalIndex).trim();
-    if (!key) continue;
+    const key = line.substring(0, equalIndex).trim()
+    if (!key) continue
 
-    let value = line.substring(equalIndex + 1).trimStart();
+    let value = line.substring(equalIndex + 1).trimStart()
     if (value.length > 0) {
-      const maybeQuote = value[0];
+      const maybeQuote = value[0]
       if (maybeQuote === '"' || maybeQuote === "'" || maybeQuote === '`') {
         // Check if the closing quote is on the same line
-        const closeIndex = value.indexOf(maybeQuote, 1);
+        const closeIndex = value.indexOf(maybeQuote, 1)
 
         if (closeIndex !== -1) {
           // Found closing quote on same line
-          value = value.substring(1, closeIndex);
+          value = value.substring(1, closeIndex)
           // Only handle escape sequences for double quotes
-          if (maybeQuote === '"') value = value.replace(/\\n/g, '\n');
+          if (maybeQuote === '"') value = value.replace(/\\n/g, '\n')
           // For single quotes and backticks, keep \n as literal
         } else {
           // Check for multiline strings
-          let fullValue = value.substring(1); // Remove opening quote
-          let currentLine = i;
-          let foundClosingQuote = false;
+          let fullValue = value.substring(1) // Remove opening quote
+          let currentLine = i
+          let foundClosingQuote = false
 
           // Look for closing quote in subsequent lines
           while (currentLine < lines.length - 1) {
-            currentLine++;
-            const nextLine = lines[currentLine];
+            currentLine++
+            const nextLine = lines[currentLine]
             if (nextLine !== undefined) {
-              const closeInNextLine = nextLine.indexOf(maybeQuote);
+              const closeInNextLine = nextLine.indexOf(maybeQuote)
               if (closeInNextLine !== -1) {
                 // Found closing quote
-                fullValue += '\n' + nextLine.substring(0, closeInNextLine);
-                value = fullValue;
+                fullValue += `\n${nextLine.substring(0, closeInNextLine)}`
+                value = fullValue
 
                 // Only handle escape sequences for double quotes
                 if (maybeQuote === '"') {
-                  value = value.replace(/\\n/g, '\n');
+                  value = value.replace(/\\n/g, '\n')
                 }
 
-                foundClosingQuote = true;
-                i = currentLine; // Update line counter
-                break;
+                foundClosingQuote = true
+                i = currentLine // Update line counter
+                break
               } else {
                 // Continue building multiline value
-                fullValue += '\n' + nextLine;
+                fullValue += `\n${nextLine}`
               }
             }
           }
@@ -447,41 +447,40 @@ export function parseEnv(content: string): Record<string, string> {
           if (!foundClosingQuote) {
             if (value.length === 1) {
               // Just the quote character, return it as the value
-              value = maybeQuote;
+              value = maybeQuote
             } else {
               // Return content after the opening quote
-              value = value.substring(1);
+              value = value.substring(1)
             }
           }
         }
       } else {
-        const hashIndex = value.indexOf('#');
-        if (hashIndex !== -1) value = value.substring(0, hashIndex);
-        value = value.trimEnd();
+        const hashIndex = value.indexOf('#')
+        if (hashIndex !== -1) value = value.substring(0, hashIndex)
+        value = value.trimEnd()
       }
     }
-    result[key] = value;
+    result[key] = value
   }
-  return result;
+  return result
 }
 
-export type NonEmptyArray<T> = [T, ...T[]];
+export type NonEmptyArray<T> = [T, ...T[]]
 export type PositiveInteger<T extends number> = T extends 0
   ? never
   : `${T}` extends `${infer _}.${infer _}`
     ? never
     : `${T}` extends `-${infer _}`
       ? never
-      : T;
+      : T
 export type FixedLengthArray<
   T,
   Length extends number,
   Accumulator extends NonEmptyArray<T> = [T],
-> =
-  Length extends PositiveInteger<Length>
-    ? number extends Length
-      ? NonEmptyArray<T>
-      : Length extends Accumulator['length']
-        ? Accumulator
-        : FixedLengthArray<T, Length, [T, ...Accumulator]>
-    : never;
+> = Length extends PositiveInteger<Length>
+  ? number extends Length
+    ? NonEmptyArray<T>
+    : Length extends Accumulator['length']
+      ? Accumulator
+      : FixedLengthArray<T, Length, [T, ...Accumulator]>
+  : never

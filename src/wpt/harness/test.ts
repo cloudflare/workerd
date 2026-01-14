@@ -25,26 +25,26 @@
 
 import {
   FilterList,
-  type UnknownFunc,
-  type TestFn,
   type PromiseTestFn,
-} from './common';
+  type TestFn,
+  type UnknownFunc,
+} from './common'
 
 declare global {
   function promise_test(
     func: PromiseTestFn,
     name?: string,
-    properties?: unknown
-  ): void;
+    properties?: unknown,
+  ): void
   function async_test(
     func: TestFn | string,
     name?: string,
-    properties?: unknown
-  ): Test;
-  function test(func: TestFn, name?: string, properties?: unknown): void;
+    properties?: unknown,
+  ): Test
+  function test(func: TestFn, name?: string, properties?: unknown): void
 }
 
-type TestErrorType = Error | 'OMITTED' | 'DISABLED' | undefined;
+type TestErrorType = Error | 'OMITTED' | 'DISABLED' | undefined
 
 /**
  * A single subtest. A Test is not constructed directly but via the
@@ -62,22 +62,22 @@ export class Test {
     HAS_RESULT: 2,
     CLEANING: 3,
     COMPLETE: 4,
-  } as const;
+  } as const
 
-  name: string;
-  properties: unknown;
-  phase: (typeof Test.Phases)[keyof typeof Test.Phases];
-  cleanup_callbacks: UnknownFunc[] = [];
+  name: string
+  properties: unknown
+  phase: (typeof Test.Phases)[keyof typeof Test.Phases]
+  cleanup_callbacks: UnknownFunc[] = []
 
-  error: TestErrorType = undefined;
+  error: TestErrorType = undefined
 
   // If this test is asynchronous, stores a promise that resolves on test completion
-  promise?: Promise<void>;
+  promise?: Promise<void>
 
   constructor(name: string, properties?: unknown) {
-    this.name = name;
-    this.properties = properties;
-    this.phase = Test.Phases.INITIAL;
+    this.name = name
+    this.properties = properties
+    this.phase = Test.Phases.INITIAL
   }
 
   /**
@@ -91,26 +91,26 @@ export class Test {
    */
   step(func: UnknownFunc, this_obj?: object, ...rest: unknown[]): unknown {
     if (this.phase > Test.Phases.STARTED) {
-      return undefined;
+      return undefined
     }
 
     if (arguments.length === 1) {
-      this_obj = this;
+      this_obj = this
     }
 
     try {
-      return func.call(this_obj, ...rest);
+      return func.call(this_obj, ...rest)
     } catch (err) {
       if (this.phase >= Test.Phases.HAS_RESULT) {
-        return undefined;
+        return undefined
       }
 
-      this.error = new AggregateError([err], this.name);
-      this.error.stack = '';
-      this.done();
+      this.error = new AggregateError([err], this.name)
+      this.error.stack = ''
+      this.done()
     }
 
-    return undefined;
+    return undefined
   }
 
   /**
@@ -135,10 +135,10 @@ export class Test {
    */
   step_func(func: UnknownFunc, this_obj?: object): UnknownFunc {
     if (arguments.length === 1) {
-      this_obj = this;
+      this_obj = this
     }
 
-    return (...params: unknown[]) => this.step(func, this_obj, ...params);
+    return (...params: unknown[]) => this.step(func, this_obj, ...params)
   }
 
   /**
@@ -155,16 +155,16 @@ export class Test {
    */
   step_func_done(func?: UnknownFunc, this_obj?: object): UnknownFunc {
     if (arguments.length === 1) {
-      this_obj = this;
+      this_obj = this
     }
 
     return (...params: unknown[]) => {
       if (func) {
-        this.step(func, this_obj, ...params);
+        this.step(func, this_obj, ...params)
       }
 
-      this.done();
-    };
+      this.done()
+    }
   }
 
   /**
@@ -177,8 +177,8 @@ export class Test {
    */
   unreached_func(description?: string): UnknownFunc {
     return this.step_func(() => {
-      assert_unreached(description);
-    });
+      assert_unreached(description)
+    })
   }
 
   /**
@@ -201,36 +201,36 @@ export class Test {
   ): ReturnType<typeof setTimeout> {
     return setTimeout(
       this.step_func(() => func(...rest)),
-      timeout
-    );
+      timeout,
+    )
   }
 
   add_cleanup(func: UnknownFunc): void {
-    this.cleanup_callbacks.push(func);
+    this.cleanup_callbacks.push(func)
   }
 
   done(): void {
     if (this.phase >= Test.Phases.CLEANING) {
-      return;
+      return
     }
 
-    this.cleanup();
+    this.cleanup()
   }
 
   cleanup(): void {
     // TODO(soon): Cleanup functions can also return a promise instead of being synchronous, but we don't need this for any tests currently.
     for (const cleanFn of this.cleanup_callbacks) {
-      cleanFn();
+      cleanFn()
     }
-    this.phase = Test.Phases.COMPLETE;
+    this.phase = Test.Phases.COMPLETE
   }
 }
 
 /* eslint-enable @typescript-eslint/no-this-alias */
 class SkippedTest extends Test {
   constructor(name: string, reason: TestErrorType) {
-    super(name);
-    this.error = reason;
+    super(name)
+    this.error = reason
   }
 
   override step(
@@ -238,7 +238,7 @@ class SkippedTest extends Test {
     _this_obj?: object,
     ..._rest: unknown[]
   ): unknown {
-    return undefined;
+    return undefined
   }
 }
 
@@ -248,13 +248,13 @@ class PromiseTest extends Test {
 
 globalThis.promise_test = (func, name, properties): void => {
   if (maybeAddSkippedTest(name ?? '')) {
-    return;
+    return
   }
 
-  const testCase = new PromiseTest(name ?? '', properties);
-  globalThis.state.subtests.push(testCase);
+  const testCase = new PromiseTest(name ?? '', properties)
+  globalThis.state.subtests.push(testCase)
 
-  const promise = testCase.step(func, testCase, testCase);
+  const promise = testCase.step(func, testCase, testCase)
 
   if (!(promise instanceof Promise)) {
     // The functions passed to promise_test are expected to return a Promise,
@@ -262,38 +262,38 @@ globalThis.promise_test = (func, name, properties): void => {
     // an error immediately when run.
 
     if (!testCase.error) {
-      testCase.error = new Error('Unexpected value returned from promise_test');
+      testCase.error = new Error('Unexpected value returned from promise_test')
     }
 
-    return;
+    return
   }
 
   testCase.promise = promise
     .then(() => {
-      testCase.done();
+      testCase.done()
     })
     .catch((err: unknown) => {
       testCase.error = Object.assign(new AggregateError([err], name), {
         stack: '',
-      });
-    });
-};
+      })
+    })
+}
 
 class AsyncTest extends Test {
-  #resolve: () => void;
+  #resolve: () => void
 
   constructor(name: string, properties: unknown) {
-    super(name, properties);
+    super(name, properties)
 
     // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
-    const { promise, resolve } = Promise.withResolvers<void>();
-    this.promise = promise;
-    this.#resolve = resolve;
+    const { promise, resolve } = Promise.withResolvers<void>()
+    this.promise = promise
+    this.#resolve = resolve
   }
 
   override done(): void {
-    super.done();
-    this.#resolve();
+    super.done()
+    this.#resolve()
   }
 }
 
@@ -301,35 +301,35 @@ globalThis.async_test = (func, name, properties): Test => {
   // async_test can be called in two ways:
   // 1. async_test(func, name, properties) - func is a TestFn
   // 2. async_test(name, properties) - just creates a test with the given name
-  let testName: string;
-  let testFunc: TestFn | undefined;
+  let testName: string
+  let testFunc: TestFn | undefined
 
   if (typeof func === 'string') {
     // async_test(name, properties) signature
-    testName = func;
-    testFunc = undefined;
+    testName = func
+    testFunc = undefined
     // name parameter is actually properties in this case
-    properties = name;
+    properties = name
   } else {
     // async_test(func, name, properties) signature
-    testName = name ?? '';
-    testFunc = func;
+    testName = name ?? ''
+    testFunc = func
   }
 
   if (maybeAddSkippedTest(testName)) {
     // Return a dummy test object for skipped tests
-    return new SkippedTest(testName, 'DISABLED');
+    return new SkippedTest(testName, 'DISABLED')
   }
 
-  const testCase = new AsyncTest(testName, properties);
-  globalThis.state.subtests.push(testCase);
+  const testCase = new AsyncTest(testName, properties)
+  globalThis.state.subtests.push(testCase)
 
   if (testFunc) {
-    testCase.step(testFunc, testCase, testCase);
+    testCase.step(testFunc, testCase, testCase)
   }
 
-  return testCase;
-};
+  return testCase
+}
 
 /**
  * Create a synchronous test
@@ -344,34 +344,34 @@ globalThis.async_test = (func, name, properties): Test => {
  */
 globalThis.test = (func, name, properties): void => {
   if (maybeAddSkippedTest(name ?? '')) {
-    return;
+    return
   }
 
-  const testCase = new Test(name ?? '', properties);
-  globalThis.state.subtests.push(testCase);
+  const testCase = new Test(name ?? '', properties)
+  globalThis.state.subtests.push(testCase)
 
-  testCase.step(func, testCase, testCase);
-  testCase.done();
-};
+  testCase.step(func, testCase, testCase)
+  testCase.done()
+}
 
 function maybeAddSkippedTest(message: string): boolean {
-  const disabledTests = new FilterList(globalThis.state.options.disabledTests);
+  const disabledTests = new FilterList(globalThis.state.options.disabledTests)
 
   if (disabledTests.has(message)) {
-    globalThis.state.subtests.push(new SkippedTest(message, 'DISABLED'));
-    return true;
+    globalThis.state.subtests.push(new SkippedTest(message, 'DISABLED'))
+    return true
   }
 
-  const omittedTests = new FilterList(globalThis.state.options.omittedTests);
+  const omittedTests = new FilterList(globalThis.state.options.omittedTests)
 
   if (omittedTests.has(message)) {
-    globalThis.state.subtests.push(new SkippedTest(message, 'OMITTED'));
-    return true;
+    globalThis.state.subtests.push(new SkippedTest(message, 'OMITTED'))
+    return true
   }
 
   if (globalThis.state.options.verbose) {
-    console.info('run', message);
+    console.info('run', message)
   }
 
-  return false;
+  return false
 }

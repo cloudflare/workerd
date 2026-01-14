@@ -12,16 +12,15 @@
 // - globalThis.setImmediate and globalThis.clearImmediate are available
 
 import {
-  setTimeout,
-  setInterval,
-  clearTimeout,
   clearInterval,
-} from 'node-internal:internal_timers';
+  clearTimeout,
+  setInterval,
+  setTimeout,
+} from 'node-internal:internal_timers'
 
-globalThis.setTimeout = setTimeout as unknown as typeof globalThis.setTimeout;
-globalThis.setInterval =
-  setInterval as unknown as typeof globalThis.setInterval;
+globalThis.setTimeout = setTimeout as unknown as typeof globalThis.setTimeout
+globalThis.setInterval = setInterval as unknown as typeof globalThis.setInterval
 globalThis.clearTimeout =
-  clearTimeout as unknown as typeof globalThis.clearTimeout;
+  clearTimeout as unknown as typeof globalThis.clearTimeout
 globalThis.clearInterval =
-  clearInterval as unknown as typeof globalThis.clearInterval;
+  clearInterval as unknown as typeof globalThis.clearInterval

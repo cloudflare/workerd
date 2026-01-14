@@ -1,3 +1,3 @@
-declare const TarReader: Reader;
+declare const TarReader: Reader
 
-export default TarReader;
+export default TarReader

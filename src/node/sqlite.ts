@@ -1,5 +1,5 @@
-import { default as sqliteUtil } from 'node-internal:sqlite';
-import type sqlite from 'node:sqlite';
+import type sqlite from 'node:sqlite'
+import { default as sqliteUtil } from 'node-internal:sqlite'
 
 const {
   DatabaseSync,
@@ -12,9 +12,9 @@ const {
   SQLITE_CHANGESET_CONFLICT,
   SQLITE_CHANGESET_CONSTRAINT,
   SQLITE_CHANGESET_FOREIGN_KEY,
-} = sqliteUtil;
+} = sqliteUtil
 
-export const backup = sqliteUtil.backup.bind(sqliteUtil);
+export const backup = sqliteUtil.backup.bind(sqliteUtil)
 
 export const constants: typeof sqlite.constants = {
   SQLITE_CHANGESET_OMIT,
@@ -26,13 +26,13 @@ export const constants: typeof sqlite.constants = {
   // @ts-expect-error TS2561 This is missing from node.js types
   SQLITE_CHANGESET_CONSTRAINT,
   SQLITE_CHANGESET_FOREIGN_KEY,
-};
+}
 
-export { DatabaseSync, StatementSync };
+export { DatabaseSync, StatementSync }
 
 export default {
   DatabaseSync,
   StatementSync,
   constants,
   backup,
-} satisfies typeof sqlite;
+} satisfies typeof sqlite

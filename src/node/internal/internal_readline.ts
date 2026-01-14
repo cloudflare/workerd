@@ -23,67 +23,67 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { EventEmitter } from 'node-internal:events';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
-import type Readline from 'node:readline';
+import type Readline from 'node:readline'
+import { EventEmitter } from 'node-internal:events'
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors'
 
 export class Interface extends EventEmitter implements Readline.Interface {
-  terminal: boolean;
-  line: string;
-  cursor: number;
+  terminal: boolean
+  line: string
+  cursor: number
 
   constructor() {
-    super();
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface');
+    super()
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface')
   }
 
   getPrompt(): string {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.getPrompt');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.getPrompt')
   }
 
   setPrompt(_prompt: string): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.setPrompt');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.setPrompt')
   }
 
   prompt(_preserveCursor?: boolean): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.prompt');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.prompt')
   }
 
   question(_query: unknown, _options: unknown, _callback?: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.question');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.question')
   }
 
   pause(): this {
-    return this;
+    return this
   }
 
   resume(): this {
-    return this;
+    return this
   }
 
   close(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.close');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.close')
   }
 
   write(_data: unknown, _key?: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.write');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.write')
   }
 
   getCursorPos(): Readline.CursorPos {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.getCursorPos');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.getCursorPos')
   }
 
   [Symbol.dispose](): void {
-    this.close();
+    this.close()
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async [Symbol.asyncDispose](): Promise<void> {
-    this.close();
+    this.close()
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [Symbol.asyncIterator](): NodeJS.AsyncIterator<string, undefined, any> {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface[Symbol.asyncIterator]');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface[Symbol.asyncIterator]')
   }
 }

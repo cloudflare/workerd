@@ -3,11 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 import {
-  Writable,
-  WritableState,
   fromWeb,
   toWeb,
-} from 'node-internal:streams_writable';
+  Writable,
+  WritableState,
+} from 'node-internal:streams_writable'
 
-export { Writable, WritableState, fromWeb, toWeb };
-export default Writable;
+export { Writable, WritableState, fromWeb, toWeb }
+export default Writable

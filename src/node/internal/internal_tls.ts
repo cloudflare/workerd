@@ -23,84 +23,84 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import type { PeerCertificate } from 'node:tls';
-import { isIP } from 'node-internal:internal_net';
-import { default as urlUtil } from 'node-internal:url';
+import type { PeerCertificate } from 'node:tls'
 import {
-  ERR_TLS_CERT_ALTNAME_INVALID,
-  ERR_TLS_CERT_ALTNAME_FORMAT,
   ERR_OUT_OF_RANGE,
-} from 'node-internal:internal_errors';
-import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
+  ERR_TLS_CERT_ALTNAME_FORMAT,
+  ERR_TLS_CERT_ALTNAME_INVALID,
+} from 'node-internal:internal_errors'
+import { isIP } from 'node-internal:internal_net'
+import { isArrayBufferView, isUint8Array } from 'node-internal:internal_types'
+import { default as urlUtil } from 'node-internal:url'
 
 // String#toLowerCase() is locale-sensitive so we use
 // a conservative version that only lowercases A-Z.
 function toLowerCase(c: string): string {
-  return String.fromCharCode(32 + c.charCodeAt(0));
+  return String.fromCharCode(32 + c.charCodeAt(0))
 }
 
 function unfqdn(host: string): string {
-  return host.replace(/[.]$/, '');
+  return host.replace(/[.]$/, '')
 }
 
 function splitHost(host: string): string[] {
-  return unfqdn(host).replace(/[A-Z]/g, toLowerCase).split('.');
+  return unfqdn(host).replace(/[A-Z]/g, toLowerCase).split('.')
 }
 
 function check(
   hostParts: string[],
   pattern: string | undefined | null,
-  wildcards: boolean
+  wildcards: boolean,
 ): boolean {
   // Empty strings, null, undefined, etc. never match.
-  if (!pattern) return false;
+  if (!pattern) return false
 
-  const patternParts = splitHost(pattern);
+  const patternParts = splitHost(pattern)
 
-  if (hostParts.length !== patternParts.length) return false;
+  if (hostParts.length !== patternParts.length) return false
 
   // Pattern has empty components, e.g. "bad..example.com".
-  if (patternParts.includes('')) return false;
+  if (patternParts.includes('')) return false
 
   // RFC 6125 allows IDNA U-labels (Unicode) in names but we have no
   // good way to detect their encoding or normalize them so we simply
   // reject them.  Control characters and blanks are rejected as well
   // because nothing good can come from accepting them.
-  const isBad = (s: string): boolean => /[^\u0021-\u007F]/u.test(s);
-  if (patternParts.some(isBad)) return false;
+  const isBad = (s: string): boolean => /[^\u0021-\u007F]/u.test(s)
+  if (patternParts.some(isBad)) return false
 
   // Check host parts from right to left first.
   for (let i = hostParts.length - 1; i > 0; i -= 1) {
-    if (hostParts[i] !== patternParts[i]) return false;
+    if (hostParts[i] !== patternParts[i]) return false
   }
 
-  const hostSubdomain = hostParts[0] as string;
-  const patternSubdomain = patternParts[0] as string;
-  const patternSubdomainParts = patternSubdomain.split('*', 3);
+  const hostSubdomain = hostParts[0] as string
+  const patternSubdomain = patternParts[0] as string
+  const patternSubdomainParts = patternSubdomain.split('*', 3)
 
   // Short-circuit when the subdomain does not contain a wildcard.
   // RFC 6125 does not allow wildcard substitution for components
   // containing IDNA A-labels (Punycode) so match those verbatim.
   if (patternSubdomainParts.length === 1 || patternSubdomain.includes('xn--'))
-    return hostSubdomain === patternSubdomain;
+    return hostSubdomain === patternSubdomain
 
-  if (!wildcards) return false;
+  if (!wildcards) return false
 
   // More than one wildcard is always wrong.
-  if (patternSubdomainParts.length > 2) return false;
+  if (patternSubdomainParts.length > 2) return false
 
   // *.tld wildcards are not allowed.
-  if (patternParts.length <= 2) return false;
+  if (patternParts.length <= 2) return false
 
-  const { 0: prefix, 1: suffix } = patternSubdomainParts as [string, string];
+  const { 0: prefix, 1: suffix } = patternSubdomainParts as [string, string]
 
-  if (prefix.length + suffix.length > hostSubdomain.length) return false;
+  if (prefix.length + suffix.length > hostSubdomain.length) return false
 
-  if (!hostSubdomain.startsWith(prefix)) return false;
+  if (!hostSubdomain.startsWith(prefix)) return false
 
-  if (!hostSubdomain.endsWith(suffix)) return false;
+  if (!hostSubdomain.endsWith(suffix)) return false
 
-  return true;
+  return true
 }
 
 // This pattern is used to determine the length of escaped sequences within
@@ -108,162 +108,162 @@ function check(
 // This MUST match the JSON specification (ECMA-404 / RFC8259) exactly.
 const jsonStringPattern =
   // eslint-disable-next-line no-control-regex
-  /^"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/;
+  /^"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/
 
 function splitEscapedAltNames(altNames: string): string[] {
-  const result = [];
-  let currentToken = '';
-  let offset = 0;
+  const result = []
+  let currentToken = ''
+  let offset = 0
   while (offset !== altNames.length) {
-    const nextSep = altNames.indexOf(',', offset);
-    const nextQuote = altNames.indexOf('"', offset);
+    const nextSep = altNames.indexOf(',', offset)
+    const nextQuote = altNames.indexOf('"', offset)
     if (nextQuote !== -1 && (nextSep === -1 || nextQuote < nextSep)) {
       // There is a quote character and there is no separator before the quote.
-      currentToken += altNames.substring(offset, nextQuote);
-      const match = jsonStringPattern.exec(altNames.substring(nextQuote));
+      currentToken += altNames.substring(offset, nextQuote)
+      const match = jsonStringPattern.exec(altNames.substring(nextQuote))
       if (!match) {
-        throw new ERR_TLS_CERT_ALTNAME_FORMAT();
+        throw new ERR_TLS_CERT_ALTNAME_FORMAT()
       }
-      currentToken += JSON.parse(match[0]) as string;
-      offset = nextQuote + match[0].length;
+      currentToken += JSON.parse(match[0]) as string
+      offset = nextQuote + match[0].length
     } else if (nextSep !== -1) {
       // There is a separator and no quote before it.
-      currentToken += altNames.substring(offset, nextSep);
-      result.push(currentToken);
-      currentToken = '';
-      offset = nextSep + 2;
+      currentToken += altNames.substring(offset, nextSep)
+      result.push(currentToken)
+      currentToken = ''
+      offset = nextSep + 2
     } else {
-      currentToken += altNames.substring(offset);
-      offset = altNames.length;
+      currentToken += altNames.substring(offset)
+      offset = altNames.length
     }
   }
-  result.push(currentToken);
-  return result;
+  result.push(currentToken)
+  return result
 }
 
 export function checkServerIdentity(
   hostname: string,
-  cert: Partial<PeerCertificate>
+  cert: Partial<PeerCertificate>,
 ): Error | undefined {
-  const subject = cert.subject;
-  const altNames = cert.subjectaltname;
-  const dnsNames: string[] = [];
-  const ips: string[] = [];
+  const subject = cert.subject
+  const altNames = cert.subjectaltname
+  const dnsNames: string[] = []
+  const ips: string[] = []
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-conversion
-  hostname = '' + hostname;
+  hostname = `${hostname}`
 
   if (altNames) {
     const splitAltNames = altNames.includes('"')
       ? splitEscapedAltNames(altNames)
-      : altNames.split(', ');
+      : altNames.split(', ')
     splitAltNames.forEach((name) => {
       if (name.startsWith('DNS:')) {
-        dnsNames.push(name.slice(4));
+        dnsNames.push(name.slice(4))
       } else if (name.startsWith('IP Address:')) {
-        ips.push(urlUtil.canonicalizeIp(name.slice(11)));
+        ips.push(urlUtil.canonicalizeIp(name.slice(11)))
       }
-    });
+    })
   }
 
-  let valid = false;
-  let reason = 'Unknown reason';
+  let valid = false
+  let reason = 'Unknown reason'
 
-  hostname = unfqdn(hostname); // Remove trailing dot for error messages.
+  hostname = unfqdn(hostname) // Remove trailing dot for error messages.
 
   if (isIP(hostname)) {
-    valid = ips.includes(urlUtil.canonicalizeIp(hostname));
+    valid = ips.includes(urlUtil.canonicalizeIp(hostname))
     if (!valid)
-      reason = `IP: ${hostname} is not in the cert's list: ` + ips.join(', ');
+      reason = `IP: ${hostname} is not in the cert's list: ${ips.join(', ')}`
   } else if (dnsNames.length > 0 || subject?.CN) {
-    const hostParts = splitHost(hostname);
+    const hostParts = splitHost(hostname)
     const wildcard = (pattern: string): boolean =>
-      check(hostParts, pattern, true);
+      check(hostParts, pattern, true)
 
     if (dnsNames.length > 0) {
-      valid = dnsNames.some(wildcard);
+      valid = dnsNames.some(wildcard)
       if (!valid)
-        reason = `Host: ${hostname}. is not in the cert's altnames: ${altNames}`;
+        reason = `Host: ${hostname}. is not in the cert's altnames: ${altNames}`
     } else {
       // Match against Common Name only if no supported identifiers exist.
-      const cn = subject?.CN;
+      const cn = subject?.CN
 
-      if (Array.isArray(cn)) valid = cn.some(wildcard);
-      else if (cn) valid = wildcard(cn);
+      if (Array.isArray(cn)) valid = cn.some(wildcard)
+      else if (cn) valid = wildcard(cn)
 
-      if (!valid) reason = `Host: ${hostname}. is not cert's CN: ${cn}`;
+      if (!valid) reason = `Host: ${hostname}. is not cert's CN: ${cn}`
     }
   } else {
-    reason = 'Cert does not contain a DNS name';
+    reason = 'Cert does not contain a DNS name'
   }
 
   if (!valid) {
-    return new ERR_TLS_CERT_ALTNAME_INVALID(reason, hostname, cert);
+    return new ERR_TLS_CERT_ALTNAME_INVALID(reason, hostname, cert)
   }
-  return undefined;
+  return undefined
 }
 
 // Convert protocols array into valid OpenSSL protocols list
 // ("\x06spdy/2\x08http/1.1\x08http/1.0")
 function convertProtocols(protocols: string[]): Buffer {
-  const lens = Array.from({ length: protocols.length }, () => 0);
+  const lens = Array.from({ length: protocols.length }, () => 0)
   const buff = Buffer.allocUnsafe(
     protocols.reduce((p, c, i) => {
-      const len = Buffer.byteLength(c);
+      const len = Buffer.byteLength(c)
       if (len > 255) {
         throw new ERR_OUT_OF_RANGE(
           'The byte length of the protocol at index ' +
             `${i} exceeds the maximum length.`,
           '<= 255',
           len,
-          true
-        );
+          true,
+        )
       }
-      lens[i] = len;
-      return p + 1 + len;
-    }, 0)
-  );
+      lens[i] = len
+      return p + 1 + len
+    }, 0),
+  )
 
-  let offset = 0;
+  let offset = 0
   for (let i = 0, c = protocols.length; i < c; i++) {
-    buff[offset++] = lens[i] as number;
-    buff.write(protocols[i] as string, offset);
-    offset += lens[i] as number;
+    buff[offset++] = lens[i] as number
+    buff.write(protocols[i] as string, offset)
+    offset += lens[i] as number
   }
 
-  return buff;
+  return buff
 }
 
 export function convertALPNProtocols(
   protocols: unknown,
   out: {
-    ALPNProtocols: Buffer;
-  }
+    ALPNProtocols: Buffer
+  },
 ): void {
   // If protocols is Array - translate it into buffer
   if (Array.isArray(protocols)) {
-    out.ALPNProtocols = convertProtocols(protocols as string[]);
+    out.ALPNProtocols = convertProtocols(protocols as string[])
   } else if (isUint8Array(protocols)) {
     // Copy new buffer not to be modified by user.
-    out.ALPNProtocols = Buffer.from(protocols);
+    out.ALPNProtocols = Buffer.from(protocols)
   } else if (isArrayBufferView(protocols)) {
     out.ALPNProtocols = Buffer.from(
       protocols.buffer.slice(
         protocols.byteOffset,
-        protocols.byteOffset + protocols.byteLength
-      )
-    );
+        protocols.byteOffset + protocols.byteLength,
+      ),
+    )
   }
 }
 
 export function createServer(): void {
-  throw new Error('Not implemented');
+  throw new Error('Not implemented')
 }
 
 export function Server(): void {
-  throw new Error('Not implemented');
+  throw new Error('Not implemented')
 }
 
 export function getCiphers(): void {
-  throw new Error('Not implemented');
+  throw new Error('Not implemented')
 }

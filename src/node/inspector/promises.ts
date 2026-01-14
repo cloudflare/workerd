@@ -3,15 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { EventEmitter } from 'node-internal:events';
 import type {
   console as _console,
   Network as _Network,
   Session as _Session,
-} from 'node:inspector/promises';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+} from 'node:inspector/promises'
+import { EventEmitter } from 'node-internal:events'
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors'
 
-const noop: VoidFunction = () => {};
+const noop: VoidFunction = () => {}
 export const console: typeof _console = {
   debug: noop,
   error: noop,
@@ -34,84 +34,84 @@ export const console: typeof _console = {
   time: noop,
   timeLog: noop,
   timeStamp: noop,
-};
+}
 
 export const Network: typeof _Network = {
   requestWillBeSent(_params: _Network.RequestWillBeSentEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.requestWillBeSent');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.requestWillBeSent')
   },
   dataReceived(_params: _Network.DataReceivedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataReceived');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataReceived')
   },
   responseReceived(_params: _Network.ResponseReceivedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.responseReceived');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.responseReceived')
   },
   loadingFinished(_params: _Network.LoadingFinishedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFinished');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFinished')
   },
   loadingFailed(_params: _Network.LoadingFailedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFailed');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFailed')
   },
   webSocketHandshakeResponseReceived(
-    _params: _Network.WebSocketHandshakeResponseReceivedEventDataType
+    _params: _Network.WebSocketHandshakeResponseReceivedEventDataType,
   ): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED(
-      'Network.webSocketHandshakeResponseReceived'
-    );
+      'Network.webSocketHandshakeResponseReceived',
+    )
   },
   webSocketClosed(_params: _Network.WebSocketClosedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketClosed');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketClosed')
   },
   webSocketCreated(_params: _Network.WebSocketCreatedEventDataType): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketCreated');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketCreated')
   },
   dataSent(_params: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataSent');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataSent')
   },
-};
+}
 
 export class Session extends EventEmitter implements _Session {
   constructor() {
-    super();
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session');
+    super()
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session')
   }
 
   connect(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.connect');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.connect')
   }
 
   connectToMainThread(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.connectToMainThread');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.connectToMainThread')
   }
 
   disconnect(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.disconnect');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.disconnect')
   }
 
   // @ts-expect-error TS2416 This is intentional
   post(
     _method: unknown,
     _params?: unknown,
-    _callback?: unknown
+    _callback?: unknown,
   ): Promise<unknown> {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.post');
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session.post')
   }
 }
 
 export function url(): string | undefined {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('Inspector.url');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('Inspector.url')
 }
 
 export function waitForDebugger(): Promise<void> {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('Inspector.waitForDebugger');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('Inspector.waitForDebugger')
 }
 
 export function open(): Disposable {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('Inspector.open');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('Inspector.open')
 }
 
 export function close(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('Inspector.close');
+  throw new ERR_METHOD_NOT_IMPLEMENTED('Inspector.close')
 }
 
 export default {
@@ -122,4 +122,4 @@ export default {
   Session,
   url,
   waitForDebugger,
-};
+}

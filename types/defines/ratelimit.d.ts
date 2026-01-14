@@ -12,5 +12,5 @@ interface RateLimit {
    * @see https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
    * @returns A promise that resolves with the outcome of the rate limit.
    */
-  limit(options: RateLimitOptions): Promise<RateLimitOutcome>;
+  limit(options: RateLimitOptions): Promise<RateLimitOutcome>
 }

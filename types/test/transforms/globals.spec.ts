@@ -2,15 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
-import { test } from "node:test";
-import path from "path";
-import ts from "typescript";
-import { printer } from "../../src/print";
-import { createMemoryProgram } from "../../src/program";
-import { createGlobalScopeTransformer } from "../../src/transforms";
+import assert from 'node:assert'
+import path from 'node:path'
+import { test } from 'node:test'
+import ts from 'typescript'
+import { printer } from '../../src/print'
+import { createMemoryProgram } from '../../src/program'
+import { createGlobalScopeTransformer } from '../../src/transforms'
 
-test("createGlobalScopeTransformer: extracts global scope", () => {
+test('createGlobalScopeTransformer: extracts global scope', () => {
   const source = `type WorkerGlobalScopeEventMap = {
     fetch: Event;
     scheduled: Event;
@@ -39,21 +39,21 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     crypto: Crypto; // PropertySignature
     get console(): Console; // GetAccessorDeclaration
 }
-`;
+`
 
-  const sourcePath = path.resolve(__dirname, "source.ts");
-  const sources = new Map([[sourcePath, source]]);
-  const program = createMemoryProgram(sources);
-  const checker = program.getTypeChecker();
-  const sourceFile = program.getSourceFile(sourcePath);
-  assert(sourceFile !== undefined);
+  const sourcePath = path.resolve(__dirname, 'source.ts')
+  const sources = new Map([[sourcePath, source]])
+  const program = createMemoryProgram(sources)
+  const checker = program.getTypeChecker()
+  const sourceFile = program.getSourceFile(sourcePath)
+  assert(sourceFile !== undefined)
 
   const result = ts.transform(sourceFile, [
     createGlobalScopeTransformer(checker),
-  ]);
-  assert.strictEqual(result.transformed.length, 1);
+  ])
+  assert.strictEqual(result.transformed.length, 1)
 
-  const output = printer.printFile(result.transformed[0]);
+  const output = printer.printFile(result.transformed[0])
   assert.strictEqual(
     output,
     // Extracted global nodes inserted after ServiceWorkerGlobalScope
@@ -67,11 +67,11 @@ declare const property: number;
 declare function btoa(value: string): string;
 declare const crypto: Crypto;
 declare const console: Console;
-`
-  );
-});
+`,
+  )
+})
 
-test("createGlobalScopeTransformer: inlining type parameters in heritage", () => {
+test('createGlobalScopeTransformer: inlining type parameters in heritage', () => {
   const source = `declare class A<T> {
     thing: T;
 }
@@ -79,25 +79,25 @@ declare class B<T> extends A<T> {
 }
 declare class ServiceWorkerGlobalScope extends B<string> {
 }
-`;
+`
 
-  const sourcePath = path.resolve(__dirname, "source.ts");
-  const sources = new Map([[sourcePath, source]]);
-  const program = createMemoryProgram(sources);
-  const checker = program.getTypeChecker();
-  const sourceFile = program.getSourceFile(sourcePath);
-  assert(sourceFile !== undefined);
+  const sourcePath = path.resolve(__dirname, 'source.ts')
+  const sources = new Map([[sourcePath, source]])
+  const program = createMemoryProgram(sources)
+  const checker = program.getTypeChecker()
+  const sourceFile = program.getSourceFile(sourcePath)
+  assert(sourceFile !== undefined)
 
   const result = ts.transform(sourceFile, [
     createGlobalScopeTransformer(checker),
-  ]);
-  assert.strictEqual(result.transformed.length, 1);
+  ])
+  assert.strictEqual(result.transformed.length, 1)
 
-  const output = printer.printFile(result.transformed[0]);
+  const output = printer.printFile(result.transformed[0])
   assert.strictEqual(
     output,
     source +
       `declare const thing: string;
-`
-  );
-});
+`,
+  )
+})

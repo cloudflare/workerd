@@ -7,4 +7,4 @@ declare namespace _default {
   class RpcStub {}
   class RpcTarget {}
 }
-export default _default;
+export default _default

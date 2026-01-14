@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 /* eslint-disable @typescript-eslint/unbound-method */
-import { win32, posix } from 'node-internal:internal_path';
+import { posix, win32 } from 'node-internal:internal_path'
+
 const {
   basename,
   dirname,
@@ -19,7 +20,7 @@ const {
   toNamespacedPath,
   delimiter,
   sep,
-} = win32;
+} = win32
 export {
   basename,
   dirname,
@@ -37,5 +38,5 @@ export {
   posix,
   sep,
   win32,
-};
-export default win32;
+}
+export default win32

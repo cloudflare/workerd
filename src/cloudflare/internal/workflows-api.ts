@@ -4,19 +4,19 @@
 
 export class NonRetryableError extends Error {
   constructor(message: string, name = 'NonRetryableError') {
-    super(message);
-    this.name = name;
+    super(message)
+    this.name = name
   }
 }
 
 interface Fetcher {
-  fetch: typeof fetch;
+  fetch: typeof fetch
 }
 
 async function callFetcher<T>(
   fetcher: Fetcher,
   path: string,
-  body: object
+  body: object,
 ): Promise<T> {
   const res = await fetcher.fetch(`http://workflow-binding.local${path}`, {
     method: 'POST',
@@ -25,118 +25,118 @@ async function callFetcher<T>(
       'X-Version': '1',
     },
     body: JSON.stringify(body),
-  });
+  })
 
   const response = (await res.json()) as {
-    result: T;
-    error?: WorkflowError;
-  };
+    result: T
+    error?: WorkflowError
+  }
 
   if (res.ok) {
-    return response.result;
+    return response.result
   } else {
-    throw new Error(response.error?.message);
+    throw new Error(response.error?.message)
   }
 }
 
 class InstanceImpl implements WorkflowInstance {
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
-  private readonly fetcher: Fetcher;
-  readonly id: string;
+  private readonly fetcher: Fetcher
+  readonly id: string
 
   constructor(id: string, fetcher: Fetcher) {
-    this.id = id;
-    this.fetcher = fetcher;
+    this.id = id
+    this.fetcher = fetcher
   }
 
   async pause(): Promise<void> {
     await callFetcher(this.fetcher, '/pause', {
       id: this.id,
-    });
+    })
   }
   async resume(): Promise<void> {
     await callFetcher(this.fetcher, '/resume', {
       id: this.id,
-    });
+    })
   }
 
   async terminate(): Promise<void> {
     await callFetcher(this.fetcher, '/terminate', {
       id: this.id,
-    });
+    })
   }
 
   async restart(): Promise<void> {
     await callFetcher(this.fetcher, '/restart', {
       id: this.id,
-    });
+    })
   }
 
   async status(): Promise<InstanceStatus> {
     const result = await callFetcher<InstanceStatus>(this.fetcher, '/status', {
       id: this.id,
-    });
-    return result;
+    })
+    return result
   }
 
   async sendEvent({
     type,
     payload,
   }: {
-    type: string;
-    payload: unknown;
+    type: string
+    payload: unknown
   }): Promise<void> {
     await callFetcher(this.fetcher, '/send-event', {
       type,
       payload,
       id: this.id,
-    });
+    })
   }
 }
 
 class WorkflowImpl {
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
-  private readonly fetcher: Fetcher;
+  private readonly fetcher: Fetcher
 
   constructor(fetcher: Fetcher) {
-    this.fetcher = fetcher;
+    this.fetcher = fetcher
   }
 
   async get(id: string): Promise<WorkflowInstance> {
     const result = await callFetcher<{
-      id: string;
-    }>(this.fetcher, '/get', { id });
+      id: string
+    }>(this.fetcher, '/get', { id })
 
-    return new InstanceImpl(result.id, this.fetcher);
+    return new InstanceImpl(result.id, this.fetcher)
   }
 
   async create(
-    options?: WorkflowInstanceCreateOptions
+    options?: WorkflowInstanceCreateOptions,
   ): Promise<WorkflowInstance> {
     const result = await callFetcher<{
-      id: string;
-    }>(this.fetcher, '/create', options ?? {});
+      id: string
+    }>(this.fetcher, '/create', options ?? {})
 
-    return new InstanceImpl(result.id, this.fetcher);
+    return new InstanceImpl(result.id, this.fetcher)
   }
 
   async createBatch(
-    options: WorkflowInstanceCreateOptions[]
+    options: WorkflowInstanceCreateOptions[],
   ): Promise<WorkflowInstance[]> {
     const results = await callFetcher<
       {
-        id: string;
+        id: string
       }[]
-    >(this.fetcher, '/createBatch', options);
+    >(this.fetcher, '/createBatch', options)
 
-    return results.map((result) => new InstanceImpl(result.id, this.fetcher));
+    return results.map((result) => new InstanceImpl(result.id, this.fetcher))
   }
 }
 
 export function makeBinding(env: { fetcher: Fetcher }): Workflow {
-  return new WorkflowImpl(env.fetcher);
+  return new WorkflowImpl(env.fetcher)
 }
 
-export default makeBinding;
+export default makeBinding

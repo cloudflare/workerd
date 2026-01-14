@@ -9,10 +9,9 @@ from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
 import js
-from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint, fetch
-
 import pyodide.http
 from pyodide.ffi import JsProxy, to_js
+from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint, fetch
 
 
 @asynccontextmanager

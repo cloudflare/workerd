@@ -1,7 +1,13 @@
 {
   "name": "@cloudflare/workerd-root",
   "private": true,
-  "scripts": {},
+  "scripts": {
+    "build:bun": "bun src/bun/build.ts",
+    "test:bun": "bun test src/bun/bun.test.ts",
+    "test:sqlite": "bun test src/bun/sqlite.test.ts",
+    "test:bun-all": "bun test src/bun/bun.test.ts src/bun/sqlite.test.ts",
+    "test:worker": "WORKERD_RUNNING=1 bun test src/bun/bun-worker.test.ts"
+  },
   "dependencies": {
     "prettier": "^3.6.2",
     "typescript": "5.9.2"

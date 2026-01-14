@@ -10,14 +10,14 @@ interface Hyperdrive {
    * code (or preferably, the client library of your choice) will authenticate
    * using the information in this class's readonly fields.
    */
-  connect(): Socket;
+  connect(): Socket
 
   /**
    * A valid DB connection string that can be passed straight into the typical
    * client library/driver/ORM. This will typically be the easiest way to use
    * Hyperdrive.
    */
-  readonly connectionString: string;
+  readonly connectionString: string
 
   /*
    * A randomly generated hostname that is only valid within the context of the
@@ -25,25 +25,25 @@ interface Hyperdrive {
    * the "cloudflare:sockets" module, will connect to the Hyperdrive instance
    * for your database.
    */
-  readonly host: string;
+  readonly host: string
   /*
    * The port that must be paired the the host field when connecting.
    */
-  readonly port: number;
+  readonly port: number
   /*
    * The username to use when authenticating to your database via Hyperdrive.
-   * Unlike the host and password, this will be the same every time 
+   * Unlike the host and password, this will be the same every time
    */
-  readonly user: string;
+  readonly user: string
   /*
    * The randomly generated password to use when authenticating to your
    * database via Hyperdrive. Like the host field, this password is only valid
    * within the context of the currently running Worker instance from which
    * it's read.
    */
-  readonly password: string;
+  readonly password: string
   /*
    * The name of the database to connect to.
    */
-  readonly database: string;
+  readonly database: string
 }

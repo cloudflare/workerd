@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'harness/harness';
+import type { TestRunnerConfig } from 'harness/harness'
 
 export default {
   'compression-large-flush-output.any.js': {},
@@ -29,4 +29,4 @@ export default {
     ],
   },
   'third_party/pako/pako_inflate.min.js': {},
-} satisfies TestRunnerConfig;
+} satisfies TestRunnerConfig
