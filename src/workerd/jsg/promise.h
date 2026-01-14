@@ -8,6 +8,9 @@
 #include "util.h"
 #include "wrappable.h"
 
+#include <workerd/util/state-machine.h>
+#include <workerd/util/weak-refs.h>
+
 #include <v8-function.h>
 #include <v8-promise.h>
 
@@ -474,6 +477,354 @@ struct PromiseResolverPair {
   }
 };
 
+// =======================================================================================
+// LazyPromise implementation
+//
+template <typename T>
+struct LazyPromiseResolverPair;
+
+// A LazyPromise<T> defers the creation of the underlying V8 Promise until `.getPromise()`
+// is called. This is useful when you want to provide a promise-returning API but avoid
+// creating the V8 Promise object until it's actually needed.
+template <typename T>
+class LazyPromise {
+ public:
+  class Resolver;
+
+ private:
+  // State machine states
+  struct Pending {
+    static constexpr kj::StringPtr NAME = "Pending"_kj;
+    void visitForGc(GcVisitor& visitor) {}
+  };
+
+  struct Resolved {
+    static constexpr kj::StringPtr NAME = "Resolved"_kj;
+    // For void, this is an empty struct. For non-void, it holds T.
+    // Using [[no_unique_address]] to avoid wasting space on the empty case.
+    struct VoidValue {};
+    [[no_unique_address]] std::conditional_t<isVoid<T>(), VoidValue, T> value;
+
+    void visitForGc(GcVisitor& visitor) {
+      if constexpr (!isVoid<T>() && isGcVisitable<T>()) {
+        visitor.visit(value);
+      }
+    }
+  };
+
+  struct Rejected {
+    static constexpr kj::StringPtr NAME = "Rejected"_kj;
+    Value reason;
+
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(reason);
+    }
+  };
+
+  struct PromisePending {
+    static constexpr kj::StringPtr NAME = "PromisePending"_kj;
+    MemoizedIdentity<Promise<T>> promise;
+    typename Promise<T>::Resolver resolver;
+
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(promise);
+      visitor.visit(resolver);
+    }
+  };
+
+  struct PromiseSettled {
+    static constexpr kj::StringPtr NAME = "PromiseSettled"_kj;
+    MemoizedIdentity<Promise<T>> promise;
+
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(promise);
+    }
+  };
+
+  using States = StateMachine<TerminalStates<PromiseSettled>,
+      ActiveState<Pending>,
+      Pending,
+      Resolved,
+      Rejected,
+      PromisePending,
+      PromiseSettled>;
+
+  struct State {
+    States machine = States::template create<Pending>();
+    kj::Own<WeakRef<State>> weakRef;
+    bool markedAsHandled = false;
+
+    State(): weakRef(kj::refcounted<WeakRef<State>>(kj::Badge<State>{}, *this)) {}
+
+    ~State() noexcept(false) {
+      weakRef->invalidate();
+    }
+
+    KJ_DISALLOW_COPY_AND_MOVE(State);
+
+    kj::Own<WeakRef<State>> getWeakRef() {
+      return weakRef->addRef();
+    }
+
+    void visitForGc(GcVisitor& visitor) {
+      machine.visitForGc(visitor);
+    }
+  };
+
+  explicit LazyPromise(kj::Own<State> state): state(kj::mv(state)) {}
+
+ public:
+  // Get the underlying Promise, creating it if necessary.
+  // On first call, creates the promise and transitions to PromisePending or PromiseSettled.
+  // On subsequent calls, returns the same promise.
+  MemoizedIdentity<Promise<T>>& getPromise(Lock& js) {
+    KJ_SWITCH_ONEOF(state->machine) {
+      KJ_CASE_ONEOF(pending, Pending) {
+        auto [promise, resolver] = js.newPromiseAndResolver<T>();
+        if (state->markedAsHandled) {
+          promise.markAsHandled(js);
+        }
+        auto& promisePending = state->machine.template transitionTo<PromisePending>(
+            PromisePending{MemoizedIdentity<Promise<T>>(kj::mv(promise)), kj::mv(resolver)});
+        return promisePending.promise;
+      }
+      KJ_CASE_ONEOF(resolved, Resolved) {
+        auto [promise, resolver] = js.newPromiseAndResolver<T>();
+        if (state->markedAsHandled) {
+          promise.markAsHandled(js);
+        }
+        if constexpr (isVoid<T>()) {
+          resolver.resolve(js);
+        } else {
+          resolver.resolve(js, kj::mv(resolved.value));
+        }
+        auto& promiseSettled = state->machine.template transitionTo<PromiseSettled>(
+            PromiseSettled{MemoizedIdentity<Promise<T>>(kj::mv(promise))});
+        return promiseSettled.promise;
+      }
+      KJ_CASE_ONEOF(rejected, Rejected) {
+        auto [promise, resolver] = js.newPromiseAndResolver<T>();
+        if (state->markedAsHandled) {
+          promise.markAsHandled(js);
+        }
+        js.withinHandleScope([&] { resolver.reject(js, rejected.reason.getHandle(js)); });
+        auto& promiseSettled = state->machine.template transitionTo<PromiseSettled>(
+            PromiseSettled{MemoizedIdentity<Promise<T>>(kj::mv(promise))});
+        return promiseSettled.promise;
+      }
+      KJ_CASE_ONEOF(promisePending, PromisePending) {
+        return promisePending.promise;
+      }
+      KJ_CASE_ONEOF(promiseSettled, PromiseSettled) {
+        return promiseSettled.promise;
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    state->visitForGc(visitor);
+  }
+
+  // Mark the promise as handled. If the V8 promise has already been created,
+  // this is a pass-through. Otherwise, the flag is stored and applied when the
+  // promise is created.
+  void markAsHandled(Lock& js) {
+    KJ_SWITCH_ONEOF(state->machine) {
+      KJ_CASE_ONEOF(pending, Pending) {
+        state->markedAsHandled = true;
+        return;
+      }
+      KJ_CASE_ONEOF(resolved, Resolved) {
+        state->markedAsHandled = true;
+        return;
+      }
+      KJ_CASE_ONEOF(rejected, Rejected) {
+        state->markedAsHandled = true;
+        return;
+      }
+      KJ_CASE_ONEOF(promisePending, PromisePending) {
+        promisePending.promise.inner().markAsHandled(js);
+        return;
+      }
+      KJ_CASE_ONEOF(promiseSettled, PromiseSettled) {
+        promiseSettled.promise.inner().markAsHandled(js);
+        return;
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  JSG_MEMORY_INFO(LazyPromise) {
+    tracker.trackFieldWithSize("state", sizeof(State));
+  }
+
+  // The Resolver class holds a weak reference to the state and can be used
+  // to resolve or reject the promise. If the LazyPromise is destroyed, the Resolver becomes
+  // invalid and resolve/reject operations silently do nothing.
+  class Resolver {
+   public:
+    Resolver(Resolver&&) = default;
+    Resolver& operator=(Resolver&&) = default;
+    KJ_DISALLOW_COPY(Resolver);
+
+    template <typename U = T>
+      requires(!isVoid<U>())
+    void resolve(Lock& js, U&& value) {
+      KJ_IF_SOME(st, weakState->tryGet()) {
+        KJ_SWITCH_ONEOF(st.machine) {
+          KJ_CASE_ONEOF(pending, Pending) {
+            st.machine.template transitionTo<Resolved>(Resolved{kj::mv(value)});
+            return;
+          }
+          KJ_CASE_ONEOF(promisePending, PromisePending) {
+            promisePending.resolver.resolve(js, kj::mv(value));
+            auto promise = kj::mv(promisePending.promise);
+            st.machine.template transitionTo<PromiseSettled>(PromiseSettled{kj::mv(promise)});
+            return;
+          }
+          KJ_CASE_ONEOF(resolved, Resolved) {
+            // Already resolved. Do nothing.
+            return;
+          }
+          KJ_CASE_ONEOF(rejected, Rejected) {
+            // Already rejected. Do nothing.
+            return;
+          }
+          KJ_CASE_ONEOF(promiseSettled, PromiseSettled) {
+            // Already settled. Do nothing.
+            return;
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+      // LazyPromise was destroyed, silently do nothing
+    }
+
+    void resolve(Lock& js)
+      requires(isVoid<T>())
+    {
+      KJ_IF_SOME(st, weakState->tryGet()) {
+        KJ_SWITCH_ONEOF(st.machine) {
+          KJ_CASE_ONEOF(pending, Pending) {
+            st.machine.template transitionTo<Resolved>(Resolved{});
+            return;
+          }
+          KJ_CASE_ONEOF(promisePending, PromisePending) {
+            promisePending.resolver.resolve(js);
+            auto promise = kj::mv(promisePending.promise);
+            st.machine.template transitionTo<PromiseSettled>(PromiseSettled{kj::mv(promise)});
+            return;
+          }
+          KJ_CASE_ONEOF(resolved, Resolved) {
+            // Already resolved. Do nothing.
+            return;
+          }
+          KJ_CASE_ONEOF(rejected, Rejected) {
+            // Already rejected. Do nothing.
+            return;
+          }
+          KJ_CASE_ONEOF(promiseSettled, PromiseSettled) {
+            // Already settled. Do nothing.
+            return;
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+      // LazyPromise was destroyed, silently do nothing
+    }
+
+    void reject(Lock& js, Value reason) {
+      KJ_IF_SOME(st, weakState->tryGet()) {
+        KJ_SWITCH_ONEOF(st.machine) {
+          KJ_CASE_ONEOF(pending, Pending) {
+            st.machine.template transitionTo<Rejected>(Rejected{kj::mv(reason)});
+            return;
+          }
+          KJ_CASE_ONEOF(promisePending, PromisePending) {
+            js.withinHandleScope([&] { promisePending.resolver.reject(js, reason.getHandle(js)); });
+            auto promise = kj::mv(promisePending.promise);
+            st.machine.template transitionTo<PromiseSettled>(PromiseSettled{kj::mv(promise)});
+            return;
+          }
+          KJ_CASE_ONEOF(resolved, Resolved) {
+            // Already resolved. Do nothing.
+            return;
+          }
+          KJ_CASE_ONEOF(rejected, Rejected) {
+            // Already rejected. Do nothing.
+            return;
+          }
+          KJ_CASE_ONEOF(promiseSettled, PromiseSettled) {
+            // Already settled. Do nothing.
+            return;
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+      // LazyPromise was destroyed, silently do nothing
+    }
+
+    void reject(Lock& js, kj::Exception exception, ExceptionToJsOptions options = {}) {
+      reject(js, exceptionToJs(js.v8Isolate, kj::mv(exception), options));
+    }
+
+    void visitForGc(GcVisitor& visitor) {
+      // WeakRef doesn't hold GC-visitable state; the State is owned by LazyPromise
+    }
+
+    JSG_MEMORY_INFO(Resolver) {
+      tracker.trackFieldWithSize("weakState", sizeof(WeakRef<State>));
+    }
+
+   private:
+    explicit Resolver(kj::Own<WeakRef<State>> weakState): weakState(kj::mv(weakState)) {}
+
+    kj::Own<WeakRef<State>> weakState;
+    friend class MemoryTracker;
+    friend struct LazyPromiseResolverPair<T>;
+  };
+
+ private:
+  kj::Own<State> state;
+  friend class MemoryTracker;
+  friend struct LazyPromiseResolverPair<T>;
+};
+
+template <typename T>
+struct LazyPromiseResolverPair {
+  typename LazyPromise<T>::Resolver resolver;
+  LazyPromise<T> promise;
+
+  LazyPromiseResolverPair(): LazyPromiseResolverPair(kj::heap<typename LazyPromise<T>::State>()) {}
+
+  JSG_MEMORY_INFO(LazyPromiseResolverPair) {
+    tracker.trackField("promise", promise);
+    tracker.trackField("resolver", resolver);
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(promise);
+    visitor.visit(resolver);
+  }
+
+ private:
+  explicit LazyPromiseResolverPair(kj::Own<typename LazyPromise<T>::State> state)
+      : resolver(state->getWeakRef()),
+        promise(kj::mv(state)) {}
+};
+
+template <typename T>
+class LazyPromise<LazyPromise<T>> {
+  static_assert(
+      sizeof(T*) == 0, "LazyPromise<LazyPromise<T>> is invalid; use LazyPromise<T> instead");
+};
+
+template <typename T>
+class LazyPromise<Promise<T>> {
+  static_assert(sizeof(T*) == 0, "LazyPromise<Promise<T>> is invalid; use LazyPromise<T> instead");
+};
+
 template <typename T>
 PromiseResolverPair<T> Lock::newPromiseAndResolver() {
   return withinHandleScope([&]() -> PromiseResolverPair<T> {
@@ -773,7 +1124,6 @@ class UnhandledRejectionHandler {
   struct HashedPromise {
     v8::Local<v8::Promise> promise;
     uint hash;
-
     HashedPromise(v8::Local<v8::Promise> promise)
         : promise(promise),
           hash(kj::hashCode(promise->GetIdentityHash())) {}

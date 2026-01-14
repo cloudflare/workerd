@@ -20,7 +20,6 @@ kj::Maybe<Ref<AsyncContextFrame>> getFrameRef(jsg::Lock& js) {
   return AsyncContextFrame::current(js).map(
       [](AsyncContextFrame& frame) -> Ref<AsyncContextFrame> { return frame.addRef(); });
 }
-
 kj::Maybe<AsyncContextFrame&> tryGetFrame(kj::Maybe<Ref<AsyncContextFrame>>& maybeFrame) {
   return maybeFrame.map(
       [](Ref<AsyncContextFrame>& frame) -> AsyncContextFrame& { return *frame.get(); });

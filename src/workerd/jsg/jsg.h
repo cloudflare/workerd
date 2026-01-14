@@ -1409,6 +1409,15 @@ class MemoizedIdentity {
     return *this;
   }
 
+  // Returns a reference to the inner value. This only works when the value
+  // hasn't been converted to JavaScript yet (i.e., while still in C++ code).
+  T& inner() {
+    return value.template get<T>();
+  }
+  const T& inner() const {
+    return value.template get<T>();
+  }
+
   void visitForGc(GcVisitor& visitor);
 
   JSG_MEMORY_INFO(MemoizedIdentity) {
