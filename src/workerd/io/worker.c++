@@ -1119,6 +1119,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getFastJsgStruct()) {
       lock->setUsingFastJsgStruct();
     }
+    if (features.getUseNullPrototypeForOpaqueWrappers()) {
+      lock->setNullPrototypeForOpaqueWrappers();
+    }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {

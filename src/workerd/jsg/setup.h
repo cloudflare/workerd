@@ -186,6 +186,14 @@ class IsolateBase {
     shouldSetImmutablePrototypeFlag = true;
   }
 
+  inline bool shouldUseNullPrototypeForOpaqueWrappers() const {
+    return useNullPrototypeForOpaqueWrappersFlag;
+  }
+
+  void enableNullPrototypeForOpaqueWrappers() {
+    useNullPrototypeForOpaqueWrappersFlag = true;
+  }
+
   inline void disableTopLevelAwait() {
     allowTopLevelAwait = false;
   }
@@ -341,6 +349,7 @@ class IsolateBase {
   bool nodeJsProcessV2Enabled = false;
   bool setToStringTag = false;
   bool shouldSetImmutablePrototypeFlag = false;
+  bool useNullPrototypeForOpaqueWrappersFlag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
