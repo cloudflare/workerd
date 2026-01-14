@@ -183,7 +183,7 @@ class Socket: public jsg::Object {
   // TODO(cleanup): Combine all the IoOwns here into one, to improve efficiency and make
   //   shutdown order clearer.
 
-  kj::Maybe<IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>>> connectionStream;
+  IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
   // This fulfiller is used to resolve the `closedPromise` below.
