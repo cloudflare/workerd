@@ -414,8 +414,23 @@ async def request_unit_tests(env):
     req_with_dup_headers = Request("http://example.com", headers=js_headers)
     assert req_with_dup_headers.url == "http://example.com/"
     encoding = req_with_dup_headers.headers.get_all("Accept-encoding")
-    assert "deflate" in encoding
-    assert "gzip" in encoding
+    assert encoding == ["deflate, gzip"]
+
+    # Verify that header values containing commas are preserved.
+    js_headers = js.Headers.new()
+    js_headers.set("User-Agent", "Example, Agent/1.0")
+    req_with_user_agent = Request("http://example.com", headers=js_headers)
+    assert req_with_user_agent.headers.get("User-Agent") == "Example, Agent/1.0"
+    assert req_with_user_agent.headers.get_all("User-Agent") == [
+        "Example, Agent/1.0"
+    ]
+
+    # Verify that Set-Cookie headers are preserved as distinct values.
+    js_headers = js.Headers.new()
+    js_headers.append("Set-Cookie", "a=b, c=d")
+    js_headers.append("Set-Cookie", "e=f")
+    req_with_set_cookie = Request("http://example.com", headers=js_headers)
+    assert req_with_set_cookie.headers.get_all("Set-Cookie") == ["a=b, c=d", "e=f"]
 
     # Verify that we can get a Blob.
     req_for_blob = Request("http://example.com", body="foobar", method="POST")
