@@ -125,11 +125,15 @@ jobs:
         run: |
           bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --profile build-win-workaround.bazel-profile.gz --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
-        # Skip build step for coverage runs - bazel coverage will build with instrumentation.
-        # Running build first would populate cache with non-instrumented binaries.
+        # Skip build step for coverage runs - coverage needs instrumented binaries built separately.
         if: ${{ !inputs.run_coverage }}
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
+      - name: Bazel build (coverage)
+        # Build with coverage instrumentation first, so we can see build vs test time separately.
+        if: ${{ inputs.run_coverage }}
+        run: |
+          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=coverage ${{ inputs.extra_bazel_args }} //...
       - name: Build and load container images
         if: inputs.build_container_images
         run: |
