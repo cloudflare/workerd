@@ -318,6 +318,15 @@ def _is_js_instance(val, js_cls_name):
     return hasattr(val, "constructor") and val.constructor.name == js_cls_name
 
 
+def _preserve_request_header_commas() -> bool:
+    try:
+        import _cloudflare_compat_flags as compat_flags
+    except Exception:
+        return False
+
+    return bool(getattr(compat_flags, "python_request_headers_preserve_commas", False))
+
+
 def _to_js_headers(headers: Headers):
     if isinstance(headers, list):
         # We should have a list[tuple[str, str]]
@@ -773,6 +782,36 @@ class Request:
         #
         # TODO(later): when dedicated snapshots are default we can move this import to the top-level.
         import http.client
+
+        if _preserve_request_header_commas():
+            from email.message import Message
+            from email.policy import compat32
+
+            result = Message(policy=compat32)
+            js_headers = self.js_object.headers
+
+            set_cookie_values = None
+            if hasattr(js_headers, "getSetCookie"):
+                try:
+                    set_cookie_values = js_headers.getSetCookie()
+                except Exception:
+                    set_cookie_values = None
+            elif hasattr(js_headers, "getAll"):
+                try:
+                    set_cookie_values = js_headers.getAll("Set-Cookie")
+                except Exception:
+                    set_cookie_values = None
+
+            if set_cookie_values:
+                for value in set_cookie_values:
+                    result.add_header("Set-Cookie", value.strip())
+
+            for key, val in js_headers:
+                if key.lower() == "set-cookie":
+                    continue
+                result.add_header(key, val.strip())
+
+            return result
 
         result = http.client.HTTPMessage()
 

@@ -7,14 +7,14 @@ const python :Workerd.Worker = (
   bindings = [
     ( name = "SELF", service = "python-sdk" ),
   ],
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "service_binding_extra_handlers", "rpc", "python_no_global_handlers", "fetch_standard_url", "formdata_parser_supports_files"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "service_binding_extra_handlers", "rpc", "python_no_global_handlers", "fetch_standard_url", "formdata_parser_supports_files", "python_request_headers_preserve_commas"],
 );
 
 const server :Workerd.Worker = (
   modules = [
     (name = "server.py", pythonModule = embed "server.py")
   ],
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "rpc", "python_no_global_handlers", "fetch_standard_url", "formdata_parser_supports_files"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "rpc", "python_no_global_handlers", "fetch_standard_url", "formdata_parser_supports_files", "python_request_headers_preserve_commas"],
 );
 
 # We need this proxy so that internal requests made to fetch packages for Python Workers are sent
