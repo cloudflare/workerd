@@ -4,6 +4,7 @@
 
 #include "jsg.h"
 #include "setup.h"
+#include "util.h"
 
 #include <v8-wasm.h>
 
@@ -527,7 +528,45 @@ JsValue ModuleRegistry::requireImpl(Lock& js, ModuleInfo& info, RequireImplOptio
         js.v8Context(), v8StrIntern(js.v8Isolate, "default"))));
   }
 
-  return JsValue(module->GetModuleNamespace());
+  // When the flag is disabled, return the original module namespace
+  // to maintain backward compatibility (same object as ESM import returns).
+  if (!isRequireReturnsDefaultExportEnabled(js)) {
+    return JsValue(module->GetModuleNamespace());
+  }
+
+  // When require_returns_default_export flag is enabled:
+  // 1. If module has default export: return it (or a mutable copy if it's a namespace)
+  // 2. If no default export: return a mutable copy of the namespace
+  // This matches Node.js require(esm) behavior and allows monkey-patching.
+  // See: https://github.com/cloudflare/workerd/issues/5844
+  JsObject moduleNamespace(module->GetModuleNamespace().As<v8::Object>());
+  if (moduleNamespace.has(js, "default"_kj)) {
+    auto defaultValue = moduleNamespace.get(js, "default"_kj);
+    // If the default export is itself a module namespace object (read-only),
+    // we need to create a mutable copy. This happens when a module does:
+    //   import * as _default from 'other-module';
+    //   export default _default;
+    KJ_IF_SOME(defaultObj, defaultValue.tryCast<JsObject>()) {
+      if (defaultObj.isModuleNamespaceObject()) {
+        KJ_IF_SOME(cached, info.maybeMutableExports) {
+          return JsValue(cached.getHandle(js));
+        }
+        auto mutableDefault = createMutableModuleExports(js, defaultObj);
+        info.maybeMutableExports = V8Ref<v8::Object>(js.v8Isolate, mutableDefault);
+        return mutableDefault;
+      }
+    }
+    // Default export is a regular object (mutable), return it directly
+    return defaultValue;
+  }
+
+  // No default export - return a mutable copy of the namespace.
+  KJ_IF_SOME(cached, info.maybeMutableExports) {
+    return JsValue(cached.getHandle(js));
+  }
+  auto mutableExports = createMutableModuleExports(js, moduleNamespace);
+  info.maybeMutableExports = V8Ref<v8::Object>(js.v8Isolate, mutableExports);
+  return mutableExports;
 }
 
 }  // namespace workerd::jsg

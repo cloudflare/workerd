@@ -849,6 +849,21 @@ v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint
 }
 
 // ======================================================================================
+// Module utilities
+
+JsObject createMutableModuleExports(Lock& js, JsObject moduleNamespace) {
+  auto result = js.objNoProto();
+  auto names = moduleNamespace.getPropertyNames(js, OWN_ONLY, ALL_PROPERTIES, INCLUDE_INDICES);
+
+  for (uint32_t i = 0; i < names.size(); i++) {
+    auto name = names.get(js, i);
+    result.set(js, name, moduleNamespace.get(js, name));
+  }
+
+  return result;
+}
+
+// ======================================================================================
 // Node.js Compat
 
 namespace {
@@ -893,6 +908,10 @@ bool isNodeJsCompatEnabled(jsg::Lock& js) {
 
 bool isNodeJsProcessV2Enabled(jsg::Lock& js) {
   return IsolateBase::from(js.v8Isolate).isNodeJsProcessV2Enabled();
+}
+
+bool isRequireReturnsDefaultExportEnabled(jsg::Lock& js) {
+  return IsolateBase::from(js.v8Isolate).isRequireReturnsDefaultExportEnabled();
 }
 
 }  // namespace workerd::jsg
