@@ -188,9 +188,9 @@ class Default(WorkerEntrypoint):
 
 
 async def can_return_custom_fetch_response(env):
-    assert isinstance(env, JsProxy), (
-        "Expecting the env for these tests not to be wrapped"
-    )
+    assert isinstance(
+        env, JsProxy
+    ), "Expecting the env for these tests not to be wrapped"
     response = await env.SELF.fetch(
         "http://example.com/",
     )
@@ -421,9 +421,19 @@ async def request_unit_tests(env):
     js_headers.set("User-Agent", "Example, Agent/1.0")
     req_with_user_agent = Request("http://example.com", headers=js_headers)
     assert req_with_user_agent.headers.get("User-Agent") == "Example, Agent/1.0"
-    assert req_with_user_agent.headers.get_all("User-Agent") == [
-        "Example, Agent/1.0"
-    ]
+    assert req_with_user_agent.headers.get_all("User-Agent") == ["Example, Agent/1.0"]
+
+    # Verify that header values with commas are preserved when using Python dict.
+    req_dict_comma = Request(
+        "http://example.com",
+        headers={
+            "User-Agent": "Python, Client/2.0",
+            "Accept": "text/html, application/json",
+        },
+    )
+    assert req_dict_comma.headers.get("User-Agent") == "Python, Client/2.0"
+    assert "text/html" in req_dict_comma.headers.get("Accept")
+    assert "application/json" in req_dict_comma.headers.get("Accept")
 
     # Verify that Set-Cookie headers are preserved as distinct values.
     js_headers = js.Headers.new()
@@ -431,6 +441,20 @@ async def request_unit_tests(env):
     js_headers.append("Set-Cookie", "e=f")
     req_with_set_cookie = Request("http://example.com", headers=js_headers)
     assert req_with_set_cookie.headers.get_all("Set-Cookie") == ["a=b, c=d", "e=f"]
+
+    # Verify that Set-Cookie headers work with Python list of tuples.
+    req_tuple_cookies = Request(
+        "http://example.com",
+        headers=[
+            ("Set-Cookie", "session=abc123"),
+            ("Set-Cookie", "token=xyz789"),
+            ("X-Custom", "value"),
+        ],
+    )
+    assert req_tuple_cookies.headers.get_all("Set-Cookie") == [
+        "session=abc123, token=xyz789"
+    ]
+    assert req_tuple_cookies.headers.get("X-Custom") == "value"
 
     # Verify that we can get a Blob.
     req_for_blob = Request("http://example.com", body="foobar", method="POST")
@@ -563,9 +587,9 @@ async def response_buffer_source_unit_tests(env):
             ) from exc
 
         buffer = await response.buffer()
-        assert int(buffer.byteLength) == expected_length, (
-            f"Response buffer length mismatch for {type_name}"
-        )
+        assert (
+            int(buffer.byteLength) == expected_length
+        ), f"Response buffer length mismatch for {type_name}"
 
 
 async def can_fetch_python_request():
