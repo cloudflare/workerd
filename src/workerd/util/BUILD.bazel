@@ -102,7 +102,6 @@ wd_cc_library(
         ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
     ],
 )
 
@@ -342,7 +341,6 @@ kj_test(
     deps = [
         ":sqlite",
         "//src/workerd/io:io-gate",
-        "@sqlite3",
     ],
 )
 

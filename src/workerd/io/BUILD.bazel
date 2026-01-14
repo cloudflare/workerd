@@ -204,16 +204,18 @@ wd_cc_library(
         "actor-sqlite.h",
         "actor-storage.h",
     ],
+    implementation_deps = [
+        ":io-gate",
+        "//src/workerd/util:autogate",
+        "//src/workerd/util:duration-exceeded-logger",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-storage_capnp",
-        ":io-gate",
         ":trace",
         "//src/workerd/jsg:exception",
-        "//src/workerd/util:autogate",
-        "//src/workerd/util:duration-exceeded-logger",
         "//src/workerd/util:sqlite",
-        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-async",
     ],
 )
@@ -222,11 +224,13 @@ wd_cc_library(
     name = "frankenvalue",
     srcs = ["frankenvalue.c++"],
     hdrs = ["frankenvalue.h"],
+    implementation_deps = [
+        "@capnp-cpp//src/capnp:capnpc",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":frankenvalue_capnp",
         "//src/workerd/jsg",
-        "@capnp-cpp//src/capnp:capnpc",
     ],
 )
 
@@ -237,6 +241,8 @@ wd_cc_library(
     implementation_deps = [
         "//src/workerd/util:entropy",
         "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -245,9 +251,6 @@ wd_cc_library(
         "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util:own-util",
         "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/capnp:capnpc",
-        "@capnp-cpp//src/kj/compat:kj-http",
-        "@ssl",
     ],
 )
 
@@ -307,6 +310,9 @@ wd_cc_library(
     name = "worker-interface",
     srcs = ["worker-interface.c++"],
     hdrs = ["worker-interface.h"],
+    implementation_deps = [
+        "@capnp-cpp//src/capnp:capnpc",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":frankenvalue_capnp",
@@ -314,7 +320,6 @@ wd_cc_library(
         ":worker-interface_capnp",
         "//src/workerd/util",
         "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
     ],
 )
@@ -408,6 +413,7 @@ kj_test(
     deps = [
         ":actor",
         ":io-gate",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
         "@sqlite3",
