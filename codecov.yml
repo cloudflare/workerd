@@ -1,0 +1,15 @@
+codecov:
+  # Should Codecov wait for all other statuses to pass before sending its status.
+  require_ci_to_pass: true
+
+coverage:
+  # What precision do you want the coverage value to be
+  precision: 2
+  # Which direction to you want to round the coverage value
+  round: down
+  # The value range where you want the value to be green
+  range: "70...100"
+
+comment:
+  # Require any change in coverage to post
+  require_changes: true
