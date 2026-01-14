@@ -201,7 +201,7 @@ export function clearSignals(Module: Module): void {
     // We will turn signal handling on as part of triggering the interrupt, having it on otherwise
     // just wastes cycles.
     Module.Py_EmscriptenSignalBuffer[0] = SIGXCPU;
-    Module.HEAPU32[getSignalClockAddr(Module)] = 1;
+    Module.HEAPU32[getSignalClockAddr(Module) / 4] = 1;
     Module.HEAPU32[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING / 4] = 0;
   }
 }
