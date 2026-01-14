@@ -10742,6 +10742,15 @@ export declare abstract class D1PreparedStatement {
 // ignored when `Disposable` is included in the standard lib.
 export interface Disposable {}
 /**
+ * The returned data after sending an email
+ */
+export interface EmailSendResult {
+  /**
+   * The Email Message ID
+   */
+  messageId: string;
+}
+/**
  * An email message that can be sent from a Worker.
  */
 export interface EmailMessage {
@@ -10782,19 +10791,19 @@ export interface ForwardableEmailMessage extends EmailMessage {
    * @param headers A [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    * @returns A promise that resolves when the email message is forwarded.
    */
-  forward(rcptTo: string, headers?: Headers): Promise<void>;
+  forward(rcptTo: string, headers?: Headers): Promise<EmailSendResult>;
   /**
    * Reply to the sender of this email message with a new EmailMessage object.
    * @param message The reply message.
    * @returns A promise that resolves when the email message is replied.
    */
-  reply(message: EmailMessage): Promise<void>;
+  reply(message: EmailMessage): Promise<EmailSendResult>;
 }
 /**
  * A binding that allows a Worker to send email messages.
  */
 export interface SendEmail {
-  send(message: EmailMessage): Promise<void>;
+  send(message: EmailMessage): Promise<EmailSendResult>;
 }
 export declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
