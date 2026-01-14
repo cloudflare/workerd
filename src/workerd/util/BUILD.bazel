@@ -337,6 +337,7 @@ kj_test(
 )
 
 kj_test(
+    size = "large",
     src = "sqlite-test.c++",
     deps = [
         ":sqlite",
@@ -386,4 +387,16 @@ kj_test(
 kj_test(
     src = "small-set-test.c++",
     deps = [":small-set"],
+)
+
+wd_cc_library(
+    name = "state-machine",
+    hdrs = ["state-machine.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+kj_test(
+    src = "state-machine-test.c++",
+    deps = [":state-machine"],
 )

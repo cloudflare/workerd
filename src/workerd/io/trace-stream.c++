@@ -28,6 +28,7 @@ namespace {
   V(CRON, "cron")                                                                                  \
   V(CUSTOM, "custom")                                                                              \
   V(DAEMONDOWN, "daemonDown")                                                                      \
+  V(DEBUG, "debug")                                                                                \
   V(DIAGNOSTICCHANNEL, "diagnosticChannel")                                                        \
   V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
   V(EMAIL, "email")                                                                                \
@@ -85,6 +86,7 @@ namespace {
   V(URL, "url")                                                                                    \
   V(VALUE, "value")                                                                                \
   V(WALLTIME, "wallTime")                                                                          \
+  V(WARN, "warn")                                                                                  \
   V(WASCLEAN, "wasClean")
 
 #define V(N, L) constexpr kj::LiteralStringConst N##_STR = L##_kjc;
@@ -318,19 +320,10 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
   KJ_UNREACHABLE;
 }
 
-template <typename Enum>
-kj::String enumToStr(const Enum& var) {
-  // TODO(cleanup): Port this to capnproto.
-  auto enums = capnp::Schema::from<Enum>().getEnumerants();
-  uint i = static_cast<uint>(var);
-  KJ_ASSERT(i < enums.size(), "invalid enum value");
-  return kj::str(enums[i].getProto().getName());
-}
-
 jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ONSET_STR));
-  obj.set(js, EXECUTIONMODEL_STR, cache.get(js, enumToStr(onset.workerInfo.executionModel)));
+  obj.set(js, EXECUTIONMODEL_STR, cache.get(js, kj::str(onset.workerInfo.executionModel)));
   obj.set(js, SPANID_STR, js.str(onset.spanId.toGoString()));
 
   KJ_IF_SOME(ns, onset.workerInfo.dispatchNamespace) {
@@ -468,7 +461,19 @@ jsg::JsValue ToJs(jsg::Lock& js, const Exception& ex, StringCache& cache) {
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const LogLevel& level, StringCache& cache) {
-  return cache.get(js, toLower(enumToStr<LogLevel>(level)));
+  switch (level) {
+    case LogLevel::DEBUG_:
+      return cache.get(js, DEBUG_STR);
+    case LogLevel::INFO:
+      return cache.get(js, INFO_STR);
+    case LogLevel::LOG:
+      return cache.get(js, LOG_STR);
+    case LogLevel::WARN:
+      return cache.get(js, WARN_STR);
+    case LogLevel::ERROR:
+      return cache.get(js, ERROR_STR);
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
@@ -902,8 +907,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 };
 }  // namespace
 
-kj::Maybe<EventInfo> TailStreamCustomEvent::getEventInfo() const {
-  return EventInfo(TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
+EventInfo TailStreamCustomEvent::getEventInfo() const {
+  return TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(

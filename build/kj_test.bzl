@@ -49,7 +49,7 @@ def kj_test(
     )
 
     sh_test(
-        name = test_name,
+        name = test_name + "@",
         size = size,
         srcs = ["//build/fixtures:kj_test.sh"],
         data = [cross_alias] + data,
@@ -57,7 +57,7 @@ def kj_test(
         tags = tags,
     )
     sh_test(
-        name = test_name + "@all-autogates-enabled",
+        name = test_name + "@all-autogates",
         size = size,
         env = {"WORKERD_ALL_AUTOGATES": "1"},
         srcs = ["//build/fixtures:kj_test.sh"],

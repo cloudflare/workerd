@@ -274,8 +274,7 @@ static_assert(HEADER_HASH_TABLE.find("AcCePt-ChArSeT"_kj) == 1);
 static_assert(std::size(COMMON_HEADER_NAMES) == (Headers::MAX_COMMON_HEADER_ID + 1));
 
 void maybeWarnIfBadHeaderString(kj::StringPtr name, kj::StringPtr str) {
-  if (IoContext::hasCurrent()) {
-    auto& context = IoContext::current();
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
     if (context.isInspectorEnabled()) {
       if (!simdutf::validate_ascii(str.begin(), str.size())) {
         // The string contains non-ASCII characters. While any 8-bit value is technically valid

@@ -1,6 +1,8 @@
 import fastapi
+from workers import WorkerEntrypoint
 
 
-async def test():
-    assert fastapi.__version__
-    print("FastAPI imported successfully!")
+class Default(WorkerEntrypoint):
+    async def test(self):
+        assert fastapi.__version__
+        print("FastAPI imported successfully!")

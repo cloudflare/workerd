@@ -1,9 +1,4 @@
-bazel_dep(name = "aspect_rules_esbuild", version = "0.24.0")
-bazel_dep(name = "aspect_rules_js", version = "2.8.0")
-bazel_dep(name = "aspect_rules_ts", version = "3.7.1")
-bazel_dep(name = "rules_nodejs", version = "6.5.2")
-
-NODE_VERSION = "22.20.0"
+NODE_VERSION = "22.21.1"
 
 # ========================================================================================
 # Node.js bootstrap

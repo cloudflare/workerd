@@ -70,6 +70,33 @@ struct MockTimerChannel final: public TimerChannel {
   }
 };
 
+// A TimerChannel implementation that uses real timers from the KJ event loop.
+// Useful for tests that need actual timer functionality (e.g., benchmarks with
+// simulated I/O delays).
+struct RealTimerChannel final: public TimerChannel {
+  explicit RealTimerChannel(kj::Timer& timer): timer(timer) {}
+
+  void syncTime() override {}
+
+  kj::Date now() override {
+    return kj::systemPreciseCalendarClock().now();
+  }
+
+  kj::Promise<void> atTime(kj::Date when) override {
+    auto nowTime = kj::systemPreciseCalendarClock().now();
+    if (when <= nowTime) {
+      return kj::READY_NOW;
+    }
+    return timer.afterDelay(when - nowTime);
+  }
+
+  kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
+    return timer.afterDelay(t);
+  }
+
+  kj::Timer& timer;
+};
+
 struct DummyIoChannelFactory final: public IoChannelFactory {
   DummyIoChannelFactory(TimerChannel& timer): timer(timer) {}
 
@@ -104,6 +131,7 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
+      ActorRoutingMode routingMode,
       SpanParent parentSpan) override {
     KJ_FAIL_REQUIRE("no actor channels");
   }
@@ -318,7 +346,10 @@ TestFixture::TestFixture(SetupParams&& params)
       io(params.waitScope == kj::none ? kj::Maybe(kj::setupAsyncIo())
                                       : kj::Maybe<kj::AsyncIoContext>(kj::none)),
       timer(kj::heap<MockTimer>()),
-      timerChannel(kj::heap<MockTimerChannel>()),
+      timerChannel(params.useRealTimers && io != kj::none
+              ? kj::Own<TimerChannel>(
+                    kj::heap<RealTimerChannel>(KJ_ASSERT_NONNULL(io).provider->getTimer()))
+              : kj::Own<TimerChannel>(kj::heap<MockTimerChannel>())),
       entropySource(kj::heap<MockEntropySource>()),
       threadContextHeaderBundle(headerTableBuilder),
       httpOverCapnpFactory(byteStreamFactory,

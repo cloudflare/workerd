@@ -1939,12 +1939,11 @@ FileFdHandle::~FileFdHandle() noexcept {
     }
 
     // If we have an active IoContext, then we'll go ahead and log a warning.
-    if (IoContext::hasCurrent()) {
-      IoContext::current().logWarning(
-          "A FileHandle was destroyed without being closed. This is "
-          "not recommended and may lead to file descriptors being held "
-          "far longer than necessary. Please make sure to explicitly close "
-          "the FileHandle object explicitly before it is destroyed."_kj);
+    KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+      ioContext.logWarning("A FileHandle was destroyed without being closed. This is "
+                           "not recommended and may lead to file descriptors being held "
+                           "far longer than necessary. Please make sure to explicitly close "
+                           "the FileHandle object explicitly before it is destroyed."_kj);
     }
   }
 }

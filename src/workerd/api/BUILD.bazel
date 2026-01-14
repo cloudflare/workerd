@@ -248,6 +248,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "//src/workerd/util:state-machine",
         "@nbytes",
     ],
 )
@@ -433,6 +434,7 @@ wd_cc_library(
     srcs = ["encoding.c++"],
     hdrs = ["encoding.h"],
     implementation_deps = [
+        "//src/workerd/io:features",
         "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
@@ -441,6 +443,7 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
+        "@simdutf",
     ],
 )
 
@@ -537,6 +540,7 @@ kj_test(
     src = "data-url-test.c++",
     deps = [
         ":data-url",
+        "//src/workerd/io",
     ],
 )
 

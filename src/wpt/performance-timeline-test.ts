@@ -17,10 +17,6 @@ export default {
       'PerformanceObserver with buffered flag should see past and future entries.',
     ],
   },
-  'buffered-flag-with-entryTypes-observer.tentative.any.js': {
-    comment: 'This is a tentative test',
-    omittedTests: true,
-  },
   'case-sensitivity.any.js': {
     comment: 'This is not yet implemented',
     disabledTests: [
@@ -41,8 +37,45 @@ export default {
   },
   'idlharness.any.js': {
     comment:
-      'Test file /resources/WebIDLParser.js not found. Update wpt_test.bzl to handle this case.',
-    omittedTests: true,
+      'Workers expose globals differently than browsers - these interface tests fail',
+    expectedFailures: [
+      'idl_test setup',
+      'PerformanceEntry interface: existence and properties of interface object',
+      'PerformanceEntry interface object length',
+      'PerformanceEntry interface object name',
+      'PerformanceEntry interface: existence and properties of interface prototype object',
+      'PerformanceEntry interface: existence and properties of interface prototype object\'s "constructor" property',
+      "PerformanceEntry interface: existence and properties of interface prototype object's @@unscopables property",
+      'PerformanceEntry interface: attribute id',
+      'PerformanceEntry interface: attribute name',
+      'PerformanceEntry interface: attribute entryType',
+      'PerformanceEntry interface: attribute startTime',
+      'PerformanceEntry interface: attribute duration',
+      'PerformanceEntry interface: attribute navigationId',
+      'PerformanceEntry interface: operation toJSON()',
+      'PerformanceObserver interface: existence and properties of interface object',
+      'PerformanceObserver interface object length',
+      'PerformanceObserver interface object name',
+      'PerformanceObserver interface: existence and properties of interface prototype object',
+      'PerformanceObserver interface: existence and properties of interface prototype object\'s "constructor" property',
+      "PerformanceObserver interface: existence and properties of interface prototype object's @@unscopables property",
+      'PerformanceObserver interface: operation observe(optional PerformanceObserverInit)',
+      'PerformanceObserver interface: operation disconnect()',
+      'PerformanceObserver interface: operation takeRecords()',
+      'PerformanceObserver interface: attribute supportedEntryTypes',
+      'PerformanceObserverEntryList interface: existence and properties of interface object',
+      'PerformanceObserverEntryList interface object length',
+      'PerformanceObserverEntryList interface object name',
+      'PerformanceObserverEntryList interface: existence and properties of interface prototype object',
+      'PerformanceObserverEntryList interface: existence and properties of interface prototype object\'s "constructor" property',
+      "PerformanceObserverEntryList interface: existence and properties of interface prototype object's @@unscopables property",
+      'PerformanceObserverEntryList interface: operation getEntries()',
+      'PerformanceObserverEntryList interface: operation getEntriesByType(DOMString)',
+      'PerformanceObserverEntryList interface: operation getEntriesByName(DOMString, optional DOMString)',
+      'Performance interface: operation getEntries()',
+      'Performance interface: operation getEntriesByType(DOMString)',
+      'Performance interface: operation getEntriesByName(DOMString, optional DOMString)',
+    ],
   },
   'multiple-buffered-flag-observers.any.js': {
     comment: 'This is not yet implemented',
@@ -55,71 +88,6 @@ export default {
     comment: 'This is not yet implemented',
     omittedTests: ['aborting a parser should block bfcache.'],
   },
-  'not-restored-reasons/performance-navigation-timing-attributes.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-bfcache-reasons-stay.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-bfcache.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-cross-origin-bfcache.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-fetch.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-iframes-without-attributes.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-lock.https.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-navigation-failure.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-not-bfcached.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-redirect-on-history.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-reload.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-same-origin-bfcache.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
-  'not-restored-reasons/performance-navigation-timing-same-origin-replace.tentative.window.js':
-    {
-      comment: 'This is a tentative test',
-      omittedTests: true,
-    },
   'not-restored-reasons/test-helper.js': {
     comment:
       'Test file /html/browsers/browsing-the-web/back-forward-cache/resources/rc-helper.js not found. Update wpt_test.bzl to handle this case.',

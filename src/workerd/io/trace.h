@@ -899,14 +899,9 @@ inline kj::String truncateScriptId(kj::StringPtr id) {
 // =======================================================================================
 // Span tracing
 //
-// TODO(cleanup): As of now, this aspect of tracing is actually not related to the rest of this
-//   file. Most of this file defines the interface to feed Trace Workers. Span tracing, however,
-//   is currently designed to feed tracing of the Workers Runtime itself for the benefit of the
-//   developers of the runtime.
-//
-//   We might potentially want to give trace workers some access to span tracing as well, but with
-//   that the trace worker and span interfaces should still be largely independent of each other;
-//   separate span tracing into a separate header.
+// TODO(cleanup): (Streaming) tail workers now have access to span tracing as well, but with that
+// the trace worker and span interfaces are still mostly independent of each other; separate span
+// tracing into a separate header.
 
 class SpanBuilder;
 class SpanObserver;

@@ -6,6 +6,7 @@ def wd_cc_benchmark(
         name,
         linkopts = [],
         deps = [],
+        tags = [],
         visibility = None,
         **kwargs):
     """Wrapper for cc_binary that sets common attributes and links the benchmark library.
@@ -31,7 +32,7 @@ def wd_cc_benchmark(
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        tags = ["workerd-benchmark", "google_benchmark"],
+        tags = ["workerd-benchmark", "google_benchmark"] + tags,
         size = "large",
         **kwargs
     )

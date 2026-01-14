@@ -295,7 +295,6 @@ const EXCLUDED_PATHS = new Set([
   '/resources/utils.js',
   '/common/utils.js',
   '/common/get-host-info.sub.js',
-  '/common/gc.js',
   '/common/sab.js',
 ]);
 
@@ -303,10 +302,14 @@ function replaceInterpolation(code: string): string {
   const hostInfo = getHostInfo();
 
   return code
-    .replace('{{host}}', hostInfo.REMOTE_HOST)
-    .replace('{{ports[http][0]}}', hostInfo.HTTP_PORT)
-    .replace('{{ports[http][1]}}', hostInfo.HTTP_PORT)
-    .replace('{{ports[https][0]}}', hostInfo.HTTPS_PORT);
+    .replace(/\{\{host\}\}/g, hostInfo.REMOTE_HOST)
+    .replace(/\{\{hosts\[alt\]\[www\]\}\}/g, hostInfo.REMOTE_HOST)
+    .replace(/\{\{ports\[http\]\[0\]\}\}/g, hostInfo.HTTP_PORT)
+    .replace(/\{\{ports\[http\]\[1\]\}\}/g, hostInfo.HTTP_PORT)
+    .replace(/\{\{ports\[https\]\[0\]\}\}/g, hostInfo.HTTPS_PORT)
+    .replace(/\{\{ports\[ws\]\[0\]\}\}/g, hostInfo.WS_PORT)
+    .replace(/\{\{ports\[wss\]\[0\]\}\}/g, hostInfo.WSS_PORT)
+    .replace(/\{\{ports\[h2\]\[0\]\}\}/g, hostInfo.HTTPS_PORT);
 }
 
 function getCodeAtPath(

@@ -9,6 +9,7 @@
 
 #include <workerd/api/deferred-proxy.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/external-pusher.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/io-thread-context.h>
@@ -399,6 +400,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Throws an exception if there is no current context (see hasCurrent() below).
   static IoContext& current();
 
+  // Like current(), but returns kj::none if there is no current context.
+  static kj::Maybe<IoContext&> tryCurrent();
+
   // True if there is a current IoContext for the thread (current() will not throw).
   static bool hasCurrent();
 
@@ -769,6 +773,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return thread.getHeaderIds();
   }
 
+  kj::Rc<ExternalPusherImpl> getExternalPusher();
+
   // Subrequest channel numbers for the two special channels.
   // NULL = The channel used by global fetch() when the Request has no fetcher attached.
   // NEXT = DEPRECATED: The fetcher attached to Requests delivered by a FetchEvent, so that we can
@@ -889,9 +895,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
+      ActorRoutingMode routingMode,
       SpanParent parentSpan) {
-    return getIoChannelFactory().getGlobalActor(
-        channel, id, kj::mv(locationHint), mode, enableReplicaRouting, kj::mv(parentSpan));
+    return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint), mode,
+        enableReplicaRouting, routingMode, kj::mv(parentSpan));
   }
   kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(
       uint channel, kj::StringPtr id, SpanParent parentSpan) {
@@ -1007,6 +1014,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
   //   objects which reference `deleteQueue` in their destructors.
   OwnedObjectList ownedObjects;
+
+  kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
 
   // Implementation detail of makeCachePutStream().
 
@@ -1150,15 +1159,16 @@ struct SuppressIoContextScope {
 
 template <typename T>
 kj::Promise<T> IoContext::lockOutputWhile(kj::Promise<T> promise) {
-  return getActorOrThrow().getOutputGate().lockWhile(kj::mv(promise));
+  return getActorOrThrow().getOutputGate().lockWhile(kj::mv(promise), getCurrentTraceSpan());
 }
 
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
-    return cs.get()->wait().then(
-        [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+    return cs.get()
+        ->wait(getCurrentTraceSpan())
+        .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
       return run(kj::fwd<Func>(func), kj::mv(inputLock));
     });
   } else {
@@ -1178,8 +1188,9 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
-      return a.getInputGate().wait().then(
-          [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+      return a.getInputGate()
+          .wait(getCurrentTraceSpan())
+          .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
         return run(kj::fwd<Func>(func), kj::mv(inputLock));
       });
     }
@@ -1593,7 +1604,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   auto [result, resolver] = js.newPromiseAndResolver<T>();
 
   addTask(
-      cs->wait()
+      cs->wait(getCurrentTraceSpan())
           .then([this, callback = kj::mv(callback),
                     maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](
                     InputGate::Lock inputLock) mutable {

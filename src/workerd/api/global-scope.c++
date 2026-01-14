@@ -438,7 +438,8 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
     }
   }
 
-  KJ_SWITCH_ONEOF(persistent.armAlarmHandler(scheduledTime, false, actorId)) {
+  KJ_SWITCH_ONEOF(persistent.armAlarmHandler(
+                      scheduledTime, context.getCurrentTraceSpan(), false, actorId)) {
     KJ_CASE_ONEOF(armResult, ActorCacheInterface::RunAlarmHandler) {
       auto& handler = KJ_REQUIRE_NONNULL(exportedHandler);
       if (handler.alarm == kj::none) {
@@ -497,7 +498,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
 
         context.getMetrics().reportFailure(e);
 
-        auto description = e.getDescription();
+        auto description = kj::str(e.getDescription());  // because e is moved before this is used
         auto log = !jsg::isTunneledException(description) && !jsg::isDoNotLogException(description);
         auto isUserError = e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none;
 
@@ -727,8 +728,11 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
   };
 
   const auto hasInspector = [] {
-    if (!IoContext::hasCurrent()) return false;
-    return IoContext::current().isInspectorEnabled();
+    KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+      return ioContext.isInspectorEnabled();
+    } else {
+      return false;
+    }
   };
 
   if (hasHandlers() || hasInspector()) {
@@ -984,7 +988,7 @@ jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
 }
 
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
-  if (IoContext::hasCurrent()) {
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
     auto v8Context = js.v8Context();
     auto& global =
         jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(v8Context, v8Context->Global());
@@ -993,8 +997,6 @@ bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::In
           .method = kj::str("POST"),
           .body = kj::mv(body),
         });
-
-    auto& context = IoContext::current();
 
     context.addWaitUntil(context.awaitJs(js, kj::mv(promise)).ignoreResult());
     return true;

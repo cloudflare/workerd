@@ -7,6 +7,7 @@
 #include "util.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/util/own-util.h>
 
 #include <kj/encoding.h>
 
@@ -634,7 +635,8 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     .featureFlagsForFl = kj::none,
   };
   if (enableCompatFlags) {
-    metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl();
+    metadata.featureFlagsForFl =
+        mapCopyString(context.getWorker().getIsolate().getFeatureFlagsForFl());
   }
   auto httpClient =
       cacheName.map([&](kj::String& n) {
@@ -659,8 +661,7 @@ jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cache
   // It is possible here that open() will be called in the global scope in fiddle
   // mode in which case the warning will not be emitted. But that's OK? The warning
   // is not critical by any stretch.
-  if (IoContext::hasCurrent()) {
-    auto& context = IoContext::current();
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
     if (context.isFiddle()) {
       context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
     }

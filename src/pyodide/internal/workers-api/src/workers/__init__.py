@@ -20,6 +20,7 @@ from ._workers import (
     fetch,
     handler,
     import_from_javascript,
+    patch_env,
     python_from_rpc,
     python_to_rpc,
 )
@@ -43,9 +44,18 @@ __all__ = [
     "Response",
     "WorkerEntrypoint",
     "WorkflowEntrypoint",
+    "env",
     "fetch",
     "handler",
     "import_from_javascript",
+    "patch_env",
     "python_from_rpc",
     "python_to_rpc",
 ]
+
+
+def __getattr__(key):
+    if key == "env":
+        cloudflare_workers = import_from_javascript("cloudflare:workers")
+        return cloudflare_workers.env
+    raise AttributeError(f"module {__name__!r} has no attribute {key!r}")

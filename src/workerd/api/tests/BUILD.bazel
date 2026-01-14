@@ -33,6 +33,19 @@ wd_test(
     ],
 )
 
+# Test to validate timing semantics for JSRPC streaming responses.
+# This test verifies that Return events occur when the handler returns,
+# NOT when the stream is fully consumed.
+wd_test(
+    src = "jsrpc-timing-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-timing-test.js",
+        "jsrpc-timing-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
 # Test for a worker that can log to itself using the isTracer parameter
 wd_test(
     src = "self-logger-test.wd-test",
@@ -112,9 +125,12 @@ wd_test(
     src = "sql-test.wd-test",
     args = ["--experimental"],
     data = [
+        "instrumentation-tail-worker.js",
         "sql-test.js",
         "sql-test-tail.js",
     ],
+    # Exceeds 240s timeout under coverage instrumentation
+    tags = ["no-coverage"],
 )
 
 wd_test(
@@ -212,6 +228,12 @@ wd_test(
 )
 
 wd_test(
+    src = "encoding-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["encoding-streams-test.js"],
+)
+
+wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
     data = ["events-test.js"],
@@ -264,6 +286,12 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-params-ownership-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-params-ownership-test.js"],
+)
+
+wd_test(
     src = "memory-cache-test.wd-test",
     args = ["--experimental"],
     data = ["memory-cache-test.js"],
@@ -312,9 +340,98 @@ wd_test(
 )
 
 wd_test(
+    src = "stub-storage-test.wd-test",
+    args = ["--experimental"],
+    data = ["stub-storage-test.js"],
+)
+
+wd_test(
+    src = "compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["compression-streams-test.js"],
+)
+
+wd_test(
+    src = "transform-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["transform-streams-test.js"],
+)
+
+wd_test(
+    src = "pipe-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["pipe-streams-test.js"],
+)
+
+wd_test(
+    src = "streams-r2-patterns-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-r2-patterns-test.js"],
+)
+
+wd_test(
+    src = "streams-respond-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-respond-test.js"],
+)
+
+wd_test(
+    src = "streams-no-auto-allocate-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-no-auto-allocate-test.js"],
+)
+
+wd_test(
+    src = "streams-js-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-js-test.js"],
+)
+
+wd_test(
+    src = "streams-iocontext-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-iocontext-test.js"],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],
+)
+
+# Test that verifies autogates are ENABLED - only runs in @all-autogates variant
+wd_test(
+    src = "autogate-enabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["autogate-enabled-test.js"],
+    generate_all_compat_flags_variant = False,
+    generate_default_variant = False,
+)
+
+# Test that verifies autogates are DISABLED - only runs in default variant
+wd_test(
+    src = "autogate-disabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["autogate-disabled-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+# Test that verifies compat flags are ENABLED - only runs in @all-compat-flags variant
+wd_test(
+    src = "compat-flag-enabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["compat-flag-enabled-test.js"],
+    generate_all_autogates_variant = False,
+    generate_default_variant = False,
+)
+
+# Test that verifies compat flags are DISABLED - only runs in default variant
+wd_test(
+    src = "compat-flag-disabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["compat-flag-disabled-test.js"],
+    generate_all_autogates_variant = False,
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
@@ -407,6 +524,7 @@ wd_test(
     src = "no-to-string-tag-test.wd-test",
     args = ["--experimental"],
     data = ["no-to-string-tag-test.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
@@ -480,6 +598,7 @@ wd_test(
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
+    tags = ["requires-network"],
 )
 
 wd_test(
@@ -553,4 +672,10 @@ wd_test(
     src = "headers-immutable-prototype-test.wd-test",
     args = ["--experimental"],
     data = ["headers-immutable-prototype-test.js"],
+)
+
+wd_test(
+    src = "identity-transform-stream-state-machine-test.wd-test",
+    args = ["--experimental"],
+    data = ["identity-transform-stream-state-machine-test.js"],
 )

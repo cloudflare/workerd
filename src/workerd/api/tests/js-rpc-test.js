@@ -2029,3 +2029,69 @@ export let portAbortCall = {
     }
   },
 };
+
+export class Greeter extends WorkerEntrypoint {
+  async greet(name) {
+    return `${this.ctx.props.greeting}, ${name}!`;
+  }
+}
+
+export class GreeterFactory extends WorkerEntrypoint {
+  async makeGreeter(greeting) {
+    return this.ctx.exports.Greeter({ props: { greeting } });
+  }
+  async makeGreeterWrapped(greeting) {
+    return { greeter: this.ctx.exports.Greeter({ props: { greeting } }) };
+  }
+}
+
+export let sendServiceStubOverRpc = {
+  async test(controller, env, ctx) {
+    {
+      let greeter = await env.GreeterFactory.makeGreeter('Yo');
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
+
+    // Test that we can pipeline on service stubs.
+    {
+      let greeter = env.GreeterFactory.makeGreeter('Yo');
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
+
+    // Pipelining works a little differently when the service stub is returned as the top-level
+    // value vs. an inner value, so test an inner value too.
+    {
+      let greeter = env.GreeterFactory.makeGreeterWrapped('Yo').greeter;
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
+  },
+};
+
+// Make sure that calls are delivered in e-order, even in the presence of pushed externals.
+export let eOrderTest = {
+  async test(controller, env, ctx) {
+    let abortController = new AbortController();
+    let abortSignal = abortController.signal;
+
+    let readableController;
+    let readableStream = new ReadableStream({
+      start(c) {
+        readableController = c;
+      },
+    });
+
+    let stub = await env.MyService.makeCounter(0);
+
+    let promises = [];
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1, abortSignal));
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1, readableStream));
+    promises.push(stub.increment(1));
+
+    let results = await Promise.all(promises);
+
+    assert.deepEqual(results, [1, 2, 3, 4, 5, 6]);
+  },
+};

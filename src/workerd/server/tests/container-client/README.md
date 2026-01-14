@@ -1,33 +1,39 @@
 ## container-client test
 
-This test is excluded from test runner. In order to run the tests, please read the following steps:
+To run the tests:
 
-- Make sure docker is installed and running correctly
+1. Make sure Docker is installed and running correctly
 
-```shell
-docker ps
-```
+   ```shell
+   docker ps
+   ```
 
-- Remove existing containers labeled as "cf-container-client-test"
+2. Use correct Docker context
 
-```shell
-docker rm -f $(docker ps -aq --filter name=workerd-container-client-test --all)
-```
+   ```shell
+   docker context use default
+   ```
 
-- Remove existing docker image
+3. Remove existing containers labeled as "cf-container-client-test"
 
-```shell
-docker image rm cf-container-client-test
-```
+   ```shell
+   docker rm -f $(docker ps -aq --filter name=workerd-container-client-test --all)
+   ```
 
-- Build docker image
+4. Remove existing Docker image
 
-```shell
-docker build -t "cf-container-client-test" src/workerd/server/tests/container-client
-```
+   ```shell
+   docker image rm cf-container-client-test
+   ```
 
-- Run the test
+5. Build Docker images
 
-```shell
-just stream-test //src/workerd/server/tests/container-client:test
-```
+   ```shell
+   bazel run //images:load_all
+   ```
+
+6. Run the test
+
+   ```shell
+   just stream-test //src/workerd/server/tests/container-client
+   ```

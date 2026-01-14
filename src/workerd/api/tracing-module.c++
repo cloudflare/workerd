@@ -28,8 +28,7 @@ void JsSpan::setAttribute(
 }
 
 jsg::Ref<JsSpan> TracingModule::startSpan(jsg::Lock& js, kj::String name) {
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     auto spanBuilder = ioContext.makeUserTraceSpan(kj::ConstString(kj::mv(name)));
     auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
     return js.alloc<JsSpan>(kj::mv(ownedSpan));

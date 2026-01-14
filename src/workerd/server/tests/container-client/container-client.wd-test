@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "internet", network = ( allow = ["private"] ) ),
+    ( name = "container-client-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        containerEngine = (localDocker = (socketPath = "unix:/var/run/docker.sock")),
+        durableObjectNamespaces = [
+          ( className = "DurableObjectExample",
+            uniqueKey = "container-client-test-DurableObjectExample",
+            container = (imageName = "cloudflare/workerd/container-client-test") ),
+          ( className = "DurableObjectExample2",
+            uniqueKey = "container-client-test-DurableObjectExample2",
+            container = (imageName = "cloudflare/workerd/container-client-test") ),
+        ],
+        durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+        bindings = [
+          ( name = "MY_CONTAINER", durableObjectNamespace = "DurableObjectExample" ),
+          ( name = "MY_DUPLICATE_CONTAINER", durableObjectNamespace = "DurableObjectExample2" ),
+        ],
+      )
+    ),
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
+  ],
+);

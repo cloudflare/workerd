@@ -77,7 +77,7 @@ class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEven
     return typeId;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
+  tracing::EventInfo getEventInfo() const override;
 
   kj::Promise<Result> notSupported() override {
     KJ_UNIMPLEMENTED("hibernatable web socket event not supported");
@@ -87,6 +87,9 @@ class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEven
   // Returns `params`, but if we have a HibernationReader we convert it to a
   // HibernatableSocketParams first.
   HibernatableSocketParams consumeParams();
+
+  // Peeks at params to extract the event type for tracing, without consuming them.
+  tracing::HibernatableWebSocketEventInfo::Type getEventType() const;
 
   uint16_t typeId;
   kj::OneOf<HibernatableSocketParams, kj::Own<HibernationReader>> params;

@@ -636,8 +636,10 @@ export type DurableObjectLocationHint =
   | "oc"
   | "afr"
   | "me";
+export type DurableObjectRoutingMode = "primary-only";
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
+  routingMode?: DurableObjectRoutingMode;
 }
 export interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
@@ -2647,6 +2649,8 @@ export interface Transformer<I = any, O = any> {
   expectedLength?: number;
 }
 export interface StreamPipeOptions {
+  preventAbort?: boolean;
+  preventCancel?: boolean;
   /**
    * Pipes this readable stream to a given writable stream destination. The way in which the piping process behaves under various error conditions can be customized with a number of passed options. It returns a promise that fulfills when the piping process completes successfully, or rejects if any errors were encountered.
    *
@@ -2665,8 +2669,6 @@ export interface StreamPipeOptions {
    * The signal option can be set to an AbortSignal to allow aborting an ongoing pipe operation via the corresponding AbortController. In this case, this source readable stream will be canceled, and destination aborted, unless the respective options preventCancel or preventAbort are set.
    */
   preventClose?: boolean;
-  preventAbort?: boolean;
-  preventCancel?: boolean;
   signal?: AbortSignal;
 }
 export type ReadableStreamReadResult<R = any> =
@@ -2959,13 +2961,13 @@ export declare abstract class TransformStreamDefaultController<O = any> {
   terminate(): void;
 }
 export interface ReadableWritablePair<R = any, W = any> {
+  readable: ReadableStream<R>;
   /**
    * Provides a convenient, chainable way of piping this readable stream through a transform stream (or any other { writable, readable } pair). It simply pipes the stream into the writable side of the supplied pair, and returns the readable side for further use.
    *
    * Piping a stream will lock it for the duration of the pipe, preventing any other consumer from acquiring a reader.
    */
   writable: WritableStream<W>;
-  readable: ReadableStream<R>;
 }
 /**
  * The **`WritableStream`** interface of the Streams API provides a standard abstraction for writing streaming data to a destination, known as a sink.
@@ -6813,7 +6815,7 @@ export interface Ai_Cf_Qwen_Qwq_32B_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7087,7 +7089,7 @@ export interface Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7180,7 +7182,7 @@ export interface Ai_Cf_Google_Gemma_3_12B_It_Prompt {
    */
   prompt: string;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7344,7 +7346,7 @@ export interface Ai_Cf_Google_Gemma_3_12B_It_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7625,7 +7627,7 @@ export interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7864,7 +7866,7 @@ export interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages_Inner {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -8952,7 +8954,7 @@ export interface Ai_Cf_Ai4Bharat_Indictrans2_En_Indic_1B_Input {
    */
   text: string | string[];
   /**
-   * Target langauge to translate to
+   * Target language to translate to
    */
   target_language:
     | "asm_Beng"
@@ -11430,7 +11432,7 @@ export interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
    *
-   * Calling this method returns an idential socket to if you call
+   * Calling this method returns an identical socket to if you call
    * `connect("host:port")` using the `host` and `port` fields from this object.
    * Pick whichever approach works better with your preferred DB client library.
    *
@@ -12427,7 +12429,7 @@ export declare namespace TailStream {
     // For Hibernate and Mark this would be the span under which they were emitted.
     // spanId is not set ONLY if:
     //  1. This is an Onset event
-    //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
     readonly spanId?: string;
   }
   interface TailEvent<Event extends EventType> {

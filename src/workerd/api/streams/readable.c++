@@ -290,6 +290,134 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 // ======================================================================================
+// DrainingReader implementation
+
+DrainingReader::DrainingReader(): ioContext(tryGetIoContext()) {}
+
+DrainingReader::~DrainingReader() noexcept(false) {
+  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
+    stream->getController().releaseReader(*this, kj::none);
+  }
+}
+
+kj::Maybe<kj::Own<DrainingReader>> DrainingReader::create(jsg::Lock& js, ReadableStream& stream) {
+  if (stream.isLocked()) {
+    return kj::none;
+  }
+  auto reader = kj::heap<DrainingReader>();
+  if (!stream.getController().lockReader(js, *reader)) {
+    return kj::none;
+  }
+  return kj::mv(reader);
+}
+
+void DrainingReader::attach(
+    ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
+  KJ_ASSERT(state.is<Initial>());
+  state = controller.addRef();
+  this->closedPromise = kj::mv(closedPromise);
+}
+
+void DrainingReader::detach() {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      return;
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      state.init<StreamStates::Closed>();
+      return;
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return;
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxRead) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto& controller = stream->getController();
+      KJ_IF_SOME(result, controller.drainingRead(js, maxRead)) {
+        return kj::mv(result);
+      }
+      return js.rejectedPromise<DrainingReadResult>(
+          js.v8TypeError("Unable to perform draining read on this stream."_kj));
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return js.rejectedPromise<DrainingReadResult>(
+          js.v8TypeError("This ReadableStream reader has been released."_kj));
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return js.resolvedPromise(DrainingReadResult{
+        .chunks = kj::Array<kj::Array<kj::byte>>(),
+        .done = true,
+      });
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<void> DrainingReader::cancel(
+    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto ref = stream.addRef();
+      return stream->getController().cancel(js, maybeReason);
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return js.rejectedPromise<void>(
+          js.v8TypeError("This ReadableStream reader has been released."_kj));
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return js.resolvedPromise();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void DrainingReader::releaseLock(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto ref = stream.addRef();
+      stream->getController().releaseReader(*this, js);
+      state.init<Released>();
+      return;
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return;
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+bool DrainingReader::isAttached() const {
+  return state.is<Attached>();
+}
+
+void DrainingReader::visitForGc(jsg::GcVisitor& visitor) {
+  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
+    visitor.visit(stream);
+  }
+  visitor.visit(closedPromise);
+}
+
+// ======================================================================================
 
 ReadableStream::ReadableStream(IoContext& ioContext, kj::Own<ReadableStreamSource> source)
     : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
@@ -352,7 +480,7 @@ ReadableStream::Reader ReadableStream::getReader(
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(mode, o.mode) {
       JSG_REQUIRE(
-          mode == "byob", RangeError, "mode must be undefined or 'byob' in call to getReader().");
+          mode == "byob", TypeError, "mode must be undefined or 'byob' in call to getReader().");
       // No need to check that the ReadableStream implementation is a byte stream: the first
       // invocation of read() will do that for us and throw if necessary. Also, we should really
       // just support reading non-byte streams with BYOB readers.
@@ -512,12 +640,28 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
     } else if ((value)->IsArrayBufferView()) {
       auto view = value.As<v8::ArrayBufferView>();
       return view->ByteLength();
+    } else {
+      // Per the WHATWG Streams spec, ByteLengthQueuingStrategy.size should return
+      // GetV(chunk, "byteLength"), which means getting the byteLength property
+      // from any object, not just ArrayBuffer/ArrayBufferView.
+      KJ_IF_SOME(obj, jsg::JsValue(value).tryCast<jsg::JsObject>()) {
+        auto byteLength = obj.get(js, "byteLength"_kj);
+        KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
+          KJ_IF_SOME(val, num.value(js)) {
+            return static_cast<uint32_t>(val);
+          }
+        }
+      }
     }
   }
   return kj::none;
 }
 
 namespace {
+
+// TODO(cleanup): These classes have been copied to external-pusher.c++. The copies here can be
+//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
+//   StreamSink-related code. For now I'm not trying to avoid duplication.
 
 // HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
 //   wrap the two ends of the pipe in special adapters that track whether end() was called.
@@ -676,18 +820,37 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   StreamEncoding encoding = controller.getPreferredEncoding();
   auto expectedLength = controller.tryGetLength(encoding);
 
-  auto streamCap = externalHandler->writeStream(
-      [encoding, expectedLength](rpc::JsValue::External::Builder builder) mutable {
-    auto rs = builder.initReadableStream();
-    rs.setEncoding(encoding);
-    KJ_IF_SOME(l, expectedLength) {
-      rs.getExpectedLength().setKnown(l);
+  capnp::ByteStream::Client streamCap = [&]() {
+    KJ_IF_SOME(pusher, externalHandler->getExternalPusher()) {
+      auto req = pusher.pushByteStreamRequest(capnp::MessageSize{2, 0});
+      KJ_IF_SOME(el, expectedLength) {
+        req.setLengthPlusOne(el + 1);
+      }
+      auto pipeline = req.sendForPipeline();
+
+      externalHandler->write([encoding, expectedLength, source = pipeline.getSource()](
+                                 rpc::JsValue::External::Builder builder) mutable {
+        auto rs = builder.initReadableStream();
+        rs.setStream(kj::mv(source));
+        rs.setEncoding(encoding);
+      });
+
+      return pipeline.getSink();
+    } else {
+      return externalHandler
+          ->writeStream(
+              [encoding, expectedLength](rpc::JsValue::External::Builder builder) mutable {
+        auto rs = builder.initReadableStream();
+        rs.setEncoding(encoding);
+        KJ_IF_SOME(l, expectedLength) {
+          rs.getExpectedLength().setKnown(l);
+        }
+      }).castAs<capnp::ByteStream>();
     }
-  });
+  }();
 
   kj::Own<capnp::ExplicitEndOutputStream> kjStream =
-      ioctx.getByteStreamFactory().capnpToKjExplicitEnd(
-          kj::mv(streamCap).castAs<capnp::ByteStream>());
+      ioctx.getByteStreamFactory().capnpToKjExplicitEnd(kj::mv(streamCap));
 
   auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
 
@@ -718,21 +881,25 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   auto& ioctx = IoContext::current();
 
-  kj::Maybe<uint64_t> expectedLength;
-  auto el = rs.getExpectedLength();
-  if (el.isKnown()) {
-    expectedLength = el.getKnown();
+  kj::Own<kj::AsyncInputStream> in;
+  if (rs.hasStream()) {
+    in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
+  } else {
+    kj::Maybe<uint64_t> expectedLength;
+    auto el = rs.getExpectedLength();
+    if (el.isKnown()) {
+      expectedLength = el.getKnown();
+    }
+
+    auto pipe = kj::newOneWayPipe(expectedLength);
+
+    auto endedFlag = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+
+    auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), kj::addRef(*endedFlag));
+    in = kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
+
+    externalHandler->setLastStream(ioctx.getByteStreamFactory().kjToCapnp(kj::mv(out)));
   }
-
-  auto pipe = kj::newOneWayPipe(expectedLength);
-
-  auto endedFlag = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
-
-  auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), kj::addRef(*endedFlag));
-  auto in =
-      kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
-
-  externalHandler->setLastStream(ioctx.getByteStreamFactory().kjToCapnp(kj::mv(out)));
 
   return js.alloc<ReadableStream>(ioctx,
       kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));

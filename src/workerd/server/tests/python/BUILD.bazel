@@ -1,9 +1,13 @@
-load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests", "gen_rust_import_tests")
+load("//src/workerd/server/tests/python:import_tests.bzl", "gen_rust_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 
 python_test_setup()
 
+# Each test takes a while to start up, so if possible add additional tests to many-tests or sdk or
+# some other existing test.
 py_wd_test("hello")
+
+py_wd_test("many-tests")
 
 py_wd_test("env-param")
 
@@ -16,17 +20,6 @@ py_wd_test("random")
 py_wd_test("subdirectory")
 
 py_wd_test("sdk")
-
-py_wd_test("seek-metadatafs")
-
-gen_import_tests(
-    pkg_skip_versions = {
-        "0.28.2": [
-            "micropip",  # missing lockfile
-            "soupsieve",  # Circular dependency with beautifulsoup4
-        ],
-    },
-)
 
 gen_rust_import_tests()
 
@@ -54,21 +47,11 @@ py_wd_test(
     skip_python_flags = ["0.26.0a2"],
 )
 
-py_wd_test("js-import")
-
-py_wd_test(
-    "importable-env",
-    # TODO: why doesn't dedicated snapshot work with this?
-    use_snapshot = None,
-)
-
 py_wd_test("python-rpc")
 
 py_wd_test("workflow-entrypoint")
 
 py_wd_test("vendor_dir_compat_flag")
-
-py_wd_test("multiprocessing")
 
 py_wd_test("default-class-with-legacy-global-handlers")
 
@@ -83,3 +66,5 @@ py_wd_test(
     make_snapshot = False,
     use_snapshot = "numpy",
 )
+
+py_wd_test("python-compat-flag")

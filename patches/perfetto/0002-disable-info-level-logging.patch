@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Carney <dcarney@cloudflare.com>
+Date: Wed, 17 Dec 2025 10:59:18 +0000
+Subject: disable info level logging
+
+---
+ .../perfetto/base/build_configs/bazel/perfetto_build_flags.h    | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/perfetto/base/build_configs/bazel/perfetto_build_flags.h b/include/perfetto/base/build_configs/bazel/perfetto_build_flags.h
+index 5298f8c6..d409d690 100644
+--- a/include/perfetto/base/build_configs/bazel/perfetto_build_flags.h
++++ b/include/perfetto/base/build_configs/bazel/perfetto_build_flags.h
+@@ -35,7 +35,7 @@
+ #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_FORCE_DLOG_OFF() (0)
+ #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_FORCE_DCHECK_ON() (0)
+ #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_FORCE_DCHECK_OFF() (1)
+-#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_VERBOSE_LOGS() (1)
++#define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_VERBOSE_LOGS() (0)
+ #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_VERSION_GEN() (1)
+ #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_TP_PERCENTILE() (1)
+ #define PERFETTO_BUILDFLAG_DEFINE_PERFETTO_TP_LINENOISE() (1)
+-- 
+2.51.0
+

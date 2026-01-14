@@ -45,7 +45,6 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     auto traceSpan = context.makeTraceSpan("r2_uploadPart"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_uploadPart"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bucket->bindingName()) {
@@ -120,6 +119,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
     auto promise = doR2HTTPPutRequest(
         kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, kj::none);
 
@@ -152,7 +152,6 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     auto traceSpan = context.makeTraceSpan("r2_completeMultipartUpload"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_completeMultipartUpload"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bucket->bindingName()) {
@@ -195,6 +194,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
@@ -223,7 +223,6 @@ jsg::Promise<void> R2MultipartUpload::abort(
     auto traceSpan = context.makeTraceSpan("r2_abortMultipartUpload"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_abortMultipartUpload"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bucket->bindingName()) {
@@ -251,6 +250,7 @@ jsg::Promise<void> R2MultipartUpload::abort(
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 

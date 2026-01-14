@@ -6,7 +6,14 @@ import functools
 import inspect
 import json
 from asyncio import create_task, gather
-from collections.abc import Awaitable, Generator, Iterable, MutableMapping
+from collections.abc import (
+    Awaitable,
+    Generator,
+    Iterable,
+    Iterator,
+    MutableMapping,
+    Sequence,
+)
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
@@ -94,6 +101,15 @@ def import_from_javascript(module_name: str) -> Any:
                 f"Failed to import '{module_name}': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
             ) from e
         raise
+
+
+@contextmanager
+def patch_env(
+    d: dict[str, Any] | Sequence[tuple[str, Any]] | None = None, **kwds: dict[str, Any]
+) -> Iterator[None]:
+    if d:
+        kwds = dict(d) | kwds
+    yield from _pyodide_entrypoint_helper.patch_env_helper(to_js(kwds))
 
 
 type JSBody = (

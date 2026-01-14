@@ -138,60 +138,20 @@ export async function runInstrumentationTest(
  * @returns {Object} An object with methods to handle spans
  */
 export function createTailStreamCollector() {
-  const invocationPromises = [];
-  const spans = new Map();
+  let state = createInstrumentationState();
 
-  const tailStream = (event, env, ctx) => {
-    // For each "onset" event, store a promise which we will resolve when
-    // we receive the equivalent "outcome" event
-    let resolveFn;
-    invocationPromises.push(
-      new Promise((resolve, reject) => {
-        resolveFn = resolve;
-      })
-    );
+  const tailStream = createTailStreamHandler(state);
 
-    // Accumulate the span info for easier testing
-    return (event) => {
-      let spanKey = `${event.invocationId}#${event.event.spanId || event.spanContext.spanId}`;
-      switch (event.event.type) {
-        case 'spanOpen':
-          // The span ids will change between tests, but Map preserves insertion order
-          spans.set(spanKey, { name: event.event.name });
-          break;
-        case 'attributes': {
-          let span = spans.get(spanKey);
-          for (let { name, value } of event.event.info) {
-            span[name] = value;
-          }
-          spans.set(spanKey, span);
-          break;
-        }
-        case 'spanClose': {
-          let span = spans.get(spanKey);
-          span['closed'] = true;
-          spans.set(spanKey, span);
-          break;
-        }
-        case 'outcome':
-          resolveFn();
-          break;
-      }
-    };
-  };
-
-  const waitForCompletion = async () => {
-    await Promise.allSettled(invocationPromises);
-  };
-
-  const getSpans = () => {
-    return Array.from(spans.values());
+  let spans = state.spans;
+  let invocationPromises = state.invocationPromises;
+  const waitForCompletion = () => {
+    return Promise.allSettled(invocationPromises);
   };
 
   return {
     tailStream,
     waitForCompletion,
-    getSpans,
+    spans,
   };
 }
 

@@ -1,6 +1,7 @@
 import readline from 'node:readline';
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
+import promises from 'node:readline/promises';
 
 export const readlineClearLine = {
   test() {
@@ -205,5 +206,12 @@ export const readlineFunctionReturnValues = {
       assert.strictEqual(readline.moveCursor(...args), false);
       assert.strictEqual(readline.emitKeypressEvents(...args), undefined);
     }
+  },
+};
+
+export const readlineImportedPromisesModule = {
+  test() {
+    assert.strictEqual(typeof promises, 'object');
+    assert.strictEqual(typeof promises.createInterface, 'function');
   },
 };

@@ -10,7 +10,8 @@
       "pyodide-internal:generated/emscriptenSetup": [
         "./internal/pool/emscriptenSetup.ts"
       ],
-      "internal:*": ["./types/*"]
+      "internal:*": ["./types/*"],
+      "cloudflare-internal:*": ["./types/cloudflare-internal/*"]
     },
     "typeRoots": ["./types"],
     "noEmit": false,

@@ -24,6 +24,14 @@ enum class AutogateKey {
   BODY_BUFFER_INPUT_STREAM_REPLACEMENT,
   // Enable the fetch request memory adjustment
   FETCH_REQUEST_MEMORY_ADJUSTMENT,
+  // Enable Rust-backed Node.js DNS implementation
+  RUST_BACKED_NODE_DNS,
+  // Switch the CompressionStream to use the new state machine-based impl
+  COMPRESSION_STREAM_USE_STATE_MACHINE,
+  // Switch the IdentityTransformStream to use the new state machine-based impl
+  IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE,
+  // Use ExternalPusher instead of StreamSink to handle streams in RPC.
+  RPC_USE_EXTERNAL_PUSHER,
   NumOfKeys  // Reserved for iteration.
 };
 
@@ -53,12 +61,16 @@ class Autogate {
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
   static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
 
+  // Initializes all autogates to true. Used for testing with the --all-autogates flag.
+  static void initAllAutogates();
+
   // Destroys an initialized global Autogate instance. Used only for testing.
   static void deinitAutogate();
 
  private:
-  bool gates[static_cast<unsigned long>(AutogateKey::NumOfKeys)];
+  bool gates[static_cast<unsigned long>(AutogateKey::NumOfKeys)] = {};
 
+  Autogate() = default;
   Autogate(capnp::List<capnp::Text>::Reader autogates);
 };
 

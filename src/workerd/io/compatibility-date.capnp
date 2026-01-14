@@ -1130,7 +1130,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsStreamWrapModule @131 :Bool
     $compatEnableFlag("enable_nodejs_stream_wrap_module")
     $compatDisableFlag("disable_nodejs_stream_wrap_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub _stream_wrap module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1144,14 +1144,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsDgramModule @133 :Bool
     $compatEnableFlag("enable_nodejs_dgram_module")
     $compatDisableFlag("disable_nodejs_dgram_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub dgram module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsInspectorModule @134 :Bool
     $compatEnableFlag("enable_nodejs_inspector_module")
     $compatDisableFlag("disable_nodejs_inspector_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub inspector module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1179,7 +1179,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsSqliteModule @138 :Bool
     $compatEnableFlag("enable_nodejs_sqlite_module")
     $compatDisableFlag("disable_nodejs_sqlite_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub sqlite module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1229,8 +1229,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   fetchIterableTypeSupport @146 :Bool
     $compatEnableFlag("fetch_iterable_type_support")
-    $compatDisableFlag("no_fetch_iterable_type_support")
-    $compatEnableDate("2025-12-16");
+    $compatDisableFlag("no_fetch_iterable_type_support");
   # Enables passing sync and async iterables as the body of fetch Request or Response.
   # Previously, sync iterables like Arrays would be accepted but stringified, and async
   # iterables would be treated as regular objects and not iterated over at all. With this
@@ -1256,4 +1255,84 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables precise timers with 3ms granularity. This provides more accurate timing for performance
   # measurements and time-sensitive operations.
+
+  fetchIterableTypeSupportOverrideAdjustment @149 :Bool
+    $compatEnableFlag("fetch_iterable_type_support_override_adjustment")
+    $compatDisableFlag("no_fetch_iterable_type_support_override_adjustment")
+    $impliedByAfterDate(name = "fetchIterableTypeSupport", date = "2026-01-15");
+  # Further adapts the fetch iterable type support to adjust for toString/toPrimitive
+  # overrides on sync iterable objects. Specifically, if an object passed as the body
+  # of a fetch Request or Response is sync iterable but has a custom toString or
+  # toPrimitive method, we will skip treating it as a sync iterable and instead allow
+  # it to fall through to being handled as a stringified object.
+
+  stripBomInReadAllText @150 :Bool
+    $compatEnableFlag("strip_bom_in_read_all_text")
+    $compatDisableFlag("do_not_strip_bom_in_read_all_text")
+    $compatEnableDate("2026-01-13")
+    $impliedByAfterDate(name = "pedanticWpt", date = "2026-01-13");
+  # Instructs the readAllText method in streams to strip the leading UTF8 BOM if present.
+
+  allowIrrevocableStubStorage @151 :Bool
+    $compatEnableFlag("allow_irrevocable_stub_storage")
+    $experimental;
+  # Permits various stub types (e.g. ServiceStub aka Fetcher, DurableObjectClass) to be stored in
+  # long-term Durable Object storage without any mechanism for the stub target to audit or revoke
+  # incoming connections.
+  #
+  # This feature exists for experimental use only, and will be removed once we have a properly
+  # auditable and revocable storage mechanism.
+
+  rpcParamsDupStubs @152 :Bool
+    $compatEnableFlag("rpc_params_dup_stubs")
+    $compatDisableFlag("rpc_params_transfer_stubs")
+    $compatEnableDate("2026-01-20");
+  # Changes the ownership semantics of RPC stubs embedded in the parameters of an RPC call.
+  #
+  # When the RPC system was first introduced, RPC stubs that were embedded in the params or return
+  # value of some other call had their ownership transferred. That is, the original stub was
+  # implicitly disposed, with a duplicate stub being delivered to the destination.
+  #
+  # This turns out to compose poorly with another rule: in the callee, any stubs received in the
+  # params of a call are automatically disposed when the call returns. These two rules combine to
+  # mean that if you proxy a call -- i.e. the implementation of an RPC just makes another RPC call
+  # passing along the same params -- then any stubs in the params get disposed twice. Worse, if
+  # the eventual recipient of the stub wants to keep a duplicate past the end of the call, this
+  # may not work because the copy of the stub in the proxy layer gets disposed anyway, breaking the
+  # connection.
+  #
+  # For this reason, the pure-JS implementation of Cap'n Web switched to saying that stubs in params
+  # do NOT transfer ownership -- they are simply duplicated. This compat flag fixes the Workers
+  # Runtime built-in RPC to match Cap'n Web behavior.
+  #
+  # In particular, this fixes: https://github.com/cloudflare/capnweb/issues/110
+
+  enableNodejsGlobalTimers @153 :Bool
+    $compatEnableFlag("enable_nodejs_global_timers")
+    $compatDisableFlag("no_nodejs_global_timers")
+    $experimental;
+  # When enabled, setTimeout, setInterval, clearTimeout, and clearInterval
+  # are available on globalThis as Node.js-compatible versions from node:timers.
+  # setTimeout and setInterval return Timeout objects with methods like
+  # refresh(), ref(), unref(), and hasRef().
+  # This flag requires nodejs_compat or nodejs_compat_v2 to be enabled.
+
+  noAutoAllocateChunkSize @154 :Bool
+    $compatEnableFlag("streams_no_default_auto_allocate_chunk_size")
+    $compatDisableFlag("streams_auto_allocate_chunk_size_default")
+    $experimental;
+  # Per the WHATWG Streams spec, byte streams should only have autoAllocateChunkSize
+  # set when the user explicitly provides it. When not set, non-BYOB reads on byte
+  # streams won't have a byobRequest available in the pull() callback, and the
+  # underlying source must use controller.enqueue() to provide data instead.
+  #
+  # Our original implementation always defaulted autoAllocateChunkSize to 4096,
+  # which meant all byte stream reads behaved as BYOB reads. This flag enables
+  # the spec-compliant behavior where autoAllocateChunkSize is only set when
+  # explicitly provided by the user.
+  #
+  # Code relying on the old behavior that accesses controller.byobRequest without
+  # checking for null will break. To migrate, either:
+  # 1. Add a null check: if (controller.byobRequest) { ... }
+  # 2. Explicitly set autoAllocateChunkSize when creating the stream
 }

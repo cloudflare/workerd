@@ -218,8 +218,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
       void* schemaAsPtr;
       memcpy(&schemaAsPtr, &schema, sizeof(schema));
 
-      auto constructor = v8::FunctionTemplate::New(
-          js.v8Isolate, &constructorCallback, v8::External::New(js.v8Isolate, schemaAsPtr));
+      auto constructor = v8::FunctionTemplate::New(js.v8Isolate, &constructorCallback,
+          v8::External::New(js.v8Isolate, schemaAsPtr, v8::kExternalPointerTypeTagDefault));
 
       auto prototype = constructor->PrototypeTemplate();
       auto signature = v8::Signature::New(js.v8Isolate, constructor);
@@ -323,8 +323,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
       auto name = jsg::v8StrIntern(js.v8Isolate, method.getProto().getName());
       prototype->Set(name,
           v8::FunctionTemplate::New(js.v8Isolate, &methodCallback,
-              v8::External::New(js.v8Isolate, &method), signature, 0,
-              v8::ConstructorBehavior::kThrow));
+              v8::External::New(js.v8Isolate, &method, v8::kExternalPointerTypeTagDefault),
+              signature, 0, v8::ConstructorBehavior::kThrow));
     }
   }
 
@@ -332,7 +332,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     jsg::liftKj(args, [&]() {
       auto data = args.Data();
       KJ_ASSERT(data->IsExternal());
-      void* schemaAsPtr = data.As<v8::External>()->Value();
+      void* schemaAsPtr = data.As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault);
       capnp::Schema schema;
       memcpy(&schema, &schemaAsPtr, sizeof(schema));
 
@@ -365,8 +365,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     jsg::liftKj(args, [&]() {
       auto data = args.Data();
       KJ_ASSERT(data->IsExternal());
-      auto& method =
-          *reinterpret_cast<capnp::InterfaceSchema::Method*>(data.As<v8::External>()->Value());
+      auto& method = *reinterpret_cast<capnp::InterfaceSchema::Method*>(
+          data.As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
 
       auto& js = jsg::Lock::from(args.GetIsolate());
       auto obj = args.This();

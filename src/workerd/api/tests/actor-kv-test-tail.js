@@ -3,7 +3,7 @@ import {
   invocationPromises,
   spans,
   testTailHandler,
-} from 'test:instumentation-tail';
+} from 'test:instrumentation-tail';
 
 // Use shared instrumentation test tail worker
 export default testTailHandler;
@@ -27,10 +27,7 @@ export const test = {
     ];
 
     await Promise.allSettled(invocationPromises);
-    let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession'
-    );
+    let received = Array.from(spans.values());
     assert.deepStrictEqual(received, expected);
-    return new Response('');
   },
 };

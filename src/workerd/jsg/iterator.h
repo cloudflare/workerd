@@ -492,12 +492,47 @@ class GeneratorWrapper {
     // where we want to allow strings to be passed through as strings but also want to allow
     // sync and async generators to be handled as well. Without this, the strings would be
     // treated as sync iterables.
-    if (config.fetchIterableTypeSupport && handle->IsObject()) {
+    if (config.fetchIterableTypeSupport && handle->IsObject() && !handle->IsStringObject()) {
       auto isolate = js.v8Isolate;
       auto object = handle.As<v8::Object>();
+
       auto iter = check(object->Get(context, v8::Symbol::GetAsyncIterator(isolate)));
       // If there is no async iterator, let's try a sync iterator.
       if (iter->IsNullOrUndefined()) {
+        // Before checking for the sync iterator, let's also check to see if the object
+        // implements a custom toString to Symbol.toPrimitive method that is not the default
+        // Object.prototype.toString. If it does, then we won't treat it as
+        // an iterator either. If the object is an Array, then we skip this check since
+        // it's exceedingly uncommon for arrays to be subclassed with a custom toString method,
+        // so much that it's not worth handling the extreme edge case.
+        // This is to deal with edge cases around objects with customized stringify methods,
+        // which are likely more common than those with customized iterator methods. While
+        // these are both rare cases, it's better to err on the side of custom stringification
+        // rather than custom iteration.
+        if (config.fetchIterableTypeSupportOverrideAdjustment && !object->IsArray()) {
+          if (protoToString == kj::none) {
+            // TODO(cleanup): In several places in the codebase we have this pattern of
+            // lazily grabbing the object prototype. We should probably centralize this
+            // an cache it in the IsolateBase or something.
+            auto obj = js.obj();
+            auto proto = obj.getPrototype(js);
+            protoToString = jsg::JsRef(
+                js, KJ_ASSERT_NONNULL(proto.tryCast<jsg::JsObject>()).get(js, "toString"_kj));
+            toPrimitiveString = jsg::JsRef(js,
+                KJ_ASSERT_NONNULL(proto.tryCast<jsg::JsObject>()).get(js, js.symbolToPrimitive()));
+          }
+
+          // We only check that the toString/Symbol.toPrimitive is the same value as
+          // Object.prototype.toString/Symbol.toPrimitive. This does not guarantee every
+          // possible edge case but should be sufficient for our purposes.
+          auto jsobj = JsObject(object);
+          if (jsobj.get(js, "toString"_kj) != KJ_ASSERT_NONNULL(protoToString).getHandle(js) ||
+              jsobj.get(js, js.symbolToPrimitive()) !=
+                  KJ_ASSERT_NONNULL(toPrimitiveString).getHandle(js)) {
+            return kj::none;
+          }
+        }
+
         iter = check(object->Get(context, v8::Symbol::GetIterator(isolate)));
       }
       if (iter->IsFunction()) {
@@ -514,6 +549,8 @@ class GeneratorWrapper {
 
  private:
   const JsgConfig config;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> protoToString;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> toPrimitiveString;
 };
 
 // -----------------------------------------------------------------------------

@@ -8,9 +8,8 @@
 #include "queue.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/ring-buffer.h>
 #include <workerd/util/weak-refs.h>
-
-#include <list>
 
 namespace workerd::api {
 
@@ -172,8 +171,18 @@ class ReadableImpl {
   // queue is below the watermark and we actually need data right now.
   void pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
 
+  // Like pullIfNeeded but bypasses the shouldCallPull() check. Used for draining reads
+  // which need to pull all available data regardless of backpressure settings.
+  void forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
+
   // True if the queue is current below the highwatermark.
   bool shouldCallPull();
+
+  // True if a pull is currently in progress (the pull promise is pending).
+  // Used by draining reads to determine if pumping completed synchronously.
+  bool isPulling() const {
+    return flags.pulling;
+  }
 
   // The consumer can be used to read from this readables queue so long as the queue
   // is open. The consumer instance may outlive the readable but will be put into
@@ -375,9 +384,7 @@ class WritableImpl {
   size_t highWaterMark = 1;
   size_t amountBuffered = 0;
 
-  // `writeRequests` is often going to be empty in common usage patterns, in which case std::list
-  // is more memory efficient than a std::deque, for example.
-  std::list<WriteRequest> writeRequests;
+  RingBuffer<WriteRequest, 8> writeRequests;
 
   kj::Maybe<WriteRequest> inFlightWrite;
   kj::Maybe<jsg::Promise<void>::Resolver> inFlightClose;
@@ -388,6 +395,7 @@ class WritableImpl {
     uint8_t started : 1 = 0;
     uint8_t starting : 1 = 0;
     uint8_t backpressure : 1 = 0;
+    uint8_t pedanticWpt : 1 = 0;
   };
   Flags flags{};
 
@@ -422,6 +430,15 @@ class ReadableStreamDefaultController: public jsg::Object {
   void error(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   void pull(jsg::Lock& js);
+
+  // Like pull(), but bypasses backpressure checks. Used for draining reads
+  // which need to pull all available data regardless of highWaterMark.
+  void forcePull(jsg::Lock& js);
+
+  // True if a pull is currently in progress (the pull promise is pending).
+  bool isPulling() const {
+    return impl.isPulling();
+  }
 
   kj::Own<ValueQueue::Consumer> getConsumer(
       kj::Maybe<ValueQueue::ConsumerImpl::StateListener&> stateListener);
@@ -551,6 +568,15 @@ class ReadableByteStreamController: public jsg::Object {
 
   void pull(jsg::Lock& js);
 
+  // Like pull(), but bypasses backpressure checks. Used for draining reads
+  // which need to pull all available data regardless of highWaterMark.
+  void forcePull(jsg::Lock& js);
+
+  // True if a pull is currently in progress (the pull promise is pending).
+  bool isPulling() const {
+    return impl.isPulling();
+  }
+
   kj::Own<ByteQueue::Consumer> getConsumer(
       kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener);
 
@@ -600,11 +626,16 @@ class WritableStreamDefaultController: public jsg::Object {
 
   void error(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
-  ssize_t getDesiredSize();
+  kj::Maybe<ssize_t> getDesiredSize();
 
   jsg::Ref<AbortSignal> getSignal();
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
+
+  // Returns true if the stream is in the erroring state. Unlike the overload
+  // that takes a lock, this method does not require a lock since it doesn't
+  // return the error reason.
+  bool isErroring() const;
 
   bool isStarted() {
     return impl.flags.started;

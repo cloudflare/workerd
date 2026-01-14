@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "channel-token.h"
+
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker.h>
@@ -32,7 +34,7 @@ using api::pyodide::PythonConfig;
 //
 // The purpose of this class is to implement the core logic independently of the CLI itself,
 // in such a way that it can be unit-tested. workerd.c++ implements the CLI wrapper around this.
-class Server final: private kj::TaskSet::ErrorHandler {
+class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandler::Resolver {
  public:
   Server(kj::Filesystem& fs,
       kj::Timer& timer,
@@ -69,11 +71,11 @@ class Server final: private kj::TaskSet::ErrorHandler {
   void enableDebugPort(kj::String addr) {
     debugPortOverride = kj::mv(addr);
   }
-  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
-    pythonConfig.packageDiskCacheRoot = kj::mv(dkr);
+  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.packageDiskCacheRoot = kj::mv(dir);
   }
-  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
-    pythonConfig.pyodideDiskCacheRoot = kj::mv(dkr);
+  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.pyodideDiskCacheRoot = kj::mv(dir);
   }
   void setPythonCreateSnapshot() {
     pythonConfig.createSnapshot = true;
@@ -83,6 +85,16 @@ class Server final: private kj::TaskSet::ErrorHandler {
   }
   void setPythonLoadSnapshot(kj::String snapshot) {
     pythonConfig.loadSnapshotFromDisk = kj::mv(snapshot);
+  }
+  void setPythonSnapshotDirectory(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.snapshotDirectory = kj::mv(dir);
+  }
+
+  // Set the compatibility date to use for all workers. When set, workers in the config must NOT
+  // specify compatibilityDate (an error is reported if they do). This is used for testing to
+  // ensure tests run with both old and new compat dates.
+  void setTestCompatibilityDateOverride(kj::String date) {
+    testCompatibilityDateOverride = kj::mv(date);
   }
 
   // Runs the server using the given config.
@@ -133,9 +145,15 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   bool experimental = false;
 
+  // When set, overrides compatibilityDate for all workers and enforces that workers don't
+  // specify their own compatibilityDate.
+  kj::Maybe<kj::String> testCompatibilityDateOverride;
+
   Worker::LoggingOptions loggingOptions;
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
+
+  ChannelTokenHandler channelTokenHandler;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
@@ -244,6 +262,24 @@ class Server final: private kj::TaskSet::ErrorHandler {
   // Returns none on a config error.
   kj::Own<ActorClass> lookupActorClass(
       config::ServiceDesignator::Reader designator, kj::String errorContext);
+
+  // Pretty similar to lookupService() and lookupActorClass(), but these callbacks are called by
+  // the `ChannelTokenHandler` when decoding tokens.
+  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(
+      kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override;
+  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
+      kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override;
+
+  kj::Array<byte> encodeChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+      kj::StringPtr serviceName,
+      kj::Maybe<kj::StringPtr> entrypoint,
+      Frankenvalue& props);
+
+  void decodeChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+      kj::ArrayPtr<const byte> token,
+      kj::FunctionParam<void(
+          kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props)>
+          callback);
 
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,

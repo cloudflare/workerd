@@ -1,18 +1,88 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
-    // rust
+    // bazel_deps from MODULE.bazel
+    {
+      "name": "aspect_bazel_lib",
+      "type": "bazel_dep",
+      // 2.22.4 causes resolution issues, breaking the build entirely.
+      // If you can't trust a patch release anymore, what can you trust?
+      "freeze_version": "2.22.2"
+    },
+    {
+      "name": "aspect_rules_lint",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "bazel_features",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "bazel_skylib",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_shell",
+      "type": "bazel_dep"
+    },
+    // abseil is used by protobuf and tcmalloc.
+    {
+      "name": "abseil-cpp",
+      "type": "bazel_dep"
+    },
+    // Not pulling in platforms via bzlmod causes issues with the Windows clang-cl toolchain
+    {
+      "name": "platforms",
+      "type": "bazel_dep"
+    },
+    // While the build should succeed with the default toolchain configuration from rules_cc,
+    // apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
+    // needs to be pulled in before rules_cc for this toolchain to actually be used.
+    {
+      "name": "apple_support",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_cc",
+      "type": "bazel_dep"
+    },
+    // Rust
     {
       "name": "rules_rust",
-      "type": "git_clone",
-      "owner": "bazelbuild",
-      "repo": "rules_rust",
-      "url": "https://github.com/bazelbuild/rules_rust",
-      "branch": "main",
-      // Support for Rust 1.91 is in this commit. Remove freeze once new rules_rust release comes out.
-      "freeze_commit": "f3ccfa44f6636aa38e14f095e17d95797ae2f720",
-      "file_regex": "^rules_rust-.*\\.tar\\.gz$"
+      "type": "bazel_dep"
     },
+    // Node.js
+    {
+      "name": "aspect_rules_esbuild",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "aspect_rules_js",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "aspect_rules_ts",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_nodejs",
+      "type": "bazel_dep"
+    },
+    // Python
+    {
+      "name": "rules_python",
+      "type": "bazel_dep"
+    },
+    // rules_oci and rules_multirun are used to build Docker images
+    {
+      "name": "rules_oci",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_multirun",
+      "type": "bazel_dep"
+    },
+    // rust
     {
       "name": "cargo_bazel_linux_x64",
       "type": "github_release",
@@ -53,6 +123,33 @@
       "file_regex": "^cargo-bazel-x86_64-pc-windows-msvc.exe$",
       "file_type": "executable",
       "downloaded_file_path": "downloaded.exe"
+    },
+    {
+      "name": "clang_tidy_linux_amd64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-linux-amd64-clang-tidy",
+      "file_type": "executable",
+      "freeze_version": "clang-tidy-21.1.4"
+    },
+    {
+      "name": "clang_tidy_linux_arm64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-linux-arm64-clang-tidy",
+      "file_type": "executable",
+      "freeze_version": "clang-tidy-21.1.4"
+    },
+    {
+      "name": "clang_tidy_darwin_arm64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-darwin-arm64-clang-tidy",
+      "file_type": "executable",
+      "freeze_version": "clang-tidy-21.1.4"
     }
   ]
 }

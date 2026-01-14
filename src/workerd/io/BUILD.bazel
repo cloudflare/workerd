@@ -34,6 +34,7 @@ wd_cc_library(
     # TODO(cleanup): Fix this.
     srcs = [
         "compatibility-date.c++",
+        "external-pusher.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-channels.c++",
@@ -47,7 +48,7 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "compatibility-date.h",
-        "features.h",
+        "external-pusher.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -90,6 +91,7 @@ wd_cc_library(
         ":actor-storage_capnp",
         ":cdp_capnp",
         ":container_capnp",
+        ":features",
         ":frankenvalue",
         ":io-gate",
         ":io-helpers",
@@ -116,12 +118,26 @@ wd_cc_library(
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:small-set",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:state-machine",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj:kj-async",
         "@ncrypto",
         "@ssl",
+    ],
+)
+
+# Headers only target to avoid having circular dependencies.
+wd_cc_library(
+    name = "features",
+    hdrs = ["features.h"],
+    implementation_deps = [
+        "//src/workerd/jsg",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compatibility-date_capnp",
     ],
 )
 
@@ -257,6 +273,7 @@ wd_cc_library(
     hdrs = ["io-gate.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":trace",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
     ],
@@ -393,6 +410,7 @@ kj_test(
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
+        "@sqlite3",
     ],
 )
 

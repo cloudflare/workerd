@@ -161,7 +161,7 @@ def main() -> int:
         i2 = " " * 16
         print(i1 + "{")
         print(i2 + f'"name": "{"-".join(args.package_name)}",')
-        print(i2 + f'"abi": "{abi}",')
+        print(i2 + f'"abi": {abi!r},')
         print(i2 + f'"sha256": "{hexdigest(zip_path)}",')
         print(i1 + "},")
         print()

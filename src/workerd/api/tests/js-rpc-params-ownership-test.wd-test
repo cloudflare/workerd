@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "js-rpc-params-ownership-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-params-ownership-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc_params_dup_stubs",
+          "rpc",
+          "enable_ctx_exports",
+        ],
+      )
+    ),
+  ],
+  v8Flags = [ "--expose-gc" ],
+);

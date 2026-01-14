@@ -1,0 +1,107 @@
+# JSG Macros
+
+Procedural macros for JSG (JavaScript Glue) Rust bindings. These macros reduce boilerplate when implementing the JSG type system.
+
+## `#[jsg_struct]`
+
+Generates the `jsg::Struct` and `jsg::Type` implementations for data structures. Only public fields are exposed to JavaScript. Automatically implements `class_name()` using the struct name, or a custom name if provided via the `name` parameter.
+
+```rust
+#[jsg_struct]
+pub struct CaaRecord {
+    pub critical: f64,
+    pub field: String,
+    pub value: String,
+}
+
+#[jsg_struct(name = "CustomName")]
+pub struct MyRecord {
+    pub value: String,
+}
+```
+
+## `#[jsg_method]`
+
+Generates FFI callback functions for JSG resource methods. The `name` parameter is optional and defaults to converting the method name from `snake_case` to `camelCase`.
+
+Parameters and return values are handled via the `jsg::Wrappable` trait. Any type implementing `Wrappable` can be used as a parameter or return value:
+
+- `Option<T>` - accepts `T` or `undefined`, rejects `null`
+- `Nullable<T>` - accepts `T`, `null`, or `undefined`
+- `NonCoercible<T>` - rejects values that would require JavaScript coercion
+
+```rust
+impl DnsUtil {
+    #[jsg_method(name = "parseCaaRecord")]
+    pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
+        // Errors are thrown as JavaScript exceptions
+    }
+
+    #[jsg_method]
+    pub fn get_name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[jsg_method]
+    pub fn reset(&self) {
+        // Void methods return undefined in JavaScript
+    }
+}
+```
+
+## `#[jsg_resource]`
+
+Generates boilerplate for JSG resources. Applied to both struct definitions and impl blocks. Automatically implements `jsg::Type::class_name()` using the struct name, or a custom name if provided via the `name` parameter.
+
+**Important:** Resource structs must include a `_state: jsg::ResourceState` field for internal JSG state management.
+
+```rust
+#[jsg_resource]
+pub struct DnsUtil {
+    pub _state: jsg::ResourceState,
+}
+
+#[jsg_resource(name = "CustomUtil")]
+pub struct MyUtil {
+    pub _state: jsg::ResourceState,
+}
+
+#[jsg_resource]
+impl DnsUtil {
+    #[jsg_method]
+    pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
+        // implementation
+    }
+}
+```
+
+On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceTemplate` implementations. On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation.
+
+## `#[jsg_oneof]`
+
+Generates `jsg::Type` and `jsg::FromJS` implementations for union types. Use this to accept parameters that can be one of several JavaScript types.
+
+Each enum variant should be a single-field tuple variant where the field type implements `jsg::Type` and `jsg::FromJS` (e.g., `String`, `f64`, `bool`).
+
+```rust
+use jsg_macros::jsg_oneof;
+
+#[jsg_oneof]
+#[derive(Debug, Clone)]
+enum StringOrNumber {
+    String(String),
+    Number(f64),
+}
+
+impl MyResource {
+    #[jsg_method]
+    pub fn process(&self, value: StringOrNumber) -> Result<String, jsg::Error> {
+        match value {
+            StringOrNumber::String(s) => Ok(format!("string: {}", s)),
+            StringOrNumber::Number(n) => Ok(format!("number: {}", n)),
+        }
+    }
+}
+```
+
+The macro generates type-checking code that matches JavaScript values to enum variants without coercion. If no variant matches, a `TypeError` is thrown listing all expected types.

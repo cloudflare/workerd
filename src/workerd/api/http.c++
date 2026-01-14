@@ -8,6 +8,7 @@
 #include "headers.h"
 #include "queue.h"
 #include "sockets.h"
+#include "streams/readable-source.h"
 #include "system-streams.h"
 #include "util.h"
 #include "worker-rpc.h"
@@ -202,8 +203,12 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   auto buf = buffer.clone(js);
 
   if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
-    auto memStream = newMemoryInputStream(buf.view, kj::heap(kj::mv(buf.ownBytes)));
-    auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
+    // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
+    // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
+    // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
+    // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
+    // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+    auto rs = streams::newMemorySource(buf.view, kj::heap(kj::mv(buf.ownBytes)));
 
     return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
       kj::mv(contentType)};
@@ -261,8 +266,12 @@ void Body::rewindBody(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     auto bufferCopy = KJ_ASSERT_NONNULL(i.buffer).clone(js);
     if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
-      auto memStream = newMemoryInputStream(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
-      auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
+      // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
+      // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
+      // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
+      // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
+      // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+      auto rs = streams::newMemorySource(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
       i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
     } else {
       // TODO(cleanup): Remove once the Autogate is removed.
@@ -2104,38 +2113,76 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
-      "ServiceStub cannot be serialized in this context.");
-  auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler);
-  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
-      "ServiceStub cannot be serialized in this context.");
-
   auto channel = getSubrequestChannel(IoContext::current());
   channel->requireAllowsTransfer();
-  serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
+
+  KJ_IF_SOME(handler, serializer.getExternalHandler()) {
+    KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableBuilder>(handler)) {
+      // Encoding a Frankenvalue (e.g. for dynamic loopback props or dynamic isolate env).
+      serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
+      return;
+    } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
+      JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), DOMDataCloneError,
+          "ServiceStub serialization requires the 'experimental' compat flag.");
+
+      auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+      rpcHandler.write([token = kj::mv(token)](rpc::JsValue::External::Builder builder) {
+        builder.setSubrequestChannelToken(token);
+      });
+      return;
+    }
+    // TODO(someday): structuredClone() should have special handling that just reproduces the same
+    //   local object. At present we have no way to recognize structuredClone() here though.
+  }
+
+  // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This format
+  // is temporary, anyone using this will lose their data later.
+  JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+      "ServiceStub cannot be serialized in this context.");
+  serializer.writeLengthDelimited(channel->getToken(IoChannelFactory::ChannelTokenUsage::STORAGE));
 }
 
 jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
     rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  auto& handler = KJ_REQUIRE_NONNULL(
-      deserializer.getExternalHandler(), "got ServiceStub in unexpected context?");
-  auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler);
-  KJ_REQUIRE(externalHandler != nullptr, "got ServiceStub in unexpected context?");
+  KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
+    KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableReader>(handler)) {
+      // Decoding a Frankenvalue (e.g. for dynamic loopback props or dynamic isolate env).
+      auto& cap = KJ_REQUIRE_NONNULL(frankenvalueHandler.get(deserializer.readRawUint32()),
+          "serialized ServiceStub had invalid cap table index");
 
-  auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
-      "serialized ServiceStub had invalid cap table index");
+      KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
+        // Probably decoding dynamic ctx.props.
+        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(channel)));
+      } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
+        // Probably decoding dynamic isolate env.
+        return js.alloc<Fetcher>(
+            channel.getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+      } else {
+        KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
+      }
+    } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcDeserializerExternalHandler>(handler)) {
+      JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), DOMDataCloneError,
+          "ServiceStub serialization requires the 'experimental' compat flag.");
 
-  if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(&cap)) {
-    return js.alloc<Fetcher>(
-        IoContext::current().addObject(kj::addRef(*channel)),
-        RequiresHostAndProtocol::YES, /*isInHouse=*/false);
-  } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
-    return js.alloc<Fetcher>(
-        channel->getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
-        RequiresHostAndProtocol::YES, /*isInHouse=*/false);
-  } else {
-    KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
+      auto external = rpcHandler.read();
+      KJ_REQUIRE(external.isSubrequestChannelToken());
+      auto& ioctx = IoContext::current();
+      auto channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
+          IoChannelFactory::ChannelTokenUsage::RPC,
+          external.getSubrequestChannelToken());
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+    }
   }
+
+  // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This format
+  // is temporary, anyone using this will lose their data later.
+  JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+      "ServiceStub cannot be deserialized in this context.");
+  auto& ioctx = IoContext::current();
+  auto channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
+      IoChannelFactory::ChannelTokenUsage::STORAGE, deserializer.readLengthDelimitedBytes());
+  return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
 }
 
 static jsg::Promise<void> throwOnError(

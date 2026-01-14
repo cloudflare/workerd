@@ -215,8 +215,7 @@ kj::Promise<void> updateStorageDeletes(
 
 // Return the id of the current actor (or the empty string if there is no current actor).
 kj::Maybe<kj::String> getCurrentActorId() {
-  if (IoContext::hasCurrent()) {
-    IoContext& ioContext = IoContext::current();
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(actor, ioContext.getActor()) {
       KJ_SWITCH_ONEOF(actor.getId()) {
         KJ_CASE_ONEOF(s, kj::String) {
@@ -500,8 +499,9 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
   // they want immediate execution.
   kj::Date dateNowKjDate = static_cast<int64_t>(dateNow()) * kj::MILLISECONDS + kj::UNIX_EPOCH;
 
-  auto maybeBackpressure = transformMaybeBackpressure(
-      js, options, getCache(OP_PUT_ALARM).setAlarm(kj::max(scheduledTime, dateNowKjDate), options));
+  auto maybeBackpressure = transformMaybeBackpressure(js, options,
+      getCache(OP_PUT_ALARM)
+          .setAlarm(kj::max(scheduledTime, dateNowKjDate), options, context.getCurrentTraceSpan()));
 
   // setAlarm() is billed as a single write unit.
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), 1));
@@ -516,10 +516,11 @@ jsg::Promise<void> DurableObjectStorageOperations::putOne(
 
   auto units = billingUnits(key.size() + buffer.size());
 
-  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(
-      js, options, getCache(OP_PUT).put(kj::mv(key), kj::mv(buffer), options));
-
   auto& context = IoContext::current();
+
+  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(js, options,
+      getCache(OP_PUT).put(kj::mv(key), kj::mv(buffer), options, context.getCurrentTraceSpan()));
+
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), units));
   return maybeBackpressure;
 }
@@ -556,8 +557,8 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
   }).orDefault(PutOptions{}));
 
   return context.attachSpans(js,
-      transformMaybeBackpressure(
-          js, options, getCache(OP_DELETE_ALARM).setAlarm(kj::none, options)),
+      transformMaybeBackpressure(js, options,
+          getCache(OP_DELETE_ALARM).setAlarm(kj::none, options, context.getCurrentTraceSpan())),
       kj::mv(userSpan));
 }
 
@@ -567,7 +568,7 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
   auto userSpan = context.makeUserTraceSpan("durable_object_storage_deleteAll"_kjc);
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
 
-  auto deleteAll = cache->deleteAll(options);
+  auto deleteAll = cache->deleteAll(options, context.getCurrentTraceSpan());
 
   context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
@@ -581,8 +582,11 @@ void DurableObjectTransaction::deleteAll() {
 
 jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
     jsg::Lock& js, kj::String key, const PutOptions& options) {
-  return transformCacheResult(
-      js, getCache(OP_DELETE).delete_(kj::mv(key), options), options, [](jsg::Lock&, bool value) {
+  auto& context = IoContext::current();
+
+  return transformCacheResult(js,
+      getCache(OP_DELETE).delete_(kj::mv(key), options, context.getCurrentTraceSpan()), options,
+      [](jsg::Lock&, bool value) {
     currentActorMetrics().addStorageDeletes(1);
     return value;
   });
@@ -614,10 +618,11 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     kvs.add(ActorCacheOps::KeyValuePair{kj::mv(field.name), kj::mv(buffer)});
   }
 
-  jsg::Promise<void> maybeBackpressure =
-      transformMaybeBackpressure(js, options, getCache(OP_PUT).put(kvs.releaseAsArray(), options));
-
   auto& context = IoContext::current();
+
+  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(js, options,
+      getCache(OP_PUT).put(kvs.releaseAsArray(), options, context.getCurrentTraceSpan()));
+
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), units));
 
   return maybeBackpressure;
@@ -627,7 +632,10 @@ jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
     jsg::Lock& js, kj::Array<kj::String> keys, const PutOptions& options) {
   auto numKeys = keys.size();
 
-  return transformCacheResult(js, getCache(OP_DELETE).delete_(kj::mv(keys), options), options,
+  auto& context = IoContext::current();
+
+  return transformCacheResult(js,
+      getCache(OP_DELETE).delete_(kj::mv(keys), options, context.getCurrentTraceSpan()), options,
       [numKeys](jsg::Lock&, uint count) -> int {
     currentActorMetrics().addStorageDeletes(numKeys);
     return count;
@@ -744,14 +752,15 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   auto& context = IoContext::current();
   auto userSpan = context.makeUserTraceSpan("durable_object_storage_sync"_kjc);
-  KJ_IF_SOME(p, cache->onNoPendingFlush()) {
+  auto span = context.makeTraceSpan("durable_object_storage_sync"_kjc);
+  KJ_IF_SOME(p, cache->onNoPendingFlush(span)) {
     // Note that we're not actually flushing since that will happen anyway once we go async. We're
     // merely checking if we have any pending or in-flight operations, and providing a promise that
     // resolves when they succeed. This promise only covers operations that were scheduled before
     // this method was invoked. If the cache has to flush again later from future operations, this
     // promise will resolve before they complete. If this promise were to reject, then the actor's
     // output gate will be broken first and the isolate will not resume synchronous execution.
-    return context.attachSpans(js, context.awaitIo(js, kj::mv(p)), kj::mv(userSpan));
+    return context.attachSpans(js, context.awaitIo(js, kj::mv(p)), kj::mv(userSpan), kj::mv(span));
   } else {
     return js.resolvedPromise();
   }

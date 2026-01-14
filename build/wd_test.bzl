@@ -7,6 +7,10 @@ def wd_test(
         args = [],
         ts_deps = [],
         python_snapshot_test = False,
+        generate_default_variant = True,
+        generate_all_autogates_variant = True,
+        generate_all_compat_flags_variant = True,
+        compat_date = "",
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -17,6 +21,16 @@ def wd_test(
      data: Additional files which the .capnp config file may embed. All TypeScript files will be compiled,
      their resulting files will be passed to the test as well. Usually TypeScript or Javascript source files.
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
+     generate_default_variant: If True (default), generate the default variant with oldest compat date.
+     generate_all_autogates_variant: If True (default), generate @all-autogates variants.
+     generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
+     compat_date: If specified, use this compat date for the default variant instead of 2000-01-01.
+        Does not affect the @all-compat-flags variant which always uses 2999-12-31.
+
+    The following test variants are generated based on the flags:
+     - name@ (if generate_default_variant): oldest compat date (2000-01-01)
+     - name@all-compat-flags (if generate_all_compat_flags_variant): newest compat date (2999-12-31)
+     - name@all-autogates (if generate_all_autogates_variant): all autogates + oldest compat date
     """
 
     # Add workerd binary to "data" dependencies.
@@ -51,20 +65,53 @@ def wd_test(
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
 
     # Add initial arguments for `workerd test` command.
-    args = [
+    base_args = [
         "$(location //src/workerd/server:workerd_cross)",
         "test",
         "$(location {})".format(src),
     ] + args
 
-    _wd_test(
-        src = src,
-        name = name,
-        data = data,
-        args = args,
-        python_snapshot_test = python_snapshot_test,
-        **kwargs
-    )
+    # Define the compat-date args for each variant
+    # Note: dates must be in range [2000-01-01, 2999-12-31] due to parsing constraints
+    default_compat_args = ["--compat-date=2000-01-01"]
+    newest_compat_args = ["--compat-date=2999-12-31"]
+
+    if compat_date:
+        default_compat_args = ["--compat-date={}".format(compat_date)]
+
+    # Generate variants based on the flags
+    # Default variant: oldest compat date
+    if generate_default_variant:
+        _wd_test(
+            src = src,
+            name = name + "@",
+            data = data,
+            args = base_args + default_compat_args,
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
+
+    # All compat flags variant: newest compat date
+    if generate_all_compat_flags_variant:
+        _wd_test(
+            src = src,
+            name = name + "@all-compat-flags",
+            data = data,
+            args = base_args + newest_compat_args,
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
+
+    # All autogates variant: all autogates + oldest compat date
+    if generate_all_autogates_variant:
+        _wd_test(
+            src = src,
+            name = name + "@all-autogates",
+            data = data,
+            args = base_args + default_compat_args + ["--all-autogates"],
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
 
 WINDOWS_TEMPLATE = """
 @echo off
@@ -87,6 +134,12 @@ exit /b !TEST_EXIT!
 
 SH_TEMPLATE = """#!/bin/sh
 set -e
+
+# Set up coverage for workerd subprocess
+if [ -n "$COVERAGE_DIR" ]; then
+    export LLVM_PROFILE_FILE="$COVERAGE_DIR/%p.profraw"
+    export KJ_CLEAN_SHUTDOWN=1
+fi
 
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
@@ -192,7 +245,7 @@ def _wd_test_impl(ctx):
         # Include all file types that might contain testable code
         extensions = ["cc", "c++", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc", "js", "ts", "mjs", "wd-test", "capnp"],
     )
-    environment = {}
+    environment = dict(ctx.attr.env)
     if ctx.attr.python_snapshot_test:
         environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = ""
     if ctx.attr.load_snapshot:
@@ -272,6 +325,8 @@ _wd_test = rule(
         ),
         "python_snapshot_test": attr.bool(),
         "load_snapshot": attr.label(allow_single_file = True),
+        # Environment variables to set when running the test
+        "env": attr.string_dict(),
         # A reference to the Windows platform label, needed for the implementation of wd_test
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },

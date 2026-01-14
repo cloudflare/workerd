@@ -99,6 +99,12 @@ class RequestObserver: public kj::Refcounted {
   // occurred asynchronously.
   virtual void reportFailure(const kj::Exception& e, FailureSource source = FailureSource::OTHER) {}
 
+  // Called when an internal exception is observed during this request. Used to track which
+  // internal exception types occurred during a request, for metrics purposes. The same exception
+  // type may be reported multiple times during a single request; implementations should deduplicate.
+  virtual void reportInternalException(
+      const kj::Exception& e, jsg::InternalExceptionObserver::Detail detail) {}
+
   // Wrap the given WorkerInterface with a version that collects metrics. This method may only be
   // called once, and only one method call may be made to the returned interface.
   //

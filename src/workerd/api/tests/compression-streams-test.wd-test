@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "compression-streams-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "compression-streams-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors", "transformstream_enable_standard_constructor", "strict_compression_checks"],
+        bindings = [
+          ( name = "SERVICE", service = "compression-streams-test" ),
+        ],
+      )
+    ),
+  ],
+);
