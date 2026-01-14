@@ -81,7 +81,7 @@ def _py_wd_test_helper(
 
     wd_test(
         src = templated_src,
-        name = name_flag + "@",
+        name = name_flag,
         args = args,
         python_snapshot_test = make_snapshot,
         data = data,
