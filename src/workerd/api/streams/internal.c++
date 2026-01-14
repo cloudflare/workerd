@@ -1006,7 +1006,7 @@ void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool ba
       // Per the spec, when backpressure is updated and is true, we replace the existing
       // ready promise on the writer with a new pending promise, regardless of whether
       // the existing one is resolved or not.
-      auto prp = js.newPromiseAndResolver<void>();
+      jsg::LazyPromiseResolverPair<void> prp;
       prp.promise.markAsHandled(js);
       writerLock.setReadyFulfiller(js, prp);
       return;
@@ -1362,10 +1362,10 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
     return false;
   }
 
-  auto closedPrp = js.newPromiseAndResolver<void>();
+  jsg::LazyPromiseResolverPair<void> closedPrp;
   closedPrp.promise.markAsHandled(js);
 
-  auto readyPrp = js.newPromiseAndResolver<void>();
+  jsg::LazyPromiseResolverPair<void> readyPrp;
   readyPrp.promise.markAsHandled(js);
 
   auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));

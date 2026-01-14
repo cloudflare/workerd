@@ -621,14 +621,15 @@ class WritableStreamController {
    public:
     // When a Writer is locked to a controller, the controller will attach itself to the writer,
     // passing along the closed and ready promises that will be used to communicate state to the
-    // user code.
+    // user code. LazyPromise is used to defer the creation of the V8 Promise until the promise
+    // is actually accessed by JavaScript.
     //
     // The controller is guaranteed to either outlive the Writer or will detach the Writer so the
     // WritableStreamController& reference should always remain valid.
     virtual void attach(jsg::Lock& js,
         WritableStreamController& controller,
-        jsg::Promise<void> closedPromise,
-        jsg::Promise<void> readyPromise) = 0;
+        jsg::LazyPromise<void> closedPromise,
+        jsg::LazyPromise<void> readyPromise) = 0;
 
     // When a Writer lock is released, the controller will signal to the writer that is has been
     // detached.
@@ -636,7 +637,7 @@ class WritableStreamController {
 
     // The ready promise can be replaced whenever backpressure is signaled by the underlying
     // controller.
-    virtual void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) = 0;
+    virtual void replaceReadyPromise(jsg::Lock& js, jsg::LazyPromise<void> readyPromise) = 0;
   };
 
   struct PendingAbort {
@@ -831,8 +832,8 @@ class WriterLocked {
  public:
   static constexpr kj::StringPtr NAME KJ_UNUSED = "writer-locked"_kj;
   WriterLocked(WritableStreamController::Writer& writer,
-      jsg::Promise<void>::Resolver closedFulfiller,
-      kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
+      jsg::LazyPromise<void>::Resolver closedFulfiller,
+      kj::Maybe<jsg::LazyPromise<void>::Resolver> readyFulfiller = kj::none)
       : writer(writer),
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)) {}
@@ -852,15 +853,15 @@ class WriterLocked {
     return KJ_ASSERT_NONNULL(writer);
   }
 
-  kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() {
+  kj::Maybe<jsg::LazyPromise<void>::Resolver>& getClosedFulfiller() {
     return closedFulfiller;
   }
 
-  kj::Maybe<jsg::Promise<void>::Resolver>& getReadyFulfiller() {
+  kj::Maybe<jsg::LazyPromise<void>::Resolver>& getReadyFulfiller() {
     return readyFulfiller;
   }
 
-  void setReadyFulfiller(jsg::Lock& js, jsg::PromiseResolverPair<void>& pair) {
+  void setReadyFulfiller(jsg::Lock& js, jsg::LazyPromiseResolverPair<void>& pair) {
     KJ_IF_SOME(w, writer) {
       readyFulfiller = kj::mv(pair.resolver);
       w.replaceReadyPromise(js, kj::mv(pair.promise));
@@ -880,8 +881,8 @@ class WriterLocked {
 
  private:
   kj::Maybe<WritableStreamController::Writer&> writer;
-  kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
-  kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;
+  kj::Maybe<jsg::LazyPromise<void>::Resolver> closedFulfiller;
+  kj::Maybe<jsg::LazyPromise<void>::Resolver> readyFulfiller;
 };
 
 template <typename T>
@@ -907,6 +908,34 @@ void maybeRejectPromise(jsg::Lock& js,
     v8::Local<v8::Value> reason) {
   KJ_IF_SOME(resolver, maybeResolver) {
     resolver.reject(js, reason);
+    maybeResolver = kj::none;
+  }
+}
+
+// LazyPromise resolver overloads
+template <typename T>
+void maybeResolvePromise(
+    jsg::Lock& js, kj::Maybe<typename jsg::LazyPromise<T>::Resolver>& maybeResolver, T&& t) {
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.resolve(js, kj::fwd<T>(t));
+    maybeResolver = kj::none;
+  }
+}
+
+inline void maybeResolvePromise(
+    jsg::Lock& js, kj::Maybe<typename jsg::LazyPromise<void>::Resolver>& maybeResolver) {
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.resolve(js);
+    maybeResolver = kj::none;
+  }
+}
+
+template <typename T>
+void maybeRejectPromise(jsg::Lock& js,
+    kj::Maybe<typename jsg::LazyPromise<T>::Resolver>& maybeResolver,
+    v8::Local<v8::Value> reason) {
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.reject(js, jsg::Value(js.v8Isolate, reason));
     maybeResolver = kj::none;
   }
 }

@@ -363,9 +363,9 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
     return false;
   }
 
-  auto closedPrp = js.newPromiseAndResolver<void>();
+  jsg::LazyPromiseResolverPair<void> closedPrp;
   closedPrp.promise.markAsHandled(js);
-  auto readyPrp = js.newPromiseAndResolver<void>();
+  jsg::LazyPromiseResolverPair<void> readyPrp;
   readyPrp.promise.markAsHandled(js);
 
   auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
@@ -3532,9 +3532,9 @@ void WritableStreamJsController::maybeRejectReadyPromise(
     if (writerLock.getReadyFulfiller() != kj::none) {
       maybeRejectPromise<void>(js, writerLock.getReadyFulfiller(), reason);
     } else {
-      auto prp = js.newPromiseAndResolver<void>();
+      jsg::LazyPromiseResolverPair<void> prp;
       prp.promise.markAsHandled(js);
-      prp.resolver.reject(js, reason);
+      prp.resolver.reject(js, jsg::Value(js.v8Isolate, reason));
       writerLock.setReadyFulfiller(js, prp);
     }
   }
@@ -3748,7 +3748,7 @@ void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpres
       // Per the spec, when backpressure is updated and is true, we replace the existing
       // ready promise on the writer with a new pending promise, regardless of whether
       // the existing one is resolved or not.
-      auto prp = js.newPromiseAndResolver<void>();
+      jsg::LazyPromiseResolverPair<void> prp;
       prp.promise.markAsHandled(js);
       return writerLock.setReadyFulfiller(js, prp);
     }

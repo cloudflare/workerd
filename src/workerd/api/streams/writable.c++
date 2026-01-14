@@ -54,12 +54,12 @@ jsg::Promise<void> WritableStreamDefaultWriter::abort(
 
 void WritableStreamDefaultWriter::attach(jsg::Lock& js,
     WritableStreamController& controller,
-    jsg::Promise<void> closedPromise,
-    jsg::Promise<void> readyPromise) {
+    jsg::LazyPromise<void> closedPromise,
+    jsg::LazyPromise<void> readyPromise) {
   KJ_ASSERT(state.is<Initial>());
   state = controller.addRef();
   this->closedPromise = kj::mv(closedPromise);
-  replaceReadyPromise(js, kj::mv(readyPromise));
+  this->readyPromise = kj::mv(readyPromise);
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::close(jsg::Lock& js) {
@@ -108,8 +108,9 @@ void WritableStreamDefaultWriter::detach() {
   KJ_UNREACHABLE;
 }
 
-jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getClosed() {
-  return KJ_ASSERT_NONNULL(closedPromise, "the writer was never attached to a stream");
+jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getClosed(jsg::Lock& js) {
+  return KJ_ASSERT_NONNULL(closedPromise, "the writer was never attached to a stream")
+      .getPromise(js);
 }
 
 kj::Maybe<int> WritableStreamDefaultWriter::getDesiredSize() {
@@ -130,12 +131,14 @@ kj::Maybe<int> WritableStreamDefaultWriter::getDesiredSize() {
   KJ_UNREACHABLE;
 }
 
-jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getReady() {
-  return KJ_ASSERT_NONNULL(readyPromise, "the writer was never attached to a stream");
+jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getReady(jsg::Lock& js) {
+  return KJ_ASSERT_NONNULL(readyPromise, "the writer was never attached to a stream")
+      .getPromise(js);
 }
 
 kj::Maybe<jsg::Promise<void>> WritableStreamDefaultWriter::isReady(jsg::Lock& js) {
-  return readyPromisePending.map([&](jsg::Promise<void>& p) { return p.whenResolved(js); });
+  return readyPromise.map(
+      [&](jsg::LazyPromise<void>& p) { return p.getPromise(js).inner().whenResolved(js); });
 }
 
 void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& stream) {
@@ -172,9 +175,8 @@ void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
 }
 
 void WritableStreamDefaultWriter::replaceReadyPromise(
-    jsg::Lock& js, jsg::Promise<void> readyPromise) {
-  this->readyPromisePending = kj::mv(readyPromise);
-  this->readyPromise = KJ_ASSERT_NONNULL(this->readyPromisePending).whenResolved(js);
+    jsg::Lock& js, jsg::LazyPromise<void> readyPromise) {
+  this->readyPromise = kj::mv(readyPromise);
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::write(
