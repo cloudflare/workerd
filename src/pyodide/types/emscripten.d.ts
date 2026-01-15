@@ -10,6 +10,7 @@ interface PyodideConfig {
   indexURL?: string;
   _makeSnapshot?: boolean;
   lockFileURL: '';
+  enableRunUntilComplete: boolean;
 }
 
 type SerializedHiwireValue = { path: string[] } | { serialized: any } | null;

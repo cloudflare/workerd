@@ -161,6 +161,7 @@ function getEmscriptenSettings(
       PYTHONHASHSEED: '111',
     },
     lockFileURL: '',
+    enableRunUntilComplete: true,
   };
   let lockFilePromise;
   if (isWorkerd) {
