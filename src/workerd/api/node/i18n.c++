@@ -126,7 +126,7 @@ kj::Maybe<jsg::BufferSource> TranscodeFromUTF16(
       utf16_input.begin(), utf16_input.size(), &status);
 
   if (U_SUCCESS(status)) {
-    destBuf.limit(len * sizeof(char16_t));
+    destBuf.limit(len);
     return jsg::BufferSource(js, kj::mv(destBuf));
   }
 
