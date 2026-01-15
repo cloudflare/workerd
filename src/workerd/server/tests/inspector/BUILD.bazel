@@ -1,5 +1,9 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
 
+# TODO(soon): Remove 'no-coverage' tag once
+# https://github.com/aspect-build/rules_js/pull/2653 lands.
+# This is a workaround for a bug in aspect_rules_js with the
+# --experimental_split_coverage_postprocessing flag.
 js_test(
     name = "inspector-test",
     size = "large",
@@ -15,5 +19,8 @@ js_test(
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "WORKERD_CONFIG": "$(rootpath :config.capnp)",
     },
-    tags = ["js-test"],
+    tags = [
+        "js-test",
+        "no-coverage",
+    ],
 )

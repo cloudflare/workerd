@@ -18,15 +18,21 @@ js_library(
     ],
 )
 
+# TODO(soon): Remove 'no-coverage' tag once
+# https://github.com/aspect-build/rules_js/pull/2653 lands.
+# This is a workaround for a bug in aspect_rules_js with the
+# --experimental_split_coverage_postprocessing flag.
 js_test(
     name = "custom-eslint-rules-test",
     size = "small",
     data = [
-        "custom-eslint-rules.mjs",
-        "//:node_modules/eslint",
+        ":base-eslint",
     ],
     entry_point = "custom-eslint-rules.test.mjs",
-    tags = ["js-test"],
+    tags = [
+        "js-test",
+        "no-coverage",
+    ],
 )
 
 ts_config(

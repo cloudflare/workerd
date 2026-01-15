@@ -17,10 +17,14 @@ def wd_ts_test(src, tsconfig_json, deps = [], eslintrc_json = None, composite = 
         composite = composite,
     )
 
+    # TODO(soon): Remove 'no-coverage' tag once
+    # https://github.com/aspect-build/rules_js/pull/2653 lands.
+    # This is a workaround for a bug in aspect_rules_js with the
+    # --experimental_split_coverage_postprocessing flag.
     js_test(
         name = name,
         entry_point = js_name(src),
         data = deps + [name + "@compile"],
-        tags = ["no-arm64", "js-test"],
+        tags = ["no-arm64", "js-test", "no-coverage"],
         **kwargs
     )
