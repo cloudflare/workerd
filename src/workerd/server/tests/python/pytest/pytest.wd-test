@@ -9,6 +9,7 @@ const unitTests :Workerd.Config = (
           (name = "tests/test_env.py", pythonModule = embed "pytest/tests/test_env.py"),
           (name = "tests/test_fs.py", pythonModule = embed "pytest/tests/test_fs.py"),
           (name = "tests/test_import_from_javascript.py", pythonModule = embed "pytest/tests/test_import_from_javascript.py"),
+          (name = "tests/test_dynlib_loading.py", pythonModule = embed "pytest/tests/test_dynlib_loading.py"),
           %PYTHON_VENDORED_MODULES%
         ],
         compatibilityFlags = [
