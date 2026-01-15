@@ -1130,7 +1130,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsStreamWrapModule @131 :Bool
     $compatEnableFlag("enable_nodejs_stream_wrap_module")
     $compatDisableFlag("disable_nodejs_stream_wrap_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub _stream_wrap module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1144,14 +1144,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsDgramModule @133 :Bool
     $compatEnableFlag("enable_nodejs_dgram_module")
     $compatDisableFlag("disable_nodejs_dgram_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub dgram module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsInspectorModule @134 :Bool
     $compatEnableFlag("enable_nodejs_inspector_module")
     $compatDisableFlag("disable_nodejs_inspector_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub inspector module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1179,7 +1179,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsSqliteModule @138 :Bool
     $compatEnableFlag("enable_nodejs_sqlite_module")
     $compatDisableFlag("disable_nodejs_sqlite_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub sqlite module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1311,9 +1311,28 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableFlag("enable_nodejs_global_timers")
     $compatDisableFlag("no_nodejs_global_timers")
     $experimental;
-  # When enabled, all 6 timer functions (setTimeout, setInterval, clearTimeout,
-  # clearInterval, setImmediate, clearImmediate) are available on globalThis as
-  # Node.js-compatible versions from node:timers. setTimeout and setInterval return
-  # Timeout objects with methods like refresh(), ref(), unref(), and hasRef().
+  # When enabled, setTimeout, setInterval, clearTimeout, and clearInterval
+  # are available on globalThis as Node.js-compatible versions from node:timers.
+  # setTimeout and setInterval return Timeout objects with methods like
+  # refresh(), ref(), unref(), and hasRef().
   # This flag requires nodejs_compat or nodejs_compat_v2 to be enabled.
+
+  noAutoAllocateChunkSize @154 :Bool
+    $compatEnableFlag("streams_no_default_auto_allocate_chunk_size")
+    $compatDisableFlag("streams_auto_allocate_chunk_size_default")
+    $experimental;
+  # Per the WHATWG Streams spec, byte streams should only have autoAllocateChunkSize
+  # set when the user explicitly provides it. When not set, non-BYOB reads on byte
+  # streams won't have a byobRequest available in the pull() callback, and the
+  # underlying source must use controller.enqueue() to provide data instead.
+  #
+  # Our original implementation always defaulted autoAllocateChunkSize to 4096,
+  # which meant all byte stream reads behaved as BYOB reads. This flag enables
+  # the spec-compliant behavior where autoAllocateChunkSize is only set when
+  # explicitly provided by the user.
+  #
+  # Code relying on the old behavior that accesses controller.byobRequest without
+  # checking for null will break. To migrate, either:
+  # 1. Add a null check: if (controller.byobRequest) { ... }
+  # 2. Explicitly set autoAllocateChunkSize when creating the stream
 }

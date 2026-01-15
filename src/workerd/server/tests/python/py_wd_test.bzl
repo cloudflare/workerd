@@ -50,7 +50,8 @@ def _py_wd_test_helper(
             use_snapshot = None
         else:
             use_snapshot = "baseline"
-            feature_flags = feature_flags + ["python_dedicated_snapshot"]
+            if make_snapshot:
+                feature_flags = feature_flags + ["python_dedicated_snapshot"]
     if use_snapshot:
         version_info = BUNDLE_VERSION_INFO[python_flag]
 
@@ -81,7 +82,7 @@ def _py_wd_test_helper(
 
     wd_test(
         src = templated_src,
-        name = name_flag + "@",
+        name = name_flag,
         args = args,
         python_snapshot_test = make_snapshot,
         data = data,

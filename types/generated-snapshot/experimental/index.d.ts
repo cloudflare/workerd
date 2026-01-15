@@ -6801,7 +6801,7 @@ interface Ai_Cf_Qwen_Qwq_32B_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7075,7 +7075,7 @@ interface Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7168,7 +7168,7 @@ interface Ai_Cf_Google_Gemma_3_12B_It_Prompt {
    */
   prompt: string;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7332,7 +7332,7 @@ interface Ai_Cf_Google_Gemma_3_12B_It_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7613,7 +7613,7 @@ interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -7852,7 +7852,7 @@ interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages_Inner {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -8940,7 +8940,7 @@ interface Ai_Cf_Ai4Bharat_Indictrans2_En_Indic_1B_Input {
    */
   text: string | string[];
   /**
-   * Target langauge to translate to
+   * Target language to translate to
    */
   target_language:
     | "asm_Beng"
@@ -11322,6 +11322,15 @@ declare abstract class D1PreparedStatement {
 // ignored when `Disposable` is included in the standard lib.
 interface Disposable {}
 /**
+ * The returned data after sending an email
+ */
+interface EmailSendResult {
+  /**
+   * The Email Message ID
+   */
+  messageId: string;
+}
+/**
  * An email message that can be sent from a Worker.
  */
 interface EmailMessage {
@@ -11362,19 +11371,19 @@ interface ForwardableEmailMessage extends EmailMessage {
    * @param headers A [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    * @returns A promise that resolves when the email message is forwarded.
    */
-  forward(rcptTo: string, headers?: Headers): Promise<void>;
+  forward(rcptTo: string, headers?: Headers): Promise<EmailSendResult>;
   /**
    * Reply to the sender of this email message with a new EmailMessage object.
    * @param message The reply message.
    * @returns A promise that resolves when the email message is replied.
    */
-  reply(message: EmailMessage): Promise<void>;
+  reply(message: EmailMessage): Promise<EmailSendResult>;
 }
 /**
  * A binding that allows a Worker to send email messages.
  */
 interface SendEmail {
-  send(message: EmailMessage): Promise<void>;
+  send(message: EmailMessage): Promise<EmailSendResult>;
 }
 declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
@@ -11411,7 +11420,7 @@ interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
    *
-   * Calling this method returns an idential socket to if you call
+   * Calling this method returns an identical socket to if you call
    * `connect("host:port")` using the `host` and `port` fields from this object.
    * Pick whichever approach works better with your preferred DB client library.
    *
@@ -11792,7 +11801,7 @@ declare module "cloudflare:pipelines" {
     protected ctx: ExecutionContext;
     constructor(ctx: ExecutionContext, env: Env);
     /**
-     * run recieves an array of PipelineRecord which can be
+     * run receives an array of PipelineRecord which can be
      * transformed and returned to the pipeline
      * @param records Incoming records from the pipeline to be transformed
      * @param metadata Information about the specific pipeline calling the transformation entrypoint
@@ -12467,7 +12476,7 @@ declare namespace TailStream {
     // For Hibernate and Mark this would be the span under which they were emitted.
     // spanId is not set ONLY if:
     //  1. This is an Onset event
-    //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
     readonly spanId?: string;
   }
   interface TailEvent<Event extends EventType> {

@@ -23,8 +23,16 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import * as promises from 'node-internal:internal_readline_promises';
+import {
+  Interface,
+  Readline,
+  createInterface,
+} from 'node-internal:internal_readline_promises';
 
 export * from 'node-internal:internal_readline_promises';
 
-export default promises;
+export default {
+  Interface,
+  Readline,
+  createInterface,
+};

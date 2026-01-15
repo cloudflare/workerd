@@ -695,6 +695,14 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
+  // Increment the pending read count to prevent the controller from
+  // being closed/errored while a synchronous callback is in progress.
+  void incrementPendingReadCount();
+
+  // Decrement the pending read count and process any deferred close/error.
+  // This may destroy the ByteReadable/ValueReadable if close was deferred.
+  void decrementPendingReadCountAndProcess(jsg::Lock& js);
+
   bool canCloseOrEnqueue();
   bool hasBackpressure();
 
@@ -722,6 +730,9 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override;
+
+  kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
+      jsg::Lock& js, size_t maxRead = kj::maxValue) override;
 
   // See the comment for releaseReader in common.h for details on the use of maybeJs
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
@@ -1138,6 +1149,39 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
     flags.pulling = false;
     if (flags.pullAgain) {
     flags.pullAgain = false;
+    pullIfNeeded(js, kj::mv(self));
+    }
+  });
+
+  auto onFailure = JSG_VISITABLE_LAMBDA(
+      (this, self = self.addRef()), (self), (jsg::Lock& js, jsg::Value reason) {
+        flags.pulling = false;
+        doError(js, kj::mv(reason));
+      });
+
+  maybeRunAlgorithm(js, algorithms.pull, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
+}
+
+template <typename Self>
+void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
+  // Like pullIfNeeded but bypasses the shouldCallPull() check. Used for draining reads
+  // which need to pull all available data regardless of backpressure settings.
+  if (!canCloseOrEnqueue()) {
+    return;
+  }
+
+  if (flags.pulling) {
+    flags.pullAgain = true;
+    return;
+  }
+  KJ_ASSERT(!flags.pullAgain);
+  flags.pulling = true;
+
+  auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
+    flags.pulling = false;
+    if (flags.pullAgain) {
+    flags.pullAgain = false;
+    // After a force pull, we go back to normal pullIfNeeded behavior.
     pullIfNeeded(js, kj::mv(self));
     }
   });
@@ -1744,6 +1788,18 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     return js.resolvedPromise(ReadResult{.done = true});
   }
 
+  jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
+    KJ_IF_SOME(s, state) {
+      return s.consumer->drainingRead(js, maxRead);
+    }
+
+    // We are canceled! Return done with empty chunks.
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = kj::Array<kj::Array<kj::byte>>(),
+      .done = true,
+    });
+  }
+
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
     // When a ReadableStream is canceled, the expected behavior is that the underlying
     // controller is notified and the cancel algorithm on the underlying source is
@@ -1754,11 +1810,16 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     // the queue that knows about all of the attached consumers.
     if (pendingCancel) return js.resolvedPromise();
     KJ_IF_SOME(s, state) {
+      // Check if there's a pending draining read before calling cancel, since cancel
+      // will resolve the pending read and we need to know if we should defer destruction.
+      bool hasPendingDrainingRead = s.consumer->hasPendingDrainingRead();
       s.consumer->cancel(js, maybeReason);
       auto promise = s.controller->cancel(js, kj::mv(maybeReason));
-      // If we're currently in a read, we need to wait for that to finish
-      // before dropping our state.
-      if (reading) {
+      // If we're currently in a read (sync or draining), we need to wait for that to
+      // finish before dropping our state. For draining reads, the promise callbacks
+      // capture 'this' (the Consumer) to clear hasPendingDrainingRead. If we destroy
+      // the state now, those callbacks will UAF.
+      if (reading || hasPendingDrainingRead) {
         pendingCancel = true;
       } else {
         state = kj::none;
@@ -1789,13 +1850,39 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     }
   }
 
-  void onConsumerWantsData(jsg::Lock& js) override {
+  bool onConsumerWantsData(jsg::Lock& js) override {
     // Called by the consumer when it has a queued pending read and needs
     // data to be provided to fulfill it. We need to notify the controller
     // to initiate pulling to provide the data.
+    // Returns true if the pull completed synchronously (meaning more pumping
+    // might yield additional synchronous data), false otherwise.
     KJ_IF_SOME(s, state) {
-      s.controller->pull(js);
+      // Save a reference to the owner before calling pull. The pull callback
+      // may trigger close/error which could destroy this ValueReadable. By
+      // incrementing pendingReadCount, we ensure doClose/doError defers the
+      // actual destruction until after we return.
+      ReadableStreamJsController& owner = s.owner;
+      owner.incrementPendingReadCount();
+
+      // For draining reads, use forcePull to bypass backpressure checks.
+      // This ensures we pull all available data regardless of highWaterMark.
+      if (s.consumer->hasPendingDrainingRead()) {
+        s.controller->forcePull(js);
+      } else {
+        s.controller->pull(js);
+      }
+
+      // Check if state is still valid BEFORE calling decrementPendingReadCountAndProcess,
+      // because that call may destroy this ValueReadable if close was deferred.
+      bool result =
+          state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
+
+      // Process any deferred close/error. This may destroy this ValueReadable.
+      owner.decrementPendingReadCountAndProcess(js);
+
+      return result;
     }
+    return false;
   }
 
   kj::Maybe<int> getDesiredSize() {
@@ -1818,7 +1905,8 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
 
   using State = ReadableState<ByobController, ByteQueue>;
   kj::Maybe<State> state;
-  int autoAllocateChunkSize;
+  kj::Maybe<int> autoAllocateChunkSize;
+  bool pendingCancel = false;
 
   JSG_MEMORY_INFO(ByteReadable) {
     KJ_IF_SOME(s, state) {
@@ -1833,8 +1921,9 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
-  ByteReadable(
-      ByobController controller, ReadableStreamJsController& owner, int autoAllocateChunkSize)
+  ByteReadable(ByobController controller,
+      ReadableStreamJsController& owner,
+      kj::Maybe<int> autoAllocateChunkSize)
       : state(State(kj::mv(controller), *this, owner)),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
@@ -1878,8 +1967,10 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
                   .atLeast = atLeast,
                   .type = ByteQueue::ReadRequest::Type::BYOB,
                 }));
-      } else {
-        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, autoAllocateChunkSize)) {
+      } else KJ_IF_SOME(chunkSize, autoAllocateChunkSize) {
+        // autoAllocateChunkSize is set, so we allocate a buffer and do a BYOB read.
+        // This makes the buffer available to the underlying source via controller.byobRequest.
+        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, chunkSize)) {
           // Ensure that the handle is created here so that the size of the buffer
           // is accounted for in the isolate memory tracking.
           s.consumer->read(js,
@@ -1887,6 +1978,21 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
                   {
                     .store = kj::mv(store),
                     .type = ByteQueue::ReadRequest::Type::BYOB,
+                  }));
+        } else {
+          prp.resolver.reject(js, js.v8Error("Failed to allocate buffer for read."));
+        }
+      } else {
+        // autoAllocateChunkSize is not set. Per spec, we do a DEFAULT read which means
+        // the underlying source's pull method won't get a byobRequest. It must use
+        // controller.enqueue() to provide data instead.
+        constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
+        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, kDefaultReadSize)) {
+          s.consumer->read(js,
+              ByteQueue::ReadRequest(kj::mv(prp.resolver),
+                  {
+                    .store = kj::mv(store),
+                    .type = ByteQueue::ReadRequest::Type::DEFAULT,
                   }));
         } else {
           prp.resolver.reject(js, js.v8Error("Failed to allocate buffer for read."));
@@ -1912,6 +2018,18 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
+  jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
+    KJ_IF_SOME(s, state) {
+      return s.consumer->drainingRead(js, maxRead);
+    }
+
+    // We are canceled! Return done with empty chunks.
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = kj::Array<kj::Array<kj::byte>>(),
+      .done = true,
+    });
+  }
+
   // When a ReadableStream is canceled, the expected behavior is that the underlying
   // controller is notified and the cancel algorithm on the underlying source is
   // called. When there are multiple ReadableStreams sharing consumption of a
@@ -1920,10 +2038,22 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   // Here, we rely on the controller implementing the correct behavior since it owns
   // the queue that knows about all of the attached consumers.
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+    if (pendingCancel) return js.resolvedPromise();
     KJ_IF_SOME(s, state) {
+      // Check if there's a pending draining read before calling cancel, since cancel
+      // will resolve the pending read and we need to know if we should defer destruction.
+      bool hasPendingDrainingRead = s.consumer->hasPendingDrainingRead();
       s.consumer->cancel(js, maybeReason);
       auto promise = s.controller->cancel(js, kj::mv(maybeReason));
-      state = kj::none;
+      // If there's a pending draining read, we need to wait for it to finish before
+      // dropping our state. The draining read's promise callbacks capture 'this' (the
+      // Consumer) to clear hasPendingDrainingRead. If we destroy the state now, those
+      // callbacks will UAF.
+      if (hasPendingDrainingRead) {
+        pendingCancel = true;
+      } else {
+        state = kj::none;
+      }
       return kj::mv(promise);
     }
 
@@ -1949,10 +2079,36 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   // Called by the consumer when it has a queued pending read and needs
   // data to be provided to fulfill it. We need to notify the controller
   // to initiate pulling to provide the data.
-  void onConsumerWantsData(jsg::Lock& js) override {
+  // Returns true if the pull completed synchronously (meaning more pumping
+  // might yield additional synchronous data), false otherwise.
+  bool onConsumerWantsData(jsg::Lock& js) override {
     KJ_IF_SOME(s, state) {
-      s.controller->pull(js);
+      // Save a reference to the owner before calling pull. The pull callback
+      // may trigger close/error which could destroy this ByteReadable. By
+      // incrementing pendingReadCount, we ensure doClose/doError defers the
+      // actual destruction until after we return.
+      ReadableStreamJsController& owner = s.owner;
+      owner.incrementPendingReadCount();
+
+      // For draining reads, use forcePull to bypass backpressure checks.
+      // This ensures we pull all available data regardless of highWaterMark.
+      if (s.consumer->hasPendingDrainingRead()) {
+        s.controller->forcePull(js);
+      } else {
+        s.controller->pull(js);
+      }
+
+      // Check if state is still valid BEFORE calling decrementPendingReadCountAndProcess,
+      // because that call may destroy this ByteReadable if close was deferred.
+      bool result =
+          state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
+
+      // Process any deferred close/error. This may destroy this ByteReadable.
+      owner.decrementPendingReadCountAndProcess(js);
+
+      return result;
     }
+    return false;
   }
 
   kj::Maybe<int> getDesiredSize() {
@@ -2045,6 +2201,10 @@ void ReadableStreamDefaultController::error(jsg::Lock& js, v8::Local<v8::Value> 
 // data if needed.
 void ReadableStreamDefaultController::pull(jsg::Lock& js) {
   impl.pullIfNeeded(js, JSG_THIS);
+}
+
+void ReadableStreamDefaultController::forcePull(jsg::Lock& js) {
+  impl.forcePullIfNeeded(js, JSG_THIS);
 }
 
 kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
@@ -2286,6 +2446,10 @@ void ReadableByteStreamController::pull(jsg::Lock& js) {
   impl.pullIfNeeded(js, JSG_THIS);
 }
 
+void ReadableByteStreamController::forcePull(jsg::Lock& js) {
+  impl.forcePullIfNeeded(js, JSG_THIS);
+}
+
 kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
     kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener) {
   return impl.getConsumer(stateListener);
@@ -2385,6 +2549,28 @@ void ReadableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   } else {
     state.init<StreamStates::Errored>(js.v8Ref(reason));
     lock.onError(js, reason);
+  }
+}
+
+void ReadableStreamJsController::incrementPendingReadCount() {
+  pendingReadCount++;
+}
+
+void ReadableStreamJsController::decrementPendingReadCountAndProcess(jsg::Lock& js) {
+  KJ_ASSERT(pendingReadCount > 0);
+  pendingReadCount--;
+  if (!isReadPending()) {
+    KJ_IF_SOME(pending, maybePendingState) {
+      KJ_SWITCH_ONEOF(pending) {
+        KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+          doClose(js);
+        }
+        KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+          doError(js, errored.getHandle(js));
+        }
+      }
+      maybePendingState = kj::none;
+    }
   }
 }
 
@@ -2509,6 +2695,62 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
   KJ_UNREACHABLE;
 }
 
+kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::drainingRead(
+    jsg::Lock& js, size_t maxRead) {
+  disturbed = true;
+
+  KJ_IF_SOME(pendingState, maybePendingState) {
+    KJ_SWITCH_ONEOF(pendingState) {
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+        return js.resolvedPromise(DrainingReadResult{
+          .chunks = kj::Array<kj::Array<kj::byte>>(),
+          .done = true,
+        });
+      }
+      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+        return js.rejectedPromise<DrainingReadResult>(errored.addRef(js));
+      }
+    }
+  }
+
+  // Like deferControllerStateChange for regular reads, we need to prevent the controller
+  // state from being destroyed while a draining read's promise callbacks are pending.
+  // The drainingRead implementation captures `this` (the Consumer) in promise lambdas to
+  // clear hasPendingDrainingRead. If the state is changed (destroying the Consumer) before
+  // those callbacks run, we get a use-after-free.
+  auto wrapDrainingRead =
+      [this](jsg::Lock& js,
+          jsg::Promise<DrainingReadResult> promise) -> jsg::Promise<DrainingReadResult> {
+    pendingReadCount++;
+    return promise.then(js, [this](jsg::Lock& js, DrainingReadResult result) {
+      decrementPendingReadCountAndProcess(js);
+      return kj::mv(result);
+    }, [this](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
+      decrementPendingReadCountAndProcess(js);
+      js.throwException(kj::mv(exception));
+    });
+  };
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return js.resolvedPromise(DrainingReadResult{
+        .chunks = kj::Array<kj::Array<kj::byte>>(),
+        .done = true,
+      });
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return js.rejectedPromise<DrainingReadResult>(errored.addRef(js));
+    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+      return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+      return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 void ReadableStreamJsController::releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) {
   lock.releaseReader(*this, reader, maybeJs);
 }
@@ -2595,14 +2837,34 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
   expectedLength = underlyingSource.expectedLength;
 
   if (type == "bytes") {
-    auto autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(
-        UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE);
+    // Per spec, autoAllocateChunkSize should only be set if the user explicitly provides it.
+    // If not set, the underlying source's pull method won't receive a byobRequest for
+    // non-BYOB reads and must use controller.enqueue() instead.
+    //
+    // However, our original implementation always defaulted to 4096, so we need a compat flag
+    // to control this behavior. Default to legacy behavior if flags aren't available.
+    bool useSpecCompliantBehavior = false;
+    KJ_IF_SOME(flags, FeatureFlags::tryGet(js)) {
+      useSpecCompliantBehavior = flags.getNoAutoAllocateChunkSize();
+    }
+
+    kj::Maybe<int> autoAllocateChunkSize;
+    if (useSpecCompliantBehavior) {
+      // Spec-compliant: only set if user explicitly provides it
+      autoAllocateChunkSize =
+          underlyingSource.autoAllocateChunkSize.map([](int size) { return size; });
+    } else {
+      // Legacy behavior: default to 4096 if not provided
+      autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(
+          UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE);
+    }
 
     auto controller =
         js.alloc<ReadableByteStreamController>(kj::mv(underlyingSource), kj::mv(queuingStrategy));
 
-    JSG_REQUIRE(
-        autoAllocateChunkSize > 0, TypeError, "The autoAllocateChunkSize option cannot be zero.");
+    KJ_IF_SOME(chunkSize, autoAllocateChunkSize) {
+      JSG_REQUIRE(chunkSize > 0, TypeError, "The autoAllocateChunkSize option cannot be zero.");
+    }
 
     // We account for the memory usage of the ByteReadable and its controller together because
     // their lifetimes are identical (in practice) and memory accounting itself has a memory

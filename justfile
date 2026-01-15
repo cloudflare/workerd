@@ -56,7 +56,7 @@ stream-test *args:
 
 # e.g. just node-test zlib
 node-test test_name *args:
-  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test {{args}}
+  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test@ {{args}}
 
 # e.g. just wpt-test urlpattern
 wpt-test test_name:
@@ -141,9 +141,10 @@ eslint:
     //src/wpt:wpt-all@eslint \
     //types:types_lib@eslint
 
+# Generate code coverage report (Linux only)
 coverage path="//...":
   bazel coverage {{path}}
-  genhtml --branch-coverage --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
+  genhtml --branch-coverage --ignore-errors category --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
   open coverage/index.html
 
 profile path:

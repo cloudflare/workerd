@@ -68,50 +68,50 @@ alias(
 )
 
 alias(
-    name = "capnp-0.24.0",
-    actual = "@crates_vendor__capnp-0.24.0//:capnp",
+    name = "capnp-0.25.0",
+    actual = "@crates_vendor__capnp-0.25.0//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.24.0//:capnp",
+    actual = "@crates_vendor__capnp-0.25.0//:capnp",
     tags = ["manual"],
 )
 
 alias(
-    name = "capnp-rpc-0.24.0",
-    actual = "@crates_vendor__capnp-rpc-0.24.0//:capnp_rpc",
+    name = "capnp-rpc-0.25.0",
+    actual = "@crates_vendor__capnp-rpc-0.25.0//:capnp_rpc",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp-rpc",
-    actual = "@crates_vendor__capnp-rpc-0.24.0//:capnp_rpc",
+    actual = "@crates_vendor__capnp-rpc-0.25.0//:capnp_rpc",
     tags = ["manual"],
 )
 
 alias(
-    name = "capnpc-0.24.0",
-    actual = "@crates_vendor__capnpc-0.24.0//:capnpc",
+    name = "capnpc-0.25.0",
+    actual = "@crates_vendor__capnpc-0.25.0//:capnpc",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc",
-    actual = "@crates_vendor__capnpc-0.24.0//:capnpc",
+    actual = "@crates_vendor__capnpc-0.25.0//:capnpc",
     tags = ["manual"],
 )
 
 alias(
-    name = "cc-1.2.51",
-    actual = "@crates_vendor__cc-1.2.51//:cc",
+    name = "cc-1.2.52",
+    actual = "@crates_vendor__cc-1.2.52//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.51//:cc",
+    actual = "@crates_vendor__cc-1.2.52//:cc",
     tags = ["manual"],
 )
 
@@ -224,26 +224,26 @@ alias(
 )
 
 alias(
-    name = "proc-macro2-1.0.104",
-    actual = "@crates_vendor__proc-macro2-1.0.104//:proc_macro2",
+    name = "proc-macro2-1.0.105",
+    actual = "@crates_vendor__proc-macro2-1.0.105//:proc_macro2",
     tags = ["manual"],
 )
 
 alias(
     name = "proc-macro2",
-    actual = "@crates_vendor__proc-macro2-1.0.104//:proc_macro2",
+    actual = "@crates_vendor__proc-macro2-1.0.105//:proc_macro2",
     tags = ["manual"],
 )
 
 alias(
-    name = "quote-1.0.42",
-    actual = "@crates_vendor__quote-1.0.42//:quote",
+    name = "quote-1.0.43",
+    actual = "@crates_vendor__quote-1.0.43//:quote",
     tags = ["manual"],
 )
 
 alias(
     name = "quote",
-    actual = "@crates_vendor__quote-1.0.42//:quote",
+    actual = "@crates_vendor__quote-1.0.43//:quote",
     tags = ["manual"],
 )
 
@@ -308,14 +308,14 @@ alias(
 )
 
 alias(
-    name = "serde_json-1.0.148",
-    actual = "@crates_vendor__serde_json-1.0.148//:serde_json",
+    name = "serde_json-1.0.149",
+    actual = "@crates_vendor__serde_json-1.0.149//:serde_json",
     tags = ["manual"],
 )
 
 alias(
     name = "serde_json",
-    actual = "@crates_vendor__serde_json-1.0.148//:serde_json",
+    actual = "@crates_vendor__serde_json-1.0.149//:serde_json",
     tags = ["manual"],
 )
 
@@ -356,14 +356,14 @@ alias(
 )
 
 alias(
-    name = "syn-2.0.113",
-    actual = "@crates_vendor__syn-2.0.113//:syn",
+    name = "syn-2.0.114",
+    actual = "@crates_vendor__syn-2.0.114//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.113//:syn",
+    actual = "@crates_vendor__syn-2.0.114//:syn",
     tags = ["manual"],
 )
 
@@ -406,13 +406,13 @@ alias(
 # Binaries
 alias(
     name = "capnpc__capnpc-rust",
-    actual = "@crates_vendor__capnpc-0.24.0//:capnpc-rust__bin",
+    actual = "@crates_vendor__capnpc-0.25.0//:capnpc-rust__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc__capnpc-rust-bootstrap",
-    actual = "@crates_vendor__capnpc-0.24.0//:capnpc-rust-bootstrap__bin",
+    actual = "@crates_vendor__capnpc-0.25.0//:capnpc-rust-bootstrap__bin",
     tags = ["manual"],
 )
 

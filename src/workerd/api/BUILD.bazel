@@ -567,6 +567,14 @@ kj_test(
 )
 
 kj_test(
+    src = "system-streams-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "actor-state-iocontext-test.c++",
     deps = [
         "//src/workerd/io",

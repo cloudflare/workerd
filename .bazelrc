@@ -1,6 +1,8 @@
 common --enable_platform_specific_config
 build --verbose_failures
 build --build_tag_filters=-off-by-default,-requires-container-engine
+# block network access by default
+build --nosandbox_default_allow_network
 test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
@@ -38,6 +40,9 @@ build --incompatible_strict_action_env
 # Use compat repo mapping to avoid O(n^2) repo mapping size, speeding up bazel repo mapping phase
 # and conserving space
 build --incompatible_compact_repo_mapping_manifest
+
+# Continue building locally when remote cache entries fail to materialize
+build --incompatible_remote_local_fallback_for_remote_cache
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'
@@ -400,8 +405,19 @@ build:windows --per_file_copt=external/boringssl@-Wno-unused-command-line-argume
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
 build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
-build:coverage --action_env=GCOV=llvm-profdata-19
+# Coverage configuration using LLVM tools. These environment variables are used by rules_cc
+# to locate LLVM coverage tools. Users should ensure llvm-profdata and llvm-cov are available
+# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-19 llvm-cov).
 build:coverage --action_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
+build:coverage --test_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
+# GCOV is used by rules_cc to merge raw profile data (.profraw) into indexed profile data (.profdata)
+build:coverage --action_env=GCOV=llvm-profdata
+build:coverage --test_env=GCOV=llvm-profdata
+# BAZEL_LLVM_COV is used by rules_cc to generate coverage reports from profile data
+build:coverage --action_env=BAZEL_LLVM_COV=llvm-cov
+build:coverage --test_env=BAZEL_LLVM_COV=llvm-cov
+# Enable optimizations to reduce coverage overhead while maintaining good coverage quality
+build:coverage --copt=-O2
 build:coverage --copt=-DNDEBUG
 build:coverage --combined_report=lcov
 build:coverage --experimental_use_llvm_covmap
@@ -410,10 +426,17 @@ build:coverage --experimental_fetch_all_coverage_outputs
 build:coverage --collect_code_coverage
 build:coverage --instrumentation_filter="^//,-//external"
 build:coverage --instrument_test_targets
+# KJ uses _exit() by default which bypasses atexit handlers and prevents LLVM profile runtime
+# from writing coverage data. KJ_CLEAN_SHUTDOWN forces use of normal exit() instead.
+build:coverage --test_env=KJ_CLEAN_SHUTDOWN=1
+coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine,-lint,-benchmark,-workerd-benchmark,-no-coverage
+# Coverage instrumentation slows down test execution, so extend timeouts
+# We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
+coverage --test_size_filters=-enormous
+coverage --test_timeout=60,240,240,240
+coverage --build_tests_only
+coverage --config=coverage
 
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
-
-coverage --build_tests_only
-coverage --config=coverage

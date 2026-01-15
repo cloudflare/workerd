@@ -135,6 +135,12 @@ exit /b !TEST_EXIT!
 SH_TEMPLATE = """#!/bin/sh
 set -e
 
+# Set up coverage for workerd subprocess
+if [ -n "$COVERAGE_DIR" ]; then
+    export LLVM_PROFILE_FILE="$COVERAGE_DIR/%p.profraw"
+    export KJ_CLEAN_SHUTDOWN=1
+fi
+
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
     # These environment variables are processed by the supervisor executable

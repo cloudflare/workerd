@@ -2,6 +2,7 @@ load("//:build/wd_test.bzl", "wd_test")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
 wd_test(
+    size = "large",
     src = "d1-api-test.wd-test",
     args = ["--experimental"],
     data = glob(
@@ -11,6 +12,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "d1-api-test-with-sessions.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]),
