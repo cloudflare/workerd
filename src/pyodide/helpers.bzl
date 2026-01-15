@@ -338,8 +338,8 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         outs = [_out_path("pyodide.capnp.bin", version)],
         cmd = " ".join([
             # Annoying logic to deal with different paths in workerd vs downstream.
-            # Either need "-I src" in workerd or -I external/workerd/src downstream
-            "INCLUDE=$$(stat src > /dev/null 2>&1 && echo src || echo external/workerd/src);",
+            # Either need "-I src" in workerd or -I external/+dep_workerd+workerd/src downstream
+            "INCLUDE=$$(stat src > /dev/null 2>&1 && echo src || echo external/+dep_workerd+workerd/src);",
             "$(execpath @capnp-cpp//src/capnp:capnp_tool)",
             "eval",
             "$(location :pyodide@%s.capnp)" % version,
