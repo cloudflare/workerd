@@ -6019,6 +6019,18 @@ export const transcodeTest = {
       strictEqual(dest.toString(), orig.toString());
     }
 
+    // Test utf16le to ascii/latin1 output length
+    {
+      const input = Buffer.from('AAA', 'utf16le');
+      strictEqual(input.length, 6);
+      const asciiOutput = transcode(input, 'utf16le', 'ascii');
+      strictEqual(asciiOutput.length, 3);
+      deepStrictEqual(asciiOutput, Buffer.from('AAA', 'ascii'));
+      const latin1Output = transcode(input, 'utf16le', 'latin1');
+      strictEqual(latin1Output.length, 3);
+      deepStrictEqual(latin1Output, Buffer.from('AAA', 'latin1'));
+    }
+
     {
       const utf8 = Buffer.from('€'.repeat(4000), 'utf8');
       const ucs2 = Buffer.from('€'.repeat(4000), 'ucs2');
