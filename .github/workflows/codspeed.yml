@@ -50,7 +50,7 @@ jobs:
         run: |
           echo '#!/bin/bash' > run_benchmarks.sh
           echo 'set -ex' >> run_benchmarks.sh
-          targets=$(bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label 2>/dev/null)
+          targets=$(bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...) except attr(tags, "[\[ ]manual[,\]]", //...)' --output=label 2>/dev/null)
           for target in $targets; do
             echo "echo 'Running benchmark: $target'" >> run_benchmarks.sh
             echo "bazel run ${{ env.BAZEL_ARGS }} $target -- --benchmark_min_time=1s" >> run_benchmarks.sh
