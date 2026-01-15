@@ -58,7 +58,11 @@
     },
     {
       "name": "aspect_rules_js",
-      "type": "bazel_dep"
+      "type": "github_tarball",
+      "owner": "anonrig",
+      "repo": "rules_js",
+      "branch": "yagiz/fix-postprocessing",
+      "freeze_commit": "93f17a3810649c95f658d85ff277fe963d1a20f8"
     },
     {
       "name": "aspect_rules_ts",

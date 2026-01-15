@@ -141,6 +141,9 @@ set -e
 
 # Set up coverage for workerd subprocess
 if [ -n "$COVERAGE_DIR" ]; then
+    # Fix directory permissions for coverage post-processing
+    # (Bazel may create COVERAGE_DIR with read-only permissions)
+    chmod -R u+w "$COVERAGE_DIR" 2>/dev/null || true
     export LLVM_PROFILE_FILE="$COVERAGE_DIR/%p.profraw"
     export KJ_CLEAN_SHUTDOWN=1
 fi
@@ -280,7 +283,7 @@ _wd_test = rule(
             cfg = config.exec(exec_group = "test"),
         ),
         "_collect_cc_coverage": attr.label(
-            default = "@bazel_tools//tools/test:collect_cc_coverage",
+            default = "//build/cc_coverage:collect_cc_coverage",
             executable = True,
             cfg = config.exec(exec_group = "test"),
         ),
