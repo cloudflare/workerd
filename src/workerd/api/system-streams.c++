@@ -380,13 +380,13 @@ kj::Own<WritableStreamSink> newSystemStream(
   return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding, context);
 }
 
-SystemMultiStream newSystemMultiStream(kj::Own<kj::AsyncIoStream> stream, IoContext& context) {
+SystemMultiStream newSystemMultiStream(
+    kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>& stream, IoContext& context) {
 
-  auto wrapped = kj::refcountedWrapper(kj::mv(stream));
   return {.readable = kj::heap<EncodedAsyncInputStream>(
-              wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context),
+              stream.addWrappedRef(), StreamEncoding::IDENTITY, context),
     .writable = kj::heap<EncodedAsyncOutputStream>(
-        wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context)};
+        stream.addWrappedRef(), StreamEncoding::IDENTITY, context)};
 }
 
 ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)
