@@ -10,6 +10,34 @@
 
 #include <kj/test.h>
 
+// Configure tcmalloc for deterministic benchmarks on Linux.
+// tcmalloc uses probabilistic heap sampling which can introduce variance in benchmark results.
+// WD_USE_TCMALLOC is defined when tcmalloc is enabled (Linux + use_tcmalloc flag).
+#if defined(WD_USE_TCMALLOC) && defined(WD_IS_BENCHMARK)
+#include "tcmalloc/malloc_extension.h"
+
+namespace workerd::bench {
+
+struct TcmallocBenchmarkConfig {
+  TcmallocBenchmarkConfig() {
+    // Disable heap profiling sampling by setting interval to max value.
+    // Default is ~512KB which causes probabilistic sampling of allocations.
+    tcmalloc::MallocExtension::SetProfileSamplingInterval(std::numeric_limits<int64_t>::max());
+
+    // Disable GWP-ASan guarded sampling. A negative value disables it.
+    tcmalloc::MallocExtension::SetGuardedSamplingInterval(-1);
+
+    // Disable background memory release actions that can cause timing variance.
+    tcmalloc::MallocExtension::SetBackgroundProcessActionsEnabled(false);
+  }
+};
+
+// Global instance ensures configuration runs before main().
+inline TcmallocBenchmarkConfig tcmallocBenchmarkConfig;
+
+}  // namespace workerd::bench
+#endif  // defined(WD_USE_TCMALLOC) && defined(WD_IS_BENCHMARK)
+
 // Define a benchmark. Use microseconds instead of nanoseconds by default, most tests run long
 // enough to not need ns precision.
 #define WD_BENCHMARK(X) BENCHMARK(X)->Unit(benchmark::kMicrosecond)
