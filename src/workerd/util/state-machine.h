@@ -4,6 +4,13 @@
 
 #pragma once
 
+// MSVC uses a different attribute name for no_unique_address
+#if _MSC_VER
+#define KJ_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+#define KJ_NO_UNIQUE_ADDRESS [[no_unique_address]]
+#endif
+
 // State Machine Abstraction built on kj::OneOf.
 // TODO(later): If this proves useful, consider moving it into kj itself as there
 // are no workerd-specific dependencies.
@@ -1664,8 +1671,8 @@ class StateMachine {
 
   // Pending state support (only allocated when HAS_PENDING is true)
   // Using _::Empty instead of char for proper [[no_unique_address]] optimization
-  [[no_unique_address]] std::conditional_t<HAS_PENDING, StateUnion, _::Empty> pendingState{};
-  [[no_unique_address]] std::conditional_t<HAS_PENDING, uint32_t, _::Empty> operationCount{};
+  KJ_NO_UNIQUE_ADDRESS std::conditional_t<HAS_PENDING, StateUnion, _::Empty> pendingState{};
+  KJ_NO_UNIQUE_ADDRESS std::conditional_t<HAS_PENDING, uint32_t, _::Empty> operationCount{};
 
   void requireUnlocked() const {
     KJ_REQUIRE(transitionLockCount == 0,
