@@ -748,7 +748,7 @@ export interface AnalyticsEngineDataset {
 }
 export interface AnalyticsEngineDataPoint {
   indexes?: ((ArrayBuffer | string) | null)[];
-  doubles?: number[];
+  doubles?: (number | null)[];
   blobs?: ((ArrayBuffer | string) | null)[];
 }
 /**

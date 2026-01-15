@@ -45,7 +45,9 @@ class AnalyticsEngine: public jsg::Object {
     // have a maximum of 20 elements.
 
     JSG_STRUCT(indexes, doubles, blobs);
-    JSG_STRUCT_TS_OVERRIDE(AnalyticsEngineDataPoint);
+    JSG_STRUCT_TS_OVERRIDE(AnalyticsEngineDataPoint {
+      doubles?: (number | null)[];
+    });
   };
 
   // Send an Analytics Engine-compatible event to the configured logfwdr socket.
