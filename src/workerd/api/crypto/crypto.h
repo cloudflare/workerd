@@ -9,7 +9,13 @@
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
 
-#include <openssl/base.h>  // for EVP_MD_CTX, X509
+// Forward declarations for OpenSSL types (avoids including openssl/base.h in header)
+struct x509_st;
+struct env_md_ctx_st;
+struct bio_st;
+using X509 = struct x509_st;
+using EVP_MD_CTX = struct env_md_ctx_st;
+using BIO = struct bio_st;
 
 #include <bit>
 

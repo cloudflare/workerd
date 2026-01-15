@@ -6,6 +6,7 @@
 
 #include <workerd/util/http-util.h>
 
+#include <capnp/compat/http-over-capnp.h>
 #include <kj/debug.h>
 
 using kj::byte;

@@ -21,7 +21,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -70,11 +70,14 @@ wd_cc_library(
         ],
     }),
     implementation_deps = [
+        ":cdp_capnp",
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
         "//src/workerd/util:completion-membrane",
         "//src/workerd/util:entropy",
+        "//src/workerd/util:header-validation",
+        "//src/workerd/util:immediate-crash",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:string-buffer",
         "//src/workerd/util:strings",
@@ -82,14 +85,15 @@ wd_cc_library(
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
+        "@ncrypto",
         "@simdutf",
+        "@ssl",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor",
         ":actor-id",
         ":actor-storage_capnp",
-        ":cdp_capnp",
         ":container_capnp",
         ":features",
         ":frankenvalue",
@@ -113,8 +117,6 @@ wd_cc_library(
         "//src/workerd/jsg:script",
         "//src/workerd/util:checked-queue",
         "//src/workerd/util:exception",
-        "//src/workerd/util:header-validation",
-        "//src/workerd/util:immediate-crash",
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:small-set",
         "//src/workerd/util:sqlite",
@@ -123,8 +125,6 @@ wd_cc_library(
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj:kj-async",
-        "@ncrypto",
-        "@ssl",
     ],
 )
 
@@ -311,16 +311,17 @@ wd_cc_library(
     srcs = ["worker-interface.c++"],
     hdrs = ["worker-interface.h"],
     implementation_deps = [
+        "//src/workerd/util",
         "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":frankenvalue_capnp",
         ":trace",
         ":worker-interface_capnp",
-        "//src/workerd/util",
         "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 

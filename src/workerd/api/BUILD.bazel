@@ -393,6 +393,8 @@ wd_cc_library(
     implementation_deps = [
         "//src/workerd/io",
         "//src/workerd/util:strings",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -401,9 +403,7 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj:kj-async",
-        "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
@@ -528,10 +528,24 @@ wd_cc_library(
     for f in [
         "actor-state-test.c++",
         "basics-test.c++",
-        "crypto/aes-test.c++",
-        "crypto/impl-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
+    ]
+]
+
+[
+    kj_test(
+        src = f,
+        deps = [
+            "//src/workerd/io",
+            "//src/workerd/io:promise-wrapper",
+            "@ncrypto",
+            "@ssl",
+        ],
+    )
+    for f in [
+        "crypto/aes-test.c++",
+        "crypto/impl-test.c++",
     ]
 ]
 
@@ -562,6 +576,7 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
+        "@ssl",
     ],
 )
 
@@ -591,12 +606,16 @@ kj_test(
         ":urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
+        "@ssl",
     ],
 )
 
 kj_test(
     src = "base64-test.c++",
-    deps = ["//src/workerd/tests:test-fixture"],
+    deps = [
+        ":base64",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(
@@ -618,6 +637,7 @@ kj_test(
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
 

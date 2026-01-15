@@ -1,7 +1,11 @@
 #pragma once
 
-#include <capnp/compat/http-over-capnp.h>
 #include <kj/compat/http.h>
+
+namespace capnp {
+class HttpOverCapnpFactory;
+class ByteStreamFactory;
+}  // namespace capnp
 
 namespace workerd {
 
