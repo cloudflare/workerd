@@ -1,7 +1,6 @@
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
 - '@types/node'
-- 'capnp-es'
 
 packages:
    - .
