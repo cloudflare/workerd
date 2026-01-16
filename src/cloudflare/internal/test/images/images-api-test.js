@@ -458,11 +458,12 @@ export const test_images_get_success = {
    * @param {Env} env
    */
   async test(_, env) {
-    const metadata = await env.images.get('test-image-id');
+    const metadata = await env.images.hosted.details('test-image-id');
     assert.notEqual(metadata, null);
     assert.equal(metadata.id, 'test-image-id');
     assert.equal(metadata.filename, 'test.jpg');
     assert.equal(metadata.requireSignedURLs, false);
+    assert.equal(metadata.creator, 'test-creator');
   },
 };
 
@@ -472,7 +473,7 @@ export const test_images_get_not_found = {
    * @param {Env} env
    */
   async test(_, env) {
-    const metadata = await env.images.get('not-found');
+    const metadata = await env.images.hosted.details('not-found');
     assert.equal(metadata, null);
   },
 };
@@ -484,7 +485,7 @@ export const test_images_getImage_success = {
    * @param {Env} env
    */
   async test(_, env) {
-    const stream = await env.images.getImage('test-image-id');
+    const stream = await env.images.hosted.image('test-image-id');
     assert.notEqual(stream, null);
 
     const reader = stream.getReader();
@@ -505,7 +506,7 @@ export const test_images_getImage_not_found = {
    * @param {Env} env
    */
   async test(_, env) {
-    const stream = await env.images.getImage('not-found');
+    const stream = await env.images.hosted.image('not-found');
     assert.equal(stream, null);
   },
 };
@@ -518,17 +519,19 @@ export const test_images_upload_with_options = {
    */
   async test(_, env) {
     const imageData = new Blob(['test image']).stream();
-    const metadata = await env.images.upload(imageData, {
+    const metadata = await env.images.hosted.upload(imageData, {
       id: 'custom-id',
       filename: 'upload-test.jpg',
       requireSignedURLs: true,
       metadata: { key: 'value' },
+      creator: 'upload-creator',
     });
 
     assert.equal(metadata.id, 'custom-id');
     assert.equal(metadata.filename, 'upload-test.jpg');
     assert.equal(metadata.requireSignedURLs, true);
     assert.deepStrictEqual(metadata.meta, { key: 'value' });
+    assert.equal(metadata.creator, 'upload-creator');
   },
 };
 
@@ -539,7 +542,7 @@ export const test_images_upload_arraybuffer = {
    */
   async test(_, env) {
     const buffer = new TextEncoder().encode('test image').buffer;
-    const metadata = await env.images.upload(buffer);
+    const metadata = await env.images.hosted.upload(buffer);
 
     assert.notEqual(metadata, null);
     assert.equal(typeof metadata.id, 'string');
@@ -553,14 +556,16 @@ export const test_images_update_success = {
    * @param {Env} env
    */
   async test(_, env) {
-    const metadata = await env.images.update('test-image-id', {
+    const metadata = await env.images.hosted.update('test-image-id', {
       requireSignedURLs: true,
       metadata: { updated: true },
+      creator: 'update-creator',
     });
 
     assert.equal(metadata.id, 'test-image-id');
     assert.equal(metadata.requireSignedURLs, true);
     assert.deepStrictEqual(metadata.meta, { updated: true });
+    assert.equal(metadata.creator, 'update-creator');
   },
 };
 
@@ -575,7 +580,7 @@ export const test_images_update_not_found = {
      */
     let e;
     try {
-      await env.images.update('not-found', { requireSignedURLs: true });
+      await env.images.hosted.update('not-found', { requireSignedURLs: true });
     } catch (err) {
       e = err;
     }
@@ -591,7 +596,7 @@ export const test_images_delete_success = {
    * @param {Env} env
    */
   async test(_, env) {
-    const result = await env.images.delete('test-image-id');
+    const result = await env.images.hosted.delete('test-image-id');
     assert.equal(result, true);
   },
 };
@@ -602,7 +607,7 @@ export const test_images_delete_not_found = {
    * @param {Env} env
    */
   async test(_, env) {
-    const result = await env.images.delete('not-found');
+    const result = await env.images.hosted.delete('not-found');
     assert.equal(result, false);
   },
 };
@@ -614,7 +619,7 @@ export const test_images_list_default = {
    * @param {Env} env
    */
   async test(_, env) {
-    const result = await env.images.list();
+    const result = await env.images.hosted.list();
 
     assert.notEqual(result.images, null);
     assert.equal(Array.isArray(result.images), true);
@@ -629,7 +634,7 @@ export const test_images_list_with_options = {
    * @param {Env} env
    */
   async test(_, env) {
-    const result = await env.images.list({
+    const result = await env.images.hosted.list({
       limit: 1,
       sortOrder: 'asc',
     });
@@ -651,7 +656,7 @@ export const test_images_upload_base64_stream = {
     const base64Data = btoa(imageData);
     const stream = new Blob([base64Data]).stream();
 
-    const metadata = await env.images.upload(stream, {
+    const metadata = await env.images.hosted.upload(stream, {
       filename: 'base64-test.jpg',
       encoding: 'base64',
     });
@@ -672,7 +677,7 @@ export const test_images_upload_base64_arraybuffer = {
     const base64Data = btoa(imageData);
     const buffer = new TextEncoder().encode(base64Data).buffer;
 
-    const metadata = await env.images.upload(buffer, {
+    const metadata = await env.images.hosted.upload(buffer, {
       filename: 'base64-buffer-test.jpg',
       encoding: 'base64',
     });
