@@ -2207,7 +2207,7 @@ class ExternalMemoryAdjustment;
 // reference is nulled out when the isolate is destroyed.
 class ExternalMemoryTarget: public kj::AtomicRefcounted {
  public:
-  ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
+  ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate), accounter() {}
 
   ExternalMemoryAdjustment getAdjustment(size_t amount) const;
 
@@ -2236,6 +2236,8 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
   static_assert(std::atomic<int64_t>::is_always_lock_free);
 
   friend class ExternalMemoryAdjustment;
+
+  mutable v8::ExternalMemoryAccounter accounter;
 };
 
 // RAII class to adjust the amount of external memory attributed to an isolate.

@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aditya Tewari <adityaatewari@gmail.com>
+Date: Wed, 15 Jan 2025 00:00:00 -0800
+Subject: Disable ExternalMemoryAccounter destructor check
+
+workerd's design allows external memory to outlive the isolate in certain
+cases. The ExternalMemoryAccounter destructor's DCHECK_EQ assertion requires
+memory to return to zero, which conflicts with this design pattern.
+
+This patch disables the assertion while maintaining proper memory accounting
+through explicit Increase/Decrease calls.
+
+diff --git a/src/api/api.cc b/src/api/api.cc
+index 946a2154e793b1def5e783fd0eea2a286fa4ee54..0000000000000000000000000000000000000000 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -12342,7 +12342,8 @@ void ExternalMemoryAccounter::Update(Isolate* isolate, int64_t delta) {
+ 
+ ExternalMemoryAccounter::~ExternalMemoryAccounter() {
+ #ifdef V8_ENABLE_MEMORY_ACCOUNTING_CHECKS
+-  DCHECK_EQ(amount_of_external_memory_, 0U);
++  // Disabled: workerd allows external memory to outlive isolates
++  // DCHECK_EQ(amount_of_external_memory_, 0U);
+ #endif
+ }
+ 
