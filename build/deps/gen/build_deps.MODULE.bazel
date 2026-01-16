@@ -114,7 +114,7 @@ bazel_dep(name = "rules_cc", version = "0.2.16")
 bazel_dep(name = "rules_multirun", version = "0.13.0")
 
 # rules_nodejs
-bazel_dep(name = "rules_nodejs", version = "6.6.2")
+bazel_dep(name = "rules_nodejs", version = "6.7.3")
 
 # rules_oci
 bazel_dep(name = "rules_oci", version = "2.2.7")

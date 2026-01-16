@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/vscode/devcontainers/javascript-node:22
+FROM mcr.microsoft.com/vscode/devcontainers/javascript-node:24
 
 # Install dependencies, including clang via through LLVM APT repository. Note that this
 # will also install lldb and clangd alongside dependencies.
