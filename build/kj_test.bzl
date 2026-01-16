@@ -61,7 +61,8 @@ def kj_test(
         env = {"WORKERD_ALL_AUTOGATES": "1"},
         binary = cross_alias,
         data = data,
-        tags = tags,
+        # Tag with no-coverage to reduce coverage CI time
+        tags = tags + ["no-coverage"],
     )
 
 # Shell template for kj_test - sets up coverage environment for the subprocess

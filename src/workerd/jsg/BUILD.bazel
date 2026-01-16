@@ -360,6 +360,8 @@ kj_test(
 
 kj_test(
     src = "multiple-typewrappers-test.c++",
+    # Omitting coverage because it takes a really long time executing it.
+    tags = ["no-coverage"],
     deps = [
         ":jsg",
         "//src/workerd/io:compatibility-date_capnp",

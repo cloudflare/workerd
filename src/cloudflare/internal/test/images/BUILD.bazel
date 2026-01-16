@@ -4,4 +4,6 @@ wd_test(
     src = "images-api-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+    # Omitting coverage because it takes a really long time executing it.
+    tags = ["no-coverage"],
 )

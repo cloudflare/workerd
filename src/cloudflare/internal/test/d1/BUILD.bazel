@@ -16,6 +16,8 @@ wd_test(
     src = "d1-api-test-with-sessions.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]),
+    # Disabling coverage because it takes a long time to execute.
+    tags = ["no-coverage"],
 )
 
 py_wd_test(
