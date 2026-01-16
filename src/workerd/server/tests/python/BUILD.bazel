@@ -31,7 +31,10 @@ py_wd_test("random")
 
 py_wd_test("subdirectory")
 
-py_wd_test("sdk")
+py_wd_test(
+    "sdk",
+    compat_date = "2026-01-01",
+)
 
 gen_rust_import_tests()
 

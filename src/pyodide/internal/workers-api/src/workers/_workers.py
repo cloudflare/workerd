@@ -785,40 +785,27 @@ class Request:
         # TODO(later): when dedicated snapshots are default we can move this import to the top-level.
         import http.client
 
-        if _preserve_request_header_commas():
-            from email.message import Message
-            from email.policy import compat32
-
-            result = Message(policy=compat32)
-            js_headers = self.js_object.headers
-
-            set_cookie_values = None
-            if hasattr(js_headers, "getSetCookie"):
-                try:
-                    set_cookie_values = js_headers.getSetCookie()
-                except Exception:
-                    set_cookie_values = None
-            elif hasattr(js_headers, "getAll"):
-                try:
-                    set_cookie_values = js_headers.getAll("Set-Cookie")
-                except Exception:
-                    set_cookie_values = None
-
-            if set_cookie_values:
-                for value in set_cookie_values:
-                    result.add_header("Set-Cookie", value.strip())
-
-            for key, val in js_headers:
-                if key.lower() == "set-cookie":
-                    continue
-                result.add_header(key, val.strip())
+        result = http.client.HTTPMessage()
+        if not _preserve_request_header_commas():
+            for key, val in self.js_object.headers:
+                result[key] = val.strip()
 
             return result
 
-        result = http.client.HTTPMessage()
+        # With the exception of Set-Cookie, duplicate headers can and are combined with a comma
+        # in the JS Headers API. We do the same when returning the headers to Python.
+        #
+        # See https://httpwg.org/specs/rfc9110.html#rfc.section.5.3.
+        js_headers = self.js_object.headers
+        set_cookie_headers = js_headers.getSetCookie()
+        if set_cookie_headers:
+            for value in set_cookie_headers:
+                result.add_header("Set-Cookie", value.strip())
 
-        for key, val in self.js_object.headers:
-            result[key] = val.strip()
+        for key, val in js_headers:
+            if key.lower() == "set-cookie":
+                continue
+            result.add_header(key, val.strip())
 
         return result
 

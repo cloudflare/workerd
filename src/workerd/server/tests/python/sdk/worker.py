@@ -143,8 +143,7 @@ class Default(WorkerEntrypoint):
             #
             # Try to grab headers which should contain a duplicated header.
             headers = request.headers.get_all("X-Custom-Header")
-            assert "some_value" in headers
-            assert "some_other_value" in headers
+            assert "some_value, some_other_value" in headers
             return Response("success")
         else:
             resp = await fetch("https://example.com/sub")
@@ -188,9 +187,9 @@ class Default(WorkerEntrypoint):
 
 
 async def can_return_custom_fetch_response(env):
-    assert isinstance(
-        env, JsProxy
-    ), "Expecting the env for these tests not to be wrapped"
+    assert isinstance(env, JsProxy), (
+        "Expecting the env for these tests not to be wrapped"
+    )
     response = await env.SELF.fetch(
         "http://example.com/",
     )
@@ -452,7 +451,8 @@ async def request_unit_tests(env):
         ],
     )
     assert req_tuple_cookies.headers.get_all("Set-Cookie") == [
-        "session=abc123, token=xyz789"
+        "session=abc123",
+        "token=xyz789",
     ]
     assert req_tuple_cookies.headers.get("X-Custom") == "value"
 
@@ -587,9 +587,9 @@ async def response_buffer_source_unit_tests(env):
             ) from exc
 
         buffer = await response.buffer()
-        assert (
-            int(buffer.byteLength) == expected_length
-        ), f"Response buffer length mismatch for {type_name}"
+        assert int(buffer.byteLength) == expected_length, (
+            f"Response buffer length mismatch for {type_name}"
+        )
 
 
 async def can_fetch_python_request():

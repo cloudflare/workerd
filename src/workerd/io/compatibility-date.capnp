@@ -1273,13 +1273,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $impliedByAfterDate(name = "pedanticWpt", date = "2026-01-13");
   # Instructs the readAllText method in streams to strip the leading UTF8 BOM if present.
 
-  pythonRequestHeadersPreserveCommas @152 :Bool
-    $compatEnableFlag("python_request_headers_preserve_commas")
-    $compatDisableFlag("disable_python_request_headers_preserve_commas")
-    $compatEnableDate("2026-02-04");
-  # Preserve commas in Python Request headers rather than treating them as separators,
-  # while still exposing multiple Set-Cookie headers as distinct values.
-
   allowIrrevocableStubStorage @151 :Bool
     $compatEnableFlag("allow_irrevocable_stub_storage")
     $experimental;
@@ -1362,4 +1355,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # TODO(later): Once this is no longer experimental, this flag should be implied by
   # exportCommonJsDefaultNamespace (or vice versa) for consistency.
+
+  pythonRequestHeadersPreserveCommas @157 :Bool
+    $compatEnableFlag("python_request_headers_preserve_commas")
+    $compatDisableFlag("disable_python_request_headers_preserve_commas")
+    $compatEnableDate("2026-02-14");
+  # Preserve commas in Python Request headers rather than treating them as separators,
+  # while still exposing multiple Set-Cookie headers as distinct values.
 }
