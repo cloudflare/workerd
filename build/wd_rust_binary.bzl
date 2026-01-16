@@ -54,8 +54,11 @@ def wd_rust_binary(
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
+        # Disable experimental_use_cc_common_link for coverage builds due to
+        # https://github.com/bazelbuild/rules_rust/issues/2729
         experimental_use_cc_common_link = select({
             "@platforms//os:windows": 0,
+            "@//build/config:coverage_enabled": 0,
             "//conditions:default": 1,
         }),
         target_compatible_with = select({
@@ -74,8 +77,11 @@ def wd_rust_binary(
             # our tests are usually very heavy and do not support concurrent invocation
             "RUST_TEST_THREADS": "1",
         },
+        # Disable experimental_use_cc_common_link for coverage builds due to
+        # https://github.com/bazelbuild/rules_rust/issues/2729
         experimental_use_cc_common_link = select({
             "@platforms//os:windows": 0,
+            "@//build/config:coverage_enabled": 0,
             "//conditions:default": 1,
         }),
         target_compatible_with = select({
