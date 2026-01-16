@@ -1817,5 +1817,130 @@ KJ_TEST("ValueQueue draining read with default maxRead (unlimited)") {
 
 #pragma endregion Draining Read maxRead Tests
 
+#pragma region Queue/Consumer Destruction Order Tests
+
+// These tests verify that destroying the queue before its consumers doesn't crash.
+// This can happen during isolate teardown when the destruction order isn't guaranteed
+// to follow the ownership hierarchy.
+// These will typically only catch in builds with AddressSanitizer enabled.
+
+KJ_TEST("ValueQueue destroyed before consumer doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    // Heap-allocate the queue so we can control its destruction order
+    auto queue = kj::heap<ValueQueue>(2);
+
+    // Create a consumer attached to the queue
+    auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
+
+    // Push some data to make sure the consumer has state
+    queue->push(js, getEntry(js, 4));
+    KJ_ASSERT(consumer->size() == 4);
+
+    // Now destroy the queue FIRST - this simulates the production scenario
+    // where wrapper cleanup destroys the controller (and its queue) before
+    // the consumer that holds a reference to it.
+    queue = nullptr;
+
+    // When the consumer is destroyed (here, or when going out of scope),
+    // its destructor calls queue.removeConsumer(this).
+    // Without the fix, this is a use-after-free.
+    // With the fix, the consumer knows the queue is gone and skips the call.
+    consumer = nullptr;
+
+    // If we get here without crashing, the test passes
+  });
+}
+
+KJ_TEST("ValueQueue destroyed before multiple consumers doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ValueQueue>(2);
+
+    auto consumer1 = kj::heap<ValueQueue::Consumer>(*queue);
+    auto consumer2 = kj::heap<ValueQueue::Consumer>(*queue);
+
+    queue->push(js, getEntry(js, 4));
+    KJ_ASSERT(consumer1->size() == 4);
+    KJ_ASSERT(consumer2->size() == 4);
+
+    // Destroy queue before consumers
+    queue = nullptr;
+
+    // Both consumers should handle destruction gracefully
+    consumer1 = nullptr;
+    consumer2 = nullptr;
+  });
+}
+
+KJ_TEST("ByteQueue destroyed before consumer doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ByteQueue>(2);
+    auto consumer = kj::heap<ByteQueue::Consumer>(*queue);
+
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr().fill('a');
+    queue->push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+    KJ_ASSERT(consumer->size() == 4);
+
+    // Destroy queue before consumer
+    queue = nullptr;
+    consumer = nullptr;
+  });
+}
+
+KJ_TEST("ValueQueue destroyed with pending read requests doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ValueQueue>(2);
+    auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
+
+    // Queue a read request (no data pushed, so it will be pending)
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+    consumer->read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+
+    KJ_ASSERT(consumer->hasReadRequests());
+
+    // Destroy queue while there are pending reads
+    queue = nullptr;
+
+    // Consumer destruction should handle this gracefully
+    consumer = nullptr;
+
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue close then destroy before consumer doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ValueQueue>(2);
+    auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
+
+    // Close the queue first
+    queue->close(js);
+
+    // Then destroy it
+    queue = nullptr;
+
+    // Consumer should still handle destruction gracefully
+    consumer = nullptr;
+  });
+}
+
+KJ_TEST("ValueQueue error then destroy before consumer doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ValueQueue>(2);
+    auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
+
+    // Error the queue first
+    queue->error(js, js.v8Ref(js.v8Error("boom"_kj)));
+
+    // Then destroy it
+    queue = nullptr;
+
+    // Consumer should still handle destruction gracefully
+    consumer = nullptr;
+  });
+}
+
+#pragma endregion Queue / Consumer Destruction Order Tests
+
 }  // namespace
 }  // namespace workerd::api
