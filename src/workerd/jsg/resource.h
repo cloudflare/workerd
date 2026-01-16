@@ -29,6 +29,10 @@
 #include <type_traits>
 #include <typeindex>
 
+// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
   // Make std::type_index (which points to std::type_info) usable as a kj::HashMap key.
@@ -880,6 +884,8 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isConte
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
+      // TODO(soon): resolve .This() -> .HolderV2() deprecation message.  When doing so, please
+      // also remove the "#pragma clang diagnostic ignored "-Wdeprecated-declarations"" above.
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
@@ -1997,5 +2003,8 @@ class ObjectWrapper {
       Ref<Object>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
 };
+
+// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
+#pragma clang diagnostic pop
 
 }  // namespace workerd::jsg
