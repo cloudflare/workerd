@@ -6,7 +6,7 @@ load("//:build/wd_test.bzl", "wd_test")
 wd_cc_library(
     name = "bench-tools",
     hdrs = ["bench-tools.h"],
-    local_defines = select({
+    defines = select({
         "//src/workerd/server:really_use_tcmalloc": ["WD_USE_TCMALLOC"],
         "//conditions:default": [],
     }),

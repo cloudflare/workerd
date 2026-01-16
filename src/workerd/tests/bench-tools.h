@@ -13,7 +13,7 @@
 // Configure tcmalloc for deterministic benchmarks on Linux.
 // tcmalloc uses probabilistic heap sampling which can introduce variance in benchmark results.
 // WD_USE_TCMALLOC is defined when tcmalloc is enabled (Linux + use_tcmalloc flag).
-#if defined(WD_USE_TCMALLOC) && defined(WD_IS_BENCHMARK)
+#if defined(WD_USE_TCMALLOC)
 #include "tcmalloc/malloc_extension.h"
 
 namespace workerd::bench {
@@ -36,7 +36,7 @@ struct TcmallocBenchmarkConfig {
 inline TcmallocBenchmarkConfig tcmallocBenchmarkConfig;
 
 }  // namespace workerd::bench
-#endif  // defined(WD_USE_TCMALLOC) && defined(WD_IS_BENCHMARK)
+#endif  // defined(WD_USE_TCMALLOC)
 
 // Define a benchmark. Use microseconds instead of nanoseconds by default, most tests run long
 // enough to not need ns precision.
