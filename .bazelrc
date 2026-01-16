@@ -445,8 +445,6 @@ coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-contain
 # We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
 coverage --test_size_filters=-enormous
 coverage --test_timeout=240,240,240,240
-# Coverage tests use more memory due to instrumentation, reduce parallelism
-coverage --local_test_jobs=HOST_CPUS*0.5
 coverage --build_tests_only
 coverage --config=coverage
 coverage --combined_report=lcov
