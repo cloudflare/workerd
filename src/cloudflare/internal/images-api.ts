@@ -245,8 +245,8 @@ function isDrawTransformer(input: unknown): input is DrawTransformer {
 }
 
 interface ServiceEntrypointStub {
-  get(imageId: string): Promise<ImageMetadata | null>;
-  getImage(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
+  details(imageId: string): Promise<ImageMetadata | null>;
+  image(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
   upload(
     image: ReadableStream<Uint8Array> | ArrayBuffer,
     options?: ImageUploadOptions
@@ -256,11 +256,71 @@ interface ServiceEntrypointStub {
   list(options?: ImageListOptions): Promise<ImageList>;
 }
 
+class HostedImagesBindingImpl implements HostedImagesBinding {
+  readonly #fetcher: ServiceEntrypointStub;
+
+  constructor(fetcher: ServiceEntrypointStub) {
+    this.#fetcher = fetcher;
+  }
+
+  async details(imageId: string): Promise<ImageMetadata | null> {
+    return this.#fetcher.details(imageId);
+  }
+
+  async image(imageId: string): Promise<ReadableStream<Uint8Array> | null> {
+    return this.#fetcher.image(imageId);
+  }
+
+  async upload(
+    image: ReadableStream<Uint8Array> | ArrayBuffer,
+    options?: ImageUploadOptions
+  ): Promise<ImageMetadata> {
+    let processedImage: ReadableStream<Uint8Array> | ArrayBuffer = image;
+
+    if (options?.encoding === 'base64') {
+      const stream =
+        image instanceof ReadableStream
+          ? image
+          : new ReadableStream({
+              start(controller): void {
+                controller.enqueue(new Uint8Array(image));
+                controller.close();
+              },
+            });
+
+      processedImage = stream.pipeThrough(createBase64DecoderTransformStream());
+    }
+
+    return this.#fetcher.upload(processedImage, options);
+  }
+
+  async update(
+    imageId: string,
+    options: ImageUpdateOptions
+  ): Promise<ImageMetadata> {
+    return this.#fetcher.update(imageId, options);
+  }
+
+  async delete(imageId: string): Promise<boolean> {
+    return this.#fetcher.delete(imageId);
+  }
+
+  async list(options?: ImageListOptions): Promise<ImageList> {
+    return this.#fetcher.list(options || {});
+  }
+}
+
 class ImagesBindingImpl implements ImagesBinding {
   readonly #fetcher: Fetcher & ServiceEntrypointStub;
+  readonly #hosted: HostedImagesBinding;
 
   constructor(fetcher: Fetcher & ServiceEntrypointStub) {
     this.#fetcher = fetcher;
+    this.#hosted = new HostedImagesBindingImpl(fetcher);
+  }
+
+  get hosted(): HostedImagesBinding {
+    return this.#hosted;
   }
 
   async info(
@@ -326,52 +386,6 @@ class ImagesBindingImpl implements ImagesBinding {
         : stream;
 
     return new ImageTransformerImpl(this.#fetcher, decodedStream);
-  }
-
-  async get(imageId: string): Promise<ImageMetadata | null> {
-    return await this.#fetcher.get(imageId);
-  }
-
-  async getImage(imageId: string): Promise<ReadableStream<Uint8Array> | null> {
-    return await this.#fetcher.getImage(imageId);
-  }
-
-  async upload(
-    image: ReadableStream<Uint8Array> | ArrayBuffer,
-    options?: ImageUploadOptions
-  ): Promise<ImageMetadata> {
-    let processedImage: ReadableStream<Uint8Array> | ArrayBuffer = image;
-
-    if (options?.encoding === 'base64') {
-      const stream =
-        image instanceof ReadableStream
-          ? image
-          : new ReadableStream({
-              start(controller): void {
-                controller.enqueue(new Uint8Array(image));
-                controller.close();
-              },
-            });
-
-      processedImage = stream.pipeThrough(createBase64DecoderTransformStream());
-    }
-
-    return await this.#fetcher.upload(processedImage, options);
-  }
-
-  async update(
-    imageId: string,
-    options: ImageUpdateOptions
-  ): Promise<ImageMetadata> {
-    return await this.#fetcher.update(imageId, options);
-  }
-
-  async delete(imageId: string): Promise<boolean> {
-    return await this.#fetcher.delete(imageId);
-  }
-
-  async list(options?: ImageListOptions): Promise<ImageList> {
-    return await this.#fetcher.list(options || {});
   }
 }
 

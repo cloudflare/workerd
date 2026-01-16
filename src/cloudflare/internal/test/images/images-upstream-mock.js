@@ -25,7 +25,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
    * @param {string} imageId
    * @returns {Promise<ImageMetadata | null>}
    */
-  async get(imageId) {
+  async details(imageId) {
     if (imageId === 'not-found') {
       return null;
     }
@@ -38,10 +38,11 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
       variants: ['public'],
       meta: {},
       draft: false,
+      creator: 'test-creator',
     };
   }
 
-  async getImage(imageId) {
+  async image(imageId) {
     if (imageId === 'not-found') {
       return null;
     }
@@ -72,6 +73,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
       variants: ['public'],
       meta: options?.metadata || {},
       draft: false,
+      creator: options?.creator,
     };
   }
 
@@ -94,6 +96,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
       variants: ['public'],
       meta: body.metadata || {},
       draft: false,
+      creator: body.creator,
     };
   }
 
@@ -118,6 +121,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
         requireSignedURLs: false,
         variants: ['public'],
         meta: {},
+        creator: 'test-creator',
       },
       {
         id: 'image-2',
@@ -126,6 +130,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
         requireSignedURLs: false,
         variants: ['public'],
         meta: {},
+        creator: 'test-creator',
       },
     ];
 
