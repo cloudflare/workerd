@@ -90,7 +90,7 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
 def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProcess:
     # Use the formatter executable from bazel-bin
     tool_suffix = Path("build") / "deps" / "formatters" / tool_name
-    internal_tool_path = BAZEL_BIN / "external" / "workerd" / tool_suffix
+    internal_tool_path = BAZEL_BIN / "external" / "+dep_workerd+workerd" / tool_suffix
     workerd_tool_path = BAZEL_BIN / tool_suffix
 
     if internal_tool_path.exists():
