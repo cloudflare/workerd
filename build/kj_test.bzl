@@ -73,7 +73,7 @@ if [ -n "$COVERAGE_DIR" ]; then
     # Fix directory permissions for coverage post-processing
     # (Bazel may create COVERAGE_DIR with read-only permissions)
     chmod -R u+w "$COVERAGE_DIR" 2>/dev/null || true
-    export LLVM_PROFILE_FILE="$COVERAGE_DIR/%p.profraw"
+    export LLVM_PROFILE_FILE="$COVERAGE_DIR/%p-%m.profraw"
     export KJ_CLEAN_SHUTDOWN=1
 fi
 
