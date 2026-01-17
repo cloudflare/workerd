@@ -243,8 +243,12 @@ class ActorCacheInterface: public ActorCacheOps {
   };
 
   // Call when entering the alarm handler.
+  //
+  // `currentTime` is used to determine if an overdue alarm should run immediately even when
+  // the local alarm state differs from the scheduled time (to avoid blocking on storage sync).
   virtual kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
       SpanParent parentSpan,
+      kj::Date currentTime,
       bool noCache = false,
       kj::StringPtr actorId = "") = 0;
 
@@ -363,6 +367,7 @@ class ActorCache final: public ActorCacheInterface {
 
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
       SpanParent parentSpan,
+      kj::Date currentTime,
       bool noCache = false,
       kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;

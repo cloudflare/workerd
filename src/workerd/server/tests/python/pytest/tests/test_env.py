@@ -2,7 +2,11 @@ import pytest
 from js import Date, Reflect
 from workers import env, import_from_javascript, patch_env
 
+from pyodide import __version__
 from pyodide.ffi import create_proxy, to_js
+
+if __version__ == "0.26.0a2":
+    pytest.skip("Not supported on 0.26.0a2", allow_module_level=True)
 
 
 @pytest.mark.asyncio

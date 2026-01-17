@@ -22,8 +22,8 @@ importers:
         specifier: ^24.7.2
         version: 24.7.2
       capnp-es:
-        specifier: 0.0.11
-        version: 0.0.11(typescript@5.9.2)
+        specifier: 0.0.14
+        version: 0.0.14(typescript@5.9.2)
       chrome-remote-interface:
         specifier: ^0.33.3
         version: 0.33.3
@@ -379,8 +379,8 @@ packages:
     resolution: {integrity: sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ==}
     engines: {node: '>=6'}
 
-  capnp-es@0.0.11:
-    resolution: {integrity: sha512-/M2sGcTIjA2UQC6mnqidCUcfGdVmXGV8DDmNRXMU0ZdiK7TmALjxzJwlLc0UQb/YNy3/xu5OgKktLede69fsnw==}
+  capnp-es@0.0.14:
+    resolution: {integrity: sha512-8lWj4GJISiqRSlAJGkWpI4Azib7QY5UDIkqxeHcI7aAnXVk9SFuWxl1Fme+2HhzNANV0WTJqwUZvvXvloc3sBA==}
     hasBin: true
     peerDependencies:
       typescript: ^5.7.3
@@ -1046,7 +1046,7 @@ snapshots:
 
   callsites@3.1.0: {}
 
-  capnp-es@0.0.11(typescript@5.9.2):
+  capnp-es@0.0.14(typescript@5.9.2):
     optionalDependencies:
       typescript: 5.9.2
 

@@ -19,7 +19,7 @@ build:rust-enable-clippy-checks --output_groups=+clippy_checks
 # - clippy::future_not_send - todo
 # - clippy::trivial_regex - there's nothing wrong with having trivial regex
 # - clippy::literal_string_with_formatting_args – somehow triggers on
-#   external/rules_rust/rust/settings/.clippy.toml
+#   external/rules_rust+/rust/settings/.clippy.toml
 # - clippy::non_std_lazy_statics – triggers on lazy_static, non-trivial to replace
 # - clippy::format_push_string – avoids single memory allocation, but makes code less readable
 # - clippy::cast_possible_truncation - usize/u64 conversion warning is unbelievably noisy

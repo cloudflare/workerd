@@ -66,10 +66,9 @@ export function createMetadataFS(Module: Module): object {
       return Array.from(node.tree.keys());
     },
     lookup(parent, name) {
+      // Parent is not a directory so we always raise ENOENT (44)
       if (parent.tree == undefined) {
-        throw new PythonWorkersInternalError(
-          'cannot lookup directory, tree is undefined'
-        );
+        throw new Module.FS.ErrnoError(44);
       }
       const res = parent.tree.get(name);
       if (res === undefined) {

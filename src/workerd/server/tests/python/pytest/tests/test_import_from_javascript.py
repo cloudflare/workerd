@@ -2,6 +2,7 @@ import pytest
 from js import setTimeout
 from workers import import_from_javascript
 
+from pyodide import __version__
 from pyodide.ffi import create_once_callable
 
 
@@ -30,6 +31,7 @@ def test_import_from_javascript():
     setTimeout(create_once_callable(f), 1)
 
 
+@pytest.mark.skipif(__version__ == "0.26.0a2", reason="Requires JSPI")
 def test_import_vectorize():
     # Assert that imports that depend on JSPI work as expected
     vectorize = import_from_javascript("cloudflare:vectorize")

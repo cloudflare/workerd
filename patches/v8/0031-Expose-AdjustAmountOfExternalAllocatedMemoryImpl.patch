@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aditya Tewari <adityaatewari@gmail.com>
+Date: Wed, 15 Jan 2025 12:00:00 +0000
+Subject: Expose AdjustAmountOfExternalAllocatedMemoryImpl as public API
+
+The deprecated AdjustAmountOfExternalAllocatedMemory is being replaced
+by ExternalMemoryAccounter, but ExternalMemoryAccounter requires that
+adjustments return to zero before destruction. This is incompatible with
+workerd's design where external memory may outlive the isolate.
+
+V8 already has AdjustAmountOfExternalAllocatedMemoryImpl as a private
+method. This patch simply makes it public for embedder use.
+
+Signed-off-by: Aditya Tewari <adityaatewari@gmail.com>
+
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+index b38a37c86a5f977d783ee44b2c6559849fd2a797..0000000000000000000000000000000000000000 100644
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -1105,6 +1105,14 @@ class V8_EXPORT Isolate {
+    */
+   size_t GetHeapSize();
+ 
++  /**
++   * Adjusts external memory without destructor constraints.
++   * This directly calls the internal implementation without the
++   * zero-balance requirement of ExternalMemoryAccounter.
++   * Use when external memory may outlive the isolate.
++   */
++  int64_t AdjustAmountOfExternalAllocatedMemoryImpl(int64_t change_in_bytes);
++
+   /**
+    * Returns heap profiler for this isolate. Will return NULL until the isolate
+    * is initialized.
+@@ -1893,7 +1901,6 @@ class V8_EXPORT Isolate {
+ 
+   internal::ValueHelper::InternalRepresentationType GetDataFromSnapshotOnce(
+       size_t index);
+-  int64_t AdjustAmountOfExternalAllocatedMemoryImpl(int64_t change_in_bytes);
+   void HandleExternalMemoryInterrupt();
+ };
+ 
