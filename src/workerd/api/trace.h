@@ -199,11 +199,13 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
     kj::Array<tracing::FetchEventInfo::Header> headers;
     kj::String method;
     kj::String url;
+    uint64_t requestSize;
 
     Detail(jsg::Optional<jsg::V8Ref<v8::Object>> cf,
         kj::Array<tracing::FetchEventInfo::Header> headers,
         kj::String method,
-        kj::String url);
+        kj::String url,
+        uint64_t requestSize);
 
     JSG_MEMORY_INFO(Detail) {
       tracker.trackField("cf", cf);
@@ -224,6 +226,7 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
   jsg::Dict<kj::String, kj::String> getHeaders(jsg::Lock& js);
   kj::StringPtr getMethod();
   kj::String getUrl();
+  jsg::Optional<double> getBodySize();
 
   jsg::Ref<Request> getUnredacted(jsg::Lock& js);
 
@@ -232,6 +235,7 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(headers, getHeaders);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(method, getMethod);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(url, getUrl);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(bodySize, getBodySize);
 
     JSG_METHOD(getUnredacted);
   }
@@ -250,13 +254,16 @@ class TraceItem::FetchEventInfo::Response final: public jsg::Object {
   explicit Response(const Trace& trace, const tracing::FetchResponseInfo& responseInfo);
 
   uint16_t getStatus();
+  jsg::Optional<double> getBodySize();
 
   JSG_RESOURCE_TYPE(Response) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(status, getStatus);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(bodySize, getBodySize);
   }
 
  private:
   uint16_t status;
+  uint64_t bodySize;
 };
 
 class TraceItem::JsRpcEventInfo final: public jsg::Object {

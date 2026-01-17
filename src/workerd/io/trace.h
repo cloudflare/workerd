@@ -309,8 +309,11 @@ kj::String KJ_STRINGIFY(const SpanContext& context);
 struct FetchEventInfo final {
   struct Header;
 
-  explicit FetchEventInfo(
-      kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
+  explicit FetchEventInfo(kj::HttpMethod method,
+      kj::String url,
+      kj::String cfJson,
+      kj::Array<Header> headers,
+      uint64_t requestSize = 0);
   FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
   FetchEventInfo(FetchEventInfo&&) = default;
   FetchEventInfo& operator=(FetchEventInfo&&) = default;
@@ -341,6 +344,7 @@ struct FetchEventInfo final {
   // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
   kj::String cfJson;
   kj::Array<Header> headers;
+  uint64_t requestSize = 0;  // Request body size in bytes. 0 if unknown or no body.
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
   FetchEventInfo clone() const;
@@ -484,13 +488,14 @@ struct CustomEventInfo final {
 
 // Describes a fetch response
 struct FetchResponseInfo final {
-  explicit FetchResponseInfo(uint16_t statusCode);
+  explicit FetchResponseInfo(uint16_t statusCode, uint64_t bodySize = 0);
   FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
   FetchResponseInfo(FetchResponseInfo&&) = default;
   FetchResponseInfo& operator=(FetchResponseInfo&&) = default;
   KJ_DISALLOW_COPY(FetchResponseInfo);
 
   uint16_t statusCode;
+  uint64_t bodySize = 0;  // Response body size in bytes. 0 if unknown or no body.
 
   void copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const;
   FetchResponseInfo clone() const;

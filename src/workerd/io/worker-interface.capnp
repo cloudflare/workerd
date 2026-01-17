@@ -108,6 +108,8 @@ struct Trace @0x8e8d911203762d34 {
       name @0 :Text;
       value @1 :Text;
     }
+    requestSize @4 :UInt64;
+    # Request body size in bytes. 0 if unknown or no body.
   }
 
   struct JsRpcEventInfo {
@@ -158,6 +160,8 @@ struct Trace @0x8e8d911203762d34 {
   response @8 :FetchResponseInfo;
   struct FetchResponseInfo {
     statusCode @0 :UInt16;
+    bodySize @1 :UInt64;
+    # Response body size in bytes. 0 if unknown or no body.
   }
 
   cpuTime @10 :UInt64;

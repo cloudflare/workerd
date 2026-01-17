@@ -138,6 +138,9 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   uint getHttpResponseStatus() const {
     return httpResponseStatus;
   }
+  kj::Maybe<uint64_t> getExpectedBodySize() const {
+    return expectedBodySize;
+  }
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
       kj::StringPtr statusText,
@@ -147,6 +150,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
         "workerd", "WorkerEntrypoint::ResponseSentTracker::send()", "statusCode", statusCode);
     sent = true;
     httpResponseStatus = statusCode;
+    this->expectedBodySize = expectedBodySize;
     return inner.send(statusCode, statusText, headers, expectedBodySize);
   }
 
@@ -158,6 +162,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
 
  private:
   uint httpResponseStatus = 0;
+  kj::Maybe<uint64_t> expectedBodySize;
   kj::HttpService::Response& inner;
   bool sent = false;
 };
@@ -286,8 +291,20 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       return tracing::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
     };
 
+    // Extract request body size from Content-Length header if present
+    uint64_t requestSize = 0;
+    KJ_IF_SOME(contentLength, headers.get(kj::HttpHeaderId::CONTENT_LENGTH)) {
+      // Parse the Content-Length value. If parsing fails, we leave requestSize as 0.
+      char* end;
+      auto parsed = strtoull(contentLength.cStr(), &end, 10);
+      if (end != contentLength.cStr() && *end == '\0') {
+        requestSize = parsed;
+      }
+    }
+
     t.setEventInfo(*incomingRequest,
-        tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
+        tracing::FetchEventInfo(
+            method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray), requestSize));
     workerTracer = t;
   }
 
@@ -331,7 +348,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     KJ_IF_SOME(t, workerTracer) {
       auto httpResponseStatus = wrappedResponse.getHttpResponseStatus();
       if (httpResponseStatus != 0) {
-        t.setReturn(context.now(), tracing::FetchResponseInfo(httpResponseStatus));
+        uint64_t responseBodySize = wrappedResponse.getExpectedBodySize().orDefault(0);
+        t.setReturn(
+            context.now(), tracing::FetchResponseInfo(httpResponseStatus, responseBodySize));
       } else {
         t.setReturn(context.now());
       }

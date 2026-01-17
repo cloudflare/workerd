@@ -323,17 +323,22 @@ static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
 
 }  // namespace
 
-FetchEventInfo::FetchEventInfo(
-    kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers)
+FetchEventInfo::FetchEventInfo(kj::HttpMethod method,
+    kj::String url,
+    kj::String cfJson,
+    kj::Array<Header> headers,
+    uint64_t requestSize)
     : method(method),
       url(kj::mv(url)),
       cfJson(kj::mv(cfJson)),
-      headers(kj::mv(headers)) {}
+      headers(kj::mv(headers)),
+      requestSize(requestSize) {}
 
 FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
     : method(validateMethod(reader.getMethod())),
       url(kj::str(reader.getUrl())),
-      cfJson(kj::str(reader.getCfJson())) {
+      cfJson(kj::str(reader.getCfJson())),
+      requestSize(reader.getRequestSize()) {
   kj::Vector<Header> v;
   v.addAll(reader.getHeaders());
   headers = v.releaseAsArray();
@@ -343,6 +348,7 @@ void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
   builder.setMethod(static_cast<capnp::HttpMethod>(method));
   builder.setUrl(url);
   builder.setCfJson(cfJson);
+  builder.setRequestSize(requestSize);
 
   auto list = builder.initHeaders(headers.size());
   for (auto i: kj::indices(headers)) {
@@ -352,7 +358,7 @@ void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
 
 FetchEventInfo FetchEventInfo::clone() const {
   return FetchEventInfo(
-      method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); });
+      method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); }, requestSize);
 }
 
 kj::String FetchEventInfo::toString() const {
@@ -595,17 +601,21 @@ HibernatableWebSocketEventInfo::Type HibernatableWebSocketEventInfo::readFrom(
   }
 }
 
-FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(statusCode) {}
+FetchResponseInfo::FetchResponseInfo(uint16_t statusCode, uint64_t bodySize)
+    : statusCode(statusCode),
+      bodySize(bodySize) {}
 
 FetchResponseInfo::FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader)
-    : statusCode(reader.getStatusCode()) {}
+    : statusCode(reader.getStatusCode()),
+      bodySize(reader.getBodySize()) {}
 
 void FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const {
   builder.setStatusCode(statusCode);
+  builder.setBodySize(bodySize);
 }
 
 FetchResponseInfo FetchResponseInfo::clone() const {
-  return FetchResponseInfo(statusCode);
+  return FetchResponseInfo(statusCode, bodySize);
 }
 
 Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
