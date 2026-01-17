@@ -366,12 +366,14 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
     // making such a change, and that's us, and we're not.
     KJ_ASSERT(v8::Locker::IsLocked(target));
 
-    // We use AdjustAmountOfExternalAllocatedMemoryImpl() instead of ExternalMemoryAccounter
-    // because we explicitly want external memory to be allowed to live beyond the isolate
-    // in some cases. The Impl variant bypasses the destructor check that
-    // ExternalMemoryAccounter enforces (requiring adjustment to return to zero).
-    // See patches/v8/0031-Expose-AdjustAmountOfExternalAllocatedMemoryImpl.patch
-    target->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
+    // TODO(cleanup): This is deprecated, but the replacement, v8::ExternalMemoryAccounter,
+    //   explicitly requires that the adjustment returns to zero before it is destroyed. That
+    //   isn't what we want, because we explicitly want external memory to be allowed to live
+    //   beyond the isolate in some cases. Perhaps we need to patch V8 to un-deprecate
+    //   AdjustAmountOfExternalAllocatedMemory(), or directly expose the underlying
+    //   AdjustAmountOfExternalAllocatedMemoryImpl(), which is what ExternalMemoryAccounter
+    //   uses anyway.
+    target->AdjustAmountOfExternalAllocatedMemory(amount);
   } else {
     // We don't hold the isolate lock. Instead, record the adjustment to be applied the next time
     // the isolate lock is acquired.
@@ -387,7 +389,7 @@ void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
   }
 #endif
   if (amount == 0) return;
-  js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
+  js.v8Isolate->AdjustAmountOfExternalAllocatedMemory(amount);
 }
 
 void ExternalMemoryTarget::detach() const {
@@ -401,7 +403,7 @@ ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) cons
 void ExternalMemoryTarget::applyDeferredMemoryUpdate() const {
   int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
   if (amount != 0) {
-    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
+    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemory(amount);
   }
 }
 
