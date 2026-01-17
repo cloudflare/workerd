@@ -18,6 +18,12 @@ bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
 
 # aspect_rules_js
 bazel_dep(name = "aspect_rules_js", version = "2.8.3")
+archive_override(
+    module_name = "aspect_rules_js",
+    integrity = "sha256-+3akxsGz4S5NKjTEPS/AafjsL+xU3GsOq2Nd3uVReps=",
+    strip_prefix = "rules_js-93f17a3810649c95f658d85ff277fe963d1a20f8",
+    urls = ["https://github.com/anonrig/rules_js/archive/93f17a3810649c95f658d85ff277fe963d1a20f8.tar.gz"],
+)
 
 # aspect_rules_lint
 bazel_dep(name = "aspect_rules_lint", version = "1.13.0")

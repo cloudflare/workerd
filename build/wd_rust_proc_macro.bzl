@@ -47,8 +47,11 @@ def wd_rust_proc_macro(
         } | test_env,
         tags = test_tags,
         deps = test_deps,
+        # Disable experimental_use_cc_common_link for coverage builds due to
+        # https://github.com/bazelbuild/rules_rust/issues/2729
         experimental_use_cc_common_link = select({
             "@platforms//os:windows": 0,
+            "@//build/config:coverage_enabled": 0,
             "//conditions:default": 1,
         }),
     )

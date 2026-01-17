@@ -1,0 +1,16 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+
+# Custom collect_cc_coverage.sh that fixes COVERAGE_DIR permissions before running.
+# This works around a Bazel issue where COVERAGE_DIR is made read-only before
+# coverage post-processing runs with --experimental_split_coverage_postprocessing.
+filegroup(
+    name = "collect_cc_coverage",
+    srcs = ["collect_cc_coverage.sh"],
+    visibility = ["//visibility:public"],
+)
+
+sh_binary(
+    name = "collect_cc_coverage_bin",
+    srcs = ["collect_cc_coverage.sh"],
+    visibility = ["//visibility:public"],
+)

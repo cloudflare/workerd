@@ -22,8 +22,7 @@ js_test(
     name = "custom-eslint-rules-test",
     size = "small",
     data = [
-        "custom-eslint-rules.mjs",
-        "//:node_modules/eslint",
+        ":base-eslint",
     ],
     entry_point = "custom-eslint-rules.test.mjs",
     tags = ["js-test"],

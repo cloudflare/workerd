@@ -20,3 +20,11 @@ config_setting(
     values = {"define": "never_match=true"},  # This will never match
     visibility = ["//visibility:public"],
 )
+
+# Coverage builds need special handling for some rules
+# This matches when --collect_code_coverage is enabled (set by bazel coverage)
+config_setting(
+    name = "coverage_enabled",
+    values = {"collect_code_coverage": "true"},
+    visibility = ["//visibility:public"],
+)
