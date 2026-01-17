@@ -292,19 +292,24 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     };
 
     // Extract request body size from Content-Length header if present
-    uint64_t requestSize = 0;
+    uint64_t bodySize = 0;
     KJ_IF_SOME(contentLength, headers.get(kj::HttpHeaderId::CONTENT_LENGTH)) {
-      // Parse the Content-Length value. If parsing fails, we leave requestSize as 0.
+      // Parse the Content-Length value. Skip leading whitespace first since HTTP headers
+      // can include leading/trailing whitespace. If parsing fails, we leave bodySize as 0.
+      const char* ptr = contentLength.cStr();
+      while (*ptr == ' ' || *ptr == '\t') ptr++;  // Skip leading whitespace
       char* end;
-      auto parsed = strtoull(contentLength.cStr(), &end, 10);
-      if (end != contentLength.cStr() && *end == '\0') {
-        requestSize = parsed;
+      auto parsed = strtoull(ptr, &end, 10);
+      // Check that we parsed something and only trailing whitespace remains
+      while (*end == ' ' || *end == '\t') end++;  // Skip trailing whitespace
+      if (end != ptr && *end == '\0') {
+        bodySize = parsed;
       }
     }
 
     t.setEventInfo(*incomingRequest,
         tracing::FetchEventInfo(
-            method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray), requestSize));
+            method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray), bodySize));
     workerTracer = t;
   }
 

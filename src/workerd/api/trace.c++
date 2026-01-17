@@ -127,8 +127,8 @@ kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
     };
   };
 
-  return kj::refcounted<TraceItem::FetchEventInfo::Request::Detail>(getCf(), getHeaders(),
-      kj::str(eventInfo.method), kj::str(eventInfo.url), eventInfo.requestSize);
+  return kj::refcounted<TraceItem::FetchEventInfo::Request::Detail>(
+      getCf(), getHeaders(), kj::str(eventInfo.method), kj::str(eventInfo.url), eventInfo.bodySize);
 }
 
 kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace) {
@@ -305,12 +305,12 @@ TraceItem::FetchEventInfo::Request::Detail::Detail(jsg::Optional<jsg::V8Ref<v8::
     kj::Array<tracing::FetchEventInfo::Header> headers,
     kj::String method,
     kj::String url,
-    uint64_t requestSize)
+    uint64_t bodySize)
     : cf(kj::mv(cf)),
       headers(kj::mv(headers)),
       method(kj::mv(method)),
       url(kj::mv(url)),
-      requestSize(requestSize) {}
+      bodySize(bodySize) {}
 
 jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::getRequest() {
   return request.addRef();
@@ -364,11 +364,13 @@ kj::String TraceItem::FetchEventInfo::Request::getUrl() {
 }
 
 jsg::Optional<double> TraceItem::FetchEventInfo::Request::getBodySize() {
-  // Return null if requestSize is 0 (unknown/no body), otherwise return the size
-  if (detail->requestSize == 0) {
+  // Return null if bodySize is 0 (unknown/no body), otherwise return the size.
+  // Note: Converting uint64_t to double may lose precision for sizes larger than 2^53 bytes
+  // (approximately 9 petabytes), though this is unlikely in practice.
+  if (detail->bodySize == 0) {
     return kj::none;
   }
-  return static_cast<double>(detail->requestSize);
+  return static_cast<double>(detail->bodySize);
 }
 
 jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request::getUnredacted(
@@ -386,7 +388,9 @@ uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
 }
 
 jsg::Optional<double> TraceItem::FetchEventInfo::Response::getBodySize() {
-  // Return null if bodySize is 0 (unknown/no body), otherwise return the size
+  // Return null if bodySize is 0 (unknown/no body), otherwise return the size.
+  // Note: Converting uint64_t to double may lose precision for sizes larger than 2^53 bytes
+  // (approximately 9 petabytes), though this is unlikely in practice.
   if (bodySize == 0) {
     return kj::none;
   }

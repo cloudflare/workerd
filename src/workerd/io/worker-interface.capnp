@@ -108,7 +108,7 @@ struct Trace @0x8e8d911203762d34 {
       name @0 :Text;
       value @1 :Text;
     }
-    requestSize @4 :UInt64;
+    bodySize @4 :UInt64;
     # Request body size in bytes. 0 if unknown or no body.
   }
 

@@ -199,13 +199,13 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
     kj::Array<tracing::FetchEventInfo::Header> headers;
     kj::String method;
     kj::String url;
-    uint64_t requestSize;
+    uint64_t bodySize;
 
     Detail(jsg::Optional<jsg::V8Ref<v8::Object>> cf,
         kj::Array<tracing::FetchEventInfo::Header> headers,
         kj::String method,
         kj::String url,
-        uint64_t requestSize);
+        uint64_t bodySize);
 
     JSG_MEMORY_INFO(Detail) {
       tracker.trackField("cf", cf);

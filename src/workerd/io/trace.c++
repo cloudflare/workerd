@@ -327,18 +327,18 @@ FetchEventInfo::FetchEventInfo(kj::HttpMethod method,
     kj::String url,
     kj::String cfJson,
     kj::Array<Header> headers,
-    uint64_t requestSize)
+    uint64_t bodySize)
     : method(method),
       url(kj::mv(url)),
       cfJson(kj::mv(cfJson)),
       headers(kj::mv(headers)),
-      requestSize(requestSize) {}
+      bodySize(bodySize) {}
 
 FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
     : method(validateMethod(reader.getMethod())),
       url(kj::str(reader.getUrl())),
       cfJson(kj::str(reader.getCfJson())),
-      requestSize(reader.getRequestSize()) {
+      bodySize(reader.getBodySize()) {
   kj::Vector<Header> v;
   v.addAll(reader.getHeaders());
   headers = v.releaseAsArray();
@@ -348,7 +348,7 @@ void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
   builder.setMethod(static_cast<capnp::HttpMethod>(method));
   builder.setUrl(url);
   builder.setCfJson(cfJson);
-  builder.setRequestSize(requestSize);
+  builder.setBodySize(bodySize);
 
   auto list = builder.initHeaders(headers.size());
   for (auto i: kj::indices(headers)) {
@@ -358,7 +358,7 @@ void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
 
 FetchEventInfo FetchEventInfo::clone() const {
   return FetchEventInfo(
-      method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); }, requestSize);
+      method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); }, bodySize);
 }
 
 kj::String FetchEventInfo::toString() const {
