@@ -438,9 +438,8 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
     }
   }
 
-  auto currentTime = context.now();
   KJ_SWITCH_ONEOF(persistent.armAlarmHandler(
-                      scheduledTime, context.getCurrentTraceSpan(), currentTime, false, actorId)) {
+                      scheduledTime, context.getCurrentTraceSpan(), false, actorId)) {
     KJ_CASE_ONEOF(armResult, ActorCacheInterface::RunAlarmHandler) {
       auto& handler = KJ_REQUIRE_NONNULL(exportedHandler);
       if (handler.alarm == kj::none) {

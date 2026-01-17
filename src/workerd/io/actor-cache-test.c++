@@ -4938,8 +4938,6 @@ KJ_TEST("ActorCache alarm get/put") {
 
   auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
   auto twoMs = 2 * kj::MILLISECONDS + kj::UNIX_EPOCH;
-  // Used as the "current time" parameter for armAlarmHandler in tests.
-  auto testCurrentTime = kj::UNIX_EPOCH;
   {
     // Test alarm writes happen transactionally with storage ops
     test.setAlarm(oneMs);
@@ -4981,8 +4979,7 @@ KJ_TEST("ActorCache alarm get/put") {
 
   {
     // we have a cached time == nullptr, so we should not attempt to run an alarm
-    auto armResult =
-        test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, nullptr, testCurrentTime);
+    auto armResult = test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, nullptr);
     KJ_ASSERT(armResult.is<ActorCache::CancelAlarmHandler>());
     auto cancelResult = kj::mv(armResult.get<ActorCache::CancelAlarmHandler>());
     KJ_ASSERT(cancelResult.waitBeforeCancel.poll(ws));
@@ -5000,7 +4997,7 @@ KJ_TEST("ActorCache alarm get/put") {
   {
     // Test that alarm handler handle clears alarm when dropped with no writes
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
@@ -5013,7 +5010,7 @@ KJ_TEST("ActorCache alarm get/put") {
 
     // Test that alarm handler handle does not clear alarm when dropped with writes
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
       test.setAlarm(twoMs);
     }
@@ -5027,7 +5024,7 @@ KJ_TEST("ActorCache alarm get/put") {
 
     // Test that alarm handler handle does not cache delete when it fails
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
@@ -5039,7 +5036,7 @@ KJ_TEST("ActorCache alarm get/put") {
   {
     // Test that alarm handler handle does not cache alarm delete when noCache == true
     {
-      auto armResult = test.cache.armAlarmHandler(twoMs, nullptr, testCurrentTime, true);
+      auto armResult = test.cache.armAlarmHandler(twoMs, nullptr, true);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
@@ -5076,7 +5073,6 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   auto& mockStorage = test.mockStorage;
 
   auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
-  auto testCurrentTime = kj::UNIX_EPOCH;
 
   {
     auto time = expectUncached(test.getAlarm());
@@ -5094,7 +5090,7 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   // we want to test that even if a flush is retried
   // that the post-delete actions for a checked delete happen.
   {
-    auto handle = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    auto handle = test.cache.armAlarmHandler(oneMs, nullptr);
 
     auto time = expectCached(test.getAlarm());
     KJ_ASSERT(time == kj::none);
