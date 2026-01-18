@@ -4,6 +4,8 @@
 
 #include <kj/debug.h>
 
+#include <atomic>
+
 namespace kj {
 class AsyncOutputStream;
 }
@@ -137,6 +139,45 @@ kj::Own<WritableSink> newEncodedWritableSink(
 // register as a pending event on the IoContext.
 kj::Own<WritableSink> newIoContextWrappedWritableSink(
     IoContext& ioContext, kj::Own<WritableSink> inner);
+
+// A refcounted byte counter that can be shared between a stream wrapper and
+// the code that needs to read the final byte count after streaming completes.
+// Using atomic for thread safety since proxyTask may run on different thread.
+struct ByteCounter: public kj::Refcounted {
+  std::atomic<uint64_t> bytesWritten{0};
+
+  void add(size_t bytes) {
+    bytesWritten.fetch_add(bytes, std::memory_order_relaxed);
+  }
+
+  uint64_t get() const {
+    return bytesWritten.load(std::memory_order_relaxed);
+  }
+};
+
+// A WritableSink wrapper that counts the total bytes written to the underlying sink.
+// This is used to track actual response body sizes for trace events.
+class ByteCountingWritableSink final: public WritableSinkWrapper {
+ public:
+  ByteCountingWritableSink(kj::Own<WritableSink> inner, kj::Own<ByteCounter> counter)
+      : WritableSinkWrapper(kj::mv(inner)),
+        counter(kj::mv(counter)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    counter->add(buffer.size());
+    return WritableSinkWrapper::write(buffer);
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    for (const auto& piece: pieces) {
+      counter->add(piece.size());
+    }
+    return WritableSinkWrapper::write(pieces);
+  }
+
+ private:
+  kj::Own<ByteCounter> counter;
+};
 
 }  // namespace api::streams
 }  // namespace workerd

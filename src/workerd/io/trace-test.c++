@@ -176,6 +176,7 @@ KJ_TEST("Read/Write FetchEventInfo works") {
   KJ_ASSERT(info2.headers.size() == 1);
   KJ_ASSERT(info2.headers[0].name == "foo"_kj);
   KJ_ASSERT(info2.headers[0].value == "bar"_kj);
+  KJ_ASSERT(info2.bodySize == 0);  // Default value
 
   FetchEventInfo info3 = info.clone();
   KJ_ASSERT(info3.method == kj::HttpMethod::GET);
@@ -184,6 +185,33 @@ KJ_TEST("Read/Write FetchEventInfo works") {
   KJ_ASSERT(info3.headers.size() == 1);
   KJ_ASSERT(info3.headers[0].name == "foo"_kj);
   KJ_ASSERT(info3.headers[0].value == "bar"_kj);
+  KJ_ASSERT(info3.bodySize == 0);  // Default value
+}
+
+KJ_TEST("Read/Write FetchEventInfo with bodySize works") {
+  capnp::MallocMessageBuilder builder;
+  auto fetchInfoBuilder = builder.initRoot<rpc::Trace::FetchEventInfo>();
+
+  kj::Vector<FetchEventInfo::Header> headers;
+  headers.add(FetchEventInfo::Header(kj::str("content-type"), kj::str("application/json")));
+
+  uint64_t bodySize = 12345;
+  FetchEventInfo info(kj::HttpMethod::POST, kj::str("https://example.com/api"), kj::str("{}"),
+      headers.releaseAsArray(), bodySize);
+
+  info.copyTo(fetchInfoBuilder);
+
+  auto reader = fetchInfoBuilder.asReader();
+
+  FetchEventInfo info2(reader);
+  KJ_ASSERT(info2.method == kj::HttpMethod::POST);
+  KJ_ASSERT(info2.url == "https://example.com/api"_kj);
+  KJ_ASSERT(info2.bodySize == 12345);
+
+  FetchEventInfo info3 = info.clone();
+  KJ_ASSERT(info3.method == kj::HttpMethod::POST);
+  KJ_ASSERT(info3.url == "https://example.com/api"_kj);
+  KJ_ASSERT(info3.bodySize == 12345);
 }
 
 KJ_TEST("Read/Write JsRpcEventInfo works") {
@@ -417,10 +445,33 @@ KJ_TEST("Read/Write Return works") {
   Return info2(reader);
   auto& fetchInfo2 = KJ_ASSERT_NONNULL(info2.info);
   KJ_ASSERT(fetchInfo2.statusCode == 123);
+  KJ_ASSERT(fetchInfo2.bodySize == 0);  // Default value
 
   Return info3 = info.clone();
   auto& fetchInfo3 = KJ_ASSERT_NONNULL(info3.info);
   KJ_ASSERT(fetchInfo3.statusCode == 123);
+  KJ_ASSERT(fetchInfo3.bodySize == 0);  // Default value
+}
+
+KJ_TEST("Read/Write Return with bodySize works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Return>();
+
+  uint64_t bodySize = 54321;
+  FetchResponseInfo fetchInfo(200, bodySize);
+  Return info(kj::mv(fetchInfo));
+  info.copyTo(infoBuilder);
+
+  auto reader = infoBuilder.asReader();
+  Return info2(reader);
+  auto& fetchInfo2 = KJ_ASSERT_NONNULL(info2.info);
+  KJ_ASSERT(fetchInfo2.statusCode == 200);
+  KJ_ASSERT(fetchInfo2.bodySize == 54321);
+
+  Return info3 = info.clone();
+  auto& fetchInfo3 = KJ_ASSERT_NONNULL(info3.info);
+  KJ_ASSERT(fetchInfo3.statusCode == 200);
+  KJ_ASSERT(fetchInfo3.bodySize == 54321);
 }
 
 KJ_TEST("Read/Write SpanOpen works") {

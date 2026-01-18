@@ -19,6 +19,7 @@ namespace {
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
+  V(BODYSIZE, "bodySize")                                                                          \
   V(CANCELED, "canceled")                                                                          \
   V(CHANNEL, "channel")                                                                            \
   V(CFJSON, "cfJson")                                                                              \
@@ -175,9 +176,14 @@ jsg::JsValue ToJs(jsg::Lock& js, kj::ArrayPtr<const Attribute> attributes, Strin
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR, STATUSCODE_STR};
-  jsg::JsValue values[] = {cache.get(js, FETCH_STR), js.num(info.statusCode)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
+  obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
+  // Only include bodySize if it's non-zero (indicating actual body size was tracked)
+  if (info.bodySize > 0) {
+    obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(info.bodySize)));
+  }
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache) {
@@ -199,6 +205,11 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache)
   obj.set(js, HEADERS_STR,
       js.arr(info.headers.asPtr(),
           [&cache, &ToJs](jsg::Lock& js, const auto& header) { return ToJs(js, header, cache); }));
+
+  // Only include bodySize if it's non-zero (indicating request body size was tracked)
+  if (info.bodySize > 0) {
+    obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(info.bodySize)));
+  }
 
   return obj;
 }
