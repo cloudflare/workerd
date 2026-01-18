@@ -10,6 +10,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
 
+#include <capnp/compat/http-over-capnp.h>
 #include <capnp/message.h>
 #include <kj/function.h>
 #include <kj/test.h>

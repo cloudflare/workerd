@@ -40,6 +40,7 @@
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 
+#include <capnp/compat/http-over-capnp.h>
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
 #include <capnp/rpc-twoparty.h>
