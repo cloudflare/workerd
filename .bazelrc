@@ -47,7 +47,7 @@ build --incompatible_remote_local_fallback_for_remote_cache
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external@-Wno-suggest-override'
-build --per_file_copt='external/v8@-Wno-unused-function'
+build --per_file_copt='external/.*v8@-Wno-unused-function'
 build --per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
@@ -73,29 +73,31 @@ build:v8-codegen-opt-windows --per_file_copt=external/abseil-cpp@/O2
 build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2
 
 # In Google projects, exceptions are not used as a rule. Disabling them is more consistent with the
-# canonical V8 build and improves code size. Paths are adjusted for bzlmod mangling.
+# canonical V8 build and improves code size. Paths are adjusted for bzlmod mangling – V8 and ICU use
+# a wildcard for this as the prefix is some variation of +_repo_rules3+ where the number can change
+# when refactoring MODULE.bazel – setting this directly would be too brittle
 build:unix --per_file_copt=external/abseil-cpp@-fno-exceptions
 build:unix --per_file_copt=external/protobuf@-fno-exceptions
 build:unix --per_file_copt=external/tcmalloc@-fno-exceptions
-build:unix --per_file_copt=external/com_googlesource_chromium_icu@-fno-exceptions
+build:unix --per_file_copt=external/.*com_googlesource_chromium_icu@-fno-exceptions
 build:unix --per_file_copt=external/perfetto@-fno-exceptions
 build:unix --per_file_copt=external/boringssl@-fno-exceptions
-build:unix --per_file_copt=external/v8@-fno-exceptions
+build:unix --per_file_copt=external/.*v8@-fno-exceptions
 build:unix --per_file_copt=external/ada-url@-fno-exceptions
 build:unix --per_file_copt=external/+http+simdutf@-fno-exceptions
 build:windows --per_file_copt=external/abseil-cpp@/clang:-fno-exceptions
 build:windows --per_file_copt=external/protobuf@/clang:-fno-exceptions
 build:windows --per_file_copt=external/tcmalloc@/clang:-fno-exceptions
-build:windows --per_file_copt=external/com_googlesource_chromium_icu@/clang:-fno-exceptions
+build:windows --per_file_copt=external/.*com_googlesource_chromium_icu@/clang:-fno-exceptions
 build:windows --per_file_copt=external/perfetto@/clang:-fno-exceptions
 build:windows --per_file_copt=external/boringssl@/clang:-fno-exceptions
-build:windows --per_file_copt=external/v8@/clang:-fno-exceptions
+build:windows --per_file_copt=external/.*v8@/clang:-fno-exceptions
 build:windows --per_file_copt=external/ada-url@/clang:-fno-exceptions
 build:windows --per_file_copt=external/+http+simdutf@/clang:-fno-exceptions
 
 # V8 torque is an exception from this policy, see v8 BUILD.gn.
-build:unix --per_file_copt=external/v8/src/torque@-fexceptions
-build:windows --per_file_copt=external/v8/src/torque@/clang:-fexceptions
+build:unix --per_file_copt=external/.*v8/src/torque@-fexceptions
+build:windows --per_file_copt=external/.*v8/src/torque@/clang:-fexceptions
 
 # Limit transitive header includes within libc++. This improves compliance with IWYU, helps avoid
 # errors with downstream projects that implicitly define this already and reduces total include size.
@@ -195,7 +197,7 @@ build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
-build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
 build:fuzzilli --config=asan
