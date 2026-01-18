@@ -21,8 +21,8 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   static jsg::Ref<WritableStreamDefaultWriter> constructor(
       jsg::Lock& js, jsg::Ref<WritableStream> stream);
 
-  jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
-  jsg::MemoizedIdentity<jsg::Promise<void>>& getReady();
+  jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed(jsg::Lock& js);
+  jsg::MemoizedIdentity<jsg::Promise<void>>& getReady(jsg::Lock& js);
   kj::Maybe<int> getDesiredSize();
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
@@ -66,14 +66,14 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   void attach(jsg::Lock& js,
       WritableStreamController& controller,
-      jsg::Promise<void> closedPromise,
-      jsg::Promise<void> readyPromise) override;
+      jsg::LazyPromise<void> closedPromise,
+      jsg::LazyPromise<void> readyPromise) override;
 
   void detach() override;
 
   void lockToStream(jsg::Lock& js, WritableStream& stream);
 
-  void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) override;
+  void replaceReadyPromise(jsg::Lock& js, jsg::LazyPromise<void> readyPromise) override;
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
@@ -94,9 +94,8 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   kj::Maybe<IoContext&> ioContext;
   kj::OneOf<Initial, Attached, Released, StreamStates::Closed> state = Initial();
 
-  kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
-  kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> readyPromise;
-  kj::Maybe<jsg::Promise<void>> readyPromisePending;
+  kj::Maybe<jsg::LazyPromise<void>> closedPromise;
+  kj::Maybe<jsg::LazyPromise<void>> readyPromise;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
