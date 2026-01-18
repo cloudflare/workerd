@@ -13,6 +13,12 @@ pub mod modules;
 pub mod v8;
 mod wrappable;
 
+pub use v8::Int8Array;
+pub use v8::Int16Array;
+pub use v8::Int32Array;
+pub use v8::Uint8Array;
+pub use v8::Uint16Array;
+pub use v8::Uint32Array;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
 pub use wrappable::ToJS;
