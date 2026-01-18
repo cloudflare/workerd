@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "clap_lex",
+rust_proc_macro(
+    name = "wasm_bindgen_macro",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,10 +35,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap_lex",
+        "crate-name=wasm-bindgen-macro",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.7.6",
+    version = "0.2.108",
+    deps = [
+        "@crates_vendor__quote-1.0.43//:quote",
+        "@crates_vendor__wasm-bindgen-macro-support-0.2.108//:wasm_bindgen_macro_support",
+    ],
 )
