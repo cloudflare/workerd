@@ -1,0 +1,40 @@
+{
+  "requestDurationNs": 45072706,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 45052206, "destroyedAt": 45052451},
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 0, "createdAt": 2052152, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 3625306, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 1, "type": "timer", "stackTraceId": 2, "createdAt": 4098072, "callbackStartedAt": 5940973, "callbackEndedAt": 43906060, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 1, "type": "timer", "stackTraceId": 3, "createdAt": 4566762, "callbackStartedAt": 44077178, "callbackEndedAt": 44108134, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 1, "type": "kj-to-js", "stackTraceId": 3, "createdAt": 4708052, "callbackStartedAt": 44179807, "callbackEndedAt": 44250087, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 1, "type": "js-promise", "stackTraceId": 3, "createdAt": 4779634, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 3, "createdAt": 4968157, "callbackStartedAt": 44271591, "callbackEndedAt": 44303897, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 8, "type": "js-promise", "stackTraceId": 3, "createdAt": 5095213, "callbackStartedAt": 44310111, "callbackEndedAt": 44324001, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 9, "type": "js-promise", "stackTraceId": 3, "createdAt": 5197547, "callbackStartedAt": 44329270, "callbackEndedAt": 44556254, "destroyedAt": 0},
+    {"asyncId": 11, "triggerId": 1, "type": "js-promise", "stackTraceId": 4, "createdAt": 5341735, "callbackStartedAt": 44587946, "callbackEndedAt": 44621855, "destroyedAt": 0},
+    {"asyncId": 12, "triggerId": 11, "type": "js-promise", "stackTraceId": 4, "createdAt": 5442416, "callbackStartedAt": 44627402, "callbackEndedAt": 44760458, "destroyedAt": 0},
+    {"asyncId": 13, "triggerId": 1, "type": "js-to-kj", "stackTraceId": 4, "createdAt": 5474931, "callbackStartedAt": 44780186, "callbackEndedAt": 44789444, "destroyedAt": 0},
+    {"asyncId": 14, "triggerId": 12, "type": "js-promise", "stackTraceId": 4, "createdAt": 5542032, "callbackStartedAt": 44766654, "callbackEndedAt": 44799870, "destroyedAt": 0},
+    {"asyncId": 15, "triggerId": 3, "type": "js-promise", "stackTraceId": 4, "createdAt": 5670451, "callbackStartedAt": 44563013, "callbackEndedAt": 44582533, "destroyedAt": 0},
+    {"asyncId": 16, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 22524164, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 17, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 22943024, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 18, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 23041242, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 19, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 26550304, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 20, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 27783688, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker:10:14"]},
+    {"id": 1, "frames": ["<anonymous> @ worker:15:35", "fetch @ worker:15:16"]},
+    {"id": 2, "frames": ["<anonymous> @ worker:19:7", "fetch @ worker:15:16"]},
+    {"id": 3, "frames": ["<anonymous> @ worker:22:23", "fetch @ worker:15:16"]},
+    {"id": 4, "frames": []},
+    {"id": 5, "frames": ["<anonymous> @ worker:12:15"]}
+  ],
+  "annotations": [
+    {"asyncId": 4, "key": "delay", "value": "5"},
+    {"asyncId": 4, "key": "type", "value": "setTimeout"},
+    {"asyncId": 5, "key": "delay", "value": "10"},
+    {"asyncId": 5, "key": "type", "value": "scheduler.wait"}
+  ]
+}
+

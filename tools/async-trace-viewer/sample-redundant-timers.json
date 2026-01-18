@@ -1,0 +1,33 @@
+{
+  "requestDurationNs": 120000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 119000000, "destroyedAt": 120000000},
+    {"asyncId": 2, "triggerId": 1, "type": "timer", "stackTraceId": 1, "createdAt": 1000000, "callbackStartedAt": 51000000, "callbackEndedAt": 52000000, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 1, "type": "timer", "stackTraceId": 1, "createdAt": 1500000, "callbackStartedAt": 51500000, "callbackEndedAt": 52500000, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 1, "type": "timer", "stackTraceId": 1, "createdAt": 2000000, "callbackStartedAt": 52000000, "callbackEndedAt": 53000000, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 1, "type": "timer", "stackTraceId": 2, "createdAt": 3000000, "callbackStartedAt": 103000000, "callbackEndedAt": 104000000, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 1, "type": "timer", "stackTraceId": 2, "createdAt": 3500000, "callbackStartedAt": 103500000, "callbackEndedAt": 104500000, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 1, "type": "timer", "stackTraceId": 2, "createdAt": 4000000, "callbackStartedAt": 104000000, "callbackEndedAt": 105000000, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 1, "type": "timer", "stackTraceId": 2, "createdAt": 4500000, "callbackStartedAt": 104500000, "callbackEndedAt": 105500000, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 1, "type": "fetch", "stackTraceId": 3, "createdAt": 5000000, "callbackStartedAt": 30000000, "callbackEndedAt": 31000000, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 9, "type": "js-promise", "stackTraceId": 4, "createdAt": 31500000, "callbackStartedAt": 32000000, "callbackEndedAt": 118000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:5:10"]},
+    {"id": 1, "frames": ["setTimeout @ worker.js:15:10", "scheduleRefresh @ worker.js:12:3"]},
+    {"id": 2, "frames": ["setTimeout @ worker.js:25:10", "scheduleRetry @ worker.js:22:3"]},
+    {"id": 3, "frames": ["fetch @ worker.js:35:20", "getData @ worker.js:32:3"]},
+    {"id": 4, "frames": ["processData @ worker.js:45:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 2, "key": "delay", "value": "50ms"},
+    {"asyncId": 3, "key": "delay", "value": "50ms"},
+    {"asyncId": 4, "key": "delay", "value": "50ms"},
+    {"asyncId": 5, "key": "delay", "value": "100ms"},
+    {"asyncId": 6, "key": "delay", "value": "100ms"},
+    {"asyncId": 7, "key": "delay", "value": "100ms"},
+    {"asyncId": 8, "key": "delay", "value": "100ms"},
+    {"asyncId": 9, "key": "url", "value": "https://api.example.com/data"},
+    {"asyncId": 9, "key": "method", "value": "GET"}
+  ]
+}

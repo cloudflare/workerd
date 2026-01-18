@@ -4,6 +4,7 @@
 
 #include "io-context.h"
 
+#include <workerd/io/async-trace.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
@@ -265,6 +266,15 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
     currentUserTraceSpan = workerTracer->makeUserRequestSpan();
   }
 
+  // Enable async tracing for bubbleprof-style visualization.
+  // TODO(perf): Make this conditional on a header, config flag, or sampling.
+  // For now, always enable when Perfetto tracing is active.
+#ifdef WORKERD_USE_PERFETTO
+  if (context->asyncTrace == kj::none) {
+    context->enableAsyncTrace();
+  }
+#endif
+
   KJ_IF_SOME(a, context->actor) {
     // Re-synchronize the timer and top up limits for every new incoming request to an actor.
     ioChannelFactory->getTimer().syncTime();
@@ -404,6 +414,12 @@ void IoContext::logWarningOnce(kj::StringPtr description) {
 
 void IoContext::logErrorOnce(kj::StringPtr description) {
   KJ_REQUIRE_NONNULL(currentLock).logErrorOnce(description);
+}
+
+void IoContext::enableAsyncTrace() {
+  // Create a new AsyncTraceContext for this request.
+  // This will track all async operations (promises, I/O) for bubbleprof-style visualization.
+  asyncTrace = kj::heap<AsyncTraceContext>();
 }
 
 void IoContext::logUncaughtException(kj::StringPtr description) {

@@ -9,6 +9,7 @@
 
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/async-trace.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
 
@@ -95,6 +96,13 @@ jsg::Promise<ReadResult> ReaderImpl::read(
       KJ_FAIL_ASSERT("this reader was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
+      // Create async trace resource for stream read if tracing is enabled
+      KJ_IF_SOME(ctx, ioContext) {
+        if (auto* asyncTrace = ctx.getAsyncTrace(); asyncTrace != nullptr) {
+          asyncTrace->createResource(AsyncTraceContext::ResourceType::kStreamRead, js.v8Isolate);
+        }
+      }
+
       KJ_IF_SOME(options, byobOptions) {
         // Per the spec, we must perform these checks before disturbing the stream.
         size_t atLeast = options.atLeast.orDefault(1);
@@ -504,6 +512,14 @@ jsg::Ref<ReadableStream::ReadableStreamAsyncIterator> ReadableStream::values(
 
 jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
     jsg::Lock& js, Transform transform, jsg::Optional<PipeToOptions> maybeOptions) {
+  // Create async trace resource for pipeThrough if tracing is enabled
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    if (auto* asyncTrace = ioContext.getAsyncTrace(); asyncTrace != nullptr) {
+      asyncTrace->createResource(AsyncTraceContext::ResourceType::kStreamPipeThrough, js.v8Isolate);
+    }
+  }
+
   auto& controller = getController();
 
   auto& destination = transform.writable->getController();
@@ -528,6 +544,14 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
 jsg::Promise<void> ReadableStream::pipeTo(jsg::Lock& js,
     jsg::Ref<WritableStream> destination,
     jsg::Optional<PipeToOptions> maybeOptions) {
+  // Create async trace resource for pipeTo if tracing is enabled
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    if (auto* asyncTrace = ioContext.getAsyncTrace(); asyncTrace != nullptr) {
+      asyncTrace->createResource(AsyncTraceContext::ResourceType::kStreamPipeTo, js.v8Isolate);
+    }
+  }
+
   if (isLocked()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));

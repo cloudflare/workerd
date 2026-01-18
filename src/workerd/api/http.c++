@@ -14,6 +14,7 @@
 #include "worker-rpc.h"
 #include "workerd/jsg/jsvalue.h"
 
+#include <workerd/io/async-trace.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/ser.h>
@@ -1505,6 +1506,16 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   KJ_ASSERT(!urlList.empty());
 
   auto& ioContext = IoContext::current();
+
+  // Create async trace resource for this fetch operation
+  AsyncTraceContext::AsyncId asyncTraceId = AsyncTraceContext::INVALID_ID;
+  if (auto* asyncTrace = ioContext.getAsyncTrace(); asyncTrace != nullptr) {
+    asyncTraceId = asyncTrace->createResource(
+        AsyncTraceContext::ResourceType::kFetch, js.v8Isolate);
+    asyncTrace->annotate(asyncTraceId, "url"_kj, jsRequest->getUrl());
+    asyncTrace->annotate(asyncTraceId, "method"_kj,
+        kj::str(jsRequest->getMethodEnum()));
+  }
 
   auto signal = jsRequest->getSignal();
   KJ_IF_SOME(s, signal) {
