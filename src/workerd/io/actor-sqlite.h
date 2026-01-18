@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include "actor-cache.h"
-
+#include <workerd/io/actor-cache.h>
 #include <workerd/io/trace.h>
 #include <workerd/util/sqlite-kv.h>
 #include <workerd/util/sqlite-metadata.h>
