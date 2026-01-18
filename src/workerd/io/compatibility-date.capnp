@@ -1335,4 +1335,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # checking for null will break. To migrate, either:
   # 1. Add a null check: if (controller.byobRequest) { ... }
   # 2. Explicitly set autoAllocateChunkSize when creating the stream
+
+  pythonRequestHeadersPreserveCommas @155 :Bool
+    $compatEnableFlag("python_request_headers_preserve_commas")
+    $compatDisableFlag("disable_python_request_headers_preserve_commas")
+    $compatEnableDate("2026-02-04");
+  # Preserve commas in Python Request headers rather than treating them as separators,
+  # while still exposing multiple Set-Cookie headers as distinct values.
 }

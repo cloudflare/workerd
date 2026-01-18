@@ -143,8 +143,7 @@ class Default(WorkerEntrypoint):
             #
             # Try to grab headers which should contain a duplicated header.
             headers = request.headers.get_all("X-Custom-Header")
-            assert "some_value" in headers
-            assert "some_other_value" in headers
+            assert "some_value, some_other_value" in headers
             return Response("success")
         else:
             resp = await fetch("https://example.com/sub")
@@ -414,8 +413,48 @@ async def request_unit_tests(env):
     req_with_dup_headers = Request("http://example.com", headers=js_headers)
     assert req_with_dup_headers.url == "http://example.com/"
     encoding = req_with_dup_headers.headers.get_all("Accept-encoding")
-    assert "deflate" in encoding
-    assert "gzip" in encoding
+    assert encoding == ["deflate, gzip"]
+
+    # Verify that header values containing commas are preserved.
+    js_headers = js.Headers.new()
+    js_headers.set("User-Agent", "Example, Agent/1.0")
+    req_with_user_agent = Request("http://example.com", headers=js_headers)
+    assert req_with_user_agent.headers.get("User-Agent") == "Example, Agent/1.0"
+    assert req_with_user_agent.headers.get_all("User-Agent") == ["Example, Agent/1.0"]
+
+    # Verify that header values with commas are preserved when using Python dict.
+    req_dict_comma = Request(
+        "http://example.com",
+        headers={
+            "User-Agent": "Python, Client/2.0",
+            "Accept": "text/html, application/json",
+        },
+    )
+    assert req_dict_comma.headers.get("User-Agent") == "Python, Client/2.0"
+    assert "text/html" in req_dict_comma.headers.get("Accept")
+    assert "application/json" in req_dict_comma.headers.get("Accept")
+
+    # Verify that Set-Cookie headers are preserved as distinct values.
+    js_headers = js.Headers.new()
+    js_headers.append("Set-Cookie", "a=b, c=d")
+    js_headers.append("Set-Cookie", "e=f")
+    req_with_set_cookie = Request("http://example.com", headers=js_headers)
+    assert req_with_set_cookie.headers.get_all("Set-Cookie") == ["a=b, c=d", "e=f"]
+
+    # Verify that Set-Cookie headers work with Python list of tuples.
+    req_tuple_cookies = Request(
+        "http://example.com",
+        headers=[
+            ("Set-Cookie", "session=abc123"),
+            ("Set-Cookie", "token=xyz789"),
+            ("X-Custom", "value"),
+        ],
+    )
+    assert req_tuple_cookies.headers.get_all("Set-Cookie") == [
+        "session=abc123",
+        "token=xyz789",
+    ]
+    assert req_tuple_cookies.headers.get("X-Custom") == "value"
 
     # Verify that we can get a Blob.
     req_for_blob = Request("http://example.com", body="foobar", method="POST")
