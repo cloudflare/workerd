@@ -137,6 +137,7 @@ kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpenssl
           switch (ERR_GET_REASON(error)) {
             case RSA_R_DATA_LEN_NOT_EQUAL_TO_MOD_LEN:
               return "Invalid RSA signature."_kj;
+            default:
           }
           break;
         case ERR_LIB_EC:
@@ -149,8 +150,10 @@ kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpenssl
               return "Point is not on curve."_kj;
             case EC_R_UNKNOWN_GROUP:
               return "Unsupported elliptic curve group."_kj;
+            default:
           }
           break;
+        default:
       }
 
       return OpensslUntranslatedError{

@@ -475,8 +475,9 @@ class AesCtrKey final: public AesKeyBase {
         return *EVP_aes_192_ctr();
       case 32:
         return *EVP_aes_256_ctr();
+      default:
+        KJ_FAIL_ASSERT("CryptoKey has invalid data length");
     }
-    KJ_FAIL_ASSERT("CryptoKey has invalid data length");
   }
 
   jsg::BufferSource encryptOrDecrypt(jsg::Lock& js,

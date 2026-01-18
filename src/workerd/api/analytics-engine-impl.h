@@ -20,6 +20,7 @@ void setDoubles(Message msg, kj::ArrayPtr<double> arr, kj::StringPtr errorPrefix
 
   uint index = 1;
   for (auto& item: arr) {
+    // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
     switch (index) {
       case 1:
         msg.setDouble1(item);
@@ -108,6 +109,7 @@ void setBlobs(Message msg,
       sizeSum += value.size();
       JSG_REQUIRE(sizeSum <= MAX_CUMULATIVE_BYTES_IN_BLOBS, TypeError, errorPrefix,
           "Cumulative size of blobs exceeds ", MAX_CUMULATIVE_BYTES_IN_BLOBS, " bytes).");
+      // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
       switch (index) {
         case 1:
           msg.setBlob1(value);

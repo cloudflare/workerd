@@ -16,11 +16,13 @@ Checks: >
   bugprone-return-const-ref-from-parameter,
   bugprone-suspicious-*,
   -bugprone-suspicious-semicolon,
+  bugprone-switch-missing-default-case,
   bugprone-undefined-memory-manipulation,
   bugprone-unhandled-self-assignment,
   bugprone-unused-raii,
   bugprone-use-after-move,
   cppcoreguidelines-c-copy-assignment-signature,
+  cppcoreguidelines-interfaces-global-init,
   cppcoreguidelines-misleading-capture-default-by-value,
   cppcoreguidelines-noexcept-destructor,
   cppcoreguidelines-prefer-member-initializer,
@@ -32,6 +34,7 @@ Checks: >
   misc-unused-alias-decls,
   misc-unused-using-decls,
   modernize-avoid-variadic-functions,
+  modernize-loop-convert,
   modernize-macro-to-enum,
   modernize-redundant-void-arg,
   modernize-type-traits,
@@ -72,6 +75,7 @@ Checks: >
 # modernize-use-override
 # modernize-use-ranges
 # readability-avoid-return-with-void-value
+# readability-convert-member-functions-to-static
 # readability-redundant-smartptr-get
 # readability-use-anyofallof
 
