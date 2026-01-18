@@ -135,4 +135,9 @@ interface Module {
   Py_EmscriptenSignalBuffer: Uint8Array;
   _Py_EMSCRIPTEN_SIGNAL_HANDLING: number;
   ___memory_base: WebAssembly.Global<'i32'>;
+  compileModuleFromReadOnlyFS: (
+    Module: Module,
+    path: string
+  ) => WebAssembly.Module;
+  findLibraryFS: (libName: string, rpath: any) => string;
 }

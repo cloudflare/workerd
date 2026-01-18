@@ -1,3 +1,18 @@
+type ReadFn<Info> = FSStreamOps<Info>['read'];
+
+// When we load shared libraries we need to ensure they come from a read only file system.
+
+// Map to store the original trusted read function for each read-only filesystem. We store the
+// function itself to prevent attacks where user code modifies stream_ops.read after filesystem
+// creation and tricks us into loading a dynamically generated so file.
+const TRUSTED_READ_FUNCS: Map<object, ReadFn<any>> = new Map();
+
+export function getTrustedReadFunc<Info>(
+  node: FSNode<Info>
+): ReadFn<Info> | undefined {
+  return TRUSTED_READ_FUNCS.get(node.mount.type);
+}
+
 export function createReadonlyFS<Info>(
   FSOps: FSOps<Info>,
   Module: Module
@@ -77,5 +92,8 @@ export function createReadonlyFS<Info>(
       },
     },
   };
+  // Register this filesystem as read-only and store its trusted read function so we can load so
+  // files from it.
+  TRUSTED_READ_FUNCS.set(ReadOnlyFS, ReadOnlyFS.stream_ops.read);
   return ReadOnlyFS;
 }
