@@ -2,8 +2,8 @@
 Give a collection of js files a JsInfo provider so it can be used as a dependency for aspect_rules.
 """
 
-load("@aspect_bazel_lib//lib:copy_to_bin.bzl", "COPY_FILE_TO_BIN_TOOLCHAINS", "copy_file_to_bin_action")
 load("@aspect_rules_js//js:providers.bzl", "JsInfo", "js_info")
+load("@bazel_lib//lib:copy_to_bin.bzl", "COPY_FILE_TO_BIN_TOOLCHAINS", "copy_file_to_bin_action")
 
 _ATTRS = {
     "srcs": attr.label_list(
