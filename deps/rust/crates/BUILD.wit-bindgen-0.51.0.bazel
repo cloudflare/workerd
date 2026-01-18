@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "zmij",
+    name = "wit_bindgen",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,20 +30,20 @@ rust_library(
         ],
     ),
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2024",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zmij",
+        "crate-name=wit-bindgen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.12",
+    version = "0.51.0",
     deps = [
-        "@crates_vendor__zmij-1.0.12//:build_script_build",
+        "@crates_vendor__wit-bindgen-0.51.0//:build_script_build",
     ],
 )
 
@@ -80,19 +80,19 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
-    pkg_name = "zmij",
+    edition = "2024",
+    pkg_name = "wit-bindgen",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zmij",
+        "crate-name=wit-bindgen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.12",
+    version = "0.51.0",
     visibility = ["//visibility:private"],
 )
 
