@@ -2,37 +2,30 @@
 
 module(name = "workerd")
 
-bazel_dep(name = "zlib", version = "1.3.1.bcr.7")
-git_override(
-    module_name = "zlib",
-    build_file = "//:build/BUILD.zlib",
-    # This should match the version specified in V8 DEPS, but in practice it is generally acceptable
-    # for it to be behind – zlib is very stable and its API has not changed in a long time, most
-    # changes to the Chromium fork affect ancillary tools and not the zlib library itself.
-    commit = "85f05b0835f934e52772efc308baa80cdd491838",
-    patch_args = ["-p1"],
-    patches = ["//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"],
-    remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
-)
-
-# BoringSSL may subtly break backwards compatibility and behave differently than the latest FIPS
-# version, often by rejecting key values that it considers invalid/unsafe even though they are still
-# accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
-# downstream build.
-bazel_dep(name = "boringssl", version = "0.20251002.0", repo_name = "ssl")
+# sqlite3 is downloaded from sqlite.org (not GitHub), so it remains manual.
+# We have some patches that aren't included in BCR:
+# https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/sqlite3/3.47.0/patches
+bazel_dep(name = "sqlite3")
 archive_override(
-    module_name = "boringssl",
-    patch_strip = 1,
+    module_name = "sqlite3",
+    build_file = "//:build/BUILD.sqlite3",
+    patch_args = ["-p1"],
     patches = [
-        "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
+        "//:patches/sqlite/0001-row-counts-plain.patch",
+        "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
+        "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+        "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
     ],
-    sha256 = "f96733fc3df03d4195db656d1b7b8c174c33f95d052f811f0ecc8f4e4e3db332",
-    strip_prefix = "boringssl-0.20251002.0",
-    type = "tgz",
-    urls = ["https://github.com/google/boringssl/archive/refs/tags/0.20251002.0.tar.gz"],
+    remote_file_integrity = {
+        "MODULE.bazel": "sha256-TtpmqyHyks3o0WcSJO0XFyKkHfAIF98wq06+urs3oKI=",
+    },
+    remote_file_urls = {
+        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/sqlite3/3.47.0/MODULE.bazel"],
+    },
+    sha256 = "f59c349bedb470203586a6b6d10adb35f2afefa49f91e55a672a36a09a8fedf7",
+    strip_prefix = "sqlite-src-3470000",
+    url = "https://sqlite.org/2024/sqlite-src-3470000.zip",
 )
-
-include("//build/deps:deps.MODULE.bazel")
 
 # Automatically managed dependencies
 include("//build/deps:gen/deps.MODULE.bazel")
