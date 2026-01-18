@@ -11266,6 +11266,10 @@ export interface D1Meta {
    */
   served_by_region?: string;
   /**
+   * The three letters airport code of the colo that executed the query.
+   */
+  served_by_colo?: string;
+  /**
    * True if-and-only-if the database instance that executed the query was the primary.
    */
   served_by_primary?: boolean;
