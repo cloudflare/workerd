@@ -3,5 +3,6 @@ load("//:build/wd_test.bzl", "wd_test")
 wd_test(
     src = "images-api-test.wd-test",
     args = ["--experimental"],
+    compat_date = "2024-04-03",
     data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
