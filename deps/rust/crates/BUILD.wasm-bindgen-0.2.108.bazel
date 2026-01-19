@@ -32,7 +32,7 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2021",
     proc_macro_deps = [
-        "@crates_vendor__wasm-bindgen-macro-0.2.106//:wasm_bindgen_macro",
+        "@crates_vendor__wasm-bindgen-macro-0.2.108//:wasm_bindgen_macro",
     ],
     rustc_flags = [
         "--cap-lints=allow",
@@ -44,12 +44,12 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.106",
+    version = "0.2.108",
     deps = [
         "@crates_vendor__cfg-if-1.0.4//:cfg_if",
         "@crates_vendor__once_cell-1.21.3//:once_cell",
-        "@crates_vendor__wasm-bindgen-0.2.106//:build_script_build",
-        "@crates_vendor__wasm-bindgen-shared-0.2.106//:wasm_bindgen_shared",
+        "@crates_vendor__wasm-bindgen-0.2.108//:build_script_build",
+        "@crates_vendor__wasm-bindgen-shared-0.2.108//:wasm_bindgen_shared",
     ],
 )
 
@@ -91,7 +91,7 @@ cargo_build_script(
     ),
     edition = "2021",
     link_deps = [
-        "@crates_vendor__wasm-bindgen-shared-0.2.106//:wasm_bindgen_shared",
+        "@crates_vendor__wasm-bindgen-shared-0.2.108//:wasm_bindgen_shared",
     ],
     pkg_name = "wasm-bindgen",
     proc_macro_deps = [
@@ -107,7 +107,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.106",
+    version = "0.2.108",
     visibility = ["//visibility:private"],
 )
 

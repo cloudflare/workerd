@@ -14,7 +14,6 @@ vendored_py_wd_test(
     data = glob(["pytest/tests/**"]),
     level = 0,
     main_py_file = "pytest/main.py",
-    skip_python_flags = ["0.26.0a2"],
     test_template = "pytest/pytest.wd-test",
 )
 

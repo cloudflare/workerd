@@ -326,7 +326,8 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
   JSG_REQUIRE(
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
-  // TODO: Track closed state of socket properly and assert that it hasn't been closed here.
+  JSG_REQUIRE(connectionStream != kj::none, TypeError,
+      "The connection was closed before startTls could be started.");
   JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
@@ -443,6 +444,13 @@ void Socket::handleProxyStatus(
       if (isDefaultFetchPort) {
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
+      } else if (remoteAddress.contains(".hyperdrive.local"_kj)) {
+        // No attempts to connect to Hyperdrive should end up here, since they go through the other
+        // version of handleProxyStatus. If they end up here somehow, log about it to get some
+        // context that can aid in debugging.
+        LOG_WARNING_PERIODICALLY(
+            "attempt to connect to Hyperdrive failed to trigger connectOverride", remoteAddress,
+            status.statusCode, status.statusText);
       }
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {

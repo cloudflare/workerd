@@ -147,6 +147,100 @@ def pyodide_static():
         tsconfig_json = "tsconfig.json",
     )
 
+_PRELUDE = """
+import {
+    addEventListener,
+    getRandomValues,
+    location,
+    monotonicDateNow,
+    newWasmModule,
+    patchedApplyFunc,
+    patchDynlibLookup,
+    reportUndefinedSymbolsPatched,
+    wasmInstantiate,
+    patched_PyEM_CountFuncParams,
+} from "pyodide-internal:pool/builtin_wrappers";
+"""
+
+# pyodide.asm.js patches
+# TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
+_REPLACEMENTS = [
+    [
+        # Convert pyodide.asm.js into an es6 module.
+        # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
+        # automatically.
+        "var _createPyodideModule",
+        _PRELUDE + "export const _createPyodideModule",
+    ],
+    [
+        "globalThis._createPyodideModule = _createPyodideModule;",
+        "",
+    ],
+    [
+        "new WebAssembly.Module",
+        "newWasmModule",
+    ],
+    [
+        "WebAssembly.instantiate",
+        "wasmInstantiate",
+    ],
+    [
+        "Date.now",
+        "monotonicDateNow",
+    ],
+    [
+        "reportUndefinedSymbols()",
+        "reportUndefinedSymbolsPatched(Module)",
+    ],
+    [
+        "crypto.getRandomValues(",
+        "getRandomValues(Module, ",
+    ],
+    [
+        # Direct eval disallowed in esbuild, see:
+        # https://esbuild.github.io/content-types/#direct-eval
+        "eval(func)",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    [
+        "eval(data)",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    [
+        "eval(UTF8ToString(ptr))",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    # Dynamic linking patches:
+    # library lookup
+    [
+        "!libData",
+        "!(libData ??= patchDynlibLookup(Module, libName))",
+    ],
+    # for ensuring memory base of dynlib is stable when restoring snapshots
+    [
+        "getMemory(",
+        "Module.getMemoryPatched(Module, libName, ",
+    ],
+    # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
+    [
+        "nullToUndefined(func.apply(",
+        "nullToUndefined(patchedApplyFunc(API, func, ",
+    ],
+    [
+        "nullToUndefined(Function.prototype.apply.apply",
+        "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
+    ],
+    [
+        "function _PyEM_CountFuncParams(func){",
+        "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
+    ],
+    [
+        "var tableBase=metadata.tableSize?wasmTable.length:0;",
+        "var tableBase=metadata.tableSize?wasmTable.length:0;" +
+        "Module.snapshotDebug && console.log('loadWebAssemblyModule', libName, memoryBase, tableBase);",
+    ],
+]
+
 def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
     pyodide_package = "@pyodide-%s//" % version
     if not pyodide_asm_wasm:
@@ -162,105 +256,10 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
 
     _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
 
-    # pyodide.asm.js patches
-    # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
-
-    PRELUDE = """
-    import {
-        addEventListener,
-        getRandomValues,
-        location,
-        monotonicDateNow,
-        newWasmModule,
-        patchedApplyFunc,
-        patchDynlibLookup,
-        reportUndefinedSymbolsPatched,
-        wasmInstantiate,
-        patched_PyEM_CountFuncParams,
-    } from "pyodide-internal:pool/builtin_wrappers";
-    """
-
-    REPLACEMENTS = [
-        [
-            # Convert pyodide.asm.js into an es6 module.
-            # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
-            # automatically.
-            "var _createPyodideModule",
-            PRELUDE + "export const _createPyodideModule",
-        ],
-        [
-            "globalThis._createPyodideModule = _createPyodideModule;",
-            "",
-        ],
-        [
-            "new WebAssembly.Module",
-            "newWasmModule",
-        ],
-        [
-            "WebAssembly.instantiate",
-            "wasmInstantiate",
-        ],
-        [
-            "Date.now",
-            "monotonicDateNow",
-        ],
-        [
-            "reportUndefinedSymbols()",
-            "reportUndefinedSymbolsPatched(Module)",
-        ],
-        [
-            "crypto.getRandomValues(",
-            "getRandomValues(Module, ",
-        ],
-        [
-            # Direct eval disallowed in esbuild, see:
-            # https://esbuild.github.io/content-types/#direct-eval
-            "eval(func)",
-            "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-        ],
-        [
-            "eval(data)",
-            "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-        ],
-        [
-            "eval(UTF8ToString(ptr))",
-            "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-        ],
-        # Dynamic linking patches:
-        # library lookup
-        [
-            "!libData",
-            "!(libData ??= patchDynlibLookup(Module, libName))",
-        ],
-        # for ensuring memory base of dynlib is stable when restoring snapshots
-        [
-            "getMemory(",
-            "Module.getMemoryPatched(Module, libName, ",
-        ],
-        # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
-        [
-            "nullToUndefined(func.apply(",
-            "nullToUndefined(patchedApplyFunc(API, func, ",
-        ],
-        [
-            "nullToUndefined(Function.prototype.apply.apply",
-            "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
-        ],
-        [
-            "function _PyEM_CountFuncParams(func){",
-            "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
-        ],
-        [
-            "var tableBase=metadata.tableSize?wasmTable.length:0;",
-            "var tableBase=metadata.tableSize?wasmTable.length:0;" +
-            "Module.snapshotDebug && console.log('loadWebAssemblyModule', libName, memoryBase, tableBase);",
-        ],
-    ]
-
     expand_template(
         name = "pyodide.asm.js@rule@" + version,
         out = _out_path("pyodide.asm.js", version),
-        substitutions = dict(REPLACEMENTS),
+        substitutions = dict(_REPLACEMENTS),
         template = pyodide_asm_js,
     )
 
@@ -338,8 +337,8 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         outs = [_out_path("pyodide.capnp.bin", version)],
         cmd = " ".join([
             # Annoying logic to deal with different paths in workerd vs downstream.
-            # Either need "-I src" in workerd or -I external/workerd/src downstream
-            "INCLUDE=$$(stat src > /dev/null 2>&1 && echo src || echo external/workerd/src);",
+            # Either need "-I src" in workerd or -I external/+dep_workerd+workerd/src downstream
+            "INCLUDE=$$(stat src > /dev/null 2>&1 && echo src || echo external/+dep_workerd+workerd/src);",
             "$(execpath @capnp-cpp//src/capnp:capnp_tool)",
             "eval",
             "$(location :pyodide@%s.capnp)" % version,

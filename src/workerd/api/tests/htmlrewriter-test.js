@@ -1015,3 +1015,30 @@ export const hugeNumberOfHandlersForAnElement = {
     }
   },
 };
+
+// Test HTMLRewriter with JS-backed ReadableStream
+// This test was moved from streams-respond-test.js because it triggers
+// a flaky ASAN failure related to V8's cppgc memory validation.
+export const htmlRewriterStream = {
+  async test() {
+    const enc = new TextEncoder();
+
+    const readable = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(enc.encode('Hello World!'));
+        controller.close();
+      },
+    });
+
+    let response = new Response(readable, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    });
+
+    response = new HTMLRewriter().transform(response);
+
+    strictEqual(await response.text(), 'Hello World!');
+  },
+};

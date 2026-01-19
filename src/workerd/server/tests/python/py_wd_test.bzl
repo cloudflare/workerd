@@ -1,4 +1,3 @@
-load("@//:build/is_pyodide_bzlmod.bzl", "is_pyodide_bzlmod")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
@@ -35,13 +34,8 @@ def _py_wd_test_helper(
     data = data + ["@all_pyodide_wheels_%s//:whls" % pkg_tag]
     args = args + ["--pyodide-package-disk-cache-dir"]
 
-    # TODO(cleanup): We support both mangled and non-mangled wheels paths for now, clean up once
-    # downstream repo fully uses bzlmod
-    if is_pyodide_bzlmod:
-        # +pyodide+ is a bzlmod canonical repository name
-        args.append("../+pyodide+all_pyodide_wheels_%s" % pkg_tag)
-    else:
-        args.append("../all_pyodide_wheels_%s" % pkg_tag)
+    # +pyodide+ is a bzlmod canonical repository name
+    args.append("../+pyodide+all_pyodide_wheels_%s" % pkg_tag)
 
     load_snapshot = None
     pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
