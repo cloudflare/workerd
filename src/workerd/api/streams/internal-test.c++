@@ -16,6 +16,60 @@
 namespace workerd::api {
 namespace {
 
+// ======================================================================================
+// Shared test helpers
+
+// Simple source that returns EOF immediately
+class EofSource final: public ReadableStreamSource {
+ public:
+  kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
+    return static_cast<size_t>(0);
+  }
+};
+
+// Simple sink that accepts all writes
+class NoopSink final: public WritableStreamSink {
+ public:
+  kj::Promise<void> write(kj::ArrayPtr<const byte>) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>>) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> end() override {
+    return kj::READY_NOW;
+  }
+  void abort(kj::Exception) override {}
+};
+
+// Creates a TestFixture with common flags for stream tests
+TestFixture makeStreamTestFixture() {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  return TestFixture({.featureFlags = flags.asReader()});
+}
+
+// Creates a TestFixture with the abortClearsQueue flag for testing abort behavior
+TestFixture makeAbortClearsQueueTestFixture() {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  flags.setInternalWritableStreamAbortClearsQueue(true);
+  return TestFixture({.featureFlags = flags.asReader()});
+}
+
+// Creates a BYOB-capable ReadableStream
+jsg::Ref<ReadableStream> makeByteStream(jsg::Lock& js) {
+  auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+  rs->getController().setup(
+      js, UnderlyingSource{.type = kj::str("bytes")}, StreamQueuingStrategy{});
+  return rs;
+}
+
+// ======================================================================================
+// ReadableStreamSource test implementations
+
 template <int size>
 class FooStream: public ReadableStreamSource {
  public:
@@ -203,34 +257,14 @@ KJ_TEST("honest small stream") {
 }
 
 KJ_TEST("WritableStreamInternalController queue size assertion") {
-
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
-
-  class MySink final: public WritableStreamSink {
-   public:
-    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-      return kj::READY_NOW;
-    }
-    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-      return kj::READY_NOW;
-    }
-    kj::Promise<void> end() override {
-      return kj::READY_NOW;
-    }
-    void abort(kj::Exception reason) override {}
-  };
-
+  auto fixture = makeStreamTestFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     // Make sure that while an internal sink is being piped into, no other writes are
     // allowed to be queued.
 
     jsg::Ref<ReadableStream> source = ReadableStream::constructor(env.js, kj::none, kj::none);
     jsg::Ref<WritableStream> sink =
-        env.js.alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::none);
+        env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
 
     auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions{.preventClose = true});
 
@@ -275,30 +309,12 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
 KJ_TEST("WritableStreamInternalController operations reject when piped to") {
   // Tests that close/flush/tryPipeFrom reject with "currently being piped to"
   // during an active pipe operation.
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
-
-  class MySink final: public WritableStreamSink {
-   public:
-    kj::Promise<void> write(kj::ArrayPtr<const byte>) override {
-      return kj::READY_NOW;
-    }
-    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>>) override {
-      return kj::READY_NOW;
-    }
-    kj::Promise<void> end() override {
-      return kj::READY_NOW;
-    }
-    void abort(kj::Exception) override {}
-  };
+  auto fixture = makeStreamTestFixture();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto source = ReadableStream::constructor(env.js, kj::none, kj::none);
     auto source2 = ReadableStream::constructor(env.js, kj::none, kj::none);
-    auto sink = env.js.alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::none);
+    auto sink = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
 
     auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions{.preventClose = true});
     KJ_ASSERT(sink->isLocked());
@@ -336,32 +352,7 @@ KJ_TEST("WritableStreamInternalController operations reject when piped to") {
 }
 
 KJ_TEST("WritableStreamInternalController observability") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
-
-  class MySink final: public WritableStreamSink {
-   public:
-    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-      ++writeCount;
-      return kj::READY_NOW;
-    }
-    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-      return kj::READY_NOW;
-    }
-    kj::Promise<void> end() override {
-      return kj::READY_NOW;
-    }
-    void abort(kj::Exception reason) override {}
-    uint getWriteCount() {
-      return writeCount;
-    }
-
-   private:
-    uint writeCount = 0;
-  };
+  auto fixture = makeStreamTestFixture();
 
   class MyObserver final: public ByteStreamObserver {
    public:
@@ -381,7 +372,7 @@ KJ_TEST("WritableStreamInternalController observability") {
   auto& observer = *myObserver;
   kj::Maybe<jsg::Ref<WritableStream>> stream;
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    stream = env.js.alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::mv(myObserver));
+    stream = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::mv(myObserver));
 
     auto write = [&](size_t size) {
       auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));
@@ -411,36 +402,9 @@ KJ_TEST("WritableStreamInternalController observability") {
 }
 
 // Test for use-after-free fix in pipeLoop when abort is called during pending read.
-// This tests the scenario where:
-// 1. A JavaScript-backed ReadableStream is piped to an internal WritableStream
-// 2. The pipeLoop is waiting for a read from the JS stream
-// 3. abort() is called on the writable stream, which triggers drain()
-// 4. drain() destroys the Pipe object
-// 5. The pending read callback must not access the freed Pipe
-//
 // The fix ensures the Pipe::State is ref-counted and survives until all callbacks complete.
 KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-  flags.setInternalWritableStreamAbortClearsQueue(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
-
-  class MySink final: public WritableStreamSink {
-   public:
-    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-      return kj::READY_NOW;
-    }
-    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-      return kj::READY_NOW;
-    }
-    kj::Promise<void> end() override {
-      return kj::READY_NOW;
-    }
-    void abort(kj::Exception reason) override {}
-  };
-
+  auto fixture = makeAbortClearsQueueTestFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     // Create a JavaScript-backed ReadableStream.
     // The pull function will be called when the pipe tries to read.
@@ -473,37 +437,19 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
         kj::none);
 
     jsg::Ref<WritableStream> sink =
-        env.js.alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::none);
+        env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
 
-    // Start the pipe. This will:
-    // 1. Call pull() which enqueues data
-    // 2. pipeLoop reads the data and writes it to the sink
-    // 3. pipeLoop calls read() again, which calls pull()
-    // 4. pull() returns without enqueuing, so read() returns a pending promise
-    // 5. pipeLoop's callback is now waiting for that promise
     auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions{});
     pipeTo.markAsHandled(env.js);
-
-    // Run microtasks to let the pipe make progress (first read/write cycle)
     env.js.runMicrotasks();
 
-    // At this point, pipeLoop should be waiting for the second read.
-    // Now abort the writable stream. This should:
-    // 1. Call doAbort() which calls drain()
-    // 2. drain() destroys the Pipe (setting state->aborted = true)
-    // 3. The pending read callback should check aborted and bail out safely
-
-    // Before the fix, this would cause a use-after-free when the pending callback
-    // tried to access the freed Pipe.
+    // Abort while pipeLoop is waiting for a pending read
     auto abortPromise = sink->getController().abort(env.js, env.js.v8TypeError("Test abort"_kj));
     abortPromise.markAsHandled(env.js);
-
-    // Run microtasks to process the abort and any pending callbacks
     env.js.runMicrotasks();
 
-    // If we get here without crashing, the test passes.
-    // The fix ensures that the Pipe::State survives until all callbacks complete.
-    KJ_ASSERT(pullCount >= 1);  // Verify pull was called at least once
+    // If we get here without crashing, the test passes
+    KJ_ASSERT(pullCount >= 1);
   });
 }
 
@@ -516,33 +462,15 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
 // and doesn't have internal JS-side buffering.
 
 KJ_TEST("DrainingReader basic creation and locking (internal stream)") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
-
+  auto fixture = makeStreamTestFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    // Create an internal stream with a simple source
-    class TestSource final: public ReadableStreamSource {
-     public:
-      kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
-        return static_cast<size_t>(0);  // EOF
-      }
-    };
-
-    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<TestSource>());
-
-    // Stream should not be locked initially
+    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<EofSource>());
     KJ_ASSERT(!rs->isLocked());
 
-    // Create DrainingReader
     KJ_IF_SOME(reader, DrainingReader::create(env.js, *rs)) {
-      // Stream should now be locked
       KJ_ASSERT(rs->isLocked());
       KJ_ASSERT(reader->isAttached());
 
-      // Release the lock
       reader->releaseLock(env.js);
       KJ_ASSERT(!rs->isLocked());
       KJ_ASSERT(!reader->isAttached());
@@ -553,30 +481,13 @@ KJ_TEST("DrainingReader basic creation and locking (internal stream)") {
 }
 
 KJ_TEST("DrainingReader cannot be created on locked internal stream") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
-
+  auto fixture = makeStreamTestFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    class TestSource final: public ReadableStreamSource {
-     public:
-      kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
-        return static_cast<size_t>(0);
-      }
-    };
+    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<EofSource>());
 
-    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<TestSource>());
-
-    // Create first reader to lock the stream
     KJ_IF_SOME(reader1, DrainingReader::create(env.js, *rs)) {
       KJ_ASSERT(rs->isLocked());
-
-      // Try to create another reader - should fail
-      auto maybeReader2 = DrainingReader::create(env.js, *rs);
-      KJ_ASSERT(maybeReader2 == kj::none);
-
+      KJ_ASSERT(DrainingReader::create(env.js, *rs) == kj::none);
       reader1->releaseLock(env.js);
     } else {
       KJ_FAIL_ASSERT("Failed to create first DrainingReader");
@@ -585,34 +496,20 @@ KJ_TEST("DrainingReader cannot be created on locked internal stream") {
 }
 
 KJ_TEST("DrainingReader read after releaseLock rejects (internal stream)") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
-
+  auto fixture = makeStreamTestFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    class TestSource final: public ReadableStreamSource {
-     public:
-      kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
-        return static_cast<size_t>(0);
-      }
-    };
-
-    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<TestSource>());
+    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<EofSource>());
 
     KJ_IF_SOME(reader, DrainingReader::create(env.js, *rs)) {
       reader->releaseLock(env.js);
 
-      bool readRejected = false;
-      auto promise = reader->read(env.js).catch_(
-          env.js, [&](jsg::Lock& js, jsg::Value reason) -> DrainingReadResult {
-        readRejected = true;
-        return DrainingReadResult{.done = true};
+      bool rejected = false;
+      reader->read(env.js).catch_(env.js, [&](jsg::Lock&, jsg::Value) -> DrainingReadResult {
+        rejected = true;
+        return {.done = true};
       });
-
       env.js.runMicrotasks();
-      KJ_ASSERT(readRejected);
+      KJ_ASSERT(rejected);
     } else {
       KJ_FAIL_ASSERT("Failed to create DrainingReader");
     }
@@ -721,38 +618,22 @@ KJ_TEST("DrainingReader with maxRead = 0 (internal stream)") {
 }
 
 KJ_TEST("DrainingReader on stream with pending closure (internal stream)") {
-  // Test that drainingRead rejects when the stream is pending closure
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
-
+  auto fixture = makeStreamTestFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    class TestSource final: public ReadableStreamSource {
-     public:
-      kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
-        return static_cast<size_t>(0);
-      }
-    };
-
-    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<TestSource>());
-
-    // Set pending closure before creating reader
+    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<EofSource>());
     rs->getController().setPendingClosure();
 
     KJ_IF_SOME(reader, DrainingReader::create(env.js, *rs)) {
-      bool readRejected = false;
-      auto readPromise = reader->read(env.js).catch_(
+      bool rejected = false;
+      reader->read(env.js).catch_(
           env.js, [&](jsg::Lock& js, jsg::Value reason) -> DrainingReadResult {
-        readRejected = true;
+        rejected = true;
         auto msg = kj::str(reason.getHandle(js));
         KJ_ASSERT(msg.contains("closing"), msg);
-        return DrainingReadResult{.done = true};
+        return {.done = true};
       });
-
       env.js.runMicrotasks();
-      KJ_ASSERT(readRejected);
+      KJ_ASSERT(rejected);
     } else {
       KJ_FAIL_ASSERT("Failed to create DrainingReader");
     }
@@ -760,21 +641,10 @@ KJ_TEST("DrainingReader on stream with pending closure (internal stream)") {
 }
 
 KJ_TEST("DrainingReader on closed stream (internal stream)") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
+  auto fixture = makeStreamTestFixture();
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    class TestSource final: public ReadableStreamSource {
-     public:
-      kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
-        return static_cast<size_t>(0);
-      }
-    };
-
-    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<TestSource>());
+    auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<EofSource>());
     rs->getController().cancel(env.js, kj::none);
 
     KJ_IF_SOME(reader, DrainingReader::create(env.js, *rs)) {
@@ -794,11 +664,7 @@ KJ_TEST("DrainingReader on closed stream (internal stream)") {
 
 KJ_TEST("DrainingReader error propagation (internal stream)") {
   // Tests that I/O errors from tryRead are propagated and put the stream in errored state.
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
+  auto fixture = makeStreamTestFixture();
 
   bool testCompleted = false;
   KJ_EXPECT_LOG(ERROR, "Simulated I/O error");
@@ -830,11 +696,7 @@ KJ_TEST("DrainingReader error propagation (internal stream)") {
 }
 
 KJ_TEST("DrainingReader concurrent read rejection (internal stream)") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setStreamsJavaScriptControllers(true);
-
-  TestFixture fixture({.featureFlags = flags.asReader()});
+  auto fixture = makeStreamTestFixture();
   bool testCompleted = false;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
@@ -878,6 +740,105 @@ KJ_TEST("DrainingReader concurrent read rejection (internal stream)") {
   });
 
   KJ_ASSERT(testCompleted);
+}
+
+// ======================================================================================
+// ReadableStreamBYOBReader validation tests
+
+KJ_TEST("ReadableStreamBYOBReader rejects read with zero-sized buffer") {
+  KJ_EXPECT_LOG(ERROR, "read() on a BYOB reader requires a positive-sized TypedArray");
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto rs = makeByteStream(env.js);
+    auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
+
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 0);
+    auto view = v8::Uint8Array::New(buffer, 0, 0);
+
+    bool rejected = false;
+    reader->read(env.js, view, kj::none)
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(ex.getDescription().contains(
+                    "read() on a BYOB reader requires a positive-sized TypedArray"),
+          ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+    KJ_ASSERT(rejected, "Expected read() to reject with zero-sized buffer");
+  });
+}
+
+KJ_TEST("ReadableStreamBYOBReader rejects read with atLeast=0") {
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto rs = makeByteStream(env.js);
+    auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
+
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
+    auto view = v8::Uint8Array::New(buffer, 0, 10);
+
+    bool rejected = false;
+    reader->readAtLeast(env.js, 0, view)
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(
+          ex.getDescription().contains("Requested invalid minimum number of bytes to read (0)"),
+          ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+    KJ_ASSERT(rejected, "Expected readAtLeast() to reject with atLeast=0");
+  });
+}
+
+KJ_TEST("ReadableStreamBYOBReader rejects read when atLeast exceeds buffer size") {
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto rs = makeByteStream(env.js);
+    auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
+
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
+    auto view = v8::Uint8Array::New(buffer, 0, 10);
+
+    bool rejected = false;
+    reader->readAtLeast(env.js, 20, view)
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(
+          ex.getDescription().contains("Minimum bytes to read (20) exceeds size of buffer (10)"),
+          ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+    KJ_ASSERT(rejected, "Expected readAtLeast() to reject when atLeast exceeds buffer size");
+  });
+}
+
+KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto rs = makeByteStream(env.js);
+    auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
+    reader->releaseLock(env.js);
+
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
+    auto view = v8::Uint8Array::New(buffer, 0, 10);
+
+    bool rejected = false;
+    reader->read(env.js, view, kj::none)
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(ex.getDescription().contains("This ReadableStream reader has been released"), ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+    KJ_ASSERT(rejected, "Expected read() to reject after releaseLock");
+  });
 }
 
 }  // namespace
