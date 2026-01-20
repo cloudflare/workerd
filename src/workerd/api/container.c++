@@ -71,6 +71,22 @@ jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durati
   return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
 
+void Container::setEgressTcp(jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding) {
+  auto& ioctx = IoContext::current();
+
+  // Get the subrequest channel from the Fetcher binding
+  auto channel = binding->getSubrequestChannel(ioctx);
+
+  // Get a channel token for RPC usage
+  auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+
+  // Send the token to the container via RPC
+  auto req = rpcClient->setEgressTcpRequest();
+  req.setAddr(addr);
+  req.setChannelToken(token);
+  ioctx.addTask(req.sendIgnoringResult());
+}
+
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 

@@ -110,4 +110,8 @@ interface Container @0x9aaceefc06523bca {
   # Note that if there is an open connection to the container, the runtime must not shutdown the container.
   # If there is no activity timeout duration configured and no container connection, it's up to the runtime
   # to decide when to signal the container to exit.
+
+  setEgressTcp @8 (addr :Text, channelToken :Data);
+  # Configures egress TCP routing for the container. When the container attempts to connect to the
+  # specified address, the connection should be routed back to the Workers runtime using the channel token.
 }
