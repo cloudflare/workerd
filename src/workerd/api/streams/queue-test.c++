@@ -6,23 +6,14 @@
 
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/tests/test-fixture.h>
 
 namespace workerd::api {
 namespace {
 
-jsg::V8System v8System;
-
-struct QueueContext: public jsg::Object, public jsg::ContextGlobal {
-  JSG_RESOURCE_TYPE(QueueContext) {}
-};
-JSG_DECLARE_ISOLATE_TYPE(QueueIsolate, QueueContext);
-
 void preamble(auto callback) {
-  QueueIsolate isolate(v8System, kj::heap<jsg::IsolateObserver>());
-  isolate.runInLockScope([&](QueueIsolate::Lock& lock) {
-    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.newContext<QueueContext>().getHandle(lock),
-        [&](jsg::Lock& js) { callback(js); });
-  });
+  TestFixture fixture;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) { callback(env.js); });
 }
 
 using ReadContinuation = jsg::Promise<ReadResult>(ReadResult&&);

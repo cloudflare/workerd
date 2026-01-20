@@ -11411,11 +11411,44 @@ export interface ForwardableEmailMessage extends EmailMessage {
    */
   reply(message: EmailMessage): Promise<EmailSendResult>;
 }
+/** A file attachment for an email message */
+export type EmailAttachment =
+  | {
+      disposition: "inline";
+      contentId: string;
+      filename: string;
+      type: string;
+      content: string | ArrayBuffer | ArrayBufferView;
+    }
+  | {
+      disposition: "attachment";
+      contentId?: undefined;
+      filename: string;
+      type: string;
+      content: string | ArrayBuffer | ArrayBufferView;
+    };
+/** An Email Address */
+export interface EmailAddress {
+  name: string;
+  email: string;
+}
 /**
  * A binding that allows a Worker to send email messages.
  */
 export interface SendEmail {
   send(message: EmailMessage): Promise<EmailSendResult>;
+  send(builder: {
+    from: string | EmailAddress;
+    to: string | string[];
+    subject: string;
+    replyTo?: string | EmailAddress;
+    cc?: string | string[];
+    bcc?: string | string[];
+    headers?: Record<string, string>;
+    text?: string;
+    html?: string;
+    attachments?: EmailAttachment[];
+  }): Promise<EmailSendResult>;
 }
 export declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
