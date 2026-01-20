@@ -333,7 +333,6 @@ kj_test(
     src = "url-test.c++",
     deps = [
         ":url",
-        "@ssl",
     ],
 )
 
