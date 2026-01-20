@@ -3,6 +3,7 @@
 Usage: update-deps.py [dep_name]
 """
 
+import base64
 import datetime
 import hashlib
 import io
@@ -60,6 +61,12 @@ bazel_dep({attrs})
 
 """
 
+BAZEL_DEP_OVERRIDE_TEMPLATE = """# {name}
+bazel_dep({bazel_dep_attrs})
+{override_type}({override_attrs}
+)
+
+"""
 
 GITHUB_ACCESS_TOKEN = ""
 
@@ -68,8 +75,10 @@ def format_attr_list(attrs, single_line=False):
     if not attrs:
         return ""
 
-    # buildifier (Bazel build file formatter) requires keys to be sorted, except name goes first
-    attr_list = sorted(attrs.items(), key=lambda kv: kv[0] if kv[0] != "name" else "")
+    # buildifier (Bazel build file formatter) requires keys to be sorted, except name and module_name go first
+    attr_list = sorted(
+        attrs.items(), key=lambda kv: "" if kv[0] in {"name", "module_name"} else kv[0]
+    )
     attr_strs = (f"{k} = {format_attr(v)}" for k, v in attr_list)
 
     if single_line:
@@ -83,6 +92,9 @@ def format_attr_list(attrs, single_line=False):
 def format_attr(v):
     if isinstance(v, (bool, int)):
         return str(v)
+    elif isinstance(v, list):
+        # Format lists as multiline with proper indentation and trailing comma
+        return json.dumps(v, indent=8).replace("\n]", ",\n    ]")
     else:
         return json.dumps(v)
 
@@ -160,6 +172,19 @@ def get_url_content_sha256(url):
     return hashlib.sha256(urllib.request.urlopen(url).read()).hexdigest()
 
 
+def get_bcr_module_bazel_url(module_name, version):
+    """Generate the URL for a MODULE.bazel file from BCR."""
+    return f"https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/{module_name}/{version}/MODULE.bazel"
+
+
+def get_bcr_module_bazel_integrity(module_name, version):
+    """Fetch MODULE.bazel from BCR and compute its SHA256 integrity hash."""
+    url = get_bcr_module_bazel_url(module_name, version)
+    content = urllib.request.urlopen(url).read()
+    sha256 = hashlib.sha256(content).digest()
+    return f"sha256-{base64.b64encode(sha256).decode()}"
+
+
 def repo_attributes(repo):
     repo_attrs = {}
 
@@ -175,9 +200,39 @@ def repo_attributes(repo):
             repo_attrs[option] = repo[option]
 
     if "patches" in repo_attrs:
-        repo_attrs["patch_args"] = ["-p1"]
+        repo_attrs["patch_strip"] = 1
+
+    if "use_module_bazel_from_bcr" in repo:
+        url = get_bcr_module_bazel_url(repo["name"], repo["use_module_bazel_from_bcr"])
+        integrity = get_bcr_module_bazel_integrity(
+            repo["name"], repo["use_module_bazel_from_bcr"]
+        )
+        repo_attrs["remote_file_urls"] = {"MODULE.bazel": [url]}
+        repo_attrs["remote_file_integrity"] = {"MODULE.bazel": integrity}
 
     return repo_attrs
+
+
+def format_bazel_dep_with_override(repo, override_type, override_attrs):
+    """Format bazel_dep + archive_override/git_override."""
+    name = repo["name"]
+
+    # bazel_dep attributes
+    bazel_dep_attrs = {"name": name}
+    if "repo_name" in repo:
+        bazel_dep_attrs["repo_name"] = repo["repo_name"]
+
+    # Override attributes - use repo_attributes but swap name for module_name
+    base_attrs = repo_attributes(repo)
+    base_attrs["module_name"] = name
+    del base_attrs["name"]
+
+    return BAZEL_DEP_OVERRIDE_TEMPLATE.format(
+        name=name,
+        bazel_dep_attrs=format_attr_list(bazel_dep_attrs, single_line=True),
+        override_type=override_type,
+        override_attrs=format_attr_list(base_attrs | override_attrs),
+    )
 
 
 def gen_github_tarball(repo):
@@ -213,17 +268,26 @@ def gen_github_tarball(repo):
     else:
         sha256 = get_url_content_sha256(url)
 
-    return format_ext_dep(
-        repo,
-        ext_name="http",
-        rule_name="archive",
-        attrs=dict(
-            url=url,
-            strip_prefix=prefix,
-            sha256=sha256,
-            type="tgz",
-        ),
+    attrs = dict(
+        url=url,
+        strip_prefix=prefix,
+        sha256=sha256,
+        type="tgz",
     )
+
+    if repo.get("use_bazel_dep"):
+        return format_bazel_dep_with_override(
+            repo,
+            override_type="archive_override",
+            override_attrs=attrs,
+        )
+    else:
+        return format_ext_dep(
+            repo,
+            ext_name="http",
+            rule_name="archive",
+            attrs=attrs,
+        )
 
 
 def github_last_release(repo):
@@ -298,18 +362,31 @@ def gen_github_release(repo):
             with tarfile.open(fileobj=io.BytesIO(content)) as tgz:
                 prefix = os.path.commonprefix(tgz.getnames())
 
-        return format_ext_dep(
-            repo,
-            ext_name="http",
-            rule_name="archive",
-            attrs=dict(
-                url=url,
-                strip_prefix=prefix,
-                sha256=sha256,
-                type=type,
-            ),
+        attrs = dict(
+            url=url,
+            strip_prefix=prefix,
+            sha256=sha256,
+            type=type,
         )
+
+        if repo.get("use_bazel_dep"):
+            return format_bazel_dep_with_override(
+                repo,
+                override_type="archive_override",
+                override_attrs=attrs,
+            )
+        else:
+            return format_ext_dep(
+                repo,
+                ext_name="http",
+                rule_name="archive",
+                attrs=attrs,
+            )
     elif file_type == "executable":
+        if repo.get("use_bazel_dep"):
+            raise UnsupportedException(
+                "use_bazel_dep is not supported for executable file_type"
+            )
         return format_ext_dep(
             repo,
             ext_name="http",
@@ -362,14 +439,23 @@ def gen_git_clone(repo):
         else:
             print(commit[:7], end="")
 
-    return format_repo_rule_dep(
-        repo,
-        rule_name="git_repository",
-        attrs=dict(
-            remote=url,
-            commit=commit,
-        ),
+    attrs = dict(
+        remote=url,
+        commit=commit,
     )
+
+    if repo.get("use_bazel_dep"):
+        return format_bazel_dep_with_override(
+            repo,
+            override_type="git_override",
+            override_attrs=attrs,
+        )
+    else:
+        return format_repo_rule_dep(
+            repo,
+            rule_name="git_repository",
+            attrs=attrs,
+        )
 
 
 def get_bcr_version(name: str) -> str:
