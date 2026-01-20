@@ -5,6 +5,8 @@
 #pragma once
 
 #include <workerd/io/container.capnp.h>
+#include <workerd/io/io-channels.h>
+#include <workerd/server/channel-token.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/list.h>
@@ -33,7 +35,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::String containerName,
       kj::String imageName,
       kj::TaskSet& waitUntilTasks,
-      kj::Function<void()> cleanupCallback);
+      kj::Function<void()> cleanupCallback,
+      ChannelTokenHandler& channelTokenHandler);
 
   ~ContainerClient() noexcept(false);
 
@@ -46,6 +49,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
+  kj::Promise<void> setEgressTcp(SetEgressTcpContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -93,6 +97,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Cleanup callback to remove from ActorNamespace map when destroyed
   kj::Function<void()> cleanupCallback;
+
+  // For redeeming channel tokens received via setEgressTcp
+  ChannelTokenHandler& channelTokenHandler;
+
+  // Egress TCP mappings: address -> SubrequestChannel
+  kj::HashMap<kj::String, kj::Own<workerd::IoChannelFactory::SubrequestChannel>> egressMappings;
 };
 
 }  // namespace workerd::server
