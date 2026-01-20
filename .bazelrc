@@ -12,15 +12,11 @@ build --test_size_filters=-enormous
 # corresponds to small,medium,large,enormous tests (medium is default)
 build --test_timeout=3,15,60,240
 
-# As part of starlarkification, Bazel 8 removes a number of rules which now need to be imported from
-# other repositories. In the long term, load() statements will be needed to import these rules. For
-# now, we can still autoload the affected repositories when needed. Do this only for a remaining
-# protobuf components instead of the larger default autoload set – perfetto isn't importing all
-# required rules yet, but we don't want to accidentally rely on autoloading more dependencies.
-common --incompatible_autoload_externally="+ProtoInfo"
-
-# Bazel 9 forward compatibility: Disable native repo rules.
-build --incompatible_disable_native_repo_rules
+# As part of starlarkification, Bazel 8 and 9 remove a number of rules which now need to be imported
+# from other repositories. In the long term, load() statements will be needed to import these rules.
+# For now, we can still autoload the affected repositories when needed. Do this only for a remaining
+# protobuf components and rules_cc (needed with Bazel 9).
+common --incompatible_autoload_externally="+ProtoInfo,+cc_binary,+cc_import,+cc_library,+cc_shared_library,+cc_test,+cc_toolchain"
 
 # bazel7 enables Build without the Bytes (BwoB) by default. This significantly speeds up builds
 # using the remote cache since less data needs to be fetched.
@@ -34,15 +30,19 @@ import %workspace%/build/ci.bazelrc
 import %workspace%/build/rust_lint.bazelrc
 import %workspace%/build/tools/clang_tidy/clang_tidy.bazelrc
 
-# Prevents bazel cache invalidation when switching terminals
-build --incompatible_strict_action_env
-
-# Use compat repo mapping to avoid O(n^2) repo mapping size, speeding up bazel repo mapping phase
-# and conserving space
-build --incompatible_compact_repo_mapping_manifest
-
 # Continue building locally when remote cache entries fail to materialize
 build --incompatible_remote_local_fallback_for_remote_cache
+
+# TODO(soon): Flipped by default in Bazel 9, add required variables to --repo_env and enable
+build --noincompatible_repo_env_ignores_action_env
+
+# Use -isystem for cc_library includes attribute – this prevents warnings for misbehaving external
+# code.
+build:linux --features=external_include_paths --host_features=external_include_paths
+
+# Forward compatibility with future Bazel versions:
+# Disable deprecated cfg = "host" Bazel rule setting. Blocked on perfetto.
+# common --incompatible_disable_starlark_host_transitions
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'
@@ -419,7 +419,6 @@ build:coverage --test_env=BAZEL_LLVM_COV=llvm-cov
 # Enable optimizations to reduce coverage overhead while maintaining good coverage quality
 build:coverage --copt=-O2
 build:coverage --copt=-DNDEBUG
-build:coverage --combined_report=lcov
 build:coverage --experimental_use_llvm_covmap
 build:coverage --experimental_generate_llvm_lcov
 build:coverage --experimental_fetch_all_coverage_outputs
