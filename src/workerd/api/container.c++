@@ -73,14 +73,12 @@ jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durati
 
 void Container::setEgressTcp(jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding) {
   auto& ioctx = IoContext::current();
-
-  // Get the subrequest channel from the Fetcher binding
   auto channel = binding->getSubrequestChannel(ioctx);
 
-  // Get a channel token for RPC usage
+  // Get a channel token for RPC usage, the container runtime can use this
+  // token later to redeem a Fetcher.
   auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
 
-  // Send the token to the container via RPC
   auto req = rpcClient->setEgressTcpRequest();
   req.setAddr(addr);
   req.setChannelToken(token);

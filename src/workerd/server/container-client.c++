@@ -108,7 +108,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String containerName,
     kj::String imageName,
     kj::TaskSet& waitUntilTasks,
-    kj::Function<void()> cleanupCallback)
+    kj::Function<void()> cleanupCallback,
+    ChannelTokenHandler& channelTokenHandler)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
@@ -116,7 +117,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       containerName(kj::encodeUriComponent(kj::mv(containerName))),
       imageName(kj::mv(imageName)),
       waitUntilTasks(waitUntilTasks),
-      cleanupCallback(kj::mv(cleanupCallback)) {}
+      cleanupCallback(kj::mv(cleanupCallback)),
+      channelTokenHandler(channelTokenHandler) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
   // Call the cleanup callback to remove this client from the ActorNamespace map
@@ -464,6 +466,27 @@ kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
 
 kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
   KJ_UNIMPLEMENTED("listenTcp not implemented for Docker containers - use port mapping instead");
+}
+
+kj::Promise<void> ContainerClient::setEgressTcp(SetEgressTcpContext context) {
+  auto params = context.getParams();
+  auto addr = kj::str(params.getAddr());
+  auto tokenBytes = params.getChannelToken();
+
+  // Redeem the channel token to get a SubrequestChannel
+  auto subrequestChannel = channelTokenHandler.decodeSubrequestChannelToken(
+      workerd::IoChannelFactory::ChannelTokenUsage::RPC, tokenBytes);
+
+  // Store the mapping
+  egressMappings.upsert(kj::mv(addr), kj::mv(subrequestChannel),
+      [](auto& existing, auto&& newValue) { existing = kj::mv(newValue); });
+
+  // TODO: At some point we need to figure out how to make it so
+  // in local development we are able to actually map to an egress mapping.
+  // For now, just fake it for testing purposes the decoding of the
+  // subrequest channel token.
+
+  co_return;
 }
 
 kj::Own<ContainerClient> ContainerClient::addRef() {

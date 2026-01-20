@@ -1929,9 +1929,9 @@ class Server::WorkerService final: public Service,
       }
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
-      auto ns =
-          kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer(),
-              threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
+      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
+          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(), channelTokenHandler,
+          network, dockerPath, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2195,6 +2195,7 @@ class Server::WorkerService final: public Service,
         const ActorConfig& config,
         kj::Timer& timer,
         capnp::ByteStreamFactory& byteStreamFactory,
+        ChannelTokenHandler& channelTokenHandler,
         kj::Network& dockerNetwork,
         kj::Maybe<kj::StringPtr> dockerPath,
         kj::TaskSet& waitUntilTasks)
@@ -2202,6 +2203,7 @@ class Server::WorkerService final: public Service,
           config(config),
           timer(timer),
           byteStreamFactory(byteStreamFactory),
+          channelTokenHandler(channelTokenHandler),
           dockerNetwork(dockerNetwork),
           dockerPath(dockerPath),
           waitUntilTasks(waitUntilTasks) {}
@@ -2856,7 +2858,7 @@ class Server::WorkerService final: public Service,
 
       auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
           kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName), waitUntilTasks,
-          kj::mv(cleanupCallback));
+          kj::mv(cleanupCallback), channelTokenHandler);
 
       // Store raw pointer in map (does not own)
       containerClients.insert(kj::str(containerId), client.get());
@@ -2901,6 +2903,7 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
     capnp::ByteStreamFactory& byteStreamFactory;
+    ChannelTokenHandler& channelTokenHandler;
     kj::Network& dockerNetwork;
     kj::Maybe<kj::StringPtr> dockerPath;
     kj::TaskSet& waitUntilTasks;
