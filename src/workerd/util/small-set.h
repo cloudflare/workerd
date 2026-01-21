@@ -9,9 +9,27 @@
 #include <kj/one-of.h>
 #include <kj/vector.h>
 
+#include <concepts>
+
 namespace workerd {
 
-// A set-like container optimized for the common case of storing 0-2 items.
+// Concept for types that support reference counting via addRef().
+// This matches kj::Rc<T> which has an addRef() method returning kj::Rc<T>.
+template <typename T>
+concept RefCountedSmartPtr = requires(T& t) {
+  { t.addRef() } -> std::convertible_to<T>;
+};
+
+// Concept for smart pointers to WeakRef-like types that have a tryGet() method.
+// This is used to constrain forEach() which needs to check if the ref is still valid.
+template <typename T>
+concept WeakRefSmartPtr = RefCountedSmartPtr<T> && requires(T& t) {
+  { t->tryGet() };
+};
+
+// A set-like container optimized for the common case of storing 0-2 items
+// of reference-counted smart pointer types (like kj::Rc<T>).
+//
 // This uses a kj::OneOf to avoid heap allocations for small sets.
 //
 // Performance characteristics:
@@ -31,16 +49,12 @@ namespace workerd {
 //
 // Iterator invalidation:
 // - Iterators are invalidated when items are removed or storage state changes
-// - If iterating over items that may remove themselves, use snapshot():
-//     auto snapshot = set.snapshot();
-//     for (auto item : snapshot) {
-//       item->doSomethingThatMightRemoveItself();
-//     }
+// - If iterating over items that may be removed during iteration, use releaseSnapshot()
+//   to get owned copies that remain valid even if the original is removed from the set.
 //
-// Template parameter T should be a pointer type or trivially copyable type.
-// In case it's not obvious, I just had Claude write this and the test for
-// simplicity.
-template <typename T>
+// Template parameter T must be a reference-counted smart pointer type like kj::Rc<X>
+// that has an addRef() method returning the same type.
+template <RefCountedSmartPtr T>
 class SmallSet {
  public:
   SmallSet() = default;
@@ -48,78 +62,75 @@ class SmallSet {
   SmallSet(SmallSet&&) = default;
   SmallSet& operator=(SmallSet&&) = default;
 
-  // Add an item to the set. Returns true if the item was added, false if it already existed.
-  bool add(T item) {
+  // Add an item to the set. The item is moved into the set.
+  // For move-only types, use containsIf() first to check for duplicates if needed.
+  void add(T item) {
     KJ_SWITCH_ONEOF(storage) {
       KJ_CASE_ONEOF(none, None) {
-        storage = Single(item);
-        return true;
+        storage = Single(kj::mv(item));
+        return;
       }
       KJ_CASE_ONEOF(single, Single) {
-        if (single.item == item) return false;
-        storage = Double(single.item, item);
-        return true;
+        storage = Double(kj::mv(single.item), kj::mv(item));
+        return;
       }
       KJ_CASE_ONEOF(dbl, Double) {
-        if (dbl.first == item || dbl.second == item) return false;
         auto vec = kj::Vector<T>(4);
-        vec.add(dbl.first);
-        vec.add(dbl.second);
-        vec.add(item);
+        vec.add(kj::mv(dbl.first));
+        vec.add(kj::mv(dbl.second));
+        vec.add(kj::mv(item));
         storage = kj::mv(vec);
-        return true;
+        return;
       }
       KJ_CASE_ONEOF(vec, kj::Vector<T>) {
-        // Linear search for the item
-        for (auto& existing: vec) {
-          if (existing == item) return false;
-        }
-        vec.add(item);
-        return true;
+        vec.add(kj::mv(item));
+        return;
       }
     }
     KJ_UNREACHABLE;
   }
 
-  // Remove an item from the set. Returns true if the item was removed, false if not found.
-  bool remove(T item) {
+  // Remove an item matching the predicate. Returns true if an item was removed.
+  // The predicate receives a const reference to each item.
+  template <typename Predicate>
+  bool removeIf(Predicate&& predicate) {
     KJ_SWITCH_ONEOF(storage) {
       KJ_CASE_ONEOF(none, None) {
         return false;
       }
       KJ_CASE_ONEOF(single, Single) {
-        if (single.item == item) {
+        if (predicate(single.item)) {
           storage = None();
           return true;
         }
         return false;
       }
       KJ_CASE_ONEOF(dbl, Double) {
-        if (dbl.first == item) {
-          storage = Single(dbl.second);
+        if (predicate(dbl.first)) {
+          storage = Single(kj::mv(dbl.second));
           return true;
         }
-        if (dbl.second == item) {
-          storage = Single(dbl.first);
+        if (predicate(dbl.second)) {
+          storage = Single(kj::mv(dbl.first));
           return true;
         }
         return false;
       }
       KJ_CASE_ONEOF(vec, kj::Vector<T>) {
-        // Find and remove the item
+        // Find and remove the first matching item
         for (size_t i = 0; i < vec.size(); ++i) {
-          if (vec[i] == item) {
-            // Remove by swapping with last element and truncating
+          if (predicate(vec[i])) {
+            // Remove by overwriting with last element and truncating
             if (i < vec.size() - 1) {
-              vec[i] = vec.back();
+              vec[i] = kj::mv(vec.back());
             }
             vec.removeLast();
 
             // Transition back to smaller state if appropriate
             if (vec.size() == 2) {
-              storage = Double(vec[0], vec[1]);
+              storage = Double(kj::mv(vec[0]), kj::mv(vec[1]));
             } else if (vec.size() == 1) {
-              storage = Single(vec[0]);
+              storage = Single(kj::mv(vec[0]));
             } else if (vec.size() == 0) {
               storage = None();
             }
@@ -134,21 +145,22 @@ class SmallSet {
     KJ_UNREACHABLE;
   }
 
-  // Check if the set contains an item.
-  bool contains(T item) const {
+  // Check if the set contains an item matching the predicate.
+  template <typename Predicate>
+  bool containsIf(Predicate&& predicate) const {
     KJ_SWITCH_ONEOF(storage) {
       KJ_CASE_ONEOF(none, None) {
         return false;
       }
       KJ_CASE_ONEOF(single, Single) {
-        return single.item == item;
+        return predicate(single.item);
       }
       KJ_CASE_ONEOF(dbl, Double) {
-        return dbl.first == item || dbl.second == item;
+        return predicate(dbl.first) || predicate(dbl.second);
       }
       KJ_CASE_ONEOF(vec, kj::Vector<T>) {
         for (auto& existing: vec) {
-          if (existing == item) return true;
+          if (predicate(existing)) return true;
         }
         return false;
       }
@@ -185,37 +197,62 @@ class SmallSet {
     storage = None();
   }
 
-  // Create a snapshot of all items as a vector.
-  // Use this when iterating over items that may remove themselves from the set during iteration.
-  // This is needed because the iterator is invalidated when the storage changes state
-  // (e.g., Double -> Single) or when items are removed from the vector.
+  // Iterate over all valid (non-invalidated) WeakRef items, calling func for each.
+  // This is safe to use even if func modifies the set (e.g., removes items).
   //
-  // Example usage:
-  //   auto snapshot = set.snapshot();
-  //   for (auto item : snapshot) {
-  //     item->doSomethingThatMightRemoveItself();
-  //   }
-  kj::Vector<T> snapshot() const {
-    auto n = size();
-    kj::Vector<T> result(n);  // Pre-allocate exact capacity to avoid reallocation
+  // Only available when T is a smart pointer to a WeakRef-like type with tryGet() method
+  // (e.g., kj::Rc<WeakRef<X>>). The callback receives a reference to the
+  // underlying type (X&).
+  //
+  // Example:
+  //   SmallSet<kj::Rc<WeakRef<Consumer>>> consumers;
+  //   consumers.forEach([&](Consumer& c) {
+  //     c.close(js);  // Safe even if this removes other consumers
+  //   });
+  template <typename F>
+  void forEach(F&& func)
+    requires WeakRefSmartPtr<T>
+  {
     KJ_SWITCH_ONEOF(storage) {
       KJ_CASE_ONEOF(none, None) {
-        // Empty, return empty vector
+        return;
       }
       KJ_CASE_ONEOF(single, Single) {
-        result.add(single.item);
+        KJ_IF_SOME(ref, single.item->tryGet()) {
+          func(ref);
+        }
+        return;
       }
       KJ_CASE_ONEOF(dbl, Double) {
-        result.add(dbl.first);
-        result.add(dbl.second);
+        // The storage state may change during iteration if func modifies the set,
+        // so we take snapshots of the items first. Snapshotting just requires calling
+        // addRef to increment the ref counts.
+        kj::Array<T> refs = kj::arr(dbl.first.addRef(), dbl.second.addRef());
+        for (auto& item: refs) {
+          // We check tryGet on each item in case func invalidated some of them
+          // in prior iterations.
+          KJ_IF_SOME(ref, item->tryGet()) {
+            func(ref);
+          }
+        }
+        return;
       }
       KJ_CASE_ONEOF(vec, kj::Vector<T>) {
-        for (auto item: vec) {
-          result.add(item);
+        // The storage state may change during iteration if func modifies the set,
+        // so we take snapshots of the items first. Snapshotting just requires calling
+        // addRef to increment the ref counts.
+        auto snapshot = KJ_MAP(item, vec) { return item.addRef(); };
+        for (auto& item: snapshot) {
+          // We check tryGet on each item in case func invalidated some of them
+          // in prior iterations.
+          KJ_IF_SOME(ref, item->tryGet()) {
+            func(ref);
+          }
         }
+        return;
       }
     }
-    return result;
+    KJ_UNREACHABLE;
   }
 
  private:
@@ -223,25 +260,25 @@ class SmallSet {
 
   struct Single {
     T item;
-    explicit Single(T item): item(item) {}
+    explicit Single(T item): item(kj::mv(item)) {}
   };
 
   struct Double {
     T first;
     T second;
-    Double(T first, T second): first(first), second(second) {}
+    Double(T first, T second): first(kj::mv(first)), second(kj::mv(second)) {}
   };
 
   using Storage = kj::OneOf<None, Single, Double, kj::Vector<T>>;
   Storage storage = None();
 
  public:
-  // Iterator support
-  class Iterator {
+  // Iterator support - returns const references to items
+  class ConstIterator {
    public:
-    Iterator() = default;
+    ConstIterator() = default;
 
-    T operator*() const {
+    const T& operator*() const {
       KJ_SWITCH_ONEOF(*storage) {
         KJ_CASE_ONEOF(none, None) {
           KJ_FAIL_REQUIRE("Dereferencing end iterator");
@@ -260,6 +297,56 @@ class SmallSet {
         }
       }
       KJ_UNREACHABLE;
+    }
+
+    ConstIterator& operator++() {
+      ++index;
+      return *this;
+    }
+
+    ConstIterator operator++(int) {
+      ConstIterator tmp = *this;
+      ++index;
+      return tmp;
+    }
+
+    bool operator==(const ConstIterator& other) const {
+      return storage == other.storage && index == other.index;
+    }
+
+    bool operator!=(const ConstIterator& other) const {
+      return !(*this == other);
+    }
+
+   private:
+    friend class SmallSet;
+
+    ConstIterator(const Storage* storage, size_t index): storage(storage), index(index) {}
+
+    const Storage* storage = nullptr;
+    size_t index = 0;
+  };
+
+  // Mutable iterator - returns mutable references to items
+  class Iterator {
+   public:
+    Iterator() = default;
+
+    T& operator*() const {
+      if (storage->template is<None>()) {
+        KJ_FAIL_REQUIRE("Dereferencing end iterator");
+      } else if (storage->template is<Single>()) {
+        KJ_REQUIRE(index == 0, "Invalid iterator");
+        return storage->template get<Single>().item;
+      } else if (storage->template is<Double>()) {
+        KJ_REQUIRE(index < 2, "Invalid iterator");
+        auto& dbl = storage->template get<Double>();
+        return index == 0 ? dbl.first : dbl.second;
+      } else {
+        auto& vec = storage->template get<kj::Vector<T>>();
+        KJ_REQUIRE(index < vec.size(), "Invalid iterator");
+        return vec[index];
+      }
     }
 
     Iterator& operator++() {
@@ -284,18 +371,26 @@ class SmallSet {
    private:
     friend class SmallSet;
 
-    Iterator(const Storage* storage, size_t index): storage(storage), index(index) {}
+    Iterator(Storage* storage, size_t index): storage(storage), index(index) {}
 
-    const Storage* storage = nullptr;
+    Storage* storage = nullptr;
     size_t index = 0;
   };
 
-  Iterator begin() const {
+  Iterator begin() {
     return Iterator(&storage, 0);
   }
 
-  Iterator end() const {
+  Iterator end() {
     return Iterator(&storage, size());
+  }
+
+  ConstIterator begin() const {
+    return ConstIterator(&storage, 0);
+  }
+
+  ConstIterator end() const {
+    return ConstIterator(&storage, size());
   }
 };
 

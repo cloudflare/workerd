@@ -1933,5 +1933,127 @@ KJ_TEST("ValueQueue error then destroy before consumer doesn't crash") {
 
 #pragma endregion Queue / Consumer Destruction Order Tests
 
+#pragma region Consumer Destroyed During Push Tests
+// These tests verify that the queue handles consumer destruction gracefully.
+// QueueImpl::push() takes a snapshot of consumers and iterates over it. If a consumer
+// is destroyed (removed from allConsumers) between the snapshot and the iteration,
+// the code must check allConsumers.contains() before dereferencing the pointer.
+// That said, the tests do not actually fail without the relevant fix because the
+// issue is extremely timing-dependent and difficult to trigger deterministically, even
+// with asan enabled. These tests at least document the intended behavior and may catch
+// future regressions.
+
+KJ_TEST("ByteQueue push skips consumer removed from queue during iteration") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+
+    // Create two consumers
+    auto consumer1 = kj::heap<ByteQueue::Consumer>(queue);
+    auto consumer2 = kj::heap<ByteQueue::Consumer>(queue);
+
+    // Destroy consumer2 BEFORE pushing. This directly tests that push()
+    // checks if consumers still exist before calling push on them.
+    // The snapshot taken at the start of push() would have included consumer2,
+    // but consumer2 is no longer in allConsumers when we iterate.
+    consumer2 = nullptr;
+
+    // Push data - should not crash even though consumer2 was in the queue
+    // when it was created but is now destroyed.
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr().fill('x');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1->size() == 4);
+  });
+}
+
+KJ_TEST("ValueQueue push skips consumer removed from queue during iteration") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+
+    auto consumer1 = kj::heap<ValueQueue::Consumer>(queue);
+    auto consumer2 = kj::heap<ValueQueue::Consumer>(queue);
+
+    // Destroy consumer2 before pushing
+    consumer2 = nullptr;
+
+    queue.push(js, getEntry(js, 4));
+
+    KJ_ASSERT(consumer1->size() == 4);
+  });
+}
+
+KJ_TEST("ByteQueue push handles consumer destroyed by microtask between pushes") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+
+    auto consumer1 = kj::heap<ByteQueue::Consumer>(queue);
+    auto consumer2 = kj::heap<ByteQueue::Consumer>(queue);
+
+    // Set up a pending read on consumer1
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+    consumer1->read(js,
+        ByteQueue::ReadRequest(kj::mv(prp.resolver),
+            {
+              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+            }));
+
+    // The continuation destroys consumer2
+    MustCall<ReadContinuation> readContinuation([&consumer2](jsg::Lock& js, ReadResult&& result) {
+      consumer2 = nullptr;
+      return js.resolvedPromise(kj::mv(result));
+    });
+    prp.promise.then(js, readContinuation);
+
+    // First push - resolves consumer1's read, schedules microtask that will destroy consumer2
+    auto store1 = jsg::BackingStore::alloc(js, 4);
+    store1.asArrayPtr().fill('x');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store1))));
+
+    // Run microtasks - this destroys consumer2
+    js.runMicrotasks();
+
+    // Second push - consumer2 is now destroyed, should not crash
+    auto store2 = jsg::BackingStore::alloc(js, 4);
+    store2.asArrayPtr().fill('y');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store2))));
+
+    // consumer1 should have the second push's data buffered
+    KJ_ASSERT(consumer1->size() == 4);
+  });
+}
+
+KJ_TEST("ByteQueue maybeUpdateBackpressure skips destroyed consumers") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+
+    auto consumer1 = kj::heap<ByteQueue::Consumer>(queue);
+    auto consumer2 = kj::heap<ByteQueue::Consumer>(queue);
+
+    // Push some data so consumers have size
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr().fill('x');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+
+    KJ_ASSERT(consumer1->size() == 4);
+    KJ_ASSERT(consumer2->size() == 4);
+    KJ_ASSERT(queue.size() == 4);
+
+    // Destroy consumer2
+    consumer2 = nullptr;
+
+    // Trigger backpressure recalculation by pushing more data
+    auto store2 = jsg::BackingStore::alloc(js, 4);
+    store2.asArrayPtr().fill('y');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store2))));
+
+    // Should not crash, and size should reflect only consumer1
+    KJ_ASSERT(consumer1->size() == 8);
+    KJ_ASSERT(queue.size() == 8);
+  });
+}
+#pragma endregion Consumer Destroyed During Push Tests
+
 }  // namespace
 }  // namespace workerd::api
