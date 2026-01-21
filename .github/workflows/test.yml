@@ -106,7 +106,7 @@ jobs:
       suffix: 'coverage'
       # Use ci-linux-common instead of ci-linux to avoid overriding coverage test_tag_filters
       # (ci-linux sets test_tag_filters that would include container tests which require docker)
-      extra_bazel_args: '--config=ci-test --config=ci-linux-common --config=ci-limit-storage'
+      extra_bazel_args: '--config=ci-test --config=ci-linux-common --config=ci-limit-storage --config=coverage'
       upload_test_logs: true
       upload_binary: false
       build_container_images: false

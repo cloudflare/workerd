@@ -125,8 +125,6 @@ jobs:
         run: |
           bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --profile build-win-workaround.bazel-profile.gz --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
-        # timestamps are no longer being added here, the GitHub logs include timestamps (Use
-        # 'Show timestamps' on the web interface)
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
       - name: Build and load container images
@@ -142,23 +140,20 @@ jobs:
         if: inputs.run_tests
         run: |
           bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
-      - name: Setup LLVM tools for coverage
-        if: inputs.run_coverage
-        run: |
-          sudo apt-get update && sudo apt-get install -y llvm
-          sudo ln -sf /usr/bin/llvm-profdata /usr/local/bin/llvm-profdata
-          sudo ln -sf /usr/bin/llvm-cov /usr/local/bin/llvm-cov
       - name: Bazel coverage
         if: inputs.run_coverage
         run: |
-          bazel coverage --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=coverage ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+          bazel coverage --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
       - name: Upload coverage to Codecov
         if: inputs.run_coverage
         uses: codecov/codecov-action@v5
         with:
-          files: ./bazel-out/_coverage/_coverage_report.dat
+          # Use bazel info to get the actual output path, avoiding symlink issues
+          files: ${{ github.workspace }}/bazel-out/_coverage/_coverage_report.dat
           fail_ci_if_error: true
           verbose: true
+          disable_search: true
+          root_dir: ${{ github.workspace }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - name: Parse headers

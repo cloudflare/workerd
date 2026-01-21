@@ -132,12 +132,12 @@ set TEST_EXIT=!ERRORLEVEL!
 exit /b !TEST_EXIT!
 """
 
-SH_TEMPLATE = """#!/bin/sh
-set -e
+SH_TEMPLATE = """#!/bin/bash
+set -euo pipefail
 
 # Set up coverage for workerd subprocess
-if [ -n "$COVERAGE_DIR" ]; then
-    export LLVM_PROFILE_FILE="$COVERAGE_DIR/%p.profraw"
+if [ -n "${{COVERAGE_DIR:-}}" ]; then
+    export LLVM_PROFILE_FILE="$COVERAGE_DIR/%p-%m.profraw"
     export KJ_CLEAN_SHUTDOWN=1
 fi
 
