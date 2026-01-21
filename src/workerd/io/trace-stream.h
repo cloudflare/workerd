@@ -101,7 +101,7 @@ class TailStreamWriter final {
     size_t queueSize = 0;
     // The number of tail events we had to drop. We'll send a warning indicating this at the end of
     // the stream.
-    size_t droppedEvents = 0;
+    uint32_t droppedEvents = 0;
     workerd::util::Queue<TailEvent> queue;
 
     Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}

@@ -512,6 +512,21 @@ struct DiagnosticChannelEvent final {
   DiagnosticChannelEvent clone() const;
 };
 
+// Describes a stream diagnostics event. Currently only droppedEvents is supported.
+struct StreamDiagnosticsEvent final {
+  explicit StreamDiagnosticsEvent(uint32_t droppedEventsCount);
+  StreamDiagnosticsEvent(rpc::Trace::StreamDiagnosticsEvent::Reader reader);
+  StreamDiagnosticsEvent(StreamDiagnosticsEvent&&) = default;
+  KJ_DISALLOW_COPY(StreamDiagnosticsEvent);
+
+  // The count of dropped events for the "droppedEvents" diagnostic. When we support other event
+  // types, this should be replaced with a kj::OneOf<> of all the different types.
+  uint32_t droppedEventsCount;
+
+  void copyTo(rpc::Trace::StreamDiagnosticsEvent::Builder builder) const;
+  StreamDiagnosticsEvent clone() const;
+};
+
 // Describes a log event
 struct Log final {
   explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
@@ -765,6 +780,7 @@ struct TailEvent final {
       DiagnosticChannelEvent,
       Exception,
       Log,
+      StreamDiagnosticsEvent,
       Return,
       CustomInfo>;
 
