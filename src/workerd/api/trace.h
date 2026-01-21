@@ -199,13 +199,13 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
     kj::Array<tracing::FetchEventInfo::Header> headers;
     kj::String method;
     kj::String url;
-    uint64_t bodySize;
+    kj::Maybe<uint64_t> bodySize;
 
     Detail(jsg::Optional<jsg::V8Ref<v8::Object>> cf,
         kj::Array<tracing::FetchEventInfo::Header> headers,
         kj::String method,
         kj::String url,
-        uint64_t bodySize);
+        kj::Maybe<uint64_t> bodySize);
 
     JSG_MEMORY_INFO(Detail) {
       tracker.trackField("cf", cf);
@@ -263,7 +263,7 @@ class TraceItem::FetchEventInfo::Response final: public jsg::Object {
 
  private:
   uint16_t status;
-  uint64_t bodySize;
+  kj::Maybe<uint64_t> bodySize;
 };
 
 class TraceItem::JsRpcEventInfo final: public jsg::Object {

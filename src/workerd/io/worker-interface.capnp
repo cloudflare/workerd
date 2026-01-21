@@ -109,7 +109,9 @@ struct Trace @0x8e8d911203762d34 {
       value @1 :Text;
     }
     bodySize @4 :UInt64;
-    # Request body size in bytes. 0 if unknown or no body.
+    # Request body size in bytes. Only valid if hasBodySize is true.
+    hasBodySize @5 :Bool;
+    # True if bodySize contains a valid value (from Content-Length header).
   }
 
   struct JsRpcEventInfo {
@@ -161,7 +163,9 @@ struct Trace @0x8e8d911203762d34 {
   struct FetchResponseInfo {
     statusCode @0 :UInt16;
     bodySize @1 :UInt64;
-    # Response body size in bytes. 0 if unknown or no body.
+    # Response body size in bytes. Only valid if hasBodySize is true.
+    hasBodySize @2 :Bool;
+    # True if bodySize contains a valid value (actual bytes written).
   }
 
   cpuTime @10 :UInt64;

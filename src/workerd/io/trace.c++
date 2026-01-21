@@ -327,7 +327,7 @@ FetchEventInfo::FetchEventInfo(kj::HttpMethod method,
     kj::String url,
     kj::String cfJson,
     kj::Array<Header> headers,
-    uint64_t bodySize)
+    kj::Maybe<uint64_t> bodySize)
     : method(method),
       url(kj::mv(url)),
       cfJson(kj::mv(cfJson)),
@@ -337,8 +337,11 @@ FetchEventInfo::FetchEventInfo(kj::HttpMethod method,
 FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
     : method(validateMethod(reader.getMethod())),
       url(kj::str(reader.getUrl())),
-      cfJson(kj::str(reader.getCfJson())),
-      bodySize(reader.getBodySize()) {
+      cfJson(kj::str(reader.getCfJson())) {
+  // Only set bodySize if hasBodySize is true
+  if (reader.getHasBodySize()) {
+    bodySize = reader.getBodySize();
+  }
   kj::Vector<Header> v;
   v.addAll(reader.getHeaders());
   headers = v.releaseAsArray();
@@ -348,7 +351,10 @@ void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
   builder.setMethod(static_cast<capnp::HttpMethod>(method));
   builder.setUrl(url);
   builder.setCfJson(cfJson);
-  builder.setBodySize(bodySize);
+  KJ_IF_SOME(size, bodySize) {
+    builder.setBodySize(size);
+    builder.setHasBodySize(true);
+  }
 
   auto list = builder.initHeaders(headers.size());
   for (auto i: kj::indices(headers)) {
@@ -601,17 +607,24 @@ HibernatableWebSocketEventInfo::Type HibernatableWebSocketEventInfo::readFrom(
   }
 }
 
-FetchResponseInfo::FetchResponseInfo(uint16_t statusCode, uint64_t bodySize)
+FetchResponseInfo::FetchResponseInfo(uint16_t statusCode, kj::Maybe<uint64_t> bodySize)
     : statusCode(statusCode),
       bodySize(bodySize) {}
 
 FetchResponseInfo::FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader)
-    : statusCode(reader.getStatusCode()),
-      bodySize(reader.getBodySize()) {}
+    : statusCode(reader.getStatusCode()) {
+  // Only set bodySize if hasBodySize is true
+  if (reader.getHasBodySize()) {
+    bodySize = reader.getBodySize();
+  }
+}
 
 void FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const {
   builder.setStatusCode(statusCode);
-  builder.setBodySize(bodySize);
+  KJ_IF_SOME(size, bodySize) {
+    builder.setBodySize(size);
+    builder.setHasBodySize(true);
+  }
 }
 
 FetchResponseInfo FetchResponseInfo::clone() const {

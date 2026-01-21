@@ -305,7 +305,7 @@ TraceItem::FetchEventInfo::Request::Detail::Detail(jsg::Optional<jsg::V8Ref<v8::
     kj::Array<tracing::FetchEventInfo::Header> headers,
     kj::String method,
     kj::String url,
-    uint64_t bodySize)
+    kj::Maybe<uint64_t> bodySize)
     : cf(kj::mv(cf)),
       headers(kj::mv(headers)),
       method(kj::mv(method)),
@@ -364,13 +364,13 @@ kj::String TraceItem::FetchEventInfo::Request::getUrl() {
 }
 
 jsg::Optional<double> TraceItem::FetchEventInfo::Request::getBodySize() {
-  // Return null if bodySize is 0 (unknown/no body), otherwise return the size.
+  // Return null if bodySize is unknown (kj::none), otherwise return the size.
   // Note: Converting uint64_t to double may lose precision for sizes larger than 2^53 bytes
   // (approximately 9 petabytes), though this is unlikely in practice.
-  if (detail->bodySize == 0) {
-    return kj::none;
+  KJ_IF_SOME(size, detail->bodySize) {
+    return static_cast<double>(size);
   }
-  return static_cast<double>(detail->bodySize);
+  return kj::none;
 }
 
 jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request::getUnredacted(
@@ -388,13 +388,13 @@ uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
 }
 
 jsg::Optional<double> TraceItem::FetchEventInfo::Response::getBodySize() {
-  // Return null if bodySize is 0 (unknown/no body), otherwise return the size.
+  // Return null if bodySize is unknown (kj::none), otherwise return the size.
   // Note: Converting uint64_t to double may lose precision for sizes larger than 2^53 bytes
   // (approximately 9 petabytes), though this is unlikely in practice.
-  if (bodySize == 0) {
-    return kj::none;
+  KJ_IF_SOME(size, bodySize) {
+    return static_cast<double>(size);
   }
-  return static_cast<double>(bodySize);
+  return kj::none;
 }
 
 TraceItem::JsRpcEventInfo::JsRpcEventInfo(

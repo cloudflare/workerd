@@ -379,9 +379,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     // TODO(someday): Track actual bytes consumed from request body stream instead of
     // relying on Content-Length header. This is less critical than response body size
     // since request bodies typically have accurate Content-Length.
-    // Note: bodySize of 0 means either no Content-Length header or Content-Length: 0;
-    // this is acceptable for trace events as both semantically indicate no/empty body data.
-    uint64_t bodySize = 0;
+    // bodySize is kj::none if no Content-Length header was present (unknown size).
+    kj::Maybe<uint64_t> bodySize;
     KJ_IF_SOME(contentLength, headers.get(kj::HttpHeaderId::CONTENT_LENGTH)) {
       KJ_IF_SOME(parsed, contentLength.tryParseAs<uint64_t>()) {
         bodySize = parsed;
@@ -500,7 +499,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         // instead of the Content-Length header value.
         KJ_IF_SOME(t, deferredWorkerTracer) {
           if (deferredHttpResponseStatus != 0) {
-            uint64_t actualBodySize = 0;
+            kj::Maybe<uint64_t> actualBodySize;
             KJ_IF_SOME(counter, traceByteCounter) {
               actualBodySize = counter->get();
             }
@@ -521,10 +520,11 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         return kj::mv(e);
       });
     } else {
-      // No proxyTask means no streaming body - report trace now if we have deferred info
+      // No proxyTask means no streaming body - report trace now if we have deferred info.
+      // bodySize is kj::none since we don't have the byte counter to track actual size.
       KJ_IF_SOME(t, deferredWorkerTracer) {
         if (deferredHttpResponseStatus != 0) {
-          t.setReturn(kj::none, tracing::FetchResponseInfo(deferredHttpResponseStatus, 0));
+          t.setReturn(kj::none, tracing::FetchResponseInfo(deferredHttpResponseStatus));
         } else {
           t.setReturn(kj::none);
         }

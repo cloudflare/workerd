@@ -179,9 +179,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cac
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
   obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
-  // Only include bodySize if it's non-zero (indicating actual body size was tracked)
-  if (info.bodySize > 0) {
-    obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(info.bodySize)));
+  // Include bodySize if it's known (kj::Maybe has a value)
+  KJ_IF_SOME(size, info.bodySize) {
+    obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(size)));
   }
   return obj;
 }
@@ -206,9 +206,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache)
       js.arr(info.headers.asPtr(),
           [&cache, &ToJs](jsg::Lock& js, const auto& header) { return ToJs(js, header, cache); }));
 
-  // Only include bodySize if it's non-zero (indicating request body size was tracked)
-  if (info.bodySize > 0) {
-    obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(info.bodySize)));
+  // Include bodySize if it's known (kj::Maybe has a value)
+  KJ_IF_SOME(size, info.bodySize) {
+    obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(size)));
   }
 
   return obj;
