@@ -611,9 +611,9 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     decrementCount = false;
     --controller.pendingReadCount;
 
-    KJ_ASSERT(!js.v8Isolate->IsExecutionTerminating());
-
-    if (!controller.isReadPending()) {
+    // Skip pending state callbacks if execution is being terminated (e.g., CPU time limit)
+    // since we can't safely execute JavaScript in that state.
+    if (!controller.isReadPending() && !js.v8Isolate->IsExecutionTerminating()) {
       KJ_IF_SOME(state, controller.maybePendingState) {
         KJ_SWITCH_ONEOF(state) {
           KJ_CASE_ONEOF(closed, StreamStates::Closed) {
