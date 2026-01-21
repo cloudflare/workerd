@@ -10,9 +10,6 @@ bazel_dep(name = "abseil-cpp", version = "20260107.0")
 # apple_support
 bazel_dep(name = "apple_support", version = "2.1.0")
 
-# aspect_bazel_lib
-bazel_dep(name = "aspect_bazel_lib", version = "2.22.2")
-
 # aspect_rules_esbuild
 bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
 
@@ -25,8 +22,8 @@ bazel_dep(name = "aspect_rules_lint", version = "1.13.0")
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.8.3")
 
-# bazel_features
-bazel_dep(name = "bazel_features", version = "1.39.0")
+# bazel_lib
+bazel_dep(name = "bazel_lib", version = "3.1.1")
 
 # bazel_skylib
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
