@@ -1217,7 +1217,9 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     liftKj(info, [&]() -> v8::Local<v8::Value> {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.This();
+      // With the interceptor on the instance template, HolderV2() returns the instance
+      // (same as This()), so we can use the non-deprecated HolderV2() API.
+      auto obj = info.HolderV2();
       auto& wrapper = TypeWrapper::from(isolate);
       if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
@@ -1267,7 +1269,10 @@ struct ResourceTypeBuilder {
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() {
-    prototype->SetHandler(
+    // Install on instance template (not prototype) so that HolderV2() == This().
+    // This matches Chromium's approach and avoids needing the deprecated
+    // PropertyCallbackInfo::This().
+    instance->SetHandler(
         WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>{});
   }
 
