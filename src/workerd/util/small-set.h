@@ -64,7 +64,6 @@ class SmallSet {
 
   // Add an item to the set. The item is moved into the set.
   // For move-only types, use containsIf() first to check for duplicates if needed.
-  // Returns true if the item was added.
   void add(T item) {
     KJ_SWITCH_ONEOF(storage) {
       KJ_CASE_ONEOF(none, None) {
@@ -121,7 +120,7 @@ class SmallSet {
         // Find and remove the first matching item
         for (size_t i = 0; i < vec.size(); ++i) {
           if (predicate(vec[i])) {
-            // Remove by swapping with last element and truncating
+            // Remove by overwriting with last element and truncating
             if (i < vec.size() - 1) {
               vec[i] = kj::mv(vec.back());
             }
