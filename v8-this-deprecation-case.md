@@ -1,86 +1,84 @@
-# Case for PropertyCallbackInfo::This() (or Equivalent)
+# Case for PropertyCallbackInfo::This()
 
 ## Summary
 
-After investigation, we found that **most uses of `PropertyCallbackInfo::This()` in workerd can be eliminated** by aligning with Chromium's patterns. However, there's one remaining case for legacy Workers.
+Cloudflare Workers (workerd) genuinely needs `PropertyCallbackInfo::This()` and **cannot follow Chromium's pattern**. We tested moving interceptors from prototype to instance template (like Chromium does) and it breaks RPC functionality.
 
-## What We Found
+## What We Tested
 
-### 1. Prototype Properties (SOLVED)
+### Attempt: Move Interceptors to Instance Template
 
-Workerd already migrated to `SetAccessorProperty` with `FunctionTemplate` for prototype properties in 2022:
-
-```cpp
-auto getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
-prototype->SetAccessorProperty(v8Name, getterFn, ...);
-```
-
-This uses `FunctionCallbackInfo::This()` which is **NOT deprecated**. Workers with compatibility date >= 2022-01-31 use this pattern.
-
-### 2. Named Property Interceptors (CAN BE SOLVED)
-
-We discovered workerd puts interceptors on the **prototype**, while Chromium puts them on the **instance template**:
+Chromium puts interceptors on `instance_template`, while workerd puts them on `prototype`:
 
 ```python
 # Chromium (interface.py line 5815)
-interceptor_template = "${instance_template}"  # Not prototype!
+interceptor_template = "${instance_template}"
 ```
-
-When interceptor is on instance: `HolderV2() == This()` → can use `HolderV2()`
-When interceptor is on prototype: `HolderV2() != This()` → need `This()`
-
-**Fix**: Change `registerWildcardProperty()` from:
-```cpp
-prototype->SetHandler(...)
-```
-to:
-```cpp
-instance->SetHandler(...)
-```
-
-This matches Chromium and eliminates the need for `This()` in interceptors. See `interceptor-on-instance.patch`.
-
-### 3. Legacy Instance Properties (NEEDS SOLUTION)
-
-Workers with compatibility date < 2022-01-31 use instance properties via `SetNativeDataProperty`. These need `This()` to detect "prototype-as-this" attacks:
 
 ```cpp
-auto obj = info.HolderV2();
-if (obj != info.This()) {  // Still need This() for this check
-  throwTypeError(isolate, kIllegalInvocation);
-}
+// Workerd (resource.h)
+prototype->SetHandler(...)  // On prototype, not instance
 ```
 
-## Observable Differences
+We tried changing workerd to match Chromium:
 
-Moving interceptor from prototype to instance may affect:
+```cpp
+instance->SetHandler(...)  // Changed to instance
+```
 
-| Operation | Prototype Interceptor | Instance Interceptor |
-|-----------|----------------------|---------------------|
-| `hasOwnProperty('x')` | Query callback NOT called | Query callback called (if defined) |
-| `Object.keys(obj)` | Enumerator on prototype | Enumerator on instance |
+**Result**: JSG unit tests pass, but **RPC tests fail**:
+```
+TypeError: stub.foo is not a function
+TypeError: stub.increment is not a function
+```
 
-However, workerd uses `kNonMasking` and has no query callback, so impact may be minimal.
+### Why It Fails
 
-V8 test `InterceptorHasOwnProperty` (test-api-interceptors.cc:1071) confirms:
-- With interceptor on instance: `hasOwnProperty` returns false for non-intercepted properties
-- After setting the property: `hasOwnProperty` returns true
+Workerd uses prototype-level interceptors for **RPC stubs**. These are wrapper objects that intercept any property access and forward it over RPC:
 
-## Questions for V8 Team
+```javascript
+const stub = env.MY_DURABLE_OBJECT.get(id);
+stub.anyMethodName(args);  // Intercepted and sent over RPC
+```
 
-1. **For the legacy instance property case**: Is there a recommended alternative to `This()` for detecting when an object is accessed through the prototype chain vs directly?
+With interceptor on prototype:
+- Works for any object inheriting from `JsRpcStub.prototype`
+- Enables flexible RPC proxying
 
-2. **For interceptors**: V8 bug 455600234 says "For interceptors, using This() is always semantically correct." Does this mean `This()` will remain available for interceptors even after deprecation?
+With interceptor on instance:
+- Only works for objects created directly from the template
+- Breaks RPC stub pattern
 
-3. **Timeline**: When will `This()` actually be removed vs just deprecated with warnings?
+This is fundamentally different from Chromium's use of interceptors (HTMLCollection, Storage, etc.) where the interceptor is on the actual object being accessed.
 
-## Summary
+## What Workerd Needs
 
-| Use Case | Current Status | Solution |
-|----------|---------------|----------|
-| Prototype properties (new Workers) | Uses `FunctionCallbackInfo::This()` | Already solved |
-| Named interceptors | Uses `PropertyCallbackInfo::This()` | Move to instance template |
-| Instance properties (legacy Workers) | Uses `PropertyCallbackInfo::This()` | Needs `This()` or alternative |
+| Use Case | API Needed | Can Migrate? |
+|----------|-----------|--------------|
+| Prototype properties (new Workers) | `FunctionCallbackInfo::This()` | Already done (2022) |
+| Named interceptors (RPC stubs) | `PropertyCallbackInfo::This()` | **No** - breaks RPC |
+| Instance properties (legacy Workers) | `PropertyCallbackInfo::This()` | **No** - backwards compat |
+
+## Request for V8 Team
+
+`PropertyCallbackInfo::This()` is needed for workerd's legitimate use case of prototype-level interceptors. This is not a case of doing something wrong that can be fixed by following Chromium's pattern - we tested that and it breaks functionality.
+
+Options:
+1. **Keep `This()` available** for prototype-level interceptors
+2. **Provide alternative API** to get the receiver in `PropertyCallbackInfo`
+3. **Clarify the migration path** for embedders who need prototype-level interceptors
+
+## Test Evidence
+
+```bash
+# Without patch (interceptor on prototype):
+bazel test '//src/workerd/api/tests:js-rpc-test@'  # PASSED
+
+# With patch (interceptor on instance):
+bazel test '//src/workerd/api/tests:js-rpc-test@'  # FAILED
+# TypeError: stub.foo is not a function
+# TypeError: stub.increment is not a function
+```
 
 ---
 
