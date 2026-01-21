@@ -20,6 +20,7 @@ namespace {
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
   V(BODYSIZE, "bodySize")                                                                          \
+  V(REQUESTBODYSIZE, "requestBodySize")                                                            \
   V(CANCELED, "canceled")                                                                          \
   V(CHANNEL, "channel")                                                                            \
   V(CFJSON, "cfJson")                                                                              \
@@ -179,9 +180,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cac
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
   obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
-  // Include bodySize if it's known (kj::Maybe has a value)
+  // Include bodySize (response body) if it's known
   KJ_IF_SOME(size, info.bodySize) {
     obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(size)));
+  }
+  // Include requestBodySize if it's known
+  KJ_IF_SOME(size, info.requestBodySize) {
+    obj.set(js, REQUESTBODYSIZE_STR, js.num(static_cast<double>(size)));
   }
   return obj;
 }
@@ -206,10 +211,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache)
       js.arr(info.headers.asPtr(),
           [&cache, &ToJs](jsg::Lock& js, const auto& header) { return ToJs(js, header, cache); }));
 
-  // Include bodySize if it's known (kj::Maybe has a value)
-  KJ_IF_SOME(size, info.bodySize) {
-    obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(size)));
-  }
+  // Note: Request body size is tracked in FetchResponseInfo, not here,
+  // because it's only known after the request body is fully consumed.
 
   return obj;
 }

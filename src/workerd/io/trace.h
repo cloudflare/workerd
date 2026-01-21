@@ -309,11 +309,8 @@ kj::String KJ_STRINGIFY(const SpanContext& context);
 struct FetchEventInfo final {
   struct Header;
 
-  explicit FetchEventInfo(kj::HttpMethod method,
-      kj::String url,
-      kj::String cfJson,
-      kj::Array<Header> headers,
-      kj::Maybe<uint64_t> bodySize = kj::none);
+  explicit FetchEventInfo(
+      kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
   FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
   FetchEventInfo(FetchEventInfo&&) = default;
   FetchEventInfo& operator=(FetchEventInfo&&) = default;
@@ -344,7 +341,8 @@ struct FetchEventInfo final {
   // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
   kj::String cfJson;
   kj::Array<Header> headers;
-  kj::Maybe<uint64_t> bodySize;  // Request body size in bytes. kj::none if unknown.
+  // Note: Request body size is tracked in FetchResponseInfo, not here, because
+  // it's only known after the request body is fully consumed.
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
   FetchEventInfo clone() const;
@@ -488,14 +486,17 @@ struct CustomEventInfo final {
 
 // Describes a fetch response
 struct FetchResponseInfo final {
-  explicit FetchResponseInfo(uint16_t statusCode, kj::Maybe<uint64_t> bodySize = kj::none);
+  explicit FetchResponseInfo(uint16_t statusCode,
+      kj::Maybe<uint64_t> bodySize = kj::none,
+      kj::Maybe<uint64_t> requestBodySize = kj::none);
   FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
   FetchResponseInfo(FetchResponseInfo&&) = default;
   FetchResponseInfo& operator=(FetchResponseInfo&&) = default;
   KJ_DISALLOW_COPY(FetchResponseInfo);
 
   uint16_t statusCode;
-  kj::Maybe<uint64_t> bodySize;  // Response body size in bytes. kj::none if unknown.
+  kj::Maybe<uint64_t> bodySize;         // Response body size in bytes. kj::none if unknown.
+  kj::Maybe<uint64_t> requestBodySize;  // Request body size in bytes. kj::none if unknown.
 
   void copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const;
   FetchResponseInfo clone() const;

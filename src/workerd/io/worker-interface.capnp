@@ -108,10 +108,10 @@ struct Trace @0x8e8d911203762d34 {
       name @0 :Text;
       value @1 :Text;
     }
-    bodySize @4 :UInt64;
-    # Request body size in bytes. Only valid if hasBodySize is true.
-    hasBodySize @5 :Bool;
-    # True if bodySize contains a valid value (from Content-Length header).
+    # Fields @4 and @5 were request body size fields that have been moved to
+    # FetchResponseInfo where they can be populated after the body is consumed.
+    obsolete4 @4 :UInt64;
+    obsolete5 @5 :Bool;
   }
 
   struct JsRpcEventInfo {
@@ -166,6 +166,11 @@ struct Trace @0x8e8d911203762d34 {
     # Response body size in bytes. Only valid if hasBodySize is true.
     hasBodySize @2 :Bool;
     # True if bodySize contains a valid value (actual bytes written).
+    requestBodySize @3 :UInt64;
+    # Request body size in bytes. Only valid if hasRequestBodySize is true.
+    # This is actual bytes consumed, not Content-Length header.
+    hasRequestBodySize @4 :Bool;
+    # True if requestBodySize contains a valid value.
   }
 
   cpuTime @10 :UInt64;

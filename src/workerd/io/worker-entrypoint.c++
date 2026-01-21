@@ -26,8 +26,9 @@ namespace workerd {
 
 namespace {
 
-// Forward declaration for deferred body size tracking
+// Forward declarations for deferred body size tracking
 struct ResponseBodyByteCounter;
+struct RequestBodyByteCounter;
 
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
@@ -104,6 +105,7 @@ class WorkerEntrypoint final: public WorkerInterface {
 
   // For deferred trace reporting after response body streaming completes
   kj::Maybe<kj::Own<ResponseBodyByteCounter>> traceByteCounter;
+  kj::Maybe<kj::Own<RequestBodyByteCounter>> traceRequestByteCounter;
   kj::Maybe<BaseTracer&> deferredWorkerTracer;
   uint deferredHttpResponseStatus = 0;
 
@@ -149,6 +151,19 @@ struct ResponseBodyByteCounter: public kj::Refcounted {
   }
 };
 
+// A refcounted byte counter for tracking request body bytes read.
+struct RequestBodyByteCounter: public kj::Refcounted {
+  uint64_t bytesRead = 0;
+
+  void add(size_t bytes) {
+    bytesRead += bytes;
+  }
+
+  uint64_t get() const {
+    return bytesRead;
+  }
+};
+
 // Wraps an AsyncOutputStream to count bytes written. Used to track actual
 // response body size for trace events (as opposed to Content-Length header).
 // Note: This wrapper intentionally doesn't implement tryPumpFrom() optimization
@@ -183,6 +198,37 @@ class ByteCountingOutputStream final: public kj::AsyncOutputStream {
  private:
   kj::Own<kj::AsyncOutputStream> inner;
   kj::Own<ResponseBodyByteCounter> counter;
+};
+
+// Wraps an AsyncInputStream to count bytes read. Used to track actual
+// request body size for trace events.
+class ByteCountingInputStream final: public kj::AsyncInputStream {
+ public:
+  ByteCountingInputStream(kj::AsyncInputStream& inner, kj::Own<RequestBodyByteCounter> counter)
+      : inner(inner),
+        counter(kj::mv(counter)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner.tryRead(buffer, minBytes, maxBytes).then([this](size_t bytesRead) {
+      counter->add(bytesRead);
+      return bytesRead;
+    });
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return inner.tryGetLength();
+  }
+
+  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
+    // We can't use the optimized pumpTo from the inner stream because we need
+    // to count the bytes. Instead, we use the default implementation which
+    // calls tryRead() in a loop, allowing us to count each chunk.
+    return kj::AsyncInputStream::pumpTo(output, amount);
+  }
+
+ private:
+  kj::AsyncInputStream& inner;
+  kj::Own<RequestBodyByteCounter> counter;
 };
 
 // Simple wrapper around `HttpService::Response` to let us know if the response was sent
@@ -375,21 +421,11 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       return tracing::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
     };
 
-    // Extract request body size from Content-Length header if present.
-    // TODO(someday): Track actual bytes consumed from request body stream instead of
-    // relying on Content-Length header. This is less critical than response body size
-    // since request bodies typically have accurate Content-Length.
-    // bodySize is kj::none if no Content-Length header was present (unknown size).
-    kj::Maybe<uint64_t> bodySize;
-    KJ_IF_SOME(contentLength, headers.get(kj::HttpHeaderId::CONTENT_LENGTH)) {
-      KJ_IF_SOME(parsed, contentLength.tryParseAs<uint64_t>()) {
-        bodySize = parsed;
-      }
-    }
+    // Note: Request body size is tracked separately and reported in FetchResponseInfo
+    // after the body is fully consumed, not here in FetchEventInfo.
 
     t.setEventInfo(*incomingRequest,
-        tracing::FetchEventInfo(
-            method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray), bodySize));
+        tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
     workerTracer = t;
   }
 
@@ -401,8 +437,24 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   TRACE_EVENT_BEGIN("workerd", "WorkerEntrypoint::request() waiting on context",
       PERFETTO_TRACK_FROM_POINTER(&context), PERFETTO_FLOW_FROM_POINTER(this));
 
+  // Create request body byte counter if tracing is enabled.
+  // We wrap the request body stream to count actual bytes consumed.
+  kj::Maybe<kj::Own<ByteCountingInputStream>> wrappedRequestBody;
+  if (hasTracer) {
+    auto counter = kj::refcounted<RequestBodyByteCounter>();
+    traceRequestByteCounter = kj::addRef(*counter);
+    wrappedRequestBody = kj::heap<ByteCountingInputStream>(requestBody, kj::mv(counter));
+  }
+
+  // Get reference to the appropriate request body stream to pass to handler.
+  // If tracing is enabled, use the wrapped stream; otherwise use the original.
+  kj::AsyncInputStream& requestBodyForHandler =
+      wrappedRequestBody.map([](auto& wrapped) -> kj::AsyncInputStream& {
+    return *wrapped;
+  }).orDefault(requestBody);
+
   return context
-      .run([this, &context, method, url, &headers, &requestBody,
+      .run([this, &context, method, url, &headers, &requestBodyForHandler,
                &metrics = incomingRequest->getMetrics(), &wrappedResponse = *wrappedResponse,
                entrypointName = entrypointName](Worker::Lock& lock) mutable {
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
@@ -421,8 +473,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
                          ->getSignal());
     }
 
-    return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
-        cfBlobJson, lock,
+    return lock.getGlobalScope().request(method, url, headers, requestBodyForHandler,
+        wrappedResponse, cfBlobJson, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), kj::mv(signal));
   })
       .then([this, &wrappedResponse = *wrappedResponse, workerTracer](
@@ -494,17 +546,22 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     KJ_IF_SOME(p, proxyTask) {
       return p
           .then([this]() {
-        // proxyTask completed successfully - report actual body size to tracer.
-        // We deferred setReturn() to here so we can report actual bytes written
-        // instead of the Content-Length header value.
+        // proxyTask completed successfully - report actual body sizes to tracer.
+        // We deferred setReturn() to here so we can report actual bytes written/read
+        // instead of Content-Length header values.
         KJ_IF_SOME(t, deferredWorkerTracer) {
           if (deferredHttpResponseStatus != 0) {
-            kj::Maybe<uint64_t> actualBodySize;
+            kj::Maybe<uint64_t> responseBodySize;
             KJ_IF_SOME(counter, traceByteCounter) {
-              actualBodySize = counter->get();
+              responseBodySize = counter->get();
             }
-            t.setReturn(
-                kj::none, tracing::FetchResponseInfo(deferredHttpResponseStatus, actualBodySize));
+            kj::Maybe<uint64_t> requestBodySize;
+            KJ_IF_SOME(counter, traceRequestByteCounter) {
+              requestBodySize = counter->get();
+            }
+            t.setReturn(kj::none,
+                tracing::FetchResponseInfo(
+                    deferredHttpResponseStatus, responseBodySize, requestBodySize));
           } else {
             t.setReturn(kj::none);
           }
@@ -512,25 +569,32 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         // Clean up deferred trace state
         deferredWorkerTracer = kj::none;
         traceByteCounter = kj::none;
+        traceRequestByteCounter = kj::none;
       }).catch_([this, metrics = kj::mv(metrics)](kj::Exception&& e) mutable -> kj::Promise<void> {
         // Clean up deferred trace state on failure too
         deferredWorkerTracer = kj::none;
         traceByteCounter = kj::none;
+        traceRequestByteCounter = kj::none;
         metrics->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
         return kj::mv(e);
       });
     } else {
       // No proxyTask means no streaming body - report trace now if we have deferred info.
-      // bodySize is kj::none since we don't have the byte counter to track actual size.
       KJ_IF_SOME(t, deferredWorkerTracer) {
         if (deferredHttpResponseStatus != 0) {
-          t.setReturn(kj::none, tracing::FetchResponseInfo(deferredHttpResponseStatus));
+          kj::Maybe<uint64_t> requestBodySize;
+          KJ_IF_SOME(counter, traceRequestByteCounter) {
+            requestBodySize = counter->get();
+          }
+          t.setReturn(kj::none,
+              tracing::FetchResponseInfo(deferredHttpResponseStatus, kj::none, requestBodySize));
         } else {
           t.setReturn(kj::none);
         }
       }
       deferredWorkerTracer = kj::none;
       traceByteCounter = kj::none;
+      traceRequestByteCounter = kj::none;
       return kj::READY_NOW;
     }
   })
@@ -538,7 +602,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
     proxyTask = kj::none;
   }))
-      .catch_([this, wrappedResponse = kj::mv(wrappedResponse), isActor, method, url, &headers,
+      .catch_([this, wrappedResponse = kj::mv(wrappedResponse),
+                  wrappedRequestBody = kj::mv(wrappedRequestBody), isActor, method, url, &headers,
                   &requestBody, metrics = kj::mv(metricsForCatch),
                   workerTracer](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.

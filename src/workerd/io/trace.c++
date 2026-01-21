@@ -323,25 +323,19 @@ static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
 
 }  // namespace
 
-FetchEventInfo::FetchEventInfo(kj::HttpMethod method,
-    kj::String url,
-    kj::String cfJson,
-    kj::Array<Header> headers,
-    kj::Maybe<uint64_t> bodySize)
+FetchEventInfo::FetchEventInfo(
+    kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers)
     : method(method),
       url(kj::mv(url)),
       cfJson(kj::mv(cfJson)),
-      headers(kj::mv(headers)),
-      bodySize(bodySize) {}
+      headers(kj::mv(headers)) {}
 
 FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
     : method(validateMethod(reader.getMethod())),
       url(kj::str(reader.getUrl())),
       cfJson(kj::str(reader.getCfJson())) {
-  // Only set bodySize if hasBodySize is true
-  if (reader.getHasBodySize()) {
-    bodySize = reader.getBodySize();
-  }
+  // Note: Request body size is now tracked in FetchResponseInfo, not here.
+  // The obsolete4/obsolete5 fields in the schema are ignored.
   kj::Vector<Header> v;
   v.addAll(reader.getHeaders());
   headers = v.releaseAsArray();
@@ -351,10 +345,7 @@ void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
   builder.setMethod(static_cast<capnp::HttpMethod>(method));
   builder.setUrl(url);
   builder.setCfJson(cfJson);
-  KJ_IF_SOME(size, bodySize) {
-    builder.setBodySize(size);
-    builder.setHasBodySize(true);
-  }
+  // Note: Request body size is now tracked in FetchResponseInfo, not here.
 
   auto list = builder.initHeaders(headers.size());
   for (auto i: kj::indices(headers)) {
@@ -364,7 +355,7 @@ void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
 
 FetchEventInfo FetchEventInfo::clone() const {
   return FetchEventInfo(
-      method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); }, bodySize);
+      method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); });
 }
 
 kj::String FetchEventInfo::toString() const {
@@ -607,15 +598,21 @@ HibernatableWebSocketEventInfo::Type HibernatableWebSocketEventInfo::readFrom(
   }
 }
 
-FetchResponseInfo::FetchResponseInfo(uint16_t statusCode, kj::Maybe<uint64_t> bodySize)
+FetchResponseInfo::FetchResponseInfo(
+    uint16_t statusCode, kj::Maybe<uint64_t> bodySize, kj::Maybe<uint64_t> requestBodySize)
     : statusCode(statusCode),
-      bodySize(bodySize) {}
+      bodySize(bodySize),
+      requestBodySize(requestBodySize) {}
 
 FetchResponseInfo::FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader)
     : statusCode(reader.getStatusCode()) {
   // Only set bodySize if hasBodySize is true
   if (reader.getHasBodySize()) {
     bodySize = reader.getBodySize();
+  }
+  // Only set requestBodySize if hasRequestBodySize is true
+  if (reader.getHasRequestBodySize()) {
+    requestBodySize = reader.getRequestBodySize();
   }
 }
 
@@ -625,10 +622,14 @@ void FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) c
     builder.setBodySize(size);
     builder.setHasBodySize(true);
   }
+  KJ_IF_SOME(size, requestBodySize) {
+    builder.setRequestBodySize(size);
+    builder.setHasRequestBodySize(true);
+  }
 }
 
 FetchResponseInfo FetchResponseInfo::clone() const {
-  return FetchResponseInfo(statusCode, bodySize);
+  return FetchResponseInfo(statusCode, bodySize, requestBodySize);
 }
 
 Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)

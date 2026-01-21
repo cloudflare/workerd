@@ -13,6 +13,22 @@ export default {
     if (pathname === '/body-length') {
       return Response.json(Object.fromEntries(request.headers));
     }
+    if (pathname === '/consume-body') {
+      // Actually consume the request body to test request body size tracking
+      const body = await request.text();
+      return new Response(`Received ${body.length} bytes`);
+    }
+    if (pathname === '/streaming-response') {
+      // Streaming response to test response body size tracking
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('chunk1'));
+          controller.enqueue(new TextEncoder().encode('chunk2'));
+          controller.close();
+        },
+      });
+      return new Response(stream);
+    }
     if (pathname === '/web-socket') {
       const pair = new WebSocketPair();
       pair[0].addEventListener('message', (event) => {
@@ -88,6 +104,30 @@ export default {
       assert(result.noRetry);
       assert.strictEqual(scheduledLastCtrl.scheduledTime, 1000);
       assert.strictEqual(scheduledLastCtrl.cron, '* * * * 30');
+    }
+
+    // Test request body consumption - body size should be tracked
+    {
+      const response = await env.SERVICE.fetch(
+        'http://placeholder/consume-body',
+        {
+          method: 'POST',
+          body: 'hello',
+        }
+      );
+      const text = await response.text();
+      assert.strictEqual(text, 'Received 5 bytes');
+    }
+
+    // Test streaming response - body size should be tracked after streaming
+    {
+      const response = await env.SERVICE.fetch(
+        'http://placeholder/streaming-response'
+      );
+      const text = await response.text();
+      // "chunk1" + "chunk2" = 12 bytes
+      assert.strictEqual(text, 'chunk1chunk2');
+      assert.strictEqual(text.length, 12);
     }
   },
 };
