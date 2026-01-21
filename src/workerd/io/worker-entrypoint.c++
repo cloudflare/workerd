@@ -22,8 +22,6 @@
 #include <capnp/message.h>
 #include <kj/compat/http.h>
 
-#include <atomic>
-
 namespace workerd {
 
 namespace {
@@ -138,20 +136,23 @@ class WorkerEntrypoint final: public WorkerInterface {
 
 // A refcounted byte counter that can be shared between the stream wrapper and
 // the code that needs to read the final byte count after streaming completes.
+// Note: kj I/O objects are single-threaded, so no atomic operations are needed.
 struct ResponseBodyByteCounter: public kj::Refcounted {
-  std::atomic<uint64_t> bytesWritten{0};
+  uint64_t bytesWritten = 0;
 
   void add(size_t bytes) {
-    bytesWritten.fetch_add(bytes, std::memory_order_relaxed);
+    bytesWritten += bytes;
   }
 
   uint64_t get() const {
-    return bytesWritten.load(std::memory_order_relaxed);
+    return bytesWritten;
   }
 };
 
 // Wraps an AsyncOutputStream to count bytes written. Used to track actual
 // response body size for trace events (as opposed to Content-Length header).
+// Note: This wrapper intentionally doesn't implement tryPumpFrom() optimization
+// to ensure all bytes flow through write() where we can count them.
 class ByteCountingOutputStream final: public kj::AsyncOutputStream {
  public:
   ByteCountingOutputStream(
@@ -175,16 +176,23 @@ class ByteCountingOutputStream final: public kj::AsyncOutputStream {
     return inner->whenWriteDisconnected();
   }
 
+  // We intentionally don't override tryPumpFrom() because we need to count bytes
+  // and the optimized pump paths don't give us access to the byte count.
+  // Returning kj::none causes fallback to the regular write() path.
+
  private:
   kj::Own<kj::AsyncOutputStream> inner;
   kj::Own<ResponseBodyByteCounter> counter;
 };
 
 // Simple wrapper around `HttpService::Response` to let us know if the response was sent
-// already. Also wraps the output stream with byte counting for trace events.
+// already. Also optionally wraps the output stream with byte counting for trace events
+// when tracing is enabled.
 class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Response {
  public:
-  ResponseSentTracker(kj::HttpService::Response& inner): inner(inner) {}
+  ResponseSentTracker(kj::HttpService::Response& inner, bool enableByteCount)
+      : inner(inner),
+        enableByteCount(enableByteCount) {}
   KJ_DISALLOW_COPY_AND_MOVE(ResponseSentTracker);
 
   bool isSent() const {
@@ -197,7 +205,8 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
     return expectedBodySize;
   }
 
-  // Returns a reference to the byte counter for deferred access after streaming.
+  // Transfers ownership of the byte counter for deferred access after streaming.
+  // Returns kj::none if byte counting is not enabled or if already called.
   // The returned ownership should be held until after proxyTask completes.
   kj::Maybe<kj::Own<ResponseBodyByteCounter>> takeByteCounter() {
     return kj::mv(byteCounter);
@@ -215,10 +224,14 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
 
     auto stream = inner.send(statusCode, statusText, headers, expectedBodySize);
 
-    // Wrap with byte counting for trace events
-    auto counter = kj::refcounted<ResponseBodyByteCounter>();
-    byteCounter = kj::addRef(*counter);
-    return kj::heap<ByteCountingOutputStream>(kj::mv(stream), kj::mv(counter));
+    // Only wrap with byte counting when tracing is enabled to avoid performance
+    // overhead for workers without tail workers.
+    if (enableByteCount) {
+      auto counter = kj::refcounted<ResponseBodyByteCounter>();
+      byteCounter = kj::addRef(*counter);
+      return kj::heap<ByteCountingOutputStream>(kj::mv(stream), kj::mv(counter));
+    }
+    return stream;
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
@@ -233,6 +246,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   kj::Maybe<kj::Own<ResponseBodyByteCounter>> byteCounter;
   kj::HttpService::Response& inner;
   bool sent = false;
+  bool enableByteCount = false;
 };
 
 kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContext,
@@ -327,7 +341,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   this->incomingRequest = kj::none;
   auto& context = incomingRequest->getContext();
 
-  auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
+  // Enable byte counting only when tracing is enabled to avoid performance overhead.
+  bool hasTracer = incomingRequest->getWorkerTracer() != kj::none;
+  auto wrappedResponse = kj::heap<ResponseSentTracker>(response, hasTracer);
 
   bool isActor = context.getActor() != kj::none;
   // HACK: Capture workerTracer directly, it's unclear how to acquire the right tracer from context
@@ -363,17 +379,11 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     // TODO(someday): Track actual bytes consumed from request body stream instead of
     // relying on Content-Length header. This is less critical than response body size
     // since request bodies typically have accurate Content-Length.
+    // Note: bodySize of 0 means either no Content-Length header or Content-Length: 0;
+    // this is acceptable for trace events as both semantically indicate no/empty body data.
     uint64_t bodySize = 0;
     KJ_IF_SOME(contentLength, headers.get(kj::HttpHeaderId::CONTENT_LENGTH)) {
-      // Parse the Content-Length value. Skip leading whitespace first since HTTP headers
-      // can include leading/trailing whitespace. If parsing fails, we leave bodySize as 0.
-      const char* ptr = contentLength.cStr();
-      while (*ptr == ' ' || *ptr == '\t') ptr++;  // Skip leading whitespace
-      char* end;
-      auto parsed = strtoull(ptr, &end, 10);
-      // Check that we parsed something and only trailing whitespace remains
-      while (*end == ' ' || *end == '\t') end++;  // Skip trailing whitespace
-      if (end != ptr && *end == '\0') {
+      KJ_IF_SOME(parsed, contentLength.tryParseAs<uint64_t>()) {
         bodySize = parsed;
       }
     }
