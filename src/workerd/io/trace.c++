@@ -273,6 +273,9 @@ kj::String KJ_STRINGIFY(const TailEvent::Event& event) {
     KJ_CASE_ONEOF(log, Log) {
       return kj::str("Log");
     }
+    KJ_CASE_ONEOF(streamDiag, StreamDiagnosticsEvent) {
+      return kj::str("StreamDiagnosticsEvent(droppedEvents: ", streamDiag.droppedEventsCount, ")");
+    }
     KJ_CASE_ONEOF(ret, Return) {
       return kj::str("Return");
     }
@@ -531,6 +534,34 @@ void DiagnosticChannelEvent::copyTo(rpc::Trace::DiagnosticChannelEvent::Builder 
 
 DiagnosticChannelEvent DiagnosticChannelEvent::clone() const {
   return DiagnosticChannelEvent(timestamp, kj::str(channel), kj::heapArray<kj::byte>(message));
+}
+
+StreamDiagnosticsEvent::StreamDiagnosticsEvent(uint32_t droppedEventsCount)
+    : droppedEventsCount(droppedEventsCount) {}
+
+StreamDiagnosticsEvent::StreamDiagnosticsEvent(rpc::Trace::StreamDiagnosticsEvent::Reader reader) {
+  auto diagnosticReader = reader.getDiagnostic();
+  switch (diagnosticReader.which()) {
+    case rpc::Trace::StreamDiagnosticsEvent::Diagnostic::UNDEFINED:
+      KJ_FAIL_ASSERT("received invalid diagnostics event");
+      break;
+    case rpc::Trace::StreamDiagnosticsEvent::Diagnostic::DROPPED_EVENTS:
+      auto droppedEvents = diagnosticReader.getDroppedEvents();
+      droppedEventsCount = droppedEvents.getCount();
+      KJ_DASSERT(droppedEventsCount > 0);
+      break;
+  }
+}
+
+void StreamDiagnosticsEvent::copyTo(rpc::Trace::StreamDiagnosticsEvent::Builder builder) const {
+  KJ_DASSERT(droppedEventsCount > 0);
+  auto diagnosticBuilder = builder.initDiagnostic();
+  auto droppedEventsBuilder = diagnosticBuilder.initDroppedEvents();
+  droppedEventsBuilder.setCount(droppedEventsCount);
+}
+
+StreamDiagnosticsEvent StreamDiagnosticsEvent::clone() const {
+  return StreamDiagnosticsEvent(droppedEventsCount);
 }
 
 HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(Type type): type(type) {}
@@ -1356,6 +1387,9 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     case rpc::Trace::TailEvent::Event::LOG: {
       return Log(event.getLog());
     }
+    case rpc::Trace::TailEvent::Event::STREAM_DIAGNOSTICS: {
+      return StreamDiagnosticsEvent(event.getStreamDiagnostics());
+    }
   }
   KJ_UNREACHABLE;
 }
@@ -1396,6 +1430,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(log, Log) {
       log.copyTo(eventBuilder.initLog());
     }
+    KJ_CASE_ONEOF(streamDiag, StreamDiagnosticsEvent) {
+      streamDiag.copyTo(eventBuilder.initStreamDiagnostics());
+    }
     KJ_CASE_ONEOF(ret, Return) {
       ret.copyTo(eventBuilder.initReturn());
     }
@@ -1432,6 +1469,9 @@ TailEvent TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(log, Log) {
         return log.clone();
+      }
+      KJ_CASE_ONEOF(streamDiag, StreamDiagnosticsEvent) {
+        return streamDiag.clone();
       }
       KJ_CASE_ONEOF(ret, Return) {
         return ret.clone();

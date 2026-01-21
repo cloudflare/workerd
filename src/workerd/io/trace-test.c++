@@ -391,6 +391,21 @@ KJ_TEST("Read/Write Exception works") {
   KJ_ASSERT(info3.stack == kj::none);
 }
 
+KJ_TEST("Read/Write StreamDiagnosticsEvent works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::StreamDiagnosticsEvent>();
+
+  StreamDiagnosticsEvent info(42);
+  info.copyTo(infoBuilder);
+
+  auto reader = infoBuilder.asReader();
+  StreamDiagnosticsEvent info2(reader);
+  KJ_ASSERT(info2.droppedEventsCount == 42);
+
+  StreamDiagnosticsEvent info3 = info.clone();
+  KJ_ASSERT(info3.droppedEventsCount == 42);
+}
+
 KJ_TEST("Read/Write Attribute works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Attribute>();

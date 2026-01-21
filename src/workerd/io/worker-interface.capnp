@@ -176,6 +176,20 @@ struct Trace @0x8e8d911203762d34 {
     message @2 :Data;
   }
 
+  # Indicates how many tail stream events were dropped in total.
+  struct DroppedEvents {
+    count @0 :UInt32;
+  }
+
+  struct StreamDiagnosticsEvent {
+    # In the future, we plan to support several types of events here, for now only the dropped
+    # events diagnostic is supported.
+    diagnostic :union {
+      undefined @0 :Void;
+      droppedEvents @1 :DroppedEvents;
+    }
+  }
+
   truncated @24 :Bool;
   # Indicates that the trace was truncated due to reaching the maximum size limit.
 
@@ -295,6 +309,7 @@ struct Trace @0x8e8d911203762d34 {
       diagnosticChannelEvent @10 :DiagnosticChannelEvent;
       exception @11 :Exception;
       log @12 :Log;
+      streamDiagnostics @13 :StreamDiagnosticsEvent;
     }
   }
 }

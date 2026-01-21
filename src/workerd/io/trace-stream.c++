@@ -24,13 +24,17 @@ namespace {
   V(CFJSON, "cfJson")                                                                              \
   V(CLOSE, "close")                                                                                \
   V(CODE, "code")                                                                                  \
+  V(COUNT, "count")                                                                                \
   V(CPUTIME, "cpuTime")                                                                            \
   V(CRON, "cron")                                                                                  \
   V(CUSTOM, "custom")                                                                              \
   V(DAEMONDOWN, "daemonDown")                                                                      \
   V(DEBUG, "debug")                                                                                \
   V(DIAGNOSTICCHANNEL, "diagnosticChannel")                                                        \
+  V(DIAGNOSTIC, "diagnostic")                                                                      \
+  V(DIAGNOSTICSTYPE, "diagnosticsType")                                                            \
   V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
+  V(DROPPEDEVENTS, "droppedEvents")                                                                \
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
@@ -76,6 +80,8 @@ namespace {
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
   V(STATUSCODE, "statusCode")                                                                      \
+  V(STREAMDIAGEVENT, "streamDiagEvent")                                                            \
+  V(STREAMDIAGNOSTIC, "streamDiagnostic")                                                          \
   V(TAG, "tag")                                                                                    \
   V(TIMESTAMP, "timestamp")                                                                        \
   V(TRACEID, "traceId")                                                                            \
@@ -485,6 +491,19 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const StreamDiagnosticsEvent& streamDiag, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, STREAMDIAGNOSTIC_STR));
+  // At present we only support the droppedEvents type.
+
+  // Handle droppedEvents
+  auto droppedEventsDiagnostic = js.obj();
+  droppedEventsDiagnostic.set(js, DIAGNOSTICSTYPE_STR, cache.get(js, DROPPEDEVENTS_STR));
+  droppedEventsDiagnostic.set(js, COUNT_STR, js.num(streamDiag.droppedEventsCount));
+  obj.set(js, DIAGNOSTIC_STR, kj::mv(droppedEventsDiagnostic));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const Return& ret, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, RETURN_STR));
@@ -533,6 +552,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(log, Log) {
       obj.set(js, EVENT_STR, ToJs(js, log, cache));
     }
+    KJ_CASE_ONEOF(diagEvent, StreamDiagnosticsEvent) {
+      obj.set(js, EVENT_STR, ToJs(js, diagEvent, cache));
+    }
     KJ_CASE_ONEOF(ret, Return) {
       obj.set(js, EVENT_STR, ToJs(js, ret, cache));
     }
@@ -568,6 +590,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, Log) {
       return LOG_STR;
+    }
+    KJ_CASE_ONEOF(_, StreamDiagnosticsEvent) {
+      return STREAMDIAGEVENT_STR;
     }
     KJ_CASE_ONEOF(_, Return) {
       return RETURN_STR;
@@ -1033,15 +1058,13 @@ bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
     // Only queue the event if we don't have an excessive queue size yet. Return and Outcome
     // events are only provided once and thus won't be dropped.
     if (active->queueSize < maxQueueSize || event.event.is<Outcome>() || event.event.is<Return>()) {
-      // When we get to the outcome, no more events will be dropped. Inject an internal structured
-      // log indicating how many events were dropped if applicable.
+      // When we get to the outcome, no more events will be dropped. Inject an internal diagnostics
+      // event indicating how many events were dropped if applicable.
       if (event.event.is<Outcome>() && active->droppedEvents > 0) {
-        auto log = kj::str(
-            "{\"$\":\"cloudflare-streaming-tail-workers-internal\",\"type\":\"dropped\",\"count\":",
-            active->droppedEvents, "}");
-        TailEvent droppedEventsLog(event.spanContext.clone(), event.invocationId, event.timestamp,
-            event.sequence, tracing::Log(event.timestamp, LogLevel::WARN, kj::mv(log)));
-        active->queue.push(kj::mv(droppedEventsLog));
+        StreamDiagnosticsEvent diag(active->droppedEvents);
+        TailEvent diagTailEvent(event.spanContext.clone(), event.invocationId, event.timestamp,
+            event.sequence, kj::mv(diag));
+        active->queue.push(kj::mv(diagTailEvent));
         // Increment the outcome sequence number to keep things consistent.
         event.sequence++;
       }
