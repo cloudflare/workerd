@@ -15,6 +15,7 @@
 #include <kj/map.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
+#include <kj/async-io.h>
 
 namespace workerd::server {
 
@@ -103,6 +104,17 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Egress TCP mappings: address -> SubrequestChannel
   kj::HashMap<kj::String, kj::Own<workerd::IoChannelFactory::SubrequestChannel>> egressMappings;
+
+  // Egress HTTP listener for handling container egress via HTTP CONNECT from sidecar
+  class EgressHttpService;
+  kj::Maybe<kj::Own<kj::HttpHeaderTable>> egressHeaderTable;
+  kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
+  kj::Maybe<kj::Promise<void>> egressListenerTask;
+
+  // Start the egress listener on the specified port
+  kj::Promise<void> startEgressListener(uint16_t port);
+  // Stop the egress listener
+  void stopEgressListener();
 };
 
 }  // namespace workerd::server

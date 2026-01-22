@@ -5,6 +5,7 @@
 #include "container-client.h"
 
 #include <workerd/io/container.capnp.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/docker-api.capnp.h>
 
@@ -121,6 +122,9 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       channelTokenHandler(channelTokenHandler) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
+  // Stop the egress listener
+  stopEgressListener();
+
   // Call the cleanup callback to remove this client from the ActorNamespace map
   cleanupCallback();
 
@@ -176,6 +180,191 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   uint16_t containerPort;
   kj::Maybe<kj::Promise<void>> pumpTask;
 };
+
+// HTTP service that handles HTTP CONNECT requests from the container sidecar (dockerproxyanything).
+// When the sidecar intercepts container egress traffic, it sends HTTP CONNECT to this service.
+// After accepting the CONNECT, the tunnel carries the actual HTTP request from the container,
+// which we parse and forward to the appropriate SubrequestChannel based on egressMappings.
+class ContainerClient::EgressHttpService final: public kj::HttpService {
+ public:
+  EgressHttpService(ContainerClient& containerClient, kj::HttpHeaderTable& headerTable)
+      : containerClient(containerClient),
+        headerTable(headerTable) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    // Regular HTTP requests are not expected - we only handle CONNECT
+    co_return co_await response.sendError(405, "Method Not Allowed", headerTable);
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    // The host header contains the destination address (e.g., "10.0.0.1:9999")
+    // that the container was trying to connect to.
+    auto destAddr = kj::str(host);
+
+    KJ_LOG(INFO, "Egress CONNECT request", destAddr);
+
+    // Accept the CONNECT tunnel - after this, the connection stream carries the actual
+    // HTTP request from the container
+    kj::HttpHeaders responseHeaders(headerTable);
+    response.accept(200, "OK", responseHeaders);
+
+    // Now read the HTTP request from the tunnel
+    auto httpInput = kj::newHttpInputStream(connection, headerTable);
+
+    // Loop to handle multiple requests on the same connection (HTTP/1.1 keep-alive)
+    while (true) {
+      // Check if there's more data
+      bool hasMore = co_await httpInput->awaitNextMessage();
+      if (!hasMore) {
+        // Client closed the connection
+        co_return;
+      }
+
+      auto req = co_await httpInput->readRequest();
+
+      // Look up the destination in egressMappings
+      auto maybeChannel = containerClient.egressMappings.find(destAddr);
+
+      kj::Own<WorkerInterface> worker;
+      if (maybeChannel != kj::none) {
+        // Found a mapping - forward to the SubrequestChannel
+        auto& channel = KJ_ASSERT_NONNULL(maybeChannel);
+        IoChannelFactory::SubrequestMetadata metadata;
+        worker = channel->startRequest(kj::mv(metadata));
+      } else {
+        // No mapping found - for now, reject the connection
+        // TODO: Forward to general internet
+        KJ_LOG(WARNING, "No egress mapping found for address", destAddr);
+
+        // Write an error response back through the tunnel
+        auto errorBody = kj::str("No egress mapping found for ", destAddr);
+
+        // We need to write the response manually since we're acting as a server
+        // within the tunnel
+        auto responseStr = kj::str(
+            "HTTP/1.1 502 Bad Gateway\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: ", errorBody.size(), "\r\n"
+            "Connection: close\r\n"
+            "\r\n",
+            errorBody);
+        co_await connection.write(responseStr.asBytes());
+        co_return;
+      }
+
+      // Create a response handler that writes back to the tunnel
+      auto tunnelResponse = kj::heap<TunnelHttpResponse>(connection);
+
+      // Forward the request to the worker
+      co_await worker->request(req.method, req.url, req.headers, *req.body, *tunnelResponse);
+    }
+  }
+
+ private:
+  ContainerClient& containerClient;
+  kj::HttpHeaderTable& headerTable;
+
+  // Response implementation that writes HTTP responses back through the tunnel.
+  // This class serializes the HTTP response and writes it to the tunnel stream.
+  class TunnelHttpResponse final: public kj::HttpService::Response {
+   public:
+    TunnelHttpResponse(kj::AsyncIoStream& tunnel)
+        : tunnel(tunnel) {}
+
+    kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+      // Serialize the response headers
+      auto headersStr = headers.serializeResponse(statusCode, statusText);
+
+      // Return a wrapper that manages header + body writing
+      return kj::heap<TunnelOutputStream>(tunnel, kj::mv(headersStr));
+    }
+
+    kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+      KJ_FAIL_REQUIRE("WebSocket upgrade not supported through egress tunnel");
+    }
+
+   private:
+    kj::AsyncIoStream& tunnel;
+  };
+
+  // Output stream that writes to the tunnel.
+  // Headers are written on the first write or when the stream ends.
+  class TunnelOutputStream final: public kj::AsyncOutputStream {
+   public:
+    TunnelOutputStream(kj::AsyncIoStream& tunnel, kj::String serializedHeaders)
+        : tunnel(tunnel),
+          serializedHeaders(kj::mv(serializedHeaders)),
+          headersWritten(false) {}
+
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+      co_await ensureHeadersWritten();
+      co_await tunnel.write(buffer);
+    }
+
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+      co_await ensureHeadersWritten();
+      co_await tunnel.write(pieces);
+    }
+
+    kj::Promise<void> whenWriteDisconnected() override {
+      return tunnel.whenWriteDisconnected();
+    }
+
+    // Ensure headers are written - must be called before destroying the stream
+    kj::Promise<void> ensureHeadersWritten() {
+      if (!headersWritten) {
+        headersWritten = true;
+        co_await tunnel.write(serializedHeaders.asBytes());
+      }
+    }
+
+   private:
+    kj::AsyncIoStream& tunnel;
+    kj::String serializedHeaders;
+    bool headersWritten;
+  };
+};
+
+kj::Promise<void> ContainerClient::startEgressListener(uint16_t port) {
+  // Create header table for HTTP parsing
+  auto headerTable = kj::heap<kj::HttpHeaderTable>();
+  auto& headerTableRef = *headerTable;
+  egressHeaderTable = kj::mv(headerTable);
+
+  // Create the egress HTTP service
+  auto service = kj::heap<EgressHttpService>(*this, headerTableRef);
+
+  // Create the HTTP server
+  auto httpServer = kj::heap<kj::HttpServer>(timer, headerTableRef, *service);
+  auto& httpServerRef = *httpServer;
+  egressHttpServer = kj::mv(httpServer);
+
+  // Listen on the specified port (0.0.0.0 to accept from container network)
+  auto addr = co_await network.parseAddress(kj::str("0.0.0.0:", port));
+  auto listener = addr->listen();
+
+  KJ_LOG(INFO, "Egress HTTP listener started", port);
+
+  // Run the server - this promise never completes normally
+  co_await httpServerRef.listenHttp(*listener).attach(kj::mv(listener), kj::mv(service));
+}
+
+void ContainerClient::stopEgressListener() {
+  egressListenerTask = kj::none;
+  egressHttpServer = kj::none;
+  egressHeaderTable = kj::none;
+}
 
 kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Network& network,
     kj::String dockerPath,
@@ -401,6 +590,12 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
   co_await createContainer(entrypoint, environment);
   co_await startContainer();
+
+  // Start the egress listener in the background.
+  // The sidecar will connect to this port to proxy container egress traffic.
+  // Default port matches the sidecar's expected port (49121).
+  constexpr uint16_t EGRESS_LISTENER_PORT = 49121;
+  egressListenerTask = startEgressListener(EGRESS_LISTENER_PORT);
 }
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
