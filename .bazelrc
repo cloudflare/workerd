@@ -463,17 +463,16 @@ build:coverage --copt=-g1
 # Use limited coverage mode for smaller binaries and faster execution (used by Chromium)
 build:coverage --copt=-mllvm
 build:coverage --copt=-limited-coverage-experimental=true
-# Disable gc-sections for faster linking (coverage doesn't need dead code elimination)
-build:coverage --linkopt=-Wl,--no-gc-sections
-# Disable test result caching to ensure fresh coverage data is generated
-coverage --nocache_test_results
 coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine,-lint,-benchmark,-workerd-benchmark,-no-coverage
+# Let tests know they're running in CI (normally set by ci-test but we can't use that config
+# due to --remote_download_minimal which prevents coverage data from being fetched)
+coverage --test_env=CI=true
+coverage --config=wpt-test
 # Coverage instrumentation slows down test execution, so extend timeouts
 # We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
 coverage --test_size_filters=-enormous
 coverage --test_timeout=240,240,240,240
 coverage --build_tests_only
-coverage --config=coverage
 coverage --combined_report=lcov
 
 # This config is defined internally and enabled on many machines.

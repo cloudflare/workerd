@@ -137,7 +137,7 @@ set -euo pipefail
 
 # Set up coverage for workerd subprocess
 if [ -n "${{COVERAGE_DIR:-}}" ]; then
-    export LLVM_PROFILE_FILE="$COVERAGE_DIR/%p-%m.profraw"
+    export LLVM_PROFILE_FILE="${{COVERAGE_DIR}}/%p-%m.profraw"
     export KJ_CLEAN_SHUTDOWN=1
 fi
 

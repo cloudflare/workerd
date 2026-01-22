@@ -104,9 +104,12 @@ jobs:
       os_name: linux
       arch_name: 'X64'
       suffix: 'coverage'
+      # Don't use ci-test here because it enables --remote_download_minimal which prevents
+      # coverage data from being fetched from cache. The coverage config already sets
+      # --test_env=CI=true and --config=wpt-test which are the relevant parts of ci-test.
       # Use ci-linux-common instead of ci-linux to avoid overriding coverage test_tag_filters
       # (ci-linux sets test_tag_filters that would include container tests which require docker)
-      extra_bazel_args: '--config=ci-test --config=ci-linux-common --config=ci-limit-storage --config=coverage'
+      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage'
       upload_test_logs: true
       upload_binary: false
       build_container_images: false
