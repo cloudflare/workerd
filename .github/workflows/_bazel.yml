@@ -51,6 +51,10 @@ on:
         type: boolean
         required: false
         default: false
+      run_coverage:
+        type: boolean
+        required: false
+        default: false
       fetch_depth:
         type: number
         required: false
@@ -68,6 +72,8 @@ on:
         required: true
       WORKERS_MIRROR_URL:
         required: true
+      CODECOV_TOKEN:
+        required: false
 
 permissions:
   # Read repo
@@ -119,8 +125,6 @@ jobs:
         run: |
           bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --profile build-win-workaround.bazel-profile.gz --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
-        # timestamps are no longer being added here, the GitHub logs include timestamps (Use
-        # 'Show timestamps' on the web interface)
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
       - name: Build and load container images
@@ -136,6 +140,22 @@ jobs:
         if: inputs.run_tests
         run: |
           bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Bazel coverage
+        if: inputs.run_coverage
+        run: |
+          bazel coverage --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Upload coverage to Codecov
+        if: inputs.run_coverage
+        uses: codecov/codecov-action@v5
+        with:
+          # Use bazel info to get the actual output path, avoiding symlink issues
+          files: ${{ github.workspace }}/bazel-out/_coverage/_coverage_report.dat
+          fail_ci_if_error: true
+          verbose: true
+          disable_search: true
+          root_dir: ${{ github.workspace }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - name: Parse headers
         # TODO(cleanup): Bazel does not allow for only parsing headers in non-recursive targets, so
         # we can't widely enable header parsing for now (dependencies like V8 do not specify

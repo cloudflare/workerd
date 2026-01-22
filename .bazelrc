@@ -1,6 +1,8 @@
 common --enable_platform_specific_config
 build --verbose_failures
 build --build_tag_filters=-off-by-default,-requires-container-engine
+# block network access by default
+build --nosandbox_default_allow_network
 test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
@@ -39,10 +41,13 @@ build --incompatible_strict_action_env
 # and conserving space
 build --incompatible_compact_repo_mapping_manifest
 
+# Continue building locally when remote cache entries fail to materialize
+build --incompatible_remote_local_fallback_for_remote_cache
+
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external@-Wno-suggest-override'
-build --per_file_copt='external/v8@-Wno-unused-function'
+build --per_file_copt='external/.*v8@-Wno-unused-function'
 build --per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
@@ -63,34 +68,42 @@ build:v8-codegen-opt --per_file_copt=external/abseil-cpp@-O2
 # zlib and tcmalloc (for Linux) are also CPU-intensive, optimize them too.
 build:v8-codegen-opt --per_file_copt=external/tcmalloc@-O2
 build:v8-codegen-opt --per_file_copt=external/zlib@-O2
+# BoringSSL is CPU-intensive for crypto tests, optimize it too.
+build:v8-codegen-opt --per_file_copt=external/boringssl@-O2
+# simdutf is used for fast string encoding/decoding
+build:v8-codegen-opt --per_file_copt=external/+http+simdutf@-O2
 build:v8-codegen-opt-windows --per_file_copt=v8/src@/O2
 build:v8-codegen-opt-windows --per_file_copt=external/abseil-cpp@/O2
 build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2
+build:v8-codegen-opt-windows --per_file_copt=external/boringssl@/O2
+build:v8-codegen-opt-windows --per_file_copt=external/+http+simdutf@/O2
 
 # In Google projects, exceptions are not used as a rule. Disabling them is more consistent with the
-# canonical V8 build and improves code size.
+# canonical V8 build and improves code size. Paths are adjusted for bzlmod mangling – V8 and ICU use
+# a wildcard for this as the prefix is some variation of +_repo_rules3+ where the number can change
+# when refactoring MODULE.bazel – setting this directly would be too brittle
 build:unix --per_file_copt=external/abseil-cpp@-fno-exceptions
 build:unix --per_file_copt=external/protobuf@-fno-exceptions
 build:unix --per_file_copt=external/tcmalloc@-fno-exceptions
-build:unix --per_file_copt=external/com_googlesource_chromium_icu@-fno-exceptions
+build:unix --per_file_copt=external/.*com_googlesource_chromium_icu@-fno-exceptions
 build:unix --per_file_copt=external/perfetto@-fno-exceptions
 build:unix --per_file_copt=external/boringssl@-fno-exceptions
-build:unix --per_file_copt=external/v8@-fno-exceptions
+build:unix --per_file_copt=external/.*v8@-fno-exceptions
 build:unix --per_file_copt=external/ada-url@-fno-exceptions
-build:unix --per_file_copt=external/simdutf@-fno-exceptions
+build:unix --per_file_copt=external/+http+simdutf@-fno-exceptions
 build:windows --per_file_copt=external/abseil-cpp@/clang:-fno-exceptions
 build:windows --per_file_copt=external/protobuf@/clang:-fno-exceptions
 build:windows --per_file_copt=external/tcmalloc@/clang:-fno-exceptions
-build:windows --per_file_copt=external/com_googlesource_chromium_icu@/clang:-fno-exceptions
+build:windows --per_file_copt=external/.*com_googlesource_chromium_icu@/clang:-fno-exceptions
 build:windows --per_file_copt=external/perfetto@/clang:-fno-exceptions
 build:windows --per_file_copt=external/boringssl@/clang:-fno-exceptions
-build:windows --per_file_copt=external/v8@/clang:-fno-exceptions
+build:windows --per_file_copt=external/.*v8@/clang:-fno-exceptions
 build:windows --per_file_copt=external/ada-url@/clang:-fno-exceptions
-build:windows --per_file_copt=external/simdutf@/clang:-fno-exceptions
+build:windows --per_file_copt=external/+http+simdutf@/clang:-fno-exceptions
 
 # V8 torque is an exception from this policy, see v8 BUILD.gn.
-build:unix --per_file_copt=external/v8/src/torque@-fexceptions
-build:windows --per_file_copt=external/v8/src/torque@/clang:-fexceptions
+build:unix --per_file_copt=external/.*v8/src/torque@-fexceptions
+build:windows --per_file_copt=external/.*v8/src/torque@/clang:-fexceptions
 
 # Limit transitive header includes within libc++. This improves compliance with IWYU, helps avoid
 # errors with downstream projects that implicitly define this already and reduces total include size.
@@ -190,7 +203,7 @@ build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
-build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
 build:fuzzilli --config=asan
@@ -334,8 +347,8 @@ build:windows --copt='/Zc:dllexportInlines-'
 build:parse_headers --features=parse_headers --process_headers_in_dependencies
 # Silence some capnproto warnings/errors that are not relevant for header parsing
 build:parse_headers --per_file_copt='.*\.h@-Wno-unused-function,-Wno-pragma-system-header-outside-header'
-build:parse_headers --per_file_copt=external/capnp-cpp/src/kj/common.h@-Wno-unreachable-code
-build:parse_headers --per_file_copt=external/capnp-cpp/src/capnp/arena.h@-DCAPNP_PRIVATE
+build:parse_headers --per_file_copt=external/+http+capnp-cpp/src/kj/common.h@-Wno-unreachable-code
+build:parse_headers --per_file_copt=external/+http+capnp-cpp/src/capnp/arena.h@-DCAPNP_PRIVATE
 
 # optimized configuration
 build:opt -c opt
@@ -400,20 +413,68 @@ build:windows --per_file_copt=external/boringssl@-Wno-unused-command-line-argume
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
 build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
-build:coverage --action_env=GCOV=llvm-profdata-19
+# Coverage configuration using LLVM tools. These environment variables are used by rules_cc
+# to locate LLVM coverage tools. Users should ensure llvm-profdata and llvm-cov are available
+# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-19 llvm-cov).
 build:coverage --action_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
-build:coverage --copt=-DNDEBUG
-build:coverage --combined_report=lcov
+build:coverage --test_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
+# GCOV is used by rules_cc to merge raw profile data (.profraw) into indexed profile data (.profdata)
+build:coverage --action_env=GCOV=llvm-profdata
+build:coverage --test_env=GCOV=llvm-profdata
+# COVERAGE_GCOV_PATH is used by collect_cc_coverage.sh for merging .profraw files.
+build:coverage --action_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
+build:coverage --test_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
+# BAZEL_LLVM_COV is used by rules_cc to generate coverage reports from profile data
+build:coverage --action_env=BAZEL_LLVM_COV=llvm-cov
+build:coverage --test_env=BAZEL_LLVM_COV=llvm-cov
+# LLVM_COV is used by collect_cc_coverage.sh for generating LCOV output
+build:coverage --test_env=LLVM_COV=llvm-cov
+# GENERATE_LLVM_LCOV=1 tells collect_cc_coverage.sh to use llvm-cov export to generate LCOV format
+# instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
+build:coverage --test_env=GENERATE_LLVM_LCOV=1
 build:coverage --experimental_use_llvm_covmap
 build:coverage --experimental_generate_llvm_lcov
+# Ensure that we fetch coverage data from remote cache
 build:coverage --experimental_fetch_all_coverage_outputs
+build:coverage --experimental_split_coverage_postprocessing
+# Allow coverage outputs to be writable for post-processing
+build:coverage --experimental_writable_outputs
 build:coverage --collect_code_coverage
-build:coverage --instrumentation_filter="^//,-//external"
+# Only instrument source code, not tests or tools - significantly speeds up coverage builds
+build:coverage --instrumentation_filter="^//src/workerd[/:],^//src/rust[/:]"
 build:coverage --instrument_test_targets
+# Disable coverage instrumentation for external dependencies to speed up compilation.
+# Coverage for V8/external code is not useful for our purposes.
+# These flags negate -fprofile-instr-generate and -fcoverage-mapping set by rules_cc.
+build:coverage --per_file_copt=external/.*@-fno-profile-instr-generate,-fno-coverage-mapping
+# KJ uses _exit() by default which bypasses atexit handlers and prevents LLVM profile runtime
+# from writing coverage data. KJ_CLEAN_SHUTDOWN forces use of normal exit() instead.
+build:coverage --test_env=KJ_CLEAN_SHUTDOWN=1
+# Use -O1 for faster compilation - coverage builds don't need heavy optimization
+build:coverage --copt=-O1
+# External dependencies can use -O2 since they're not instrumented anyway
+build:coverage --config=v8-codegen-opt
+# Run coverage-related actions locally with sandboxing - remote execution doesn't support LLVM coverage well
+build:coverage --strategy=TestRunner=worker,sandboxed,local
+build:coverage --strategy=CoverageReport=worker,sandboxed,local
+build:coverage --strategy=CoveragePostprocessing=worker,sandboxed,local
+# Reduce debug info for faster compilation and smaller binaries
+build:coverage --copt=-g1
+# Use limited coverage mode for smaller binaries and faster execution (used by Chromium)
+build:coverage --copt=-mllvm
+build:coverage --copt=-limited-coverage-experimental=true
+coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine,-lint,-benchmark,-workerd-benchmark,-no-coverage
+# Let tests know they're running in CI (normally set by ci-test but we can't use that config
+# due to --remote_download_minimal which prevents coverage data from being fetched)
+coverage --test_env=CI=true
+coverage --config=wpt-test
+# Coverage instrumentation slows down test execution, so extend timeouts
+# We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
+coverage --test_size_filters=-enormous
+coverage --test_timeout=240,240,240,240
+coverage --build_tests_only
+coverage --combined_report=lcov
 
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
-
-coverage --build_tests_only
-coverage --config=coverage

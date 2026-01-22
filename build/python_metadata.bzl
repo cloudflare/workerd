@@ -1,6 +1,6 @@
 # After updating this file, make sure to run "bazel mod tidy"
-load("@aspect_bazel_lib//lib:base64.bzl", "base64")
-load("@aspect_bazel_lib//lib:strings.bzl", "chr")
+load("@bazel_lib//lib:base64.bzl", "base64")
+load("@bazel_lib//lib:strings.bzl", "chr")
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
 load("//:build/python/packages_20250808.bzl", "PACKAGES_20250808")
 
@@ -104,6 +104,25 @@ def _make_bundle_version_info(versions):
     _check_pyodide_versions(result)
     return result
 
+VENDORED_VERSION_INDEPENDENT = [
+    {
+        # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
+        "name": "beautifulsoup4",
+        "abi": None,
+        "sha256": "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd",
+    },
+    {
+        "name": "pytest-asyncio",
+        "abi": None,
+        "sha256": "be25b788392d124cbdfbb9b3d13541da69a7b6b977bc9474dddaddeaab6421b4",
+    },
+    {
+        "name": "python-workers-runtime-sdk",
+        "abi": None,
+        "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
+    },
+]
+
 BUNDLE_VERSION_INFO = _make_bundle_version_info([
     {
         "name": "0.26.0a2",
@@ -111,8 +130,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": PACKAGES_20240829_4,
-        "backport": "75",
-        "integrity": "sha256-E1OCAgukWZU6gchqkxgYlvMSieJ8xz6aPFhN/KeqhTw=",
+        "backport": "77",
+        "integrity": "sha256-/7lNXWxMRip/FS4+9+luOqccULG1ht6/lYs4BfH+nFQ=",
         "flag": "pythonWorkers",
         "enable_flag_name": "python_workers",
         "emscripten_version": "3.1.52",
@@ -123,23 +142,12 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "numpy_snapshot_hash": "5055deb53f404afacba73642fd10e766b123e661847e8fdf4f1ec92d8ca624dc",
         "fastapi_snapshot": "ew-py-package-snapshot_fastapi-v2.bin",
         "fastapi_snapshot_hash": "d204956a074cd74f7fe72e029e9a82686fcb8a138b509f765e664a03bfdd50fb",
-        "vendored_packages_for_tests": [
-            {
-                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
-                "name": "beautifulsoup4",
-                "abi": None,
-                "sha256": "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd",
-            },
+        "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
             {
                 # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-312-vendored-for-ew-testing.zip
                 "name": "fastapi",
                 "abi": "3.12",
                 "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
-            },
-            {
-                "name": "python-workers-runtime-sdk",
-                "abi": None,
-                "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
             },
             {
                 "name": "scipy",
@@ -153,8 +161,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
         "packages": PACKAGES_20250808,
-        "backport": "6",
-        "integrity": "sha256-bsCa4xEXjgtTDJu7h28GzjJEGqCVawPMqlQqkauCVp8=",
+        "backport": "8",
+        "integrity": "sha256-rl3htxJqgtZXPDjDYA6iftkmK8CT8DnQ+dm2fN8Kt1k=",
         "flag": "pythonWorkers20250116",
         "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",
@@ -167,22 +175,11 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "fastapi_snapshot_hash": "a6ccb56fe9eac265d139727d0134e8d6432c5fe25c8c0b8ec95252b13493b297",
         "dedicated_fastapi_snapshot": "snapshot_a6b652a95810783f5078b9a5dbd4a07c30718acb4ff724e82c25db7353dd7f2d.bin",
         "dedicated_fastapi_snapshot_hash": "4af6f012a5fb32f31a426e6f109e88ae85b18ee3dd131e1caaaad989cd962bbe",
-        "vendored_packages_for_tests": [
-            {
-                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
-                "name": "beautifulsoup4",
-                "abi": None,
-                "sha256": "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd",
-            },
+        "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
             {
                 "name": "fastapi",
                 "abi": "3.13",
                 "sha256": "955091f1bd2eb33255ff2633df990bedc96e2f6294e78f2b416078777394f942",
-            },
-            {
-                "name": "python-workers-runtime-sdk",
-                "abi": None,
-                "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
             },
             # {
             #     "name": "scipy",

@@ -10,6 +10,7 @@
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/small-set.h>
 #include <workerd/util/state-machine.h>
+#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 
@@ -144,6 +145,8 @@ class ConsumerImpl;
 template <typename Self>
 class QueueImpl;
 
+// DrainingReadResult is defined in common.h
+
 // Provides the underlying implementation shared by ByteQueue and ValueQueue.
 template <typename Self>
 class QueueImpl final {
@@ -159,16 +162,22 @@ class QueueImpl final {
   QueueImpl(QueueImpl&&) = default;
   QueueImpl& operator=(QueueImpl&&) = default;
 
+  ~QueueImpl() noexcept(false) {
+    // Detach all consumers before destruction to prevent UAF.
+    // This can happen during isolate teardown when the destruction order
+    // of JS wrapper objects doesn't follow the ownership hierarchy.
+    allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.detachQueue(); });
+  }
+
   // Closes the queue. The close is forwarded on to all consumers.
   // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
-    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      // We copy the list of consumers in case the consumers remove themselves
-      // from the queue during the close callback, invalidating the iterator.
-      auto consumers = ready.consumers.snapshot();
-      for (auto consumer: consumers) {
-        consumer->close(js);
-      }
+    if (state.isActive()) {
+#ifdef KJ_DEBUG
+      isClosingOrErroring = true;
+      KJ_DEFER(isClosingOrErroring = false);
+#endif
+      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.close(js); });
       state.template transitionTo<Closed>();
     }
   }
@@ -186,13 +195,12 @@ class QueueImpl final {
   // all pending consume promises.
   // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::Value reason) {
-    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      // We copy the list of consumers in case the consumers remove themselves
-      // from the queue during the error callback, invalidating the iterator.
-      auto consumers = ready.consumers.snapshot();
-      for (auto consumer: consumers) {
-        consumer->error(js, reason.addRef(js));
-      }
+    if (state.isActive()) {
+#ifdef KJ_DEBUG
+      isClosingOrErroring = true;
+      KJ_DEFER(isClosingOrErroring = false);
+#endif
+      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.error(js, reason.addRef(js)); });
       state.template transitionTo<Errored>(kj::mv(reason));
     }
   }
@@ -202,11 +210,10 @@ class QueueImpl final {
   // If we are already closed or errored, set totalQueueSize to zero.
   void maybeUpdateBackpressure() {
     totalQueueSize = 0;
-    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      auto consumers = ready.consumers.snapshot();
-      for (auto consumer: consumers) {
-        totalQueueSize = kj::max(totalQueueSize, consumer->size());
-      }
+    if (state.isActive()) {
+      allConsumers.forEach([&](ConsumerImpl& consumer) {
+        totalQueueSize = kj::max(totalQueueSize, consumer.size());
+      });
     }
   }
 
@@ -216,18 +223,16 @@ class QueueImpl final {
   // operations, then any left over data will be pushed into the consumer's buffer.
   // Asserts if the queue is closed or errored.
   void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
-    auto& ready = state.requireActiveUnsafe("The queue is closed or errored.");
+    state.requireActiveUnsafe("The queue is closed or errored.");
 
-    auto consumers = ready.consumers.snapshot();
-    for (auto consumer: consumers) {
+    allConsumers.forEach([&](ConsumerImpl& consumer) {
       KJ_IF_SOME(skip, skipConsumer) {
-        if (&skip == consumer) {
-          continue;
+        if (&skip == &consumer) {
+          return;
         }
       }
-
-      consumer->push(js, entry->clone(js));
-    }
+      consumer.push(js, entry->clone(js));
+    });
   }
 
   // The current size of consumer with the most stored data.
@@ -236,14 +241,15 @@ class QueueImpl final {
   }
 
   size_t getConsumerCount() const {
-    return state.whenActiveOr([](const Ready& ready) { return ready.consumers.size(); }, 0ul);
+    return allConsumers.size();
   }
 
   bool wantsRead() const {
-    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      auto consumers = ready.consumers.snapshot();
-      for (auto consumer: consumers) {
-        if (consumer->hasReadRequests()) return true;
+    if (state.isActive()) {
+      for (const auto& weakRef: allConsumers) {
+        KJ_IF_SOME(consumer, weakRef->tryGet()) {
+          if (consumer.hasReadRequests()) return true;
+        }
       }
     }
     return false;
@@ -273,10 +279,6 @@ class QueueImpl final {
 
   struct Ready final: public State {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
-    // The set of consumers attached to this queue. In the typical case this
-    // will be a very small number (often just one or two), so we use SmallSet to
-    // optimize for that.
-    SmallSet<ConsumerImpl*> consumers;
   };
 
   // State machine for QueueImpl:
@@ -293,18 +295,36 @@ class QueueImpl final {
   size_t highWaterMark;
   size_t totalQueueSize = 0;
   QueueState state;
+  // The set of consumers attached to this queue. In the typical case this
+  // will be a very small number (often just one or two), so we use SmallSet to
+  // optimize for that. This persists across state transitions so we can detach
+  // consumers even after close()/error() transitions the queue to a terminal state.
+  //
+  // We store weak references to consumers to safely handle the case where a consumer
+  // is destroyed during iteration (e.g., resolving a read request triggers JS that
+  // destroys another consumer in the same queue). When iterating, we check if the WeakRef is still valid.
+  SmallSet<kj::Rc<WeakRef<ConsumerImpl>>> allConsumers;
 
-  void addConsumer(ConsumerImpl* consumer) {
-    KJ_IF_SOME(ready, state.template tryGetUnsafe<Ready>()) {
-      ready.consumers.add(consumer);
-    }
+#ifdef KJ_DEBUG
+  // Debug flag to detect if addConsumer is called during close/error iteration.
+  // This should never happen - it would indicate a bug in the streams implementation.
+  bool isClosingOrErroring = false;
+#endif
+
+  void addConsumer(kj::Rc<WeakRef<ConsumerImpl>> weakRef) {
+    KJ_DASSERT(
+        !isClosingOrErroring, "Cannot add a consumer while the queue is being closed or errored");
+    allConsumers.add(kj::mv(weakRef));
   }
 
-  void removeConsumer(ConsumerImpl* consumer) {
-    KJ_IF_SOME(ready, state.template tryGetUnsafe<Ready>()) {
-      ready.consumers.remove(consumer);
-      maybeUpdateBackpressure();
-    }
+  void removeConsumer(ConsumerImpl& consumer) {
+    allConsumers.removeIf([&consumer](const kj::Rc<WeakRef<ConsumerImpl>>& ref) {
+      KJ_IF_SOME(c, ref->tryGet()) {
+        return &c == &consumer;
+      }
+      return false;  // Already invalid, will be cleaned up later
+    });
+    maybeUpdateBackpressure();
   }
 
   friend Self;
@@ -318,19 +338,26 @@ class ConsumerImpl final {
   struct StateListener {
     virtual void onConsumerClose(jsg::Lock& js) = 0;
     virtual void onConsumerError(jsg::Lock& js, jsg::Value reason) = 0;
-    virtual void onConsumerWantsData(jsg::Lock& js) = 0;
+    // Called when the consumer has a pending read and needs data.
+    // Returns true if the pull algorithm completed synchronously (meaning
+    // more pumping might yield additional synchronous data), false if the
+    // pull is async (promise pending) or no pull was needed.
+    virtual bool onConsumerWantsData(jsg::Lock& js) = 0;
   };
 
   using QueueImpl = QueueImpl<Self>;
 
   // A simple utility to be allocated on any stack where consumer buffer data maybe consumed
   // or expanded. When the stack is unwound, it ensures the backpressure is appropriately
-  // updated.
+  // updated. Captures the queue at construction time since the consumer may be
+  // destroyed before the scope ends (e.g., via onConsumerError -> owner.doError()).
   struct UpdateBackpressureScope final {
-    QueueImpl& queue;
-    UpdateBackpressureScope(QueueImpl& queue): queue(queue) {};
+    kj::Maybe<QueueImpl&> queue;
+    UpdateBackpressureScope(ConsumerImpl& consumer): queue(consumer.queue) {}
     ~UpdateBackpressureScope() noexcept(false) {
-      queue.maybeUpdateBackpressure();
+      KJ_IF_SOME(q, queue) {
+        q.maybeUpdateBackpressure();
+      }
     }
     KJ_DISALLOW_COPY_AND_MOVE(UpdateBackpressureScope);
   };
@@ -343,13 +370,32 @@ class ConsumerImpl final {
       : queue(queue),
         state(ConsumerState::template create<Ready>()),
         stateListener(stateListener) {
-    queue.addConsumer(this);
+    queue.addConsumer(selfRef.addRef());
   }
+
+  explicit ConsumerImpl(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
+      : queue(kj::none),
+        state(ConsumerState::template create<Ready>()),
+        stateListener(stateListener) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ConsumerImpl);
 
   ~ConsumerImpl() noexcept(false) {
-    queue.removeConsumer(this);
+    // queue may be none if the queue was destroyed before this consumer
+    // (e.g., during isolate teardown) or if cloned from a closed stream.
+    // We must remove ourselves before invalidating selfRef, otherwise
+    // removeConsumer won't find us (tryGet() would return none).
+    KJ_IF_SOME(q, queue) {
+      q.removeConsumer(*this);
+    }
+    // Invalidate after removal so any concurrent iteration will skip us.
+    selfRef->invalidate();
+  }
+
+  // Called by QueueImpl destructor to detach this consumer from a queue
+  // that is about to be destroyed.
+  void detachQueue() {
+    queue = kj::none;
   }
 
   void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
@@ -395,11 +441,12 @@ class ConsumerImpl final {
     // closes or errors another consumer in the same queue.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // If the consumer is already closing or the entry is empty, do nothing.
-      if (isClosing() || entry->getSize() == 0) {
+      // Also skip if queue is none (consumer cloned from closed stream).
+      if (isClosing() || entry->getSize() == 0 || queue == kj::none) {
         return;
       }
 
-      UpdateBackpressureScope scope(queue);
+      UpdateBackpressureScope scope(*this);
       Self::handlePush(js, ready, queue, kj::mv(entry));
     }
   }
@@ -412,13 +459,19 @@ class ConsumerImpl final {
       return request.reject(js, errored.reason);
     }
     auto& ready = state.requireActiveUnsafe();
+    // Mutual exclusion with draining reads.
+    if (ready.hasPendingDrainingRead) {
+      auto error = jsg::Value(
+          js.v8Isolate, js.typeError("Cannot call read while there is a pending draining read"_kj));
+      return request.reject(js, error);
+    }
     Self::handleRead(js, ready, *this, queue, kj::mv(request));
     return maybeDrainAndSetState(js);
   }
 
   void reset() {
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      UpdateBackpressureScope scope(queue);
+      UpdateBackpressureScope scope(*this);
       ready.buffer.clear();
       ready.queueTotalSize = 0;
     }
@@ -528,6 +581,10 @@ class ConsumerImpl final {
     // grows. By heap-allocating each ReadRequest, we ensure reference stability.
     workerd::RingBuffer<kj::Own<ReadRequest>, 8> readRequests;
     size_t queueTotalSize = 0;
+    // True if there is a pending draining read operation. Draining reads are mutually
+    // exclusive with regular reads - read() will reject if this is true, and drainingRead()
+    // will reject if there are pending readRequests.
+    bool hasPendingDrainingRead = false;
 
     inline kj::StringPtr jsgGetMemoryName() const;
     inline size_t jsgGetMemorySelfSize() const;
@@ -545,9 +602,14 @@ class ConsumerImpl final {
       Closed,
       Errored>;
 
-  QueueImpl& queue;
+  kj::Maybe<QueueImpl&> queue;
   ConsumerState state;
   kj::Maybe<ConsumerImpl::StateListener&> stateListener;
+  // WeakRef to this consumer, used for safe registration with QueueImpl.
+  // When this consumer is destroyed, we invalidate the WeakRef so that
+  // any iteration over allConsumers in QueueImpl will safely skip us.
+  kj::Rc<WeakRef<ConsumerImpl>> selfRef =
+      kj::rc<WeakRef<ConsumerImpl>>(kj::Badge<ConsumerImpl>{}, *this);
 
   bool isClosing() {
     // Closing state is determined by whether there is a Close sentinel that has been
@@ -564,7 +626,7 @@ class ConsumerImpl final {
   void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      UpdateBackpressureScope scope(queue);
+      UpdateBackpressureScope scope(*this);
       KJ_IF_SOME(reason, maybeReason) {
         // If maybeReason != nullptr, then we are draining because of an error.
         // In that case, we want to reset/clear the buffer and reject any remaining
@@ -673,6 +735,8 @@ class ValueQueue final {
    public:
     Consumer(ValueQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+    // Used when cloning a consumer whose queue has been destroyed.
+    explicit Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -688,6 +752,15 @@ class ValueQueue final {
 
     void read(jsg::Lock& js, ReadRequest request);
 
+    // Draining read for optimized pipe-to operations. Drains all currently buffered
+    // data, pumps the controller for synchronously available data, and converts
+    // all values to bytes. Values must be ArrayBuffer, ArrayBufferView, or string;
+    // other types will error the stream.
+    // Rejects if there are pending regular reads (mutual exclusion).
+    // Regular read() will reject if there is a pending draining read.
+    // The maxRead parameter is a soft limit - see ReadableStreamController::drainingRead.
+    jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead = kj::maxValue);
+
     void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
     void reset();
@@ -698,6 +771,7 @@ class ValueQueue final {
         jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
 
     bool hasReadRequests();
+    bool hasPendingDrainingRead();
     void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
 
     void visitForGc(jsg::GcVisitor& visitor);
@@ -742,14 +816,16 @@ class ValueQueue final {
   QueueImpl impl;
 
   static void handlePush(
-      jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Rc<Entry> entry);
+      jsg::Lock& js, ConsumerImpl::Ready& state, kj::Maybe<QueueImpl&> queue, kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
-      QueueImpl& queue,
+      kj::Maybe<QueueImpl&> queue,
       ReadRequest request);
-  static bool handleMaybeClose(
-      jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer, QueueImpl& queue);
+  static bool handleMaybeClose(jsg::Lock& js,
+      ConsumerImpl::Ready& state,
+      ConsumerImpl& consumer,
+      kj::Maybe<QueueImpl&> queue);
 
   friend ConsumerImpl;
 };
@@ -895,6 +971,8 @@ class ByteQueue final {
    public:
     Consumer(ByteQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+    // Used when cloning a consumer whose queue has been destroyed.
+    explicit Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -910,6 +988,14 @@ class ByteQueue final {
 
     void read(jsg::Lock& js, ReadRequest request);
 
+    // Draining read for optimized pipe-to operations. Drains all currently buffered
+    // data and pumps the controller for synchronously available data.
+    // Returns bytes directly without conversion (data is already bytes).
+    // Rejects if there are pending regular reads (mutual exclusion).
+    // Regular read() will reject if there is a pending draining read.
+    // The maxRead parameter is a soft limit - see ReadableStreamController::drainingRead.
+    jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead = kj::maxValue);
+
     void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
     void reset();
@@ -919,6 +1005,7 @@ class ByteQueue final {
     kj::Own<Consumer> clone(
         jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     bool hasReadRequests();
+    bool hasPendingDrainingRead();
     void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
 
     void visitForGc(jsg::GcVisitor& visitor);
@@ -971,14 +1058,16 @@ class ByteQueue final {
   QueueImpl impl;
 
   static void handlePush(
-      jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Rc<Entry> entry);
+      jsg::Lock& js, ConsumerImpl::Ready& state, kj::Maybe<QueueImpl&> queue, kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
-      QueueImpl& queue,
+      kj::Maybe<QueueImpl&> queue,
       ReadRequest request);
-  static bool handleMaybeClose(
-      jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer, QueueImpl& queue);
+  static bool handleMaybeClose(jsg::Lock& js,
+      ConsumerImpl::Ready& state,
+      ConsumerImpl& consumer,
+      kj::Maybe<QueueImpl&> queue);
 
   friend ConsumerImpl;
   friend class Consumer;

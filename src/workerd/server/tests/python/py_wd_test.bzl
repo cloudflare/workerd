@@ -1,4 +1,3 @@
-load("@//:build/is_pyodide_bzlmod.bzl", "is_pyodide_bzlmod")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
@@ -35,13 +34,8 @@ def _py_wd_test_helper(
     data = data + ["@all_pyodide_wheels_%s//:whls" % pkg_tag]
     args = args + ["--pyodide-package-disk-cache-dir"]
 
-    # TODO(cleanup): We support both mangled and non-mangled wheels paths for now, clean up once
-    # downstream repo fully uses bzlmod
-    if is_pyodide_bzlmod:
-        # +pyodide+ is a bzlmod canonical repository name
-        args.append("../+pyodide+all_pyodide_wheels_%s" % pkg_tag)
-    else:
-        args.append("../all_pyodide_wheels_%s" % pkg_tag)
+    # +pyodide+ is a bzlmod canonical repository name
+    args.append("../+pyodide+all_pyodide_wheels_%s" % pkg_tag)
 
     load_snapshot = None
     pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
@@ -50,7 +44,8 @@ def _py_wd_test_helper(
             use_snapshot = None
         else:
             use_snapshot = "baseline"
-            feature_flags = feature_flags + ["python_dedicated_snapshot"]
+            if make_snapshot:
+                feature_flags = feature_flags + ["python_dedicated_snapshot"]
     if use_snapshot:
         version_info = BUNDLE_VERSION_INFO[python_flag]
 
@@ -81,7 +76,7 @@ def _py_wd_test_helper(
 
     wd_test(
         src = templated_src,
-        name = name_flag + "@",
+        name = name_flag,
         args = args,
         python_snapshot_test = make_snapshot,
         data = data,
@@ -210,7 +205,9 @@ def py_wd_test(
         "--python-snapshot-dir",
         ".",
     ]
-    tags = tags + ["py_wd_test", "python"]
+
+    # Python tests are extremely slow with coverage instrumentation, skip them
+    tags = tags + ["py_wd_test", "python", "no-coverage"]
 
     for python_flag in python_flags:
         _py_wd_test_helper(

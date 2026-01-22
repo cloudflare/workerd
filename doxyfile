@@ -1209,11 +1209,11 @@ CLANG_OPTIONS          = -std=c++23     \
                          -Wunused-lambda-capture \
                          -Wunused-variable \
                          -no-canonical-prefixes \
-                         -Iexternal/codspeed/google_benchmark/include/ \
-                         -Iexternal/ada-url/ \
-                         -Iexternal/simdutf/ \
-                         -Iexternal/nbytes/ \
-                         -Iexternal/ssl/src/include/ \
+                         -Iexternal/google_benchmark++_repo_rules+codspeed/google_benchmark/include/ \
+                         -Iexternal/ada-url+/ \
+                         -Iexternal/+http+simdutf/ \
+                         -Iexternal/+http+nbytes/ \
+                         -Iexternal/boringssl+/include/ \
                          -I/usr/include \
                          -I/usr/include/c++/11 \
                          -I/usr/include/c++/11/bits \

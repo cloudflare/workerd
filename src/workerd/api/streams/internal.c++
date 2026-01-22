@@ -677,6 +677,100 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
   KJ_UNREACHABLE;
 }
 
+kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::drainingRead(
+    jsg::Lock& js, size_t maxRead) {
+  // InternalController does not support draining reads fully since all reads are
+  // async. We implement a simplified version that just performs a normal read
+  // like read(). The significant difference is that with JS-backed streams, a draining
+  // read will pull any already enqueued data from the stream buffer and try synchronously
+  // pumping the stream for more data until either maxRead is satisfied or the stream
+  // indicates EOF, error, or that it needs to wait for more data. Internal streams have
+  // no such internal buffering and never provide data synchronously so drainingRead
+  // is effectively the same as read().
+
+  if (isPendingClosure) {
+    return js.rejectedPromise<DrainingReadResult>(
+        js.v8TypeError("This ReadableStream belongs to an object that is closing."_kj));
+  }
+
+  static constexpr size_t kAtLeast = 1;
+
+  disturbed = true;
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return js.resolvedPromise(DrainingReadResult{.done = true});
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return js.rejectedPromise<DrainingReadResult>(errored.addRef(js));
+    }
+    KJ_CASE_ONEOF(readable, Readable) {
+      if (readPending) {
+        return js.rejectedPromise<DrainingReadResult>(js.v8TypeError(
+            "This ReadableStream only supports a single pending read request at a time."_kj));
+      }
+      readPending = true;
+
+      // TODO(later): In the case that maxRead is large, we may consider splitting this into
+      // multiple reads to avoid allocating too large of a buffer at once. The draining read
+      // result can handle multiple chunks so this would be feasible at the cost of more
+      // read calls. For now we just do a single read up to maxRead.
+      // At the very least, we cap maxRead to some reasonable limit to avoid
+      // potential OOM issues.
+      static constexpr size_t kMaxReadCap = 1 * 1024 * 1024;  // 1 MB
+      maxRead = kj::min(maxRead, kMaxReadCap);
+
+      if (maxRead == 0) {
+        // No data requested, return empty result.
+        // This really shouldn't ever happen but let's handle it gracefully.
+        readPending = false;
+        return js.resolvedPromise(DrainingReadResult{
+          .chunks = nullptr,
+          .done = false,
+        });
+      }
+
+      auto store = kj::heapArray<kj::byte>(maxRead);
+
+      auto promise =
+          kj::evalNow([&] { return readable->tryRead(store.begin(), kAtLeast, store.size()); });
+      KJ_IF_SOME(readerLock, readState.tryGet<ReaderLocked>()) {
+        promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
+      }
+
+      auto& ioContext = IoContext::current();
+      return ioContext.awaitIoLegacy(js, kj::mv(promise))
+          .then(js,
+              ioContext.addFunctor([this, store = kj::mv(store)](jsg::Lock& js,
+                                       size_t amount) mutable -> jsg::Promise<DrainingReadResult> {
+        readPending = false;
+        KJ_ASSERT(amount <= store.size());
+        if (amount == 0) {
+          if (!state.is<StreamStates::Errored>()) {
+            doClose(js);
+          }
+          KJ_IF_SOME(o, owner) {
+            o.signalEof(js);
+          }
+          return js.resolvedPromise(DrainingReadResult{.done = true});
+        }
+        // Return a slice so the script can see how many bytes were read.
+        return js.resolvedPromise(DrainingReadResult{
+          .chunks = kj::arr(store.slice(0, amount).attach(kj::mv(store))), .done = false});
+      }),
+              ioContext.addFunctor(
+                  [this](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<DrainingReadResult> {
+        readPending = false;
+        if (!state.is<StreamStates::Errored>()) {
+          doError(js, reason.getHandle(js));
+        }
+        return js.rejectedPromise<DrainingReadResult>(kj::mv(reason));
+      }));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 jsg::Promise<void> ReadableStreamInternalController::pipeTo(
     jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) {
 

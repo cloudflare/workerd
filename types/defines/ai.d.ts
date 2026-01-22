@@ -2298,7 +2298,7 @@ export interface Ai_Cf_Qwen_Qwq_32B_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -2572,7 +2572,7 @@ export interface Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -2665,7 +2665,7 @@ export interface Ai_Cf_Google_Gemma_3_12B_It_Prompt {
    */
   prompt: string;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -2829,7 +2829,7 @@ export interface Ai_Cf_Google_Gemma_3_12B_It_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -3110,7 +3110,7 @@ export interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -3349,7 +3349,7 @@ export interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages_Inner {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fufilled for the response.
+   * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
   /**
@@ -4426,7 +4426,7 @@ export interface Ai_Cf_Ai4Bharat_Indictrans2_En_Indic_1B_Input {
    */
   text: string | string[];
   /**
-   * Target langauge to translate to
+   * Target language to translate to
    */
   target_language:
     | "asm_Beng"

@@ -722,30 +722,6 @@ export const jsSourceTeed = {
   },
 };
 
-export const htmlRewriterStream = {
-  async test() {
-    const enc = new TextEncoder();
-
-    const readable = new ReadableStream({
-      pull(controller) {
-        controller.enqueue(enc.encode('Hello World!'));
-        controller.close();
-      },
-    });
-
-    let response = new Response(readable, {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-      },
-    });
-
-    response = new HTMLRewriter().transform(response);
-
-    strictEqual(await response.text(), 'Hello World!');
-  },
-};
-
 export const jsByteSourceLargeData = {
   async test() {
     const largeData = 'x'.repeat(100000);

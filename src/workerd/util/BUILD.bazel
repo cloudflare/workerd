@@ -337,6 +337,7 @@ kj_test(
 )
 
 kj_test(
+    size = "large",
     src = "sqlite-test.c++",
     deps = [
         ":sqlite",
@@ -385,7 +386,10 @@ kj_test(
 
 kj_test(
     src = "small-set-test.c++",
-    deps = [":small-set"],
+    deps = [
+        ":small-set",
+        ":util",
+    ],
 )
 
 wd_cc_library(

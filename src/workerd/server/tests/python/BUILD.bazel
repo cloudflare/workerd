@@ -1,13 +1,25 @@
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_rust_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
+load("//src/workerd/server/tests/python/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
 
 python_test_setup()
 
-# Each test takes a while to start up, so if possible add additional tests to many-tests or sdk or
-# some other existing test.
+# NOTE: Each test takes a while to start up, so if possible add additional tests to pytest or to
+# top-level-tests or sdk or some other existing test.
+
+# TODO: This only works for pytest-asyncio <= 1.1.0, starting from pytest-asyncio 1.2.0 there is a
+# problem.
+vendored_py_wd_test(
+    "pytest-asyncio",
+    data = glob(["pytest/tests/**"]),
+    level = 0,
+    main_py_file = "pytest/main.py",
+    test_template = "pytest/pytest.wd-test",
+)
+
 py_wd_test("hello")
 
-py_wd_test("many-tests")
+py_wd_test("top-level-tests")
 
 py_wd_test("env-param")
 

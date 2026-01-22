@@ -1,10 +1,13 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 
 js_library(
     name = "base-eslint",
-    srcs = ["base.eslint.config.mjs"],
+    srcs = [
+        "base.eslint.config.mjs",
+        "custom-eslint-rules.mjs",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//:node_modules/@eslint/js",
@@ -13,6 +16,16 @@ js_library(
         "//:node_modules/typescript",
         "//:node_modules/typescript-eslint",
     ],
+)
+
+js_test(
+    name = "custom-eslint-rules-test",
+    size = "small",
+    data = [
+        ":base-eslint",
+    ],
+    entry_point = "custom-eslint-rules.test.mjs",
+    tags = ["js-test"],
 )
 
 ts_config(

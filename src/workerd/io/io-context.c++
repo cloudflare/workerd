@@ -548,7 +548,8 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     auto timeoutLogPromise = [this]() -> kj::Promise<void> {
       return context->run([this](Worker::Lock&) {
         context->logWarning(
-            "IoContext timed out due to inactivity, waitUntil tasks were cancelled without completing.");
+            "waitUntil() tasks did not complete within the allowed time after invocation end and have been cancelled. "
+            "See: https://developers.cloudflare.com/workers/runtime-apis/context/#waituntil");
       });
     };
     timeoutPromise = context->limitEnforcer->limitDrain().then(kj::mv(timeoutLogPromise));
@@ -946,7 +947,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     ret = ret.attach(kj::mv(tracing.span));
   }
   if (tracing.userSpan.isObserved()) {
-    ret = ret.attach(kj::mv(tracing.userSpan));
+    auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing.userSpan)));
+    ret = ret.attach(kj::mv(ioOwnedSpan));
   }
 
   return kj::mv(ret);

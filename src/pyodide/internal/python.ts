@@ -31,6 +31,7 @@ import { default as SetupEmscripten } from 'internal:setup-emscripten';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import {
+  PythonUserError,
   PythonWorkersInternalError,
   reportError,
   unreachable,
@@ -38,6 +39,7 @@ import {
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
+import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -201,9 +203,30 @@ export function clearSignals(Module: Module): void {
     // We will turn signal handling on as part of triggering the interrupt, having it on otherwise
     // just wastes cycles.
     Module.Py_EmscriptenSignalBuffer[0] = SIGXCPU;
-    Module.HEAPU32[getSignalClockAddr(Module)] = 1;
+    Module.HEAPU32[getSignalClockAddr(Module) / 4] = 1;
     Module.HEAPU32[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING / 4] = 0;
   }
+}
+
+function compileModuleFromReadOnlyFS(
+  Module: Module,
+  path: string
+): WebAssembly.Module {
+  const { node } = Module.FS.lookupPath(path);
+  // Get the trusted read function from our private Map, not from the node
+  // or filesystem object (which could have been tampered with by user code)
+  const trustedRead = getTrustedReadFunc(node);
+  if (!trustedRead) {
+    throw new PythonUserError(
+      'Can only load shared libraries from read only file systems.'
+    );
+  }
+  const stat = node.node_ops.getattr(node);
+  const buffer = new Uint8Array(stat.size);
+  // Create a minimal stream object and read using trusted read function
+  const stream = { node, position: 0 };
+  trustedRead(stream, buffer, 0, stat.size, 0);
+  return UnsafeEval.newWasmModule(buffer);
 }
 
 export function loadPyodide(
@@ -216,6 +239,7 @@ export function loadPyodide(
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
       SetupEmscripten.getModule()
     );
+    Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     Module.API.config.jsglobals = globalThis;
     if (isWorkerd) {
       Module.API.config.indexURL = indexURL;

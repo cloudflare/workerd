@@ -493,7 +493,7 @@ uint32_t FileSystemModule::write(
   auto& vfs = workerd::VirtualFileSystem::current(js);
 
   KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
-    static const auto getPosition = [](jsg::Lock& js, auto& opened, auto& file,
+    static const auto getPosition = [](jsg::Lock& js, auto opened, auto file,
                                         const WriteOptions& options) -> uint32_t {
       if (opened->append) {
         // If the file descriptor is opened in append mode, we ignore the position
@@ -509,7 +509,7 @@ uint32_t FileSystemModule::write(
     };
     KJ_SWITCH_ONEOF(opened->node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        auto pos = getPosition(js, opened, file, options);
+        auto pos = getPosition(js, opened.addRef(), file.addRef(), options);
         uint32_t total = 0;
         for (auto& buffer: data) {
           KJ_SWITCH_ONEOF(file->write(js, pos, buffer)) {
@@ -1142,7 +1142,7 @@ static constexpr int UV_DIRENT_LINK = 3;
 static constexpr int UV_DIRENT_CHAR = 6;
 void readdirImpl(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
-    kj::Rc<workerd::Directory>& dir,
+    kj::Rc<workerd::Directory> dir,
     const kj::Path& path,
     const FileSystemModule::ReadDirOptions& options,
     kj::Vector<FileSystemModule::DirEntHandle>& entries) {
@@ -1165,7 +1165,7 @@ void readdirImpl(jsg::Lock& js,
         });
 
         if (options.recursive) {
-          readdirImpl(js, vfs, dir, path.append(entry.key), options, entries);
+          readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
         }
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
@@ -1186,7 +1186,7 @@ void readdirImpl(jsg::Lock& js,
                 // Do nothing
               }
               KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-                readdirImpl(js, vfs, dir, path.append(entry.key), options, entries);
+                readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
                 throwFsError(js, err, "readdir"_kj);
@@ -1209,7 +1209,7 @@ kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         kj::Vector<DirEntHandle> entries;
-        readdirImpl(js, vfs, dir, normalizedPath, options, entries);
+        readdirImpl(js, vfs, kj::mv(dir), normalizedPath, options, entries);
         return entries.releaseAsArray();
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -2338,7 +2338,7 @@ jsg::Promise<kj::Array<jsg::USVString>> FileSystemDirectoryHandle::resolve(
 namespace {
 kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileSystem& vfs,
     jsg::Lock& js,
-    kj::Rc<workerd::Directory>& inner,
+    kj::Rc<workerd::Directory> inner,
     const jsg::Url& parentLocator) {
   kj::Vector<jsg::Ref<FileSystemHandle>> entries;
   for (auto& entry: *inner.get()) {
@@ -2404,7 +2404,7 @@ jsg::Ref<FileSystemDirectoryHandle::EntryIterator> FileSystemDirectoryHandle::en
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         return js.alloc<EntryIterator>(
-            IteratorState(JSG_THIS, collectEntries(getVfs(), js, dir, getLocator())));
+            IteratorState(JSG_THIS, collectEntries(getVfs(), js, kj::mv(dir), getLocator())));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         JSG_FAIL_REQUIRE(DOMTypeMismatchError, "Not a directory");
@@ -2432,7 +2432,7 @@ jsg::Ref<FileSystemDirectoryHandle::KeyIterator> FileSystemDirectoryHandle::keys
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         return js.alloc<KeyIterator>(
-            IteratorState(JSG_THIS, collectEntries(getVfs(), js, dir, getLocator())));
+            IteratorState(JSG_THIS, collectEntries(getVfs(), js, kj::mv(dir), getLocator())));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         JSG_FAIL_REQUIRE(DOMTypeMismatchError, "Not a directory");
@@ -2461,7 +2461,7 @@ jsg::Ref<FileSystemDirectoryHandle::ValueIterator> FileSystemDirectoryHandle::va
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         return js.alloc<ValueIterator>(
-            IteratorState(JSG_THIS, collectEntries(getVfs(), js, dir, getLocator())));
+            IteratorState(JSG_THIS, collectEntries(getVfs(), js, kj::mv(dir), getLocator())));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         JSG_FAIL_REQUIRE(DOMTypeMismatchError, "Not a directory");
@@ -2502,7 +2502,7 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
         }
         callback.setReceiver(js.v8Ref(receiver));
 
-        for (auto& entry: collectEntries(getVfs(), js, dir, getLocator())) {
+        for (auto& entry: collectEntries(getVfs(), js, kj::mv(dir), getLocator())) {
           callback(js, jsg::USVString(kj::str(entry->getName(js))), entry.addRef(), JSG_THIS);
         }
         return;

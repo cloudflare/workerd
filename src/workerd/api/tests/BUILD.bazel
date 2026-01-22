@@ -43,6 +43,7 @@ wd_test(
         "jsrpc-timing-test.js",
         "jsrpc-timing-test-tail.js",
     ],
+    tags = ["no-coverage"],
 )
 
 # Test for a worker that can log to itself using the isTracer parameter
@@ -120,7 +121,7 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
+    size = "enormous",
     src = "sql-test.wd-test",
     args = ["--experimental"],
     data = [
@@ -373,6 +374,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-no-auto-allocate-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-no-auto-allocate-test.js"],
+)
+
+wd_test(
     src = "streams-js-test.wd-test",
     args = ["--experimental"],
     data = ["streams-js-test.js"],
@@ -589,6 +596,7 @@ wd_test(
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
+    tags = ["requires-network"],
 )
 
 wd_test(

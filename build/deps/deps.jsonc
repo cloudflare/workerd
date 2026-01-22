@@ -2,12 +2,80 @@
   "$schema": "deps.schema.json",
   "repositories": [
     {
+      "name": "ada-url",
+      "type": "bazel_dep"
+    },
+    // BoringSSL is more likely to break than other dependencies, because our downstream build uses
+    // a custom-built version of BoringSSL in FIPS mode.
+    {
+      "name": "boringssl",
+      "type": "github_release",
+      "use_bazel_dep": true,
+      "owner": "google",
+      "repo": "boringssl",
+      "repo_name": "ssl",
+      "freeze_version": "0.20251002.0",
+      "patches": [
+        "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch"
+      ]
+    },
+    {
+      "name": "brotli",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "tcmalloc",
+      "type": "bazel_dep"
+    },
+    {
       "name": "capnp-cpp",
       "type": "github_tarball",
       "owner": "capnproto",
       "repo": "capnproto",
       "branch": "v2",
       "extra_strip_prefix": "/c++"
+    },
+    // We want to avoid version skew with v8, so we use identical versions.
+    {
+      "name": "dragonbox",
+      "type": "github_tarball",
+      "build_file_content": "cc_library(name = 'dragonbox', hdrs = glob(['include/dragonbox/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/dragonbox/src')",
+      "owner": "jk-jeon",
+      "repo": "dragonbox",
+      "freeze_commit": "6c7c925b571d54486b9ffae8d9d18a822801cbda"
+    },
+    // We want to avoid version skew with v8, so we use identical versions.
+    {
+      "name": "fast_float",
+      "type": "github_tarball",
+      "use_bazel_dep": true,
+      "owner": "fastfloat",
+      "repo": "fast_float",
+      "branch": "main",
+      "freeze_commit": "cb1d42aaa1e14b09e1452cfdef373d051b8c02a4",
+      "build_file_content": "cc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
+      "use_module_bazel_from_bcr": "8.0.2"
+    },
+    // We want to avoid version skew with v8, so we use identical versions.
+    {
+      "name": "fp16",
+      "type": "github_tarball",
+      "use_bazel_dep": true,
+      "owner": "Maratyszcza",
+      "repo": "FP16",
+      "freeze_commit": "b3720617faf1a4581ed7e6787cc51722ec7751f0",
+      "build_file_content": "exports_files(glob(['**']))",
+      "use_module_bazel_from_bcr": "0.0.0-20210320-0a92994"
+    },
+    // We want to avoid version skew with v8, so we use identical versions.
+    {
+      "name": "highway",
+      "type": "github_tarball",
+      "use_bazel_dep": true,
+      "owner": "google",
+      "repo": "highway",
+      "freeze_commit": "00fe003dac355b979f36157f9407c7c46448958e",
+      "use_module_bazel_from_bcr": "1.3.0"
     },
     {
       "name": "nbytes",
@@ -24,12 +92,15 @@
       "branch": "main"
     },
     {
-      "name": "dragonbox",
-      "type": "github_tarball",
-      "build_file_content": "cc_library(name = \"dragonbox\", hdrs = glob([\"include/dragonbox/*.h\"]), visibility = [\"//visibility:public\"], include_prefix = \"third_party/dragonbox/src\")",
-      "owner": "jk-jeon",
-      "repo": "dragonbox",
-      "freeze_commit": "6c7c925b571d54486b9ffae8d9d18a822801cbda"
+      "name": "perfetto",
+      "type": "github_release",
+      "use_bazel_dep": true,
+      "owner": "google",
+      "repo": "perfetto",
+      "patches": [
+        "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
+        "//:patches/perfetto/0002-disable-info-level-logging.patch"
+      ]
     },
     {
       "name": "simdutf",
@@ -39,7 +110,6 @@
       "build_file": "//:build/BUILD.simdutf",
       "file_regex": "singleheader.zip"
     },
-    //wpt
     // TODO: wpt was temporarily removed from shared_deps.jsonc because it would require
     // workerd to be fully converted to bzlmod before the internal repo can load it.
     {
@@ -50,6 +120,19 @@
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "@workerd//:build/BUILD.wpt",
       "freeze_version": "wpt-c1ad85a22"
+    },
+    // This should match the version specified in V8 DEPS, but in practice it is generally acceptable
+    // for it to be behind – zlib is very stable and its API has not changed in a long time, most
+    // changes to the Chromium fork affect ancillary tools and not the zlib library itself.
+    {
+      "name": "zlib",
+      "type": "git_clone",
+      "use_bazel_dep": true,
+      "url": "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
+      "branch": "main",
+      "freeze_commit": "85f05b0835f934e52772efc308baa80cdd491838",
+      "build_file": "//:build/BUILD.zlib",
+      "patches": ["//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"]
     }
   ]
 }

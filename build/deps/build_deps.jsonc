@@ -1,6 +1,82 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
+    // bazel_deps from MODULE.bazel
+    {
+      "name": "aspect_rules_lint",
+      "type": "bazel_dep"
+    },
+    // bazel_lib was formerly known as aspect_bazel_lib, new versions starting with v3 are released
+    // under the new name which should now be used.
+    {
+      "name": "bazel_lib",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "bazel_skylib",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_shell",
+      "type": "bazel_dep"
+    },
+    // abseil is used by protobuf and tcmalloc.
+    {
+      "name": "abseil-cpp",
+      "type": "bazel_dep"
+    },
+    // Not pulling in platforms via bzlmod causes issues with the Windows clang-cl toolchain
+    {
+      "name": "platforms",
+      "type": "bazel_dep"
+    },
+    // While the build should succeed with the default toolchain configuration from rules_cc,
+    // apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
+    // needs to be pulled in before rules_cc for this toolchain to actually be used.
+    {
+      "name": "apple_support",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_cc",
+      "type": "bazel_dep"
+    },
+    // Rust
+    {
+      "name": "rules_rust",
+      "type": "bazel_dep"
+    },
+    // Node.js
+    {
+      "name": "aspect_rules_esbuild",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "aspect_rules_js",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "aspect_rules_ts",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_nodejs",
+      "type": "bazel_dep"
+    },
+    // Python
+    {
+      "name": "rules_python",
+      "type": "bazel_dep"
+    },
+    // rules_oci and rules_multirun are used to build Docker images
+    {
+      "name": "rules_oci",
+      "type": "bazel_dep"
+    },
+    {
+      "name": "rules_multirun",
+      "type": "bazel_dep"
+    },
     // rust
     {
       "name": "cargo_bazel_linux_x64",

@@ -410,11 +410,14 @@ kj_test(
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
+        "@sqlite3",
     ],
 )
 
 kj_test(
     src = "promise-wrapper-test.c++",
+    # Omitting coverage because it takes a really long time executing it.
+    tags = ["no-coverage"],
     deps = [
         ":io",
         ":promise-wrapper",

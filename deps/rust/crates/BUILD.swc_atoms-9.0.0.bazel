@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "9.0.0",
     deps = [
-        "@crates_vendor__hstr-3.0.3//:hstr",
+        "@crates_vendor__hstr-3.0.4//:hstr",
         "@crates_vendor__once_cell-1.21.3//:once_cell",
         "@crates_vendor__serde-1.0.228//:serde",
     ],

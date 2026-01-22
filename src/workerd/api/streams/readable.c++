@@ -290,6 +290,134 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 // ======================================================================================
+// DrainingReader implementation
+
+DrainingReader::DrainingReader(): ioContext(tryGetIoContext()) {}
+
+DrainingReader::~DrainingReader() noexcept(false) {
+  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
+    stream->getController().releaseReader(*this, kj::none);
+  }
+}
+
+kj::Maybe<kj::Own<DrainingReader>> DrainingReader::create(jsg::Lock& js, ReadableStream& stream) {
+  if (stream.isLocked()) {
+    return kj::none;
+  }
+  auto reader = kj::heap<DrainingReader>();
+  if (!stream.getController().lockReader(js, *reader)) {
+    return kj::none;
+  }
+  return kj::mv(reader);
+}
+
+void DrainingReader::attach(
+    ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
+  KJ_ASSERT(state.is<Initial>());
+  state = controller.addRef();
+  this->closedPromise = kj::mv(closedPromise);
+}
+
+void DrainingReader::detach() {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      return;
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      state.init<StreamStates::Closed>();
+      return;
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return;
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxRead) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto& controller = stream->getController();
+      KJ_IF_SOME(result, controller.drainingRead(js, maxRead)) {
+        return kj::mv(result);
+      }
+      return js.rejectedPromise<DrainingReadResult>(
+          js.v8TypeError("Unable to perform draining read on this stream."_kj));
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return js.rejectedPromise<DrainingReadResult>(
+          js.v8TypeError("This ReadableStream reader has been released."_kj));
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return js.resolvedPromise(DrainingReadResult{
+        .chunks = kj::Array<kj::Array<kj::byte>>(),
+        .done = true,
+      });
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<void> DrainingReader::cancel(
+    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto ref = stream.addRef();
+      return stream->getController().cancel(js, maybeReason);
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return js.rejectedPromise<void>(
+          js.v8TypeError("This ReadableStream reader has been released."_kj));
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return js.resolvedPromise();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void DrainingReader::releaseLock(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto ref = stream.addRef();
+      stream->getController().releaseReader(*this, js);
+      state.init<Released>();
+      return;
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return;
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+bool DrainingReader::isAttached() const {
+  return state.is<Attached>();
+}
+
+void DrainingReader::visitForGc(jsg::GcVisitor& visitor) {
+  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
+    visitor.visit(stream);
+  }
+  visitor.visit(closedPromise);
+}
+
+// ======================================================================================
 
 ReadableStream::ReadableStream(IoContext& ioContext, kj::Own<ReadableStreamSource> source)
     : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
