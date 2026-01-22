@@ -58,7 +58,18 @@ class BaseTracer: public kj::Refcounted {
 
   // Reports the outcome event of the worker invocation. For Streaming Tail Worker, this will be the
   // final event, causing the stream to terminate.
-  virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
+  // Body sizes can be passed directly here, or pre-set via setBodySizes().
+  virtual void setOutcome(EventOutcome outcome,
+      kj::Duration cpuTime,
+      kj::Duration wallTime,
+      kj::Maybe<uint64_t> responseBodySize = kj::none,
+      kj::Maybe<uint64_t> requestBodySize = kj::none) = 0;
+
+  // Pre-sets body sizes to be included in the Outcome event when setOutcome is called.
+  // This allows body sizes to be set from worker-entrypoint.c++ when proxyTask completes,
+  // before setOutcome is called from the RequestObserver destructor.
+  virtual void setBodySizes(
+      kj::Maybe<uint64_t> responseBodySize, kj::Maybe<uint64_t> requestBodySize) = 0;
 
   // Report time as seen from the incoming Request when the request is complete, since it will not
   // be available afterwards.
@@ -146,7 +157,13 @@ class WorkerTracer final: public BaseTracer {
   void setEventInfoInternal(
       const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info);
 
-  void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
+  void setOutcome(EventOutcome outcome,
+      kj::Duration cpuTime,
+      kj::Duration wallTime,
+      kj::Maybe<uint64_t> responseBodySize = kj::none,
+      kj::Maybe<uint64_t> requestBodySize = kj::none) override;
+  void setBodySizes(
+      kj::Maybe<uint64_t> responseBodySize, kj::Maybe<uint64_t> requestBodySize) override;
   virtual void recordTimestamp(kj::Date timestamp) override;
 
   // Set a worker-level tag/attribute to be provided in the onset event.

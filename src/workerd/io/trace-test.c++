@@ -320,62 +320,17 @@ KJ_TEST("Read/Write FetchResponseInfo works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::FetchResponseInfo>();
 
+  // FetchResponseInfo now only contains statusCode.
+  // Body sizes have been moved to Outcome where they can be populated after body streaming completes.
   FetchResponseInfo info(123);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
   FetchResponseInfo info2(reader);
   KJ_ASSERT(info2.statusCode == 123);
-  KJ_ASSERT(info2.bodySize == kj::none);         // Default value (unknown)
-  KJ_ASSERT(info2.requestBodySize == kj::none);  // Default value (unknown)
 
   FetchResponseInfo info3 = info.clone();
   KJ_ASSERT(info3.statusCode == 123);
-  KJ_ASSERT(info3.bodySize == kj::none);         // Default value (unknown)
-  KJ_ASSERT(info3.requestBodySize == kj::none);  // Default value (unknown)
-}
-
-KJ_TEST("Read/Write FetchResponseInfo with requestBodySize works") {
-  capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::FetchResponseInfo>();
-
-  kj::Maybe<uint64_t> responseBodySize = 54321;
-  kj::Maybe<uint64_t> requestBodySize = 12345;
-  FetchResponseInfo info(200, responseBodySize, requestBodySize);
-  info.copyTo(infoBuilder);
-
-  auto reader = infoBuilder.asReader();
-  FetchResponseInfo info2(reader);
-  KJ_ASSERT(info2.statusCode == 200);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.bodySize) == 54321);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.requestBodySize) == 12345);
-
-  FetchResponseInfo info3 = info.clone();
-  KJ_ASSERT(info3.statusCode == 200);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.bodySize) == 54321);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.requestBodySize) == 12345);
-}
-
-KJ_TEST("Read/Write FetchResponseInfo with zero body sizes works") {
-  capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::FetchResponseInfo>();
-
-  // Zero body sizes should be distinguishable from unknown
-  kj::Maybe<uint64_t> responseBodySize = uint64_t{0};
-  kj::Maybe<uint64_t> requestBodySize = uint64_t{0};
-  FetchResponseInfo info(204, responseBodySize, requestBodySize);
-  info.copyTo(infoBuilder);
-
-  auto reader = infoBuilder.asReader();
-  FetchResponseInfo info2(reader);
-  KJ_ASSERT(info2.statusCode == 204);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.bodySize) == 0);         // Known to be zero, not unknown
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.requestBodySize) == 0);  // Known to be zero, not unknown
-
-  FetchResponseInfo info3 = info.clone();
-  KJ_ASSERT(info3.statusCode == 204);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.bodySize) == 0);         // Known to be zero, not unknown
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.requestBodySize) == 0);  // Known to be zero, not unknown
 }
 
 KJ_TEST("Read/Write DiagnosticChannelEvent works") {
@@ -456,6 +411,8 @@ KJ_TEST("Read/Write Return works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Return>();
 
+  // FetchResponseInfo now only contains statusCode.
+  // Body sizes have been moved to Outcome where they can be populated after body streaming completes.
   FetchResponseInfo fetchInfo(123);
   Return info(kj::mv(fetchInfo));
   info.copyTo(infoBuilder);
@@ -464,63 +421,10 @@ KJ_TEST("Read/Write Return works") {
   Return info2(reader);
   auto& fetchInfo2 = KJ_ASSERT_NONNULL(info2.info);
   KJ_ASSERT(fetchInfo2.statusCode == 123);
-  KJ_ASSERT(fetchInfo2.bodySize == kj::none);         // Default value (unknown)
-  KJ_ASSERT(fetchInfo2.requestBodySize == kj::none);  // Default value (unknown)
 
   Return info3 = info.clone();
   auto& fetchInfo3 = KJ_ASSERT_NONNULL(info3.info);
   KJ_ASSERT(fetchInfo3.statusCode == 123);
-  KJ_ASSERT(fetchInfo3.bodySize == kj::none);         // Default value (unknown)
-  KJ_ASSERT(fetchInfo3.requestBodySize == kj::none);  // Default value (unknown)
-}
-
-KJ_TEST("Read/Write Return with body sizes works") {
-  capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::Return>();
-
-  kj::Maybe<uint64_t> responseBodySize = 54321;
-  kj::Maybe<uint64_t> requestBodySize = 12345;
-  FetchResponseInfo fetchInfo(200, responseBodySize, requestBodySize);
-  Return info(kj::mv(fetchInfo));
-  info.copyTo(infoBuilder);
-
-  auto reader = infoBuilder.asReader();
-  Return info2(reader);
-  auto& fetchInfo2 = KJ_ASSERT_NONNULL(info2.info);
-  KJ_ASSERT(fetchInfo2.statusCode == 200);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(fetchInfo2.bodySize) == 54321);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(fetchInfo2.requestBodySize) == 12345);
-
-  Return info3 = info.clone();
-  auto& fetchInfo3 = KJ_ASSERT_NONNULL(info3.info);
-  KJ_ASSERT(fetchInfo3.statusCode == 200);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(fetchInfo3.bodySize) == 54321);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(fetchInfo3.requestBodySize) == 12345);
-}
-
-KJ_TEST("Read/Write Return with zero body sizes works") {
-  capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::Return>();
-
-  // Zero body sizes should be distinguishable from unknown
-  kj::Maybe<uint64_t> responseBodySize = uint64_t{0};
-  kj::Maybe<uint64_t> requestBodySize = uint64_t{0};
-  FetchResponseInfo fetchInfo(204, responseBodySize, requestBodySize);
-  Return info(kj::mv(fetchInfo));
-  info.copyTo(infoBuilder);
-
-  auto reader = infoBuilder.asReader();
-  Return info2(reader);
-  auto& fetchInfo2 = KJ_ASSERT_NONNULL(info2.info);
-  KJ_ASSERT(fetchInfo2.statusCode == 204);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(fetchInfo2.bodySize) == 0);         // Known to be zero, not unknown
-  KJ_ASSERT(KJ_ASSERT_NONNULL(fetchInfo2.requestBodySize) == 0);  // Known to be zero, not unknown
-
-  Return info3 = info.clone();
-  auto& fetchInfo3 = KJ_ASSERT_NONNULL(info3.info);
-  KJ_ASSERT(fetchInfo3.statusCode == 204);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(fetchInfo3.bodySize) == 0);         // Known to be zero, not unknown
-  KJ_ASSERT(KJ_ASSERT_NONNULL(fetchInfo3.requestBodySize) == 0);  // Known to be zero, not unknown
 }
 
 KJ_TEST("Read/Write SpanOpen works") {
@@ -596,11 +500,63 @@ KJ_TEST("Read/Write Outcome works") {
   KJ_ASSERT(info2.outcome == EventOutcome::EXCEPTION);
   KJ_ASSERT(info2.wallTime == 2 * kj::MILLISECONDS);
   KJ_ASSERT(info2.cpuTime == 1 * kj::MILLISECONDS);
+  KJ_ASSERT(info2.responseBodySize == kj::none);  // Default value (unknown)
+  KJ_ASSERT(info2.requestBodySize == kj::none);   // Default value (unknown)
 
   Outcome info3 = info.clone();
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
   KJ_ASSERT(info3.wallTime == 2 * kj::MILLISECONDS);
   KJ_ASSERT(info3.cpuTime == 1 * kj::MILLISECONDS);
+  KJ_ASSERT(info3.responseBodySize == kj::none);  // Default value (unknown)
+  KJ_ASSERT(info3.requestBodySize == kj::none);   // Default value (unknown)
+}
+
+KJ_TEST("Read/Write Outcome with body sizes works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Outcome>();
+
+  kj::Maybe<uint64_t> responseBodySize = 54321;
+  kj::Maybe<uint64_t> requestBodySize = 12345;
+  Outcome info(EventOutcome::OK, 1 * kj::MILLISECONDS, 2 * kj::MILLISECONDS, responseBodySize,
+      requestBodySize);
+  info.copyTo(infoBuilder);
+
+  auto reader = infoBuilder.asReader();
+  Outcome info2(reader);
+  KJ_ASSERT(info2.outcome == EventOutcome::OK);
+  KJ_ASSERT(info2.wallTime == 2 * kj::MILLISECONDS);
+  KJ_ASSERT(info2.cpuTime == 1 * kj::MILLISECONDS);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.responseBodySize) == 54321);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.requestBodySize) == 12345);
+
+  Outcome info3 = info.clone();
+  KJ_ASSERT(info3.outcome == EventOutcome::OK);
+  KJ_ASSERT(info3.wallTime == 2 * kj::MILLISECONDS);
+  KJ_ASSERT(info3.cpuTime == 1 * kj::MILLISECONDS);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.responseBodySize) == 54321);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.requestBodySize) == 12345);
+}
+
+KJ_TEST("Read/Write Outcome with zero body sizes works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Outcome>();
+
+  // Zero body sizes should be distinguishable from unknown
+  kj::Maybe<uint64_t> responseBodySize = uint64_t{0};
+  kj::Maybe<uint64_t> requestBodySize = uint64_t{0};
+  Outcome info(EventOutcome::OK, 1 * kj::MILLISECONDS, 2 * kj::MILLISECONDS, responseBodySize,
+      requestBodySize);
+  info.copyTo(infoBuilder);
+
+  auto reader = infoBuilder.asReader();
+  Outcome info2(reader);
+  KJ_ASSERT(info2.outcome == EventOutcome::OK);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.responseBodySize) == 0);  // Known to be zero, not unknown
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.requestBodySize) == 0);   // Known to be zero, not unknown
+
+  Outcome info3 = info.clone();
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.responseBodySize) == 0);  // Known to be zero, not unknown
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.requestBodySize) == 0);   // Known to be zero, not unknown
 }
 
 KJ_TEST("Read/Write TailEvent works") {

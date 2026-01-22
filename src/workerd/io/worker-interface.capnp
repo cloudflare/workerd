@@ -162,15 +162,8 @@ struct Trace @0x8e8d911203762d34 {
   response @8 :FetchResponseInfo;
   struct FetchResponseInfo {
     statusCode @0 :UInt16;
-    bodySize @1 :UInt64;
-    # Response body size in bytes. Only valid if hasBodySize is true.
-    hasBodySize @2 :Bool;
-    # True if bodySize contains a valid value (actual bytes written).
-    requestBodySize @3 :UInt64;
-    # Request body size in bytes. Only valid if hasRequestBodySize is true.
-    # This is actual bytes consumed, not Content-Length header.
-    hasRequestBodySize @4 :Bool;
-    # True if requestBodySize contains a valid value.
+    # Fields @1-@4 were body size fields that have been moved to Outcome
+    # where they can be populated after body streaming completes.
   }
 
   cpuTime @10 :UInt64;
@@ -281,6 +274,18 @@ struct Trace @0x8e8d911203762d34 {
     outcome @0 :EventOutcome;
     cpuTime @1 :UInt64;
     wallTime @2 :UInt64;
+    # Body sizes are reported in Outcome because this is when streaming has
+    # definitively completed. Per HTTP spec, body size is only known after
+    # the body has been fully transmitted.
+    responseBodySize @3 :UInt64;
+    # Response body size in bytes. Only valid if hasResponseBodySize is true.
+    hasResponseBodySize @4 :Bool;
+    # True if responseBodySize contains a valid value (actual bytes written).
+    requestBodySize @5 :UInt64;
+    # Request body size in bytes. Only valid if hasRequestBodySize is true.
+    # This is actual bytes consumed, not Content-Length header.
+    hasRequestBodySize @6 :Bool;
+    # True if requestBodySize contains a valid value.
   }
 
   struct TailEvent {

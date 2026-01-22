@@ -341,8 +341,8 @@ struct FetchEventInfo final {
   // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
   kj::String cfJson;
   kj::Array<Header> headers;
-  // Note: Request body size is tracked in FetchResponseInfo, not here, because
-  // it's only known after the request body is fully consumed.
+  // Note: Body sizes are tracked in Outcome, not here, because
+  // they're only known after body streaming completes.
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
   FetchEventInfo clone() const;
@@ -486,17 +486,16 @@ struct CustomEventInfo final {
 
 // Describes a fetch response
 struct FetchResponseInfo final {
-  explicit FetchResponseInfo(uint16_t statusCode,
-      kj::Maybe<uint64_t> bodySize = kj::none,
-      kj::Maybe<uint64_t> requestBodySize = kj::none);
+  explicit FetchResponseInfo(uint16_t statusCode);
   FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
   FetchResponseInfo(FetchResponseInfo&&) = default;
   FetchResponseInfo& operator=(FetchResponseInfo&&) = default;
   KJ_DISALLOW_COPY(FetchResponseInfo);
 
   uint16_t statusCode;
-  kj::Maybe<uint64_t> bodySize;         // Response body size in bytes. kj::none if unknown.
-  kj::Maybe<uint64_t> requestBodySize;  // Request body size in bytes. kj::none if unknown.
+  // Body sizes have been moved to Outcome where they can be populated after
+  // body streaming completes. Per HTTP spec, body size is only known after
+  // the body has been fully transmitted.
 
   void copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const;
   FetchResponseInfo clone() const;
@@ -741,7 +740,11 @@ Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info);
 void writeOnsetInfo(const tracing::Onset::Info& info, rpc::Trace::Onset::Info::Builder& builder);
 
 struct Outcome final {
-  explicit Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
+  explicit Outcome(EventOutcome outcome,
+      kj::Duration cpuTime,
+      kj::Duration wallTime,
+      kj::Maybe<uint64_t> responseBodySize = kj::none,
+      kj::Maybe<uint64_t> requestBodySize = kj::none);
   Outcome(rpc::Trace::Outcome::Reader reader);
   Outcome(Outcome&&) = default;
   Outcome& operator=(Outcome&&) = default;
@@ -750,6 +753,11 @@ struct Outcome final {
   EventOutcome outcome = EventOutcome::OK;
   kj::Duration cpuTime;
   kj::Duration wallTime;
+  // Body sizes are reported in Outcome because this is when streaming has
+  // definitively completed. Per HTTP spec, body size is only known after
+  // the body has been fully transmitted.
+  kj::Maybe<uint64_t> responseBodySize;  // Response body size in bytes. kj::none if unknown.
+  kj::Maybe<uint64_t> requestBodySize;   // Request body size in bytes. kj::none if unknown.
 
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
@@ -875,6 +883,10 @@ class Trace final: public kj::Refcounted {
 
   kj::Duration cpuTime;
   kj::Duration wallTime;
+  // Body sizes are stored here for the Outcome event. They're only known after
+  // body streaming completes, which is why they're separate from FetchResponseInfo.
+  kj::Maybe<uint64_t> responseBodySize;
+  kj::Maybe<uint64_t> requestBodySize;
 
   bool truncated = false;
   bool exceededLogLimit = false;

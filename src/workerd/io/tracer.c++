@@ -57,11 +57,14 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
       }
       if (isPredictableModeForTest()) {
         writer->report(spanContext,
-            tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS),
+            tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS,
+                trace->responseBodySize, trace->requestBodySize),
             completeTime);
       } else {
         writer->report(spanContext,
-            tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime), completeTime);
+            tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime,
+                trace->responseBodySize, trace->requestBodySize),
+            completeTime);
       }
     } else if (!markedUnused) {
       // If no span context is available, we have a streaming tail worker set up but shut down the
@@ -345,10 +348,22 @@ void WorkerTracer::setEventInfoInternal(
   }
 }
 
-void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) {
+void WorkerTracer::setOutcome(EventOutcome outcome,
+    kj::Duration cpuTime,
+    kj::Duration wallTime,
+    kj::Maybe<uint64_t> responseBodySize,
+    kj::Maybe<uint64_t> requestBodySize) {
   trace->outcome = outcome;
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
+  // Body sizes can come from parameters or from pre-set values via setBodySizes().
+  // Parameters take precedence if provided.
+  if (responseBodySize != kj::none) {
+    trace->responseBodySize = responseBodySize;
+  }
+  if (requestBodySize != kj::none) {
+    trace->requestBodySize = requestBodySize;
+  }
 
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
   // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans
@@ -357,6 +372,12 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   // This is somewhat at odds with the concept of "streaming" events, but benign as the WorkerTracer
   // wraps up right after the metrics request object in the average case and since the outcome has a
   // fixed size.
+}
+
+void WorkerTracer::setBodySizes(
+    kj::Maybe<uint64_t> responseBodySize, kj::Maybe<uint64_t> requestBodySize) {
+  trace->responseBodySize = responseBodySize;
+  trace->requestBodySize = requestBodySize;
 }
 
 void WorkerTracer::recordTimestamp(kj::Date timestamp) {

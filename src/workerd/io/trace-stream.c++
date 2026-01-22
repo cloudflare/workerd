@@ -19,7 +19,7 @@ namespace {
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
-  V(BODYSIZE, "bodySize")                                                                          \
+  V(RESPONSEBODYSIZE, "responseBodySize")                                                          \
   V(REQUESTBODYSIZE, "requestBodySize")                                                            \
   V(CANCELED, "canceled")                                                                          \
   V(CHANNEL, "channel")                                                                            \
@@ -180,14 +180,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cac
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
   obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
-  // Include bodySize (response body) if it's known
-  KJ_IF_SOME(size, info.bodySize) {
-    obj.set(js, BODYSIZE_STR, js.num(static_cast<double>(size)));
-  }
-  // Include requestBodySize if it's known
-  KJ_IF_SOME(size, info.requestBodySize) {
-    obj.set(js, REQUESTBODYSIZE_STR, js.num(static_cast<double>(size)));
-  }
+  // Note: Body sizes are now in Outcome, not FetchResponseInfo,
+  // because they're only known after body streaming completes.
   return obj;
 }
 
@@ -211,8 +205,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache)
       js.arr(info.headers.asPtr(),
           [&cache, &ToJs](jsg::Lock& js, const auto& header) { return ToJs(js, header, cache); }));
 
-  // Note: Request body size is tracked in FetchResponseInfo, not here,
-  // because it's only known after the request body is fully consumed.
+  // Note: Body sizes are tracked in Outcome, not here,
+  // because they're only known after body streaming completes.
 
   return obj;
 }
@@ -417,6 +411,16 @@ jsg::JsValue ToJs(jsg::Lock& js, const Outcome& outcome, StringCache& cache) {
 
   obj.set(js, CPUTIME_STR, js.num(cpuTime));
   obj.set(js, WALLTIME_STR, js.num(wallTime));
+
+  // Body sizes are included in Outcome because this is when streaming has
+  // definitively completed. Per HTTP spec, body size is only known after
+  // the body has been fully transmitted.
+  KJ_IF_SOME(size, outcome.responseBodySize) {
+    obj.set(js, RESPONSEBODYSIZE_STR, js.num(static_cast<double>(size)));
+  }
+  KJ_IF_SOME(size, outcome.requestBodySize) {
+    obj.set(js, REQUESTBODYSIZE_STR, js.num(static_cast<double>(size)));
+  }
 
   return obj;
 }

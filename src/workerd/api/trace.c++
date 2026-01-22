@@ -369,8 +369,11 @@ jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request:
 TraceItem::FetchEventInfo::Response::Response(
     const Trace& trace, const tracing::FetchResponseInfo& responseInfo)
     : status(responseInfo.statusCode),
-      bodySize(responseInfo.bodySize),
-      requestBodySize(responseInfo.requestBodySize) {}
+      // Body sizes are now stored on the Trace object (in Outcome), not FetchResponseInfo
+      // (in Return event). This is because body sizes are only known after body streaming
+      // completes, which happens after the return event.
+      bodySize(trace.responseBodySize),
+      requestBodySize(trace.requestBodySize) {}
 
 uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
   return status;
