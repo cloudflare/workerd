@@ -205,7 +205,9 @@ def py_wd_test(
         "--python-snapshot-dir",
         ".",
     ]
-    tags = tags + ["py_wd_test", "python"]
+
+    # Python tests are extremely slow with coverage instrumentation, skip them
+    tags = tags + ["py_wd_test", "python", "no-coverage"]
 
     for python_flag in python_flags:
         _py_wd_test_helper(

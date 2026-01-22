@@ -12,7 +12,7 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
+    size = "enormous",
     src = "d1-api-test-with-sessions.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]),

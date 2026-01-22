@@ -416,6 +416,8 @@ kj_test(
 
 kj_test(
     src = "promise-wrapper-test.c++",
+    # Omitting coverage because it takes a really long time executing it.
+    tags = ["no-coverage"],
     deps = [
         ":io",
         ":promise-wrapper",
