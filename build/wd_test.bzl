@@ -242,8 +242,6 @@ def _wd_test_impl(ctx):
         ctx,
         source_attributes = ["src", "data"],
         dependency_attributes = ["workerd", "sidecar", "sidecar_supervisor"],
-        # Include all file types that might contain testable code
-        extensions = ["cc", "c++", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc", "js", "ts", "mjs", "wd-test", "capnp"],
     )
     environment = dict(ctx.attr.env)
     if ctx.attr.python_snapshot_test:
@@ -282,11 +280,14 @@ _wd_test = rule(
         ),
         # Source file
         "src": attr.label(allow_single_file = True),
-        # The workerd executable is used to run all tests
+        # The workerd executable is used to run all tests.
+        # Using cfg = "target" instead of "exec" ensures workerd is built with coverage
+        # instrumentation when running `bazel coverage`. With cfg = "exec", the binary
+        # would be built in exec configuration which doesn't include coverage flags.
         "workerd": attr.label(
             allow_single_file = True,
             executable = True,
-            cfg = "exec",
+            cfg = "target",
             default = "//src/workerd/server:workerd_cross",
         ),
         # A list of files that this test requires to be present in order to run.
