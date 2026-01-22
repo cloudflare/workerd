@@ -1,1 +1,4 @@
-exports_files(["kj_test.sh"])
+exports_files([
+    "kj_test.sh",
+    "wd_test.sh",
+])
