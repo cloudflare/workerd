@@ -287,4 +287,21 @@ struct Docker {
       }
     }
   }
+
+  # Network inspection response (GET /networks/{id})
+  struct NetworkInspectResponse {
+    name @0 :Text $Json.name("Name");
+    id @1 :Text $Json.name("Id");
+    ipam @2 :IPAM $Json.name("IPAM");
+
+    struct IPAM {
+      driver @0 :Text $Json.name("Driver");
+      config @1 :List(IPAMConfig) $Json.name("Config");
+
+      struct IPAMConfig {
+        subnet @0 :Text $Json.name("Subnet");
+        gateway @1 :Text $Json.name("Gateway");
+      }
+    }
+  }
 }

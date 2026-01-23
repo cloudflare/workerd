@@ -294,36 +294,8 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
         kj::StringPtr statusText,
         const kj::HttpHeaders& headers,
         kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-      // We need to ensure Content-Length is in the response so the client knows
-      // when the body ends. If expectedBodySize is provided, add it to headers.
-      kj::String headersStr;
-      KJ_IF_SOME(bodySize, expectedBodySize) {
-        // Build headers with Content-Length
-        kj::Vector<char> headerBuf;
-        auto statusLine = kj::str("HTTP/1.1 ", statusCode, " ", statusText, "\r\n");
-        headerBuf.addAll(statusLine);
 
-        // Add Content-Length
-        auto contentLengthLine = kj::str("Content-Length: ", bodySize, "\r\n");
-        headerBuf.addAll(contentLengthLine);
-
-        // Serialize the rest of the headers using forEach
-        headers.forEach([&headerBuf](kj::StringPtr name, kj::StringPtr value) {
-          // Skip Content-Length if already in headers (we're overriding it)
-          if (name != "Content-Length" && name != "content-length") {
-            auto line = kj::str(name, ": ", value, "\r\n");
-            headerBuf.addAll(line);
-          }
-        });
-        headerBuf.addAll(kj::StringPtr("\r\n"));
-        headerBuf.add('\0');  // NUL terminator required for kj::String
-        headersStr = kj::String(headerBuf.releaseAsArray());
-      } else {
-        // No body size known - use standard serialization
-        // Client will need to wait for connection close
-        headersStr = headers.serializeResponse(statusCode, statusText);
-      }
-
+      auto headersStr = headers.serializeResponse(statusCode, statusText);
       // Return a wrapper that manages header + body writing
       return kj::heap<TunnelOutputStream>(tunnel, kj::mv(headersStr));
     }
@@ -374,7 +346,28 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
   };
 };
 
-kj::Promise<void> ContainerClient::startEgressListener(uint16_t port) {
+kj::Promise<kj::String> ContainerClient::getDockerBridgeGateway() {
+  // Docker API: GET /networks/bridge
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/networks/bridge"));
+
+  if (response.statusCode == 200) {
+    auto jsonRoot = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
+    auto ipamConfig = jsonRoot.getIpam().getConfig();
+    if (ipamConfig.size() > 0) {
+      auto gateway = ipamConfig[0].getGateway();
+      if (gateway.size() > 0) {
+        co_return kj::str(gateway);
+      }
+    }
+  }
+
+  // Fallback to default Docker bridge gateway
+  KJ_LOG(WARNING, "Could not determine Docker bridge gateway, using default 172.17.0.1");
+  co_return kj::str("172.17.0.1");
+}
+
+kj::Promise<void> ContainerClient::startEgressListener(kj::StringPtr listenAddress, uint16_t port) {
   // Create header table for HTTP parsing
   auto headerTable = kj::heap<kj::HttpHeaderTable>();
   auto& headerTableRef = *headerTable;
@@ -388,11 +381,11 @@ kj::Promise<void> ContainerClient::startEgressListener(uint16_t port) {
   auto& httpServerRef = *httpServer;
   egressHttpServer = kj::mv(httpServer);
 
-  // Listen on the specified port (0.0.0.0 to accept from container network)
-  auto addr = co_await network.parseAddress(kj::str("0.0.0.0:", port));
+  // Listen on the Docker bridge gateway IP so only containers can connect
+  auto addr = co_await network.parseAddress(kj::str(listenAddress, ":", port));
   auto listener = addr->listen();
 
-  KJ_LOG(INFO, "Egress HTTP listener started", port);
+  KJ_LOG(INFO, "Egress HTTP listener started", listenAddress, port);
 
   // Run the server - this promise never completes normally
   co_await httpServerRef.listenHttp(*listener).attach(kj::mv(listener), kj::mv(service));
@@ -629,9 +622,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer() {
   // Sidecar needs NET_ADMIN capability for iptables/TPROXY
   auto capAdd = hostConfig.initCapAdd(1);
   capAdd.set(0, "NET_ADMIN");
-  // TODO: Re-enable AutoRemove once sidecar is stable
-  // For now, keep containers around for debugging
-  // hostConfig.setAutoRemove(true);
+  hostConfig.setAutoRemove(true);
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", sidecarContainerName), codec.encode(jsonRoot));
@@ -723,11 +714,14 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     environment = params.getEnvironmentVariables();
   }
 
+  // Get the Docker bridge gateway IP to listen on (only accessible from containers)
+  auto bridgeGateway = co_await getDockerBridgeGateway();
+
   // Start the egress listener first so it's ready when the sidecar starts.
   // The sidecar will connect to this port to proxy container egress traffic.
   // Default port matches the sidecar's expected port (49121).
   constexpr uint16_t EGRESS_LISTENER_PORT = 49121;
-  egressListenerTask = startEgressListener(EGRESS_LISTENER_PORT);
+  egressListenerTask = startEgressListener(bridgeGateway, EGRESS_LISTENER_PORT);
 
   // Create and start the main user container
   co_await createContainer(entrypoint, environment);

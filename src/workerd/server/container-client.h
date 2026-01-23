@@ -121,8 +121,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
   kj::Maybe<kj::Promise<void>> egressListenerTask;
 
-  // Start the egress listener on the specified port
-  kj::Promise<void> startEgressListener(uint16_t port);
+  // Get the Docker bridge network gateway IP (e.g., "172.17.0.1")
+  kj::Promise<kj::String> getDockerBridgeGateway();
+  // Start the egress listener on the specified address and port
+  kj::Promise<void> startEgressListener(kj::StringPtr listenAddress, uint16_t port);
   // Stop the egress listener
   void stopEgressListener();
 };
