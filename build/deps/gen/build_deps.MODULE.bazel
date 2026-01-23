@@ -119,8 +119,5 @@ bazel_dep(name = "rules_oci", version = "2.2.7")
 # rules_python
 bazel_dep(name = "rules_python", version = "1.8.0")
 
-# rules_rust
-bazel_dep(name = "rules_rust", version = "0.68.1")
-
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.6.1")
