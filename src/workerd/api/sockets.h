@@ -71,13 +71,13 @@ class Socket: public jsg::Object {
       kj::String domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
-      : connectionStream(context.addObject(kj::mv(connectionStream))),
+      : connectionData(context.addObject(
+            kj::heap<ConnectionData>(kj::mv(connectionStream), kj::mv(watchForDisconnectTask)))),
         readable(kj::mv(readableParam)),
         writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
         closedPromiseCopy(closedPrPair.promise.whenResolved(js)),
         closedPromise(kj::mv(closedPrPair.promise)),
-        watchForDisconnectTask(context.addObject(kj::heap(kj::mv(watchForDisconnectTask)))),
         options(kj::mv(options)),
         remoteAddress(kj::mv(remoteAddress)),
         tlsStarter(context.addObject(kj::mv(tlsStarter))),
@@ -182,8 +182,16 @@ class Socket: public jsg::Object {
  private:
   // TODO(cleanup): Combine all the IoOwns here into one, to improve efficiency and make
   //   shutdown order clearer.
+  struct ConnectionData {
+    kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
+    kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
+    ConnectionData(kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connStream,
+        kj::Promise<void> disconnectTask)
+        : connectionStream(kj::mv(connStream)),
+          watchForDisconnectTask(kj::mv(disconnectTask)) {}
+  };
+  kj::Maybe<IoOwn<ConnectionData>> connectionData;
 
-  kj::Maybe<IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>>> connectionStream;
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
   // This fulfiller is used to resolve the `closedPromise` below.
@@ -192,7 +200,6 @@ class Socket: public jsg::Object {
   jsg::Promise<void> closedPromiseCopy;
   // Memoized copy that is returned by the `closed` attribute.
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
-  IoOwn<kj::Promise<void>> watchForDisconnectTask;
   jsg::Optional<SocketOptions> options;
   kj::String remoteAddress;
   // Callback used to upgrade the existing connection to a secure one.

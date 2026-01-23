@@ -308,15 +308,12 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     });
   })
       .then(js, [this](jsg::Lock& js) {
-    // This task needs to destroyed prior to destroying the AsyncIoStream as it is awaiting
-    // that stream's `whenWriteDisconnected` promise.
-    watchForDisconnectTask = nullptr;
-
     // Destroy the tlsStarter which is also keeping the connection open.
     { auto _ = kj::mv(tlsStarter); }
 
+    { auto _ = kj::mv(connectionData); }
     // Destroy the connection stream to close the connection.
-    connectionStream = kj::none;
+    connectionData = kj::none;
 
     resolveFulfiller(js, kj::none);
     return js.resolvedPromise();
@@ -326,7 +323,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
   JSG_REQUIRE(
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
-  JSG_REQUIRE(connectionStream != kj::none, TypeError,
+  JSG_REQUIRE(connectionData != kj::none, TypeError,
       "The connection was closed before startTls could be started.");
   JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
   auto invalidOptKindMsg =
@@ -401,16 +398,13 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
                 // Move the stream out of the plain text socket, to ensure the stream is properly
                 // destroyed when the socket is closed.
-                JSG_REQUIRE(self->connectionStream != kj::none, TypeError,
+                auto& connData = JSG_REQUIRE_NONNULL(self->connectionData, TypeError,
                     "The connection was closed before startTls completed.");
-                IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> wrapper =
-                    KJ_ASSERT_NONNULL(kj::mv(self->connectionStream));
-                self->connectionStream = kj::none;
+                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream->addWrappedRef();
+                self->connectionData = kj::none;
 
                 auto secureStream = forkedPromise.addBranch().then(
-                    [stream = wrapper->addWrappedRef()]() mutable -> kj::Own<kj::AsyncIoStream> {
-                  return kj::mv(stream);
-                });
+                    [stream = kj::mv(stream)]() mutable { return kj::mv(stream); });
 
                 return kj::newPromisedStream(kj::mv(secureStream));
               })));
@@ -558,16 +552,12 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
 
   // Move the stream out of the socket, to ensure the stream is properly destroyed when the
   // caller is done with it.
-  JSG_REQUIRE(connectionStream != kj::none, TypeError,
-      "The socket connection is closed or was already taken.");
-  IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> wrapper =
-      KJ_ASSERT_NONNULL(kj::mv(connectionStream));
-  connectionStream = kj::none;
-
+  auto& dataConn = JSG_REQUIRE_NONNULL(
+      connectionData, TypeError, "The socket connection is closed or was already taken.");
+  auto wrapper = dataConn->connectionStream->addWrappedRef();
+  connectionData = kj::none;
   closedResolver.resolve(js);
-
-  // Get a new reference to the wrapped stream via refcounting
-  return wrapper->addWrappedRef();
+  return wrapper;
 }
 
 // Implementation of the custom factory for creating WorkerInterface instances from a socket
