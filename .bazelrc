@@ -18,6 +18,9 @@ build --test_timeout=3,15,60,240
 # protobuf components and rules_cc (needed with Bazel 9).
 common --incompatible_autoload_externally="+ProtoInfo,+cc_binary,+cc_import,+cc_library,+cc_shared_library,+cc_test,+cc_toolchain"
 
+# TODO(cleanup): Bazel 9 sets this by default, which breaks the macOS-cross build. Fix and re-enable.
+common --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=False
+
 # bazel7 enables Build without the Bytes (BwoB) by default. This significantly speeds up builds
 # using the remote cache since less data needs to be fetched.
 # Note that we use remote_download_minimal for test builds, which avoids fetching build outputs
@@ -454,20 +457,11 @@ build:coverage --test_env=KJ_CLEAN_SHUTDOWN=1
 build:coverage --copt=-O1
 # External dependencies can use -O2 since they're not instrumented anyway
 build:coverage --config=v8-codegen-opt
-# Run coverage-related actions locally with sandboxing - remote execution doesn't support LLVM coverage well
-build:coverage --strategy=TestRunner=worker,sandboxed,local
-build:coverage --strategy=CoverageReport=worker,sandboxed,local
-build:coverage --strategy=CoveragePostprocessing=worker,sandboxed,local
 # Reduce debug info for faster compilation and smaller binaries
 build:coverage --copt=-g1
 # Use limited coverage mode for smaller binaries and faster execution (used by Chromium)
-build:coverage --copt=-mllvm
-build:coverage --copt=-limited-coverage-experimental=true
+build:coverage --copt=-mllvm --copt=-limited-coverage-experimental=true
 coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine,-lint,-benchmark,-workerd-benchmark,-no-coverage
-# Let tests know they're running in CI (normally set by ci-test but we can't use that config
-# due to --remote_download_minimal which prevents coverage data from being fetched)
-coverage --test_env=CI=true
-coverage --config=wpt-test
 # Coverage instrumentation slows down test execution, so extend timeouts
 # We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
 coverage --test_size_filters=-enormous
