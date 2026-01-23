@@ -386,6 +386,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-standard-coverage-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-standard-coverage-test.js"],
+)
+
+wd_test(
     src = "streams-iocontext-test.wd-test",
     args = ["--experimental"],
     data = ["streams-iocontext-test.js"],

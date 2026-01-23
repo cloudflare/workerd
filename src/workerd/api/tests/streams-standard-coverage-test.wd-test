@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    ( name = "streams-standard-coverage-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "streams-standard-coverage-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "streams_enable_constructors",
+        ]
+      )
+    ),
+  ],
+);
