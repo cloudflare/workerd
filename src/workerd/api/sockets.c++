@@ -278,6 +278,9 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
 }
 
 jsg::Promise<void> Socket::close(jsg::Lock& js) {
+  IoContext::requireCurrentOrThrowJs(*ioContext);
+  auto& ctx = KJ_ASSERT_NONNULL(ioContext->tryGet());
+
   if (isClosing) {
     return closedPromiseCopy.whenResolved(js);
   }
@@ -288,16 +291,14 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 
   // Wait until the socket connects (successfully or otherwise)
   return openedPromiseCopy.whenResolved(js)
-      .then(js,
-          [this](jsg::Lock& js) {
+      .then(js, ctx.addFunctor([this](jsg::Lock& js) {
     if (!writable->getController().isClosedOrClosing()) {
       return writable->getController().flush(js);
     } else {
       return js.resolvedPromise();
     }
-  })
-      .then(js,
-          [this](jsg::Lock& js) {
+  }))
+      .then(js, ctx.addFunctor([this](jsg::Lock& js) {
     // Forcibly abort the readable/writable streams.
     auto cancelPromise = readable->getController().cancel(js, kj::none);
     auto abortPromise = writable->getController().abort(js, kj::none);
@@ -306,8 +307,8 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
       return kj::mv(abortPromise);
     });
-  })
-      .then(js, [this](jsg::Lock& js) {
+  }))
+      .then(js, ctx.addFunctor([this](jsg::Lock& js) {
     // This task needs to destroyed prior to destroying the AsyncIoStream as it is awaiting
     // that stream's `whenWriteDisconnected` promise.
     watchForDisconnectTask = nullptr;
@@ -320,7 +321,9 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 
     resolveFulfiller(js, kj::none);
     return js.resolvedPromise();
-  }).catch_(js, [this](jsg::Lock& js, jsg::Value err) { errorHandler(js, kj::mv(err)); });
+  })).catch_(js, ctx.addFunctor([this](jsg::Lock& js, jsg::Value err) {
+    errorHandler(js, kj::mv(err));
+  }));
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {

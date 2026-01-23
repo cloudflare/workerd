@@ -71,7 +71,8 @@ class Socket: public jsg::Object {
       kj::String domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
-      : connectionStream(context.addObject(kj::mv(connectionStream))),
+      : ioContext(context.getWeakRef()),
+        connectionStream(context.addObject(kj::mv(connectionStream))),
         readable(kj::mv(readableParam)),
         writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
@@ -183,6 +184,7 @@ class Socket: public jsg::Object {
   // TODO(cleanup): Combine all the IoOwns here into one, to improve efficiency and make
   //   shutdown order clearer.
 
+  kj::Own<IoContext::WeakRef> ioContext;
   kj::Maybe<IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>>> connectionStream;
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
