@@ -115,6 +115,9 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // Egress TCP mappings: address -> SubrequestChannel
   kj::HashMap<kj::String, kj::Own<workerd::IoChannelFactory::SubrequestChannel>> egressMappings;
 
+  // Whether general internet access is enabled for this container
+  bool internetEnabled = false;
+
   // Egress HTTP listener for handling container egress via HTTP CONNECT from sidecar
   class EgressHttpService;
   kj::Maybe<kj::Own<kj::HttpHeaderTable>> egressHeaderTable;

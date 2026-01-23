@@ -320,8 +320,12 @@ export class DurableObjectExample extends DurableObject {
 }
 
 export class TestService extends WorkerEntrypoint {
-  fetch() {
-    return new Response('you have hit TestService');
+  fetch(req) {
+    if (req.url.includes('google')) {
+      return fetch('http://google.com');
+    }
+
+    return new Response('you have hit TestService: ' + req.url);
   }
 }
 

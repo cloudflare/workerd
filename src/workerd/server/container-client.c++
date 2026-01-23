@@ -215,12 +215,46 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
     // that the container was trying to connect to.
     auto destAddr = kj::str(host);
 
-    // Accept the CONNECT tunnel - after this, the connection stream carries the actual
-    // HTTP request from the container
+    // Accept the CONNECT tunnel
     kj::HttpHeaders responseHeaders(headerTable);
     response.accept(200, "OK", responseHeaders);
 
-    // Now read the HTTP request from the tunnel
+    // Check if there's a mapping for this destination
+    auto maybeChannel = containerClient.egressMappings.find(destAddr);
+
+    if (maybeChannel == kj::none) {
+      // No mapping found - check if internet access is enabled
+      if (!containerClient.internetEnabled) {
+        // Internet access not enabled - close the connection
+        connection.shutdownWrite();
+        co_return;
+      }
+
+      // Forward to the general internet via raw TCP
+      // Just do bidirectional byte pumping, no HTTP parsing needed
+      auto addr = co_await containerClient.network.parseAddress(destAddr);
+      auto destConn = co_await addr->connect();
+
+      // Pump bytes bidirectionally: tunnel <-> destination
+      auto promises = kj::heapArrayBuilder<kj::Promise<void>>(2);
+
+      promises.add(connection.pumpTo(*destConn).then([&destConn = *destConn](uint64_t) {
+        destConn.shutdownWrite();
+      }));
+
+      promises.add(destConn->pumpTo(connection).then([&connection](uint64_t) {
+        connection.shutdownWrite();
+      }));
+
+      // Wait for both directions to complete, keeping destConn alive
+      co_await kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(destConn));
+      co_return;
+    }
+
+    // Found a mapping - need to parse HTTP and forward to the SubrequestChannel
+    auto& channel = KJ_ASSERT_NONNULL(maybeChannel);
+
+    // Parse HTTP requests from the tunnel
     auto httpInput = kj::newHttpInputStream(connection, headerTable);
 
     // Loop to handle multiple requests on the same connection (HTTP/1.1 keep-alive)
@@ -234,46 +268,20 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
 
       auto req = co_await httpInput->readRequest();
 
-      // Look up the destination in egressMappings
-      auto maybeChannel = containerClient.egressMappings.find(destAddr);
-
-      kj::Own<WorkerInterface> worker;
-      if (maybeChannel != kj::none) {
-        // Found a mapping - forward to the SubrequestChannel
-        auto& channel = KJ_ASSERT_NONNULL(maybeChannel);
-        IoChannelFactory::SubrequestMetadata metadata;
-        worker = channel->startRequest(kj::mv(metadata));
-      } else {
-        // No mapping found - for now, reject the connection
-        // TODO: Forward to general internet
-        KJ_LOG(WARNING, "No egress mapping found for address", destAddr);
-
-        // Write an error response back through the tunnel
-        auto errorBody = kj::str("No egress mapping found for ", destAddr);
-
-        // We need to write the response manually since we're acting as a server
-        // within the tunnel
-        auto responseStr = kj::str(
-            "HTTP/1.1 502 Bad Gateway\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: ", errorBody.size(), "\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            errorBody);
-        co_await connection.write(responseStr.asBytes());
-        co_return;
-      }
+      // Forward to the SubrequestChannel
+      IoChannelFactory::SubrequestMetadata metadata;
+      auto worker = channel->startRequest(kj::mv(metadata));
 
       // Create a response handler that writes back to the tunnel
-      auto tunnelResponse = kj::heap<TunnelHttpResponse>(connection);
+      TunnelHttpResponse tunnelResponse(connection);
 
       // Forward the request to the worker
-      co_await worker->request(req.method, req.url, req.headers, *req.body, *tunnelResponse);
+      co_await worker->request(req.method, req.url, req.headers, *req.body, tunnelResponse);
 
-      // After the response is complete, we need to signal EOF to the client.
-      // For HTTP/1.1 without Content-Length, the client waits for connection close.
-      // Since we're handling one request at a time through this tunnel, shut down
-      // the write side to signal the response is complete.
+      // Finalize the response (writes chunked terminator if needed)
+      co_await tunnelResponse.end();
+
+      // After the response is complete, shut down the write side to signal EOF
       connection.shutdownWrite();
       co_return;
     }
@@ -288,50 +296,83 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
   class TunnelHttpResponse final: public kj::HttpService::Response {
    public:
     TunnelHttpResponse(kj::AsyncIoStream& tunnel)
-        : tunnel(tunnel) {}
+        : tunnel(tunnel), isChunked(false) {}
 
     kj::Own<kj::AsyncOutputStream> send(uint statusCode,
         kj::StringPtr statusText,
         const kj::HttpHeaders& headers,
         kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
 
+      isChunked = (expectedBodySize == kj::none);
       auto headersStr = headers.serializeResponse(statusCode, statusText);
-      // Return a wrapper that manages header + body writing
-      return kj::heap<TunnelOutputStream>(tunnel, kj::mv(headersStr));
+
+      return kj::heap<TunnelOutputStream>(tunnel, kj::mv(headersStr), isChunked);
     }
 
     kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
       KJ_FAIL_REQUIRE("WebSocket upgrade not supported through egress tunnel");
     }
 
+    // Called after worker->request() completes to finalize the response
+    kj::Promise<void> end() {
+      if (isChunked) {
+        // Write final empty chunk to terminate chunked encoding
+        co_await tunnel.write("0\r\n\r\n"_kjb);
+      }
+    }
+
    private:
     kj::AsyncIoStream& tunnel;
+    bool isChunked;
   };
 
   // Output stream that writes to the tunnel.
   // Headers are written on the first write or when the stream ends.
+  // If chunked mode is enabled, wraps body data in chunked transfer encoding.
   class TunnelOutputStream final: public kj::AsyncOutputStream {
    public:
-    TunnelOutputStream(kj::AsyncIoStream& tunnel, kj::String serializedHeaders)
+    TunnelOutputStream(kj::AsyncIoStream& tunnel, kj::String serializedHeaders, bool chunked)
         : tunnel(tunnel),
           serializedHeaders(kj::mv(serializedHeaders)),
-          headersWritten(false) {}
+          headersWritten(false),
+          chunked(chunked) {}
 
     kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
       co_await ensureHeadersWritten();
-      co_await tunnel.write(buffer);
+      if (chunked) {
+        // Write chunk: size in hex, CRLF, data, CRLF
+        auto chunkHeader = kj::str(kj::hex(buffer.size()), "\r\n");
+        co_await tunnel.write(chunkHeader.asBytes());
+        co_await tunnel.write(buffer);
+        co_await tunnel.write("\r\n"_kjb);
+      } else {
+        co_await tunnel.write(buffer);
+      }
     }
 
     kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
       co_await ensureHeadersWritten();
-      co_await tunnel.write(pieces);
+      if (chunked) {
+        // Calculate total size for chunk header
+        size_t totalSize = 0;
+        for (auto& piece : pieces) {
+          totalSize += piece.size();
+        }
+        auto chunkHeader = kj::str(kj::hex(totalSize), "\r\n");
+        co_await tunnel.write(chunkHeader.asBytes());
+        co_await tunnel.write(pieces);
+        co_await tunnel.write("\r\n"_kjb);
+      } else {
+        co_await tunnel.write(pieces);
+      }
     }
 
     kj::Promise<void> whenWriteDisconnected() override {
       return tunnel.whenWriteDisconnected();
     }
 
-    // Ensure headers are written - must be called before destroying the stream
+   private:
+    // Ensure headers are written
     kj::Promise<void> ensureHeadersWritten() {
       if (!headersWritten) {
         headersWritten = true;
@@ -339,10 +380,10 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
       }
     }
 
-   private:
     kj::AsyncIoStream& tunnel;
     kj::String serializedHeaders;
     bool headersWritten;
+    bool chunked;
   };
 };
 
@@ -713,6 +754,9 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   if (params.hasEnvironmentVariables()) {
     environment = params.getEnvironmentVariables();
   }
+
+  // Track whether internet access is enabled for this container
+  internetEnabled = params.getEnableInternet();
 
   // Get the Docker bridge gateway IP to listen on (only accessible from containers)
   auto bridgeGateway = co_await getDockerBridgeGateway();
