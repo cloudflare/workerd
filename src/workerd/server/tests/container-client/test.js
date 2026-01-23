@@ -261,6 +261,42 @@ export class DurableObjectExample extends DurableObject {
     return this.ctx.container.running;
   }
 
+  async ping() {
+    const container = this.ctx.container;
+    {
+      let resp;
+      // The retry count here is arbitrary. Can increase it if necessary.
+      const maxRetries = 15;
+      for (let i = 1; i <= maxRetries; i++) {
+        try {
+          resp = await container
+            .getTcpPort(8080)
+            .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
+          break;
+        } catch (e) {
+          if (!e.message.includes('container port not found')) {
+            throw e;
+          }
+          console.info(
+            `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+          );
+          console.info(e);
+          if (i === maxRetries) {
+            console.error(
+              `Failed to connect to container ${container.id}. Retried ${i} times`
+            );
+            throw e;
+          }
+          await scheduler.wait(500);
+        }
+      }
+
+      assert.equal(resp.status, 200);
+      assert.equal(resp.statusText, 'OK');
+      assert.strictEqual(await resp.text(), 'Hello World!');
+    }
+  }
+
   async testSetEgressTcp() {
     const container = this.ctx.container;
     if (container.running) {
@@ -292,7 +328,7 @@ export class TestService extends WorkerEntrypoint {
 export class DurableObjectExample2 extends DurableObjectExample {}
 
 // Test basic container status
-export const testStatus = {
+const testStatus = {
   async test(_ctrl, env) {
     for (const CONTAINER of [env.MY_CONTAINER, env.MY_DUPLICATE_CONTAINER]) {
       for (const name of ['testStatus', 'testStatus2']) {
@@ -305,7 +341,7 @@ export const testStatus = {
 };
 
 // Test basic container functionality
-export const testBasics = {
+const testBasics = {
   async test(_ctrl, env) {
     for (const CONTAINER of [env.MY_CONTAINER, env.MY_DUPLICATE_CONTAINER]) {
       const id = CONTAINER.idFromName('testBasics');
@@ -316,7 +352,7 @@ export const testBasics = {
 };
 
 // Test exit code monitor functionality
-export const testExitCode = {
+const testExitCode = {
   async test(_ctrl, env) {
     const id = env.MY_CONTAINER.idFromName('testExitCode');
     const stub = env.MY_CONTAINER.get(id);
@@ -325,7 +361,7 @@ export const testExitCode = {
 };
 
 // Test WebSocket functionality
-export const testWebSockets = {
+const testWebSockets = {
   async test(_ctrl, env) {
     const id = env.MY_CONTAINER.idFromName('testWebsockets');
     const stub = env.MY_CONTAINER.get(id);
@@ -334,7 +370,7 @@ export const testWebSockets = {
 };
 
 // Test alarm functionality with containers
-export const testAlarm = {
+const testAlarm = {
   async test(_ctrl, env) {
     // Test that we can recover the use_containers flag correctly in setAlarm
     // after a DO has been evicted
@@ -371,7 +407,7 @@ export const testAlarm = {
   },
 };
 
-export const testContainerShutdown = {
+const testContainerShutdown = {
   async test(_, env) {
     {
       const stub = env.MY_CONTAINER.getByName('testContainerShutdown');
@@ -394,7 +430,7 @@ export const testContainerShutdown = {
   },
 };
 
-export const testSetInactivityTimeout = {
+const testSetInactivityTimeout = {
   async test(_ctrl, env) {
     {
       const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
@@ -428,5 +464,9 @@ export const testSetEgressTcp = {
     const id = env.MY_CONTAINER.idFromName('testSetEgressTcp');
     const stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressTcp();
+    while (true) {
+      await new Promise((res) => setTimeout(res, 1000));
+      await stub.ping();
+    }
   },
 };

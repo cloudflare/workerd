@@ -60,8 +60,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Network& network;
   kj::String dockerPath;
   kj::String containerName;
+  kj::String sidecarContainerName;
   kj::String imageName;
   kj::TaskSet& waitUntilTasks;
+
+  // Sidecar image name for the egress proxy
+  static constexpr kj::StringPtr SIDECAR_IMAGE_NAME = "dockerproxyanything:dev"_kj;
 
   static constexpr kj::StringPtr defaultEnv[] = {"CLOUDFLARE_COUNTRY_A2=XX"_kj,
     "CLOUDFLARE_DEPLOYMENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
@@ -95,6 +99,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
   kj::Promise<void> destroyContainer();
+
+  // Sidecar container management (for egress proxy)
+  kj::Promise<void> createSidecarContainer();
+  kj::Promise<void> startSidecarContainer();
+  kj::Promise<void> destroySidecarContainer();
+  kj::Promise<void> monitorSidecarContainer();
 
   // Cleanup callback to remove from ActorNamespace map when destroyed
   kj::Function<void()> cleanupCallback;

@@ -115,7 +115,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       timer(timer),
       network(network),
       dockerPath(kj::mv(dockerPath)),
-      containerName(kj::encodeUriComponent(kj::mv(containerName))),
+      containerName(kj::encodeUriComponent(kj::str(containerName))),
+      sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
       imageName(kj::mv(imageName)),
       waitUntilTasks(waitUntilTasks),
       cleanupCallback(kj::mv(cleanupCallback)),
@@ -128,7 +129,12 @@ ContainerClient::~ContainerClient() noexcept(false) {
   // Call the cleanup callback to remove this client from the ActorNamespace map
   cleanupCallback();
 
-  // Destroy the Docker container
+  // Destroy the sidecar container first (it depends on the main container's network)
+  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+      kj::str("/containers/", sidecarContainerName, "?force=true"))
+                         .ignoreResult());
+
+  // Destroy the main Docker container
   waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", containerName, "?force=true"))
                          .ignoreResult());
@@ -209,8 +215,6 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
     // that the container was trying to connect to.
     auto destAddr = kj::str(host);
 
-    KJ_LOG(INFO, "Egress CONNECT request", destAddr);
-
     // Accept the CONNECT tunnel - after this, the connection stream carries the actual
     // HTTP request from the container
     kj::HttpHeaders responseHeaders(headerTable);
@@ -265,6 +269,13 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
 
       // Forward the request to the worker
       co_await worker->request(req.method, req.url, req.headers, *req.body, *tunnelResponse);
+
+      // After the response is complete, we need to signal EOF to the client.
+      // For HTTP/1.1 without Content-Length, the client waits for connection close.
+      // Since we're handling one request at a time through this tunnel, shut down
+      // the write side to signal the response is complete.
+      connection.shutdownWrite();
+      co_return;
     }
   }
 
@@ -283,8 +294,35 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
         kj::StringPtr statusText,
         const kj::HttpHeaders& headers,
         kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-      // Serialize the response headers
-      auto headersStr = headers.serializeResponse(statusCode, statusText);
+      // We need to ensure Content-Length is in the response so the client knows
+      // when the body ends. If expectedBodySize is provided, add it to headers.
+      kj::String headersStr;
+      KJ_IF_SOME(bodySize, expectedBodySize) {
+        // Build headers with Content-Length
+        kj::Vector<char> headerBuf;
+        auto statusLine = kj::str("HTTP/1.1 ", statusCode, " ", statusText, "\r\n");
+        headerBuf.addAll(statusLine);
+
+        // Add Content-Length
+        auto contentLengthLine = kj::str("Content-Length: ", bodySize, "\r\n");
+        headerBuf.addAll(contentLengthLine);
+
+        // Serialize the rest of the headers using forEach
+        headers.forEach([&headerBuf](kj::StringPtr name, kj::StringPtr value) {
+          // Skip Content-Length if already in headers (we're overriding it)
+          if (name != "Content-Length" && name != "content-length") {
+            auto line = kj::str(name, ": ", value, "\r\n");
+            headerBuf.addAll(line);
+          }
+        });
+        headerBuf.addAll(kj::StringPtr("\r\n"));
+        headerBuf.add('\0');  // NUL terminator required for kj::String
+        headersStr = kj::String(headerBuf.releaseAsArray());
+      } else {
+        // No body size known - use standard serialization
+        // Client will need to wait for connection close
+        headersStr = headers.serializeResponse(statusCode, statusText);
+      }
 
       // Return a wrapper that manages header + body writing
       return kj::heap<TunnelOutputStream>(tunnel, kj::mv(headersStr));
@@ -491,6 +529,10 @@ kj::Promise<void> ContainerClient::createContainer(
   // We need to set a restart policy to avoid having ambiguous states
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
+  // Add host.docker.internal mapping so containers can reach the host
+  // This is equivalent to --add-host=host.docker.internal:host-gateway
+  auto extraHosts = hostConfig.initExtraHosts(1);
+  extraHosts.set(0, "host.docker.internal:host-gateway");
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
@@ -569,6 +611,99 @@ kj::Promise<void> ContainerClient::destroyContainer() {
   }
 }
 
+// Creates the sidecar container for egress proxy.
+// The sidecar shares the network namespace with the main container and runs
+// dockerproxyanything to intercept and proxy egress traffic.
+kj::Promise<void> ContainerClient::createSidecarContainer() {
+  // Docker API: POST /containers/create
+  // Equivalent to: docker run --cap-add=NET_ADMIN --network container:$(CONTAINER) ...
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
+  capnp::MallocMessageBuilder message;
+  auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+  jsonRoot.setImage(SIDECAR_IMAGE_NAME);
+
+  auto hostConfig = jsonRoot.initHostConfig();
+  // Share network namespace with the main container
+  hostConfig.setNetworkMode(kj::str("container:", containerName));
+  // Sidecar needs NET_ADMIN capability for iptables/TPROXY
+  auto capAdd = hostConfig.initCapAdd(1);
+  capAdd.set(0, "NET_ADMIN");
+  // TODO: Re-enable AutoRemove once sidecar is stable
+  // For now, keep containers around for debugging
+  // hostConfig.setAutoRemove(true);
+
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/containers/create?name=", sidecarContainerName), codec.encode(jsonRoot));
+
+  // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
+  // In that case we destroy and re-create the container.
+  if (response.statusCode == 409) {
+    co_await destroySidecarContainer();
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+        kj::str("/containers/create?name=", sidecarContainerName), codec.encode(jsonRoot));
+  }
+
+  // statusCode 201 refers to "container created successfully"
+  if (response.statusCode != 201) {
+    JSG_REQUIRE(response.statusCode != 404, Error,
+        "No such image available named ", SIDECAR_IMAGE_NAME,
+        ". Please ensure the dockerproxyanything image is built and available.");
+    JSG_REQUIRE(response.statusCode != 409, Error, "Sidecar container already exists");
+    JSG_FAIL_REQUIRE(Error,
+        "Create sidecar container failed with [", response.statusCode, "] ", response.body);
+  }
+}
+
+kj::Promise<void> ContainerClient::startSidecarContainer() {
+  // Docker API: POST /containers/{id}/start
+  auto endpoint = kj::str("/containers/", sidecarContainerName, "/start");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint), kj::str(""));
+  // statusCode 304 refers to "container already started"
+  JSG_REQUIRE(response.statusCode != 304, Error, "Sidecar container already started");
+  // statusCode 204 refers to "no error"
+  JSG_REQUIRE(response.statusCode == 204, Error,
+      "Starting sidecar container failed with: ", response.body);
+}
+
+kj::Promise<void> ContainerClient::destroySidecarContainer() {
+  auto endpoint = kj::str("/containers/", sidecarContainerName, "?force=true");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
+  // statusCode 204 refers to "no error"
+  // statusCode 404 refers to "no such container"
+  // Both are fine since we're tearing down the container anyway.
+  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
+      "Removing sidecar container failed with: ", response.body);
+}
+
+kj::Promise<void> ContainerClient::monitorSidecarContainer() {
+  // Docker API: POST /containers/{id}/wait - wait for container to exit
+  auto endpoint = kj::str("/containers/", sidecarContainerName, "/wait");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
+
+  if (response.statusCode == 200) {
+    // Container exited - parse the exit code and log it
+    auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
+    auto exitCode = jsonRoot.getStatusCode();
+    KJ_LOG(WARNING, "Sidecar container exited unexpectedly", sidecarContainerName, exitCode);
+
+    // Fetch the container logs to help diagnose the exit
+    auto logsEndpoint = kj::str("/containers/", sidecarContainerName, "/logs?stdout=true&stderr=true&tail=50");
+    auto logsResponse = co_await dockerApiRequest(
+        network, kj::str(dockerPath), kj::HttpMethod::GET, kj::mv(logsEndpoint));
+    if (logsResponse.statusCode == 200) {
+      KJ_LOG(WARNING, "Sidecar container logs:", logsResponse.body);
+    }
+  } else if (response.statusCode == 404) {
+    // Container was removed before we could monitor it - this is normal during shutdown
+  } else {
+    KJ_LOG(ERROR, "Failed to monitor sidecar container", response.statusCode, response.body);
+  }
+}
+
 kj::Promise<void> ContainerClient::status(StatusContext context) {
   const auto [isRunning, _ports] = co_await inspectContainer();
   context.getResults().setRunning(isRunning);
@@ -588,14 +723,23 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     environment = params.getEnvironmentVariables();
   }
 
-  co_await createContainer(entrypoint, environment);
-  co_await startContainer();
-
-  // Start the egress listener in the background.
+  // Start the egress listener first so it's ready when the sidecar starts.
   // The sidecar will connect to this port to proxy container egress traffic.
   // Default port matches the sidecar's expected port (49121).
   constexpr uint16_t EGRESS_LISTENER_PORT = 49121;
   egressListenerTask = startEgressListener(EGRESS_LISTENER_PORT);
+
+  // Create and start the main user container
+  co_await createContainer(entrypoint, environment);
+  co_await startContainer();
+
+  // Create and start the sidecar container that shares the network namespace
+  // with the main container and intercepts egress traffic
+  co_await createSidecarContainer();
+  co_await startSidecarContainer();
+
+  // Monitor the sidecar container for unexpected exits
+  waitUntilTasks.add(monitorSidecarContainer());
 }
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
@@ -625,6 +769,8 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
+  // Destroy sidecar first since it depends on the main container's network
+  co_await destroySidecarContainer();
   co_await destroyContainer();
 }
 

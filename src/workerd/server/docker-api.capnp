@@ -162,6 +162,7 @@ struct Docker {
       cgroupParent @47 :Text $Json.name("CgroupParent");
       volumeDriver @48 :Text $Json.name("VolumeDriver");
       shmSize @49 :UInt32 $Json.name("ShmSize");
+      extraHosts @50 :List(Text) $Json.name("ExtraHosts"); # --add-host entries in "host:ip" format
 
     }
   }
