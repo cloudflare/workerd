@@ -297,42 +297,68 @@ export class DurableObjectExample extends DurableObject {
     }
   }
 
-  async testSetEgressTcp() {
+  async testSetEgressHttp() {
     const container = this.ctx.container;
     if (container.running) {
       let monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
+
     assert.strictEqual(container.running, false);
 
     // Start container
     container.start();
+
+    // wait for container to be available
+    await this.ping();
+
     assert.strictEqual(container.running, true);
 
     // Set up egress TCP mapping to route requests to the binding
     // This registers the binding's channel token with the container runtime
-    container.setEgressTcp(
-      '10.0.0.1:9999',
-      this.ctx.exports.TestService({ props: {} })
+    container.setEgressHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 1 } })
     );
+
+    container.setEgressHttp(
+      '11.0.0.2:9999',
+      this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.1:9999' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 1');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.2:9999' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 2');
+    }
   }
 }
 
 export class TestService extends WorkerEntrypoint {
-  fetch(req) {
-    if (req.url.includes('google')) {
-      return fetch('http://google.com');
-    }
-
-    return new Response('you have hit TestService: ' + req.url);
+  fetch() {
+    return new Response('hello binding: ' + this.ctx.props.id);
   }
 }
 
 export class DurableObjectExample2 extends DurableObjectExample {}
 
 // Test basic container status
-const testStatus = {
+export const testStatus = {
   async test(_ctrl, env) {
     for (const CONTAINER of [env.MY_CONTAINER, env.MY_DUPLICATE_CONTAINER]) {
       for (const name of ['testStatus', 'testStatus2']) {
@@ -345,7 +371,7 @@ const testStatus = {
 };
 
 // Test basic container functionality
-const testBasics = {
+export const testBasics = {
   async test(_ctrl, env) {
     for (const CONTAINER of [env.MY_CONTAINER, env.MY_DUPLICATE_CONTAINER]) {
       const id = CONTAINER.idFromName('testBasics');
@@ -356,7 +382,7 @@ const testBasics = {
 };
 
 // Test exit code monitor functionality
-const testExitCode = {
+export const testExitCode = {
   async test(_ctrl, env) {
     const id = env.MY_CONTAINER.idFromName('testExitCode');
     const stub = env.MY_CONTAINER.get(id);
@@ -365,7 +391,7 @@ const testExitCode = {
 };
 
 // Test WebSocket functionality
-const testWebSockets = {
+export const testWebSockets = {
   async test(_ctrl, env) {
     const id = env.MY_CONTAINER.idFromName('testWebsockets');
     const stub = env.MY_CONTAINER.get(id);
@@ -374,7 +400,7 @@ const testWebSockets = {
 };
 
 // Test alarm functionality with containers
-const testAlarm = {
+export const testAlarm = {
   async test(_ctrl, env) {
     // Test that we can recover the use_containers flag correctly in setAlarm
     // after a DO has been evicted
@@ -411,7 +437,7 @@ const testAlarm = {
   },
 };
 
-const testContainerShutdown = {
+export const testContainerShutdown = {
   async test(_, env) {
     {
       const stub = env.MY_CONTAINER.getByName('testContainerShutdown');
@@ -434,7 +460,7 @@ const testContainerShutdown = {
   },
 };
 
-const testSetInactivityTimeout = {
+export const testSetInactivityTimeout = {
   async test(_ctrl, env) {
     {
       const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
@@ -462,15 +488,11 @@ const testSetInactivityTimeout = {
   },
 };
 
-// Test setEgressTcp functionality - registers a binding's channel token with the container
-export const testSetEgressTcp = {
+// Test setEgressHttp functionality - registers a binding's channel token with the container
+export const testSetEgressHttp = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName('testSetEgressTcp');
+    const id = env.MY_CONTAINER.idFromName('testSetEgressHttp');
     const stub = env.MY_CONTAINER.get(id);
-    await stub.testSetEgressTcp();
-    while (true) {
-      await new Promise((res) => setTimeout(res, 1000));
-      await stub.ping();
-    }
+    await stub.testSetEgressHttp();
   },
 };
