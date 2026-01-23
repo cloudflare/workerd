@@ -10,12 +10,12 @@
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/list.h>
+#include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
-#include <kj/async-io.h>
 
 namespace workerd::server {
 

@@ -240,9 +240,8 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
       // Pump bytes bidirectionally: tunnel <-> destination
       auto promises = kj::heapArrayBuilder<kj::Promise<void>>(2);
 
-      promises.add(connection.pumpTo(*destConn).then([&destConn = *destConn](uint64_t) {
-        destConn.shutdownWrite();
-      }));
+      promises.add(connection.pumpTo(*destConn).then(
+          [&destConn = *destConn](uint64_t) { destConn.shutdownWrite(); }));
 
       promises.add(destConn->pumpTo(connection).then([&connection](uint64_t) {
         connection.shutdownWrite();
@@ -297,8 +296,7 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
   // This class serializes the HTTP response and writes it to the tunnel stream.
   class TunnelHttpResponse final: public kj::HttpService::Response {
    public:
-    TunnelHttpResponse(kj::AsyncIoStream& tunnel)
-        : tunnel(tunnel), isChunked(false) {}
+    TunnelHttpResponse(kj::AsyncIoStream& tunnel): tunnel(tunnel), isChunked(false) {}
 
     kj::Own<kj::AsyncOutputStream> send(uint statusCode,
         kj::StringPtr statusText,
@@ -357,7 +355,7 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
       if (chunked) {
         // Calculate total size for chunk header
         size_t totalSize = 0;
-        for (auto& piece : pieces) {
+        for (auto& piece: pieces) {
           totalSize += piece.size();
         }
         auto chunkHeader = kj::str(kj::hex(totalSize), "\r\n");
@@ -433,11 +431,10 @@ kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenA
 
   // Run the server in the background - this promise never completes normally
   // We need to detach it and return the port
-  egressListenerTask = httpServerRef.listenHttp(*listener)
-      .attach(kj::mv(listener), kj::mv(service))
-      .eagerlyEvaluate([](kj::Exception&& e) {
-        LOG_EXCEPTION("Error in egress listener", e);
-      });
+  egressListenerTask =
+      httpServerRef.listenHttp(*listener)
+          .attach(kj::mv(listener), kj::mv(service))
+          .eagerlyEvaluate([](kj::Exception&& e) { LOG_EXCEPTION("Error in egress listener", e); });
 
   co_return chosenPort;
 }
@@ -694,12 +691,12 @@ kj::Promise<void> ContainerClient::createSidecarContainer(uint16_t egressPort) {
 
   // statusCode 201 refers to "container created successfully"
   if (response.statusCode != 201) {
-    JSG_REQUIRE(response.statusCode != 404, Error,
-        "No such image available named ", containerEgressInterceptorImage,
+    JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ",
+        containerEgressInterceptorImage,
         ". Please ensure the container egress interceptor image is built and available.");
     JSG_REQUIRE(response.statusCode != 409, Error, "Sidecar container already exists");
-    JSG_FAIL_REQUIRE(Error,
-        "Create sidecar container failed with [", response.statusCode, "] ", response.body);
+    JSG_FAIL_REQUIRE(
+        Error, "Create sidecar container failed with [", response.statusCode, "] ", response.body);
   }
 }
 
@@ -711,18 +708,18 @@ kj::Promise<void> ContainerClient::startSidecarContainer() {
   // statusCode 304 refers to "container already started"
   JSG_REQUIRE(response.statusCode != 304, Error, "Sidecar container already started");
   // statusCode 204 refers to "no error"
-  JSG_REQUIRE(response.statusCode == 204, Error,
-      "Starting sidecar container failed with: ", response.body);
+  JSG_REQUIRE(
+      response.statusCode == 204, Error, "Starting sidecar container failed with: ", response.body);
 }
 
 kj::Promise<void> ContainerClient::destroySidecarContainer() {
   auto endpoint = kj::str("/containers/", sidecarContainerName, "?force=true");
-  co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint)).ignoreResult();
+  co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint))
+      .ignoreResult();
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
-        kj::str("/containers/", sidecarContainerName, "/wait?condition=removed"));
-    JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
-        "Waiting for container sidecar removal failed with: ", response.statusCode, response.body);
+      kj::str("/containers/", sidecarContainerName, "/wait?condition=removed"));
+  JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
+      "Waiting for container sidecar removal failed with: ", response.statusCode, response.body);
   KJ_LOG(WARNING, "Container destroyed");
 }
 
@@ -739,7 +736,8 @@ kj::Promise<void> ContainerClient::monitorSidecarContainer() {
     KJ_LOG(WARNING, "Sidecar container exited unexpectedly", sidecarContainerName, exitCode);
 
     // Fetch the container logs to help diagnose the exit
-    auto logsEndpoint = kj::str("/containers/", sidecarContainerName, "/logs?stdout=true&stderr=true&tail=50");
+    auto logsEndpoint =
+        kj::str("/containers/", sidecarContainerName, "/logs?stdout=true&stderr=true&tail=50");
     auto logsResponse = co_await dockerApiRequest(
         network, kj::str(dockerPath), kj::HttpMethod::GET, kj::mv(logsEndpoint));
     if (logsResponse.statusCode == 200) {
@@ -895,7 +893,7 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
 }
 
 kj::Promise<void> ContainerClient::setEgressTcp(SetEgressTcpContext context) {
-   KJ_UNIMPLEMENTED("setEgressTcp not implemented - use setEgressHttp for now");
+  KJ_UNIMPLEMENTED("setEgressTcp not implemented - use setEgressHttp for now");
 }
 
 kj::Own<ContainerClient> ContainerClient::addRef() {

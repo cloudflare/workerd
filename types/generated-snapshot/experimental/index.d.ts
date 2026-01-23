@@ -3829,7 +3829,7 @@ interface Container {
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
-  setEgressTcp(addr: string, binding: Fetcher): void;
+  setEgressHttp(addr: string, binding: Fetcher): void;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
