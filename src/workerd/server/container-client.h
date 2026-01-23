@@ -51,6 +51,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
   kj::Promise<void> setEgressTcp(SetEgressTcpContext context) override;
+  kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -109,10 +110,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // Cleanup callback to remove from ActorNamespace map when destroyed
   kj::Function<void()> cleanupCallback;
 
-  // For redeeming channel tokens received via setEgressTcp
+  // For redeeming channel tokens received via setEgressHttp
   ChannelTokenHandler& channelTokenHandler;
 
-  // Egress TCP mappings: address -> SubrequestChannel
+  // Egress HTTP mappings: address -> SubrequestChannel
   kj::HashMap<kj::String, kj::Own<workerd::IoChannelFactory::SubrequestChannel>> egressMappings;
 
   // Whether general internet access is enabled for this container
@@ -123,6 +124,9 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Maybe<kj::Own<kj::HttpHeaderTable>> egressHeaderTable;
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
   kj::Maybe<kj::Promise<void>> egressListenerTask;
+
+  // Mutex to serialize setEgressHttp() calls (sidecar setup must complete before adding mappings)
+  kj::Maybe<kj::ForkedPromise<void>> egressSetupLock;
 
   // Get the Docker bridge network gateway IP (e.g., "172.17.0.1")
   kj::Promise<kj::String> getDockerBridgeGateway();

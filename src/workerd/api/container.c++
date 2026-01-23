@@ -71,7 +71,7 @@ jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durati
   return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
 
-void Container::setEgressTcp(jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding) {
+void Container::setEgressHttp(jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding) {
   auto& ioctx = IoContext::current();
   auto channel = binding->getSubrequestChannel(ioctx);
 
@@ -79,8 +79,8 @@ void Container::setEgressTcp(jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> b
   // token later to redeem a Fetcher.
   auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
 
-  auto req = rpcClient->setEgressTcpRequest();
-  req.setAddr(addr);
+  auto req = rpcClient->setEgressHttpRequest();
+  req.setHostPort(addr);
   req.setChannelToken(token);
   ioctx.addTask(req.sendIgnoringResult());
 }

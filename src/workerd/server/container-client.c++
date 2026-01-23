@@ -426,8 +426,6 @@ kj::Promise<void> ContainerClient::startEgressListener(kj::StringPtr listenAddre
   auto addr = co_await network.parseAddress(kj::str(listenAddress, ":", port));
   auto listener = addr->listen();
 
-  KJ_LOG(INFO, "Egress HTTP listener started", listenAddress, port);
-
   // Run the server - this promise never completes normally
   co_await httpServerRef.listenHttp(*listener).attach(kj::mv(listener), kj::mv(service));
 }
@@ -660,6 +658,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer() {
   auto hostConfig = jsonRoot.initHostConfig();
   // Share network namespace with the main container
   hostConfig.setNetworkMode(kj::str("container:", containerName));
+
   // Sidecar needs NET_ADMIN capability for iptables/TPROXY
   auto capAdd = hostConfig.initCapAdd(1);
   capAdd.set(0, "NET_ADMIN");
@@ -701,13 +700,13 @@ kj::Promise<void> ContainerClient::startSidecarContainer() {
 
 kj::Promise<void> ContainerClient::destroySidecarContainer() {
   auto endpoint = kj::str("/containers/", sidecarContainerName, "?force=true");
-  auto response = co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
-  // statusCode 204 refers to "no error"
-  // statusCode 404 refers to "no such container"
-  // Both are fine since we're tearing down the container anyway.
-  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
-      "Removing sidecar container failed with: ", response.body);
+  co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint)).ignoreResult();
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+        kj::str("/containers/", sidecarContainerName, "/wait?condition=removed"));
+    JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
+        "Waiting for container sidecar removal failed with: ", response.statusCode, response.body);
+  KJ_LOG(WARNING, "Container destroyed");
 }
 
 kj::Promise<void> ContainerClient::monitorSidecarContainer() {
@@ -758,26 +757,9 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   // Track whether internet access is enabled for this container
   internetEnabled = params.getEnableInternet();
 
-  // Get the Docker bridge gateway IP to listen on (only accessible from containers)
-  auto bridgeGateway = co_await getDockerBridgeGateway();
-
-  // Start the egress listener first so it's ready when the sidecar starts.
-  // The sidecar will connect to this port to proxy container egress traffic.
-  // Default port matches the sidecar's expected port (49121).
-  constexpr uint16_t EGRESS_LISTENER_PORT = 49121;
-  egressListenerTask = startEgressListener(bridgeGateway, EGRESS_LISTENER_PORT);
-
   // Create and start the main user container
   co_await createContainer(entrypoint, environment);
   co_await startContainer();
-
-  // Create and start the sidecar container that shares the network namespace
-  // with the main container and intercepts egress traffic
-  co_await createSidecarContainer();
-  co_await startSidecarContainer();
-
-  // Monitor the sidecar container for unexpected exits
-  waitUntilTasks.add(monitorSidecarContainer());
 }
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
@@ -847,10 +829,47 @@ kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
   KJ_UNIMPLEMENTED("listenTcp not implemented for Docker containers - use port mapping instead");
 }
 
-kj::Promise<void> ContainerClient::setEgressTcp(SetEgressTcpContext context) {
+kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   auto params = context.getParams();
-  auto addr = kj::str(params.getAddr());
+  auto addr = kj::str(params.getHostPort());
   auto tokenBytes = params.getChannelToken();
+
+  // Wait for any previous setEgressHttp call to complete (serializes sidecar setup)
+  KJ_IF_SOME(lock, egressSetupLock) {
+    co_await lock.addBranch();
+  }
+
+  // If no egressListenerTask, start one now.
+  // The biggest disadvantage of doing it here, is that if the workerd process restarts,
+  // and the container is still running, it might have no connectivity.
+  if (egressListenerTask == kj::none) {
+    // Create a promise/fulfiller pair to signal when setup is complete
+    // TODO: Actually, every RPC in this class would benefit from this.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    egressSetupLock = paf.promise.fork();
+    KJ_DEFER(paf.fulfiller->fulfill());
+
+    // Get the Docker bridge gateway IP to listen on (only accessible from containers)
+    auto bridgeGateway = co_await getDockerBridgeGateway();
+
+    // Start the egress listener first so it's ready when the sidecar starts.
+    // The sidecar will connect to this port to proxy container egress traffic.
+    // Default port matches the sidecar's expected port (49121).
+    // TODO: Multiple containers will break this assumption.
+    constexpr uint16_t EGRESS_LISTENER_PORT = 49121;
+    egressListenerTask = startEgressListener(bridgeGateway, EGRESS_LISTENER_PORT).eagerlyEvaluate([](kj::Exception&& e) {
+      LOG_EXCEPTION("Error listening to port", e);
+    });
+
+    // Create and start the sidecar container that shares the network namespace
+    // with the main container and intercepts egress traffic.
+    // Keep in mind there will be blips of connectivity on multiple calls.
+    co_await createSidecarContainer();
+    co_await startSidecarContainer();
+
+    // Monitor the sidecar container for unexpected exits
+    waitUntilTasks.add(monitorSidecarContainer());
+  }
 
   // Redeem the channel token to get a SubrequestChannel
   auto subrequestChannel = channelTokenHandler.decodeSubrequestChannelToken(
@@ -860,12 +879,11 @@ kj::Promise<void> ContainerClient::setEgressTcp(SetEgressTcpContext context) {
   egressMappings.upsert(kj::mv(addr), kj::mv(subrequestChannel),
       [](auto& existing, auto&& newValue) { existing = kj::mv(newValue); });
 
-  // TODO: At some point we need to figure out how to make it so
-  // in local development we are able to actually map to an egress mapping.
-  // For now, just fake it for testing purposes the decoding of the
-  // subrequest channel token.
-
   co_return;
+}
+
+kj::Promise<void> ContainerClient::setEgressTcp(SetEgressTcpContext context) {
+   KJ_UNIMPLEMENTED("setEgressTcp not implemented - use setEgressHttp for now");
 }
 
 kj::Own<ContainerClient> ContainerClient::addRef() {
