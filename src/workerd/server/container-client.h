@@ -35,6 +35,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::String dockerPath,
       kj::String containerName,
       kj::String imageName,
+      kj::String containerEgressInterceptorImage,
       kj::TaskSet& waitUntilTasks,
       kj::Function<void()> cleanupCallback,
       ChannelTokenHandler& channelTokenHandler);
@@ -63,10 +64,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::String containerName;
   kj::String sidecarContainerName;
   kj::String imageName;
-  kj::TaskSet& waitUntilTasks;
 
-  // Sidecar image name for the egress proxy
-  static constexpr kj::StringPtr SIDECAR_IMAGE_NAME = "dockerproxyanything:dev"_kj;
+  // Container egress interceptor image name (sidecar for egress proxy)
+  kj::String containerEgressInterceptorImage;
+
+  kj::TaskSet& waitUntilTasks;
 
   static constexpr kj::StringPtr defaultEnv[] = {"CLOUDFLARE_COUNTRY_A2=XX"_kj,
     "CLOUDFLARE_DEPLOYMENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
@@ -102,7 +104,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> destroyContainer();
 
   // Sidecar container management (for egress proxy)
-  kj::Promise<void> createSidecarContainer();
+  kj::Promise<void> createSidecarContainer(uint16_t egressPort);
   kj::Promise<void> startSidecarContainer();
   kj::Promise<void> destroySidecarContainer();
   kj::Promise<void> monitorSidecarContainer();
@@ -125,13 +127,16 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
   kj::Maybe<kj::Promise<void>> egressListenerTask;
 
+  // The dynamically chosen port for the egress listener
+  uint16_t egressListenerPort = 0;
+
   // Mutex to serialize setEgressHttp() calls (sidecar setup must complete before adding mappings)
   kj::Maybe<kj::ForkedPromise<void>> egressSetupLock;
 
   // Get the Docker bridge network gateway IP (e.g., "172.17.0.1")
   kj::Promise<kj::String> getDockerBridgeGateway();
-  // Start the egress listener on the specified address and port
-  kj::Promise<void> startEgressListener(kj::StringPtr listenAddress, uint16_t port);
+  // Start the egress listener on the specified address, returns the chosen port
+  kj::Promise<uint16_t> startEgressListener(kj::StringPtr listenAddress);
   // Stop the egress listener
   void stopEgressListener();
 };

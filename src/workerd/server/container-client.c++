@@ -108,6 +108,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String dockerPath,
     kj::String containerName,
     kj::String imageName,
+    kj::String containerEgressInterceptorImage,
     kj::TaskSet& waitUntilTasks,
     kj::Function<void()> cleanupCallback,
     ChannelTokenHandler& channelTokenHandler)
@@ -118,6 +119,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       containerName(kj::encodeUriComponent(kj::str(containerName))),
       sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
       imageName(kj::mv(imageName)),
+      containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
       waitUntilTasks(waitUntilTasks),
       cleanupCallback(kj::mv(cleanupCallback)),
       channelTokenHandler(channelTokenHandler) {}
@@ -408,7 +410,7 @@ kj::Promise<kj::String> ContainerClient::getDockerBridgeGateway() {
   co_return kj::str("172.17.0.1");
 }
 
-kj::Promise<void> ContainerClient::startEgressListener(kj::StringPtr listenAddress, uint16_t port) {
+kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenAddress) {
   // Create header table for HTTP parsing
   auto headerTable = kj::heap<kj::HttpHeaderTable>();
   auto& headerTableRef = *headerTable;
@@ -422,12 +424,22 @@ kj::Promise<void> ContainerClient::startEgressListener(kj::StringPtr listenAddre
   auto& httpServerRef = *httpServer;
   egressHttpServer = kj::mv(httpServer);
 
-  // Listen on the Docker bridge gateway IP so only containers can connect
-  auto addr = co_await network.parseAddress(kj::str(listenAddress, ":", port));
+  // Listen on the Docker bridge gateway IP with port 0 to let the OS pick a free port
+  auto addr = co_await network.parseAddress(kj::str(listenAddress, ":0"));
   auto listener = addr->listen();
 
-  // Run the server - this promise never completes normally
-  co_await httpServerRef.listenHttp(*listener).attach(kj::mv(listener), kj::mv(service));
+  // Get the actual port that was assigned
+  uint16_t chosenPort = listener->getPort();
+
+  // Run the server in the background - this promise never completes normally
+  // We need to detach it and return the port
+  egressListenerTask = httpServerRef.listenHttp(*listener)
+      .attach(kj::mv(listener), kj::mv(service))
+      .eagerlyEvaluate([](kj::Exception&& e) {
+        LOG_EXCEPTION("Error in egress listener", e);
+      });
+
+  co_return chosenPort;
 }
 
 void ContainerClient::stopEgressListener() {
@@ -646,14 +658,19 @@ kj::Promise<void> ContainerClient::destroyContainer() {
 // Creates the sidecar container for egress proxy.
 // The sidecar shares the network namespace with the main container and runs
 // dockerproxyanything to intercept and proxy egress traffic.
-kj::Promise<void> ContainerClient::createSidecarContainer() {
+kj::Promise<void> ContainerClient::createSidecarContainer(uint16_t egressPort) {
   // Docker API: POST /containers/create
   // Equivalent to: docker run --cap-add=NET_ADMIN --network container:$(CONTAINER) ...
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(SIDECAR_IMAGE_NAME);
+  jsonRoot.setImage(containerEgressInterceptorImage);
+
+  // Pass the egress port to the sidecar via command line flag
+  auto cmd = jsonRoot.initCmd(2);
+  cmd.set(0, "--http-egress-port");
+  cmd.set(1, kj::str(egressPort));
 
   auto hostConfig = jsonRoot.initHostConfig();
   // Share network namespace with the main container
@@ -678,8 +695,8 @@ kj::Promise<void> ContainerClient::createSidecarContainer() {
   // statusCode 201 refers to "container created successfully"
   if (response.statusCode != 201) {
     JSG_REQUIRE(response.statusCode != 404, Error,
-        "No such image available named ", SIDECAR_IMAGE_NAME,
-        ". Please ensure the dockerproxyanything image is built and available.");
+        "No such image available named ", containerEgressInterceptorImage,
+        ". Please ensure the container egress interceptor image is built and available.");
     JSG_REQUIRE(response.statusCode != 409, Error, "Sidecar container already exists");
     JSG_FAIL_REQUIRE(Error,
         "Create sidecar container failed with [", response.statusCode, "] ", response.body);
@@ -853,18 +870,13 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
     auto bridgeGateway = co_await getDockerBridgeGateway();
 
     // Start the egress listener first so it's ready when the sidecar starts.
-    // The sidecar will connect to this port to proxy container egress traffic.
-    // Default port matches the sidecar's expected port (49121).
-    // TODO: Multiple containers will break this assumption.
-    constexpr uint16_t EGRESS_LISTENER_PORT = 49121;
-    egressListenerTask = startEgressListener(bridgeGateway, EGRESS_LISTENER_PORT).eagerlyEvaluate([](kj::Exception&& e) {
-      LOG_EXCEPTION("Error listening to port", e);
-    });
+    // Use port 0 to let the OS pick a free port dynamically.
+    egressListenerPort = co_await startEgressListener(bridgeGateway);
 
     // Create and start the sidecar container that shares the network namespace
     // with the main container and intercepts egress traffic.
-    // Keep in mind there will be blips of connectivity on multiple calls.
-    co_await createSidecarContainer();
+    // Pass the dynamically chosen port so the sidecar knows where to connect.
+    co_await createSidecarContainer(egressListenerPort);
     co_await startSidecarContainer();
 
     // Monitor the sidecar container for unexpected exits
