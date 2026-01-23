@@ -10,6 +10,20 @@ RUST_TARGET_TRIPLES = [
     "aarch64-unknown-linux-gnu",
 ]
 
+# rules_rust
+bazel_dep(name = "rules_rust", version = "0.68.1")
+
+# Under Bazel 9, Rust coverage is broken when using experimental_split_coverage_postprocessing.
+# TODO(cleanup): https://github.com/bazelbuild/rules_rust/pull/3812 should fix this, we're using
+# that commit for now. Switch back to regular release once resolved.
+archive_override(
+    module_name = "rules_rust",
+    integrity = "sha256-dtn87CNPspDl5xEfAGEl0eQ4HBf07vpxIdMNPRHqMqM=",
+    strip_prefix = "bazelbuild-rules_rust-cb9d412",
+    type = "tgz",
+    url = "https://github.com/bazelbuild/rules_rust/tarball/cb9d412afdb95578bd533b60483eecb373119c36",
+)
+
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     allocator_library = "@rules_rust//ffi/rs:empty",

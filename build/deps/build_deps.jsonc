@@ -41,11 +41,6 @@
       "name": "rules_cc",
       "type": "bazel_dep"
     },
-    // Rust
-    {
-      "name": "rules_rust",
-      "type": "bazel_dep"
-    },
     // Node.js
     {
       "name": "aspect_rules_esbuild",
