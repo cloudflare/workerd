@@ -23,7 +23,12 @@ export const test = {
       { name: 'durable_object_storage_deleteAlarm', closed: true },
       { name: 'durable_object_storage_transaction', closed: true },
       { name: 'durable_object_storage_sync', closed: true },
-      { name: 'durable_object_subrequest', closed: true },
+      {
+        name: 'durable_object_subrequest',
+        closed: true,
+        objectId:
+          'aa299662980ce671dbcb09a5d7ab26ab30e45465bcd12f263f2bdd7d5edd804a',
+      },
     ];
 
     await Promise.allSettled(invocationPromises);
