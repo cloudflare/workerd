@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_proc_macro(
-    name = "thiserror_impl",
+rust_library(
+    name = "socket2",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,9 @@ rust_proc_macro(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "all",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,15 +38,28 @@ rust_proc_macro(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror-impl",
+        "crate-name=socket2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.17",
-    deps = [
-        "@crates_vendor__proc-macro2-1.0.105//:proc_macro2",
-        "@crates_vendor__quote-1.0.43//:quote",
-        "@crates_vendor__syn-2.0.114//:syn",
-    ],
+    version = "0.6.2",
+    deps = select({
+        "@rules_rust//rust/platform:aarch64-apple-darwin": [
+            "@crates_vendor__libc-0.2.180//:libc",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
+            "@crates_vendor__libc-0.2.180//:libc",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:x86_64-apple-darwin": [
+            "@crates_vendor__libc-0.2.180//:libc",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.60.2//:windows_sys",  # cfg(windows)
+        ],
+        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
+            "@crates_vendor__libc-0.2.180//:libc",  # cfg(unix)
+        ],
+        "//conditions:default": [],
+    }),
 )
