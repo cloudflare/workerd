@@ -8,7 +8,7 @@ git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "g
 bazel_dep(name = "abseil-cpp", version = "20260107.0")
 
 # apple_support
-bazel_dep(name = "apple_support", version = "2.1.0")
+bazel_dep(name = "apple_support", version = "2.2.0")
 
 # aspect_rules_esbuild
 bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")

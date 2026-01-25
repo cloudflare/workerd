@@ -43,7 +43,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.53",
+    version = "1.2.54",
     deps = [
         "@crates_vendor__find-msvc-tools-0.1.8//:find_msvc_tools",
         "@crates_vendor__jobserver-0.1.34//:jobserver",
