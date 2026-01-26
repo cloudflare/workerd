@@ -21,12 +21,12 @@ struct ArrayResource {
 impl ArrayResource {
     #[jsg_method]
     pub fn sum(&self, numbers: Vec<Number>) -> Number {
-        Number::new(numbers.iter().map(|n| n.value()).sum())
+        Number::new(numbers.iter().map(jsg::Number::value).sum())
     }
 
     #[jsg_method]
     pub fn sum_slice(&self, numbers: &[Number]) -> Number {
-        Number::new(numbers.iter().map(|n| n.value()).sum())
+        Number::new(numbers.iter().map(jsg::Number::value).sum())
     }
 
     #[jsg_method]
@@ -120,11 +120,13 @@ impl ArrayResource {
     // BigInt64Array methods
     #[jsg_method]
     pub fn sum_i64(&self, numbers: Vec<i64>) -> Number {
+        #[expect(clippy::cast_precision_loss)]
         Number::new(numbers.iter().map(|&n| n as f64).sum())
     }
 
     #[jsg_method]
     pub fn sum_i64_slice(&self, numbers: &[i64]) -> Number {
+        #[expect(clippy::cast_precision_loss)]
         Number::new(numbers.iter().map(|&n| n as f64).sum())
     }
 
@@ -136,11 +138,13 @@ impl ArrayResource {
     // BigUint64Array methods
     #[jsg_method]
     pub fn sum_u64(&self, numbers: Vec<u64>) -> Number {
+        #[expect(clippy::cast_precision_loss)]
         Number::new(numbers.iter().map(|&n| n as f64).sum())
     }
 
     #[jsg_method]
     pub fn sum_u64_slice(&self, numbers: &[u64]) -> Number {
+        #[expect(clippy::cast_precision_loss)]
         Number::new(numbers.iter().map(|&n| n as f64).sum())
     }
 
@@ -207,7 +211,7 @@ fn resource_returns_array() {
         ctx.set_global("arr", wrapped);
 
         let result: Vec<Number> = ctx.eval(lock, "arr.double([1, 2, 3])").unwrap();
-        let values: Vec<f64> = result.iter().map(|n| n.value()).collect();
+        let values: Vec<f64> = result.iter().map(jsg::Number::value).collect();
         assert_eq!(values, vec![2.0, 4.0, 6.0]);
 
         let result: Vec<String> = ctx.eval(lock, "arr.splitString('a, b, c')").unwrap();
@@ -216,7 +220,7 @@ fn resource_returns_array() {
         let result: Vec<Number> = ctx
             .eval(lock, "arr.filterPositive([-1, 2, -3, 4, 0])")
             .unwrap();
-        let values: Vec<f64> = result.iter().map(|n| n.value()).collect();
+        let values: Vec<f64> = result.iter().map(jsg::Number::value).collect();
         assert_eq!(values, vec![2.0, 4.0]);
         Ok(())
     });
@@ -398,7 +402,7 @@ fn vec_from_js_parses_array() {
         assert_eq!(strings, vec!["a", "b", "c"]);
 
         let numbers: Vec<Number> = ctx.eval(lock, "[1, 2, 3]").unwrap();
-        let values: Vec<f64> = numbers.iter().map(|n| n.value()).collect();
+        let values: Vec<f64> = numbers.iter().map(jsg::Number::value).collect();
         assert_eq!(values, vec![1.0, 2.0, 3.0]);
         Ok(())
     });
@@ -786,7 +790,9 @@ fn float32_array_to_js_and_from_js() {
         assert!(is_f32);
 
         let len: Number = ctx.eval(lock, "f32arr.length").unwrap();
-        assert_eq!(len.value() as usize, 4);
+        #[expect(clippy::cast_sign_loss)]
+        let len_usize = len.value() as usize;
+        assert_eq!(len_usize, 4);
 
         // Test FromJS: Float32Array -> Vec<f32>
         let result: Vec<f32> = ctx.eval(lock, "f32arr").unwrap();
@@ -801,8 +807,11 @@ fn float32_array_to_js_and_from_js() {
         let js_special = special.to_js(lock);
         ctx.set_global("special", js_special);
         let roundtrip: Vec<f32> = ctx.eval(lock, "special").unwrap();
-        assert_eq!(roundtrip[0], f32::MIN);
-        assert_eq!(roundtrip[1], f32::MAX);
+        #[expect(clippy::float_cmp)]
+        {
+            assert_eq!(roundtrip[0], f32::MIN);
+            assert_eq!(roundtrip[1], f32::MAX);
+        }
 
         Ok(())
     });

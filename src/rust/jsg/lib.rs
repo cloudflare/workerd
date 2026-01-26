@@ -13,6 +13,10 @@ pub mod modules;
 pub mod v8;
 mod wrappable;
 
+pub use v8::BigInt64Array;
+pub use v8::BigUint64Array;
+pub use v8::Float32Array;
+pub use v8::Float64Array;
 pub use v8::Int8Array;
 pub use v8::Int16Array;
 pub use v8::Int32Array;
