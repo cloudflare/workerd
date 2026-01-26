@@ -109,7 +109,7 @@ jobs:
       # --test_env=CI=true and --config=wpt-test which are the relevant parts of ci-test.
       # Use ci-linux-common instead of ci-linux to avoid overriding coverage test_tag_filters
       # (ci-linux sets test_tag_filters that would include container tests which require docker)
-      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage'
+      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage --test_env=CI=true --config=wpt-test'
       upload_test_logs: true
       upload_binary: false
       build_container_images: false

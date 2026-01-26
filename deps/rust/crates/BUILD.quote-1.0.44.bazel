@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "zmij",
+    name = "quote",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,6 +29,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "proc-macro",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -36,14 +40,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zmij",
+        "crate-name=quote",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.15",
+    version = "1.0.44",
     deps = [
-        "@crates_vendor__zmij-1.0.15//:build_script_build",
+        "@crates_vendor__proc-macro2-1.0.106//:proc_macro2",
+        "@crates_vendor__quote-1.0.44//:build_script_build",
     ],
 )
 
@@ -66,6 +71,10 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "proc-macro",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -81,18 +90,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "zmij",
+    pkg_name = "quote",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zmij",
+        "crate-name=quote",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.15",
+    version = "1.0.44",
     visibility = ["//visibility:private"],
 )
 

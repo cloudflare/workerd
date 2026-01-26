@@ -51,6 +51,6 @@ rust_library(
         "@crates_vendor__mime-0.3.17//:mime",
         "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
         "@crates_vendor__selectors-0.32.0//:selectors",
-        "@crates_vendor__thiserror-2.0.17//:thiserror",
+        "@crates_vendor__thiserror-2.0.18//:thiserror",
     ],
 )
