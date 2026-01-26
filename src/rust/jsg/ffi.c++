@@ -160,6 +160,22 @@ bool local_is_int32_array(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsInt32Array();
 }
 
+bool local_is_float32_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsFloat32Array();
+}
+
+bool local_is_float64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsFloat64Array();
+}
+
+bool local_is_bigint64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigInt64Array();
+}
+
+bool local_is_biguint64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigUint64Array();
+}
+
 bool local_is_array_buffer(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsArrayBuffer();
 }
@@ -232,6 +248,10 @@ DEFINE_TYPED_ARRAY_NEW(uint32_array, Uint32Array, uint32_t)
 DEFINE_TYPED_ARRAY_NEW(int8_array, Int8Array, int8_t)
 DEFINE_TYPED_ARRAY_NEW(int16_array, Int16Array, int16_t)
 DEFINE_TYPED_ARRAY_NEW(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_NEW(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_NEW(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
 Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
@@ -290,6 +310,10 @@ DEFINE_TYPED_ARRAY_UNWRAP(uint32_array, Uint32Array, uint32_t)
 DEFINE_TYPED_ARRAY_UNWRAP(int8_array, Int8Array, int8_t)
 DEFINE_TYPED_ARRAY_UNWRAP(int16_array, Int16Array, int16_t)
 DEFINE_TYPED_ARRAY_UNWRAP(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_UNWRAP(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_UNWRAP(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_UNWRAP(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 
 // Uses V8's Array::Iterate() which is faster than indexed access.
 // Returns Global handles because Local handles get reused during iteration.
@@ -334,6 +358,10 @@ DEFINE_TYPED_ARRAY_GET(uint32_array, Uint32Array, uint32_t)
 DEFINE_TYPED_ARRAY_GET(int8_array, Int8Array, int8_t)
 DEFINE_TYPED_ARRAY_GET(int16_array, Int16Array, int16_t)
 DEFINE_TYPED_ARRAY_GET(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_GET(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_GET(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_GET(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_GET(biguint64_array, BigUint64Array, uint64_t)
 
 // Global<T>
 void global_drop(Global value) {

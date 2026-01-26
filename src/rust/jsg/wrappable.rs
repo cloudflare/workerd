@@ -16,7 +16,7 @@
 //! | `String` | `string` |
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
-//! | `f64` | `number` |
+//! | `Number` | `number` |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T`, `null`, or `undefined` |
 //! | `Result<T, E>` | `T` or throws |
@@ -27,8 +27,8 @@
 //!
 //! ## `TypedArray` Types
 //!
-//! These specialized `Vec` types map directly to JavaScript `TypedArray`s for
-//! efficient binary data transfer:
+//! These specialized `Vec` and slice types map directly to JavaScript `TypedArray`s
+//! for efficient binary data transfer:
 //!
 //! | Rust Type | JavaScript Type |
 //! |-----------|-----------------|
@@ -38,6 +38,20 @@
 //! | `Vec<i8>` | `Int8Array` |
 //! | `Vec<i16>` | `Int16Array` |
 //! | `Vec<i32>` | `Int32Array` |
+//! | `Vec<f32>` | `Float32Array` |
+//! | `Vec<f64>` | `Float64Array` |
+//! | `Vec<i64>` | `BigInt64Array` |
+//! | `Vec<u64>` | `BigUint64Array` |
+//! | `&[u8]` | `Uint8Array` (parameter only) |
+//! | `&[u16]` | `Uint16Array` (parameter only) |
+//! | `&[u32]` | `Uint32Array` (parameter only) |
+//! | `&[i8]` | `Int8Array` (parameter only) |
+//! | `&[i16]` | `Int16Array` (parameter only) |
+//! | `&[i32]` | `Int32Array` (parameter only) |
+//! | `&[f32]` | `Float32Array` (parameter only) |
+//! | `&[f64]` | `Float64Array` (parameter only) |
+//! | `&[i64]` | `BigInt64Array` (parameter only) |
+//! | `&[u64]` | `BigUint64Array` (parameter only) |
 //!
 //! ## Integer Parameter Types
 //!
@@ -54,6 +68,7 @@ use crate::Error;
 use crate::Lock;
 use crate::NonCoercible;
 use crate::Nullable;
+use crate::Number;
 use crate::Type;
 use crate::v8;
 use crate::v8::ToLocalValue;
@@ -142,11 +157,40 @@ macro_rules! impl_primitive {
 
 impl_primitive!(String, "string", is_string, unwrap_string);
 impl_primitive!(bool, "boolean", is_boolean, unwrap_boolean);
-impl_primitive!(f64, "number", is_number, unwrap_number);
+
+// Number implementation for JavaScript numbers
+impl Type for Number {
+    fn class_name() -> &'static str {
+        "number"
+    }
+
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_number()
+    }
+}
+
+impl ToJS for Number {
+    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
+    where
+        'b: 'a,
+    {
+        self.to_local(lock)
+    }
+}
+
+impl FromJS for Number {
+    type ResultType = Self;
+
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        let f64_value =
+            unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) };
+        Ok(Self::new(f64_value))
+    }
+}
 
 // Special implementation for &str - allows functions to accept &str parameters
 // by converting JavaScript strings to owned Strings, then borrowing.
-// The macro handles passing &arg instead of arg for reference types.zs
+// The macro handles passing &arg instead of arg for reference types.
 impl Type for &str {
     fn class_name() -> &'static str {
         "string"
@@ -362,52 +406,50 @@ impl<T: Type + FromJS<ResultType = T>> FromJS for Vec<T> {
 }
 
 // =============================================================================
-// TypedArray marker type implementations
+// TypedArray implementations
 // =============================================================================
 //
-// These implement `Type` for TypedArray marker structs (e.g., `v8::Uint8Array`).
-// Marker types are used with `Local<'a, T>` handles for type-safe references.
+// This macro generates implementations for TypedArray types:
+// - `v8::*Array` marker types: `Type` trait for type-safe V8 handles
+// - `Vec<T>`: `Type`, `ToJS`, `FromJS` for bidirectional conversion
+// - `&[T]`: `Type`, `FromJS` for parameter-only conversion (delegates to Vec<T>)
+//
+// Supported mappings:
+// - `Vec<u8>` / `&[u8]`   <-> `Uint8Array`
+// - `Vec<u16>` / `&[u16]` <-> `Uint16Array`
+// - `Vec<u32>` / `&[u32]` <-> `Uint32Array`
+// - `Vec<i8>` / `&[i8]`   <-> `Int8Array`
+// - `Vec<i16>` / `&[i16]` <-> `Int16Array`
+// - `Vec<i32>` / `&[i32]` <-> `Int32Array`
+// - `Vec<f32>` / `&[f32]` <-> `Float32Array`
+// - `Vec<f64>` / `&[f64]` <-> `Float64Array`
+// - `Vec<i64>` / `&[i64]` <-> `BigInt64Array`
+// - `Vec<u64>` / `&[u64]` <-> `BigUint64Array`
 
-macro_rules! impl_typed_array_type {
-    ($marker:ident, $js_name:literal, $is_check:ident) => {
+macro_rules! impl_typed_array {
+    ($elem:ty, $marker:ident, $is_check:ident, $new_fn:ident, $unwrap_fn:ident) => {
         impl Type for v8::$marker {
             fn class_name() -> &'static str {
-                $js_name
+                stringify!($marker)
             }
-
             fn is_exact(value: &v8::Local<v8::Value>) -> bool {
                 value.$is_check()
             }
         }
-    };
-}
 
-impl_typed_array_type!(Uint8Array, "Uint8Array", is_uint8_array);
-impl_typed_array_type!(Uint16Array, "Uint16Array", is_uint16_array);
-impl_typed_array_type!(Uint32Array, "Uint32Array", is_uint32_array);
-impl_typed_array_type!(Int8Array, "Int8Array", is_int8_array);
-impl_typed_array_type!(Int16Array, "Int16Array", is_int16_array);
-impl_typed_array_type!(Int32Array, "Int32Array", is_int32_array);
-
-// =============================================================================
-// Vec<T> specialized implementations for TypedArrays
-// =============================================================================
-//
-// These implementations map Rust `Vec<T>` types directly to JavaScript TypedArrays:
-// - `Vec<u8>`  <-> `Uint8Array`
-// - `Vec<u16>` <-> `Uint16Array`
-// - `Vec<u32>` <-> `Uint32Array`
-// - `Vec<i8>`  <-> `Int8Array`
-// - `Vec<i16>` <-> `Int16Array`
-// - `Vec<i32>` <-> `Int32Array`
-
-macro_rules! impl_vec_typed_array {
-    ($elem:ty, $js_name:literal, $is_check:ident, $new_fn:ident, $unwrap_fn:ident) => {
         impl Type for Vec<$elem> {
             fn class_name() -> &'static str {
-                $js_name
+                stringify!($marker)
             }
+            fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+                value.$is_check()
+            }
+        }
 
+        impl Type for &[$elem] {
+            fn class_name() -> &'static str {
+                stringify!($marker)
+            }
             fn is_exact(value: &v8::Local<v8::Value>) -> bool {
                 value.$is_check()
             }
@@ -431,63 +473,95 @@ macro_rules! impl_vec_typed_array {
         impl FromJS for Vec<$elem> {
             type ResultType = Self;
 
-            fn from_js(
-                lock: &mut Lock,
-                value: v8::Local<v8::Value>,
-            ) -> Result<Self::ResultType, Error> {
+            fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self, Error> {
                 if !value.$is_check() {
                     return Err(Error::new_type_error(format!(
                         "Expected {} but got {}",
-                        $js_name,
+                        stringify!($marker),
                         value.type_of()
                     )));
                 }
-
                 Ok(unsafe { v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi()) })
+            }
+        }
+
+        impl FromJS for &[$elem] {
+            type ResultType = Vec<$elem>;
+
+            fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Vec<$elem>, Error> {
+                Vec::<$elem>::from_js(lock, value)
             }
         }
     };
 }
 
-impl_vec_typed_array!(
+impl_typed_array!(
     u8,
-    "Uint8Array",
+    Uint8Array,
     is_uint8_array,
     local_new_uint8_array,
     unwrap_uint8_array
 );
-impl_vec_typed_array!(
+impl_typed_array!(
     u16,
-    "Uint16Array",
+    Uint16Array,
     is_uint16_array,
     local_new_uint16_array,
     unwrap_uint16_array
 );
-impl_vec_typed_array!(
+impl_typed_array!(
     u32,
-    "Uint32Array",
+    Uint32Array,
     is_uint32_array,
     local_new_uint32_array,
     unwrap_uint32_array
 );
-impl_vec_typed_array!(
+impl_typed_array!(
     i8,
-    "Int8Array",
+    Int8Array,
     is_int8_array,
     local_new_int8_array,
     unwrap_int8_array
 );
-impl_vec_typed_array!(
+impl_typed_array!(
     i16,
-    "Int16Array",
+    Int16Array,
     is_int16_array,
     local_new_int16_array,
     unwrap_int16_array
 );
-impl_vec_typed_array!(
+impl_typed_array!(
     i32,
-    "Int32Array",
+    Int32Array,
     is_int32_array,
     local_new_int32_array,
     unwrap_int32_array
+);
+impl_typed_array!(
+    f32,
+    Float32Array,
+    is_float32_array,
+    local_new_float32_array,
+    unwrap_float32_array
+);
+impl_typed_array!(
+    f64,
+    Float64Array,
+    is_float64_array,
+    local_new_float64_array,
+    unwrap_float64_array
+);
+impl_typed_array!(
+    i64,
+    BigInt64Array,
+    is_bigint64_array,
+    local_new_bigint64_array,
+    unwrap_bigint64_array
+);
+impl_typed_array!(
+    u64,
+    BigUint64Array,
+    is_biguint64_array,
+    local_new_biguint64_array,
+    unwrap_biguint64_array
 );

@@ -8,6 +8,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use jsg::Number;
 use jsg::ResourceState;
 use jsg::ResourceTemplate;
 use jsg_macros::jsg_method;
@@ -53,8 +54,8 @@ impl DirectReturnResource {
     }
 
     #[jsg_method]
-    pub fn get_counter(&self) -> f64 {
-        f64::from(self.counter.get())
+    pub fn get_counter(&self) -> jsg::Number {
+        jsg::Number::from(self.counter.get())
     }
 
     #[jsg_method]
@@ -157,8 +158,8 @@ fn resource_method_returns_non_result_values() {
         assert!(result);
 
         // Test getCounter returns number
-        let result: f64 = ctx.eval(lock, "resource.getCounter()").unwrap();
-        assert!((result - 42.0).abs() < f64::EPSILON);
+        let result: Number = ctx.eval(lock, "resource.getCounter()").unwrap();
+        assert!((result.value() - 42.0).abs() < f64::EPSILON);
 
         // Test incrementCounter returns undefined (we just check it doesn't error)
         let _: Option<bool> = ctx.eval(lock, "resource.incrementCounter()").unwrap();

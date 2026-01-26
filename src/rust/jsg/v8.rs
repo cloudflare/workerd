@@ -5,6 +5,7 @@ use std::ptr::NonNull;
 
 use crate::FromJS;
 use crate::Lock;
+use crate::Number;
 
 #[expect(clippy::missing_safety_doc)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
@@ -99,6 +100,26 @@ pub mod ffi {
             data: *const i32,
             length: usize,
         ) -> Local;
+        pub unsafe fn local_new_float32_array(
+            isolate: *mut Isolate,
+            data: *const f32,
+            length: usize,
+        ) -> Local;
+        pub unsafe fn local_new_float64_array(
+            isolate: *mut Isolate,
+            data: *const f64,
+            length: usize,
+        ) -> Local;
+        pub unsafe fn local_new_bigint64_array(
+            isolate: *mut Isolate,
+            data: *const i64,
+            length: usize,
+        ) -> Local;
+        pub unsafe fn local_new_biguint64_array(
+            isolate: *mut Isolate,
+            data: *const u64,
+            length: usize,
+        ) -> Local;
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
         pub unsafe fn local_has_value(value: &Local) -> bool;
         pub unsafe fn local_is_string(value: &Local) -> bool;
@@ -116,6 +137,10 @@ pub mod ffi {
         pub unsafe fn local_is_int8_array(value: &Local) -> bool;
         pub unsafe fn local_is_int16_array(value: &Local) -> bool;
         pub unsafe fn local_is_int32_array(value: &Local) -> bool;
+        pub unsafe fn local_is_float32_array(value: &Local) -> bool;
+        pub unsafe fn local_is_float64_array(value: &Local) -> bool;
+        pub unsafe fn local_is_bigint64_array(value: &Local) -> bool;
+        pub unsafe fn local_is_biguint64_array(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
@@ -181,6 +206,26 @@ pub mod ffi {
             array: &Local,
             index: usize,
         ) -> i32;
+        pub unsafe fn local_float32_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: usize,
+        ) -> f32;
+        pub unsafe fn local_float64_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: usize,
+        ) -> f64;
+        pub unsafe fn local_bigint64_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: usize,
+        ) -> i64;
+        pub unsafe fn local_biguint64_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: usize,
+        ) -> u64;
 
         // Global<T>
         pub unsafe fn global_drop(value: Global);
@@ -203,6 +248,10 @@ pub mod ffi {
         pub unsafe fn unwrap_int8_array(isolate: *mut Isolate, value: Local) -> Vec<i8>;
         pub unsafe fn unwrap_int16_array(isolate: *mut Isolate, value: Local) -> Vec<i16>;
         pub unsafe fn unwrap_int32_array(isolate: *mut Isolate, value: Local) -> Vec<i32>;
+        pub unsafe fn unwrap_float32_array(isolate: *mut Isolate, value: Local) -> Vec<f32>;
+        pub unsafe fn unwrap_float64_array(isolate: *mut Isolate, value: Local) -> Vec<f64>;
+        pub unsafe fn unwrap_bigint64_array(isolate: *mut Isolate, value: Local) -> Vec<i64>;
+        pub unsafe fn unwrap_biguint64_array(isolate: *mut Isolate, value: Local) -> Vec<u64>;
 
         // FunctionCallbackInfo
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
@@ -325,6 +374,10 @@ pub struct Uint32Array;
 pub struct Int8Array;
 pub struct Int16Array;
 pub struct Int32Array;
+pub struct Float32Array;
+pub struct Float64Array;
+pub struct BigInt64Array;
+pub struct BigUint64Array;
 
 // Generic Local<'a, T> handle with lifetime
 #[derive(Debug)]
@@ -475,6 +528,26 @@ impl<'a, T> Local<'a, T> {
     /// Returns true if the value is an `Int32Array`.
     pub fn is_int32_array(&self) -> bool {
         unsafe { ffi::local_is_int32_array(&self.handle) }
+    }
+
+    /// Returns true if the value is a `Float32Array`.
+    pub fn is_float32_array(&self) -> bool {
+        unsafe { ffi::local_is_float32_array(&self.handle) }
+    }
+
+    /// Returns true if the value is a `Float64Array`.
+    pub fn is_float64_array(&self) -> bool {
+        unsafe { ffi::local_is_float64_array(&self.handle) }
+    }
+
+    /// Returns true if the value is a `BigInt64Array`.
+    pub fn is_bigint64_array(&self) -> bool {
+        unsafe { ffi::local_is_bigint64_array(&self.handle) }
+    }
+
+    /// Returns true if the value is a `BigUint64Array`.
+    pub fn is_biguint64_array(&self) -> bool {
+        unsafe { ffi::local_is_biguint64_array(&self.handle) }
     }
 
     /// Returns true if the value is an `ArrayBuffer`.
@@ -894,6 +967,10 @@ impl_typed_array!(Uint32Array, u32, local_uint32_array_get);
 impl_typed_array!(Int8Array, i8, local_int8_array_get);
 impl_typed_array!(Int16Array, i16, local_int16_array_get);
 impl_typed_array!(Int32Array, i32, local_int32_array_get);
+impl_typed_array!(Float32Array, f32, local_float32_array_get);
+impl_typed_array!(Float64Array, f64, local_float64_array_get);
+impl_typed_array!(BigInt64Array, i64, local_bigint64_array_get);
+impl_typed_array!(BigUint64Array, u64, local_biguint64_array_get);
 
 // Object-specific implementations
 impl<'a> Local<'a, Object> {
@@ -1084,12 +1161,12 @@ impl ToLocalValue for bool {
     }
 }
 
-impl ToLocalValue for f64 {
+impl ToLocalValue for Number {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         unsafe {
             Local::from_ffi(
                 lock.isolate(),
-                ffi::local_new_number(lock.isolate().as_ffi(), *self),
+                ffi::local_new_number(lock.isolate().as_ffi(), self.value()),
             )
         }
     }

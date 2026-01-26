@@ -43,6 +43,10 @@ Local local_new_uint32_array(Isolate* isolate, const uint32_t* data, size_t leng
 Local local_new_int8_array(Isolate* isolate, const int8_t* data, size_t length);
 Local local_new_int16_array(Isolate* isolate, const int16_t* data, size_t length);
 Local local_new_int32_array(Isolate* isolate, const int32_t* data, size_t length);
+Local local_new_float32_array(Isolate* isolate, const float* data, size_t length);
+Local local_new_float64_array(Isolate* isolate, const double* data, size_t length);
+Local local_new_bigint64_array(Isolate* isolate, const int64_t* data, size_t length);
+Local local_new_biguint64_array(Isolate* isolate, const uint64_t* data, size_t length);
 bool local_eq(const Local& lhs, const Local& rhs);
 bool local_has_value(const Local& val);
 bool local_is_string(const Local& val);
@@ -60,6 +64,10 @@ bool local_is_uint32_array(const Local& val);
 bool local_is_int8_array(const Local& val);
 bool local_is_int16_array(const Local& val);
 bool local_is_int32_array(const Local& val);
+bool local_is_float32_array(const Local& val);
+bool local_is_float64_array(const Local& val);
+bool local_is_bigint64_array(const Local& val);
+bool local_is_biguint64_array(const Local& val);
 bool local_is_array_buffer(const Local& val);
 bool local_is_array_buffer_view(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
@@ -83,6 +91,10 @@ uint32_t local_uint32_array_get(Isolate* isolate, const Local& array, size_t ind
 int8_t local_int8_array_get(Isolate* isolate, const Local& array, size_t index);
 int16_t local_int16_array_get(Isolate* isolate, const Local& array, size_t index);
 int32_t local_int32_array_get(Isolate* isolate, const Local& array, size_t index);
+float local_float32_array_get(Isolate* isolate, const Local& array, size_t index);
+double local_float64_array_get(Isolate* isolate, const Local& array, size_t index);
+int64_t local_bigint64_array_get(Isolate* isolate, const Local& array, size_t index);
+uint64_t local_biguint64_array_get(Isolate* isolate, const Local& array, size_t index);
 
 // Global<T>
 void global_drop(Global value);
@@ -105,6 +117,10 @@ size_t unwrap_resource(Isolate* isolate, Local value);
 ::rust::Vec<int8_t> unwrap_int8_array(Isolate* isolate, Local value);
 ::rust::Vec<int16_t> unwrap_int16_array(Isolate* isolate, Local value);
 ::rust::Vec<int32_t> unwrap_int32_array(Isolate* isolate, Local value);
+::rust::Vec<float> unwrap_float32_array(Isolate* isolate, Local value);
+::rust::Vec<double> unwrap_float64_array(Isolate* isolate, Local value);
+::rust::Vec<int64_t> unwrap_bigint64_array(Isolate* isolate, Local value);
+::rust::Vec<uint64_t> unwrap_biguint64_array(Isolate* isolate, Local value);
 
 // FunctionCallbackInfo
 Isolate* fci_get_isolate(FunctionCallbackInfo* args);
