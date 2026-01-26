@@ -31,3 +31,17 @@ export {
   type ImageConversionOptions,
   type MarkdownDocument,
 } from 'cloudflare-internal:to-markdown-api';
+
+export {
+  AiSearchAccountService,
+  AiSearchInstanceService,
+  AiSearchInternalError,
+  AiSearchNotFoundError,
+  AiSearchNameNotSetError,
+  type AiSearchSearchRequest,
+  type AiSearchChatCompletionsRequest,
+  type AiSearchSearchResponse,
+  type AiSearchListResponse,
+  type AiSearchConfig,
+  type AiSearchInstance,
+} from 'cloudflare-internal:ai-search-api';

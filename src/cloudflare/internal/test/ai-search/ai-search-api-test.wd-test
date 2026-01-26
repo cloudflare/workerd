@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ai-search-api-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "ai-search-api-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (
+            name = "ai",
+            wrapped = (
+              moduleName = "cloudflare-internal:ai-api",
+              innerBindings = [(
+                name = "fetcher",
+                service = "ai-search-mock"
+              )],
+            )
+          )
+        ],
+      )
+    ),
+    ( name = "ai-search-mock",
+      worker = (
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        modules = [
+          (name = "worker", esModule = embed "ai-search-mock.js")
+        ],
+      )
+    )
+  ]
+);

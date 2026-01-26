@@ -4495,6 +4495,184 @@ export interface EventCounts {
   ): void;
   [Symbol.iterator](): IterableIterator<string[]>;
 }
+// AI Search V2 API Error Interfaces
+export interface AiSearchInternalError extends Error {}
+export interface AiSearchNotFoundError extends Error {}
+export interface AiSearchNameNotSetError extends Error {}
+// Filter types (shared with AutoRAG for compatibility)
+export type ComparisonFilter = {
+  key: string;
+  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+  value: string | number | boolean;
+};
+export type CompoundFilter = {
+  type: "and" | "or";
+  filters: ComparisonFilter[];
+};
+// AI Search V2 Request Types
+export type AiSearchSearchRequest = {
+  messages: Array<{
+    role: "system" | "developer" | "user" | "assistant" | "tool";
+    content: string | null;
+  }>;
+  ai_search_options?: {
+    retrieval?: {
+      retrieval_type?: "vector" | "keyword" | "hybrid";
+      /** Match threshold (0-1, default 0.4) */
+      match_threshold?: number;
+      /** Maximum number of results (1-50, default 10) */
+      max_num_results?: number;
+      filters?: CompoundFilter | ComparisonFilter;
+      /** Context expansion (0-3, default 0) */
+      context_expansion?: number;
+      [key: string]: unknown;
+    };
+    query_rewrite?: {
+      enabled?: boolean;
+      model?: string;
+      rewrite_prompt?: string;
+      [key: string]: unknown;
+    };
+    reranking?: {
+      /** Enable reranking (default false) */
+      enabled?: boolean;
+      model?: "@cf/baai/bge-reranker-base" | "";
+      /** Match threshold (0-1, default 0.4) */
+      match_threshold?: number;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
+};
+export type AiSearchChatCompletionsRequest = {
+  messages: Array<{
+    role: "system" | "developer" | "user" | "assistant" | "tool";
+    content: string | null;
+  }>;
+  model?: string;
+  stream?: boolean;
+  ai_search_options?: {
+    retrieval?: {
+      retrieval_type?: "vector" | "keyword" | "hybrid";
+      match_threshold?: number;
+      max_num_results?: number;
+      filters?: CompoundFilter | ComparisonFilter;
+      context_expansion?: number;
+      [key: string]: unknown;
+    };
+    query_rewrite?: {
+      enabled?: boolean;
+      model?: string;
+      rewrite_prompt?: string;
+      [key: string]: unknown;
+    };
+    reranking?: {
+      enabled?: boolean;
+      model?: "@cf/baai/bge-reranker-base" | "";
+      match_threshold?: number;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+};
+// AI Search V2 Response Types
+export type AiSearchSearchResponse = {
+  search_query: string;
+  chunks: Array<{
+    id: string;
+    type: string;
+    /** Match score (0-1) */
+    score: number;
+    text: string;
+    item: {
+      timestamp?: number;
+      key: string;
+      metadata?: Record<string, unknown>;
+    };
+    scoring_details?: {
+      /** Keyword match score (0-1) */
+      keyword_score?: number;
+      /** Vector similarity score (0-1) */
+      vector_score?: number;
+    };
+  }>;
+};
+export type AiSearchListResponse = Array<{
+  id: string;
+  internal_id?: string;
+  account_id?: string;
+  account_tag?: string;
+  /** Whether the instance is enabled (default true) */
+  enable?: boolean;
+  type?: "r2" | "web-crawler";
+  source?: string;
+  [key: string]: unknown;
+}>;
+export type AiSearchConfig = {
+  /** Instance ID (1-32 chars, pattern: ^[a-z0-9_]+(?:-[a-z0-9_]+)*$) */
+  id: string;
+  type: "r2" | "web-crawler";
+  source: string;
+  source_params?: object;
+  /** Token ID (UUID format) */
+  token_id?: string;
+  ai_gateway_id?: string;
+  /** Enable query rewriting (default false) */
+  rewrite_query?: boolean;
+  /** Enable reranking (default false) */
+  reranking?: boolean;
+  embedding_model?: string;
+  ai_search_model?: string;
+};
+export type AiSearchInstance = {
+  id: string;
+  enable?: boolean;
+  type?: "r2" | "web-crawler";
+  source?: string;
+  [key: string]: unknown;
+};
+// AI Search Instance Service - Instance-level operations
+export declare abstract class AiSearchInstanceService {
+  /**
+   * Search the AI Search instance for relevant chunks.
+   * @param params Search request with messages and AI search options
+   * @returns Search response with matching chunks
+   */
+  search(params: AiSearchSearchRequest): Promise<AiSearchSearchResponse>;
+  /**
+   * Generate chat completions with AI Search context.
+   * @param params Chat completions request with optional streaming
+   * @returns Response object (if streaming) or chat completion result
+   */
+  chatCompletions(
+    params: AiSearchChatCompletionsRequest,
+  ): Promise<Response | object>;
+  /**
+   * Delete this AI Search instance.
+   */
+  delete(): Promise<void>;
+}
+// AI Search Account Service - Account-level operations
+export declare abstract class AiSearchAccountService {
+  /**
+   * List all AI Search instances in the account.
+   * @returns Array of AI Search instances
+   */
+  list(): Promise<AiSearchListResponse>;
+  /**
+   * Get an AI Search instance by ID.
+   * @param name Instance ID
+   * @returns Instance service for performing operations
+   */
+  get(name: string): AiSearchInstanceService;
+  /**
+   * Create a new AI Search instance.
+   * @param config Instance configuration
+   * @returns Instance service for performing operations
+   */
+  create(config: AiSearchConfig): Promise<AiSearchInstanceService>;
+}
 export type AiImageClassificationInput = {
   image: number[];
 };
@@ -9995,6 +10173,48 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+  /**
+   * Access the AI Search API for managing AI-powered search instances.
+   *
+   * This is the new API that replaces AutoRAG with better namespace separation:
+   * - Account-level operations: `list()`, `create()`
+   * - Instance-level operations: `get(id).search()`, `get(id).chatCompletions()`, `get(id).delete()`
+   *
+   * @example
+   * ```typescript
+   * // List all AI Search instances
+   * const instances = await env.AI.aiSearch.list();
+   *
+   * // Search an instance
+   * const results = await env.AI.aiSearch.get('my-search').search({
+   *   messages: [{ role: 'user', content: 'What is the policy?' }],
+   *   ai_search_options: {
+   *     retrieval: { max_num_results: 10 }
+   *   }
+   * });
+   *
+   * // Generate chat completions with AI Search context
+   * const response = await env.AI.aiSearch.get('my-search').chatCompletions({
+   *   messages: [{ role: 'user', content: 'What is the policy?' }],
+   *   model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+   * });
+   * ```
+   */
+  aiSearch: AiSearchAccountService;
+  /**
+   * @deprecated AutoRAG has been replaced by AI Search.
+   * Use `env.AI.aiSearch` instead for better API design and new features.
+   *
+   * Migration guide:
+   * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
+   * - `env.AI.autorag('id').search({ query: '...' })` → `env.AI.aiSearch.get('id').search({ messages: [{ role: 'user', content: '...' }] })`
+   * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
+   *
+   * Note: The old API continues to work for backwards compatibility, but new projects should use AI Search.
+   *
+   * @see AiSearchAccountService
+   * @param autoragId Optional instance ID (omit for account-level operations)
+   */
   autorag(autoragId: string): AutoRAG;
   run<
     Name extends keyof AiModelList,
@@ -10151,19 +10371,30 @@ export declare abstract class AiGateway {
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
+/**
+ * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchInternalError instead.
+ * @see AiSearchInternalError
+ */
 export interface AutoRAGInternalError extends Error {}
+/**
+ * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchNotFoundError instead.
+ * @see AiSearchNotFoundError
+ */
 export interface AutoRAGNotFoundError extends Error {}
+/**
+ * @deprecated This error type is no longer used in the AI Search API.
+ */
 export interface AutoRAGUnauthorizedError extends Error {}
+/**
+ * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchNameNotSetError instead.
+ * @see AiSearchNameNotSetError
+ */
 export interface AutoRAGNameNotSetError extends Error {}
-export type ComparisonFilter = {
-  key: string;
-  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
-  value: string | number | boolean;
-};
-export type CompoundFilter = {
-  type: "and" | "or";
-  filters: ComparisonFilter[];
-};
+/**
+ * @deprecated AutoRAG has been replaced by AI Search.
+ * Use AiSearchSearchRequest with the new API instead.
+ * @see AiSearchSearchRequest
+ */
 export type AutoRagSearchRequest = {
   query: string;
   filters?: CompoundFilter | ComparisonFilter;
@@ -10178,16 +10409,31 @@ export type AutoRagSearchRequest = {
   };
   rewrite_query?: boolean;
 };
+/**
+ * @deprecated AutoRAG has been replaced by AI Search.
+ * Use AiSearchChatCompletionsRequest with the new API instead.
+ * @see AiSearchChatCompletionsRequest
+ */
 export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
   system_prompt?: string;
 };
+/**
+ * @deprecated AutoRAG has been replaced by AI Search.
+ * Use AiSearchChatCompletionsRequest with stream: true instead.
+ * @see AiSearchChatCompletionsRequest
+ */
 export type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
   "stream"
 > & {
   stream: true;
 };
+/**
+ * @deprecated AutoRAG has been replaced by AI Search.
+ * Use AiSearchSearchResponse with the new API instead.
+ * @see AiSearchSearchResponse
+ */
 export type AutoRagSearchResponse = {
   object: "vector_store.search_results.page";
   search_query: string;
@@ -10204,6 +10450,11 @@ export type AutoRagSearchResponse = {
   has_more: boolean;
   next_page: string | null;
 };
+/**
+ * @deprecated AutoRAG has been replaced by AI Search.
+ * Use AiSearchListResponse with the new API instead.
+ * @see AiSearchListResponse
+ */
 export type AutoRagListResponse = {
   id: string;
   enable: boolean;
@@ -10213,14 +10464,51 @@ export type AutoRagListResponse = {
   paused: boolean;
   status: string;
 }[];
+/**
+ * @deprecated AutoRAG has been replaced by AI Search.
+ * The new API returns different response formats for chat completions.
+ */
 export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
+/**
+ * @deprecated AutoRAG has been replaced by AI Search.
+ * Use the new AI Search API instead: `env.AI.aiSearch`
+ *
+ * Migration guide:
+ * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
+ * - `env.AI.autorag('id').search(...)` → `env.AI.aiSearch.get('id').search(...)`
+ * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
+ *
+ * @see AiSearchAccountService
+ * @see AiSearchInstanceService
+ */
 export declare abstract class AutoRAG {
+  /**
+   * @deprecated Use `env.AI.aiSearch.list()` instead.
+   * @see AiSearchAccountService.list
+   */
   list(): Promise<AutoRagListResponse>;
+  /**
+   * @deprecated Use `env.AI.aiSearch.get(id).search(...)` instead.
+   * Note: The new API uses a messages array instead of a query string.
+   * @see AiSearchInstanceService.search
+   */
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
+  /**
+   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
+   * @see AiSearchInstanceService.chatCompletions
+   */
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
+  /**
+   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
+   * @see AiSearchInstanceService.chatCompletions
+   */
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
+  /**
+   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
+   * @see AiSearchInstanceService.chatCompletions
+   */
   aiSearch(
     params: AutoRagAiSearchRequest,
   ): Promise<AutoRagAiSearchResponse | Response>;
