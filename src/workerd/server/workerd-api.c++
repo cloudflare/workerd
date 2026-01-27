@@ -55,7 +55,9 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+#ifdef WORKERD_USE_TRANSPILER
 #include <workerd/rust/transpiler/lib.rs.h>
+#endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/server/workerd-debug-port-client.h>
@@ -473,6 +475,7 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       case config::Worker::Module::ES_MODULE:
         // TODO(soon): Update this to also support full TS transform
         // with a separate compat flag.
+#ifdef WORKERD_USE_TRANSPILER
         if (featureFlags.getTypescriptStripTypes()) {
           auto output = rust::transpiler::ts_strip(
               // value comes from capnp so it is a valid utf-8
@@ -494,6 +497,7 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
             KJ_FAIL_REQUIRE(description);
           }
         }
+#endif  // defined(WORKERD_USE_TRANSPILER)
         return Worker::Script::EsModule{static_cast<kj::StringPtr>(conf.getEsModule())};
       case config::Worker::Module::COMMON_JS_MODULE: {
         Worker::Script::CommonJsModule result{.body = conf.getCommonJsModule()};
