@@ -3,8 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import { default as util } from 'node-internal:util';
 

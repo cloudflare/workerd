@@ -1148,7 +1148,7 @@ function initializeConnection(
     localAddress,
     localPort,
   } = options;
-  let { port = 0 } = options;
+  let { port } = options;
   if (localAddress && !isIP(localAddress)) {
     throw new ERR_INVALID_IP_ADDRESS(localAddress);
   }

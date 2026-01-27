@@ -128,6 +128,8 @@ export function eos(
 
   const wState = stream._writableState;
   const rState = stream._readableState;
+  // Extract req as EventEmitter to avoid union type incompatibility with on/removeListener
+  const req = stream.req as EventEmitter | undefined;
 
   const onlegacyfinish = (): void => {
     if (!stream.writable) {
@@ -222,7 +224,7 @@ export function eos(
   };
 
   const onrequest = (): void => {
-    stream.req?.on('finish', onfinish);
+    req?.on('finish', onfinish);
   };
 
   if (isRequest(stream)) {
@@ -285,7 +287,7 @@ export function eos(
     stream.removeListener('complete', onfinish);
     stream.removeListener('abort', onclose);
     stream.removeListener('request', onrequest);
-    stream.req?.removeListener('finish', onfinish);
+    req?.removeListener('finish', onfinish);
     stream.removeListener('end', onlegacyfinish);
     stream.removeListener('close', onlegacyfinish);
     stream.removeListener('finish', onfinish);

@@ -33,7 +33,7 @@ import type {
 import type { Context } from 'node:vm';
 import type { Readable, Writable } from 'node:stream';
 import type { Transferable, WorkerPerformance } from 'node:worker_threads';
-import type { HeapInfo } from 'node:v8';
+import type { CPUProfileHandle, HeapInfo, HeapProfileHandle } from 'node:v8';
 
 export const MessageChannel = globalThis.MessageChannel;
 export const MessagePort = globalThis.MessagePort;
@@ -96,6 +96,16 @@ export class Worker extends EventEmitter implements _Worker {
   // eslint-disable-next-line @typescript-eslint/require-await
   async getHeapStatistics(): Promise<HeapInfo> {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.getHeapStatistics');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async startCpuProfile(): Promise<CPUProfileHandle> {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.startCpuProfile');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async startHeapProfile(): Promise<HeapProfileHandle> {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Worker.startHeapProfile');
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

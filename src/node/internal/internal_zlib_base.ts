@@ -492,10 +492,7 @@ export class ZlibBase extends Transform {
 
   flush(kind: number, callback: () => void): void;
   flush(callback?: () => void): void;
-  flush(
-    kind?: number | (() => void),
-    callback: (() => void) | undefined = undefined
-  ): void {
+  flush(kind?: number | (() => void), callback?: () => void): void {
     if (typeof kind === 'function' || (kind === undefined && !callback)) {
       callback = kind as (() => void) | undefined;
       kind = this._defaultFullFlushFlag;

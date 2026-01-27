@@ -295,9 +295,9 @@ export function compileFunction(
     filename = '',
     columnOffset = 0,
     lineOffset = 0,
-    cachedData = undefined,
+    cachedData,
     produceCachedData = false, // eslint-disable-line @typescript-eslint/no-deprecated
-    parsingContext = undefined,
+    parsingContext,
     contextExtensions = [],
     importModuleDynamically = false,
   } = options;
