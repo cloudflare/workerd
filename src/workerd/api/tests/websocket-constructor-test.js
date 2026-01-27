@@ -39,7 +39,7 @@ export const invalidProtocolToken = {
   },
 };
 
-// Test that duplicate protocols throw SyntaxError
+// Test that duplicate valid protocols throw SyntaxError
 export const duplicateProtocols = {
   async test() {
     throws(() => new WebSocket('wss://example.com/', ['chat', 'chat']), {
