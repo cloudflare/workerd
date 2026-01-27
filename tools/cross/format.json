@@ -15,6 +15,11 @@
     "formatter": "prettier"
   },
   {
+    "directory": "fuzzilli",
+    "globs": ["*.js"],
+    "formatter": "prettier"
+  },
+  {
     "directory": ".",
     "globs": ["*.py"],
     "formatter": "ruff"
