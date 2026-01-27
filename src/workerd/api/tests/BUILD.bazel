@@ -256,6 +256,12 @@ wd_test(
 )
 
 wd_test(
+    src = "form-data-test-ts.wd-test",
+    args = ["--experimental"],
+    data = ["form-data-test-ts.ts"],
+)
+
+wd_test(
     size = "large",
     src = "global-scope-test.wd-test",
     args = ["--experimental"],
