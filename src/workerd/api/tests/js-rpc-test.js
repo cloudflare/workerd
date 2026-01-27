@@ -194,6 +194,11 @@ export class MyService extends WorkerEntrypoint {
     return new Response('method = ' + req.method + ', url = ' + req.url);
   }
 
+  async connect(arg) {
+    const enc = new TextEncoder();
+    return ReadableStream.from([enc.encode('hello')]);
+  }
+
   // Define a property to test behavior of property accessors.
   get nonFunctionProperty() {
     return { foo: 123 };
@@ -629,6 +634,11 @@ export let extendingEntrypointClasses = {
     // Verify that we can instantiate classes that inherit built-in classes.
     let svc = new MyService(ctx, env);
     assert.equal(svc instanceof WorkerEntrypoint, true);
+  },
+};
+export let connectBinding = {
+  async test(controller, env, ctx) {
+    let resp2 = await env.MyService.connect('localhost:8081');
   },
 };
 

@@ -5829,8 +5829,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       })(kj::mv(listener), kj::mv(t));
     }
 
-    // Need to create rewriter before waiting on anything since `headerTableBuilder` will
-    // no longer be available later.
+    // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
+    // be available later.
     auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
 
     auto handle = kj::coCapture(

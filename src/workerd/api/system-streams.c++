@@ -6,6 +6,8 @@
 
 #include "util.h"
 
+#include <workerd/util/stream-utils.h>
+
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
 #include <kj/one-of.h>
@@ -387,6 +389,13 @@ SystemMultiStream newSystemMultiStream(
               stream.addWrappedRef(), StreamEncoding::IDENTITY, context),
     .writable = kj::heap<EncodedAsyncOutputStream>(
         stream.addWrappedRef(), StreamEncoding::IDENTITY, context)};
+}
+SystemMultiStream newSystemMultiStream(kj::Own<NeuterableIoStream>& stream, IoContext& context) {
+
+  return {.readable = kj::heap<EncodedAsyncInputStream>(
+              kj::addRef(*stream), StreamEncoding::IDENTITY, context),
+    .writable =
+        kj::heap<EncodedAsyncOutputStream>(kj::addRef(*stream), StreamEncoding::IDENTITY, context)};
 }
 
 ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)

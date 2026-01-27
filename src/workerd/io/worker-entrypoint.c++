@@ -539,11 +539,11 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   auto& context = incomingRequest->getContext();
 
   // TODO: Does this block interfere with connect stuff below, does drain() get duplicated?
-  KJ_DEFER({
+  /*KJ_DEFER({
     // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
     auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
     waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
-  });
+  });*/
 
   if (context.getWorker().getIsolate().getApi().getFeatureFlags().getConnectPassThrough()) {
     // connect_pass_through feature flag means we should just forward the connect request on to
@@ -569,6 +569,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   }
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
+  auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
 
   return context
       .run([this, &context, &connection, &response, entrypointName = entrypointName](
@@ -581,7 +582,6 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       .then([this](api::DeferredProxy<void> deferredProxy) {
     proxyTask = kj::mv(deferredProxy.proxyTask);
   })
-      .exclusiveJoin(context.onAbort())
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
     // logging internal errors to syslog.
@@ -599,12 +599,18 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // The request has been canceled, but allow it to continue executing in the background.
     auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
     waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+    //}))
+    //  .then([this, metrics = kj::mv(metricsForProxyTask)]() -> kj::Promise<void> {
   }))
-      .then([this]() -> kj::Promise<void> {
+      .then([this, metrics = kj::mv(metricsForProxyTask)]() mutable -> kj::Promise<void> {
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
     KJ_IF_SOME(p, proxyTask) {
-      return kj::mv(p);
+      //return kj::mv(p);
+      return p.catch_([metrics = kj::mv(metrics)](kj::Exception&& e) mutable -> kj::Promise<void> {
+        metrics->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
+        return kj::mv(e);
+      });
     } else {
       return kj::READY_NOW;
     }
