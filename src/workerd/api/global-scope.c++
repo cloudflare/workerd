@@ -86,6 +86,7 @@ jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& functi
 ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
   return ExportedHandler{
     .fetch{mapAddRef(js, fetch)},
+    .connect{mapAddRef(js, connect)},
     .tail{mapAddRef(js, tail)},
     .trace{mapAddRef(js, trace)},
     .tailStream{mapAddRef(js, tailStream)},
@@ -128,11 +129,10 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoSt
   KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
       "TCP ingress requires the experimental flag.");
 
-  kj::HttpHeaderTable table;
-  kj::HttpHeaders headers(table);
-
   KJ_IF_SOME(handler, eh.connect) {
     // Has a connect handler!
+    kj::HttpHeaderTable table;
+    kj::HttpHeaders headers(table);
     response.accept(200, "OK", headers);
 
     // TODO(cleanup): There's a fair amount of duplication between this and
@@ -150,37 +150,35 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoSt
 
     CfProperty cf(cfBlobJson);
 
-    auto conn = newSystemMultiStream(kj::addRef(*ownConnection), ioContext);
-    auto jsInbound = jsg::alloc<ReadableStream>(ioContext, kj::mv(conn.readable));
+    auto ownConn2 = kj::addRef(*ownConnection);
+    auto conn = newSystemMultiStream(ownConn2, ioContext);
+    auto jsInbound = js.alloc<ReadableStream>(ioContext, kj::mv(conn.readable));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto event = jsg::alloc<ConnectEvent>(kj::mv(jsInbound), kj::mv(cf));
+    auto event = js.alloc<ConnectEvent>(kj::mv(jsInbound), kj::mv(cf));
     auto promise = handler(js, kj::mv(event), eh.env.addRef(js), eh.getCtx());
 
-    struct RefcountedBool: public kj::Refcounted {
-      bool value;
-      RefcountedBool(bool value): value(value) {}
-    };
-    auto canceled = kj::refcounted<RefcountedBool>(false);
+    auto canceled = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
 
     return ioContext
         .awaitJs(js,
             promise.then(js,
-                ioContext.addFunctor([canceled = kj::addRef(*canceled),
+                ioContext.addFunctor([canceled = canceled->addWrappedRef(),
                                          outbound = kj::mv(conn.writable), span = kj::mv(span)](
                                          jsg::Lock& js, jsg::Ref<ReadableStream> jsOutbound) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       auto& context = IoContext::current();
       span = kj::none;
-      if (canceled->value) {
-        // The client disconnected before the response was ready. The outbound
-        // is a dangling reference, let's not use it.
+      if (*canceled) {
+        // The client disconnected before the response was ready. The outbound is a dangling
+        // reference, let's not use it.
         return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
       } else {
         return context.addObject(kj::heap(jsOutbound->pumpTo(js, kj::mv(outbound), true)));
       }
     })))
-        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
+        .attach(
+            kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->getWrapped() = true; }))
         .then(
             [ownConnection = kj::mv(ownConnection), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {

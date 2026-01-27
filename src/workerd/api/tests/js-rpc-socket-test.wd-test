@@ -72,6 +72,7 @@ const unitTests :Workerd.Config = (
         http = (capnpConnectHost = "cappy")
       )
     ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
   ],
   sockets = [
     ( name = "MyService-loop",
@@ -99,6 +100,8 @@ const unitTests :Workerd.Config = (
       service = (name = "js-rpc-test", entrypoint = "GreeterFactory"),
       http = (capnpConnectHost = "cappy")
     ),
+    # For testing connect() handler
+    (name = "tcp", address = "*:8081", tcp = (), service = "js-rpc-test")
   ],
   v8Flags = [ "--expose-gc" ],
 );
