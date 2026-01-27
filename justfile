@@ -122,9 +122,9 @@ update-reported-node-version:
   python3 tools/update_node_version.py src/workerd/api/node/node-version.h
 
 # called by rust-analyzer discoverConfig (quiet recipe with no output)
+# rust-analyzer doesn't like stderr output, redirect it to /dev/null
 @_rust-analyzer:
   rm -rf ./rust-project.json
-  # rust-analyzer doesn't like stderr output, redirect it to /dev/null
   bazel run @rules_rust//tools/rust_analyzer:discover_bazel_rust_project 2>/dev/null
 
 create-external:
@@ -132,6 +132,8 @@ create-external:
 
 bench-all:
   bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run --config=benchmark {}
+
+lint: eslint
 
 eslint:
   just stream-test \
