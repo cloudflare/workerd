@@ -8,8 +8,10 @@ coverage:
   # Which direction to you want to round the coverage value
   round: down
   # The value range where you want the value to be green
-  range: "70...100"
+  range: '70...100'
 
 comment:
   # Require any change in coverage to post
   require_changes: true
+  # Only comment if coverage decreases (not on increases or no-change)
+  behavior: new
