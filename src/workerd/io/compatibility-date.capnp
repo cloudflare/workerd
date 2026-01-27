@@ -1342,4 +1342,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $impliedByAfterDate(name = "pythonWorkers", date = "2026-02-25");
   # replaces depends param on steps to an implicit approach with step callables passed as params
   # these steps are called internally and act as dependencies
+
+  queueExposeErrorCodes @156 :Bool
+    $compatEnableFlag("queue_expose_error_codes")
+    $compatDisableFlag("no_queue_expose_error_codes");
+  # When enabled, queue operations will include detailed error information (error code and cause)
 }
