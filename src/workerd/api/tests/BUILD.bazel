@@ -11,6 +11,7 @@ wd_test(
     src = "tcp-ingress-test.wd-test",
     args = ["--experimental"],
     data = ["tcp-ingress-test.js"],
+    tags = ["requires-network"],
 )
 
 wd_test(

@@ -86,6 +86,7 @@ jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& functi
 ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
   return ExportedHandler{
     .fetch{mapAddRef(js, fetch)},
+    .connect{mapAddRef(js, connect)},
     .tail{mapAddRef(js, tail)},
     .trace{mapAddRef(js, trace)},
     .tailStream{mapAddRef(js, tailStream)},
@@ -150,7 +151,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoSt
 
     CfProperty cf(cfBlobJson);
 
-    auto conn = newSystemMultiStream(kj::addRef(*ownConnection), ioContext);
+    auto ownConn2 = kj::addRef(*ownConnection);
+    auto conn = newSystemMultiStream(ownConn2, ioContext);
     auto jsInbound = jsg::alloc<ReadableStream>(ioContext, kj::mv(conn.readable));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
