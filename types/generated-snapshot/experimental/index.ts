@@ -504,6 +504,11 @@ export type ExportedHandlerFetchHandler<
   env: Env,
   ctx: ExecutionContext,
 ) => Response | Promise<Response>;
+export type ExportedHandlerConnectHandler<Env = unknown> = (
+  readable: ReadableStream,
+  env: Env,
+  ctx: ExecutionContext,
+) => ReadableStream | Promise<ReadableStream>;
 export type ExportedHandlerTailHandler<Env = unknown> = (
   events: TraceItem[],
   env: Env,
@@ -540,6 +545,7 @@ export interface ExportedHandler<
   CfHostMetadata = unknown,
 > {
   fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
+  connect?: ExportedHandlerConnectHandler<Env>;
   tail?: ExportedHandlerTailHandler<Env>;
   trace?: ExportedHandlerTraceHandler<Env>;
   tailStream?: ExportedHandlerTailStreamHandler<Env>;
@@ -562,6 +568,10 @@ export declare abstract class Navigator {
 export interface AlarmInvocationInfo {
   readonly isRetry: boolean;
   readonly retryCount: number;
+}
+export interface ConnectEvent {
+  get inbound(): ReadableStream;
+  get cf(): any | undefined;
 }
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
@@ -3225,6 +3235,7 @@ export interface TraceItem {
     | (
         | TraceItemFetchEventInfo
         | TraceItemJsRpcEventInfo
+        | TraceItemConnectEventInfo
         | TraceItemScheduledEventInfo
         | TraceItemAlarmEventInfo
         | TraceItemQueueEventInfo
@@ -3252,6 +3263,9 @@ export interface TraceItem {
 }
 export interface TraceItemAlarmEventInfo {
   readonly scheduledTime: Date;
+}
+export interface TraceItemConnectEventInfo {
+  readonly cf?: any;
 }
 export interface TraceItemCustomEventInfo {}
 export interface TraceItemScheduledEventInfo {
@@ -12556,6 +12570,7 @@ export declare namespace CloudflareWorkersModule {
     constructor(ctx: ExecutionContext, env: Env);
     email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
+    connect?(socket: Socket): Socket | Promise<Socket>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;

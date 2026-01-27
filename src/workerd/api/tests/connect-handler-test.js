@@ -8,6 +8,7 @@ export const newFunction = {
     const dec = new TextDecoder();
     let result = '';
     for await (const chunk of socket.readable) {
+      dec.decode(chunk, { stream: true });
       result += dec.decode(chunk, { stream: true });
     }
     result += dec.decode();

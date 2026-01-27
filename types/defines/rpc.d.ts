@@ -239,6 +239,7 @@ declare namespace CloudflareWorkersModule {
 
     email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
+    connect?(socket: Socket): Socket | Promise<Socket>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;
@@ -260,6 +261,8 @@ declare namespace CloudflareWorkersModule {
 
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
+    // TODO(now): Should connect also be defined here?
+    // connect?(socket: Socket): Socket | Promise<Socket>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer
