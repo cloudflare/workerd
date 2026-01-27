@@ -305,10 +305,12 @@ void WorkerTracer::setEventInfoInternal(
     }
     KJ_CASE_ONEOF(connect, tracing::ConnectEventInfo) {
       eventSize += connect.cfJson.size();
+      // TODO: This is not quite right.
       if (eventSize > MAX_TRACE_BYTES) {
+        trace->truncated = true;
         trace->logs.add(timestamp, LogLevel::WARN,
             kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
-        trace->eventInfo = tracing::ConnectEventInfo(kj::str());
+        trace->eventInfo = tracing::ConnectEventInfo(kj::String());
         return;
       }
     }

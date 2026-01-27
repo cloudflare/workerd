@@ -15,5 +15,6 @@ const worker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "worker.js")
   ],
+  compatibilityFlags = ["nodejs_compat_v2", "experimental"],
   compatibilityDate = "2023-02-28",
 );

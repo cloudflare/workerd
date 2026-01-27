@@ -24,6 +24,7 @@ namespace {
   V(CFJSON, "cfJson")                                                                              \
   V(CLOSE, "close")                                                                                \
   V(CODE, "code")                                                                                  \
+  V(CONNECT, "connect")                                                                            \
   V(COUNT, "count")                                                                                \
   V(CPUTIME, "cpuTime")                                                                            \
   V(CRON, "cron")                                                                                  \
@@ -292,6 +293,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const HibernatableWebSocketEventInfo& info, Str
   return obj;
 }
 
+// TODO
+jsg::JsValue ToJs(jsg::Lock& js, const ConnectEventInfo& info, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, CONNECT_STR));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const CustomEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, CUSTOM_STR));
@@ -385,9 +393,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
     KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, hws, cache));
     }
-    // TODO
-    KJ_CASE_ONEOF(custom, ConnectEventInfo) {
-      // obj.set(js, INFO_STR, ToJs(js, custom, cache));
+    KJ_CASE_ONEOF(connect, ConnectEventInfo) {
+      obj.set(js, INFO_STR, ToJs(js, connect, cache));
     }
     KJ_CASE_ONEOF(custom, CustomEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, custom, cache));

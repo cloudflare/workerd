@@ -1528,6 +1528,15 @@ class Server::InspectorService final: public kj::HttpService, public kj::HttpSer
     co_return co_await response.sendError(500, "Not yet implemented", responseHeaders);
   }
 
+  // TODO(now): This is not needed for connect handler support right
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    KJ_UNIMPLEMENTED("CONNECT is not implemented by InspectorService");
+  }
+
   kj::Promise<void> listen(kj::Own<kj::ConnectionReceiver> listener) {
     // Note that we intentionally do not make inspector connections be part of the usual drain()
     // procedure. Inspector connections are always long-lived WebSockets, and we do not want the
@@ -5045,7 +5054,7 @@ kj::Maybe<kj::String> processCfBlobHeader(kj::AuthenticatedStream& stream) {
   }
 
   KJ_IF_SOME(remote, kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
-    return kj::str("{\"clientIp\": \"", escapeJsonString(remote.toString()), "\"}");
+    return kj::str("{\"clientIp\": ", escapeJsonString(remote.toString()), "}");
   } else KJ_IF_SOME(local, kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
     auto creds = local.getCredentials();
 
@@ -5217,17 +5226,35 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::AsyncIoStream& connection,
         ConnectResponse& response,
         kj::HttpConnectSettings settings) override {
+      TRACE_EVENT("workerd", "Connection:connect()");
       KJ_IF_SOME(h, parent.rewriter->getCapnpConnectHost()) {
         if (h == host) {
           // Client is requesting to open a capnp session!
           response.accept(200, "OK", kj::HttpHeaders(parent.headerTable));
-          return parent.acceptCapnpConnection(connection);
+          co_return co_await parent.acceptCapnpConnection(connection);
         }
       }
 
-      // TODO(someday): Deliver connect() event to to worker? For now we call the default
-      //   implementation which throws an exception.
-      return kj::HttpService::connect(host, headers, connection, response, kj::mv(settings));
+      IoChannelFactory::SubrequestMetadata metadata;
+      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+
+      ConnectResponse* wrappedResponse = &response;
+      /*kj::Own<ResponseWrapper> ownResponse;
+      if (parent.rewriter->needsRewriteResponse()) {
+        wrappedResponse = ownResponse = kj::heap<ResponseWrapper>(response, *parent.rewriter);
+      }
+
+      if (parent.rewriter->needsRewriteRequest() || cfBlobJson != kj::none) {
+        auto rewrite = KJ_UNWRAP_OR(parent.rewriter->rewriteIncomingRequest(
+                                        url, parent.physicalProtocol, headers, metadata.cfBlobJson),
+            { co_return co_await response.sendError(400, "Bad Request", parent.headerTable); });
+        auto worker = parent.service->startRequest(kj::mv(metadata));
+        co_return co_await worker->connect(host, *rewrite.headers, connection, *wrappedResponse, kj::mv(settings)) request(
+            method, url, *rewrite.headers, requestBody, *wrappedResponse);
+      } else {*/
+      auto worker = parent.service->startRequest(kj::mv(metadata));
+      co_return co_await worker->connect(
+          host, headers, connection, *wrappedResponse, kj::mv(settings));
     }
 
     // ---------------------------------------------------------------------------
@@ -5261,8 +5288,10 @@ class Server::TcpListener final: public kj::Refcounted {
         rewriter(kj::mv(rewriter)) {}
 
   kj::Promise<void> run() {
+    TRACE_EVENT("workerd", "TcpListener::run");
     for (;;) {
       kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
+      TRACE_EVENT("workerd", "TcpListener handle connection");
 
       kj::Maybe<kj::String> cfBlobJson;
       if (!rewriter->hasCfBlobHeader()) {
@@ -5274,8 +5303,8 @@ class Server::TcpListener final: public kj::Refcounted {
       auto req = service->startRequest(kj::mv(metadata));
       auto response = kj::heap<ResponseWrapper>();
       kj::HttpHeaders headers(headerTable);
-      // The empty string here is the host parameter that is required by the API
-      // but is not actually used in the implementation at this point.
+      // TODO(now): The empty string here is the host parameter that is required by the API but is
+      // not actually used in the implementation at this point.
       owner.tasks.add(req->connect(""_kj, headers, *stream.stream, *response, {})
                           .attach(kj::mv(stream.stream), kj::mv(response))
                           .attach(kj::mv(req)));
@@ -5289,16 +5318,19 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::HttpHeaderTable& headerTable;
   kj::Own<HttpRewriter> rewriter;
 
+  // TODO: Would using a plain ConnectResponse work here too?
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
     void accept(
         uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
       // Ok.. we're accepting the connection... anything to do?
+      KJ_LOG(WARNING, "accepted TCP stream", statusCode, statusText);
     }
     kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
         kj::StringPtr statusText,
         const kj::HttpHeaders& headers,
         kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
       // Doh... we're rejecting the connection... anything to do?
+      KJ_LOG(WARNING, "rejected TCP stream");
       return newNullOutputStream();
     }
   };
@@ -5829,8 +5861,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       })(kj::mv(listener), kj::mv(t));
     }
 
-    // Need to create rewriter before waiting on anything since `headerTableBuilder` will
-    // no longer be available later.
+    // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
+    // be available later.
     auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
 
     auto handle = kj::coCapture(
