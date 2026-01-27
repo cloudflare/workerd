@@ -16,21 +16,12 @@ filegroup(
 wd_ts_project(
     name = "wpt-all@tsproject",
     srcs = srcs,
+    eslintrc_json = "eslint.config.mjs",
     source_map = False,
     tsconfig_json = "tsconfig.json",
     deps = [
         "//:node_modules/@types/node",
     ],
-)
-
-eslint_test(
-    name = "wpt-all",
-    srcs = srcs,
-    data = [
-        "//:node_modules/@types/node",
-    ],
-    eslintrc_json = "eslint.config.mjs",
-    tsconfig_json = "tsconfig.json",
 )
 
 wpt_test(
