@@ -80,20 +80,9 @@ local_path_override(
     path = "build/perfetto",
 )
 
-bazel_dep(name = "perfetto")
-bazel_dep(name = "workerd-v8")
+# perfetto is managed in deps.jsonc with use_bazel_dep: true
 
-archive_override(
-    module_name = "perfetto",
-    integrity = "sha256-slAj8ygRZaGn183p8+0t/PzgIv/XJ+d/ZYmVHgumr5o=",
-    patch_args = ["-p1"],
-    patches = [
-        "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
-        "//:patches/perfetto/0002-disable-info-level-logging.patch",
-    ],
-    strip_prefix = "perfetto-53.0",
-    url = "https://github.com/google/perfetto/archive/refs/tags/v53.0.tar.gz",
-)
+bazel_dep(name = "workerd-v8")
 
 # Tell workerd code where to find v8.
 #

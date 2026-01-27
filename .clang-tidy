@@ -32,6 +32,7 @@ Checks: >
   misc-unused-alias-decls,
   misc-unused-using-decls,
   modernize-avoid-variadic-functions,
+  modernize-loop-convert,
   modernize-macro-to-enum,
   modernize-redundant-void-arg,
   modernize-type-traits,
@@ -72,6 +73,7 @@ Checks: >
 # modernize-use-override
 # modernize-use-ranges
 # readability-avoid-return-with-void-value
+# readability-convert-member-functions-to-static
 # readability-redundant-smartptr-get
 # readability-use-anyofallof
 

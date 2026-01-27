@@ -947,7 +947,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     ret = ret.attach(kj::mv(tracing.span));
   }
   if (tracing.userSpan.isObserved()) {
-    ret = ret.attach(kj::mv(tracing.userSpan));
+    auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing.userSpan)));
+    ret = ret.attach(kj::mv(ioOwnedSpan));
   }
 
   return kj::mv(ret);

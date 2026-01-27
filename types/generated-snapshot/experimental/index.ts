@@ -3153,9 +3153,7 @@ export interface TextDecoderStreamTextDecoderStreamInit {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy)
  */
-export declare class ByteLengthQueuingStrategy
-  implements QueuingStrategy<ArrayBufferView>
-{
+export declare class ByteLengthQueuingStrategy implements QueuingStrategy<ArrayBufferView> {
   constructor(init: QueuingStrategyInit);
   /**
    * The read-only **`ByteLengthQueuingStrategy.highWaterMark`** property returns the total number of bytes that can be contained in the internal queue before backpressure is applied.
@@ -4094,10 +4092,8 @@ export type LoopbackDurableObjectClass<
   (T extends CloudflareWorkersModule.DurableObject<any, infer Props>
     ? (opts: { props?: Props }) => DurableObjectClass<T>
     : (opts: { props?: any }) => DurableObjectClass<T>);
-export interface LoopbackDurableObjectNamespace
-  extends DurableObjectNamespace {}
-export interface LoopbackColoLocalActorNamespace
-  extends ColoLocalActorNamespace {}
+export interface LoopbackDurableObjectNamespace extends DurableObjectNamespace {}
+export interface LoopbackColoLocalActorNamespace extends ColoLocalActorNamespace {}
 export interface SyncKvStorage {
   get<T = unknown>(key: string): T | undefined;
   list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
@@ -10358,8 +10354,7 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
    */
   resolveOverride?: string;
 }
-export interface RequestInitCfPropertiesImageDraw
-  extends BasicImageTransformations {
+export interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
   /**
    * Absolute URL of the image file to use for the drawing. It can be any of
    * the supported file formats. For drawing of watermarks or non-rectangular
@@ -10396,8 +10391,7 @@ export interface RequestInitCfPropertiesImageDraw
   bottom?: number;
   right?: number;
 }
-export interface RequestInitCfPropertiesImage
-  extends BasicImageTransformations {
+export interface RequestInitCfPropertiesImage extends BasicImageTransformations {
   /**
    * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
    * easier to specify higher-DPI sizes in <img srcset>.
@@ -10582,8 +10576,10 @@ export type IncomingRequestCfProperties<HostMetadata = unknown> =
     IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<HostMetadata> &
     IncomingRequestCfPropertiesGeographicInformation &
     IncomingRequestCfPropertiesCloudflareAccessOrApiShield;
-export interface IncomingRequestCfPropertiesBase
-  extends Record<string, unknown> {
+export interface IncomingRequestCfPropertiesBase extends Record<
+  string,
+  unknown
+> {
   /**
    * [ASN](https://www.iana.org/assignments/as-numbers/as-numbers.xhtml) of the incoming request.
    *
@@ -10700,8 +10696,7 @@ export interface IncomingRequestCfPropertiesBotManagement {
    */
   clientTrustScore: number;
 }
-export interface IncomingRequestCfPropertiesBotManagementEnterprise
-  extends IncomingRequestCfPropertiesBotManagement {
+export interface IncomingRequestCfPropertiesBotManagementEnterprise extends IncomingRequestCfPropertiesBotManagement {
   /**
    * Results of Cloudflare's Bot Management analysis
    */
@@ -11266,6 +11261,10 @@ export interface D1Meta {
    */
   served_by_region?: string;
   /**
+   * The three letters airport code of the colo that executed the query.
+   */
+  served_by_colo?: string;
+  /**
    * True if-and-only-if the database instance that executed the query was the primary.
    */
   served_by_primary?: boolean;
@@ -11407,11 +11406,44 @@ export interface ForwardableEmailMessage extends EmailMessage {
    */
   reply(message: EmailMessage): Promise<EmailSendResult>;
 }
+/** A file attachment for an email message */
+export type EmailAttachment =
+  | {
+      disposition: "inline";
+      contentId: string;
+      filename: string;
+      type: string;
+      content: string | ArrayBuffer | ArrayBufferView;
+    }
+  | {
+      disposition: "attachment";
+      contentId?: undefined;
+      filename: string;
+      type: string;
+      content: string | ArrayBuffer | ArrayBufferView;
+    };
+/** An Email Address */
+export interface EmailAddress {
+  name: string;
+  email: string;
+}
 /**
  * A binding that allows a Worker to send email messages.
  */
 export interface SendEmail {
   send(message: EmailMessage): Promise<EmailSendResult>;
+  send(builder: {
+    from: string | EmailAddress;
+    to: string | string[];
+    subject: string;
+    replyTo?: string | EmailAddress;
+    cc?: string | string[];
+    bcc?: string | string[];
+    headers?: Record<string, string>;
+    text?: string;
+    html?: string;
+    attachments?: EmailAttachment[];
+  }): Promise<EmailSendResult>;
 }
 export declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
@@ -12166,7 +12198,8 @@ export declare namespace CloudflareWorkersModule {
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
-  > implements Rpc.WorkflowEntrypointBranded
+  >
+    implements Rpc.WorkflowEntrypointBranded
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
     protected ctx: ExecutionContext;

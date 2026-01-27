@@ -62,10 +62,10 @@ inline bool isInterestingException(const kj::Exception& e) {
 #define LOG_PERIODICALLY(severity, ...)                                                            \
   do {                                                                                             \
     static kj::TimePoint KJ_UNIQUE_NAME(lastLogged) = kj::origin<kj::TimePoint>() - 1 * kj::HOURS; \
-    const auto now = kj::systemCoarseMonotonicClock().now();                                       \
-    const auto elapsed = now - KJ_UNIQUE_NAME(lastLogged);                                         \
-    if (KJ_UNLIKELY(elapsed >= 1 * kj::HOURS)) {                                                   \
-      KJ_UNIQUE_NAME(lastLogged) = now;                                                            \
+    const auto KJ_UNIQUE_NAME(now) = kj::systemCoarseMonotonicClock().now();                       \
+    const auto KJ_UNIQUE_NAME(elapsed) = KJ_UNIQUE_NAME(now) - KJ_UNIQUE_NAME(lastLogged);         \
+    if (KJ_UNLIKELY(KJ_UNIQUE_NAME(elapsed) >= 1 * kj::HOURS)) {                                   \
+      KJ_UNIQUE_NAME(lastLogged) = KJ_UNIQUE_NAME(now);                                            \
       KJ_LOG(severity, __VA_ARGS__);                                                               \
     }                                                                                              \
   } while (0)

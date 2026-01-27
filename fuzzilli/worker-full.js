@@ -1,33 +1,40 @@
 // Enhanced REPRL worker script with all API bindings exposed
-import { default as Stdin } from "workerd:stdin";
+import { default as Stdin } from 'workerd:stdin';
 import crypto from 'crypto';
 import * as fs from 'node:fs';
 import { Buffer } from 'node:buffer';
-import { ok, match, rejects, strictEqual, throws, deepStrictEqual, notStrictEqual } from 'node:assert';
+import {
+  ok,
+  match,
+  rejects,
+  strictEqual,
+  throws,
+  deepStrictEqual,
+  notStrictEqual,
+} from 'node:assert';
 import { mock } from 'node:test';
 import { Writable, Readable, Transform } from 'node:stream';
-import { text } from "node:stream/consumers";
-import { pipeline } from "node:stream/promises";
-import { StringDecoder } from "node:string_decoder";
+import { text } from 'node:stream/consumers';
+import { pipeline } from 'node:stream/promises';
+import { StringDecoder } from 'node:string_decoder';
 import { EventEmitter } from 'node:events';
-import { env } from "node:process";
-import zlib from "node:zlib";
-import { AsyncLocalStorage } from "node:async_hooks";
+import { env } from 'node:process';
+import zlib from 'node:zlib';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   channel,
   hasSubscribers,
   subscribe,
   unsubscribe,
   tracingChannel,
-} from "node:diagnostics_channel";
-import dns from "node:dns";
-import path from "node:path";
-
+} from 'node:diagnostics_channel';
+import dns from 'node:dns';
+import path from 'node:path';
 
 // Expose all APIs to the global scope for fuzzing
 export default {
   async fetch(request, env, ctx) {
-    return new Response("REPRL mode active");
+    return new Response('REPRL mode active');
   },
 
   async test(request, env, ctx) {
@@ -38,10 +45,10 @@ export default {
     globalThis.env = env;
     process = undefined;
     globalThis.process = undefined;
-    
+
     // used for scheduler.await
     globalThis.scheduler = scheduler;
-    
+
     // zlib
     globalThis.zlib = zlib;
 
@@ -49,8 +56,8 @@ export default {
     globalThis.crypto = crypto;
 
     globalThis.AsyncLocalStorage = AsyncLocalStorage;
-    
-    //path 
+
+    //path
     globalThis.path = path;
 
     // dns
@@ -128,10 +135,14 @@ export default {
 
     // Mock Cloudflare APIs for fuzzing
     globalThis.MOCK_KV = {
-      get: (key, options) => Promise.resolve(options?.type === 'json' ? { test: 'value' } : 'test-value'),
+      get: (key, options) =>
+        Promise.resolve(
+          options?.type === 'json' ? { test: 'value' } : 'test-value'
+        ),
       put: (key, value, options) => Promise.resolve(),
       delete: (key) => Promise.resolve(),
-      list: (options) => Promise.resolve({ keys: [{ name: 'key1' }], list_complete: true })
+      list: (options) =>
+        Promise.resolve({ keys: [{ name: 'key1' }], list_complete: true }),
     };
 
     globalThis.MOCK_D1 = {
@@ -139,25 +150,32 @@ export default {
         bind: (...params) => ({
           first: () => Promise.resolve({ id: 1, name: 'test' }),
           all: () => Promise.resolve({ results: [{ id: 1 }], meta: {} }),
-          run: () => Promise.resolve({ success: true, meta: { changes: 1 } })
-        })
+          run: () => Promise.resolve({ success: true, meta: { changes: 1 } }),
+        }),
       }),
-      batch: (stmts) => Promise.resolve(stmts.map(() => ({ success: true })))
+      batch: (stmts) => Promise.resolve(stmts.map(() => ({ success: true }))),
     };
 
     globalThis.MOCK_R2 = {
-      get: (key) => Promise.resolve({
-        body: new ReadableStream(),
-        text: () => Promise.resolve('content'),
-        json: () => Promise.resolve({ data: 'test' }),
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
-      }),
+      get: (key) =>
+        Promise.resolve({
+          body: new ReadableStream(),
+          text: () => Promise.resolve('content'),
+          json: () => Promise.resolve({ data: 'test' }),
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+        }),
       put: (key, value, options) => Promise.resolve({ etag: 'test-etag' }),
-      delete: (keys) => Promise.resolve({ deleted: Array.isArray(keys) ? keys.map(k => ({ key: k })) : [{ key: keys }] }),
-      list: (options) => Promise.resolve({ objects: [{ key: 'test.txt', size: 100 }] })
+      delete: (keys) =>
+        Promise.resolve({
+          deleted: Array.isArray(keys)
+            ? keys.map((k) => ({ key: k }))
+            : [{ key: keys }],
+        }),
+      list: (options) =>
+        Promise.resolve({ objects: [{ key: 'test.txt', size: 100 }] }),
     };
 
     // Enter the REPRL loop
     Stdin.reprl();
-  }
+  },
 };

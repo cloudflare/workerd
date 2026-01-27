@@ -343,7 +343,7 @@ export function checkRangesOrGetDefault(
   name: string,
   lower: number,
   upper: number,
-  def: number | undefined = undefined
+  def?: number
 ): number | undefined {
   if (!checkFiniteNumber(number, name)) {
     return def;

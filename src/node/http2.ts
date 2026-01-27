@@ -43,11 +43,10 @@ export function connect(..._args: unknown[]): H2.ClientHttp2Session {
 
 export function performServerHandshake<
   Http1Request extends typeof H1.IncomingMessage = typeof H1.IncomingMessage,
-  Http1Response extends typeof H1.ServerResponse<
-    InstanceType<Http1Request>
-  > = typeof H1.ServerResponse,
-  Http2Request extends
-    typeof H2.Http2ServerRequest = typeof H2.Http2ServerRequest,
+  Http1Response extends typeof H1.ServerResponse<InstanceType<Http1Request>> =
+    typeof H1.ServerResponse,
+  Http2Request extends typeof H2.Http2ServerRequest =
+    typeof H2.Http2ServerRequest,
   Http2Response extends typeof H2.Http2ServerResponse<
     InstanceType<Http2Request>
   > = typeof H2.Http2ServerResponse,

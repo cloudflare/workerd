@@ -9,6 +9,7 @@
 #include <workerd/api/crypto/x509.h>
 #include <workerd/jsg/jsg.h>
 
+#include <aead.h>
 #include <ncrypto.h>
 
 namespace workerd::api::node {

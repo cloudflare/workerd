@@ -361,6 +361,58 @@ export const cacheMode = {
           'Unsupported cache mode: ' + cacheMode
         );
       }
+
+      // Test cache mode compatibility with cf.cacheTtl
+      // cache: 'no-store' with cf: { cacheTtl: -1 } should succeed because
+      // -1 is the NOCACHE_TTL value that no-store sets automatically.
+      {
+        const req = new Request('https://example.org', {
+          cache: 'no-store',
+          cf: { cacheTtl: -1 },
+        });
+        assert.strictEqual(req.cache, 'no-store');
+        // Fetch should succeed with compatible cacheTtl
+        await env.SERVICE.fetch('http://placeholder/not-found', {
+          cache: 'no-store',
+          cf: { cacheTtl: -1 },
+        });
+      }
+
+      // cache: 'no-store' with cf: { cacheTtl: 300 } should throw TypeError
+      // because 300 is incompatible with no-store (validation happens at fetch time)
+      {
+        const req = new Request('https://example.org', {
+          cache: 'no-store',
+          cf: { cacheTtl: 300 },
+        });
+        // Request construction succeeds
+        assert.strictEqual(req.cache, 'no-store');
+        // But fetch should fail with incompatible cacheTtl
+        await assert.rejects(
+          env.SERVICE.fetch('http://placeholder/not-found', {
+            cache: 'no-store',
+            cf: { cacheTtl: 300 },
+          }),
+          {
+            name: 'TypeError',
+            message: /is not compatible with cache/,
+          }
+        );
+      }
+
+      // cache: 'no-store' with cf: { cacheTtl: 0 } should also throw TypeError
+      {
+        await assert.rejects(
+          env.SERVICE.fetch('http://placeholder/not-found', {
+            cache: 'no-store',
+            cf: { cacheTtl: 0 },
+          }),
+          {
+            name: 'TypeError',
+            message: /is not compatible with cache/,
+          }
+        );
+      }
     }
   },
 };

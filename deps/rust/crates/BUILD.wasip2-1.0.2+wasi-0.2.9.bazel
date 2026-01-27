@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "hstr",
+    name = "wasip2",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,9 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "serde",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -38,18 +35,13 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=hstr",
+        "crate-name=wasip2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "3.0.3",
+    version = "1.0.2+wasi-0.2.9",
     deps = [
-        "@crates_vendor__hashbrown-0.14.5//:hashbrown",
-        "@crates_vendor__new_debug_unreachable-1.0.6//:debug_unreachable",
-        "@crates_vendor__once_cell-1.21.3//:once_cell",
-        "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
-        "@crates_vendor__serde-1.0.228//:serde",
-        "@crates_vendor__triomphe-0.1.15//:triomphe",
+        "@crates_vendor__wit-bindgen-0.51.0//:wit_bindgen",
     ],
 )

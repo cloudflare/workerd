@@ -10,6 +10,7 @@ import type {
   Cluster as _Cluster,
   Worker as _Worker,
   ClusterSettings,
+  WorkerOptions,
 } from 'node:cluster';
 import { EventEmitter } from 'node-internal:events';
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
@@ -48,6 +49,11 @@ export const _maxListeners = 0;
 export class Worker extends EventEmitter implements _Worker {
   _connected: boolean = false;
   id = 0;
+
+  constructor(_options?: WorkerOptions) {
+    super();
+  }
+
   get process(): any {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return globalThis.process as any;

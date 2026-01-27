@@ -1156,8 +1156,8 @@ kj::Maybe<kj::Array<kj::String>> getScriptTagsFromReader(const rpc::Trace::Onset
   if (reader.hasScriptTags()) {
     auto tags = reader.getScriptTags();
     kj::Vector<kj::String> scriptTags(tags.size());
-    for (size_t i = 0; i < tags.size(); i++) {
-      scriptTags.add(kj::str(tags[i]));
+    for (const auto& tag: tags) {
+      scriptTags.add(kj::str(tag));
     }
     return kj::Maybe(scriptTags.releaseAsArray());
   }
@@ -1339,8 +1339,8 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<Attribute> attrs(listReader.size());
-      for (size_t n = 0; n < listReader.size(); n++) {
-        attrs.add(Attribute(listReader[n]));
+      for (const auto& reader: listReader) {
+        attrs.add(Attribute(reader));
       }
       return attrs.releaseAsArray();
     }

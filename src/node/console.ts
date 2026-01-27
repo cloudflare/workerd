@@ -7,10 +7,7 @@
 
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:public_process';
-import type {
-  Console as _Console,
-  ConsoleConstructorOptions,
-} from 'node:console';
+import type { Console as _Console, ConsoleOptions } from 'node:console';
 
 const noop: VoidFunction = () => {};
 
@@ -36,7 +33,7 @@ globalConsole._stdoutErrorHandler = noop;
 globalConsole._stderr = processImpl.stderr as unknown as NodeJS.WritableStream;
 globalConsole._stdout = processImpl.stdout as unknown as NodeJS.WritableStream;
 
-export function Console(_options: ConsoleConstructorOptions): Console {
+export function Console(_options: ConsoleOptions): Console {
   throw new ERR_METHOD_NOT_IMPLEMENTED('Console');
 }
 // We want to make sure the following works:

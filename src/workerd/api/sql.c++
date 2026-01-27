@@ -58,13 +58,14 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   // actually done, which for read queries that iterate over a cursor won't be until later.
   kj::Maybe<kj::Function<void(Cursor&)>> doneCallback;
   if (span.isObserved() || userSpan.isObserved()) {
-    doneCallback = [span = kj::mv(span), userSpan = kj::mv(userSpan)](Cursor& cursor) mutable {
+    doneCallback = [span = kj::mv(span), userSpan = context.addObject(kj::heap(kj::mv(userSpan)))](
+                       Cursor& cursor) mutable {
       int64_t rowsRead = cursor.getRowsRead();
       int64_t rowsWritten = cursor.getRowsWritten();
       span.setTag("rows_read"_kjc, rowsRead);
       span.setTag("rows_written"_kjc, rowsWritten);
-      userSpan.setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
-      userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
+      userSpan->setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
+      userSpan->setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
     };
   }
 

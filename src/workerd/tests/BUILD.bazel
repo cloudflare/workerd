@@ -6,12 +6,21 @@ load("//:build/wd_test.bzl", "wd_test")
 wd_cc_library(
     name = "bench-tools",
     hdrs = ["bench-tools.h"],
+    defines = select({
+        "//src/workerd/server:really_use_tcmalloc": ["WD_USE_TCMALLOC"],
+        "//conditions:default": [],
+    }),
     tags = ["workerd-benchmark"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",
         "@google_benchmark//:benchmark",
-    ],
+    ] + select({
+        # tcmalloc is only available on Linux and when use_tcmalloc is enabled.
+        # We use the malloc_extension API to configure tcmalloc for deterministic benchmarks.
+        "//src/workerd/server:really_use_tcmalloc": ["@tcmalloc//tcmalloc:malloc_extension"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_cc_library(

@@ -54,10 +54,6 @@ def wd_rust_binary(
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
-        experimental_use_cc_common_link = select({
-            "@platforms//os:windows": 0,
-            "//conditions:default": 1,
-        }),
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -74,10 +70,6 @@ def wd_rust_binary(
             # our tests are usually very heavy and do not support concurrent invocation
             "RUST_TEST_THREADS": "1",
         },
-        experimental_use_cc_common_link = select({
-            "@platforms//os:windows": 0,
-            "//conditions:default": 1,
-        }),
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],

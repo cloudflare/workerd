@@ -10,6 +10,7 @@
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/small-set.h>
 #include <workerd/util/state-machine.h>
+#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 
@@ -165,22 +166,18 @@ class QueueImpl final {
     // Detach all consumers before destruction to prevent UAF.
     // This can happen during isolate teardown when the destruction order
     // of JS wrapper objects doesn't follow the ownership hierarchy.
-    auto consumers = allConsumers.snapshot();
-    for (auto consumer: consumers) {
-      consumer->detachQueue();
-    }
+    allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.detachQueue(); });
   }
 
   // Closes the queue. The close is forwarded on to all consumers.
   // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
     if (state.isActive()) {
-      // We copy the list of consumers in case the consumers remove themselves
-      // from the queue during the close callback, invalidating the iterator.
-      auto consumers = allConsumers.snapshot();
-      for (auto consumer: consumers) {
-        consumer->close(js);
-      }
+#ifdef KJ_DEBUG
+      isClosingOrErroring = true;
+      KJ_DEFER(isClosingOrErroring = false);
+#endif
+      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.close(js); });
       state.template transitionTo<Closed>();
     }
   }
@@ -199,12 +196,11 @@ class QueueImpl final {
   // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::Value reason) {
     if (state.isActive()) {
-      // We copy the list of consumers in case the consumers remove themselves
-      // from the queue during the error callback, invalidating the iterator.
-      auto consumers = allConsumers.snapshot();
-      for (auto consumer: consumers) {
-        consumer->error(js, reason.addRef(js));
-      }
+#ifdef KJ_DEBUG
+      isClosingOrErroring = true;
+      KJ_DEFER(isClosingOrErroring = false);
+#endif
+      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.error(js, reason.addRef(js)); });
       state.template transitionTo<Errored>(kj::mv(reason));
     }
   }
@@ -215,9 +211,9 @@ class QueueImpl final {
   void maybeUpdateBackpressure() {
     totalQueueSize = 0;
     if (state.isActive()) {
-      for (auto consumer: allConsumers.snapshot()) {
-        totalQueueSize = kj::max(totalQueueSize, consumer->size());
-      }
+      allConsumers.forEach([&](ConsumerImpl& consumer) {
+        totalQueueSize = kj::max(totalQueueSize, consumer.size());
+      });
     }
   }
 
@@ -229,15 +225,14 @@ class QueueImpl final {
   void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
     state.requireActiveUnsafe("The queue is closed or errored.");
 
-    for (auto consumer: allConsumers.snapshot()) {
+    allConsumers.forEach([&](ConsumerImpl& consumer) {
       KJ_IF_SOME(skip, skipConsumer) {
-        if (&skip == consumer) {
-          continue;
+        if (&skip == &consumer) {
+          return;
         }
       }
-
-      consumer->push(js, entry->clone(js));
-    }
+      consumer.push(js, entry->clone(js));
+    });
   }
 
   // The current size of consumer with the most stored data.
@@ -251,8 +246,10 @@ class QueueImpl final {
 
   bool wantsRead() const {
     if (state.isActive()) {
-      for (auto consumer: allConsumers.snapshot()) {
-        if (consumer->hasReadRequests()) return true;
+      for (const auto& weakRef: allConsumers) {
+        KJ_IF_SOME(consumer, weakRef->tryGet()) {
+          if (consumer.hasReadRequests()) return true;
+        }
       }
     }
     return false;
@@ -302,14 +299,31 @@ class QueueImpl final {
   // will be a very small number (often just one or two), so we use SmallSet to
   // optimize for that. This persists across state transitions so we can detach
   // consumers even after close()/error() transitions the queue to a terminal state.
-  SmallSet<ConsumerImpl*> allConsumers;
+  //
+  // We store weak references to consumers to safely handle the case where a consumer
+  // is destroyed during iteration (e.g., resolving a read request triggers JS that
+  // destroys another consumer in the same queue). When iterating, we check if the WeakRef is still valid.
+  SmallSet<kj::Rc<WeakRef<ConsumerImpl>>> allConsumers;
 
-  void addConsumer(ConsumerImpl* consumer) {
-    allConsumers.add(consumer);
+#ifdef KJ_DEBUG
+  // Debug flag to detect if addConsumer is called during close/error iteration.
+  // This should never happen - it would indicate a bug in the streams implementation.
+  bool isClosingOrErroring = false;
+#endif
+
+  void addConsumer(kj::Rc<WeakRef<ConsumerImpl>> weakRef) {
+    KJ_DASSERT(
+        !isClosingOrErroring, "Cannot add a consumer while the queue is being closed or errored");
+    allConsumers.add(kj::mv(weakRef));
   }
 
-  void removeConsumer(ConsumerImpl* consumer) {
-    allConsumers.remove(consumer);
+  void removeConsumer(ConsumerImpl& consumer) {
+    allConsumers.removeIf([&consumer](const kj::Rc<WeakRef<ConsumerImpl>>& ref) {
+      KJ_IF_SOME(c, ref->tryGet()) {
+        return &c == &consumer;
+      }
+      return false;  // Already invalid, will be cleaned up later
+    });
     maybeUpdateBackpressure();
   }
 
@@ -356,7 +370,7 @@ class ConsumerImpl final {
       : queue(queue),
         state(ConsumerState::template create<Ready>()),
         stateListener(stateListener) {
-    queue.addConsumer(this);
+    queue.addConsumer(selfRef.addRef());
   }
 
   explicit ConsumerImpl(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
@@ -369,9 +383,13 @@ class ConsumerImpl final {
   ~ConsumerImpl() noexcept(false) {
     // queue may be none if the queue was destroyed before this consumer
     // (e.g., during isolate teardown) or if cloned from a closed stream.
+    // We must remove ourselves before invalidating selfRef, otherwise
+    // removeConsumer won't find us (tryGet() would return none).
     KJ_IF_SOME(q, queue) {
-      q.removeConsumer(this);
+      q.removeConsumer(*this);
     }
+    // Invalidate after removal so any concurrent iteration will skip us.
+    selfRef->invalidate();
   }
 
   // Called by QueueImpl destructor to detach this consumer from a queue
@@ -587,6 +605,11 @@ class ConsumerImpl final {
   kj::Maybe<QueueImpl&> queue;
   ConsumerState state;
   kj::Maybe<ConsumerImpl::StateListener&> stateListener;
+  // WeakRef to this consumer, used for safe registration with QueueImpl.
+  // When this consumer is destroyed, we invalidate the WeakRef so that
+  // any iteration over allConsumers in QueueImpl will safely skip us.
+  kj::Rc<WeakRef<ConsumerImpl>> selfRef =
+      kj::rc<WeakRef<ConsumerImpl>>(kj::Badge<ConsumerImpl>{}, *this);
 
   bool isClosing() {
     // Closing state is determined by whether there is a Close sentinel that has been

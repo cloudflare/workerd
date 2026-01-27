@@ -79,10 +79,7 @@ export function invalidateCaches(Module: Module): void {
   );
 }
 
-export function unreachable(
-  obj: never,
-  msg: string | undefined = undefined
-): never {
+export function unreachable(obj: never, msg?: string): never {
   if (msg === undefined) {
     msg = obj;
   }

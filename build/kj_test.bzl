@@ -50,18 +50,20 @@ def kj_test(
 
     sh_test(
         name = test_name + "@",
-        size = size,
         srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias] + data,
-        args = ["$(location " + cross_alias + ")"],
+        args = ["$(location {})".format(cross_alias)],
+        data = data + [cross_alias],
         tags = tags,
+        size = size,
     )
+
     sh_test(
         name = test_name + "@all-autogates",
-        size = size,
-        env = {"WORKERD_ALL_AUTOGATES": "1"},
         srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias] + data,
-        args = ["$(location " + cross_alias + ")"],
-        tags = tags,
+        args = ["$(location {})".format(cross_alias)],
+        data = data + [cross_alias],
+        env = {"WORKERD_ALL_AUTOGATES": "1"},
+        # Tag with no-coverage to reduce coverage CI time
+        tags = tags + ["no-coverage"],
+        size = size,
     )

@@ -1335,4 +1335,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # checking for null will break. To migrate, either:
   # 1. Add a null check: if (controller.byobRequest) { ... }
   # 2. Explicitly set autoAllocateChunkSize when creating the stream
+
+  pythonWorkflowsImplicitDeps @155 :Bool
+    $compatEnableFlag("python_workflows_implicit_dependencies")
+    $compatDisableFlag("no_python_workflows_implicit_dependencies")
+    $impliedByAfterDate(name = "pythonWorkers", date = "2026-02-25");
+  # replaces depends param on steps to an implicit approach with step callables passed as params
+  # these steps are called internally and act as dependencies
 }

@@ -115,6 +115,8 @@ KJ_TEST("RingBuffer iterator basic") {
   }
 
   int expected = 0;
+  // Using verbose syntax to test iterator
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto it = buffer.begin(); it != buffer.end(); ++it) {
     KJ_EXPECT(*it == expected++);
   }
@@ -165,6 +167,8 @@ KJ_TEST("RingBuffer const_iterator") {
   const auto& constBuffer = buffer;
 
   int expected = 0;
+  // Using verbose syntax to test iterator
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (auto it = constBuffer.begin(); it != constBuffer.end(); ++it) {
     KJ_EXPECT(*it == expected++);
   }

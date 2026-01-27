@@ -1,6 +1,6 @@
 # After updating this file, make sure to run "bazel mod tidy"
-load("@aspect_bazel_lib//lib:base64.bzl", "base64")
-load("@aspect_bazel_lib//lib:strings.bzl", "chr")
+load("@bazel_lib//lib:base64.bzl", "base64")
+load("@bazel_lib//lib:strings.bzl", "chr")
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
 load("//:build/python/packages_20250808.bzl", "PACKAGES_20250808")
 
@@ -130,8 +130,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": PACKAGES_20240829_4,
-        "backport": "76",
-        "integrity": "sha256-JJNmE10FaBPZ2p9/EKg6qy/hR2RgscCEYVpFreoPE44=",
+        "backport": "77",
+        "integrity": "sha256-/7lNXWxMRip/FS4+9+luOqccULG1ht6/lYs4BfH+nFQ=",
         "flag": "pythonWorkers",
         "enable_flag_name": "python_workers",
         "emscripten_version": "3.1.52",
@@ -161,8 +161,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
         "packages": PACKAGES_20250808,
-        "backport": "7",
-        "integrity": "sha256-AnWUl4RzLQLbQSB3RvC3y+hPNBPjS7tY2v04b+UfTsc=",
+        "backport": "8",
+        "integrity": "sha256-rl3htxJqgtZXPDjDYA6iftkmK8CT8DnQ+dm2fN8Kt1k=",
         "flag": "pythonWorkers20250116",
         "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",

@@ -155,7 +155,7 @@ import {
     monotonicDateNow,
     newWasmModule,
     patchedApplyFunc,
-    patchDynlibLookup,
+    patchedLoadLibData,
     reportUndefinedSymbolsPatched,
     wasmInstantiate,
     patched_PyEM_CountFuncParams,
@@ -213,8 +213,14 @@ _REPLACEMENTS = [
     # Dynamic linking patches:
     # library lookup
     [
-        "!libData",
-        "!(libData ??= patchDynlibLookup(Module, libName))",
+        "function loadLibData(){",
+        """
+        function loadLibData(){
+            var libData = patchedLoadLibData(Module, libName, flags.rpath);
+            return flags.loadAsync ? Promise.resolve(libData) : libData;
+        }
+        function dummiedOutOrigLoadLibData(){
+        """,
     ],
     # for ensuring memory base of dynlib is stable when restoring snapshots
     [

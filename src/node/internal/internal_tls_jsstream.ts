@@ -140,7 +140,6 @@ export class JSStreamSocket extends Socket {
     this[kPendingShutdownRequest] = null;
     this[kPendingClose] = false;
     this.readable = stream.readable;
-    // @ts-expect-error TS2540 Read-only property.
     this.writable = stream.writable;
 
     // eslint-disable-next-line @typescript-eslint/no-floating-promises

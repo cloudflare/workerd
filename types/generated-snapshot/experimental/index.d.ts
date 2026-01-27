@@ -2062,8 +2062,10 @@ declare var Request: {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request)
  */
-interface Request<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>
-  extends Body {
+interface Request<
+  CfHostMetadata = unknown,
+  Cf = CfProperties<CfHostMetadata>,
+> extends Body {
   /**
    * The **`clone()`** method of the Request interface creates a copy of the current `Request` object.
    *
@@ -3142,9 +3144,7 @@ interface TextDecoderStreamTextDecoderStreamInit {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy)
  */
-declare class ByteLengthQueuingStrategy
-  implements QueuingStrategy<ArrayBufferView>
-{
+declare class ByteLengthQueuingStrategy implements QueuingStrategy<ArrayBufferView> {
   constructor(init: QueuingStrategyInit);
   /**
    * The read-only **`ByteLengthQueuingStrategy.highWaterMark`** property returns the total number of bytes that can be contained in the internal queue before backpressure is applied.
@@ -10681,8 +10681,7 @@ interface IncomingRequestCfPropertiesBotManagement {
    */
   clientTrustScore: number;
 }
-interface IncomingRequestCfPropertiesBotManagementEnterprise
-  extends IncomingRequestCfPropertiesBotManagement {
+interface IncomingRequestCfPropertiesBotManagementEnterprise extends IncomingRequestCfPropertiesBotManagement {
   /**
    * Results of Cloudflare's Bot Management analysis
    */
@@ -11238,6 +11237,10 @@ interface D1Meta {
    */
   served_by_region?: string;
   /**
+   * The three letters airport code of the colo that executed the query.
+   */
+  served_by_colo?: string;
+  /**
    * True if-and-only-if the database instance that executed the query was the primary.
    */
   served_by_primary?: boolean;
@@ -11379,11 +11382,44 @@ interface ForwardableEmailMessage extends EmailMessage {
    */
   reply(message: EmailMessage): Promise<EmailSendResult>;
 }
+/** A file attachment for an email message */
+type EmailAttachment =
+  | {
+      disposition: "inline";
+      contentId: string;
+      filename: string;
+      type: string;
+      content: string | ArrayBuffer | ArrayBufferView;
+    }
+  | {
+      disposition: "attachment";
+      contentId?: undefined;
+      filename: string;
+      type: string;
+      content: string | ArrayBuffer | ArrayBufferView;
+    };
+/** An Email Address */
+interface EmailAddress {
+  name: string;
+  email: string;
+}
 /**
  * A binding that allows a Worker to send email messages.
  */
 interface SendEmail {
   send(message: EmailMessage): Promise<EmailSendResult>;
+  send(builder: {
+    from: string | EmailAddress;
+    to: string | string[];
+    subject: string;
+    replyTo?: string | EmailAddress;
+    cc?: string | string[];
+    bcc?: string | string[];
+    headers?: Record<string, string>;
+    text?: string;
+    html?: string;
+    attachments?: EmailAttachment[];
+  }): Promise<EmailSendResult>;
 }
 declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
@@ -12194,7 +12230,8 @@ declare namespace CloudflareWorkersModule {
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
-  > implements Rpc.WorkflowEntrypointBranded
+  >
+    implements Rpc.WorkflowEntrypointBranded
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
     protected ctx: ExecutionContext;

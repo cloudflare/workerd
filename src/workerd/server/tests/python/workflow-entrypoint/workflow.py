@@ -19,48 +19,50 @@ class WorkflowEntrypointExample(WorkflowEntrypoint):
             raise TypeError("Intentional error in my_failing")
 
         @step.do("normal_step")
-        async def normal_step():
-            print("Executing normal step")
+        async def normal_step(ctx):
+            assert ctx["attempt"] == "1"
             return "done"
 
-        await await_step(normal_step)
+        await normal_step()
 
-        @step.do("step_1")
+        @step.do()
         async def step_1():
             print("Executing step 1")
             return {"foo": "foo"}
 
-        @step.do("step_2")
+        @step.do()
         async def step_2():
             print("Executing step 2")
             return {"bar": "bar"}
 
         # DAG example with error handling
-        @step.do("step_3", depends=[my_failing, step_2], concurrent=True)
-        async def step_3(_result1, _result2):
+        @step.do("step_3", concurrent=True)
+        async def step_3():
             # this should never run because one of the dependencies will fail
             pass
 
         await await_step(step_3)
 
         # `step_1` and `step_2` run serially
-        @step.do("step_4", depends=[step_1, step_2], concurrent=False)
-        async def step_4(result1, result2):
+        @step.do("step_4", concurrent=True)
+        async def step_4(step_1, ctx, step_2):
+            assert ctx["attempt"] == "1"
             print("Executing step 4 (depends on step 1 and step 2)")
-            assert result1["foo"] == "foo"
-            assert result2["bar"] == "bar"
+            assert step_1["foo"] == "foo"
+            assert step_2["bar"] == "bar"
 
         await await_step(step_4)
 
-        @step.do("step_5", depends=[step_1, step_2], concurrent=False)
-        async def step_5(result1, result2):
+        # tests step memoization - steps 1 and 2 are already resolved
+        @step.do("step_5", concurrent=False)
+        async def step_5(ctx, step_1=(), step_2=()):
             print("Executing step 5 (depends on step 1 and step 2)")
-            assert result1["foo"] == "foo"
-            assert result2["bar"] == "bar"
+            assert step_1["foo"] == "foo"
+            assert step_2["bar"] == "bar"
 
-            return result1["foo"] + result2["bar"]
+            return step_1["foo"] + step_2["bar"]
 
-        return await await_step(step_5)
+        return await step_5()
 
 
 async def test(ctrl, env, ctx):

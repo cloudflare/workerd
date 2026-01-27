@@ -75,12 +75,12 @@ import type {
   GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
-  ReadAsyncOptions,
+  ReadOptionsWithBuffer,
   RmOptions,
-  RmDirOptions,
   StatsFs,
   WriteFileOptions,
 } from 'node:fs';
+import type { RmDirOptions } from 'node-internal:internal_fs_utils';
 import type {
   ReadableWebStreamOptions,
   CreateReadStreamOptions,
@@ -151,8 +151,8 @@ export class FileHandle extends EventEmitter {
   }
 
   read<T extends NodeJS.ArrayBufferView>(
-    bufferOrOptions: T | ReadAsyncOptions<T> = {},
-    offsetOrOptions: number | ReadAsyncOptions<T> = {},
+    bufferOrOptions: T | ReadOptionsWithBuffer<T> = {},
+    offsetOrOptions: number | ReadOptionsWithBuffer<T> = {},
     length?: number,
     position: Position = null
   ): Promise<{ bytesRead: number; buffer: T }> {
@@ -161,7 +161,7 @@ export class FileHandle extends EventEmitter {
         throw new ERR_EBADF({ syscall: 'stat' });
       }
 
-      let options: ReadAsyncOptions<T>;
+      let options: ReadOptionsWithBuffer<T>;
       if (isArrayBufferView(bufferOrOptions)) {
         if (typeof offsetOrOptions === 'number') {
           options = {
