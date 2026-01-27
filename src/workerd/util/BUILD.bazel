@@ -1,5 +1,25 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+
+bool_flag(
+    name = "use_perfetto",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "set_use_perfetto",
+    flag_values = {"use_perfetto": "True"},
+)
+
+selects.config_setting_group(
+    name = "really_use_perfetto",
+    match_all = [
+        ":set_use_perfetto",
+        "//:is_unix",
+    ],
+)
 
 wd_cc_library(
     name = "perfetto",
@@ -20,15 +40,15 @@ wd_cc_library(
     # optimization.
     copts = ["-O3"],
     defines = select({
-        "@platforms//os:windows": [],
-        "//conditions:default": ["WORKERD_USE_PERFETTO"],
+        ":really_use_perfetto": ["WORKERD_USE_PERFETTO"],
+        "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
     ] + select({
-        "@platforms//os:windows": [],
-        "//conditions:default": ["@perfetto//:libperfetto_client_experimental"],
+        ":really_use_perfetto": ["@perfetto//:libperfetto_client_experimental"],
+        "//conditions:default": [],
     }),
 )
 # TODO(later): Currently perfetto support is not enabled on Windows simply because the
