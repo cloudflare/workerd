@@ -7,11 +7,6 @@ load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
-config_setting(
-    name = "is_linux",
-    constraint_values = ["@platforms//os:linux"],
-)
-
 # Flag that can be used to force-disable tcmalloc. Mainly used for ASAN builds.
 # TODO(cleanup): This feels ugly but I've exceeded my timebox for fighting Bazel for now.
 bool_flag(
@@ -28,7 +23,7 @@ selects.config_setting_group(
     name = "really_use_tcmalloc",
     match_all = [
         ":set_use_tcmalloc",
-        ":is_linux",
+        "//:is_linux",
     ],
 )
 
