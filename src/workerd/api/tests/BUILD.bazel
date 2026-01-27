@@ -214,6 +214,12 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-toplevel-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-toplevel-test.js"],
+)
+
+wd_test(
     src = "data-url-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["data-url-fetch-test.js"],

@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-toplevel-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-toplevel-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"]
+      )
+    ),
+  ],
+);

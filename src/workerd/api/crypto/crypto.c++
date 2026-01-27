@@ -10,8 +10,8 @@
 #include <workerd/api/crypto/endianness.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/util.h>
-#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/entropy.h>
 #include <workerd/util/uuid.h>
 
 #include <openssl/digest.h>
@@ -673,12 +673,12 @@ jsg::BufferSource Crypto::getRandomValues(jsg::BufferSource buffer) {
   JSG_REQUIRE(buffer.size() <= 0x10000, DOMQuotaExceededError,
       "getRandomValues() only accepts buffers of size <= 64K but provided ", buffer.size(),
       " bytes.");
-  IoContext::current().getEntropySource().generate(buffer.asArrayPtr());
+  ::workerd::getEntropy(buffer.asArrayPtr());
   return kj::mv(buffer);
 }
 
 kj::String Crypto::randomUUID() {
-  return ::workerd::randomUUID(IoContext::current().getEntropySource());
+  return ::workerd::randomUUID(kj::none);
 }
 
 // =======================================================================================
