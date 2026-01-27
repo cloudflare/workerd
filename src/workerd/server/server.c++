@@ -5045,7 +5045,7 @@ kj::Maybe<kj::String> processCfBlobHeader(kj::AuthenticatedStream& stream) {
   }
 
   KJ_IF_SOME(remote, kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
-    return kj::str("{\"clientIp\": \"", escapeJsonString(remote.toString()), "\"}");
+    return kj::str("{\"clientIp\": ", escapeJsonString(remote.toString()), "}");
   } else KJ_IF_SOME(local, kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
     auto creds = local.getCredentials();
 
@@ -5261,8 +5261,10 @@ class Server::TcpListener final: public kj::Refcounted {
         rewriter(kj::mv(rewriter)) {}
 
   kj::Promise<void> run() {
+    TRACE_EVENT("workerd", "TcpListener::run");
     for (;;) {
       kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
+      TRACE_EVENT("workerd", "TcpListener handle connection");
 
       kj::Maybe<kj::String> cfBlobJson;
       if (!rewriter->hasCfBlobHeader()) {
@@ -5274,8 +5276,8 @@ class Server::TcpListener final: public kj::Refcounted {
       auto req = service->startRequest(kj::mv(metadata));
       auto response = kj::heap<ResponseWrapper>();
       kj::HttpHeaders headers(headerTable);
-      // The empty string here is the host parameter that is required by the API
-      // but is not actually used in the implementation at this point.
+      // TODO(now): The empty string here is the host parameter that is required by the API but is
+      // not actually used in the implementation at this point.
       owner.tasks.add(req->connect(""_kj, headers, *stream.stream, *response, {})
                           .attach(kj::mv(stream.stream), kj::mv(response))
                           .attach(kj::mv(req)));
@@ -5289,16 +5291,19 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::HttpHeaderTable& headerTable;
   kj::Own<HttpRewriter> rewriter;
 
+  // TODO: Would using a plain ConnectResponse work here too?
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
     void accept(
         uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
       // Ok.. we're accepting the connection... anything to do?
+      KJ_LOG(WARNING, "accepted TCP stream", statusCode, statusText);
     }
     kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
         kj::StringPtr statusText,
         const kj::HttpHeaders& headers,
         kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
       // Doh... we're rejecting the connection... anything to do?
+      KJ_LOG(WARNING, "rejected TCP stream");
       return newNullOutputStream();
     }
   };
@@ -5829,8 +5834,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       })(kj::mv(listener), kj::mv(t));
     }
 
-    // Need to create rewriter before waiting on anything since `headerTableBuilder` will
-    // no longer be available later.
+    // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
+    // be available later.
     auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
 
     auto handle = kj::coCapture(

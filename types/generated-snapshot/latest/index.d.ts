@@ -485,6 +485,11 @@ type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
   env: Env,
   ctx: ExecutionContext,
 ) => Response | Promise<Response>;
+type ExportedHandlerConnectHandler<Env = unknown> = (
+  readable: ReadableStream,
+  env: Env,
+  ctx: ExecutionContext,
+) => ReadableStream | Promise<ReadableStream>;
 type ExportedHandlerTailHandler<Env = unknown> = (
   events: TraceItem[],
   env: Env,
@@ -521,6 +526,7 @@ interface ExportedHandler<
   CfHostMetadata = unknown,
 > {
   fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
+  connect?: ExportedHandlerConnectHandler<Env>;
   tail?: ExportedHandlerTailHandler<Env>;
   trace?: ExportedHandlerTraceHandler<Env>;
   tailStream?: ExportedHandlerTailStreamHandler<Env>;
@@ -542,6 +548,10 @@ declare abstract class Navigator {
 interface AlarmInvocationInfo {
   readonly isRetry: boolean;
   readonly retryCount: number;
+}
+interface ConnectEvent {
+  get inbound(): ReadableStream;
+  get cf(): any | undefined;
 }
 interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
@@ -3111,6 +3121,7 @@ interface TraceItem {
     | (
         | TraceItemFetchEventInfo
         | TraceItemJsRpcEventInfo
+        | TraceItemConnectEventInfo
         | TraceItemScheduledEventInfo
         | TraceItemAlarmEventInfo
         | TraceItemQueueEventInfo
@@ -3138,6 +3149,9 @@ interface TraceItem {
 }
 interface TraceItemAlarmEventInfo {
   readonly scheduledTime: Date;
+}
+interface TraceItemConnectEventInfo {
+  readonly cf?: any;
 }
 interface TraceItemCustomEventInfo {}
 interface TraceItemScheduledEventInfo {
@@ -11550,6 +11564,7 @@ declare namespace CloudflareWorkersModule {
     constructor(ctx: ExecutionContext, env: Env);
     email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
+    connect?(socket: Socket): Socket | Promise<Socket>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;

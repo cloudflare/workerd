@@ -14,9 +14,9 @@ wd_test(
 )
 
 wd_test(
-    src = "tcp-ingress-test.wd-test",
+    src = "connect-handler-test.wd-test",
     args = ["--experimental"],
-    data = ["tcp-ingress-test.js"],
+    data = ["connect-handler-test.js"],
 )
 
 wd_test(
@@ -42,6 +42,7 @@ wd_test(
         "tail-worker-test-invalid.js",
         "tail-worker-test-jsrpc.js",
         "websocket-hibernation.js",
+        "connect-handler-test.js",
     ],
 )
 

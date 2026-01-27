@@ -242,7 +242,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
                         .attach(kj::mv(actor));
 }
 
-kj::Exception exceptionToPropagate2(bool isInternalException, kj::Exception&& exception) {
+kj::Exception exceptionToPropagate(bool isInternalException, kj::Exception&& exception) {
   if (isInternalException) {
     // We've already logged it here, the only thing that matters to the client is that we failed
     // due to an internal error. Note that this does not need to be labeled "remote." since jsg
@@ -461,7 +461,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
-      return exceptionToPropagate2(isInternalException, kj::mv(exception));
+      return exceptionToPropagate(isInternalException, kj::mv(exception));
     } else KJ_IF_SOME(service, failOpenService) {
       // Fall back to origin.
 
@@ -495,7 +495,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       // Like with the isActor check, we want to return exceptions back to the caller.
       // We don't want to handle this case the same as the isActor case though, since we want
       // fail-open to operate normally, which means this case must happen after fail-open handling.
-      return exceptionToPropagate2(isInternalException, kj::mv(exception));
+      return exceptionToPropagate(isInternalException, kj::mv(exception));
     } else {
       // Return error.
 
@@ -532,20 +532,16 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   auto incomingRequest =
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "connect() can only be called once"));
   this->incomingRequest = kj::none;
-  // Whenever we implement incoming connections over the `connect` handler we need to remember to
-  // add tracing `onset` and `return` events using setEventInfo()/setReturn(), as with the other
-  // event types here.
-  incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
-  // TODO: Does this block interfere with connect stuff below, does drain() get duplicated?
-  KJ_DEFER({
-    // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
-    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-    waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
-  });
-
   if (context.getWorker().getIsolate().getApi().getFeatureFlags().getConnectPassThrough()) {
+    incomingRequest->delivered();
+
+    KJ_DEFER({
+      // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
+      auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
+      waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+    });
     // connect_pass_through feature flag means we should just forward the connect request on to
     // the global outbound.
 
@@ -555,6 +551,17 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // Note: Intentionally return without co_await so that the `incomingRequest` is destroyed,
     //   because we don't have any need to keep the context around.
     return next->connect(host, headers, connection, response, settings);
+  }
+
+  if (!context.getWorker().getIsolate().getApi().getFeatureFlags().getWorkerdExperimental()) {
+    incomingRequest->delivered();
+
+    KJ_DEFER({
+      // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
+      auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
+      waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+    });
+    JSG_FAIL_REQUIRE(TypeError, "Incoming CONNECT on a worker not supported");
   }
 
   bool isActor = context.getActor() != kj::none;
@@ -567,8 +574,10 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
     t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo(kj::mv(cfJson)));
   }
+  incomingRequest->delivered();
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
+  auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
 
   return context
       .run([this, &context, &connection, &response, entrypointName = entrypointName](
@@ -581,7 +590,6 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       .then([this](api::DeferredProxy<void> deferredProxy) {
     proxyTask = kj::mv(deferredProxy.proxyTask);
   })
-      .exclusiveJoin(context.onAbort())
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
     // logging internal errors to syslog.
@@ -599,12 +607,18 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // The request has been canceled, but allow it to continue executing in the background.
     auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
     waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+    //}))
+    //  .then([this, metrics = kj::mv(metricsForProxyTask)]() -> kj::Promise<void> {
   }))
-      .then([this]() -> kj::Promise<void> {
+      .then([this, metrics = kj::mv(metricsForProxyTask)]() mutable -> kj::Promise<void> {
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
     KJ_IF_SOME(p, proxyTask) {
-      return kj::mv(p);
+      //return kj::mv(p);
+      return p.catch_([metrics = kj::mv(metrics)](kj::Exception&& e) mutable -> kj::Promise<void> {
+        metrics->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
+        return kj::mv(e);
+      });
     } else {
       return kj::READY_NOW;
     }
@@ -634,7 +648,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
-      return exceptionToPropagate2(isInternalException, kj::mv(exception));
+      return exceptionToPropagate(isInternalException, kj::mv(exception));
     } else {
       // Return error.
 
