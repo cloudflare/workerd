@@ -214,34 +214,38 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   // Set protocols header if necessary.
   KJ_IF_SOME(variant, protocols) {
     // String consisting of the protocol(s) we send to the server.
-    kj::String protoString;
+    kj::Maybe<kj::String> maybeProtoString;
 
     KJ_SWITCH_ONEOF(variant) {
       KJ_CASE_ONEOF(proto, kj::String) {
         JSG_REQUIRE(
             validProtoToken(proto), DOMSyntaxError, wsErr, "The protocol header token is invalid.");
-        protoString = kj::mv(proto);
+        maybeProtoString = kj::mv(proto);
       }
       KJ_CASE_ONEOF(protoArr, kj::Array<kj::String>) {
-        JSG_REQUIRE(
-            kj::size(protoArr) > 0, DOMSyntaxError, wsErr, "The protocols array cannot be empty.");
-        // Search for duplicates by checking for their presence in the set.
-        kj::HashSet<kj::String> present;
+        // Per the WebSocket spec, an empty protocols array is valid and equivalent to not
+        // specifying any protocols - we simply don't set the Sec-WebSocket-Protocol header.
+        if (protoArr.size() > 0) {
+          // Search for duplicates by checking for their presence in the set.
+          kj::HashSet<kj::String> present;
 
-        for (const auto& proto: protoArr) {
-          JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
-              "One of the protocol header tokens is invalid.");
-          JSG_REQUIRE(!present.contains(proto), DOMSyntaxError, wsErr,
-              "The protocols header cannot have repeating values.");
+          for (const auto& proto: protoArr) {
+            JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
+                "One of the protocol header tokens is invalid.");
+            JSG_REQUIRE(!present.contains(proto), DOMSyntaxError, wsErr,
+                "The protocols header cannot have repeating values.");
 
-          present.insert(kj::str(proto));
+            present.insert(kj::str(proto));
+          }
+          constexpr auto delim = ", "_kj;
+          maybeProtoString = kj::str(kj::delimited(protoArr, delim));
         }
-        const auto delim = ", "_kj;
-        protoString = kj::str(kj::delimited(protoArr, delim));
       }
     }
-    auto protoHeaderId = context.getHeaderIds().secWebSocketProtocol;
-    headers.set(protoHeaderId, kj::mv(protoString));
+    KJ_IF_SOME(protoString, maybeProtoString) {
+      auto protoHeaderId = context.getHeaderIds().secWebSocketProtocol;
+      headers.set(protoHeaderId, kj::mv(protoString));
+    }
   }
 
   // Any userinfo, username and/or password, should be removed.
