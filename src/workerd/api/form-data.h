@@ -157,9 +157,11 @@ public:
 
     if (flags.getFormDataParserSupportsFiles()) {
       JSG_TS_OVERRIDE({
+        append(name: string, value: string | Blob): void;
         append(name: string, value: string): void;
         append(name: string, value: Blob, filename?: string): void;
 
+        set(name: string, value: string | Blob): void;
         set(name: string, value: string): void;
         set(name: string, value: Blob, filename?: string): void;
 
@@ -173,9 +175,11 @@ public:
         get(name: string): string | null;
         getAll(name: string): string[];
 
+        append(name: string, value: string | Blob): void;
         append(name: string, value: string): void;
         append(name: string, value: Blob, filename?: string): void;
 
+        set(name: string, value: string | Blob): void;
         set(name: string, value: string): void;
         set(name: string, value: Blob, filename?: string): void;
 
