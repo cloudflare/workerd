@@ -9,7 +9,7 @@ export class Server extends HttpServer implements _Server {
     throw new ERR_METHOD_NOT_IMPLEMENTED('addContext');
   }
 
-  getTicketKeys(): Buffer {
+  getTicketKeys(): Buffer<ArrayBuffer> {
     // We don't support TLS ticket keys.
     throw new ERR_METHOD_NOT_IMPLEMENTED('getTicketKeys');
   }
