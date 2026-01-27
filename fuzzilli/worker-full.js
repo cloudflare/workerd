@@ -87,6 +87,18 @@ export default {
     globalThis.ByteLengthQueuingStrategy = ByteLengthQueuingStrategy;
     globalThis.CountQueuingStrategy = CountQueuingStrategy;
 
+    // Expose compression/decompression streams
+    globalThis.CompressionStream = CompressionStream;
+    globalThis.DecompressionStream = DecompressionStream;
+
+    // Expose text encoding/decoding streams
+    globalThis.TextEncoderStream = TextEncoderStream;
+    globalThis.TextDecoderStream = TextDecoderStream;
+
+    // Expose identity/fixed-length streams
+    globalThis.IdentityTransformStream = IdentityTransformStream;
+    globalThis.FixedLengthStream = FixedLengthStream;
+
     // Expose fetch API
     globalThis.fetch = fetch;
 
