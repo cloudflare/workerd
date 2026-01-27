@@ -12,19 +12,28 @@ function getChaoticD1Response() {
   const chaos = Math.random();
   if (chaos < 0.25) {
     // Database locked
-    return Response.json({ error: 'database is locked', success: false }, { status: 500 });
+    return Response.json(
+      { error: 'database is locked', success: false },
+      { status: 500 }
+    );
   } else if (chaos < 0.45) {
-    // Connection limit exceeded  
-    return Response.json({ error: 'too many connections', success: false }, { status: 503 });
+    // Connection limit exceeded
+    return Response.json(
+      { error: 'too many connections', success: false },
+      { status: 503 }
+    );
   } else if (chaos < 0.65) {
     // Malformed response (missing success field)
     return Response.json({ results: [], meta: { served_by: 'chaos' } });
   } else if (chaos < 0.85) {
     // SQL constraint violation
-    return Response.json({ 
-      error: 'UNIQUE constraint failed: users.email', 
-      success: false 
-    }, { status: 400 });
+    return Response.json(
+      {
+        error: 'UNIQUE constraint failed: users.email',
+        success: false,
+      },
+      { status: 400 }
+    );
   } else {
     // Completely wrong JSON structure
     return Response.json({ chaos: true, random_field: 'unexpected' });
@@ -38,7 +47,7 @@ function mockQuery({ sql, params = [] }) {
       throw new Error('Random SQL execution error');
     }
   }
-  
+
   switch (sql.trim()) {
     case 'select 1;':
     case 'SELECT 1':
@@ -66,11 +75,14 @@ export default {
     if (shouldChaos()) {
       return getChaoticD1Response();
     }
-    
+
     try {
       const { pathname } = new URL(request.url);
-      
-      if (request.method === 'POST' && (pathname.startsWith('/query') || pathname.startsWith('/execute'))) {
+
+      if (
+        request.method === 'POST' &&
+        (pathname.startsWith('/query') || pathname.startsWith('/execute'))
+      ) {
         const body = await request.json();
         return Response.json(
           Array.isArray(body)
@@ -78,7 +90,7 @@ export default {
             : mockQuery(body)
         );
       }
-      
+
       return new Response('D1 mock ready', { status: 200 });
     } catch (err) {
       return Response.json(
@@ -86,5 +98,5 @@ export default {
         { status: 500 }
       );
     }
-  }
+  },
 };
