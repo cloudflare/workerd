@@ -119,7 +119,7 @@
       "repo": "workerd-tools",
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "@workerd//:build/BUILD.wpt",
-      "freeze_version": "wpt-c1ad85a22"
+      "freeze_version": "wpt-11b9300f1"
     },
     // This should match the version specified in V8 DEPS, but in practice it is generally acceptable
     // for it to be behind – zlib is very stable and its API has not changed in a long time, most

@@ -73,6 +73,10 @@ declare global {
     descriptionOrFunc: string | ThrowingFn,
     maybeDescription?: string
   ): void;
+  function assert_throws_quotaexceedederror(
+    func: ThrowingFn,
+    description?: string
+  ): void;
   function promise_rejects_dom(
     test: Test,
     type: number | string,
@@ -370,6 +374,19 @@ globalThis.assert_throws_dom = (
     },
     `Failed to throw: ${description}`
   );
+};
+
+/**
+ * Assert a QuotaExceededError DOMException is thrown.
+ *
+ * This is a convenience wrapper around assert_throws_dom for the common case
+ * of checking for QuotaExceededError.
+ *
+ * @param func - Function which should throw.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_throws_quotaexceedederror = (func, description): void => {
+  assert_throws_dom('QuotaExceededError', func, description ?? '');
 };
 
 /**

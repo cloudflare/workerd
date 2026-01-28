@@ -24,7 +24,6 @@ export default {
       'ReadableStream interface: operation pipeThrough(ReadableWritablePair, optional StreamPipeOptions)',
       'ReadableStream interface: operation pipeTo(WritableStream, optional StreamPipeOptions)',
       'ReadableStream interface: operation tee()',
-      'ReadableStream interface: async iterable<any>',
       'ReadableStream must be primary interface of new ReadableStream()',
       'Stringification of new ReadableStream()',
       'ReadableStream interface: new ReadableStream() must inherit property "from(any)" with the proper type',
@@ -374,6 +373,7 @@ export default {
     ],
   },
   'readable-byte-streams/construct-byob-request.any.js': {},
+  'readable-byte-streams/crashtests/tee-locked-stream.any.js': {},
   'readable-byte-streams/enqueue-with-detached-buffer.any.js': {},
   'readable-byte-streams/general.any.js': {
     comment: 'See individual comments',

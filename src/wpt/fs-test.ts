@@ -210,7 +210,6 @@ export default {
       'FileSystemDirectoryHandle interface: existence and properties of interface prototype object',
       'FileSystemDirectoryHandle interface: existence and properties of interface prototype object\'s "constructor" property',
       "FileSystemDirectoryHandle interface: existence and properties of interface prototype object's @@unscopables property",
-      'FileSystemDirectoryHandle interface: async iterable<USVString, FileSystemHandle>',
       'FileSystemDirectoryHandle interface: operation getFileHandle(USVString, optional FileSystemGetFileOptions)',
       'FileSystemDirectoryHandle interface: operation getDirectoryHandle(USVString, optional FileSystemGetDirectoryOptions)',
       'FileSystemDirectoryHandle interface: operation removeEntry(USVString, optional FileSystemRemoveOptions)',

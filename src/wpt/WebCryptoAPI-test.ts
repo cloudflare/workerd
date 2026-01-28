@@ -17,21 +17,19 @@ export default {
     ],
   },
 
-  'derive_bits_keys/cfrg_curves_bits.js': {},
-  'derive_bits_keys/cfrg_curves_bits_curve25519.https.any.js': {},
-  'derive_bits_keys/cfrg_curves_bits_curve448.https.any.js': {
-    comment:
-      'X448 is not supported by BoringSSL and is intentionally disabled.',
+  'derive_bits_keys/argon2.js': {
+    comment: 'Argon2 is not supported',
     omittedTests: true,
   },
+  'derive_bits_keys/argon2_vectors.js': {
+    comment: 'Argon2 is not supported',
+    omittedTests: true,
+  },
+  'derive_bits_keys/cfrg_curves_bits.js': {},
+  'derive_bits_keys/cfrg_curves_bits_curve25519.https.any.js': {},
   'derive_bits_keys/cfrg_curves_bits_fixtures.js': {},
   'derive_bits_keys/cfrg_curves_keys.js': {},
   'derive_bits_keys/cfrg_curves_keys_curve25519.https.any.js': {},
-  'derive_bits_keys/cfrg_curves_keys_curve448.https.any.js': {
-    comment:
-      'X448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
-  },
   'derive_bits_keys/derive_key_and_encrypt.https.any.js': {},
   'derive_bits_keys/derive_key_and_encrypt.js': {},
   'derive_bits_keys/derived_bits_length.https.any.js': {},
@@ -69,6 +67,15 @@ export default {
     ],
   },
 
+  'encap_decap/ml_kem_encap_decap.js': {
+    comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
+  },
+  'encap_decap/ml_kem_vectors.js': {
+    comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
+  },
+
   'encrypt_decrypt/aes.js': {},
   'encrypt_decrypt/aes_cbc.https.any.js': {},
   'encrypt_decrypt/aes_cbc_vectors.js': {},
@@ -79,6 +86,14 @@ export default {
   'encrypt_decrypt/aes_gcm_256_iv_fixtures.js': {},
   'encrypt_decrypt/aes_gcm_96_iv_fixtures.js': {},
   'encrypt_decrypt/aes_gcm_vectors.js': {},
+  'encrypt_decrypt/aes_ocb_fixtures.js': {
+    comment: 'AES-OCB is not supported',
+    omittedTests: true,
+  },
+  'encrypt_decrypt/aes_ocb_vectors.js': {
+    comment: 'AES-OCB is not supported',
+    omittedTests: true,
+  },
   'encrypt_decrypt/rsa.js': {},
   'encrypt_decrypt/rsa_oaep.https.any.js': {},
   'encrypt_decrypt/rsa_vectors.js': {},
@@ -112,11 +127,6 @@ export default {
     comment: 'Wrong type of error returned',
     expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
-  'generateKey/failures_Ed448.https.any.js': {
-    comment:
-      'Ed448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
-  },
   'generateKey/failures_HMAC.https.any.js': {
     comment: 'Wrong type of error returned',
     expectedFailures: [/^(Empty|Bad) algorithm:/],
@@ -136,11 +146,6 @@ export default {
   'generateKey/failures_X25519.https.any.js': {
     comment: 'Wrong type of error returned',
     expectedFailures: [/^(Empty|Bad) algorithm:/],
-  },
-  'generateKey/failures_X448.https.any.js': {
-    comment:
-      'X448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
   },
   'generateKey/successes.js': {},
   'generateKey/successes_AES-CBC.https.any.js': {
@@ -171,11 +176,6 @@ export default {
     comment: 'TODO investigate this',
     expectedFailures: [/^undefined: /],
   },
-  'generateKey/successes_Ed448.https.any.js': {
-    comment:
-      'Ed448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
-  },
   'generateKey/successes_HMAC.https.any.js': {
     comment: 'TODO investigate this',
     expectedFailures: [/^undefined: /],
@@ -195,11 +195,6 @@ export default {
   'generateKey/successes_X25519.https.any.js': {
     comment: 'TODO investigate this',
     expectedFailures: [/^undefined: /],
-  },
-  'generateKey/successes_X448.https.any.js': {
-    comment:
-      'X448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
   },
 
   'getRandomValues.any.js': {},
@@ -287,6 +282,22 @@ export default {
     ],
   },
 
+  'import_export/ML-DSA_importKey.js': {
+    comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
+    omittedTests: true,
+  },
+  'import_export/ML-DSA_importKey_fixtures.js': {
+    comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
+    omittedTests: true,
+  },
+  'import_export/ML-KEM_importKey.js': {
+    comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
+  },
+  'import_export/ML-KEM_importKey_fixtures.js': {
+    comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
+    omittedTests: true,
+  },
   'import_export/crashtests/importKey-unsettled-promise.https.any.js': {},
   'import_export/ec_importKey.https.any.js': {},
   'import_export/ec_importKey_failures_ECDH.https.any.js': {
@@ -339,51 +350,34 @@ export default {
       'Good parameters with JWK alg EdDSA: Ed25519 (jwk, object(crv, d, x, kty), Ed25519, true, [sign, sign])',
     ],
   },
-  'import_export/okp_importKey_Ed448.https.any.js': {
-    comment:
-      'Ed448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
-  },
   'import_export/okp_importKey_X25519.https.any.js': {},
-  'import_export/okp_importKey_X448.https.any.js': {
-    comment:
-      'X448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
-  },
   'import_export/okp_importKey_failures_Ed25519.https.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'Invalid key pair: importKey(jwk(private), {name: Ed25519}, true, [sign])',
-      'Invalid key pair: importKey(jwk(private), {name: Ed25519}, true, [sign, sign])',
-      "Invalid 'crv' field: importKey(jwk(private), {name: Ed25519}, true, [sign])",
-      "Invalid 'crv' field: importKey(jwk (public) , {name: Ed25519}, true, [verify])",
-    ],
-  },
-  'import_export/okp_importKey_failures_Ed448.https.any.js': {
     comment:
-      'Ed448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
+      'To be investigated - workerd does not reject these invalid key pairs',
+    expectedFailures: [
+      /Invalid key pair: importKey\(jwk\(private\), .*, true, \[sign\]\)/,
+      /Invalid key pair: importKey\(jwk\(private\), .*, true, \[sign, sign\]\)/,
+      /Invalid 'crv' field: importKey\(jwk\(private\), .*, true, \[sign\]\)/,
+      /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[verify\]\)/,
+    ],
   },
   'import_export/okp_importKey_failures_X25519.https.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'Invalid key pair: importKey(jwk(private), {name: X25519}, true, [deriveKey])',
-      'Invalid key pair: importKey(jwk(private), {name: X25519}, true, [deriveBits, deriveKey])',
-      'Invalid key pair: importKey(jwk(private), {name: X25519}, true, [deriveBits])',
-      'Invalid key pair: importKey(jwk(private), {name: X25519}, true, [deriveKey, deriveBits, deriveKey, deriveBits])',
-      "Invalid 'crv' field: importKey(jwk(private), {name: X25519}, true, [deriveKey, deriveBits])",
-      "Invalid 'crv' field: importKey(jwk (public) , {name: X25519}, true, [])",
-    ],
-  },
-  'import_export/okp_importKey_failures_X448.https.any.js': {
     comment:
-      'X448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
+      'To be investigated - workerd does not reject these invalid key pairs',
+    expectedFailures: [
+      /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveKey\]\)/,
+      /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveBits, deriveKey\]\)/,
+      /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveBits\]\)/,
+      /Invalid key pair: importKey\(jwk\(private\), .*, true, \[deriveKey, deriveBits, deriveKey, deriveBits\]\)/,
+      /Invalid 'crv' field: importKey\(jwk\(private\), .*, true, \[deriveKey, deriveBits\]\)/,
+      /Invalid 'crv' field: importKey\(jwk \(public\) , .*, true, \[\]\)/,
+    ],
   },
   'import_export/okp_importKey_failures_fixtures.js': {},
   'import_export/okp_importKey_fixtures.js': {},
   'import_export/rsa_importKey.https.any.js': {},
   'import_export/symmetric_importKey.https.any.js': {},
+  'import_export/symmetric_importKey.js': {},
 
   'randomUUID.https.any.js': {},
 
@@ -396,11 +390,6 @@ export default {
     expectedFailures: [
       'EdDSA Ed25519 verification failure due to shortened signature',
     ],
-  },
-  'sign_verify/eddsa_curve448.https.any.js': {
-    comment:
-      'Ed448 is not supported by BoringSSL and is intentionally disabled.',
-    omittedTests: true,
   },
   'sign_verify/eddsa_small_order_points.https.any.js': {
     comment: 'To be investigated',
@@ -419,6 +408,22 @@ export default {
   'sign_verify/hmac.https.any.js': {},
   'sign_verify/hmac.js': {},
   'sign_verify/hmac_vectors.js': {},
+  'sign_verify/kmac.js': {
+    comment: 'KMAC is not supported',
+    omittedTests: true,
+  },
+  'sign_verify/kmac_vectors.js': {
+    comment: 'KMAC is not supported',
+    omittedTests: true,
+  },
+  'sign_verify/mldsa.js': {
+    comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
+    omittedTests: true,
+  },
+  'sign_verify/mldsa_vectors.js': {
+    comment: 'ML-DSA (post-quantum signature algorithm) is not supported',
+    omittedTests: true,
+  },
   'sign_verify/rsa.js': {},
   'sign_verify/rsa_pkcs.https.any.js': {},
   'sign_verify/rsa_pkcs_vectors.js': {},
