@@ -442,8 +442,3 @@ export async function validateAccessJwt(
     throw e;
   }
 }
-
-// For testing purposes - allows clearing the cache
-export function _clearJwksCache(): void {
-  jwksCache.clear();
-}

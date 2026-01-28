@@ -14,7 +14,9 @@ const keyPairs = new Map();
 
 // Track request counts for retry testing
 let requestCount = 0;
-let failUntilAttempt = 0;
+
+// Per-team failure configuration: teamDomain -> { failCount, requestCount }
+const failureConfig = new Map();
 
 /**
  * Base64url encode a buffer or string.
@@ -117,18 +119,15 @@ async function createJwt(teamDomain, claims, options = {}) {
 /**
  * Handle requests to the mock JWKS endpoint.
  */
-async function handleJwksRequest(teamDomain, failConfig) {
+async function handleJwksRequest(teamDomain) {
   requestCount++;
 
-  // Handle configured failures for retry testing
-  if (failConfig) {
-    if (failConfig.failCount && requestCount <= failConfig.failCount) {
+  // Check for per-team failure configuration
+  const teamFailConfig = failureConfig.get(teamDomain);
+  if (teamFailConfig) {
+    teamFailConfig.requestCount = (teamFailConfig.requestCount || 0) + 1;
+    if (teamFailConfig.requestCount <= teamFailConfig.failCount) {
       return new Response('Service Unavailable', { status: 503 });
-    }
-    if (failConfig.status) {
-      return new Response(failConfig.message || 'Error', {
-        status: failConfig.status,
-      });
     }
   }
 
@@ -145,25 +144,35 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
 
-    // Reset request count on specific endpoint
+    // Reset all state
     if (url.pathname === '/_test/reset') {
       requestCount = 0;
-      failUntilAttempt = 0;
+      failureConfig.clear();
       keyPairs.clear();
+      return new Response('OK');
+    }
+
+    // Reset just the request count (for caching tests)
+    if (url.pathname === '/_test/reset-count') {
+      requestCount = 0;
       return new Response('OK');
     }
 
     // Get request count for assertions
     if (url.pathname === '/_test/request-count') {
-      return new Response(JSON.stringify({ count: requestCount }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return Response.json({ count: requestCount });
     }
 
-    // Configure failure behavior
+    // Configure per-team failure behavior
     if (url.pathname === '/_test/configure-failure') {
       const config = await request.json();
-      failUntilAttempt = config.failCount || 0;
+      const teamDomain = config.teamDomain;
+      if (teamDomain) {
+        failureConfig.set(teamDomain, {
+          failCount: config.failCount || 0,
+          requestCount: 0,
+        });
+      }
       return new Response('OK');
     }
 
@@ -193,9 +202,7 @@ export default {
     );
     if (jwksMatch) {
       const teamDomain = jwksMatch[1];
-      const failConfig =
-        failUntilAttempt > 0 ? { failCount: failUntilAttempt } : null;
-      return handleJwksRequest(teamDomain, failConfig);
+      return handleJwksRequest(teamDomain);
     }
 
     // Also handle direct /cdn-cgi/access/certs requests with host header
@@ -203,9 +210,7 @@ export default {
       const host = request.headers.get('host') || '';
       const teamMatch = host.match(/^([^.]+)\.cloudflareaccess\.com$/);
       if (teamMatch) {
-        const failConfig =
-          failUntilAttempt > 0 ? { failCount: failUntilAttempt } : null;
-        return handleJwksRequest(teamMatch[1], failConfig);
+        return handleJwksRequest(teamMatch[1]);
       }
     }
 
