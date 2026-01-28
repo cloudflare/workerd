@@ -9,7 +9,7 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "test.js")
         ],
         compatibilityFlags = ["enable_ctx_exports", "nodejs_compat", "experimental", "containers_pid_namespace"],
-        containerEngine = (localDocker = (socketPath = "unix:/var/run/docker.sock")),
+        containerEngine = (localDocker = (socketPath = "unix:/var/run/docker.sock", containerEgressInterceptorImage = "cloudflare/proxy-everything:main")),
         durableObjectNamespaces = [
           ( className = "DurableObjectExample",
             uniqueKey = "container-client-test-DurableObjectExample",
