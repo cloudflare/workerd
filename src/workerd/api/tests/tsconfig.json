@@ -2,12 +2,11 @@
   "extends": "../../../../tools/base.tsconfig.json",
   "compilerOptions": {
     "lib": ["esnext", "webworker"],
-    "sourceMap": true,
     "paths": {
       "@workerd/*": ["../../../bazel-bin/src/workerd/*"]
     },
-    "declaration": true,
     "skipLibCheck": true,
+    "allowJs": false,
     "types": ["@types/node"]
   },
   "include": ["**/*.ts"]

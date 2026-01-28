@@ -256,6 +256,12 @@ wd_test(
 )
 
 wd_test(
+    src = "form-data-test-ts.wd-test",
+    args = ["--experimental"],
+    data = ["form-data-test-ts.ts"],
+)
+
+wd_test(
     size = "large",
     src = "global-scope-test.wd-test",
     args = ["--experimental"],
@@ -436,6 +442,12 @@ wd_test(
     src = "url-test.wd-test",
     args = ["--experimental"],
     data = ["url-test.js"],
+)
+
+wd_test(
+    src = "websocket-constructor-test.wd-test",
+    args = ["--experimental"],
+    data = ["websocket-constructor-test.js"],
 )
 
 wd_test(

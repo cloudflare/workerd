@@ -1653,6 +1653,12 @@ export declare class FormData {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
    */
+  append(name: string, value: string | Blob): void;
+  /**
+   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
+   */
   append(name: string, value: string): void;
   /**
    * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
@@ -1684,6 +1690,12 @@ export declare class FormData {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/has)
    */
   has(name: string): boolean;
+  /**
+   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set)
+   */
+  set(name: string, value: string | Blob): void;
   /**
    * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
    *
@@ -2064,7 +2076,7 @@ export interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/signal)
    */
   signal: AbortSignal;
-  cf: Cf | undefined;
+  cf?: Cf;
   /**
    * The **`integrity`** read-only property of the Request interface contains the subresource integrity value of the request.
    *

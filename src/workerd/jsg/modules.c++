@@ -4,6 +4,7 @@
 
 #include "jsg.h"
 #include "setup.h"
+#include "util.h"
 
 #include <v8-wasm.h>
 
@@ -527,7 +528,34 @@ JsValue ModuleRegistry::requireImpl(Lock& js, ModuleInfo& info, RequireImplOptio
         js.v8Context(), v8StrIntern(js.v8Isolate, "default"))));
   }
 
-  return JsValue(module->GetModuleNamespace());
+  // When the flag is disabled, return the original module namespace
+  // to maintain backward compatibility (same object as ESM import returns).
+  if (!isRequireReturnsDefaultExportEnabled(js)) {
+    return JsValue(module->GetModuleNamespace());
+  }
+
+  // When require_returns_default_export flag is enabled:
+  // 1. If module has default export: return it directly (it should be mutable)
+  // 2. If no default export: return a mutable copy of the namespace
+  // This matches Node.js require(esm) behavior and allows monkey-patching.
+  // See: https://github.com/cloudflare/workerd/issues/5844
+
+  JsObject moduleNamespace(module->GetModuleNamespace().As<v8::Object>());
+  if (moduleNamespace.has(js, "default"_kj)) {
+    // Default export should be a regular mutable object, return it directly.
+    // No caching needed here since we're returning the module's own default export.
+    // Note: Modules should NOT re-export namespace objects as their default.
+    // If they do, the default export will be read-only which breaks monkey-patching.
+    return moduleNamespace.get(js, "default"_kj);
+  }
+
+  // No default export - return a cached mutable copy of the namespace, or create one.
+  KJ_IF_SOME(cached, info.maybeMutableExports) {
+    return JsValue(cached.getHandle(js));
+  }
+  auto mutableExports = createMutableModuleExports(js, moduleNamespace);
+  info.maybeMutableExports = V8Ref<v8::Object>(js.v8Isolate, mutableExports);
+  return mutableExports;
 }
 
 }  // namespace workerd::jsg

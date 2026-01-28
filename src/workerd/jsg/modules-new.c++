@@ -449,8 +449,6 @@ class IsolateModuleRegistry final {
   // like the CommonJS require. Returns the instantiated/evaluated module namespace.
   // If an empty v8::MaybeLocal is returned and the default option is given, then an
   // exception has been scheduled.
-  // Note that this returns the module namespace object. In CommonJS, the require()
-  // function will actually return the default export from the module namespace object.
   v8::MaybeLocal<v8::Object> require(
       Lock& js, const ResolveContext& context, RequireOption option = RequireOption::DEFAULT) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry, const Url& id,

@@ -1,6 +1,6 @@
 load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
 
-def eslint_test(
+def lint_test(
         name,
         eslintrc_json,
         tsconfig_json,
