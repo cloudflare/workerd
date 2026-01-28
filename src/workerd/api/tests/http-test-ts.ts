@@ -47,6 +47,37 @@ async function assertFetchCacheRejectsError(
   );
 }
 
+// Test that the Request constructor accepts a Request object as the second parameter.
+// This validates the TypeScript type definitions are correct.
+// Reference: https://github.com/cloudflare/workerd/issues/5940
+export const requestConstructorWithRequestAsInit = {
+  async test() {
+    // Create an original request
+    const originalRequest = new Request('https://example.com/original', {
+      method: 'POST',
+      headers: { 'X-Custom-Header': 'test-value' },
+    });
+
+    // TypeScript should allow passing a Request as the second parameter
+    const newRequest = new Request(
+      'https://example.com/new-url',
+      originalRequest
+    );
+
+    assert.strictEqual(newRequest.url, 'https://example.com/new-url');
+    assert.strictEqual(newRequest.method, 'POST');
+    assert.strictEqual(newRequest.headers.get('X-Custom-Header'), 'test-value');
+
+    // Also test with clone() which is a common pattern
+    const clonedAsInit = new Request(
+      'https://example.com/another-url',
+      originalRequest.clone()
+    );
+    assert.strictEqual(clonedAsInit.url, 'https://example.com/another-url');
+    assert.strictEqual(clonedAsInit.method, 'POST');
+  },
+};
+
 export const cacheMode = {
   async test(_ctrl: any, env: any, _ctx: any) {
     const allowedCacheModes: Set<RequestCache> = new Set([
