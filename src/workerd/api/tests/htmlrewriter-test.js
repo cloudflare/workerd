@@ -908,6 +908,64 @@ export const exceptionPropagation = {
   },
 };
 
+// handled HTMLRewriter errors must not poison the IoContext.
+export const continueAfterException = {
+  async test() {
+    const errorResponse = new HTMLRewriter()
+      .on('*', {
+        element() {
+          throw new Error('intentional error for testing');
+        },
+      })
+      .transform(new Response('<div>test</div>'));
+
+    await rejects(errorResponse.text(), {
+      message: 'intentional error for testing',
+    });
+
+    const successResponse = new HTMLRewriter()
+      .on('div', {
+        element(el) {
+          el.setInnerContent('success');
+        },
+      })
+      .transform(new Response('<div>original</div>'));
+
+    strictEqual(await successResponse.text(), '<div>success</div>');
+  },
+};
+
+export const continueAfterException2 = {
+  async test() {
+    const errorResponse = new HTMLRewriter()
+      .on('*', {
+        element() {
+          throw new Error('intentional error for pipeTo testing');
+        },
+      })
+      .transform(new Response('<div>test</div>'));
+
+    const { writable } = new TransformStream();
+
+    await rejects(errorResponse.body.pipeTo(writable), {
+      message: 'intentional error for pipeTo testing',
+    });
+
+    const successResponse = new HTMLRewriter()
+      .on('div', {
+        element(el) {
+          el.setInnerContent('success after pipeTo');
+        },
+      })
+      .transform(new Response('<div>original</div>'));
+
+    strictEqual(
+      await successResponse.text(),
+      '<div>success after pipeTo</div>'
+    );
+  },
+};
+
 export const sameToken = {
   async test() {
     const obj = {};
