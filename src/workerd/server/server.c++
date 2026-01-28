@@ -2148,8 +2148,8 @@ class Server::WorkerService final: public Service,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, kj::none /* scriptId */,
           nullptr /* scriptTags */, mapCopyString(entrypointName), executionModel,
           kj::none /* durableObjectId */);
-      kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(
-          kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::mv(tailStreamWriter));
+      kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(kj::none, kj::mv(trace),
+          PipelineLogLevel::FULL, kj::mv(tailStreamWriter), !bufferedTailWorkers.empty());
 
       // When the tracer is complete, deliver traces to any buffered tail workers. We end up
       // creating two references to the WorkerTracer, one held by the observer and one that will be
