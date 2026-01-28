@@ -14,12 +14,10 @@ export default {
       return Response.json(Object.fromEntries(request.headers));
     }
     if (pathname === '/consume-body') {
-      // Actually consume the request body to test request body size tracking
       const body = await request.text();
       return new Response(`Received ${body.length} bytes`);
     }
     if (pathname === '/streaming-response') {
-      // Streaming response to test response body size tracking
       const stream = new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('chunk1'));
@@ -106,7 +104,6 @@ export default {
       assert.strictEqual(scheduledLastCtrl.cron, '* * * * 30');
     }
 
-    // Test request body consumption - body size should be tracked
     {
       const response = await env.SERVICE.fetch(
         'http://placeholder/consume-body',
@@ -119,7 +116,6 @@ export default {
       assert.strictEqual(text, 'Received 5 bytes');
     }
 
-    // Test streaming response - body size should be tracked after streaming
     {
       const response = await env.SERVICE.fetch(
         'http://placeholder/streaming-response'

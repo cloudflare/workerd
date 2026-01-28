@@ -199,8 +199,6 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
     kj::Array<tracing::FetchEventInfo::Header> headers;
     kj::String method;
     kj::String url;
-    // Note: Request body size is tracked in Response, not here, because
-    // it's only known after the request body is fully consumed.
 
     Detail(jsg::Optional<jsg::V8Ref<v8::Object>> cf,
         kj::Array<tracing::FetchEventInfo::Header> headers,

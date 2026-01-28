@@ -320,8 +320,6 @@ KJ_TEST("Read/Write FetchResponseInfo works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::FetchResponseInfo>();
 
-  // FetchResponseInfo now only contains statusCode.
-  // Body sizes have been moved to Outcome where they can be populated after body streaming completes.
   FetchResponseInfo info(123);
   info.copyTo(infoBuilder);
 
@@ -411,8 +409,6 @@ KJ_TEST("Read/Write Return works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Return>();
 
-  // FetchResponseInfo now only contains statusCode.
-  // Body sizes have been moved to Outcome where they can be populated after body streaming completes.
   FetchResponseInfo fetchInfo(123);
   Return info(kj::mv(fetchInfo));
   info.copyTo(infoBuilder);

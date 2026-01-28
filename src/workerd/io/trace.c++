@@ -334,8 +334,6 @@ FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
     : method(validateMethod(reader.getMethod())),
       url(kj::str(reader.getUrl())),
       cfJson(kj::str(reader.getCfJson())) {
-  // Note: Request body size is now tracked in FetchResponseInfo, not here.
-  // The obsolete4/obsolete5 fields in the schema are ignored.
   kj::Vector<Header> v;
   v.addAll(reader.getHeaders());
   headers = v.releaseAsArray();
@@ -345,7 +343,6 @@ void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
   builder.setMethod(static_cast<capnp::HttpMethod>(method));
   builder.setUrl(url);
   builder.setCfJson(cfJson);
-  // Note: Request body size is now tracked in FetchResponseInfo, not here.
 
   auto list = builder.initHeaders(headers.size());
   for (auto i: kj::indices(headers)) {

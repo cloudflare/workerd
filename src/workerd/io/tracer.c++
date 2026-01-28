@@ -356,8 +356,6 @@ void WorkerTracer::setOutcome(EventOutcome outcome,
   trace->outcome = outcome;
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
-  // Body sizes can come from parameters or from pre-set values via setBodySizes().
-  // Parameters take precedence if provided.
   if (responseBodySize != kj::none) {
     trace->responseBodySize = responseBodySize;
   }

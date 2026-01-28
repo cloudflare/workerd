@@ -341,8 +341,6 @@ struct FetchEventInfo final {
   // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
   kj::String cfJson;
   kj::Array<Header> headers;
-  // Note: Body sizes are tracked in Outcome, not here, because
-  // they're only known after body streaming completes.
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
   FetchEventInfo clone() const;
@@ -493,9 +491,6 @@ struct FetchResponseInfo final {
   KJ_DISALLOW_COPY(FetchResponseInfo);
 
   uint16_t statusCode;
-  // Body sizes have been moved to Outcome where they can be populated after
-  // body streaming completes. Per HTTP spec, body size is only known after
-  // the body has been fully transmitted.
 
   void copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const;
   FetchResponseInfo clone() const;
@@ -753,11 +748,8 @@ struct Outcome final {
   EventOutcome outcome = EventOutcome::OK;
   kj::Duration cpuTime;
   kj::Duration wallTime;
-  // Body sizes are reported in Outcome because this is when streaming has
-  // definitively completed. Per HTTP spec, body size is only known after
-  // the body has been fully transmitted.
-  kj::Maybe<uint64_t> responseBodySize;  // Response body size in bytes. kj::none if unknown.
-  kj::Maybe<uint64_t> requestBodySize;   // Request body size in bytes. kj::none if unknown.
+  kj::Maybe<uint64_t> responseBodySize;
+  kj::Maybe<uint64_t> requestBodySize;
 
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
@@ -883,8 +875,6 @@ class Trace final: public kj::Refcounted {
 
   kj::Duration cpuTime;
   kj::Duration wallTime;
-  // Body sizes are stored here for the Outcome event. They're only known after
-  // body streaming completes, which is why they're separate from FetchResponseInfo.
   kj::Maybe<uint64_t> responseBodySize;
   kj::Maybe<uint64_t> requestBodySize;
 
