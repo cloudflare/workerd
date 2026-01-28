@@ -654,7 +654,7 @@ kj::Promise<void> ContainerClient::destroyContainer() {
 
 // Creates the sidecar container for egress proxy.
 // The sidecar shares the network namespace with the main container and runs
-// dockerproxyanything to intercept and proxy egress traffic.
+// proxy-everything to intercept and proxy egress traffic.
 kj::Promise<void> ContainerClient::createSidecarContainer(uint16_t egressPort) {
   // Docker API: POST /containers/create
   // Equivalent to: docker run --cap-add=NET_ADMIN --network container:$(CONTAINER) ...

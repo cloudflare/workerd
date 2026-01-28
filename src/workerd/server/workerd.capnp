@@ -734,7 +734,7 @@ struct Worker {
     socketPath @0 :Text;
     # Path to the Docker socket.
 
-    containerEgressInterceptorImage @1 :Text = "dockerproxyanything:dev";
+    containerEgressInterceptorImage @1 :Text = "cloudflare/proxy-everything:main";
     # Docker image name for the container egress interceptor sidecar.
     # This sidecar intercepts outbound traffic from containers and routes it
     # through workerd for egress mappings (setEgressHttp bindings).
