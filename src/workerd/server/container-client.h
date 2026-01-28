@@ -5,9 +5,12 @@
 #pragma once
 
 #include <workerd/io/container.capnp.h>
+#include <workerd/io/io-channels.h>
+#include <workerd/server/channel-token.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/list.h>
+#include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
@@ -32,8 +35,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::String dockerPath,
       kj::String containerName,
       kj::String imageName,
+      kj::String containerEgressInterceptorImage,
       kj::TaskSet& waitUntilTasks,
-      kj::Function<void()> cleanupCallback);
+      kj::Function<void()> cleanupCallback,
+      ChannelTokenHandler& channelTokenHandler);
 
   ~ContainerClient() noexcept(false);
 
@@ -46,6 +51,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
+  kj::Promise<void> setEgressTcp(SetEgressTcpContext context) override;
+  kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -55,7 +62,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Network& network;
   kj::String dockerPath;
   kj::String containerName;
+  kj::String sidecarContainerName;
   kj::String imageName;
+
+  // Container egress interceptor image name (sidecar for egress proxy)
+  kj::String containerEgressInterceptorImage;
+
   kj::TaskSet& waitUntilTasks;
 
   static constexpr kj::StringPtr defaultEnv[] = {"CLOUDFLARE_COUNTRY_A2=XX"_kj,
@@ -92,8 +104,42 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> killContainer(uint32_t signal);
   kj::Promise<void> destroyContainer();
 
+  // Sidecar container management (for egress proxy)
+  kj::Promise<void> createSidecarContainer(uint16_t egressPort);
+  kj::Promise<void> startSidecarContainer();
+  kj::Promise<void> destroySidecarContainer();
+  kj::Promise<void> monitorSidecarContainer();
+
   // Cleanup callback to remove from ActorNamespace map when destroyed
   kj::Function<void()> cleanupCallback;
+
+  // For redeeming channel tokens received via setEgressHttp
+  ChannelTokenHandler& channelTokenHandler;
+
+  // Egress HTTP mappings: address -> SubrequestChannel
+  kj::HashMap<kj::String, kj::Own<workerd::IoChannelFactory::SubrequestChannel>> egressMappings;
+
+  // Whether general internet access is enabled for this container
+  bool internetEnabled = false;
+
+  // Egress HTTP listener for handling container egress via HTTP CONNECT from sidecar
+  class EgressHttpService;
+  kj::Maybe<kj::Own<kj::HttpHeaderTable>> egressHeaderTable;
+  kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
+  kj::Maybe<kj::Promise<void>> egressListenerTask;
+
+  // The dynamically chosen port for the egress listener
+  uint16_t egressListenerPort = 0;
+
+  // Mutex to serialize setEgressHttp() calls (sidecar setup must complete before adding mappings)
+  kj::Maybe<kj::ForkedPromise<void>> egressSetupLock;
+
+  // Get the Docker bridge network gateway IP (e.g., "172.17.0.1")
+  kj::Promise<kj::String> getDockerBridgeGateway();
+  // Start the egress listener on the specified address, returns the chosen port
+  kj::Promise<uint16_t> startEgressListener(kj::StringPtr listenAddress);
+  // Stop the egress listener
+  void stopEgressListener();
 };
 
 }  // namespace workerd::server
