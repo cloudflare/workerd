@@ -198,7 +198,7 @@ def is_test_file(file):
         # into the main directory, and would need to manually be marked as skipAllTests
         return False
 
-    if ".tentative." in file.path:
+    if ".tentative." in file.path or "/tentative/" in file.path:
         # Tentative tests are for proposed features that are not yet standardized.
         # We skip these to avoid noise from unstable specifications.
         return False
