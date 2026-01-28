@@ -570,27 +570,94 @@ type DurableObjectStub<
   readonly id: DurableObjectId;
   readonly name?: string;
 };
+/**
+ * A 64-digit hexadecimal number used to identify a Durable Object. Durable Object IDs are
+ * constructed via the DurableObjectNamespace interface. Creating an ID does not create the object;
+ * the object is created lazily when the stub is first used.
+ *
+ * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/id/)
+ */
 interface DurableObjectId {
+  /**
+   * Converts this ID to a 64-digit hex string that can be stored and later used to recreate
+   * the ID via `idFromString()`.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/id/#tostring)
+   */
   toString(): string;
+  /**
+   * Compares this ID with another DurableObjectId for equality.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/id/#equals)
+   */
   equals(other: DurableObjectId): boolean;
+  /**
+   * The name that was used to create this ID via `idFromName()`, or undefined if the ID was
+   * created using `newUniqueId()`.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/id/#name)
+   */
   readonly name?: string;
 }
+/**
+ * A Durable Object namespace is a binding that allows a Worker to send messages to a Durable Object.
+ *
+ * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/namespace/)
+ */
 declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
+  /**
+   * Creates a new unique DurableObjectId. Use this when the Durable Object does not need to be addressed
+   * by a well-known name, such as for session IDs that can be stored in a cookie or URL.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/namespace/#newuniqueid)
+   */
   newUniqueId(
     options?: DurableObjectNamespaceNewUniqueIdOptions,
   ): DurableObjectId;
+  /**
+   * Creates a DurableObjectId for an instance with the provided name. This method always returns
+   * the same ID for the same name, making it ideal for objects that need to be addressed by a well-known name.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/namespace/#idfromname)
+   */
   idFromName(name: string): DurableObjectId;
+  /**
+   * Recreates a DurableObjectId from a previously stringified ID. Use this to restore an ID that was
+   * stored elsewhere, such as in a database or session cookie. Throws if the ID is not a valid 64-digit
+   * hex number, or if the ID was not originally created for this class.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/namespace/#idfromstring)
+   */
   idFromString(id: string): DurableObjectId;
+  /**
+   * Obtains a stub for the Durable Object instance corresponding to the given ID, creating the Durable
+   * Object if it doesn't already exist. The stub is a client that can be used to send messages to the
+   * remote Durable Object.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/namespace/#get)
+   */
   get(
     id: DurableObjectId,
     options?: DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStub<T>;
+  /**
+   * Obtains a stub for the Durable Object instance with the given name. This is a convenience method
+   * equivalent to calling `idFromName()` followed by `get()`.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/namespace/#getbyname)
+   */
   getByName(
     name: string,
     options?: DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStub<T>;
+  /**
+   * Creates a subnamespace scoped to the specified jurisdiction. All Durable Object IDs and stubs
+   * created from the subnamespace will be restricted to the specified jurisdiction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/namespace/#jurisdiction)
+   */
   jurisdiction(
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
@@ -617,94 +684,332 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
 interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
+/**
+ * Provides access to the Durable Object's storage and other state. Accessible via the `ctx`
+ * parameter passed to the Durable Object constructor.
+ *
+ * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/)
+ */
 interface DurableObjectState<Props = unknown> {
+  /**
+   * Extends the lifetime of the Durable Object to wait for the given promise. In Durable Objects,
+   * this has no effect as objects automatically remain active while work is pending.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#waituntil)
+   */
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  /**
+   * The DurableObjectId of this Durable Object instance.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#id)
+   */
   readonly id: DurableObjectId;
+  /**
+   * Provides access to the Durable Object's persistent storage.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#storage)
+   */
   readonly storage: DurableObjectStorage;
   container?: Container;
+  /**
+   * Executes an async callback while blocking delivery of other events to the Durable Object.
+   * Commonly used in the constructor to ensure initialization completes before handling requests.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#blockconcurrencywhile)
+   */
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+  /**
+   * Adds a WebSocket to the set of WebSockets attached to this Durable Object for hibernation.
+   * After calling this, incoming messages will be delivered to the `webSocketMessage` handler.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#acceptwebsocket)
+   */
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
+  /**
+   * Returns all WebSockets attached to this Durable Object via `acceptWebSocket()`.
+   * Optionally filters by tag if one was provided when accepting the WebSocket.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#getwebsockets)
+   */
   getWebSockets(tag?: string): WebSocket[];
+  /**
+   * Configures an automatic response for WebSocket ping/pong messages, allowing the Durable Object
+   * to remain hibernated while still responding to keep-alive messages.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#setwebsocketautoresponse)
+   */
   setWebSocketAutoResponse(maybeReqResp?: WebSocketRequestResponsePair): void;
+  /**
+   * Returns the currently configured automatic WebSocket response, or null if none is set.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#getwebsocketautoresponse)
+   */
   getWebSocketAutoResponse(): WebSocketRequestResponsePair | null;
+  /**
+   * Returns the most recent Date when the given WebSocket sent an auto-response, or null if it never has.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#getwebsocketautoresponsetimestamp)
+   */
   getWebSocketAutoResponseTimestamp(ws: WebSocket): Date | null;
+  /**
+   * Sets the maximum time in milliseconds that a WebSocket event handler can run for.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#sethibernatablewebsocketeventtimeout)
+   */
   setHibernatableWebSocketEventTimeout(timeoutMs?: number): void;
+  /**
+   * Returns the currently configured WebSocket event timeout, or null if none is set.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#gethibernatablewebsocketeventtimeout)
+   */
   getHibernatableWebSocketEventTimeout(): number | null;
+  /**
+   * Returns the tags associated with the given WebSocket, as provided to `acceptWebSocket()`.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#gettags)
+   */
   getTags(ws: WebSocket): string[];
+  /**
+   * Forcibly resets the Durable Object, logging the provided message as an error.
+   * This error cannot be caught within application code.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/state/#abort)
+   */
   abort(reason?: string): void;
 }
+/**
+ * Provides transactional access to Durable Object storage within a `transaction()` callback.
+ * Operations on this object are executed atomically.
+ *
+ * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transaction)
+ */
 interface DurableObjectTransaction {
+  /**
+   * Retrieves the value associated with the given key within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#get)
+   */
   get<T = unknown>(
     key: string,
     options?: DurableObjectGetOptions,
   ): Promise<T | undefined>;
+  /**
+   * Retrieves the value associated with the given key within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#get)
+   */
   get<T = unknown>(
     keys: string[],
     options?: DurableObjectGetOptions,
   ): Promise<Map<string, T>>;
+  /**
+   * Returns all keys and values within the transaction, optionally filtered.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#list)
+   */
   list<T = unknown>(
     options?: DurableObjectListOptions,
   ): Promise<Map<string, T>>;
+  /**
+   * Stores a value associated with the given key within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#put)
+   */
   put<T>(
     key: string,
     value: T,
     options?: DurableObjectPutOptions,
   ): Promise<void>;
+  /**
+   * Stores a value associated with the given key within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#put)
+   */
   put<T>(
     entries: Record<string, T>,
     options?: DurableObjectPutOptions,
   ): Promise<void>;
+  /**
+   * Deletes the given key(s) within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#delete)
+   */
   delete(key: string, options?: DurableObjectPutOptions): Promise<boolean>;
+  /**
+   * Deletes the given key(s) within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#delete)
+   */
   delete(keys: string[], options?: DurableObjectPutOptions): Promise<number>;
+  /**
+   * Ensures all changes made during the transaction will be rolled back rather than committed.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transaction)
+   */
   rollback(): void;
+  /**
+   * Retrieves the current alarm time within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#getalarm)
+   */
   getAlarm(options?: DurableObjectGetAlarmOptions): Promise<number | null>;
+  /**
+   * Sets an alarm within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#setalarm)
+   */
   setAlarm(
     scheduledTime: number | Date,
     options?: DurableObjectSetAlarmOptions,
   ): Promise<void>;
+  /**
+   * Deletes the alarm within the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#deletealarm)
+   */
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
 }
+/**
+ * Provides access to the Durable Object's persistent storage. The storage is private to this
+ * Durable Object instance and supports both key-value and SQL APIs.
+ *
+ * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
+ */
 interface DurableObjectStorage {
+  /**
+   * Retrieves the value associated with the given key, or a Map of values for multiple keys.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#get)
+   */
   get<T = unknown>(
     key: string,
     options?: DurableObjectGetOptions,
   ): Promise<T | undefined>;
+  /**
+   * Retrieves the value associated with the given key, or a Map of values for multiple keys.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#get)
+   */
   get<T = unknown>(
     keys: string[],
     options?: DurableObjectGetOptions,
   ): Promise<Map<string, T>>;
+  /**
+   * Returns all keys and values in storage, optionally filtered by prefix or key range.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#list)
+   */
   list<T = unknown>(
     options?: DurableObjectListOptions,
   ): Promise<Map<string, T>>;
+  /**
+   * Stores a value associated with the given key, or multiple key-value pairs from an object.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#put)
+   */
   put<T>(
     key: string,
     value: T,
     options?: DurableObjectPutOptions,
   ): Promise<void>;
+  /**
+   * Stores a value associated with the given key, or multiple key-value pairs from an object.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#put)
+   */
   put<T>(
     entries: Record<string, T>,
     options?: DurableObjectPutOptions,
   ): Promise<void>;
+  /**
+   * Deletes the given key(s) and associated value(s) from storage.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#delete)
+   */
   delete(key: string, options?: DurableObjectPutOptions): Promise<boolean>;
+  /**
+   * Deletes the given key(s) and associated value(s) from storage.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#delete)
+   */
   delete(keys: string[], options?: DurableObjectPutOptions): Promise<number>;
+  /**
+   * Deletes all stored data, effectively deallocating all storage used by the Durable Object.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#deleteall)
+   */
   deleteAll(options?: DurableObjectPutOptions): Promise<void>;
+  /**
+   * Runs a sequence of storage operations in a single atomic transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transaction)
+   */
   transaction<T>(
     closure: (txn: DurableObjectTransaction) => Promise<T>,
   ): Promise<T>;
+  /**
+   * Retrieves the current alarm time in milliseconds since epoch, or null if no alarm is set.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#getalarm)
+   */
   getAlarm(options?: DurableObjectGetAlarmOptions): Promise<number | null>;
+  /**
+   * Sets an alarm to trigger the Durable Object's `alarm()` handler at the specified time.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#setalarm)
+   */
   setAlarm(
     scheduledTime: number | Date,
     options?: DurableObjectSetAlarmOptions,
   ): Promise<void>;
+  /**
+   * Deletes the currently set alarm, if any. Does not cancel an alarm handler that is currently executing.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#deletealarm)
+   */
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
+  /**
+   * Synchronizes any pending writes to disk. Returns a promise that resolves when all prior
+   * writes have been confirmed persisted.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#sync)
+   */
   sync(): Promise<void>;
+  /**
+   * Provides access to the SQL API for SQLite-backed Durable Objects.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#sql)
+   */
   sql: SqlStorage;
   kv: SyncKvStorage;
+  /**
+   * Runs a synchronous callback wrapped in a transaction. Only synchronous storage operations
+   * (such as SQL queries) can be part of the transaction.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transactionsync)
+   */
   transactionSync<T>(closure: () => T): T;
+  /**
+   * Returns a bookmark representing the current point in time in the object's history, for use
+   * with point-in-time recovery.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#getcurrentbookmark)
+   */
   getCurrentBookmark(): Promise<string>;
+  /**
+   * Returns a bookmark representing approximately the given point in time, which must be within the last 30 days.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#getbookmarkfortime)
+   */
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
+  /**
+   * Configures the Durable Object to restore its storage to the given bookmark on next restart.
+   * Typically followed by `ctx.abort()` to trigger the restoration.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#onnextsessionrestorebookmark)
+   */
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
 }
 interface DurableObjectListOptions {
