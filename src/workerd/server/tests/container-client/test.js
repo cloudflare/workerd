@@ -1,4 +1,4 @@
-import { DurableObject } from 'cloudflare:workers';
+import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import assert from 'node:assert';
 import { scheduler } from 'node:timers/promises';
 
@@ -66,7 +66,7 @@ export class DurableObjectExample extends DurableObject {
     {
       let resp;
       // The retry count here is arbitrary. Can increase it if necessary.
-      const maxRetries = 6;
+      const maxRetries = 15;
       for (let i = 1; i <= maxRetries; i++) {
         try {
           resp = await container
@@ -260,6 +260,99 @@ export class DurableObjectExample extends DurableObject {
   getStatus() {
     return this.ctx.container.running;
   }
+
+  async ping() {
+    const container = this.ctx.container;
+    {
+      let resp;
+      // The retry count here is arbitrary. Can increase it if necessary.
+      const maxRetries = 15;
+      for (let i = 1; i <= maxRetries; i++) {
+        try {
+          resp = await container
+            .getTcpPort(8080)
+            .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
+          break;
+        } catch (e) {
+          if (!e.message.includes('container port not found')) {
+            throw e;
+          }
+          console.info(
+            `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+          );
+          console.info(e);
+          if (i === maxRetries) {
+            console.error(
+              `Failed to connect to container ${container.id}. Retried ${i} times`
+            );
+            throw e;
+          }
+          await scheduler.wait(500);
+        }
+      }
+
+      assert.equal(resp.status, 200);
+      assert.equal(resp.statusText, 'OK');
+      assert.strictEqual(await resp.text(), 'Hello World!');
+    }
+  }
+
+  async testSetEgressHttp() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    // Start container
+    container.start();
+
+    // wait for container to be available
+    await this.ping();
+
+    assert.strictEqual(container.running, true);
+
+    // Set up egress TCP mapping to route requests to the binding
+    // This registers the binding's channel token with the container runtime
+    container.setEgressHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 1 } })
+    );
+
+    container.setEgressHttp(
+      '11.0.0.2:9999',
+      this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.1:9999' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 1');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.2:9999' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 2');
+    }
+  }
+}
+
+export class TestService extends WorkerEntrypoint {
+  fetch() {
+    return new Response('hello binding: ' + this.ctx.props.id);
+  }
 }
 
 export class DurableObjectExample2 extends DurableObjectExample {}
@@ -409,5 +502,14 @@ export const testSetInactivityTimeout = {
       // Container should still be running after DO exited
       await stub.expectRunning(true);
     }
+  },
+};
+
+// Test setEgressHttp functionality - registers a binding's channel token with the container
+export const testSetEgressHttp = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testSetEgressHttp');
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testSetEgressHttp();
   },
 };
