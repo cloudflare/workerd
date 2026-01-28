@@ -25,6 +25,7 @@ class Isolate;
 namespace workerd::jsg {
 
 class Lock;
+class JsObject;
 
 using uint = unsigned int;
 
@@ -537,11 +538,22 @@ struct Unimplemented {};
 using WontImplement = Unimplemented;
 
 // ======================================================================================
+// Module utilities
+
+// Creates a mutable copy of a module namespace object for CommonJS compatibility.
+// This is needed because ES module namespaces have read-only properties, but
+// CommonJS require() is expected to return objects with mutable properties.
+// This matches Node.js behavior when requiring an ESM module from CJS.
+// See: https://github.com/cloudflare/workerd/issues/5844
+JsObject createMutableModuleExports(Lock& js, JsObject moduleNamespace);
+
+// ======================================================================================
 // Node.js Compat
 
 kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier);
 bool isNodeJsCompatEnabled(jsg::Lock& js);
 bool isNodeJsProcessV2Enabled(jsg::Lock& js);
+bool isRequireReturnsDefaultExportEnabled(jsg::Lock& js);
 
 // The following counter is used to track the number of times a method is called.
 // This is mostly useful for validating/testing v8 fast api methods, but also for

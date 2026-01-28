@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "module-require-mutable-exports-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "module-require-mutable-exports-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "require_returns_default_export"],
+      )
+    ),
+  ],
+);

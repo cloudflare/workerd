@@ -219,6 +219,10 @@ void Lock::setNodeJsProcessV2Enabled() {
   IsolateBase::from(v8Isolate).setNodeJsProcessV2Enabled({}, true);
 }
 
+void Lock::setRequireReturnsDefaultExportEnabled() {
+  IsolateBase::from(v8Isolate).setRequireReturnsDefaultExportEnabled({}, true);
+}
+
 void Lock::setThrowOnUnrecognizedImportAssertion() {
   IsolateBase::from(v8Isolate).setThrowOnUnrecognizedImportAssertion();
 }

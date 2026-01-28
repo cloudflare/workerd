@@ -14,14 +14,28 @@ export const doTheTest = {
     const baz = require('baz');
     const qux = require('worker/qux');
 
-    strictEqual(foo.default, 1);
+    // When require_returns_default_export flag is enabled, require() returns the
+    // default export directly. Otherwise it returns the namespace object.
+    if (Cloudflare.compatibilityFlags.require_returns_default_export) {
+      strictEqual(foo, 1);
+    } else {
+      strictEqual(foo.default, 1);
+    }
     strictEqual(bar, 2);
     strictEqual(baz, 3);
     strictEqual(qux, '4');
 
     const assert = await import('node:assert');
     const required = require('node:assert');
-    strictEqual(assert, required);
+
+    // When require_returns_default_export flag is enabled, require() returns the
+    // default export directly (assert.default === required).
+    // When the flag is disabled, require() returns the namespace (assert === required).
+    if (Cloudflare.compatibilityFlags.require_returns_default_export) {
+      strictEqual(assert.default, required);
+    } else {
+      strictEqual(assert, required);
+    }
 
     throws(() => require('invalid'), {
       message: 'Top-level await in module is not permitted at this time.',

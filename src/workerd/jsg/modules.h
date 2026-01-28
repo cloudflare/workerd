@@ -150,6 +150,12 @@ class ModuleRegistry {
     // For source phase imports - stores the module source object (e.g., WebAssembly.Module)
     kj::Maybe<V8Ref<v8::Object>> maybeModuleSourceObject;
 
+    // Cache for mutable module exports wrapper when require_returns_default_export flag is enabled.
+    // Used to ensure require() returns the same mutable object for the same module.
+    // This enables frameworks like Next.js to patch built-in module exports.
+    // See: https://github.com/cloudflare/workerd/issues/5844
+    mutable kj::Maybe<V8Ref<v8::Object>> maybeMutableExports;
+
     ModuleInfo(jsg::Lock& js,
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
