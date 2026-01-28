@@ -34,6 +34,25 @@ const server = createServer(function (req, res) {
       res.write(`Error reading /proc/1/cmdline: ${err.message}`);
       res.end();
     }
+
+    return;
+  }
+
+  if (req.url === '/intercept') {
+    const targetHost = req.headers['x-host'] || '11.0.0.1';
+    fetch(`http://${targetHost}`)
+      .then((result) => result.text())
+      .then((body) => {
+        res.writeHead(200);
+        res.write(body);
+        res.end();
+      })
+      .catch((err) => {
+        res.writeHead(500);
+        res.write(err.message);
+        res.end();
+      });
+
     return;
   }
 
