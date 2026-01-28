@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental", "containers_pid_namespace"],
+        compatibilityFlags = ["enable_ctx_exports", "nodejs_compat", "experimental", "containers_pid_namespace"],
         containerEngine = (localDocker = (socketPath = "unix:/var/run/docker.sock")),
         durableObjectNamespaces = [
           ( className = "DurableObjectExample",
