@@ -5,21 +5,17 @@
 import * as assert from 'node:assert';
 import { validateAccessJwt, AccessJwtError } from 'cloudflare:workers';
 
-// Import internal function for cache clearing in tests
-import { _clearJwksCache } from 'cloudflare-internal:access-jwt';
-
-const TEAM_DOMAIN = 'test-team';
 const AUDIENCE = 'test-audience-tag-12345';
 
 /**
  * Helper to generate a JWT via the mock service.
  */
-async function generateJwt(env, claims = {}, options = {}) {
+async function generateJwt(env, teamDomain, claims = {}, options = {}) {
   const res = await env.mock.fetch('http://mock/_test/generate-jwt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      teamDomain: options.teamDomain || TEAM_DOMAIN,
+      teamDomain: options.teamDomain || teamDomain,
       claims: {
         aud: [AUDIENCE],
         ...claims,
@@ -40,27 +36,18 @@ function createRequest(jwt) {
   });
 }
 
-/**
- * Reset the mock state between tests.
- */
-async function resetMock(env) {
-  await env.mock.fetch('http://mock/_test/reset');
-  _clearJwksCache();
-}
-
 export const tests = {
   // Test: Valid JWT validates successfully
   async testValidJwt(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env);
+    const teamDomain = 'test-valid';
+    const jwt = await generateJwt(env, teamDomain);
     const req = createRequest(jwt);
 
-    const payload = await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+    const payload = await validateAccessJwt(req, teamDomain, AUDIENCE);
 
     assert.strictEqual(
       payload.iss,
-      `https://${TEAM_DOMAIN}.cloudflareaccess.com`
+      `https://${teamDomain}.cloudflareaccess.com`
     );
     assert.deepStrictEqual(payload.aud, [AUDIENCE]);
     assert.strictEqual(payload.email, 'test@example.com');
@@ -71,38 +58,36 @@ export const tests = {
 
   // Test: Team domain normalization (accepts both formats)
   async testTeamDomainNormalization(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env);
+    const teamDomain = 'test-normalize';
+    const jwt = await generateJwt(env, teamDomain);
     const req = createRequest(jwt);
 
     // Should work with just the team name
-    const payload1 = await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+    const payload1 = await validateAccessJwt(req, teamDomain, AUDIENCE);
     assert.strictEqual(
       payload1.iss,
-      `https://${TEAM_DOMAIN}.cloudflareaccess.com`
+      `https://${teamDomain}.cloudflareaccess.com`
     );
 
     // Should also work with full domain
     const payload2 = await validateAccessJwt(
       req,
-      `${TEAM_DOMAIN}.cloudflareaccess.com`,
+      `${teamDomain}.cloudflareaccess.com`,
       AUDIENCE
     );
     assert.strictEqual(
       payload2.iss,
-      `https://${TEAM_DOMAIN}.cloudflareaccess.com`
+      `https://${teamDomain}.cloudflareaccess.com`
     );
   },
 
   // Test: Missing JWT header throws ERR_JWT_MISSING
   async testMissingJwtHeader(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-missing';
     const req = createRequest(null);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWT_MISSING');
@@ -114,12 +99,11 @@ export const tests = {
 
   // Test: Malformed JWT (wrong number of parts)
   async testMalformedJwtParts(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-malformed-parts';
     const req = createRequest('not.a.valid.jwt.token');
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
@@ -130,12 +114,11 @@ export const tests = {
 
   // Test: Malformed JWT (invalid base64)
   async testMalformedJwtBase64(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-malformed-base64';
     const req = createRequest('!!!.@@@.###');
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
@@ -146,14 +129,13 @@ export const tests = {
 
   // Test: Invalid signature throws ERR_JWT_INVALID_SIGNATURE
   async testInvalidSignature(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-invalid-sig';
     // Generate JWT signed with a different key
-    const jwt = await generateJwt(env, {}, { useWrongKey: true });
+    const jwt = await generateJwt(env, teamDomain, {}, { useWrongKey: true });
     const req = createRequest(jwt);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWT_INVALID_SIGNATURE');
@@ -164,17 +146,16 @@ export const tests = {
 
   // Test: Expired JWT throws ERR_JWT_EXPIRED
   async testExpiredJwt(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-expired';
     const pastTime = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
-    const jwt = await generateJwt(env, {
+    const jwt = await generateJwt(env, teamDomain, {
       iat: pastTime - 3600,
       exp: pastTime,
     });
     const req = createRequest(jwt);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWT_EXPIRED');
@@ -186,13 +167,14 @@ export const tests = {
 
   // Test: Wrong audience throws ERR_JWT_AUDIENCE_MISMATCH
   async testWrongAudience(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env, { aud: ['different-audience'] });
+    const teamDomain = 'test-wrong-aud';
+    const jwt = await generateJwt(env, teamDomain, {
+      aud: ['different-audience'],
+    });
     const req = createRequest(jwt);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWT_AUDIENCE_MISMATCH');
@@ -204,14 +186,18 @@ export const tests = {
 
   // Test: Wrong issuer (mismatched team) throws ERR_JWT_ISSUER_MISMATCH
   async testWrongIssuer(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-wrong-issuer';
     // Generate JWT for a different team
-    const jwt = await generateJwt(env, {}, { teamDomain: 'other-team' });
+    const jwt = await generateJwt(
+      env,
+      teamDomain,
+      {},
+      { teamDomain: 'other-team' }
+    );
     const req = createRequest(jwt);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWT_ISSUER_MISMATCH');
@@ -222,9 +208,8 @@ export const tests = {
 
   // Test: Empty team domain throws ERR_INVALID_TEAM_DOMAIN
   async testEmptyTeamDomain(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env);
+    const teamDomain = 'test-empty-domain';
+    const jwt = await generateJwt(env, teamDomain);
     const req = createRequest(jwt);
 
     await assert.rejects(
@@ -248,13 +233,12 @@ export const tests = {
 
   // Test: Empty audience throws ERR_INVALID_AUDIENCE
   async testEmptyAudience(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env);
+    const teamDomain = 'test-empty-aud';
+    const jwt = await generateJwt(env, teamDomain);
     const req = createRequest(jwt);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, ''),
+      () => validateAccessJwt(req, teamDomain, ''),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_INVALID_AUDIENCE');
@@ -265,14 +249,18 @@ export const tests = {
 
   // Test: No matching kid throws ERR_JWKS_NO_MATCHING_KEY
   async testNoMatchingKid(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-no-kid';
     // Generate JWT with a non-existent kid
-    const jwt = await generateJwt(env, {}, { kid: 'non-existent-kid-12345' });
+    const jwt = await generateJwt(
+      env,
+      teamDomain,
+      {},
+      { kid: 'non-existent-kid-12345' }
+    );
     const req = createRequest(jwt);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWKS_NO_MATCHING_KEY');
@@ -283,19 +271,17 @@ export const tests = {
 
   // Test: JWKS 4xx error fails immediately (no retry)
   async testJwks4xxError(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env);
+    const teamDomain = 'test-4xx';
+    const jwt = await generateJwt(env, teamDomain);
     const req = createRequest(jwt);
 
-    // Configure mock to return 404 (simulates unknown team)
-    // We use a team domain that doesn't have keys generated
+    // Try to validate against an unknown team - will fail on issuer mismatch
+    // since the JWT was signed for teamDomain but we're validating against 'unknown-team'
     await assert.rejects(
       () => validateAccessJwt(req, 'unknown-team', AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
-        // Will fail on issuer mismatch first since the JWT was signed for test-team
-        // Or JWKS fetch if the issuer check happens after
+        // Will fail on issuer mismatch first since the JWT was signed for teamDomain
         assert.ok(
           err.code === 'ERR_JWT_ISSUER_MISMATCH' ||
             err.code === 'ERR_JWKS_NO_MATCHING_KEY'
@@ -307,60 +293,50 @@ export const tests = {
 
   // Test: JWKS 5xx errors trigger retry (up to 3 attempts)
   async testJwks5xxRetry(_, env) {
-    await resetMock(env);
+    // Use a unique team domain so we start with empty cache
+    const teamDomain = 'test-5xx-retry';
 
     // First, make sure we have keys for this team
-    await generateJwt(env);
+    await generateJwt(env, teamDomain);
 
     // Configure mock to fail first 2 requests with 503
     await env.mock.fetch('http://mock/_test/configure-failure', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ failCount: 2 }),
+      body: JSON.stringify({ failCount: 2, teamDomain }),
     });
 
-    // Clear cache to force fresh fetch
-    _clearJwksCache();
-
-    const jwt = await generateJwt(env, {}, { teamDomain: TEAM_DOMAIN });
+    const jwt = await generateJwt(env, teamDomain);
     const req = createRequest(jwt);
 
     // Should succeed on 3rd attempt
-    const payload = await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+    const payload = await validateAccessJwt(req, teamDomain, AUDIENCE);
     assert.strictEqual(
       payload.iss,
-      `https://${TEAM_DOMAIN}.cloudflareaccess.com`
+      `https://${teamDomain}.cloudflareaccess.com`
     );
-
-    // Verify we made 3 requests (2 failures + 1 success)
-    const countRes = await env.mock.fetch('http://mock/_test/request-count');
-    const { count } = await countRes.json();
-    // Count includes the generate-jwt calls too, so just verify it's >= 3
-    assert.ok(count >= 3, `Expected at least 3 requests, got ${count}`);
   },
 
   // Test: JWKS fetch fails after max retries
   async testJwksFetchFailsAfterRetries(_, env) {
-    await resetMock(env);
+    // Use a unique team domain so we start with empty cache
+    const teamDomain = 'test-retry-fail';
 
     // First generate keys for this team
-    await generateJwt(env);
+    await generateJwt(env, teamDomain);
 
-    // Configure mock to fail all requests
+    // Configure mock to fail all requests for this team
     await env.mock.fetch('http://mock/_test/configure-failure', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ failCount: 10 }), // More than MAX_RETRIES
+      body: JSON.stringify({ failCount: 10, teamDomain }), // More than MAX_RETRIES
     });
 
-    // Clear cache to force fresh fetch
-    _clearJwksCache();
-
-    const jwt = await generateJwt(env, {}, { teamDomain: TEAM_DOMAIN });
+    const jwt = await generateJwt(env, teamDomain);
     const req = createRequest(jwt);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWKS_FETCH_FAILED');
@@ -372,20 +348,22 @@ export const tests = {
 
   // Test: JWKS caching - second call doesn't fetch again
   async testJwksCaching(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env);
+    const teamDomain = 'test-caching';
+    const jwt = await generateJwt(env, teamDomain);
     const req = createRequest(jwt);
 
+    // Reset request count before testing
+    await env.mock.fetch('http://mock/_test/reset-count');
+
     // First validation - fetches JWKS
-    await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+    await validateAccessJwt(req, teamDomain, AUDIENCE);
 
     // Get request count after first validation
     let countRes = await env.mock.fetch('http://mock/_test/request-count');
     let { count: countAfterFirst } = await countRes.json();
 
     // Second validation - should use cached JWKS
-    await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+    await validateAccessJwt(req, teamDomain, AUDIENCE);
 
     // Get request count after second validation
     countRes = await env.mock.fetch('http://mock/_test/request-count');
@@ -401,14 +379,13 @@ export const tests = {
 
   // Test: Unsupported algorithm throws ERR_JWT_MALFORMED
   async testUnsupportedAlgorithm(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-bad-alg';
     // Generate JWT with unsupported algorithm (mock will still sign with RS256 but set alg to HS256)
-    const jwt = await generateJwt(env, {}, { alg: 'HS256' });
+    const jwt = await generateJwt(env, teamDomain, {}, { alg: 'HS256' });
     const req = createRequest(jwt);
 
     await assert.rejects(
-      () => validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE),
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
@@ -420,59 +397,55 @@ export const tests = {
 
   // Test: JWT with string audience (not array) works
   async testStringAudience(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env, { aud: AUDIENCE }); // string, not array
+    const teamDomain = 'test-string-aud';
+    const jwt = await generateJwt(env, teamDomain, { aud: AUDIENCE }); // string, not array
     const req = createRequest(jwt);
 
-    const payload = await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+    const payload = await validateAccessJwt(req, teamDomain, AUDIENCE);
     assert.strictEqual(
       payload.iss,
-      `https://${TEAM_DOMAIN}.cloudflareaccess.com`
+      `https://${teamDomain}.cloudflareaccess.com`
     );
   },
 
   // Test: JWT with multiple audiences where one matches
   async testMultipleAudiences(_, env) {
-    await resetMock(env);
-
-    const jwt = await generateJwt(env, {
+    const teamDomain = 'test-multi-aud';
+    const jwt = await generateJwt(env, teamDomain, {
       aud: ['other-audience', AUDIENCE, 'another-audience'],
     });
     const req = createRequest(jwt);
 
-    const payload = await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+    const payload = await validateAccessJwt(req, teamDomain, AUDIENCE);
     assert.ok(payload.aud.includes(AUDIENCE));
   },
 
   // Test: Clock skew tolerance allows recently expired JWTs
   async testClockSkewTolerance(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-clock-skew';
     // JWT that expired 30 seconds ago (within 60s tolerance)
     const now = Math.floor(Date.now() / 1000);
-    const jwt = await generateJwt(env, {
+    const jwt = await generateJwt(env, teamDomain, {
       iat: now - 3600,
       exp: now - 30,
     });
     const req = createRequest(jwt);
 
     // Should still pass due to clock skew tolerance
-    const payload = await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+    const payload = await validateAccessJwt(req, teamDomain, AUDIENCE);
     assert.strictEqual(
       payload.iss,
-      `https://${TEAM_DOMAIN}.cloudflareaccess.com`
+      `https://${teamDomain}.cloudflareaccess.com`
     );
   },
 
   // Test: Error has correct name property
   async testErrorName(_, env) {
-    await resetMock(env);
-
+    const teamDomain = 'test-error-name';
     const req = createRequest(null);
 
     try {
-      await validateAccessJwt(req, TEAM_DOMAIN, AUDIENCE);
+      await validateAccessJwt(req, teamDomain, AUDIENCE);
       assert.fail('Should have thrown');
     } catch (err) {
       assert.strictEqual(err.name, 'AccessJwtError');
