@@ -1,4 +1,4 @@
-load("//:build/eslint_test.bzl", "eslint_test")
+load("//:build/lint_test.bzl", "lint_test")
 load("//:build/wd_ts_project.bzl", "wd_ts_project")
 load("//:build/wpt_test.bzl", "wpt_test")
 
@@ -16,21 +16,12 @@ filegroup(
 wd_ts_project(
     name = "wpt-all@tsproject",
     srcs = srcs,
+    eslintrc_json = "eslint.config.mjs",
     source_map = False,
     tsconfig_json = "tsconfig.json",
     deps = [
         "//:node_modules/@types/node",
     ],
-)
-
-eslint_test(
-    name = "wpt-all",
-    srcs = srcs,
-    data = [
-        "//:node_modules/@types/node",
-    ],
-    eslintrc_json = "eslint.config.mjs",
-    tsconfig_json = "tsconfig.json",
 )
 
 wpt_test(

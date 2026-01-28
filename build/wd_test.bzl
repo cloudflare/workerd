@@ -43,11 +43,13 @@ def wd_test(
         name = src.removesuffix(".capnp").removesuffix(".wd-test").removesuffix(".ts-wd-test")
 
     if len(ts_srcs) != 0:
-        # Generated declarations are currently not being used, but required based on https://github.com/aspect-build/rules_ts/issues/719
-        # TODO(build perf): Consider adopting isolated_typecheck to avoid bottlebecks in TS
-        # compilation, see https://github.com/aspect-build/rules_ts/blob/f1b7b83/docs/performance.md#isolated-typecheck.
-        # This will require extensive refactoring and we may only want to enable it for some
-        # targets, but might be useful if we end up transpiling more code later on.
+        # NOTE: We intentionally do not use isolated_typecheck here. While isolated_typecheck can
+        # improve build parallelism by separating transpilation from type-checking, it requires
+        # isolatedDeclarations in tsconfig (which mandates explicit return type annotations on all
+        # exports) and uses --noResolve during transpilation. The --noResolve flag prevents
+        # TypeScript from finding @types/node, breaking IDE support for Node.js imports like
+        # 'node:assert'. Since wd_test TypeScript files are typically standalone test files (leaf
+        # nodes in the dependency graph), the parallelization benefits would be minimal anyway.
         ts_config(
             name = name + "@ts_config",
             src = "tsconfig.json",
@@ -57,9 +59,6 @@ def wd_test(
             name = name + "@ts_project",
             srcs = ts_srcs,
             tsconfig = ":" + name + "@ts_config",
-            allow_js = True,
-            source_map = True,
-            declaration = True,
             deps = ["//src/node:node@tsproject"] + ts_deps,
         )
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
