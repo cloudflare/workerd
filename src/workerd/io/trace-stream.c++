@@ -19,6 +19,8 @@ namespace {
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
+  V(RESPONSEBODYSIZE, "responseBodySize")                                                          \
+  V(REQUESTBODYSIZE, "requestBodySize")                                                            \
   V(CANCELED, "canceled")                                                                          \
   V(CHANNEL, "channel")                                                                            \
   V(CFJSON, "cfJson")                                                                              \
@@ -175,9 +177,10 @@ jsg::JsValue ToJs(jsg::Lock& js, kj::ArrayPtr<const Attribute> attributes, Strin
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR, STATUSCODE_STR};
-  jsg::JsValue values[] = {cache.get(js, FETCH_STR), js.num(info.statusCode)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
+  obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache) {
@@ -199,7 +202,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache)
   obj.set(js, HEADERS_STR,
       js.arr(info.headers.asPtr(),
           [&cache, &ToJs](jsg::Lock& js, const auto& header) { return ToJs(js, header, cache); }));
-
   return obj;
 }
 
@@ -403,7 +405,12 @@ jsg::JsValue ToJs(jsg::Lock& js, const Outcome& outcome, StringCache& cache) {
 
   obj.set(js, CPUTIME_STR, js.num(cpuTime));
   obj.set(js, WALLTIME_STR, js.num(wallTime));
-
+  KJ_IF_SOME(size, outcome.responseBodySize) {
+    obj.set(js, RESPONSEBODYSIZE_STR, js.num(static_cast<double>(size)));
+  }
+  KJ_IF_SOME(size, outcome.requestBodySize) {
+    obj.set(js, REQUESTBODYSIZE_STR, js.num(static_cast<double>(size)));
+  }
   return obj;
 }
 

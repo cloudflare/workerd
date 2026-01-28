@@ -735,7 +735,11 @@ Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info);
 void writeOnsetInfo(const tracing::Onset::Info& info, rpc::Trace::Onset::Info::Builder& builder);
 
 struct Outcome final {
-  explicit Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
+  explicit Outcome(EventOutcome outcome,
+      kj::Duration cpuTime,
+      kj::Duration wallTime,
+      kj::Maybe<uint64_t> responseBodySize = kj::none,
+      kj::Maybe<uint64_t> requestBodySize = kj::none);
   Outcome(rpc::Trace::Outcome::Reader reader);
   Outcome(Outcome&&) = default;
   Outcome& operator=(Outcome&&) = default;
@@ -744,6 +748,8 @@ struct Outcome final {
   EventOutcome outcome = EventOutcome::OK;
   kj::Duration cpuTime;
   kj::Duration wallTime;
+  kj::Maybe<uint64_t> responseBodySize;
+  kj::Maybe<uint64_t> requestBodySize;
 
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
@@ -869,6 +875,8 @@ class Trace final: public kj::Refcounted {
 
   kj::Duration cpuTime;
   kj::Duration wallTime;
+  kj::Maybe<uint64_t> responseBodySize;
+  kj::Maybe<uint64_t> requestBodySize;
 
   bool truncated = false;
   bool exceededLogLimit = false;

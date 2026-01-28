@@ -1280,24 +1280,45 @@ Onset Onset::clone() const {
       KJ_MAP(attr, attributes) { return attr.clone(); });
 }
 
-Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)
+Outcome::Outcome(EventOutcome outcome,
+    kj::Duration cpuTime,
+    kj::Duration wallTime,
+    kj::Maybe<uint64_t> responseBodySize,
+    kj::Maybe<uint64_t> requestBodySize)
     : outcome(outcome),
       cpuTime(cpuTime),
-      wallTime(wallTime) {}
+      wallTime(wallTime),
+      responseBodySize(responseBodySize),
+      requestBodySize(requestBodySize) {}
 
 Outcome::Outcome(rpc::Trace::Outcome::Reader reader)
     : outcome(reader.getOutcome()),
       cpuTime(reader.getCpuTime() * kj::MILLISECONDS),
-      wallTime(reader.getWallTime() * kj::MILLISECONDS) {}
+      wallTime(reader.getWallTime() * kj::MILLISECONDS) {
+  if (reader.getHasResponseBodySize()) {
+    responseBodySize = reader.getResponseBodySize();
+  }
+  if (reader.getHasRequestBodySize()) {
+    requestBodySize = reader.getRequestBodySize();
+  }
+}
 
 void Outcome::copyTo(rpc::Trace::Outcome::Builder builder) const {
   builder.setOutcome(outcome);
   builder.setCpuTime(cpuTime / kj::MILLISECONDS);
   builder.setWallTime(wallTime / kj::MILLISECONDS);
+  KJ_IF_SOME(size, responseBodySize) {
+    builder.setResponseBodySize(size);
+    builder.setHasResponseBodySize(true);
+  }
+  KJ_IF_SOME(size, requestBodySize) {
+    builder.setRequestBodySize(size);
+    builder.setHasRequestBodySize(true);
+  }
 }
 
 Outcome Outcome::clone() const {
-  return Outcome(outcome, cpuTime, wallTime);
+  return Outcome(outcome, cpuTime, wallTime, responseBodySize, requestBodySize);
 }
 
 TailEvent::TailEvent(

@@ -25,6 +25,10 @@
 namespace workerd {
 
 namespace {
+
+struct ResponseBodyByteCounter;
+struct RequestBodyByteCounter;
+
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
 // - Creating a IoContext and making it current.
@@ -98,6 +102,12 @@ class WorkerEntrypoint final: public WorkerInterface {
   bool loggedExceptionEarlier = false;
   kj::Maybe<jsg::Ref<api::AbortController>> abortController;
 
+  // For deferred trace reporting after response body streaming completes
+  kj::Maybe<kj::Own<ResponseBodyByteCounter>> traceByteCounter;
+  kj::Maybe<kj::Own<RequestBodyByteCounter>> traceRequestByteCounter;
+  kj::Maybe<BaseTracer&> deferredWorkerTracer;
+  uint deferredHttpResponseStatus = 0;
+
   void init(kj::Own<const Worker> worker,
       kj::Maybe<kj::Own<Worker::Actor>> actor,
       kj::Own<LimitEnforcer> limitEnforcer,
@@ -125,11 +135,103 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::String> cfBlobJson);
 };
 
+// A refcounted byte counter that can be shared between the stream wrapper and
+// the code that needs to read the final byte count after streaming completes.
+// Note: kj I/O objects are single-threaded, so no atomic operations are needed.
+struct ResponseBodyByteCounter: public kj::Refcounted {
+  uint64_t bytesWritten = 0;
+
+  void add(size_t bytes) {
+    bytesWritten += bytes;
+  }
+
+  uint64_t get() const {
+    return bytesWritten;
+  }
+};
+
+// A refcounted byte counter for tracking request body bytes read.
+struct RequestBodyByteCounter: public kj::Refcounted {
+  uint64_t bytesRead = 0;
+
+  void add(size_t bytes) {
+    bytesRead += bytes;
+  }
+
+  uint64_t get() const {
+    return bytesRead;
+  }
+};
+
+class ByteCountingOutputStream final: public kj::AsyncOutputStream {
+ public:
+  ByteCountingOutputStream(
+      kj::Own<kj::AsyncOutputStream> inner, kj::Own<ResponseBodyByteCounter> counter)
+      : inner(kj::mv(inner)),
+        counter(kj::mv(counter)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    counter->add(buffer.size());
+    return inner->write(buffer);
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    for (const auto& piece: pieces) {
+      counter->add(piece.size());
+    }
+    return inner->write(pieces);
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return inner->whenWriteDisconnected();
+  }
+
+  // We intentionally don't override tryPumpFrom() because we need to count bytes
+  // and the optimized pump paths don't give us access to the byte count.
+  // Returning kj::none causes fallback to the regular write() path.
+
+ private:
+  kj::Own<kj::AsyncOutputStream> inner;
+  kj::Own<ResponseBodyByteCounter> counter;
+};
+
+class ByteCountingInputStream final: public kj::AsyncInputStream {
+ public:
+  ByteCountingInputStream(kj::AsyncInputStream& inner, kj::Own<RequestBodyByteCounter> counter)
+      : inner(inner),
+        counter(kj::mv(counter)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner.tryRead(buffer, minBytes, maxBytes).then([this](size_t bytesRead) {
+      counter->add(bytesRead);
+      return bytesRead;
+    });
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return inner.tryGetLength();
+  }
+
+  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
+    // We can't use the optimized pumpTo from the inner stream because we need
+    // to count the bytes. Instead, we use the default implementation which
+    // calls tryRead() in a loop, allowing us to count each chunk.
+    return kj::AsyncInputStream::pumpTo(output, amount);
+  }
+
+ private:
+  kj::AsyncInputStream& inner;
+  kj::Own<RequestBodyByteCounter> counter;
+};
+
 // Simple wrapper around `HttpService::Response` to let us know if the response was sent
-// already.
+// already. Also optionally wraps the output stream with byte counting for trace events
+// when tracing is enabled.
 class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Response {
  public:
-  ResponseSentTracker(kj::HttpService::Response& inner): inner(inner) {}
+  ResponseSentTracker(kj::HttpService::Response& inner, bool enableByteCount)
+      : inner(inner),
+        enableByteCount(enableByteCount) {}
   KJ_DISALLOW_COPY_AND_MOVE(ResponseSentTracker);
 
   bool isSent() const {
@@ -137,6 +239,16 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   }
   uint getHttpResponseStatus() const {
     return httpResponseStatus;
+  }
+  kj::Maybe<uint64_t> getExpectedBodySize() const {
+    return expectedBodySize;
+  }
+
+  // Transfers ownership of the byte counter for deferred access after streaming.
+  // Returns kj::none if byte counting is not enabled or if already called.
+  // The returned ownership should be held until after proxyTask completes.
+  kj::Maybe<kj::Own<ResponseBodyByteCounter>> takeByteCounter() {
+    return kj::mv(byteCounter);
   }
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
@@ -147,7 +259,18 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
         "workerd", "WorkerEntrypoint::ResponseSentTracker::send()", "statusCode", statusCode);
     sent = true;
     httpResponseStatus = statusCode;
-    return inner.send(statusCode, statusText, headers, expectedBodySize);
+    this->expectedBodySize = expectedBodySize;
+
+    auto stream = inner.send(statusCode, statusText, headers, expectedBodySize);
+
+    // Only wrap with byte counting when tracing is enabled to avoid performance
+    // overhead for workers without tail workers.
+    if (enableByteCount) {
+      auto counter = kj::refcounted<ResponseBodyByteCounter>();
+      byteCounter = kj::addRef(*counter);
+      return kj::heap<ByteCountingOutputStream>(kj::mv(stream), kj::mv(counter));
+    }
+    return stream;
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
@@ -158,8 +281,11 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
 
  private:
   uint httpResponseStatus = 0;
+  kj::Maybe<uint64_t> expectedBodySize;
+  kj::Maybe<kj::Own<ResponseBodyByteCounter>> byteCounter;
   kj::HttpService::Response& inner;
   bool sent = false;
+  bool enableByteCount = false;
 };
 
 kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContext,
@@ -254,7 +380,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   this->incomingRequest = kj::none;
   auto& context = incomingRequest->getContext();
 
-  auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
+  // Enable byte counting only when tracing is enabled to avoid performance overhead.
+  bool hasTracer = incomingRequest->getWorkerTracer() != kj::none;
+  auto wrappedResponse = kj::heap<ResponseSentTracker>(response, hasTracer);
 
   bool isActor = context.getActor() != kj::none;
   // HACK: Capture workerTracer directly, it's unclear how to acquire the right tracer from context
@@ -299,8 +427,24 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   TRACE_EVENT_BEGIN("workerd", "WorkerEntrypoint::request() waiting on context",
       PERFETTO_TRACK_FROM_POINTER(&context), PERFETTO_FLOW_FROM_POINTER(this));
 
+  // Create request body byte counter if tracing is enabled.
+  // We wrap the request body stream to count actual bytes consumed.
+  kj::Maybe<kj::Own<ByteCountingInputStream>> wrappedRequestBody;
+  if (hasTracer) {
+    auto counter = kj::refcounted<RequestBodyByteCounter>();
+    traceRequestByteCounter = kj::addRef(*counter);
+    wrappedRequestBody = kj::heap<ByteCountingInputStream>(requestBody, kj::mv(counter));
+  }
+
+  // Get reference to the appropriate request body stream to pass to handler.
+  // If tracing is enabled, use the wrapped stream; otherwise use the original.
+  kj::AsyncInputStream& requestBodyForHandler =
+      wrappedRequestBody.map([](auto& wrapped) -> kj::AsyncInputStream& {
+    return *wrapped;
+  }).orDefault(requestBody);
+
   return context
-      .run([this, &context, method, url, &headers, &requestBody,
+      .run([this, &context, method, url, &headers, &requestBodyForHandler,
                &metrics = incomingRequest->getMetrics(), &wrappedResponse = *wrappedResponse,
                entrypointName = entrypointName](Worker::Lock& lock) mutable {
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
@@ -319,22 +463,20 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
                          ->getSignal());
     }
 
-    return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
-        cfBlobJson, lock,
+    return lock.getGlobalScope().request(method, url, headers, requestBodyForHandler,
+        wrappedResponse, cfBlobJson, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), kj::mv(signal));
   })
-      .then([this, &context, &wrappedResponse = *wrappedResponse, workerTracer](
+      .then([this, &wrappedResponse = *wrappedResponse, workerTracer](
                 api::DeferredProxy<void> deferredProxy) {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
         PERFETTO_FLOW_FROM_POINTER(this));
     proxyTask = kj::mv(deferredProxy.proxyTask);
+
     KJ_IF_SOME(t, workerTracer) {
-      auto httpResponseStatus = wrappedResponse.getHttpResponseStatus();
-      if (httpResponseStatus != 0) {
-        t.setReturn(context.now(), tracing::FetchResponseInfo(httpResponseStatus));
-      } else {
-        t.setReturn(context.now());
-      }
+      deferredWorkerTracer = t;
+      deferredHttpResponseStatus = wrappedResponse.getHttpResponseStatus();
+      traceByteCounter = wrappedResponse.takeByteCounter();
     }
   })
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
@@ -389,11 +531,50 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
     KJ_IF_SOME(p, proxyTask) {
-      return p.catch_([metrics = kj::mv(metrics)](kj::Exception&& e) mutable -> kj::Promise<void> {
+      return p
+          .then([this]() {
+        KJ_IF_SOME(t, deferredWorkerTracer) {
+          if (deferredHttpResponseStatus != 0) {
+            t.setReturn(kj::none, tracing::FetchResponseInfo(deferredHttpResponseStatus));
+          } else {
+            t.setReturn(kj::none);
+          }
+          kj::Maybe<uint64_t> responseBodySize;
+          KJ_IF_SOME(counter, traceByteCounter) {
+            responseBodySize = counter->get();
+          }
+          kj::Maybe<uint64_t> requestBodySize;
+          KJ_IF_SOME(counter, traceRequestByteCounter) {
+            requestBodySize = counter->get();
+          }
+          t.setBodySizes(responseBodySize, requestBodySize);
+        }
+        deferredWorkerTracer = kj::none;
+        traceByteCounter = kj::none;
+        traceRequestByteCounter = kj::none;
+      }).catch_([this, metrics = kj::mv(metrics)](kj::Exception&& e) mutable -> kj::Promise<void> {
+        deferredWorkerTracer = kj::none;
+        traceByteCounter = kj::none;
+        traceRequestByteCounter = kj::none;
         metrics->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
         return kj::mv(e);
       });
     } else {
+      KJ_IF_SOME(t, deferredWorkerTracer) {
+        if (deferredHttpResponseStatus != 0) {
+          t.setReturn(kj::none, tracing::FetchResponseInfo(deferredHttpResponseStatus));
+        } else {
+          t.setReturn(kj::none);
+        }
+        kj::Maybe<uint64_t> requestBodySize;
+        KJ_IF_SOME(counter, traceRequestByteCounter) {
+          requestBodySize = counter->get();
+        }
+        t.setBodySizes(kj::none, requestBodySize);
+      }
+      deferredWorkerTracer = kj::none;
+      traceByteCounter = kj::none;
+      traceRequestByteCounter = kj::none;
       return kj::READY_NOW;
     }
   })
@@ -401,7 +582,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
     proxyTask = kj::none;
   }))
-      .catch_([this, wrappedResponse = kj::mv(wrappedResponse), isActor, method, url, &headers,
+      .catch_([this, wrappedResponse = kj::mv(wrappedResponse),
+                  wrappedRequestBody = kj::mv(wrappedRequestBody), isActor, method, url, &headers,
                   &requestBody, metrics = kj::mv(metricsForCatch),
                   workerTracer](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.

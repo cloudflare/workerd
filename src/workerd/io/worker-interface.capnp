@@ -268,6 +268,10 @@ struct Trace @0x8e8d911203762d34 {
     outcome @0 :EventOutcome;
     cpuTime @1 :UInt64;
     wallTime @2 :UInt64;
+    responseBodySize @3 :UInt64;
+    hasResponseBodySize @4 :Bool;
+    requestBodySize @5 :UInt64;
+    hasRequestBodySize @6 :Bool;
   }
 
   struct TailEvent {

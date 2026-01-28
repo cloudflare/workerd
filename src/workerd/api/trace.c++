@@ -368,10 +368,30 @@ jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request:
 
 TraceItem::FetchEventInfo::Response::Response(
     const Trace& trace, const tracing::FetchResponseInfo& responseInfo)
-    : status(responseInfo.statusCode) {}
+    : status(responseInfo.statusCode),
+      bodySize(trace.responseBodySize),
+      requestBodySize(trace.requestBodySize) {}
 
 uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
   return status;
+}
+
+jsg::Optional<double> TraceItem::FetchEventInfo::Response::getBodySize() {
+  // Return null if bodySize is unknown (kj::none), otherwise return the size.
+  // Note: Converting uint64_t to double may lose precision for sizes larger than 2^53 bytes
+  // (approximately 9 petabytes), though this is unlikely in practice.
+  KJ_IF_SOME(size, bodySize) {
+    return static_cast<double>(size);
+  }
+  return kj::none;
+}
+
+jsg::Optional<double> TraceItem::FetchEventInfo::Response::getRequestBodySize() {
+  // Return null if requestBodySize is unknown (kj::none), otherwise return the size.
+  KJ_IF_SOME(size, requestBodySize) {
+    return static_cast<double>(size);
+  }
+  return kj::none;
 }
 
 TraceItem::JsRpcEventInfo::JsRpcEventInfo(

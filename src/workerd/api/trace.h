@@ -250,13 +250,19 @@ class TraceItem::FetchEventInfo::Response final: public jsg::Object {
   explicit Response(const Trace& trace, const tracing::FetchResponseInfo& responseInfo);
 
   uint16_t getStatus();
+  jsg::Optional<double> getBodySize();
+  jsg::Optional<double> getRequestBodySize();
 
   JSG_RESOURCE_TYPE(Response) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(status, getStatus);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(bodySize, getBodySize);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(requestBodySize, getRequestBodySize);
   }
 
  private:
   uint16_t status;
+  kj::Maybe<uint64_t> bodySize;
+  kj::Maybe<uint64_t> requestBodySize;
 };
 
 class TraceItem::JsRpcEventInfo final: public jsg::Object {

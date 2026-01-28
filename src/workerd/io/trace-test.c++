@@ -496,11 +496,63 @@ KJ_TEST("Read/Write Outcome works") {
   KJ_ASSERT(info2.outcome == EventOutcome::EXCEPTION);
   KJ_ASSERT(info2.wallTime == 2 * kj::MILLISECONDS);
   KJ_ASSERT(info2.cpuTime == 1 * kj::MILLISECONDS);
+  KJ_ASSERT(info2.responseBodySize == kj::none);  // Default value (unknown)
+  KJ_ASSERT(info2.requestBodySize == kj::none);   // Default value (unknown)
 
   Outcome info3 = info.clone();
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
   KJ_ASSERT(info3.wallTime == 2 * kj::MILLISECONDS);
   KJ_ASSERT(info3.cpuTime == 1 * kj::MILLISECONDS);
+  KJ_ASSERT(info3.responseBodySize == kj::none);  // Default value (unknown)
+  KJ_ASSERT(info3.requestBodySize == kj::none);   // Default value (unknown)
+}
+
+KJ_TEST("Read/Write Outcome with body sizes works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Outcome>();
+
+  kj::Maybe<uint64_t> responseBodySize = 54321;
+  kj::Maybe<uint64_t> requestBodySize = 12345;
+  Outcome info(EventOutcome::OK, 1 * kj::MILLISECONDS, 2 * kj::MILLISECONDS, responseBodySize,
+      requestBodySize);
+  info.copyTo(infoBuilder);
+
+  auto reader = infoBuilder.asReader();
+  Outcome info2(reader);
+  KJ_ASSERT(info2.outcome == EventOutcome::OK);
+  KJ_ASSERT(info2.wallTime == 2 * kj::MILLISECONDS);
+  KJ_ASSERT(info2.cpuTime == 1 * kj::MILLISECONDS);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.responseBodySize) == 54321);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.requestBodySize) == 12345);
+
+  Outcome info3 = info.clone();
+  KJ_ASSERT(info3.outcome == EventOutcome::OK);
+  KJ_ASSERT(info3.wallTime == 2 * kj::MILLISECONDS);
+  KJ_ASSERT(info3.cpuTime == 1 * kj::MILLISECONDS);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.responseBodySize) == 54321);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.requestBodySize) == 12345);
+}
+
+KJ_TEST("Read/Write Outcome with zero body sizes works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Outcome>();
+
+  // Zero body sizes should be distinguishable from unknown
+  kj::Maybe<uint64_t> responseBodySize = uint64_t{0};
+  kj::Maybe<uint64_t> requestBodySize = uint64_t{0};
+  Outcome info(EventOutcome::OK, 1 * kj::MILLISECONDS, 2 * kj::MILLISECONDS, responseBodySize,
+      requestBodySize);
+  info.copyTo(infoBuilder);
+
+  auto reader = infoBuilder.asReader();
+  Outcome info2(reader);
+  KJ_ASSERT(info2.outcome == EventOutcome::OK);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.responseBodySize) == 0);  // Known to be zero, not unknown
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.requestBodySize) == 0);   // Known to be zero, not unknown
+
+  Outcome info3 = info.clone();
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.responseBodySize) == 0);  // Known to be zero, not unknown
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.requestBodySize) == 0);   // Known to be zero, not unknown
 }
 
 KJ_TEST("Read/Write TailEvent works") {
