@@ -177,6 +177,20 @@ struct Docker {
     statusCode @0 :Int32 $Json.name("StatusCode");
   }
 
+  struct ImagePullResponse {
+    # Response from ImagePull operation (streamed as multiple JSON objects)
+    status @0 :Text $Json.name("status");
+    id @1 :Text $Json.name("id");  # Layer ID (if applicable)
+    progress @2 :Text $Json.name("progress");  # Progress bar text
+    progressDetail @3 :ProgressDetail $Json.name("progressDetail");
+    error @4 :Text $Json.name("error");  # Error message if pull failed
+
+    struct ProgressDetail {
+      current @0 :UInt64 $Json.name("current");
+      total @1 :UInt64 $Json.name("total");
+    }
+  }
+
   struct ContainerState {
     # Container's running state
     status @0 :Text $Json.name("Status"); # "created", "running", "paused", "restarting", "removing", "exited", "dead"

@@ -2,6 +2,7 @@ load("@rules_multirun//:defs.bzl", "command", "multirun")
 
 IMAGES = {
     "container-client-test": "//images/container-client-test:load",
+    "proxy-everything": "//images/container-client-test:load-proxy-everything",
 }
 
 [

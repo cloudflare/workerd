@@ -189,7 +189,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   kj::Maybe<kj::Promise<void>> pumpTask;
 };
 
-// HTTP service that handles HTTP CONNECT requests from the container sidecar (dockerproxyanything).
+// HTTP service that handles HTTP CONNECT requests from the container sidecar (proxy-everything).
 // When the sidecar intercepts container egress traffic, it sends HTTP CONNECT to this service.
 // After accepting the CONNECT, the tunnel carries the actual HTTP request from the container,
 // which we parse and forward to the appropriate SubrequestChannel based on egressMappings.
@@ -848,6 +848,7 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   auto params = context.getParams();
   auto addr = kj::str(params.getHostPort());
   auto tokenBytes = params.getChannelToken();
+  JSG_REQUIRE(containerEgressInterceptorImage != "", Error, "should be set for setEgressHttp");
 
   // Wait for any previous setEgressHttp call to complete (serializes sidecar setup)
   KJ_IF_SOME(lock, egressSetupLock) {
