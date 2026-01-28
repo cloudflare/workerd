@@ -9,6 +9,23 @@ const server = createServer(function (req, res) {
     return;
   }
 
+  if (req.url === '/intercept') {
+    const targetHost = req.headers['x-host'] || '11.0.0.1';
+    fetch(`http://${targetHost}`)
+      .then((result) => result.text())
+      .then((body) => {
+        res.writeHead(200);
+        res.write(body);
+        res.end();
+      })
+      .catch((err) => {
+        res.writeHead(500);
+        res.write(err.message);
+        res.end();
+      });
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.write('Hello World!');
   res.end();
