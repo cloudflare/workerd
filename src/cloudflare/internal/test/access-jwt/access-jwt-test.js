@@ -414,6 +414,42 @@ export const tests = {
     );
   },
 
+  // Test: Algorithm "none" is rejected (CVE-2015-9235 mitigation)
+  async testAlgorithmNoneRejected(_, env) {
+    const teamDomain = 'test-alg-none';
+    // Generate JWT with alg: "none" - critical security vulnerability if accepted
+    const jwt = await generateJwt(env, teamDomain, {}, { alg: 'none' });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
+        assert.ok(err.message.includes('none'));
+        return true;
+      }
+    );
+  },
+
+  // Test: Algorithm case sensitivity (RS256 vs rs256)
+  async testAlgorithmCaseSensitive(_, env) {
+    const teamDomain = 'test-alg-case';
+    // Generate JWT with lowercase algorithm - must be exact match
+    const jwt = await generateJwt(env, teamDomain, {}, { alg: 'rs256' });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
+        assert.ok(err.message.includes('rs256'));
+        return true;
+      }
+    );
+  },
+
   // Test: JWT with string audience (not array) works
   async testStringAudience(_, env) {
     const teamDomain = 'test-string-aud';
@@ -436,7 +472,9 @@ export const tests = {
     const req = createRequest(jwt);
 
     const payload = await validateAccessJwt(req, teamDomain, AUDIENCE);
-    assert.ok(payload.aud.includes(AUDIENCE));
+    // Handle both string and array aud types per JWT spec
+    const audArray = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    assert.ok(audArray.includes(AUDIENCE));
   },
 
   // Test: Clock skew tolerance allows recently expired JWTs
@@ -447,6 +485,25 @@ export const tests = {
     const jwt = await generateJwt(env, teamDomain, {
       iat: now - 3600,
       exp: now - 30,
+    });
+    const req = createRequest(jwt);
+
+    // Should still pass due to clock skew tolerance
+    const payload = await validateAccessJwt(req, teamDomain, AUDIENCE);
+    assert.strictEqual(
+      payload.iss,
+      `https://${teamDomain}.cloudflareaccess.com`
+    );
+  },
+
+  // Test: Clock skew tolerance allows JWTs issued slightly in the future
+  async testClockSkewToleranceIssuedAt(_, env) {
+    const teamDomain = 'test-clock-skew-iat';
+    // JWT issued 30 seconds in the future (within 60s tolerance)
+    const now = Math.floor(Date.now() / 1000);
+    const jwt = await generateJwt(env, teamDomain, {
+      iat: now + 30,
+      exp: now + 3600,
     });
     const req = createRequest(jwt);
 

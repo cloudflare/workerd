@@ -348,7 +348,7 @@ function validateClaims(
   }
 
   // Validate issued-at if present (defense-in-depth against future-dated tokens)
-  if (payload.iat > now + CLOCK_SKEW_SECONDS) {
+  if (payload.iat !== undefined && payload.iat > now + CLOCK_SKEW_SECONDS) {
     throw new AccessJwtError(
       'ERR_JWT_NOT_YET_VALID',
       `Token issued in the future at ${new Date(payload.iat * 1000).toISOString()}`
