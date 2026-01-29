@@ -93,10 +93,10 @@ declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
 }
 
-declare type EmailExportedHandler<Env = unknown> = (
+declare type EmailExportedHandler<Env = unknown, Props = unknown> = (
   message: ForwardableEmailMessage,
   env: Env,
-  ctx: ExecutionContext
+  ctx: ExecutionContext<Props>
 ) => void | Promise<void>;
 
 declare module "cloudflare:email" {

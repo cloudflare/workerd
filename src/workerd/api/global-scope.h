@@ -348,27 +348,27 @@ struct ExportedHandler {
   // include it in type definitions.
 
   JSG_STRUCT_TS_DEFINE(
-    type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
-    type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTailStreamHandler<Env = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
-    type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
+    type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown, Props = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext<Props>) => Response | Promise<Response>;
+    type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext<Props>) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+    type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerQueueHandler<Env = unknown, Message = unknown, Props = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTestHandler<Env = unknown, Props = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
   );
-  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown> {
-    email?: EmailExportedHandler<Env>;
-    fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
-    tail?: ExportedHandlerTailHandler<Env>;
-    trace?: ExportedHandlerTraceHandler<Env>;
-    tailStream?: ExportedHandlerTailStreamHandler<Env>;
-    scheduled?: ExportedHandlerScheduledHandler<Env>;
+  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown, Props = unknown> {
+    email?: EmailExportedHandler<Env, Props>;
+    fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
+    tail?: ExportedHandlerTailHandler<Env, Props>;
+    trace?: ExportedHandlerTraceHandler<Env, Props>;
+    tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
+    scheduled?: ExportedHandlerScheduledHandler<Env, Props>;
     alarm: never;
     webSocketMessage: never;
     webSocketClose: never;
     webSocketError: never;
-    queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage>;
-    test?: ExportedHandlerTestHandler<Env>;
+    queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
+    test?: ExportedHandlerTestHandler<Env, Props>;
   });
   // Make `env` parameter generic
 
