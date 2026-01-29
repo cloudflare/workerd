@@ -33,6 +33,8 @@ py_wd_test("subdirectory")
 
 py_wd_test("sdk")
 
+py_wd_test("htmlrewriter")
+
 gen_rust_import_tests()
 
 py_wd_test("undefined-handler")

@@ -1340,6 +1340,132 @@ def _wrap_workflow_step(cls):
     cls.run = wrapped_run
 
 
+# Create a cleanup function that destroys all proxies exactly once
+def cleanup_once(proxies: list[JsProxy]):
+    called = False
+
+    def _cleanup():
+        nonlocal called
+        if called:
+            return
+        called = True
+        for proxy in proxies:
+            try:
+                proxy.destroy()
+            except Exception:
+                pass
+
+    return _cleanup
+
+
+class HTMLRewriter:
+    """
+    A Python wrapper for the HTMLRewriter API that automatically manages proxy lifetimes.
+    """
+
+    def __init__(self):
+        # Store handler registrations as tuples: ("element", selector, handler) or ("document", handler)
+        self._handlers: list[tuple] = []
+        # (For testing only) keep track of proxies created for the current transform
+        self._last_transform_proxies: list[JsProxy] | None = None
+
+    def on(self, selector: str, handlers: object) -> "HTMLRewriter":
+        self._handlers.append(("element", selector, handlers))
+        return self
+
+    def onDocument(self, handlers: object) -> "HTMLRewriter":
+        self._handlers.append(("document", handlers))
+        return self
+
+    def transform(self, response: "Response") -> "Response":
+        # Create a fresh JS HTMLRewriter and proxies for this transform
+        js_rewriter = js.HTMLRewriter.new()
+        proxies_to_cleanup: list[JsProxy] = []
+
+        for handler_info in self._handlers:
+            if handler_info[0] == "element":
+                _, selector, handler = handler_info
+                proxy = create_proxy(handler)
+                proxies_to_cleanup.append(proxy)
+                js_rewriter.on(selector, proxy)
+            else:  # document
+                _, handler = handler_info
+                proxy = create_proxy(handler)
+                proxies_to_cleanup.append(proxy)
+                js_rewriter.onDocument(proxy)
+
+        # Store reference for testing (allows tests to verify proxy cleanup)
+        self._last_transform_proxies = proxies_to_cleanup
+
+        js_response = response.js_object
+        transformed = js_rewriter.transform(js_response)
+
+        # No handler to clean up, just return the response
+        if not proxies_to_cleanup:
+            return Response(transformed)
+
+        cleanup = cleanup_once(proxies_to_cleanup)
+
+        original_body = transformed.body
+        if original_body is None:
+            # No body to transform, cleanup and return
+            cleanup()
+            return Response(transformed)
+
+        # Wrap the original body in a custom ReadableStream that calls cleanup
+        # when the stream is fully consumed or errors.
+
+        reader = original_body.getReader()
+
+        async def start_reading(controller):
+            try:
+                while True:
+                    result = await reader.read()
+                    if result.done:
+                        controller.close()
+                        break
+                    controller.enqueue(result.value)
+            except Exception as e:
+                # Propagate error to the stream consumer
+                controller.error(e)
+            finally:
+                # Clean up all proxies (handlers + callback) in finally block
+                cleanup()
+
+        async def cancel(reason):
+            try:
+                if reader:
+                    await reader.cancel(reason)
+            finally:
+                cleanup()
+
+        start_proxy = create_proxy(start_reading)
+        cancel_proxy = create_proxy(cancel)
+        proxies_to_cleanup.append(start_proxy)
+        proxies_to_cleanup.append(cancel_proxy)
+
+        wrapped_body = js.ReadableStream.new(
+            to_js(
+                {"start": start_proxy, "cancel": cancel_proxy},
+                dict_converter=Object.fromEntries,
+            )
+        )
+
+        new_js_response = js.Response.new(
+            wrapped_body,
+            to_js(
+                {
+                    "status": transformed.status,
+                    "statusText": transformed.statusText,
+                    "headers": transformed.headers,
+                },
+                dict_converter=Object.fromEntries,
+            ),
+        )
+
+        return Response(new_js_response)
+
+
 class DurableObject:
     """
     Base class used to define a Durable Object.
