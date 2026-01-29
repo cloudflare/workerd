@@ -63,15 +63,6 @@ class LolString {
     lol_html_str_free({chars.begin(), chars.size()});
   }
   KJ_DISALLOW_COPY(LolString);
-  LolString(LolString&& other): chars(other.chars) {
-    other.chars = nullptr;
-  }
-  LolString& operator=(LolString&& other) {
-    LolString old(kj::mv(*this));
-    chars = other.chars;
-    other.chars = nullptr;
-    return *this;
-  }
 
   kj::ArrayPtr<const char> asChars() const {
     return chars;
