@@ -1,0 +1,20 @@
+load("//:build/wd_test.bzl", "wd_test")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+
+wd_test(
+    src = "ai-search-api-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)
+
+py_wd_test(
+    size = "large",
+    src = "python-ai-search-api-test.wd-test",
+    args = ["--experimental"],
+    data = glob([
+        "*.js",
+        "*.py",
+    ]),
+    make_snapshot = False,
+    use_snapshot = None,
+)

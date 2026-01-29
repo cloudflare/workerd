@@ -4,6 +4,7 @@
 
 import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
 import { AutoRAG } from 'cloudflare-internal:autorag-api';
+import { AiSearchAccountService } from 'cloudflare-internal:ai-search-api';
 import {
   ToMarkdownService,
   type ConversionRequestOptions,
@@ -121,6 +122,7 @@ function findReadableStreamKeys(
 
 export class Ai {
   #fetcher: Fetcher;
+  #aiSearchService: AiSearchAccountService | null = null;
 
   /*
    * @deprecated this option is deprecated, do not use this
@@ -137,6 +139,14 @@ export class Ai {
 
   constructor(fetcher: Fetcher) {
     this.#fetcher = fetcher;
+  }
+
+  // Lazy initialization of AI Search service
+  get aiSearch(): AiSearchAccountService {
+    if (!this.#aiSearchService) {
+      this.#aiSearchService = new AiSearchAccountService(this.#fetcher);
+    }
+    return this.#aiSearchService;
   }
 
   async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
