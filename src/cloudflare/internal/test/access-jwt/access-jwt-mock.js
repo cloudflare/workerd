@@ -18,6 +18,9 @@ let requestCount = 0;
 // Per-team failure configuration: teamDomain -> { failCount, requestCount }
 const failureConfig = new Map();
 
+// Per-team key type override: teamDomain -> 'EC' etc.
+const keyTypeOverride = new Map();
+
 /**
  * Base64url encode a buffer or string.
  */
@@ -64,12 +67,45 @@ async function generateKeyPair() {
 }
 
 /**
+ * Generate an EC key pair (for testing non-RSA key rejection).
+ */
+async function generateEcKeyPair() {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: 'ECDSA',
+      namedCurve: 'P-256',
+    },
+    true,
+    ['sign', 'verify']
+  );
+
+  const publicJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+  const kid = crypto.randomUUID();
+  publicJwk.kid = kid;
+  publicJwk.alg = 'ES256';
+  publicJwk.use = 'sig';
+
+  return {
+    privateKey: keyPair.privateKey,
+    publicKey: keyPair.publicKey,
+    publicJwk,
+    kid,
+  };
+}
+
+/**
  * Get or create a key pair for a team domain.
  */
 async function getKeyPair(teamDomain) {
   let value = keyPairs.get(teamDomain);
   if (value == null) {
-    value = await generateKeyPair();
+    // Check if this team should use a non-RSA key type
+    const keyType = keyTypeOverride.get(teamDomain);
+    if (keyType === 'EC') {
+      value = await generateEcKeyPair();
+    } else {
+      value = await generateKeyPair();
+    }
     keyPairs.set(teamDomain, value);
   }
   return value;
@@ -84,19 +120,31 @@ async function createJwt(teamDomain, claims, options = {}) {
   const header = {
     alg: options.alg || 'RS256',
     typ: 'JWT',
-    kid: options.kid || keyPair.kid,
   };
+
+  // Only include kid if not explicitly omitted
+  if (!options.omitKid) {
+    header.kid = options.kid || keyPair.kid;
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     iss: `https://${teamDomain}.cloudflareaccess.com`,
     sub: claims.sub || 'test-user-id',
-    aud: claims.aud || ['test-audience'],
     email: claims.email || 'test@example.com',
     iat: claims.iat || now,
-    exp: claims.exp || now + 3600, // 1 hour from now
     ...claims,
   };
+
+  // Only include aud if not explicitly omitted
+  if (!options.omitAud) {
+    payload.aud = claims.aud || ['test-audience'];
+  }
+
+  // Only include exp if not explicitly omitted
+  if (!options.omitExp) {
+    payload.exp = claims.exp || now + 3600; // 1 hour from now
+  }
 
   const headerB64 = base64UrlEncode(JSON.stringify(header));
   const payloadB64 = base64UrlEncode(JSON.stringify(payload));
@@ -126,6 +174,15 @@ async function handleJwksRequest(teamDomain) {
   const teamFailConfig = failureConfig.get(teamDomain);
   if (teamFailConfig) {
     teamFailConfig.requestCount = (teamFailConfig.requestCount || 0) + 1;
+
+    // Return specific status code (e.g., 404 for 4xx test)
+    if (teamFailConfig.status) {
+      return new Response(teamFailConfig.message || 'Error', {
+        status: teamFailConfig.status,
+      });
+    }
+
+    // Return 503 for retry tests
     if (teamFailConfig.requestCount <= teamFailConfig.failCount) {
       return new Response('Service Unavailable', { status: 503 });
     }
@@ -149,6 +206,7 @@ export default {
       requestCount = 0;
       failureConfig.clear();
       keyPairs.clear();
+      keyTypeOverride.clear();
       return new Response('OK');
     }
 
@@ -170,8 +228,20 @@ export default {
       if (teamDomain) {
         failureConfig.set(teamDomain, {
           failCount: config.failCount || 0,
+          status: config.status || null, // e.g., 404 for 4xx error
+          message: config.message || null,
           requestCount: 0,
         });
+      }
+      return new Response('OK');
+    }
+
+    // Configure per-team key type (for testing non-RSA key rejection)
+    if (url.pathname === '/_test/configure-key-type') {
+      const config = await request.json();
+      const { teamDomain, keyType } = config;
+      if (teamDomain && keyType) {
+        keyTypeOverride.set(teamDomain, keyType);
       }
       return new Response('OK');
     }

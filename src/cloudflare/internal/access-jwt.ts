@@ -16,7 +16,6 @@ const RETRY_DELAY_MS = 5000;
 const MAX_RETRIES = 3;
 
 declare global {
-  // eslint-disable-next-line no-var
   var scheduler: {
     wait: (delay: number, options?: { signal?: AbortSignal }) => Promise<void>;
   };
@@ -32,6 +31,7 @@ export type AccessJwtErrorCode =
   | 'ERR_JWT_ISSUER_MISMATCH'
   | 'ERR_JWKS_FETCH_FAILED'
   | 'ERR_JWKS_NO_MATCHING_KEY'
+  | 'ERR_JWKS_INVALID_KEY'
   | 'ERR_INVALID_TEAM_DOMAIN'
   | 'ERR_INVALID_AUDIENCE';
 
@@ -49,7 +49,7 @@ export interface AccessJwtPayload {
   aud: string | string[];
   email?: string;
   exp: number;
-  iat: number;
+  iat?: number;
   nbf?: number;
   iss: string;
   sub: string;
@@ -123,12 +123,6 @@ interface Uint8ArrayConstructorWithBase64 {
 const Uint8ArrayWithBase64 =
   Uint8Array as unknown as Uint8ArrayConstructorWithBase64;
 
-type FixedLengthArray<
-  T,
-  N extends number,
-  A extends T[] = [],
-> = A['length'] extends N ? A : FixedLengthArray<T, N, [T, ...A]>;
-
 /**
  * Parse a JWT into its components without verifying.
  */
@@ -146,10 +140,11 @@ function parseJwt(token: string): {
     );
   }
 
-  const [headerB64, payloadB64, signatureB64] = parts as FixedLengthArray<
+  const [headerB64, payloadB64, signatureB64] = parts as [
     string,
-    3
-  >;
+    string,
+    string,
+  ];
 
   try {
     const header = JSON.parse(
@@ -207,8 +202,15 @@ async function fetchJwks(normalizedDomain: string): Promise<JwkSet> {
       const res = await fetch(url);
 
       if (res.ok) {
-        const data = (await res.json()) as JwkSet;
-        return data;
+        const data = await res.json();
+        // Validate JWKS response structure
+        if (!data || !Array.isArray(data.keys)) {
+          throw new AccessJwtError(
+            'ERR_JWKS_FETCH_FAILED',
+            'Invalid JWKS response: missing or invalid keys array'
+          );
+        }
+        return data as JwkSet;
       }
 
       // Don't retry client errors (4xx)
@@ -271,7 +273,7 @@ async function importKey(jwk: JwkKey): Promise<CryptoKey> {
   // Validate key type before import
   if (jwk.kty !== 'RSA') {
     throw new AccessJwtError(
-      'ERR_JWT_MALFORMED',
+      'ERR_JWKS_INVALID_KEY',
       `Expected RSA key type, got ${jwk.kty}`
     );
   }
@@ -289,7 +291,7 @@ async function importKey(jwk: JwkKey): Promise<CryptoKey> {
     );
   } catch (e) {
     throw new AccessJwtError(
-      'ERR_JWT_MALFORMED',
+      'ERR_JWKS_INVALID_KEY',
       `Failed to import key: ${Error.isError(e) ? e.message : 'unknown error'}`
     );
   }
@@ -321,6 +323,36 @@ function validateClaims(
   normalizedDomain: string,
   audience: string
 ): void {
+  // Validate required claims exist (defense against malformed JWTs)
+  if (typeof payload.iss !== 'string') {
+    throw new AccessJwtError(
+      'ERR_JWT_MALFORMED',
+      'JWT missing required iss claim'
+    );
+  }
+  if (typeof payload.sub !== 'string') {
+    throw new AccessJwtError(
+      'ERR_JWT_MALFORMED',
+      'JWT missing required sub claim'
+    );
+  }
+  if (typeof payload.exp !== 'number') {
+    throw new AccessJwtError(
+      'ERR_JWT_MALFORMED',
+      'JWT missing required exp claim'
+    );
+  }
+  if (
+    payload.aud === undefined ||
+    payload.aud === null ||
+    (typeof payload.aud !== 'string' && !Array.isArray(payload.aud))
+  ) {
+    throw new AccessJwtError(
+      'ERR_JWT_MALFORMED',
+      'JWT aud claim must be a string or array'
+    );
+  }
+
   // Validate issuer
   const expectedIssuer = `https://${normalizedDomain}`;
   if (payload.iss !== expectedIssuer) {
@@ -340,19 +372,35 @@ function validateClaims(
   }
 
   // Validate not-before if present (RFC 7519)
-  if (payload.nbf !== undefined && payload.nbf > now + CLOCK_SKEW_SECONDS) {
-    throw new AccessJwtError(
-      'ERR_JWT_NOT_YET_VALID',
-      `Token not valid until ${new Date(payload.nbf * 1000).toISOString()}`
-    );
+  if (payload.nbf !== undefined) {
+    if (typeof payload.nbf !== 'number') {
+      throw new AccessJwtError(
+        'ERR_JWT_MALFORMED',
+        'JWT nbf claim must be a number'
+      );
+    }
+    if (payload.nbf > now + CLOCK_SKEW_SECONDS) {
+      throw new AccessJwtError(
+        'ERR_JWT_NOT_YET_VALID',
+        `Token not valid until ${new Date(payload.nbf * 1000).toISOString()}`
+      );
+    }
   }
 
   // Validate issued-at if present (defense-in-depth against future-dated tokens)
-  if (payload.iat !== undefined && payload.iat > now + CLOCK_SKEW_SECONDS) {
-    throw new AccessJwtError(
-      'ERR_JWT_NOT_YET_VALID',
-      `Token issued in the future at ${new Date(payload.iat * 1000).toISOString()}`
-    );
+  if (payload.iat !== undefined) {
+    if (typeof payload.iat !== 'number') {
+      throw new AccessJwtError(
+        'ERR_JWT_MALFORMED',
+        'JWT iat claim must be a number'
+      );
+    }
+    if (payload.iat > now + CLOCK_SKEW_SECONDS) {
+      throw new AccessJwtError(
+        'ERR_JWT_NOT_YET_VALID',
+        `Token issued in the future at ${new Date(payload.iat * 1000).toISOString()}`
+      );
+    }
   }
 
   // Validate audience
@@ -382,6 +430,14 @@ async function validateJwtInternal(
     throw new AccessJwtError(
       'ERR_JWT_MALFORMED',
       `Unsupported algorithm "${header.alg}", expected RS256`
+    );
+  }
+
+  // Validate kid exists (required for key lookup)
+  if (typeof header.kid !== 'string' || header.kid === '') {
+    throw new AccessJwtError(
+      'ERR_JWT_MALFORMED',
+      'JWT header missing required kid claim'
     );
   }
 
@@ -460,7 +516,7 @@ export async function validateAccessJwt(
     // If we got a missing key error, try once more with fresh JWKS
     // This handles the edge case of key rotation with stale cache
     if (e instanceof AccessJwtError && e.code === 'ERR_JWKS_NO_MATCHING_KEY') {
-      return await validateJwtInternal(token, normalizedDomain, audience, true);
+      return validateJwtInternal(token, normalizedDomain, audience, true);
     }
     throw e;
   }

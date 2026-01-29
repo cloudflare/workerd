@@ -365,6 +365,48 @@ export const tests = {
     );
   },
 
+  // Test: JWKS 4xx error fails immediately without retry
+  async testJwks4xxNoRetry(_, env) {
+    const teamDomain = 'test-4xx-no-retry';
+
+    // Generate JWT first so the mock has keys
+    const jwt = await generateJwt(env, teamDomain);
+    const req = createRequest(jwt);
+
+    // Reset request count
+    await env.mock.fetch('http://mock/_test/reset-count');
+
+    // Configure mock to return 404 for this team
+    await env.mock.fetch('http://mock/_test/configure-failure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teamDomain,
+        status: 404,
+        message: 'Not Found',
+      }),
+    });
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWKS_FETCH_FAILED');
+        assert.ok(err.message.includes('404'));
+        return true;
+      }
+    );
+
+    // Verify only 1 request was made (no retries for 4xx)
+    const countRes = await env.mock.fetch('http://mock/_test/request-count');
+    const { count } = await countRes.json();
+    assert.strictEqual(
+      count,
+      1,
+      'Expected exactly 1 request (no retries for 4xx)'
+    );
+  },
+
   // Test: JWKS caching - second call doesn't fetch again
   async testJwksCaching(_, env) {
     const teamDomain = 'test-caching';
@@ -515,6 +557,124 @@ export const tests = {
     );
   },
 
+  // Test: Clock skew boundary - exactly 60s ago should pass
+  async testClockSkewBoundaryExact(_, env) {
+    const teamDomain = 'test-clock-skew-60';
+    const now = Math.floor(Date.now() / 1000);
+    // JWT expired exactly 60 seconds ago (at boundary)
+    const jwt = await generateJwt(env, teamDomain, {
+      iat: now - 3600,
+      exp: now - 60,
+    });
+    const req = createRequest(jwt);
+
+    // Should pass - exp < now - 60 is false when exp === now - 60
+    const payload = await validateAccessJwt(req, teamDomain, AUDIENCE);
+    assert.strictEqual(
+      payload.iss,
+      `https://${teamDomain}.cloudflareaccess.com`
+    );
+  },
+
+  // Test: Clock skew boundary - 61s ago should fail
+  async testClockSkewBoundaryFail(_, env) {
+    const teamDomain = 'test-clock-skew-61';
+    const now = Math.floor(Date.now() / 1000);
+    // JWT expired 61 seconds ago (just past boundary)
+    const jwt = await generateJwt(env, teamDomain, {
+      iat: now - 3600,
+      exp: now - 61,
+    });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_EXPIRED');
+        return true;
+      }
+    );
+  },
+
+  // Test: Missing exp claim throws ERR_JWT_MALFORMED
+  async testMissingExpClaim(_, env) {
+    const teamDomain = 'test-missing-exp';
+    // Generate JWT then manually remove exp from payload
+    const jwt = await generateJwt(env, teamDomain, {}, { omitExp: true });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
+        assert.ok(err.message.includes('exp'));
+        return true;
+      }
+    );
+  },
+
+  // Test: Missing aud claim throws ERR_JWT_MALFORMED
+  async testMissingAudClaim(_, env) {
+    const teamDomain = 'test-missing-aud';
+    const jwt = await generateJwt(env, teamDomain, {}, { omitAud: true });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
+        assert.ok(err.message.includes('aud'));
+        return true;
+      }
+    );
+  },
+
+  // Test: Missing kid in header throws ERR_JWT_MALFORMED
+  async testMissingKidHeader(_, env) {
+    const teamDomain = 'test-missing-kid';
+    const jwt = await generateJwt(env, teamDomain, {}, { omitKid: true });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
+        assert.ok(err.message.includes('kid'));
+        return true;
+      }
+    );
+  },
+
+  // Test: Non-RSA key type throws ERR_JWKS_INVALID_KEY
+  async testNonRsaKeyType(_, env) {
+    const teamDomain = 'test-non-rsa-key';
+
+    // Configure mock to use EC key for this team
+    await env.mock.fetch('http://mock/_test/configure-key-type', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamDomain, keyType: 'EC' }),
+    });
+
+    // Generate JWT (will be signed with EC key)
+    const jwt = await generateJwt(env, teamDomain);
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        // Should fail because validation code rejects non-RSA keys
+        assert.strictEqual(err.code, 'ERR_JWKS_INVALID_KEY');
+        return true;
+      }
+    );
+  },
+
   // Test: Error has correct name property
   async testErrorName(_, env) {
     const teamDomain = 'test-error-name';
@@ -527,5 +687,39 @@ export const tests = {
       assert.strictEqual(err.name, 'AccessJwtError');
       assert.ok(err instanceof Error);
     }
+  },
+
+  // Test: Non-numeric nbf claim throws ERR_JWT_MALFORMED
+  async testNonNumericNbf(_, env) {
+    const teamDomain = 'test-non-numeric-nbf';
+    const jwt = await generateJwt(env, teamDomain, { nbf: 'not-a-number' });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
+        assert.ok(err.message.includes('nbf'));
+        return true;
+      }
+    );
+  },
+
+  // Test: Non-numeric iat claim throws ERR_JWT_MALFORMED
+  async testNonNumericIat(_, env) {
+    const teamDomain = 'test-non-numeric-iat';
+    const jwt = await generateJwt(env, teamDomain, { iat: 'not-a-number' });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_MALFORMED');
+        assert.ok(err.message.includes('iat'));
+        return true;
+      }
+    );
   },
 };
