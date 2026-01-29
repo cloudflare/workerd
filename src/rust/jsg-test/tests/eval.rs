@@ -1,3 +1,5 @@
+use jsg::Number;
+
 use crate::EvalError;
 
 #[test]
@@ -24,8 +26,8 @@ fn eval_string_concatenation() {
 fn eval_number_returns_number_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: f64 = ctx.eval(lock, "42").unwrap();
-        assert!((result - 42.0).abs() < f64::EPSILON);
+        let result: Number = ctx.eval(lock, "42").unwrap();
+        assert!((result.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -34,8 +36,8 @@ fn eval_number_returns_number_type() {
 fn eval_arithmetic_expression() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: f64 = ctx.eval(lock, "1 + 2 + 3").unwrap();
-        assert!((result - 6.0).abs() < f64::EPSILON);
+        let result: Number = ctx.eval(lock, "1 + 2 + 3").unwrap();
+        assert!((result.value() - 6.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
