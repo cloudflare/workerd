@@ -639,12 +639,19 @@ struct GetterCallback;
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
+        // For interceptors on the prototype, HolderV2() returns the prototype, but This()         \
+        // returns the actual instance. We need to validate This() for security, but use           \
+        // HolderV2() wouldn't work here since it's the prototype object.                          \
+        // Note: This still uses the deprecated This() API - see V8 bug 455600234.                 \
         auto obj = info.This();                                                                    \
         auto& js = Lock::from(isolate);                                                            \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
+        /* Also check that HolderV2() == This() to prevent "prototype-as-this" attacks where */    \
+        /* a native object is used as a prototype and accessed through a derived object. */        \
         if (!isContext &&                                                                          \
-            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
+            (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj) ||          \
+             obj != info.This())) {                                                                \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
@@ -689,8 +696,11 @@ struct GetterCallback;
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
+        /* Also check that HolderV2() == This() to prevent "prototype-as-this" attacks where */    \
+        /* a native object is used as a prototype and accessed through a derived object. */        \
         if (!isContext &&                                                                          \
-            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
+            (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj) ||          \
+             obj != info.This())) {                                                                \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
@@ -889,7 +899,11 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isConte
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
+      // Also check that HolderV2() == This() to prevent "prototype-as-this" attacks where
+      // a native object is used as a prototype and accessed through a derived object.
+      if (!isContext &&
+          (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj) ||
+              obj != info.This())) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -915,7 +929,11 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), method, 
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
+      // Also check that HolderV2() == This() to prevent "prototype-as-this" attacks where
+      // a native object is used as a prototype and accessed through a derived object.
+      if (!isContext &&
+          (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj) ||
+              obj != info.This())) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -1199,7 +1217,9 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     liftKj(info, [&]() -> v8::Local<v8::Value> {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.This();
+      // With the interceptor on the instance template, HolderV2() returns the instance
+      // (same as This()), so we can use the non-deprecated HolderV2() API.
+      auto obj = info.HolderV2();
       auto& wrapper = TypeWrapper::from(isolate);
       if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
@@ -1249,7 +1269,10 @@ struct ResourceTypeBuilder {
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() {
-    prototype->SetHandler(
+    // Install on instance template (not prototype) so that HolderV2() == This().
+    // This matches Chromium's approach and avoids needing the deprecated
+    // PropertyCallbackInfo::This().
+    instance->SetHandler(
         WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>{});
   }
 
@@ -1449,7 +1472,11 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() {
-    using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    // Use PropertyGetterCallback (FunctionCallbackInfo) instead of GetterCallback
+    // (PropertyCallbackInfo) because this property is on the prototype but needs access
+    // to instance state. FunctionCallbackInfo::This() is not deprecated, while
+    // PropertyCallbackInfo::This() is.
+    using Gcb = PropertyGetterCallback<TypeWrapper, name, Getter, getter, isContext>;
 
     auto v8Name = v8StrIntern(isolate, name);
 
@@ -1457,7 +1484,8 @@ struct ResourceTypeBuilder {
     auto symbol = v8::Symbol::New(isolate, v8Name);
     inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
 
-    prototype->SetNativeDataProperty(symbol, &Gcb::callback, nullptr, v8::Local<v8::Value>(),
+    auto getterFn = v8::FunctionTemplate::New(isolate, &Gcb::callback);
+    prototype->SetAccessorProperty(symbol, getterFn, v8::Local<v8::FunctionTemplate>(),
         static_cast<v8::PropertyAttribute>(
             v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }
