@@ -2466,6 +2466,9 @@ declare abstract class R2Bucket {
   resumeMultipartUpload(key: string, uploadId: string): R2MultipartUpload;
   delete(keys: string | string[]): Promise<void>;
   list(options?: R2ListOptions): Promise<R2Objects>;
+  listMultipartUploads(
+    options?: R2ListMultipartUploadsOptions,
+  ): Promise<R2MultipartUploads>;
 }
 interface R2MultipartUpload {
   readonly key: string;
@@ -2477,6 +2480,7 @@ interface R2MultipartUpload {
   ): Promise<R2UploadedPart>;
   abort(): Promise<void>;
   complete(uploadedParts: R2UploadedPart[]): Promise<R2Object>;
+  listParts(options?: R2ListPartsOptions): Promise<R2UploadedParts>;
 }
 interface R2UploadedPart {
   partNumber: number;
@@ -2586,6 +2590,52 @@ type R2Objects = {
 interface R2UploadPartOptions {
   ssecKey?: ArrayBuffer | string;
 }
+interface R2ListPartsOptions {
+  maxParts?: number;
+  partNumberMarker?: number;
+}
+interface R2UploadedPartInfo {
+  partNumber: number;
+  etag: string;
+  size: number;
+  uploaded: Date;
+}
+type R2UploadedParts = {
+  parts: R2UploadedPartInfo[];
+} & (
+  | {
+      truncated: true;
+      partNumberMarker: number;
+    }
+  | {
+      truncated: false;
+    }
+);
+interface R2ListMultipartUploadsOptions {
+  limit?: number;
+  prefix?: string;
+  cursor?: string;
+  delimiter?: string;
+  startAfter?: string;
+}
+interface R2MultipartUploadListing {
+  key: string;
+  uploadId: string;
+  initiated?: Date;
+  storageClass?: string;
+}
+type R2MultipartUploads = {
+  uploads: R2MultipartUploadListing[];
+  delimitedPrefixes: string[];
+} & (
+  | {
+      truncated: true;
+      cursor: string;
+    }
+  | {
+      truncated: false;
+    }
+);
 declare abstract class JsRpcPromise {
   then(handler: Function, errorHandler?: Function): any;
   catch(errorHandler: Function): any;
