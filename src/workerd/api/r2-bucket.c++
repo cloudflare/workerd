@@ -4,6 +4,7 @@
 
 #include "r2-bucket.h"
 
+#include "r2-impl-utils.h"
 #include "r2-multipart.h"
 #include "r2-rpc.h"
 #include "util.h"
@@ -19,8 +20,6 @@
 #include <kj/encoding.h>
 
 #include <array>
-#include <cmath>
-#include <regex>
 
 namespace workerd::api::public_beta {
 kj::Own<kj::HttpClient> r2GetClient(
@@ -42,11 +41,6 @@ kj::Own<kj::HttpClient> r2GetClient(
       .attach(kj::mv(traceContext));
 }
 
-static bool isWholeNumber(double x) {
-  double intpart;
-  return modf(x, &intpart) == 0;
-}
-
 // TODO(perf): Would be nice to expose the v8 internals for parsing a date/stringifying it as
 // something an embedder can call directly rather than doing this rigamarole. It would also avoid
 // concerns about the user overriding the methods we're invoking.
@@ -56,10 +50,6 @@ static kj::Date parseDate(jsg::Lock& js, kj::StringPtr value) {
 
 static kj::String toUTCString(jsg::Lock& js, kj::Date date) {
   return js.date(date).toUTCString(js);
-}
-
-static kj::String toISOString(jsg::Lock& js, kj::Date date) {
-  return js.date(date).toISOString(js);
 }
 
 enum class OptionalMetadata : uint16_t {
@@ -203,31 +193,6 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(jsg::Lock& js,
   return parseObjectMetadata<T>(js, responseBuilder, expectedFields, kj::fwd<Args>(args)...);
 }
 
-namespace {
-
-void addEtagsToBuilder(
-    capnp::List<R2Etag>::Builder etagListBuilder, kj::ArrayPtr<R2Bucket::Etag> etagArray) {
-  R2Bucket::Etag* currentEtag = etagArray.begin();
-  for (unsigned int i = 0; i < etagArray.size(); i++) {
-    KJ_SWITCH_ONEOF(*currentEtag) {
-      KJ_CASE_ONEOF(e, R2Bucket::WildcardEtag) {
-        etagListBuilder[i].initType().setWildcard();
-      }
-      KJ_CASE_ONEOF(e, R2Bucket::StrongEtag) {
-        etagListBuilder[i].initType().setStrong();
-        etagListBuilder[i].setValue(e.value);
-      }
-      KJ_CASE_ONEOF(e, R2Bucket::WeakEtag) {
-        etagListBuilder[i].initType().setWeak();
-        etagListBuilder[i].setValue(e.value);
-      }
-    }
-    currentEtag = std::next(currentEtag);
-  }
-}
-
-}  // namespace
-
 kj::String buildEtagsString(kj::ArrayPtr<R2Bucket::Etag> etagArray) {
   return kj::strArray(KJ_MAP(etag, etagArray) {
     KJ_SWITCH_ONEOF(etag) {
@@ -299,8 +264,8 @@ kj::Maybe<kj::String> buildSsecKey(
   KJ_IF_SOME(rawSsecKey, maybeRawSsecKey) {
     KJ_SWITCH_ONEOF(rawSsecKey) {
       KJ_CASE_ONEOF(keyString, kj::String) {
-        JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
-            Error, "SSE-C Key has invalid format");
+        JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), hexPattern), Error,
+            "SSE-C Key has invalid format");
         JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
         return kj::str(keyString);
       }
@@ -311,17 +276,6 @@ kj::Maybe<kj::String> buildSsecKey(
     }
   }
   return kj::none;
-}
-
-static void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
-  traceContext.userSpan.setTag("cloudflare.r2.response.success"_kjc, r2Result.success());
-  KJ_IF_SOME(e, r2Result.getR2ErrorMessage()) {
-    traceContext.userSpan.setTag("error.type"_kjc, e.asPtr());
-    traceContext.userSpan.setTag("cloudflare.r2.error.message"_kjc, e.asPtr());
-  }
-  KJ_IF_SOME(v4, r2Result.v4ErrorCode()) {
-    traceContext.userSpan.setTag("cloudflare.r2.error.code"_kjc, static_cast<int64_t>(v4));
-  }
 }
 
 void addHeadResultSpanTags(
@@ -621,9 +575,6 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     auto putBuilder = payloadBuilder.initPut();
     putBuilder.setObject(key);
 
-    HttpMetadata sentHttpMetadata;
-    jsg::Dict<kj::String> sentCustomMetadata;
-
     bool hashAlreadySpecified = false;
     const auto verifyHashNotSpecified = [&] {
       JSG_REQUIRE(
@@ -854,6 +805,210 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         return kj::none;
       } else {
         auto result = parseObjectMetadata<HeadResult>(js, "put", r2Result, errorType);
+        KJ_IF_SOME(o, result) {
+          o.get()->httpMetadata = kj::mv(sentHttpMetadata);
+          o.get()->customMetadata = kj::mv(sentCustomMetadata);
+          addHeadResultSpanTags(js, traceContext, *o.get());
+        }
+        return result;
+      }
+    });
+  });
+}
+
+jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::copy(jsg::Lock& js,
+    kj::String key,
+    CopySource source,
+    jsg::Optional<CopyOptions> options,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+
+    auto traceSpan = context.makeTraceSpan("r2_copyObject"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_copyObject"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, "CopyObject"_kjc);
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+    traceContext.userSpan.setTag("cloudflare.r2.request.source.bucket"_kjc, source.bucket.asPtr());
+    traceContext.userSpan.setTag("cloudflare.r2.request.source.object"_kjc, source.object.asPtr());
+
+    HttpMetadata sentHttpMetadata;
+    jsg::Dict<kj::String> sentCustomMetadata;
+
+    capnp::JsonCodec json;
+    json.handleByAnnotation<R2BindingRequest>();
+    json.setHasMode(capnp::HasMode::NON_DEFAULT);
+    capnp::MallocMessageBuilder requestMessage;
+
+    auto requestBuilder = requestMessage.initRoot<R2BindingRequest>();
+    requestBuilder.setVersion(VERSION_PUBLIC_BETA);
+    auto payloadBuilder = requestBuilder.initPayload();
+    auto copyBuilder = payloadBuilder.initCopy();
+    copyBuilder.setObject(key);
+    auto sourceBuilder = copyBuilder.initSource();
+    sourceBuilder.setBucket(source.bucket);
+    sourceBuilder.setObject(source.object);
+
+    // Handle source conditional inline with source-specific tracing tags
+    KJ_IF_SOME(i, source.onlyIf) {
+      R2Bucket::UnwrappedConditional c = [&] {
+        KJ_SWITCH_ONEOF(i) {
+          KJ_CASE_ONEOF(conditional, Conditional) {
+            return R2Bucket::UnwrappedConditional(conditional);
+          }
+          KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
+            return R2Bucket::UnwrappedConditional(js, *h);
+          }
+        }
+        KJ_UNREACHABLE;
+      }();
+
+      R2Conditional::Builder onlyIfBuilder = sourceBuilder.initOnlyIf();
+      KJ_IF_SOME(etagArray, c.etagMatches) {
+        auto etagMatchList = onlyIfBuilder.initEtagMatches(etagArray.size());
+        addEtagsToBuilder(
+            etagMatchList, kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
+        traceContext.userSpan.setTag("cloudflare.r2.request.source.only_if.etag_matches"_kjc,
+            buildEtagsString(etagArray));
+      }
+      KJ_IF_SOME(etagArray, c.etagDoesNotMatch) {
+        auto etagDoesNotMatchList = onlyIfBuilder.initEtagDoesNotMatch(etagArray.size());
+        addEtagsToBuilder(etagDoesNotMatchList,
+            kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
+        traceContext.userSpan.setTag("cloudflare.r2.request.source.only_if.etag_does_not_match"_kjc,
+            buildEtagsString(etagArray));
+      }
+      KJ_IF_SOME(d, c.uploadedBefore) {
+        onlyIfBuilder.setUploadedBefore((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        if (c.secondsGranularity) {
+          onlyIfBuilder.setSecondsGranularity(true);
+        }
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.source.only_if.uploaded_before"_kjc, toISOString(js, d));
+      }
+      KJ_IF_SOME(d, c.uploadedAfter) {
+        onlyIfBuilder.setUploadedAfter((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        if (c.secondsGranularity) {
+          onlyIfBuilder.setSecondsGranularity(true);
+        }
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.source.only_if.uploaded_after"_kjc, toISOString(js, d));
+      }
+    }
+
+    KJ_IF_SOME(ssecKey, source.ssecKey) {
+      kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(ssecKey));
+      KJ_IF_SOME(ssecKeyStr, maybeSsecKey) {
+        auto ssecBuilder = sourceBuilder.initSsec();
+        ssecBuilder.setKey(ssecKeyStr);
+        traceContext.userSpan.setTag("cloudflare.r2.request.source.ssec_key"_kjc, true);
+      }
+    }
+
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(metadataDirective, o.metadataDirective) {
+        if (metadataDirective == "COPY" || metadataDirective == "REPLACE" ||
+            metadataDirective == "MERGE") {
+          copyBuilder.setMetadataDirective(metadataDirective);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.metadata_directive"_kjc, metadataDirective.asPtr());
+        } else {
+          JSG_FAIL_REQUIRE(RangeError, "Unsupported metadata directive value ", metadataDirective);
+        }
+      }
+      initOnlyIf(traceContext, js, copyBuilder, o);
+      KJ_IF_SOME(m, o.customMetadata) {
+        auto fields = copyBuilder.initCustomFields(m.fields.size());
+        for (size_t i = 0; i < m.fields.size(); i++) {
+          fields[i].setK(m.fields[i].name);
+          fields[i].setV(m.fields[i].value);
+        }
+        sentCustomMetadata = kj::mv(m);
+        traceContext.userSpan.setTag("cloudflare.r2.request.custom_metadata"_kjc, true);
+      }
+      KJ_IF_SOME(m, o.httpMetadata) {
+        auto fields = copyBuilder.initHttpFields();
+        sentHttpMetadata = [&]() {
+          KJ_SWITCH_ONEOF(m) {
+            KJ_CASE_ONEOF(m, HttpMetadata) {
+              return kj::mv(m);
+            }
+            KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
+              return HttpMetadata::fromRequestHeaders(js, *h);
+            }
+          }
+          KJ_UNREACHABLE;
+        }();
+
+        KJ_IF_SOME(ct, sentHttpMetadata.contentType) {
+          fields.setContentType(ct);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_type"_kjc, ct.asPtr());
+        }
+        KJ_IF_SOME(ce, sentHttpMetadata.contentEncoding) {
+          fields.setContentEncoding(ce);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_encoding"_kjc, ce.asPtr());
+        }
+        KJ_IF_SOME(cd, sentHttpMetadata.contentDisposition) {
+          fields.setContentDisposition(cd);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_disposition"_kjc, cd.asPtr());
+        }
+        KJ_IF_SOME(cl, sentHttpMetadata.contentLanguage) {
+          fields.setContentLanguage(cl);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_language"_kjc, cl.asPtr());
+        }
+        KJ_IF_SOME(cc, sentHttpMetadata.cacheControl) {
+          fields.setCacheControl(cc);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.cache_control"_kjc, cc.asPtr());
+        }
+        KJ_IF_SOME(ce, sentHttpMetadata.cacheExpiry) {
+          fields.setCacheExpiry((ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+          traceContext.userSpan.setTag("cloudflare.r2.request.http_metadata.cache_expiry"_kjc,
+              (ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        }
+      }
+      KJ_IF_SOME(s, o.storageClass) {
+        copyBuilder.setStorageClass(s);
+        traceContext.userSpan.setTag("cloudflare.r2.request.storage_class"_kjc, s.asPtr());
+      }
+      kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
+      KJ_IF_SOME(ssecKey, maybeSsecKey) {
+        auto ssecBuilder = copyBuilder.initSsec();
+        ssecBuilder.setKey(ssecKey);
+        traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
+      }
+    }
+
+    auto requestJson = json.encode(requestBuilder);
+
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
+    auto promise =
+        doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
+
+    return context.awaitIo(js, kj::mv(promise),
+        [sentHttpMetadata = kj::mv(sentHttpMetadata),
+            sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType,
+            traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+      addR2ResponseSpanTags(traceContext, r2Result);
+      if (r2Result.preconditionFailed()) {
+        return kj::none;
+      } else {
+        auto result = parseObjectMetadata<HeadResult>(js, "copy", r2Result, errorType);
         KJ_IF_SOME(o, result) {
           o.get()->httpMetadata = kj::mv(sentHttpMetadata);
           o.get()->customMetadata = kj::mv(sentCustomMetadata);
@@ -1147,12 +1302,6 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
         listBuilder.initInclude(0);
       }
     }
-
-    // TODO(soon): Remove this after the release for 2022-07-04 is cut (from here & R2 worker).
-    // This just tells the R2 worker that it can honor the `includes` field without breaking back
-    // compat. If we just started spontaneously honoring the `includes` field then existing Workers
-    // might suddenly lose http metadata because they weren't explicitly asking for it even though
-    listBuilder.setNewRuntime(true);
 
     // TODO(later): Add a sentry message (+ console warning) to check if we have users that aren't
     // asking for any optional metadata but are asking it in the result anyway just so that we can
