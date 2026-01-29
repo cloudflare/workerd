@@ -4489,17 +4489,14 @@ jsg::Ref<ReadableStream> ReadableStream::from(
 
   // AsyncGenerator is not a refcounted type, so we need to wrap it in a refcounted
   // struct so that we can keep it alive through the various promise branches below.
-  struct RefcountedGenerator: public kj::Refcounted {
-    jsg::AsyncGenerator<jsg::Value> generator;
-    RefcountedGenerator(jsg::AsyncGenerator<jsg::Value> generator): generator(kj::mv(generator)) {}
-  };
-  auto rcGenerator = kj::rc<RefcountedGenerator>(kj::mv(generator));
+  auto rcGenerator =
+      kj::rc<kj::RefcountedWrapper<jsg::AsyncGenerator<jsg::Value>>>(kj::mv(generator));
 
   // clang-format off
   return constructor(js, UnderlyingSource{
     .pull = [generator = rcGenerator.addRef()](jsg::Lock& js, auto controller) mutable {
       auto& c = controller.template get<DefaultController>();
-      return generator->generator.next(js).then(js,
+      return generator->getWrapped().next(js).then(js,
           JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = generator.addRef()),
               (controller),
               (jsg::Lock& js, kj::Maybe<jsg::Value> value) {
@@ -4533,7 +4530,7 @@ jsg::Ref<ReadableStream> ReadableStream::from(
               }));
     },
     .cancel = [generator = rcGenerator.addRef()](jsg::Lock& js, auto reason) mutable {
-      return generator->generator.return_(js, js.v8Ref(reason))
+      return generator->getWrapped().return_(js, js.v8Ref(reason))
           .then(js, [generator = kj::mv(generator)](auto& lock, auto) {
         // The generator might produce a value on return and might even want to continue,
         // but the stream has been canceled at this point, so we stop here.
