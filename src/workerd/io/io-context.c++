@@ -920,15 +920,11 @@ kj::Rc<ExternalPusherImpl> IoContext::getExternalPusher() {
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
-  SpanBuilder span = nullptr;
-  SpanBuilder userSpan = nullptr;
-
+  TraceContext tracing;
   KJ_IF_SOME(n, options.operationName) {
-    span = makeTraceSpan(n.clone());
-    userSpan = makeUserTraceSpan(n.clone());
+    tracing = makeUserTraceSpan(n.clone());
   }
 
-  TraceContext tracing(kj::mv(span), kj::mv(userSpan));
   kj::Own<WorkerInterface> ret;
   KJ_IF_SOME(existing, options.existingTraceContext) {
     ret = func(existing, getIoChannelFactory());
@@ -943,11 +939,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
 
-  if (tracing.span.isObserved()) {
-    ret = ret.attach(kj::mv(tracing.span));
-  }
-  if (tracing.userSpan.isObserved()) {
-    auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing.userSpan)));
+  if (tracing.isObserved()) {
+    auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing)));
     ret = ret.attach(kj::mv(ioOwnedSpan));
   }
 
@@ -1012,7 +1005,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     IoChannelFactory& channelFactory) {
   IoChannelFactory::SubrequestMetadata metadata{
     .cfBlobJson = kj::mv(cfBlobJson),
-    .tracing = tracing,
+    .parentSpan = tracing.getInternalSpanParent(),
     .featureFlagsForFl = mapCopyString(worker->getIsolate().getFeatureFlagsForFl()),
   };
 
@@ -1109,8 +1102,10 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
 }
 
-SpanBuilder IoContext::makeUserTraceSpan(kj::ConstString operationName) {
-  return getCurrentUserTraceSpan().newChild(kj::mv(operationName));
+TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
+  auto span = makeTraceSpan(operationName.clone());
+  auto userSpan = getCurrentUserTraceSpan().newChild(kj::mv(operationName));
+  return TraceContext(kj::mv(span), kj::mv(userSpan));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

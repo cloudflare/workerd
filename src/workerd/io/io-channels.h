@@ -103,7 +103,7 @@ class IoChannelFactory {
     kj::Maybe<kj::String> cfBlobJson;
 
     // Specifies the parent span for the subrequest for tracing purposes.
-    TraceParentContext tracing = TraceParentContext(nullptr, nullptr);
+    SpanParent parentSpan = SpanParent(nullptr);
 
     // Serialized JSON value to pass in ew_compat field of control header to FL. If this subrequest
     // does not go directly to FL, this value is ignored. Flags marked with `$neededByFl` in

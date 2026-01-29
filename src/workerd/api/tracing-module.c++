@@ -6,7 +6,7 @@
 
 namespace workerd::api {
 
-JsSpan::JsSpan(kj::Maybe<IoOwn<SpanBuilder>> span): span(kj::mv(span)) {}
+JsSpan::JsSpan(kj::Maybe<IoOwn<TraceContext>> span): span(kj::mv(span)) {}
 
 JsSpan::~JsSpan() noexcept(false) {
   end();
@@ -29,8 +29,8 @@ void JsSpan::setAttribute(
 
 jsg::Ref<JsSpan> TracingModule::startSpan(jsg::Lock& js, kj::String name) {
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    auto spanBuilder = ioContext.makeUserTraceSpan(kj::ConstString(kj::mv(name)));
-    auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
+    TraceContext traceContext = ioContext.makeUserTraceSpan(kj::ConstString(kj::mv(name)));
+    auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(traceContext)));
     return js.alloc<JsSpan>(kj::mv(ownedSpan));
   } else {
     // When no IoContext is available, create a no-op span

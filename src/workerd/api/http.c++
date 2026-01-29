@@ -2381,23 +2381,19 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       // For channels, create trace context
-      auto userSpan = ioContext.makeUserTraceSpan(operationName.clone());
-      auto traceSpan = ioContext.makeTraceSpan(operationName.clone());
-      auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto userSpan = ioContext.makeUserTraceSpan(operationName.clone());
-      auto traceSpan = ioContext.makeTraceSpan(operationName.clone());
-      auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-        return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+        return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .parentSpan = tracing.getInternalSpanParent()});
       }, {
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
+        .existingTraceContext = traceContext,
       });
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }

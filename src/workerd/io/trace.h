@@ -1144,14 +1144,9 @@ inline SpanBuilder SpanBuilder::newChild(
 }
 
 // TraceContext to keep track of user tracing/existing tracing better
-// TODO(o11y): When creating user child spans, verify that operationName is within a set of
-// supported operations. This is important to avoid adding spans to the wrong tracing system.
-
-// Interface to track trace context including both Jaeger and User spans.
-// TODO(o11y): Consider fleshing this out to make it a proper class, support adding tags/child spans
-// to both,... We expect that tracking user spans will not be needed in all places where we have the
-// existing spans, so synergies will be limited.
-struct TraceContext {
+class TraceContext {
+ public:
+  TraceContext(): span(nullptr), userSpan(nullptr) {}
   TraceContext(SpanBuilder span, SpanBuilder userSpan)
       : span(kj::mv(span)),
         userSpan(kj::mv(userSpan)) {}
@@ -1161,28 +1156,16 @@ struct TraceContext {
 
   // Set a tag on both the internal span and user span.
   void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
+  bool isObserved() {
+    return span.isObserved() || userSpan.isObserved();
+  }
+  SpanParent getInternalSpanParent() {
+    return SpanParent(span);
+  }
 
+ private:
   SpanBuilder span;
   SpanBuilder userSpan;
-};
-
-// TraceContext variant tracking span parents instead. This is useful for code interacting with
-// IoChannelFactory::SubrequestMetadata, which often needs to pass through both spans together
-// without modifying them. In particular, add functions like newUserChild() here to make it easier
-// to add a span for the right parent.
-struct TraceParentContext {
-  TraceParentContext(TraceContext& tracing)
-      : parentSpan(tracing.span),
-        userParentSpan(tracing.userSpan) {}
-  TraceParentContext(SpanParent span, SpanParent userSpan)
-      : parentSpan(kj::mv(span)),
-        userParentSpan(kj::mv(userSpan)) {}
-  TraceParentContext(TraceParentContext&& other) = default;
-  TraceParentContext& operator=(TraceParentContext&& other) = default;
-  KJ_DISALLOW_COPY(TraceParentContext);
-
-  SpanParent parentSpan;
-  SpanParent userParentSpan;
 };
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a
