@@ -31,11 +31,6 @@ build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things
 build:ci-test --remote_download_minimal
-# Enable v8-codegen-opt for test so that python tests run in an acceptable time frame but not for
-# release builds – this sets -O2 and release should keep -O3. For Windows, we can enable /O2
-# unconditionally, release already uses that and just adds "/clang:-O3" on top of it.
-build:ci-test --config=v8-codegen-opt
-build:ci-windows --config=v8-codegen-opt-windows
 
 # limit storage usage on ci
 # Exclude large benchmarking binaries created in debug and asan configurations to avoid
