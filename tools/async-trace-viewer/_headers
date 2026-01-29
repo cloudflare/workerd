@@ -1,0 +1,10 @@
+# Custom headers for Cloudflare Pages
+
+# Allow JSON files to be fetched from any origin (for local development)
+/*.json
+  Access-Control-Allow-Origin: *
+  Content-Type: application/json
+
+# Cache static assets
+/*
+  Cache-Control: public, max-age=3600

@@ -1,0 +1,42 @@
+{
+  "requestDurationNs": 85000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 84500000, "destroyedAt": 84800000},
+    {"asyncId": 2, "triggerId": 1, "type": "fetch", "stackTraceId": 1, "createdAt": 500000, "callbackStartedAt": 15000000, "callbackEndedAt": 15500000, "destroyedAt": 0},
+    {"asyncId": 3, "triggerId": 2, "type": "stream-read", "stackTraceId": 2, "createdAt": 16000000, "callbackStartedAt": 18000000, "callbackEndedAt": 18200000, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 3, "type": "js-promise", "stackTraceId": 3, "createdAt": 18300000, "callbackStartedAt": 18500000, "callbackEndedAt": 19500000, "destroyedAt": 0},
+    {"asyncId": 5, "triggerId": 4, "type": "stream-read", "stackTraceId": 2, "createdAt": 19600000, "callbackStartedAt": 22000000, "callbackEndedAt": 22200000, "destroyedAt": 0},
+    {"asyncId": 6, "triggerId": 5, "type": "js-promise", "stackTraceId": 3, "createdAt": 22300000, "callbackStartedAt": 22500000, "callbackEndedAt": 23500000, "destroyedAt": 0},
+    {"asyncId": 7, "triggerId": 6, "type": "stream-read", "stackTraceId": 2, "createdAt": 23600000, "callbackStartedAt": 26000000, "callbackEndedAt": 26200000, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 7, "type": "js-promise", "stackTraceId": 3, "createdAt": 26300000, "callbackStartedAt": 26500000, "callbackEndedAt": 27500000, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 8, "type": "stream-read", "stackTraceId": 2, "createdAt": 27600000, "callbackStartedAt": 30000000, "callbackEndedAt": 30200000, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 9, "type": "js-promise", "stackTraceId": 3, "createdAt": 30300000, "callbackStartedAt": 30500000, "callbackEndedAt": 31500000, "destroyedAt": 0},
+    {"asyncId": 11, "triggerId": 10, "type": "stream-read", "stackTraceId": 2, "createdAt": 31600000, "callbackStartedAt": 34000000, "callbackEndedAt": 34200000, "destroyedAt": 0},
+    {"asyncId": 12, "triggerId": 11, "type": "js-promise", "stackTraceId": 3, "createdAt": 34300000, "callbackStartedAt": 34500000, "callbackEndedAt": 35500000, "destroyedAt": 0},
+    {"asyncId": 13, "triggerId": 1, "type": "stream-write", "stackTraceId": 4, "createdAt": 16500000, "callbackStartedAt": 20000000, "callbackEndedAt": 20100000, "destroyedAt": 0},
+    {"asyncId": 14, "triggerId": 13, "type": "stream-write", "stackTraceId": 4, "createdAt": 24000000, "callbackStartedAt": 28000000, "callbackEndedAt": 28100000, "destroyedAt": 0},
+    {"asyncId": 15, "triggerId": 14, "type": "stream-write", "stackTraceId": 4, "createdAt": 32000000, "callbackStartedAt": 36000000, "callbackEndedAt": 36100000, "destroyedAt": 0},
+    {"asyncId": 16, "triggerId": 15, "type": "stream-write", "stackTraceId": 4, "createdAt": 40000000, "callbackStartedAt": 44000000, "callbackEndedAt": 44100000, "destroyedAt": 0},
+    {"asyncId": 17, "triggerId": 16, "type": "stream-write", "stackTraceId": 4, "createdAt": 48000000, "callbackStartedAt": 52000000, "callbackEndedAt": 52100000, "destroyedAt": 0},
+    {"asyncId": 18, "triggerId": 17, "type": "stream-write", "stackTraceId": 4, "createdAt": 56000000, "callbackStartedAt": 60000000, "callbackEndedAt": 60100000, "destroyedAt": 0},
+    {"asyncId": 19, "triggerId": 4, "type": "js-promise", "stackTraceId": 5, "createdAt": 19000000, "callbackStartedAt": 20200000, "callbackEndedAt": 20800000, "destroyedAt": 0},
+    {"asyncId": 20, "triggerId": 6, "type": "js-promise", "stackTraceId": 5, "createdAt": 23000000, "callbackStartedAt": 24200000, "callbackEndedAt": 24800000, "destroyedAt": 0},
+    {"asyncId": 21, "triggerId": 8, "type": "js-promise", "stackTraceId": 5, "createdAt": 27000000, "callbackStartedAt": 28200000, "callbackEndedAt": 28800000, "destroyedAt": 0},
+    {"asyncId": 22, "triggerId": 10, "type": "js-promise", "stackTraceId": 5, "createdAt": 31000000, "callbackStartedAt": 32200000, "callbackEndedAt": 32800000, "destroyedAt": 0},
+    {"asyncId": 23, "triggerId": 12, "type": "js-promise", "stackTraceId": 5, "createdAt": 35000000, "callbackStartedAt": 36200000, "callbackEndedAt": 36800000, "destroyedAt": 0},
+    {"asyncId": 24, "triggerId": 12, "type": "js-promise", "stackTraceId": 6, "createdAt": 36000000, "callbackStartedAt": 70000000, "callbackEndedAt": 84000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:5:10"]},
+    {"id": 1, "frames": ["fetch @ worker.js:15:20", "streamTransform @ worker.js:10:3"]},
+    {"id": 2, "frames": ["reader.read @ worker.js:25:10", "pumpStream @ worker.js:20:5"]},
+    {"id": 3, "frames": ["transform @ worker.js:35:8", "TransformStream @ worker.js:30:3"]},
+    {"id": 4, "frames": ["writer.write @ worker.js:45:10", "pumpStream @ worker.js:20:5"]},
+    {"id": 5, "frames": ["enqueue @ worker.js:40:12", "transform @ worker.js:35:8"]},
+    {"id": 6, "frames": ["writer.close @ worker.js:50:10", "pumpStream @ worker.js:20:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 2, "key": "url", "value": "https://api.example.com/large-data.json"},
+    {"asyncId": 2, "key": "method", "value": "GET"}
+  ]
+}

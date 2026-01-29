@@ -7,6 +7,8 @@
 #include "streams/standard.h"
 #include "system-streams.h"
 
+#include <workerd/io/async-trace.h>
+#include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
@@ -255,6 +257,25 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   }
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
   httpConnectSettings.tlsStarter = tlsStarter;
+
+  // Create async trace resource for socket connect
+  if (auto* asyncTrace = ioContext.getAsyncTrace(); asyncTrace != nullptr) {
+    auto asyncId =
+        asyncTrace->createResource(AsyncTraceContext::ResourceType::kSocketConnect, js.v8Isolate);
+    asyncTrace->annotate(asyncId, "address"_kj, addressStr);
+    switch (secureTransport) {
+      case SecureTransportKind::OFF:
+        asyncTrace->annotate(asyncId, "secureTransport"_kj, "off"_kj);
+        break;
+      case SecureTransportKind::ON:
+        asyncTrace->annotate(asyncId, "secureTransport"_kj, "on"_kj);
+        break;
+      case SecureTransportKind::STARTTLS:
+        asyncTrace->annotate(asyncId, "secureTransport"_kj, "starttls"_kj);
+        break;
+    }
+  }
+
   auto request = httpClient->connect(addressStr, *headers, httpConnectSettings);
   request.connection = request.connection.attach(kj::mv(httpClient));
 
@@ -283,6 +304,15 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   }
 
   isClosing = true;
+
+  // Create async trace resource for socket close
+  auto& context = IoContext::current();
+  if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+    auto asyncId =
+        asyncTrace->createResource(AsyncTraceContext::ResourceType::kSocketClose, js.v8Isolate);
+    asyncTrace->annotate(asyncId, "address"_kj, remoteAddress);
+  }
+
   writable->getController().setPendingClosure();
   readable->getController().setPendingClosure();
 
@@ -337,6 +367,13 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   //
   // Detach the AsyncIoStream from the Writable/Readable streams and make them unusable.
   auto& context = IoContext::current();
+
+  // Create async trace resource for startTls
+  if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+    auto asyncId =
+        asyncTrace->createResource(AsyncTraceContext::ResourceType::kSocketStartTls, js.v8Isolate);
+    asyncTrace->annotate(asyncId, "address"_kj, remoteAddress);
+  }
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   auto secureStreamPromise = context.awaitJs(js,
       writable->flush(js).then(js,

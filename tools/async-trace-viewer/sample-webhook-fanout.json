@@ -1,0 +1,91 @@
+{
+  "requestDurationNs": 520000000,
+  "resources": [
+    {"asyncId": 1, "triggerId": 0, "type": "root", "stackTraceId": 0, "createdAt": 0, "callbackStartedAt": 0, "callbackEndedAt": 519500000, "destroyedAt": 519800000},
+
+    {"asyncId": 2, "triggerId": 1, "type": "js-promise", "stackTraceId": 1, "createdAt": 200000, "callbackStartedAt": 300000, "callbackEndedAt": 800000, "destroyedAt": 0},
+
+    {"asyncId": 3, "triggerId": 2, "type": "kv-get", "stackTraceId": 2, "createdAt": 1000000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 4, "triggerId": 2, "type": "kj-to-js", "stackTraceId": 2, "createdAt": 1100000, "callbackStartedAt": 8000000, "callbackEndedAt": 8200000, "destroyedAt": 0},
+
+    {"asyncId": 5, "triggerId": 4, "type": "js-promise", "stackTraceId": 3, "createdAt": 8300000, "callbackStartedAt": 8400000, "callbackEndedAt": 9000000, "destroyedAt": 0},
+
+    {"asyncId": 6, "triggerId": 5, "type": "js-promise", "stackTraceId": 4, "createdAt": 9100000, "callbackStartedAt": 9200000, "callbackEndedAt": 10000000, "destroyedAt": 0},
+
+    {"asyncId": 7, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 8, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10200000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 9, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10300000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 10, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10400000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 11, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10500000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 12, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10600000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 13, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10700000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 14, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10800000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 15, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 10900000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 16, "triggerId": 6, "type": "fetch", "stackTraceId": 5, "createdAt": 11000000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+
+    {"asyncId": 17, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11100000, "callbackStartedAt": 85000000, "callbackEndedAt": 85100000, "destroyedAt": 0},
+    {"asyncId": 18, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11200000, "callbackStartedAt": 120000000, "callbackEndedAt": 120100000, "destroyedAt": 0},
+    {"asyncId": 19, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11300000, "callbackStartedAt": 95000000, "callbackEndedAt": 95100000, "destroyedAt": 0},
+    {"asyncId": 20, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11400000, "callbackStartedAt": 180000000, "callbackEndedAt": 180100000, "destroyedAt": 0},
+    {"asyncId": 21, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11500000, "callbackStartedAt": 250000000, "callbackEndedAt": 250100000, "destroyedAt": 0},
+    {"asyncId": 22, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11600000, "callbackStartedAt": 310000000, "callbackEndedAt": 310100000, "destroyedAt": 0},
+    {"asyncId": 23, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11700000, "callbackStartedAt": 75000000, "callbackEndedAt": 75100000, "destroyedAt": 0},
+    {"asyncId": 24, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11800000, "callbackStartedAt": 450000000, "callbackEndedAt": 450100000, "destroyedAt": 0},
+    {"asyncId": 25, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 11900000, "callbackStartedAt": 380000000, "callbackEndedAt": 380100000, "destroyedAt": 0},
+    {"asyncId": 26, "triggerId": 6, "type": "kj-to-js", "stackTraceId": 5, "createdAt": 12000000, "callbackStartedAt": 510000000, "callbackEndedAt": 510100000, "destroyedAt": 0},
+
+    {"asyncId": 27, "triggerId": 23, "type": "js-promise", "stackTraceId": 6, "createdAt": 75200000, "callbackStartedAt": 75300000, "callbackEndedAt": 75400000, "destroyedAt": 0},
+    {"asyncId": 28, "triggerId": 17, "type": "js-promise", "stackTraceId": 6, "createdAt": 85200000, "callbackStartedAt": 85300000, "callbackEndedAt": 85400000, "destroyedAt": 0},
+    {"asyncId": 29, "triggerId": 19, "type": "js-promise", "stackTraceId": 6, "createdAt": 95200000, "callbackStartedAt": 95300000, "callbackEndedAt": 95400000, "destroyedAt": 0},
+    {"asyncId": 30, "triggerId": 18, "type": "js-promise", "stackTraceId": 6, "createdAt": 120200000, "callbackStartedAt": 120300000, "callbackEndedAt": 120400000, "destroyedAt": 0},
+    {"asyncId": 31, "triggerId": 20, "type": "js-promise", "stackTraceId": 6, "createdAt": 180200000, "callbackStartedAt": 180300000, "callbackEndedAt": 180400000, "destroyedAt": 0},
+    {"asyncId": 32, "triggerId": 21, "type": "js-promise", "stackTraceId": 6, "createdAt": 250200000, "callbackStartedAt": 250300000, "callbackEndedAt": 250400000, "destroyedAt": 0},
+    {"asyncId": 33, "triggerId": 22, "type": "js-promise", "stackTraceId": 6, "createdAt": 310200000, "callbackStartedAt": 310300000, "callbackEndedAt": 310400000, "destroyedAt": 0},
+    {"asyncId": 34, "triggerId": 25, "type": "js-promise", "stackTraceId": 6, "createdAt": 380200000, "callbackStartedAt": 380300000, "callbackEndedAt": 380400000, "destroyedAt": 0},
+    {"asyncId": 35, "triggerId": 24, "type": "js-promise", "stackTraceId": 6, "createdAt": 450200000, "callbackStartedAt": 450300000, "callbackEndedAt": 450400000, "destroyedAt": 0},
+    {"asyncId": 36, "triggerId": 26, "type": "js-promise", "stackTraceId": 6, "createdAt": 510200000, "callbackStartedAt": 510300000, "callbackEndedAt": 510400000, "destroyedAt": 0},
+
+    {"asyncId": 37, "triggerId": 1, "type": "js-promise", "stackTraceId": 7, "createdAt": 511000000, "callbackStartedAt": 511100000, "callbackEndedAt": 515000000, "destroyedAt": 0},
+
+    {"asyncId": 38, "triggerId": 37, "type": "kv-put", "stackTraceId": 8, "createdAt": 515100000, "callbackStartedAt": 0, "callbackEndedAt": 0, "destroyedAt": 0},
+    {"asyncId": 39, "triggerId": 37, "type": "kj-to-js", "stackTraceId": 8, "createdAt": 515200000, "callbackStartedAt": 518000000, "callbackEndedAt": 518100000, "destroyedAt": 0},
+
+    {"asyncId": 40, "triggerId": 39, "type": "js-promise", "stackTraceId": 9, "createdAt": 518200000, "callbackStartedAt": 518300000, "callbackEndedAt": 519000000, "destroyedAt": 0}
+  ],
+  "stackTraces": [
+    {"id": 0, "frames": ["fetch @ worker.js:1:1"]},
+    {"id": 1, "frames": ["handleWebhook @ webhooks/handler.js:15:3"]},
+    {"id": 2, "frames": ["loadSubscribers @ webhooks/subscribers.js:22:5", "handleWebhook @ webhooks/handler.js:25:8"]},
+    {"id": 3, "frames": ["parseSubscriberList @ webhooks/subscribers.js:45:5"]},
+    {"id": 4, "frames": ["preparePayloads @ webhooks/delivery.js:18:5", "handleWebhook @ webhooks/handler.js:35:8"]},
+    {"id": 5, "frames": ["deliverToEndpoint @ webhooks/delivery.js:42:5", "fanOutDelivery @ webhooks/delivery.js:55:8"]},
+    {"id": 6, "frames": ["processDeliveryResult @ webhooks/delivery.js:72:5"]},
+    {"id": 7, "frames": ["aggregateResults @ webhooks/handler.js:55:5"]},
+    {"id": 8, "frames": ["logDeliveryStatus @ webhooks/logging.js:15:5", "handleWebhook @ webhooks/handler.js:65:8"]},
+    {"id": 9, "frames": ["sendResponse @ webhooks/handler.js:75:5"]}
+  ],
+  "annotations": [
+    {"asyncId": 3, "key": "key", "value": "webhooks:event:order.created:subscribers"},
+    {"asyncId": 7, "key": "url", "value": "https://api.slack.com/webhooks/T123/B456"},
+    {"asyncId": 7, "key": "method", "value": "POST"},
+    {"asyncId": 8, "key": "url", "value": "https://hooks.zapier.com/hooks/catch/12345/abcdef"},
+    {"asyncId": 8, "key": "method", "value": "POST"},
+    {"asyncId": 9, "key": "url", "value": "https://webhook.site/uuid-here"},
+    {"asyncId": 9, "key": "method", "value": "POST"},
+    {"asyncId": 10, "key": "url", "value": "https://api.segment.io/v1/track"},
+    {"asyncId": 10, "key": "method", "value": "POST"},
+    {"asyncId": 11, "key": "url", "value": "https://events.pagerduty.com/v2/enqueue"},
+    {"asyncId": 11, "key": "method", "value": "POST"},
+    {"asyncId": 12, "key": "url", "value": "https://discordapp.com/api/webhooks/123/token"},
+    {"asyncId": 12, "key": "method", "value": "POST"},
+    {"asyncId": 13, "key": "url", "value": "https://customer1.example.com/webhook"},
+    {"asyncId": 13, "key": "method", "value": "POST"},
+    {"asyncId": 14, "key": "url", "value": "https://customer2.example.net/api/events"},
+    {"asyncId": 14, "key": "method", "value": "POST"},
+    {"asyncId": 15, "key": "url", "value": "https://customer3.example.org/notifications"},
+    {"asyncId": 15, "key": "method", "value": "POST"},
+    {"asyncId": 16, "key": "url", "value": "https://internal.analytics.company.com/events"},
+    {"asyncId": 16, "key": "method", "value": "POST"},
+    {"asyncId": 38, "key": "key", "value": "webhooks:delivery:evt_abc123:status"}
+  ]
+}

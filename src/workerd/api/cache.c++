@@ -6,6 +6,7 @@
 
 #include "util.h"
 
+#include <workerd/io/async-trace.h>
 #include <workerd/io/io-context.h>
 #include <workerd/util/own-util.h>
 
@@ -80,6 +81,12 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
   auto traceSpan = context.makeTraceSpan("cache_match"_kjc);
   auto userSpan = context.makeUserTraceSpan("cache_match"_kjc);
   TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+
+  // Create async trace resource for cache.match
+  if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+    asyncTrace->createResource(AsyncTraceContext::ResourceType::kCacheGet, js.v8Isolate);
+    // Annotation will be added inside evalNow where we have the URL
+  }
 
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
@@ -287,6 +294,13 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
     auto traceSpan = context.makeTraceSpan("cache_put"_kjc);
     auto userSpan = context.makeUserTraceSpan("cache_put"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+
+    // Create async trace resource for cache.put
+    if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+      auto asyncId =
+          asyncTrace->createResource(AsyncTraceContext::ResourceType::kCachePut, js.v8Isolate);
+      asyncTrace->annotate(asyncId, "url"_kj, jsRequest->getUrl());
+    }
 
     traceContext.userSpan.setTag("cache.request.url"_kjc, jsRequest->getUrl());
     traceContext.userSpan.setTag("cache.request.method"_kjc, kj::str(jsRequest->getMethodEnum()));
@@ -561,6 +575,13 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
   auto traceSpan = context.makeTraceSpan("cache_delete"_kjc);
   auto userSpan = context.makeUserTraceSpan("cache_delete"_kjc);
   TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+
+  // Create async trace resource for cache.delete
+  // Note: URL annotation is added inside evalNow where we have the request
+  if (auto* asyncTrace = context.getAsyncTrace(); asyncTrace != nullptr) {
+    asyncTrace->createResource(
+        AsyncTraceContext::ResourceType::kCacheGet, js.v8Isolate);  // Using kCacheGet as stand-in
+  }
 
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {

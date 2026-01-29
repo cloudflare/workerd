@@ -1,0 +1,6 @@
+# Cloudflare Pages configuration for async-trace-viewer
+# Deploy with: npx wrangler pages deploy .
+
+name = "async-trace-viewer"
+compatibility_date = "2025-12-25"
+pages_build_output_dir = "."

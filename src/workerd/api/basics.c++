@@ -7,6 +7,7 @@
 #include "actor-state.h"
 #include "global-scope.h"
 
+#include <workerd/io/async-trace.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
@@ -1062,6 +1063,17 @@ kj::Promise<void> Scheduler::wait(
     }
   }
 
+  auto& ioContext = IoContext::current();
+
+  // Create async trace resource for this scheduler.wait operation
+  AsyncTraceContext::AsyncId asyncTraceId = AsyncTraceContext::INVALID_ID;
+  if (auto* asyncTrace = ioContext.getAsyncTrace(); asyncTrace != nullptr) {
+    asyncTraceId =
+        asyncTrace->createResource(AsyncTraceContext::ResourceType::kTimer, js.v8Isolate);
+    asyncTrace->annotate(asyncTraceId, "delay"_kj, kj::str(delay));
+    asyncTrace->annotate(asyncTraceId, "type"_kj, "scheduler.wait"_kj);
+  }
+
   // TODO(cleanup): Use jsg promise and resolver to avoid an unlock/relock. However, we need
   //   the abort signal to support wrapping jsg promises.
   auto paf = kj::newPromiseAndFulfiller<void>();
@@ -1070,8 +1082,25 @@ kj::Promise<void> Scheduler::wait(
 
   auto& global =
       jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
-  global.setTimeoutInternal([fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))](
-                                jsg::Lock& lock) mutable { fulfiller->fulfill(); },
+  global.setTimeoutInternal(
+      [fulfiller = ioContext.addObject(kj::mv(paf.fulfiller)), asyncTraceId](
+          jsg::Lock& lock) mutable {
+    // Enter async trace callback scope
+    if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+      if (auto* trace = IoContext::current().getAsyncTrace()) {
+        trace->enterCallback(asyncTraceId);
+      }
+    }
+    KJ_DEFER({
+      // Exit async trace callback scope
+      if (asyncTraceId != AsyncTraceContext::INVALID_ID) {
+        if (auto* trace = IoContext::current().getAsyncTrace()) {
+          trace->exitCallback();
+        }
+      }
+    });
+    fulfiller->fulfill();
+  },
       delay);
 
   auto promise = kj::mv(paf.promise);
