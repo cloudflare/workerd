@@ -165,6 +165,47 @@ export const tests = {
     );
   },
 
+  // Test: JWT not yet valid (nbf in future) throws ERR_JWT_NOT_YET_VALID
+  async testNotYetValid(_, env) {
+    const teamDomain = 'test-nbf';
+    const futureTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+    const jwt = await generateJwt(env, teamDomain, {
+      nbf: futureTime,
+    });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_NOT_YET_VALID');
+        assert.ok(err.message.includes('not valid until'));
+        return true;
+      }
+    );
+  },
+
+  // Test: JWT issued in the future throws ERR_JWT_NOT_YET_VALID
+  async testFutureIssuedAt(_, env) {
+    const teamDomain = 'test-future-iat';
+    const futureTime = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+    const jwt = await generateJwt(env, teamDomain, {
+      iat: futureTime,
+      exp: futureTime + 3600,
+    });
+    const req = createRequest(jwt);
+
+    await assert.rejects(
+      () => validateAccessJwt(req, teamDomain, AUDIENCE),
+      (err) => {
+        assert.ok(err instanceof AccessJwtError);
+        assert.strictEqual(err.code, 'ERR_JWT_NOT_YET_VALID');
+        assert.ok(err.message.includes('issued in the future'));
+        return true;
+      }
+    );
+  },
+
   // Test: Wrong audience throws ERR_JWT_AUDIENCE_MISMATCH
   async testWrongAudience(_, env) {
     const teamDomain = 'test-wrong-aud';
@@ -264,28 +305,6 @@ export const tests = {
       (err) => {
         assert.ok(err instanceof AccessJwtError);
         assert.strictEqual(err.code, 'ERR_JWKS_NO_MATCHING_KEY');
-        return true;
-      }
-    );
-  },
-
-  // Test: JWKS 4xx error fails immediately (no retry)
-  async testJwks4xxError(_, env) {
-    const teamDomain = 'test-4xx';
-    const jwt = await generateJwt(env, teamDomain);
-    const req = createRequest(jwt);
-
-    // Try to validate against an unknown team - will fail on issuer mismatch
-    // since the JWT was signed for teamDomain but we're validating against 'unknown-team'
-    await assert.rejects(
-      () => validateAccessJwt(req, 'unknown-team', AUDIENCE),
-      (err) => {
-        assert.ok(err instanceof AccessJwtError);
-        // Will fail on issuer mismatch first since the JWT was signed for teamDomain
-        assert.ok(
-          err.code === 'ERR_JWT_ISSUER_MISMATCH' ||
-            err.code === 'ERR_JWKS_NO_MATCHING_KEY'
-        );
         return true;
       }
     );

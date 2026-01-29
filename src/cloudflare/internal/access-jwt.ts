@@ -46,7 +46,7 @@ export class AccessJwtError extends Error {
 }
 
 export interface AccessJwtPayload {
-  aud: string[];
+  aud: string | string[];
   email?: string;
   exp: number;
   iat: number;
@@ -268,16 +268,31 @@ function findKey(jwks: JwkSet, kid: string): JwkKey | undefined {
  * Import a JWK as a CryptoKey for signature verification.
  */
 async function importKey(jwk: JwkKey): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    {
-      name: 'RSASSA-PKCS1-v1_5',
-      hash: 'SHA-256',
-    },
-    false,
-    ['verify']
-  );
+  // Validate key type before import
+  if (jwk.kty !== 'RSA') {
+    throw new AccessJwtError(
+      'ERR_JWT_MALFORMED',
+      `Expected RSA key type, got ${jwk.kty}`
+    );
+  }
+
+  try {
+    return await crypto.subtle.importKey(
+      'jwk',
+      jwk,
+      {
+        name: 'RSASSA-PKCS1-v1_5',
+        hash: 'SHA-256',
+      },
+      false,
+      ['verify']
+    );
+  } catch (e) {
+    throw new AccessJwtError(
+      'ERR_JWT_MALFORMED',
+      `Failed to import key: ${Error.isError(e) ? e.message : 'unknown error'}`
+    );
+  }
 }
 
 /**
@@ -329,6 +344,14 @@ function validateClaims(
     throw new AccessJwtError(
       'ERR_JWT_NOT_YET_VALID',
       `Token not valid until ${new Date(payload.nbf * 1000).toISOString()}`
+    );
+  }
+
+  // Validate issued-at if present (defense-in-depth against future-dated tokens)
+  if (payload.iat > now + CLOCK_SKEW_SECONDS) {
+    throw new AccessJwtError(
+      'ERR_JWT_NOT_YET_VALID',
+      `Token issued in the future at ${new Date(payload.iat * 1000).toISOString()}`
     );
   }
 

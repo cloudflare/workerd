@@ -385,7 +385,7 @@ declare namespace CloudflareWorkersModule {
   }
 
   export interface AccessJwtPayload {
-    aud: string[];
+    aud: string | string[];
     email?: string;
     exp: number;
     iat: number;
