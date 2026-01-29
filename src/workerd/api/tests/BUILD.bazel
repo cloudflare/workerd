@@ -398,6 +398,36 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-backpressure-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-backpressure-test.js"],
+)
+
+wd_test(
+    src = "streams-error-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-error-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-byob-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byob-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-tee-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-tee-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-async-iterator-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-async-iterator-test.js"],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],

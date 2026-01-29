@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-error-edge-cases-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "streams-error-edge-cases-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors", "transformstream_enable_standard_constructor"],
+      )
+    ),
+  ],
+);
