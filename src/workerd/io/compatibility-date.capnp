@@ -1310,7 +1310,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodejsGlobalTimers @153 :Bool
     $compatEnableFlag("enable_nodejs_global_timers")
     $compatDisableFlag("no_nodejs_global_timers")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-02-09");
   # When enabled, setTimeout, setInterval, clearTimeout, and clearInterval
   # are available on globalThis as Node.js-compatible versions from node:timers.
   # setTimeout and setInterval return Timeout objects with methods like
