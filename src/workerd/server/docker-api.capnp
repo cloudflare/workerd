@@ -162,6 +162,7 @@ struct Docker {
       cgroupParent @47 :Text $Json.name("CgroupParent");
       volumeDriver @48 :Text $Json.name("VolumeDriver");
       shmSize @49 :UInt32 $Json.name("ShmSize");
+      extraHosts @50 :List(Text) $Json.name("ExtraHosts"); # --add-host entries in "host:ip" format
 
     }
   }
@@ -174,6 +175,20 @@ struct Docker {
 
   struct ContainerMonitorResponse {
     statusCode @0 :Int32 $Json.name("StatusCode");
+  }
+
+  struct ImagePullResponse {
+    # Response from ImagePull operation (streamed as multiple JSON objects)
+    status @0 :Text $Json.name("status");
+    id @1 :Text $Json.name("id");  # Layer ID (if applicable)
+    progress @2 :Text $Json.name("progress");  # Progress bar text
+    progressDetail @3 :ProgressDetail $Json.name("progressDetail");
+    error @4 :Text $Json.name("error");  # Error message if pull failed
+
+    struct ProgressDetail {
+      current @0 :UInt64 $Json.name("current");
+      total @1 :UInt64 $Json.name("total");
+    }
   }
 
   struct ContainerState {
@@ -283,6 +298,23 @@ struct Docker {
       }
       struct Result {
         response @0 :ContainerInspectResponse;
+      }
+    }
+  }
+
+  # Network inspection response (GET /networks/{id})
+  struct NetworkInspectResponse {
+    name @0 :Text $Json.name("Name");
+    id @1 :Text $Json.name("Id");
+    ipam @2 :IPAM $Json.name("IPAM");
+
+    struct IPAM {
+      driver @0 :Text $Json.name("Driver");
+      config @1 :List(IPAMConfig) $Json.name("Config");
+
+      struct IPAMConfig {
+        subnet @0 :Text $Json.name("Subnet");
+        gateway @1 :Text $Json.name("Gateway");
       }
     }
   }

@@ -62,6 +62,7 @@ class Container: public jsg::Object {
   void signal(jsg::Lock& js, int signo);
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
   jsg::Promise<void> setInactivityTimeout(jsg::Lock& js, int64_t durationMs);
+  void setEgressHttp(jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
 
   // TODO(containers): listenTcp()
 
@@ -73,6 +74,10 @@ class Container: public jsg::Object {
     JSG_METHOD(signal);
     JSG_METHOD(getTcpPort);
     JSG_METHOD(setInactivityTimeout);
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(setEgressHttp);
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
