@@ -825,12 +825,8 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'readable.cancel() and a parallel writable.close() should reject if a transformer.cancel() calls controller.error()',
-      'closing the writable side should reject if a parallel transformer.cancel() throws',
       'writable.abort() and readable.cancel() should reject if a transformer.cancel() calls controller.error()',
-      'readable.cancel() should not call cancel() again when already called from writable.abort()',
-      'writable.close() should not call flush() when cancel() is already called from readable.cancel()',
       'writable.abort() should not call cancel() again when already called from readable.cancel()',
-      'readable.cancel() should not call cancel() when flush() is already called from writable.close()',
     ],
   },
   'transform-streams/errors.any.js': {
@@ -840,16 +836,11 @@ export default {
       'an exception from transform() should error the stream if terminate has been requested but not completed',
     ],
     expectedFailures: [
-      'when controller.error is followed by a rejection, the error reason should come from controller.error',
       'TransformStream constructor should throw when start does',
       'when strategy.size throws inside start(), the constructor should throw the same error',
       'when strategy.size calls controller.error() then throws, the constructor should throw the first error',
-      'it should be possible to error the readable between close requested and complete',
       'controller.error() should do nothing after a transformer method has thrown an exception',
-      'controller.error() should do nothing the second time it is called',
-      'abort should set the close reason for the writable when it happens before cancel during start, and cancel should reject',
       'controller.error() should close writable immediately after readable.cancel()',
-      'abort should set the close reason for the writable when it happens before cancel during underlying sink write, but cancel should still succeed',
       'erroring during write with backpressure should result in the write failing',
     ],
   },
@@ -914,8 +905,6 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'controller.error() after controller.terminate() with queued chunk should error the readable',
-      'controller.error() after controller.terminate() without queued chunk should do nothing',
-      'controller.terminate() inside flush() should not prevent writer.close() from succeeding',
     ],
   },
 
