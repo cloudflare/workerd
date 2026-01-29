@@ -148,15 +148,13 @@ declare namespace Rpc {
   export type Provider<
     T extends object,
     Reserved extends string = never,
-  > = MaybeCallableProvider<T> & Pick<
-    {
-      [K in keyof T]: MethodOrProperty<T[K]>;
-    },
-    Exclude<
-      keyof T,
-      Reserved | symbol | keyof StubBase<never>
-    >
-  >
+  > = MaybeCallableProvider<T> &
+    Pick<
+      {
+        [K in keyof T]: MethodOrProperty<T[K]>;
+      },
+      Exclude<keyof T, Reserved | symbol | keyof StubBase<never>>
+    >;
 }
 
 declare namespace Cloudflare {
@@ -190,27 +188,26 @@ declare namespace Cloudflare {
 
   // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
   // present.
-  type GlobalProp<K extends string, Default> =
-      K extends keyof GlobalProps ? GlobalProps[K] : Default;
+  type GlobalProp<K extends string, Default> = K extends keyof GlobalProps
+    ? GlobalProps[K]
+    : Default;
 
   // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
   // `mainModule` property.
-  type MainModule = GlobalProp<"mainModule", {}>;
+  type MainModule = GlobalProp<'mainModule', {}>;
 
   // The type of ctx.exports, which contains loopback bindings for all top-level exports.
   type Exports = {
-    [K in keyof MainModule]:
-        & LoopbackForExport<MainModule[K]>
-
-        // If the export is listed in `durableNamespaces`, then it is also a
-        // DurableObjectNamespace.
-        & (K extends GlobalProp<"durableNamespaces", never>
-            ?  MainModule[K] extends new (...args: any[]) => infer DoInstance
-                ? DoInstance extends Rpc.DurableObjectBranded
-                    ? DurableObjectNamespace<DoInstance>
-                    : DurableObjectNamespace<undefined>
-                : DurableObjectNamespace<undefined>
-            : {});
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]> &
+      // If the export is listed in `durableNamespaces`, then it is also a
+      // DurableObjectNamespace.
+      (K extends GlobalProp<'durableNamespaces', never>
+        ? MainModule[K] extends new (...args: any[]) => infer DoInstance
+          ? DoInstance extends Rpc.DurableObjectBranded
+            ? DurableObjectNamespace<DoInstance>
+            : DurableObjectNamespace<undefined>
+          : DurableObjectNamespace<undefined>
+        : {});
   };
 }
 
@@ -226,10 +223,8 @@ declare namespace CloudflareWorkersModule {
 
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
-  export abstract class WorkerEntrypoint<
-    Env = Cloudflare.Env,
-    Props = {},
-  > implements Rpc.WorkerEntrypointBranded
+  export abstract class WorkerEntrypoint<Env = Cloudflare.Env, Props = {}>
+    implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
@@ -242,15 +237,17 @@ declare namespace CloudflareWorkersModule {
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;
-    tailStream?(event: TailStream.TailEvent<TailStream.Onset>): TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+    tailStream?(
+      event: TailStream.TailEvent<TailStream.Onset>
+    ):
+      | TailStream.TailEventHandlerType
+      | Promise<TailStream.TailEventHandlerType>;
     test?(controller: TestController): void | Promise<void>;
     trace?(traces: TraceItem[]): void | Promise<void>;
   }
 
-  export abstract class DurableObject<
-    Env = Cloudflare.Env,
-    Props = {},
-  > implements Rpc.DurableObjectBranded
+  export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
+    implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
@@ -339,7 +336,8 @@ declare namespace CloudflareWorkersModule {
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
-  > implements Rpc.WorkflowEntrypointBranded
+  >
+    implements Rpc.WorkflowEntrypointBranded
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
 
@@ -357,10 +355,7 @@ declare namespace CloudflareWorkersModule {
   export function waitUntil(promise: Promise<unknown>): void;
 
   export function withEnv(newEnv: unknown, fn: () => unknown): unknown;
-  export function withExports(
-    newExports: unknown,
-    fn: () => unknown
-  ): unknown;
+  export function withExports(newExports: unknown, fn: () => unknown): unknown;
   export function withEnvAndExports(
     newEnv: unknown,
     newExports: unknown,
@@ -369,6 +364,51 @@ declare namespace CloudflareWorkersModule {
 
   export const env: Cloudflare.Env;
   export const exports: Cloudflare.Exports;
+
+  // Access JWT validation
+  export type AccessJwtErrorCode =
+    | 'ERR_JWT_MISSING'
+    | 'ERR_JWT_MALFORMED'
+    | 'ERR_JWT_INVALID_SIGNATURE'
+    | 'ERR_JWT_EXPIRED'
+    | 'ERR_JWT_NOT_YET_VALID'
+    | 'ERR_JWT_AUDIENCE_MISMATCH'
+    | 'ERR_JWT_ISSUER_MISMATCH'
+    | 'ERR_JWKS_FETCH_FAILED'
+    | 'ERR_JWKS_NO_MATCHING_KEY'
+    | 'ERR_INVALID_TEAM_DOMAIN'
+    | 'ERR_INVALID_AUDIENCE';
+
+  export class AccessJwtError extends Error {
+    readonly code: AccessJwtErrorCode;
+    constructor(code: AccessJwtErrorCode, message: string);
+  }
+
+  export interface AccessJwtPayload {
+    aud: string[];
+    email?: string;
+    exp: number;
+    iat: number;
+    nbf?: number;
+    iss: string;
+    sub: string;
+    [key: string]: unknown;
+  }
+
+  /**
+   * Validates a Cloudflare Access JWT from an incoming request.
+   *
+   * @param req - The incoming Request containing the cf-access-jwt-assertion header
+   * @param teamDomain - The Cloudflare One team domain (e.g., "mycompany" or "mycompany.cloudflareaccess.com")
+   * @param audience - The Application Audience (AUD) tag
+   * @throws {AccessJwtError} If validation fails for any reason
+   * @returns The decoded JWT payload on success
+   */
+  export function validateAccessJwt(
+    req: Request,
+    teamDomain: string,
+    audience: string
+  ): Promise<AccessJwtPayload>;
 }
 
 declare module 'cloudflare:workers' {
