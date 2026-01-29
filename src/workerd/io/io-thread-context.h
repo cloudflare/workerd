@@ -27,6 +27,8 @@ class ThreadContext {
     const kj::HttpHeaderId cfBlobMetadataSize;  // used by R2 binding implementation
     const kj::HttpHeaderId cfBlobRequest;       // used by R2 binding implementation
     const kj::HttpHeaderId authorization;       // used by R2 binding implementation
+    const kj::HttpHeaderId cfQueuesErrorCode;   // used by Queue binding implementation
+    const kj::HttpHeaderId cfQueuesErrorCause;  // used by Queue binding implementation
     const kj::HttpHeaderId secWebSocketProtocol;
     const kj::HttpHeaderId userAgent;       // used in tracing instrumentation
     const kj::HttpHeaderId contentType;     // used in tracing instrumentation

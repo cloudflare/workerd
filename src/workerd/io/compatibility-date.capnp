@@ -1355,4 +1355,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # TODO(later): Once this is no longer experimental, this flag should be implied by
   # exportCommonJsDefaultNamespace (or vice versa) for consistency.
+  
+  queueExposeErrorCodes @157 :Bool
+    $compatEnableFlag("queue_expose_error_codes")
+    $compatDisableFlag("no_queue_expose_error_codes");
+  # When enabled, queue operations will include detailed error information (error code and cause)
 }
