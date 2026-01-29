@@ -424,6 +424,7 @@ build:release_windows --per_file_copt=.*capnp/rpc\.c++@/clang:-O1
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
 build:windows --copt='/DWIN32_LEAN_AND_MEAN' --host_copt='/DWIN32_LEAN_AND_MEAN'
+build:windows --copt='/EHs' --host_copt='/EHs'
 # The `/std:c++23preview` argument is unused during BoringSSL compilation and we don't
 # want a warning when compiling each file.
 build:windows --per_file_copt=external/boringssl@-Wno-unused-command-line-argument --host_per_file_copt=external/boringssl@-Wno-unused-command-line-argument
