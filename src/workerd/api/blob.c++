@@ -4,11 +4,13 @@
 
 #include "blob.h"
 
+#include "system-streams.h"
 #include "util.h"
 
 #include <workerd/api/streams/readable.h>
 #include <workerd/io/observer.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/stream-utils.h>
 
 namespace workerd::api {
 
@@ -206,62 +208,10 @@ jsg::Promise<kj::String> Blob::text(jsg::Lock& js) {
   return js.resolvedPromise(kj::str(data.asChars()));
 }
 
-class Blob::BlobInputStream final: public ReadableStreamSource {
- public:
-  BlobInputStream(jsg::Ref<Blob> blob): unread(blob->data), blob(kj::mv(blob)) {}
-
-  // Attempt to read a maximum of maxBytes from the remaining unread content of the blob
-  // into the given buffer. It is the caller's responsibility to ensure that buffer has
-  // enough capacity for at least maxBytes.
-  // The minBytes argument is ignored in this implementation of tryRead.
-  // The buffer must be kept alive by the caller until the returned promise is fulfilled.
-  // The returned promise is fulfilled with the actual number of bytes read.
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t amount = kj::min(maxBytes, unread.size());
-    if (amount > 0) {
-      memcpy(buffer, unread.begin(), amount);
-      unread = unread.slice(amount, unread.size());
-    }
-    return amount;
-  }
-
-  // Returns the number of bytes remaining to be read for the given encoding if that
-  // encoding is supported. This implementation only supports StreamEncoding::IDENTITY.
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-    if (encoding == StreamEncoding::IDENTITY) {
-      return unread.size();
-    } else {
-      return kj::none;
-    }
-  }
-
-  // Write all of the remaining unread content of the blob to output.
-  // If end is true, output.end() will be called once the write has been completed.
-  // Importantly, the WritableStreamSink must be kept alive by the caller until the
-  // returned promise is fulfilled.
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    if (unread.size() != 0) {
-      auto promise = output.write(unread);
-      unread = nullptr;
-
-      co_await promise;
-
-      if (end) co_await output.end();
-    }
-
-    // We can't defer the write to the proxy stage since it depends on `blob` which lives in the
-    // isolate, so we don't `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
-    co_return;
-  }
-
- private:
-  kj::ArrayPtr<const byte> unread;
-  jsg::Ref<Blob> blob;
-};
-
 jsg::Ref<ReadableStream> Blob::stream(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_STREAM);
-  return js.alloc<ReadableStream>(IoContext::current(), kj::heap<BlobInputStream>(JSG_THIS));
+  return js.alloc<ReadableStream>(IoContext::current(),
+      newSystemStream(newMemoryInputStream(data, kj::heap(JSG_THIS)), StreamEncoding::IDENTITY));
 }
 
 // =======================================================================================
