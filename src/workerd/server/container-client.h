@@ -12,6 +12,7 @@
 #include <capnp/list.h>
 #include <kj/async-io.h>
 #include <kj/async.h>
+#include <kj/cidr.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/refcount.h>
@@ -58,6 +59,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
+  // Create header table for HTTP parsing
+  kj::HttpHeaderTable headerTable;
   kj::Timer& timer;
   kj::Network& network;
   kj::String dockerPath;
@@ -116,15 +119,29 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // For redeeming channel tokens received via setEgressHttp
   ChannelTokenHandler& channelTokenHandler;
 
-  // Egress HTTP mappings: address -> SubrequestChannel
-  kj::HashMap<kj::String, kj::Own<workerd::IoChannelFactory::SubrequestChannel>> egressMappings;
+  // Represents a parsed egress mapping with CIDR and port matching
+  struct EgressMapping {
+    // The cidr to match this mapping on
+    kj::CidrRange cidr;
+    // Port to match (0 means match all ports)
+    uint16_t port;
+    // The channel to route matching connections to
+    kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
+  };
+
+  // Egress HTTP mappings - list of CIDR/port rules to match against
+  kj::Vector<EgressMapping> egressMappings;
+
+  // Find a matching egress mapping for the given destination address (host:port format)
+  kj::Maybe<workerd::IoChannelFactory::SubrequestChannel*> findEgressMapping(
+      kj::StringPtr destAddr, uint16_t defaultPort);
 
   // Whether general internet access is enabled for this container
   bool internetEnabled = false;
 
   // Egress HTTP listener for handling container egress via HTTP CONNECT from sidecar
   class EgressHttpService;
-  kj::Maybe<kj::Own<kj::HttpHeaderTable>> egressHeaderTable;
+  class InnerEgressService;
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
   kj::Maybe<kj::Promise<void>> egressListenerTask;
 
