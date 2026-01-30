@@ -1,11 +1,10 @@
 const { createServer } = require('http');
 
 const webSocketEnabled = process.env.WS_ENABLED === 'true';
+const wsProxyTarget = process.env.WS_PROXY_TARGET || null;
 
-// Create HTTP server
 const server = createServer(function (req, res) {
   if (req.url === '/ws') {
-    // WebSocket upgrade will be handled by the WebSocket server
     return;
   }
 
@@ -20,7 +19,7 @@ const server = createServer(function (req, res) {
       })
       .catch((err) => {
         res.writeHead(500);
-        res.write(err.message);
+        res.write(`${targetHost} ${err.message}`);
         res.end();
       });
     return;
@@ -31,30 +30,30 @@ const server = createServer(function (req, res) {
   res.end();
 });
 
-// Check if WebSocket functionality is enabled
 if (webSocketEnabled) {
   const WebSocket = require('ws');
+  const wss = new WebSocket.Server({ server, path: '/ws' });
 
-  // Create WebSocket server
-  const wss = new WebSocket.Server({
-    server: server,
-    path: '/ws',
-  });
+  wss.on('connection', function (clientWs) {
+    if (wsProxyTarget) {
+      const targetWs = new WebSocket(`ws://${wsProxyTarget}/ws`);
+      const ready = new Promise(function (resolve) {
+        targetWs.on('open', resolve);
+      });
 
-  wss.on('connection', function connection(ws) {
-    console.log('WebSocket connection established');
+      targetWs.on('message', (data) => clientWs.send(data));
+      clientWs.on('message', async function (data) {
+        await ready;
+        targetWs.send(data);
+      });
 
-    ws.on('message', function message(data) {
-      console.log('Received:', data.toString());
-      // Echo the message back with prefix
-      ws.send('Echo: ' + data.toString());
-    });
-
-    ws.on('close', function close() {
-      console.log('WebSocket connection closed');
-    });
-
-    ws.on('error', console.error);
+      clientWs.on('close', targetWs.close);
+      targetWs.on('close', clientWs.close);
+    } else {
+      clientWs.on('message', function (data) {
+        clientWs.send('Echo: ' + data.toString());
+      });
+    }
   });
 }
 

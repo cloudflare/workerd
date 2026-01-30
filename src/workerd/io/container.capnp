@@ -112,13 +112,14 @@ interface Container @0x9aaceefc06523bca {
   # to decide when to signal the container to exit.
 
   setEgressTcp @8 (addr :Text, channelToken :Data);
+  # TODO: This method is unimplemented.
+  #
   # Configures egress TCP routing for the container. When the container attempts to connect to the
   # specified address, the connection should be routed back to the Workers runtime using the channel token.
 
   setEgressHttp @9 (hostPort :Text, channelToken :Data);
   # Configures egress HTTP routing for the container. When the container attempts to connect to the
   # specified host:port, the connection should be routed back to the Workers runtime using the channel token.
-  # The format of hostPort can be '<domain|ip>[':'<port>]'.
-  # Implementation across container runtimes might differ; a perfect world is this method can parse both HTTP and HTTPs
-  # requests, if possible.
+  # The format of hostPort can be '<ip|cidr>[':'<port>]'. If port is omitted, it's assumed to only cover port 80.
+  # This method does not support HTTPs yet.
 }
