@@ -1,6 +1,10 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
+    {
+      "name": "ada-url",
+      "type": "bazel_dep"
+    },
     //buildifier
     // Version is frozen to avoid to keep formatting consistent.
     {
@@ -106,6 +110,15 @@
       "file_regex": "llvm-.*-darwin-arm64-clang-format",
       "file_type": "executable",
       "freeze_version": "llvm-18.1.8"
+    },
+    {
+      "name": "wpt",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "wpt-.*.tar.gz",
+      "build_file": "@workerd//:build/BUILD.wpt",
+      "freeze_version": "wpt-11b9300f1"
     }
   ]
 }

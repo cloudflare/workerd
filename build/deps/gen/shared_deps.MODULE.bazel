@@ -4,6 +4,9 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
+# ada-url
+bazel_dep(name = "ada-url", version = "3.4.2")
+
 # buildifier-darwin-amd64
 http.file(
     name = "buildifier-darwin-amd64",
@@ -108,3 +111,14 @@ http.archive(
     url = "https://github.com/astral-sh/ruff/releases/download/0.12.1/ruff-aarch64-unknown-linux-gnu.tar.gz",
 )
 use_repo(http, "ruff-linux-arm64")
+
+# wpt
+http.archive(
+    name = "wpt",
+    build_file = "@workerd//:build/BUILD.wpt",
+    sha256 = "12e70405452dd56cbd92d4986d4e002fa91db2db1c3f1725d303692b6699974b",
+    strip_prefix = "wpt-11b9300f1",
+    type = "tgz",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/wpt-11b9300f1/wpt-11b9300f1.tar.gz",
+)
+use_repo(http, "wpt")
