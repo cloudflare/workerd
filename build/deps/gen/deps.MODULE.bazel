@@ -133,17 +133,6 @@ use_repo(http, "simdutf")
 # tcmalloc
 bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
 
-# wpt
-http.archive(
-    name = "wpt",
-    build_file = "@workerd//:build/BUILD.wpt",
-    sha256 = "12e70405452dd56cbd92d4986d4e002fa91db2db1c3f1725d303692b6699974b",
-    strip_prefix = "wpt-11b9300f1",
-    type = "tgz",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/wpt-11b9300f1/wpt-11b9300f1.tar.gz",
-)
-use_repo(http, "wpt")
-
 # zlib
 bazel_dep(name = "zlib")
 git_override(
