@@ -6,16 +6,7 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'IdnaTestV2-removed.window.js': {},
-  'IdnaTestV2.window.js': {
-    comment: 'These IDNA tests fail due to URL parsing differences',
-    expectedFailures: [
-      'ToASCII("𲤱20.音.ꡦ1.") A4_2 (ignored)',
-      'ToASCII("xn--20-9802c.xn--0w5a.xn--1-eg4e.") A4_2 (ignored)',
-      'ToASCII("xn--9-i0j5967eg3qz.ss")',
-      'ToASCII("𲮚9ꍩ៓.ss")',
-      'ToASCII("𲮚9ꍩ៓.SS")',
-    ],
-  },
+  'IdnaTestV2.window.js': {},
   'historical.any.js': {},
   'idlharness.any.js': {
     comment: 'TODO: Investigate this',

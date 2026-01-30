@@ -5,7 +5,7 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 # ada-url
-bazel_dep(name = "ada-url", version = "3.4.1")
+bazel_dep(name = "ada-url", version = "3.4.2")
 
 # boringssl
 bazel_dep(name = "boringssl", repo_name = "ssl")
