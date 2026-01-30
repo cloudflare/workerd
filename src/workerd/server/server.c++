@@ -4741,8 +4741,9 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     case config::Worker::ContainerEngine::LOCAL_DOCKER: {
       auto dockerConf = def.containerEngineConf.getLocalDocker();
       dockerPath = kj::str(dockerConf.getSocketPath());
-      // Cap'n Proto default is "cloudflare/proxy-everything:main"
-      containerEgressInterceptorImage = kj::str(dockerConf.getContainerEgressInterceptorImage());
+      if (dockerConf.hasContainerEgressInterceptorImage()) {
+        containerEgressInterceptorImage = kj::str(dockerConf.getContainerEgressInterceptorImage());
+      }
       break;
     }
   }
