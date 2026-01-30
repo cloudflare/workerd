@@ -13,15 +13,90 @@
 #include <capnp/message.h>
 #include <kj/async-io.h>
 #include <kj/async.h>
+#include <kj/cidr.h>
 #include <kj/compat/http.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/exception.h>
 #include <kj/string.h>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
 namespace workerd::server {
 
 namespace {
+
+// Parsed address from parseHostPort()
+struct ParsedAddress {
+  kj::CidrRange cidr;
+  kj::Maybe<uint16_t> port;
+};
+
+struct HostAndPort {
+  kj::String host;
+  kj::Maybe<uint16_t> port;
+};
+
+// Strips a port suffix from a string, returning the host and port separately.
+// For IPv6, expects brackets: "[::1]:8080" -> ("::1", 8080)
+// For IPv4: "10.0.0.1:8080" -> ("10.0.0.1", 8080)
+// If no port, returns the host as-is with no port.
+HostAndPort stripPort(kj::StringPtr str) {
+  if (str.startsWith("[")) {
+    // Bracketed IPv6: "[ipv6]" or "[ipv6]:port"
+    size_t closeBracket = KJ_REQUIRE_NONNULL(
+        str.findLast(']'), "Unclosed '[' in address string.", str);
+
+    auto host = str.slice(1, closeBracket);
+
+    if (str.size() > closeBracket + 1) {
+      KJ_REQUIRE(str.slice(closeBracket + 1).startsWith(":"),
+          "Expected port suffix after ']'.", str);
+      auto port = KJ_REQUIRE_NONNULL(
+          str.slice(closeBracket + 2).tryParseAs<uint16_t>(), "Invalid port number.", str);
+      return {kj::str(host), port};
+    }
+    return {kj::str(host), kj::none};
+  }
+
+  // No brackets - check if there's exactly one colon (IPv4 with port)
+  // IPv6 without brackets has 2+ colons and no port suffix supported
+  KJ_IF_SOME(colonPos, str.findLast(':')) {
+    auto afterColon = str.slice(colonPos + 1);
+    KJ_IF_SOME(port, afterColon.tryParseAs<uint16_t>()) {
+      // Valid port - but only treat as port for IPv4 (check no other colons before)
+      auto beforeColon = str.first(colonPos);
+      if (beforeColon.findFirst(':') == kj::none) {
+        // No other colons, so this is IPv4 with port
+        return {kj::str(beforeColon), port};
+      }
+    }
+  }
+
+  // No port found
+  return {kj::str(str), kj::none};
+}
+
+// Build a CidrRange from a host string, adding /32 or /128 prefix if not present.
+kj::CidrRange makeCidr(kj::StringPtr host) {
+  if (host.findFirst('/') != kj::none) {
+    return kj::CidrRange(host);
+  }
+  // No CIDR prefix - add /32 for IPv4, /128 for IPv6
+  bool isIpv6 = host.findFirst(':') != kj::none;
+  return kj::CidrRange(kj::str(host, isIpv6 ? "/128" : "/32"));
+}
+
+// Parses "host[:port]" strings. Handles:
+// - IPv4: "10.0.0.1", "10.0.0.1:8080", "10.0.0.0/8", "10.0.0.0/8:8080"
+// - IPv6 with brackets: "[::1]", "[::1]:8080", "[fe80::1]", "[fe80::/10]:8080"
+// - IPv6 without brackets: "::1", "fe80::1", "fe80::/10"
+ParsedAddress parseHostPort(kj::StringPtr str) {
+  auto hostAndPort = stripPort(str);
+  return {makeCidr(hostAndPort.host), hostAndPort.port};
+}
+
 kj::StringPtr signalToString(uint32_t signal) {
   switch (signal) {
     case 1:
@@ -193,6 +268,31 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
 // When the sidecar intercepts container egress traffic, it sends HTTP CONNECT to this service.
 // After accepting the CONNECT, the tunnel carries the actual HTTP request from the container,
 // which we parse and forward to the appropriate SubrequestChannel based on egressMappings.
+// Inner HTTP service that handles requests inside the CONNECT tunnel.
+// Forwards requests to the worker binding via SubrequestChannel.
+class ContainerClient::InnerEgressService final: public kj::HttpService {
+ public:
+  InnerEgressService(IoChannelFactory::SubrequestChannel& channel)
+      : channel(channel) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    // Forward to the SubrequestChannel
+    IoChannelFactory::SubrequestMetadata metadata;
+    auto worker = channel.startRequest(kj::mv(metadata));
+
+    // Forward the request to the worker - the response flows back through 'response'
+    co_await worker->request(method, url, headers, requestBody, response);
+  }
+
+ private:
+  IoChannelFactory::SubrequestChannel& channel;
+};
+
+// Outer HTTP service that handles CONNECT requests from the sidecar.
 class ContainerClient::EgressHttpService final: public kj::HttpService {
  public:
   EgressHttpService(ContainerClient& containerClient, kj::HttpHeaderTable& headerTable)
@@ -222,169 +322,54 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
     response.accept(200, "OK", responseHeaders);
 
     // Check if there's a mapping for this destination
-    auto maybeChannel = containerClient.egressMappings.find(destAddr);
+    auto mapping = containerClient.findEgressMapping(destAddr, /*defaultPort=*/80);
 
-    if (maybeChannel == kj::none) {
-      // No mapping found - check if internet access is enabled
-      if (!containerClient.internetEnabled) {
-        // Internet access not enabled - close the connection
-        connection.shutdownWrite();
+    KJ_IF_SOME(channel, mapping) {
+        // Found a mapping - layer an HttpServer on top of the tunnel connection
+        // to handle HTTP parsing/serialization automatically
+
+        // Create the inner service that forwards to the worker binding
+        auto innerService = kj::heap<InnerEgressService>(*channel);
+
+        // Create an HttpServer for the tunnel connection
+        auto innerServer = kj::heap<kj::HttpServer>(
+            containerClient.timer, headerTable, *innerService);
+
+        // Let the HttpServer handle the HTTP traffic inside the tunnel
+        co_await innerServer->listenHttpCleanDrain(connection).attach(
+            kj::mv(innerServer), kj::mv(innerService));
+
         co_return;
-      }
-
-      // Forward to the general internet via raw TCP
-      // Just do bidirectional byte pumping, no HTTP parsing needed
-      auto addr = co_await containerClient.network.parseAddress(destAddr);
-      auto destConn = co_await addr->connect();
-
-      // Pump bytes bidirectionally: tunnel <-> destination
-      auto promises = kj::heapArrayBuilder<kj::Promise<void>>(2);
-
-      promises.add(connection.pumpTo(*destConn).then(
-          [&destConn = *destConn](uint64_t) { destConn.shutdownWrite(); }));
-
-      promises.add(destConn->pumpTo(connection).then([&connection](uint64_t) {
-        connection.shutdownWrite();
-      }));
-
-      // Wait for both directions to complete, keeping destConn alive
-      co_await kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(destConn));
-      co_return;
     }
 
-    // Found a mapping - need to parse HTTP and forward to the SubrequestChannel
-    auto& channel = KJ_ASSERT_NONNULL(maybeChannel);
-
-    // Parse HTTP requests from the tunnel
-    auto httpInput = kj::newHttpInputStream(connection, headerTable);
-
-    // Loop to handle multiple requests on the same connection (HTTP/1.1 keep-alive)
-    while (true) {
-      // Check if there's more data
-      bool hasMore = co_await httpInput->awaitNextMessage();
-      if (!hasMore) {
-        // Client closed the connection
-        co_return;
-      }
-
-      auto req = co_await httpInput->readRequest();
-
-      // Forward to the SubrequestChannel
-      IoChannelFactory::SubrequestMetadata metadata;
-      auto worker = channel->startRequest(kj::mv(metadata));
-
-      // Create a response handler that writes back to the tunnel
-      TunnelHttpResponse tunnelResponse(connection);
-
-      // Forward the request to the worker
-      co_await worker->request(req.method, req.url, req.headers, *req.body, tunnelResponse);
-
-      // Finalize the response (writes chunked terminator if needed)
-      co_await tunnelResponse.end();
-
-      // After the response is complete, shut down the write side to signal EOF
+    // No mapping found - check if internet access is enabled
+    if (!containerClient.internetEnabled) {
+      // Internet access not enabled - close the connection
       connection.shutdownWrite();
       co_return;
     }
+
+    // Forward to the general internet via raw TCP
+    // Just do bidirectional byte pumping, no HTTP parsing needed
+    auto addr = co_await containerClient.network.parseAddress(destAddr);
+    auto destConn = co_await addr->connect();
+
+    // Pump bytes bidirectionally: tunnel <-> destination
+    auto connToDestination = connection.pumpTo(*destConn).then(
+        [&destConn = *destConn](uint64_t) { destConn.shutdownWrite(); });
+
+    auto destinationToConn = destConn->pumpTo(connection).then([&connection](uint64_t) {
+      connection.shutdownWrite();
+    });
+
+    // Wait for both directions to complete
+    co_await kj::joinPromisesFailFast(kj::arr(kj::mv(connToDestination), kj::mv(destinationToConn)));
+    co_return;
   }
 
  private:
   ContainerClient& containerClient;
   kj::HttpHeaderTable& headerTable;
-
-  // Response implementation that writes HTTP responses back through the tunnel.
-  // This class serializes the HTTP response and writes it to the tunnel stream.
-  class TunnelHttpResponse final: public kj::HttpService::Response {
-   public:
-    TunnelHttpResponse(kj::AsyncIoStream& tunnel): tunnel(tunnel), isChunked(false) {}
-
-    kj::Own<kj::AsyncOutputStream> send(uint statusCode,
-        kj::StringPtr statusText,
-        const kj::HttpHeaders& headers,
-        kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-
-      isChunked = (expectedBodySize == kj::none);
-      auto headersStr = headers.serializeResponse(statusCode, statusText);
-
-      return kj::heap<TunnelOutputStream>(tunnel, kj::mv(headersStr), isChunked);
-    }
-
-    kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
-      KJ_FAIL_REQUIRE("WebSocket upgrade not supported through egress tunnel");
-    }
-
-    // Called after worker->request() completes to finalize the response
-    kj::Promise<void> end() {
-      if (isChunked) {
-        // Write final empty chunk to terminate chunked encoding
-        co_await tunnel.write("0\r\n\r\n"_kjb);
-      }
-    }
-
-   private:
-    kj::AsyncIoStream& tunnel;
-    bool isChunked;
-  };
-
-  // Output stream that writes to the tunnel.
-  // Headers are written on the first write or when the stream ends.
-  // If chunked mode is enabled, wraps body data in chunked transfer encoding.
-  class TunnelOutputStream final: public kj::AsyncOutputStream {
-   public:
-    TunnelOutputStream(kj::AsyncIoStream& tunnel, kj::String serializedHeaders, bool chunked)
-        : tunnel(tunnel),
-          serializedHeaders(kj::mv(serializedHeaders)),
-          headersWritten(false),
-          chunked(chunked) {}
-
-    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-      co_await ensureHeadersWritten();
-      if (chunked) {
-        // Write chunk: size in hex, CRLF, data, CRLF
-        auto chunkHeader = kj::str(kj::hex(buffer.size()), "\r\n");
-        co_await tunnel.write(chunkHeader.asBytes());
-        co_await tunnel.write(buffer);
-        co_await tunnel.write("\r\n"_kjb);
-      } else {
-        co_await tunnel.write(buffer);
-      }
-    }
-
-    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-      co_await ensureHeadersWritten();
-      if (chunked) {
-        // Calculate total size for chunk header
-        size_t totalSize = 0;
-        for (auto& piece: pieces) {
-          totalSize += piece.size();
-        }
-        auto chunkHeader = kj::str(kj::hex(totalSize), "\r\n");
-        co_await tunnel.write(chunkHeader.asBytes());
-        co_await tunnel.write(pieces);
-        co_await tunnel.write("\r\n"_kjb);
-      } else {
-        co_await tunnel.write(pieces);
-      }
-    }
-
-    kj::Promise<void> whenWriteDisconnected() override {
-      return tunnel.whenWriteDisconnected();
-    }
-
-   private:
-    // Ensure headers are written
-    kj::Promise<void> ensureHeadersWritten() {
-      if (!headersWritten) {
-        headersWritten = true;
-        co_await tunnel.write(serializedHeaders.asBytes());
-      }
-    }
-
-    kj::AsyncIoStream& tunnel;
-    kj::String serializedHeaders;
-    bool headersWritten;
-    bool chunked;
-  };
 };
 
 kj::Promise<kj::String> ContainerClient::getDockerBridgeGateway() {
@@ -409,18 +394,15 @@ kj::Promise<kj::String> ContainerClient::getDockerBridgeGateway() {
 }
 
 kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenAddress) {
-  // Create header table for HTTP parsing
-  auto headerTable = kj::heap<kj::HttpHeaderTable>();
-  auto& headerTableRef = *headerTable;
-  egressHeaderTable = kj::mv(headerTable);
-
   // Create the egress HTTP service
-  auto service = kj::heap<EgressHttpService>(*this, headerTableRef);
+  auto service = kj::heap<EgressHttpService>(*this, headerTable);
 
   // Create the HTTP server
-  auto httpServer = kj::heap<kj::HttpServer>(timer, headerTableRef, *service);
+  auto httpServer = kj::heap<kj::HttpServer>(timer, headerTable, *service);
   auto& httpServerRef = *httpServer;
-  egressHttpServer = kj::mv(httpServer);
+
+  // Attach service to httpServer so ownership is clear - httpServer owns service
+  egressHttpServer = httpServer.attach(kj::mv(service));
 
   // Listen on the Docker bridge gateway IP with port 0 to let the OS pick a free port
   auto addr = co_await network.parseAddress(kj::str(listenAddress, ":0"));
@@ -430,11 +412,10 @@ kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenA
   uint16_t chosenPort = listener->getPort();
 
   // Run the server in the background - this promise never completes normally
-  // We need to detach it and return the port
   egressListenerTask =
       httpServerRef.listenHttp(*listener)
-          .attach(kj::mv(listener), kj::mv(service))
-          .eagerlyEvaluate([](kj::Exception&& e) { LOG_EXCEPTION("Error in egress listener", e); });
+          .attach(kj::mv(listener))
+          .eagerlyEvaluate([](kj::Exception&& e) { LOG_EXCEPTION("Workerd could not listen in the TCP port to proxy traffic off the docker container", e); });
 
   co_return chosenPort;
 }
@@ -442,7 +423,6 @@ kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenA
 void ContainerClient::stopEgressListener() {
   egressListenerTask = kj::none;
   egressHttpServer = kj::none;
-  egressHeaderTable = kj::none;
 }
 
 kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Network& network,
@@ -844,13 +824,57 @@ kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
   KJ_UNIMPLEMENTED("listenTcp not implemented for Docker containers - use port mapping instead");
 }
 
+kj::Maybe<workerd::IoChannelFactory::SubrequestChannel*> ContainerClient::findEgressMapping(
+    kj::StringPtr destAddr,
+    uint16_t defaultPort) {
+  auto hostAndPort = stripPort(destAddr);
+  uint16_t port = hostAndPort.port.orDefault(defaultPort);
+
+  struct sockaddr_storage ss;
+  memset(&ss, 0, sizeof(ss));
+
+  auto* sin = reinterpret_cast<struct sockaddr_in*>(&ss);
+  auto* sin6 = reinterpret_cast<struct sockaddr_in6*>(&ss);
+
+  // This is kind of awful. We could theoretically have a CidrRange
+  // parse this, but we don't have a way to compare two CidrRanges.
+  // Ideally, KJ would have a library to parse IPs, and we are able to have a cidr.includes(ip) method.
+  if (inet_pton(AF_INET, hostAndPort.host.cStr(), &sin->sin_addr) == 1) {
+    ss.ss_family = AF_INET;
+    sin->sin_port = htons(port);
+  } else if (inet_pton(AF_INET6, hostAndPort.host.cStr(), &sin6->sin6_addr) == 1) {
+    ss.ss_family = AF_INET6;
+    sin6->sin6_port = htons(port);
+  } else {
+    JSG_KJ_EXCEPTION(DISCONNECTED, Error,
+          "host is an invalid address");
+  }
+
+  // Find a matching mapping
+  for (auto& mapping : egressMappings) {
+    if (mapping.cidr.matches(reinterpret_cast<struct sockaddr*>(&ss))) {
+      // CIDR matches, now check port.
+      // If the port is 0, we match anything.
+      if (mapping.port == 0 || mapping.port == port) {
+        return mapping.channel.get();
+      }
+    }
+  }
+
+  return kj::none;
+}
+
 kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   auto params = context.getParams();
-  auto addr = kj::str(params.getHostPort());
+  auto hostPortStr = kj::str(params.getHostPort());
   auto tokenBytes = params.getChannelToken();
   JSG_REQUIRE(containerEgressInterceptorImage != "", Error, "should be set for setEgressHttp");
 
-  // Wait for any previous setEgressHttp call to complete (serializes sidecar setup)
+  auto parsed = parseHostPort(hostPortStr);
+  uint16_t port = parsed.port.orDefault(80);
+  auto cidr = kj::mv(parsed.cidr);
+
+  // Wait for any previous setEgressHttp call to complete
   KJ_IF_SOME(lock, egressSetupLock) {
     co_await lock.addBranch();
   }
@@ -887,8 +911,11 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
       workerd::IoChannelFactory::ChannelTokenUsage::RPC, tokenBytes);
 
   // Store the mapping
-  egressMappings.upsert(kj::mv(addr), kj::mv(subrequestChannel),
-      [](auto& existing, auto&& newValue) { existing = kj::mv(newValue); });
+  egressMappings.add(EgressMapping{
+    .cidr = kj::mv(cidr),
+    .port = port,
+    .channel = kj::mv(subrequestChannel),
+  });
 
   co_return;
 }

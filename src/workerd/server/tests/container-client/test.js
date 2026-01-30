@@ -317,14 +317,19 @@ export class DurableObjectExample extends DurableObject {
 
     // Set up egress TCP mapping to route requests to the binding
     // This registers the binding's channel token with the container runtime
-    container.setEgressHttp(
+    await container.interceptOutboundHttp(
       '11.0.0.1:9999',
       this.ctx.exports.TestService({ props: { id: 1 } })
     );
 
-    container.setEgressHttp(
+    await container.interceptOutboundHttp(
       '11.0.0.2:9999',
       this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    // we catch all HTTP requests to port 80
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 3 } })
     );
 
     {
@@ -346,11 +351,121 @@ export class DurableObjectExample extends DurableObject {
       assert.equal(response.status, 200);
       assert.equal(await response.text(), 'hello binding: 2');
     }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '15.0.0.2:80' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 3');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '[111::]:80' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 3');
+    }
+  }
+
+  async testInterceptWebSocket() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    // Start container with WebSocket proxy mode enabled
+    container.start({
+      env: { WS_ENABLED: 'true', WS_PROXY_TARGET: '11.0.0.1:9999' },
+    });
+
+    // Wait for container to be available
+    await this.ping();
+
+    assert.strictEqual(container.running, true);
+
+    // Set up egress mapping to route WebSocket requests to the binding
+    await container.interceptOutboundHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 42 } })
+    );
+
+    // Connect to container's /ws endpoint which proxies to the intercepted address
+    // Flow: DO -> container:8080/ws -> container connects to 11.0.0.1:9999/ws
+    //       -> sidecar intercepts -> workerd -> TestService worker binding
+    const res = await container.getTcpPort(8080).fetch('http://foo/ws', {
+      headers: {
+        Upgrade: 'websocket',
+        Connection: 'Upgrade',
+        'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
+        'Sec-WebSocket-Version': '13',
+      },
+    });
+
+    // Should get WebSocket upgrade response
+    assert.strictEqual(res.status, 101);
+    assert.strictEqual(res.headers.get('upgrade'), 'websocket');
+    assert.strictEqual(!!res.webSocket, true);
+
+    const ws = res.webSocket;
+    ws.accept();
+
+    // Listen for response
+    const messagePromise = new Promise((resolve) => {
+      ws.addEventListener(
+        'message',
+        (event) => {
+          resolve(event.data);
+        },
+        { once: true }
+      );
+    });
+
+    // Send a test message - should go through the whole chain and come back
+    ws.send('Hello through intercept!');
+
+    // Should receive response from TestService binding with id 42
+    const response = new TextDecoder().decode(await messagePromise);
+    assert.strictEqual(response, 'Binding 42: Hello through intercept!');
+
+    ws.close();
+    await container.destroy();
   }
 }
 
 export class TestService extends WorkerEntrypoint {
-  fetch() {
+  fetch(request) {
+    // Check if this is a WebSocket upgrade request
+    const upgradeHeader = request.headers.get('Upgrade');
+    if (upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') {
+      // Handle WebSocket upgrade
+      const [client, server] = Object.values(new WebSocketPair());
+
+      server.accept();
+
+      server.addEventListener('message', (event) => {
+        // Echo back with binding id prefix
+        server.send(
+          `Binding ${this.ctx.props.id}: ${new TextDecoder().decode(event.data)}`
+        );
+      });
+
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+      });
+    }
+
+    // Regular HTTP request
     return new Response('hello binding: ' + this.ctx.props.id);
   }
 }
@@ -494,5 +609,14 @@ export const testSetEgressHttp = {
     const id = env.MY_CONTAINER.idFromName('testSetEgressHttp');
     const stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressHttp();
+  },
+};
+
+// Test WebSocket through interceptOutboundHttp - DO -> container -> worker binding via WebSocket
+export const testInterceptWebSocket = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testInterceptWebSocket');
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInterceptWebSocket();
   },
 };
