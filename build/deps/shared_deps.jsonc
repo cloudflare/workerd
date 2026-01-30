@@ -1,6 +1,10 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
+    {
+      "name": "ada-url",
+      "type": "bazel_dep"
+    },
     //buildifier
     // Version is frozen to avoid to keep formatting consistent.
     {
