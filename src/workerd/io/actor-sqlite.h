@@ -96,6 +96,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
       SpanParent parentSpan,
+      kj::Date currentTime,
       bool noCache = false,
       kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
