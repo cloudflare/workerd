@@ -26,12 +26,11 @@ SqlStorage::~SqlStorage() {}
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
   auto& context = IoContext::current();
-  auto span = context.makeTraceSpan("durable_object_storage_exec"_kjc);
-  auto userSpan = context.makeUserTraceSpan("durable_object_storage_exec"_kjc);
-  userSpan.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
-  userSpan.setTag("db.operation.name"_kjc, "exec"_kjc);
-  userSpan.setTag("db.query.text"_kjc, kj::str(querySql));
-  userSpan.setTag(
+  TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_exec"_kjc);
+  traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
+  traceContext.setTag("db.operation.name"_kjc, "exec"_kjc);
+  traceContext.setTag("db.query.text"_kjc, kj::str(querySql));
+  traceContext.setTag(
       "cloudflare.durable_object.query.bindings"_kjc, static_cast<int64_t>(bindings.size()));
 
   // Internalize the string, so that the cache can be keyed by string identity rather than content.
@@ -57,15 +56,13 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   // In order to get accurate statistics, we have to keep the spans around until the query is
   // actually done, which for read queries that iterate over a cursor won't be until later.
   kj::Maybe<kj::Function<void(Cursor&)>> doneCallback;
-  if (span.isObserved() || userSpan.isObserved()) {
-    doneCallback = [span = kj::mv(span), userSpan = context.addObject(kj::heap(kj::mv(userSpan)))](
+  if (traceContext.isObserved()) {
+    doneCallback = [traceContext = context.addObject(kj::heap(kj::mv(traceContext)))](
                        Cursor& cursor) mutable {
       int64_t rowsRead = cursor.getRowsRead();
       int64_t rowsWritten = cursor.getRowsWritten();
-      span.setTag("rows_read"_kjc, rowsRead);
-      span.setTag("rows_written"_kjc, rowsWritten);
-      userSpan->setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
-      userSpan->setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
+      traceContext->setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
+      traceContext->setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
     };
   }
 
@@ -98,19 +95,15 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
   auto& context = IoContext::current();
-  auto span = context.makeTraceSpan("durable_object_storage_ingest"_kjc);
-  auto userSpan = context.makeUserTraceSpan("durable_object_storage_ingest"_kjc);
+  TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_ingest"_kjc);
   SqliteDatabase::Regulator& regulator = *this;
   auto result = getDb(js).ingestSql(regulator, querySql);
 
-  span.setTag("rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
-  span.setTag("rows_written"_kjc, static_cast<int64_t>(result.rowsWritten));
-  span.setTag("statement_count"_kjc, static_cast<int64_t>(result.statementCount));
-  userSpan.setTag(
+  traceContext.setTag(
       "cloudflare.durable_object.response.rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
-  userSpan.setTag("cloudflare.durable_object.response.rows_written"_kjc,
+  traceContext.setTag("cloudflare.durable_object.response.rows_written"_kjc,
       static_cast<int64_t>(result.rowsWritten));
-  userSpan.setTag("cloudflare.durable_object.response.statement_count"_kjc,
+  traceContext.setTag("cloudflare.durable_object.response.statement_count"_kjc,
       static_cast<int64_t>(result.statementCount));
 
   return IngestResult(
@@ -127,15 +120,17 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString
 }
 
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
-  auto userSpan =
-      IoContext::current().makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
-  userSpan.setTag("db.operation.name"_kjc, "getDatabaseSize"_kjc);
+  auto& context = IoContext::current();
+  TraceContext traceContext =
+      context.makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
+  traceContext.setTag("db.operation.name"_kjc, "getDatabaseSize"_kjc);
   auto& db = getDb(js);
   int64_t pages = execMemoized(db, pragmaPageCount,
       "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
                       .getInt64(0);
   auto dbSize = pages * getPageSize(db);
-  userSpan.setTag("cloudflare.durable_object.response.db_size"_kjc, static_cast<int64_t>(dbSize));
+  traceContext.setTag(
+      "cloudflare.durable_object.response.db_size"_kjc, static_cast<int64_t>(dbSize));
   return dbSize;
 }
 

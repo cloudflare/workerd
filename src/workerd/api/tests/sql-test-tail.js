@@ -37,6 +37,8 @@ export const test = {
       durable_object_storage_setAlarm: 2,
       durable_object_storage_getAlarm: 1,
       testSessionsAPIBookmark: 20,
+      durable_object_storage_getCurrentBookmark: 20,
+      durable_object_storage_waitForBookmark: 19,
     });
   },
 };
