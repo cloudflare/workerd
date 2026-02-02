@@ -320,13 +320,14 @@ def _is_js_instance(val, js_cls_name):
     return hasattr(val, "constructor") and val.constructor.name == js_cls_name
 
 
-def _preserve_request_header_commas() -> bool:
-    try:
-        import _cloudflare_compat_flags as compat_flags
-    except Exception:
-        return False
+try:
+    import _cloudflare_compat_flags
+except ImportError:
+    _cloudflare_compat_flags = object()
 
-    return bool(getattr(compat_flags, "python_request_headers_preserve_commas", False))
+
+def get_compat_flag(flag: str) -> bool:
+    return getattr(_cloudflare_compat_flags, flag, False)
 
 
 def _to_js_headers(headers: Headers):
@@ -786,7 +787,7 @@ class Request:
         import http.client
 
         result = http.client.HTTPMessage()
-        if not _preserve_request_header_commas():
+        if not get_compat_flag("python_request_headers_preserve_commas"):
             for key, val in self.js_object.headers:
                 result[key] = val.strip()
 
