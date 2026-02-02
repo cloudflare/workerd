@@ -29,10 +29,11 @@ class Container: public jsg::Object {
     bool enableInternet = false;
     jsg::Optional<jsg::Dict<kj::String>> env;
     jsg::Optional<int64_t> hardTimeout;
+    jsg::Optional<kj::Array<kj::String>> hostNamespaces;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
-    JSG_STRUCT(entrypoint, enableInternet, env, hardTimeout);
+    JSG_STRUCT(entrypoint, enableInternet, env, hardTimeout, hostNamespaces);
     JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
       if (flags.getWorkerdExperimental()) {
         JSG_TS_OVERRIDE(ContainerStartupOptions {
@@ -40,6 +41,7 @@ class Container: public jsg::Object {
           enableInternet: boolean;
           env?: Record<string, string>;
           hardTimeout?: number | bigint;
+          hostNamespaces?: HostNamespace[];
         });
       } else {
         JSG_TS_OVERRIDE(ContainerStartupOptions {
@@ -73,6 +75,7 @@ class Container: public jsg::Object {
     JSG_METHOD(signal);
     JSG_METHOD(getTcpPort);
     JSG_METHOD(setInactivityTimeout);
+    JSG_TS_DEFINE(type HostNamespace = "pid");
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

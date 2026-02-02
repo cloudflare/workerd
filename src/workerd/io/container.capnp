@@ -40,6 +40,15 @@ interface Container @0x9aaceefc06523bca {
     # The container will be forcefully terminated when this timeout expires, regardless of activity.
     # Unlike inactivity timeout, this is a hard deadline from container startup.
     # If 0 (default), no hard timeout is applied.
+
+    hostNamespaces @4 :List(Namespace);
+    # Configure which namespaces to share with the host
+
+    enum Namespace {
+      pid @0;
+      # Sharing the host PID namespace will make processes running outside of
+      # the container visible inside of the container.
+    }
   }
 
   monitor @2 () -> (exitCode: Int32);

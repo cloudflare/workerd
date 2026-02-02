@@ -260,6 +260,41 @@ export class DurableObjectExample extends DurableObject {
   getStatus() {
     return this.ctx.container.running;
   }
+
+  async testHostNamespaces() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+    assert.strictEqual(container.running, false);
+
+    // Test with valid hostNamespaces
+    container.start({
+      hostNamespaces: ['pid'],
+    });
+
+    assert.strictEqual(container.running, true);
+    await container.destroy();
+  }
+
+  async testHostNamespacesInvalid() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+    assert.strictEqual(container.running, false);
+
+    // Test with invalid hostNamespaces
+    assert.throws(() => {
+      container.start({
+        hostNamespaces: ['invalid'],
+      });
+    }, /Invalid hostNamespace value/);
+  }
 }
 
 export class DurableObjectExample2 extends DurableObjectExample {}
@@ -392,5 +427,23 @@ export const testSetInactivityTimeout = {
       // Container should still be running after DO exited
       await stub.expectRunning(true);
     }
+  },
+};
+
+// Test hostNamespaces with valid value
+export const testHostNamespaces = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testHostNamespaces');
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testHostNamespaces();
+  },
+};
+
+// Test hostNamespaces with invalid value
+export const testHostNamespacesInvalid = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testHostNamespacesInvalid');
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testHostNamespacesInvalid();
   },
 };
