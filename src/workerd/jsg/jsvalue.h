@@ -452,6 +452,7 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   enum class HasOption {
     NONE,
     OWN,
+    OWN_SKIP_INTERCEPTOR,
   };
 
   bool has(Lock& js, const JsValue& name, HasOption option = HasOption::NONE) KJ_WARN_UNUSED_RESULT;
@@ -965,6 +966,9 @@ inline bool JsObject::has(Lock& js, const JsValue& name, HasOption option) {
   if (option == HasOption::OWN) {
     KJ_ASSERT(name.inner->IsName());
     return check(inner->HasOwnProperty(js.v8Context(), name.inner.As<v8::Name>()));
+  } else if (option == HasOption::OWN_SKIP_INTERCEPTOR) {
+    KJ_ASSERT(name.inner->IsName());
+    return check(inner->HasRealNamedProperty(js.v8Context(), name.inner.As<v8::Name>()));
   } else {
     return check(inner->Has(js.v8Context(), name.inner));
   }
