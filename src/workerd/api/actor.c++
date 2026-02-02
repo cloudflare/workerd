@@ -21,17 +21,17 @@ kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
 
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-    if (tracing.span.isObserved()) {
-      tracing.span.setTag("actor_id"_kjc, actorId.asPtr());
-    }
+    tracing.setTag("objectId"_kjc, actorId.asPtr());
 
     // Lazily initialize actorChannel
     if (actorChannel == kj::none) {
-      actorChannel = context.getColoLocalActorChannel(channelId, actorId, tracing.span);
+      actorChannel =
+          context.getColoLocalActorChannel(channelId, actorId, tracing.getInternalSpanParent());
     }
 
     return KJ_REQUIRE_NONNULL(actorChannel)
-        ->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+        ->startRequest(
+            {.cfBlobJson = kj::mv(cfStr), .parentSpan = tracing.getInternalSpanParent()});
   },
       {.inHouse = true,
         .wrapMetrics = true,
@@ -44,26 +44,26 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
 
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-    if (tracing.span.isObserved()) {
-      tracing.span.setTag("actor_id"_kjc, id->toString());
-    }
+    tracing.setTag("objectId"_kjc, id->toString());
 
     // Lazily initialize actorChannel
     if (actorChannel == kj::none) {
       KJ_SWITCH_ONEOF(channelIdOrFactory) {
         KJ_CASE_ONEOF(channelId, uint) {
-          actorChannel = context.getGlobalActorChannel(channelId, id->getInner(),
-              kj::mv(locationHint), mode, enableReplicaRouting, routingMode, tracing.span);
+          actorChannel =
+              context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint), mode,
+                  enableReplicaRouting, routingMode, tracing.getInternalSpanParent());
         }
         KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
           actorChannel = factory->getGlobalActor(id->getInner(), kj::mv(locationHint), mode,
-              enableReplicaRouting, routingMode, tracing.span);
+              enableReplicaRouting, routingMode, tracing.getInternalSpanParent());
         }
       }
     }
 
     return KJ_REQUIRE_NONNULL(actorChannel)
-        ->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+        ->startRequest(
+            {.cfBlobJson = kj::mv(cfStr), .parentSpan = tracing.getInternalSpanParent()});
   },
       {.inHouse = true,
         .wrapMetrics = true,
@@ -76,13 +76,12 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
 
   return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-    if (tracing.span.isObserved()) {
-      tracing.span.setTag("actor_id"_kjc, actorId.asPtr());
-    }
+    tracing.setTag("objectId"_kjc, actorId.asPtr());
 
     // Unlike in `GlobalActorOutgoingFactory`, we do not create this lazily, since our channel was
     // already open prior to this DO starting up.
-    return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+    return actorChannel->startRequest(
+        {.cfBlobJson = kj::mv(cfStr), .parentSpan = tracing.getInternalSpanParent()});
   },
       {.inHouse = true,
         .wrapMetrics = true,

@@ -11,8 +11,11 @@ import {
   type MarkdownDocument,
 } from 'cloudflare-internal:to-markdown-api';
 
+type AiSearchService = object;
+
 interface Fetcher {
   fetch: typeof fetch;
+  aiSearch: () => AiSearchService;
 }
 
 interface AiError {
@@ -421,6 +424,10 @@ export class Ai {
 
   autorag(autoragId?: string): AutoRAG {
     return new AutoRAG(this.#fetcher, autoragId);
+  }
+
+  aiSearch(): AiSearchService {
+    return this.#fetcher.aiSearch();
   }
 }
 

@@ -7,11 +7,6 @@ load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
-config_setting(
-    name = "is_linux",
-    constraint_values = ["@platforms//os:linux"],
-)
-
 # Flag that can be used to force-disable tcmalloc. Mainly used for ASAN builds.
 # TODO(cleanup): This feels ugly but I've exceeded my timebox for fighting Bazel for now.
 bool_flag(
@@ -24,11 +19,21 @@ config_setting(
     flag_values = {"use_tcmalloc": "True"},
 )
 
+bool_flag(
+    name = "use_transpiler",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "set_use_transpiler",
+    flag_values = {"use_transpiler": "True"},
+)
+
 selects.config_setting_group(
     name = "really_use_tcmalloc",
     match_all = [
         ":set_use_tcmalloc",
-        ":is_linux",
+        "//:is_linux",
     ],
 )
 
@@ -165,6 +170,10 @@ wd_cc_library(
         "//src/workerd/api:worker-loader",
         "//src/workerd/io:promise-wrapper",
     ],
+    local_defines = select({
+        ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
@@ -176,7 +185,6 @@ wd_cc_library(
         "//src/node",
         "//src/pyodide:pyodide_static",
         "//src/pyodide:python-entrypoint",
-        "//src/rust/transpiler",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:hyperdrive",
         "//src/workerd/api:memory-cache",
@@ -190,7 +198,10 @@ wd_cc_library(
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
-    ],
+    ] + select({
+        ":set_use_transpiler": ["//src/rust/transpiler"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_cc_library(

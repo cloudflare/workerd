@@ -11,7 +11,7 @@ namespace workerd::api {
 // JavaScript-accessible span class that manages span ownership through IoContext
 class JsSpan: public jsg::Object {
  public:
-  JsSpan(kj::Maybe<IoOwn<SpanBuilder>> span);
+  JsSpan(kj::Maybe<IoOwn<TraceContext>> span);
   ~JsSpan() noexcept(false);
 
   // Ends the span, marking its completion. Once ended, the span cannot be modified.
@@ -33,7 +33,7 @@ class JsSpan: public jsg::Object {
   }
 
  private:
-  kj::Maybe<IoOwn<SpanBuilder>> span;
+  kj::Maybe<IoOwn<TraceContext>> span;
 };
 
 // Module that provides tracing capabilities for Workers.

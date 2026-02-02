@@ -347,11 +347,17 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     // Do not allow the exception to escape the isolate without waiting for the output gate to
     // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
     return context.waitForOutputLocks().then(
+#ifdef WORKERD_USE_PERFETTO
         [exception = kj::mv(exception),
             flow = PERFETTO_TERMINATING_FLOW_FROM_POINTER(this)]() mutable -> kj::Promise<void> {
       TRACE_EVENT("workerd", "WorkerEntrypoint::request() after output lock wait", flow);
       return kj::mv(exception);
     });
+#else
+        [exception = kj::mv(exception)]() mutable -> kj::Promise<void> {
+      return kj::mv(exception);
+    });
+#endif  // defined(WORKERD_USE_PERFETTO)
   })
       .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest), &context]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.

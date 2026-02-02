@@ -161,7 +161,7 @@ class Worker: public kj::AtomicRefcounted {
           v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports)> compileBindings,
       IsolateObserver::StartType startType,
-      TraceParentContext spans,
+      SpanParent parentSpan,
       LockType lockType,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Duration&> startupTime = kj::none);

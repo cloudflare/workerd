@@ -290,6 +290,11 @@ export default {
     comment: 'Back/forward cache tests are browser-specific',
     omittedTests: true,
   },
+  'back-forward-cache-with-open-websocket-connection-and-close-it-in-pagehide.window.js':
+    {
+      comment: 'Back/forward cache tests are browser-specific',
+      omittedTests: true,
+    },
   'back-forward-cache-with-open-websocket-connection.window.js': {
     comment: 'Back/forward cache tests are browser-specific',
     omittedTests: true,
@@ -423,34 +428,5 @@ export default {
   },
   'send-many-64K-messages-with-backpressure.any.js': {
     replace: removeUseCapture,
-  },
-  // WebSocketStream is a tentative API and not yet implemented
-  'stream/tentative/abort.any.js': {
-    comment: 'WebSocketStream is not yet implemented',
-    omittedTests: true,
-  },
-  'stream/tentative/backpressure-receive.any.js': {
-    comment: 'WebSocketStream is not yet implemented',
-    omittedTests: true,
-  },
-  'stream/tentative/backpressure-send.any.js': {
-    comment: 'WebSocketStream is not yet implemented',
-    omittedTests: true,
-  },
-  'stream/tentative/close.any.js': {
-    comment: 'WebSocketStream is not yet implemented',
-    omittedTests: true,
-  },
-  'stream/tentative/constructor.any.js': {
-    comment: 'WebSocketStream is not yet implemented',
-    omittedTests: true,
-  },
-  'stream/tentative/remote-close.any.js': {
-    comment: 'WebSocketStream is not yet implemented',
-    omittedTests: true,
-  },
-  'stream/tentative/websocket-error.any.js': {
-    comment: 'WebSocketStream is not yet implemented',
-    omittedTests: true,
   },
 } satisfies TestRunnerConfig;

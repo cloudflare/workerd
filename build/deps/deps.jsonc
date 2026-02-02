@@ -1,10 +1,6 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
-    {
-      "name": "ada-url",
-      "type": "bazel_dep"
-    },
     // BoringSSL is more likely to break than other dependencies, because our downstream build uses
     // a custom-built version of BoringSSL in FIPS mode.
     {
@@ -109,17 +105,6 @@
       "repo": "simdutf",
       "build_file": "//:build/BUILD.simdutf",
       "file_regex": "singleheader.zip"
-    },
-    // TODO: wpt was temporarily removed from shared_deps.jsonc because it would require
-    // workerd to be fully converted to bzlmod before the internal repo can load it.
-    {
-      "name": "wpt",
-      "type": "github_release",
-      "owner": "cloudflare",
-      "repo": "workerd-tools",
-      "file_regex": "wpt-.*.tar.gz",
-      "build_file": "@workerd//:build/BUILD.wpt",
-      "freeze_version": "wpt-c1ad85a22"
     },
     // This should match the version specified in V8 DEPS, but in practice it is generally acceptable
     // for it to be behind – zlib is very stable and its API has not changed in a long time, most

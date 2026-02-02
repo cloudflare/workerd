@@ -90,6 +90,7 @@ export default {
       'javascript: URL without an opaque path',
       'javascript: URL containing a JavaScript string split over path and query',
       'javascript: URL containing a JavaScript string split over path and query and has a U+000A in scheme',
+      'javascript: URL with extra slashes at the start',
     ],
   },
   'percent-encoding.window.js': {

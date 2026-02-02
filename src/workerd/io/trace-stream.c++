@@ -24,13 +24,17 @@ namespace {
   V(CFJSON, "cfJson")                                                                              \
   V(CLOSE, "close")                                                                                \
   V(CODE, "code")                                                                                  \
+  V(COUNT, "count")                                                                                \
   V(CPUTIME, "cpuTime")                                                                            \
   V(CRON, "cron")                                                                                  \
   V(CUSTOM, "custom")                                                                              \
   V(DAEMONDOWN, "daemonDown")                                                                      \
   V(DEBUG, "debug")                                                                                \
   V(DIAGNOSTICCHANNEL, "diagnosticChannel")                                                        \
+  V(DIAGNOSTIC, "diagnostic")                                                                      \
+  V(DIAGNOSTICSTYPE, "diagnosticsType")                                                            \
   V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
+  V(DROPPEDEVENTS, "droppedEvents")                                                                \
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
@@ -76,6 +80,8 @@ namespace {
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
   V(STATUSCODE, "statusCode")                                                                      \
+  V(STREAMDIAGEVENT, "streamDiagEvent")                                                            \
+  V(STREAMDIAGNOSTIC, "streamDiagnostic")                                                          \
   V(TAG, "tag")                                                                                    \
   V(TIMESTAMP, "timestamp")                                                                        \
   V(TRACEID, "traceId")                                                                            \
@@ -485,6 +491,19 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   return obj;
 }
 
+jsg::JsValue ToJs(jsg::Lock& js, const StreamDiagnosticsEvent& streamDiag, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, STREAMDIAGNOSTIC_STR));
+  // At present we only support the droppedEvents type.
+
+  // Handle droppedEvents
+  auto droppedEventsDiagnostic = js.obj();
+  droppedEventsDiagnostic.set(js, DIAGNOSTICSTYPE_STR, cache.get(js, DROPPEDEVENTS_STR));
+  droppedEventsDiagnostic.set(js, COUNT_STR, js.num(streamDiag.droppedEventsCount));
+  obj.set(js, DIAGNOSTIC_STR, kj::mv(droppedEventsDiagnostic));
+  return obj;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const Return& ret, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, RETURN_STR));
@@ -533,6 +552,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(log, Log) {
       obj.set(js, EVENT_STR, ToJs(js, log, cache));
     }
+    KJ_CASE_ONEOF(diagEvent, StreamDiagnosticsEvent) {
+      obj.set(js, EVENT_STR, ToJs(js, diagEvent, cache));
+    }
     KJ_CASE_ONEOF(ret, Return) {
       obj.set(js, EVENT_STR, ToJs(js, ret, cache));
     }
@@ -568,6 +590,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, Log) {
       return LOG_STR;
+    }
+    KJ_CASE_ONEOF(_, StreamDiagnosticsEvent) {
+      return STREAMDIAGEVENT_STR;
     }
     KJ_CASE_ONEOF(_, Return) {
       return RETURN_STR;
@@ -1004,7 +1029,7 @@ TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
     : inner(kj::mv(pending)),
       waitUntilTasks(waitUntilTasks) {}
 
-bool TailStreamWriter::reportImpl(TailEvent&& event) {
+bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   // In reportImpl, our inner state must be active.
   auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Vector<kj::Own<Active>>>());
 
@@ -1030,13 +1055,35 @@ bool TailStreamWriter::reportImpl(TailEvent&& event) {
   bool isClosing = event.event.is<Outcome>();
   // Deliver the event to the queue and make sure we are processing.
   for (auto& active: actives) {
-    // Optimization: Elide copy for last tail worker, helpful for common case of only one STW
-    // being present.
-    if (&active == &actives.back()) {
-      active->queue.push(kj::mv(event));
+    // Only queue the event if we don't have an excessive queue size yet. Return and Outcome
+    // events are only provided once and thus won't be dropped.
+    if (active->queueSize < maxQueueSize || event.event.is<Outcome>() || event.event.is<Return>()) {
+      // When we get to the outcome, no more events will be dropped. Inject an internal diagnostics
+      // event indicating how many events were dropped if applicable.
+      if (event.event.is<Outcome>() && active->droppedEvents > 0) {
+        StreamDiagnosticsEvent diag(active->droppedEvents);
+        TailEvent diagTailEvent(event.spanContext.clone(), event.invocationId, event.timestamp,
+            event.sequence, kj::mv(diag));
+        active->queue.push(kj::mv(diagTailEvent));
+        // Increment the outcome sequence number to keep things consistent.
+        event.sequence++;
+      }
+
+      // Optimization: Elide copy for last tail worker, helpful for common case of only one STW
+      // being present.
+      if (&active == &actives.back()) {
+        active->queue.push(kj::mv(event));
+      } else {
+        active->queue.push(event.clone());
+      }
+      // Adjust estimated queue size based on size hint and an arbitrary amount for serialization
+      // overhead. As long as this estimate is reasonably accurate, we won't need to check the
+      // size again when serializing the message.
+      active->queueSize += tailSerializationOverhead + sizeHint;
     } else {
-      active->queue.push(event.clone());
+      active->droppedEvents++;
     }
+
     if (!active->pumping) {
       waitUntilTasks.add(pump(kj::addRef(*active)));
     }
@@ -1088,6 +1135,9 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
       auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
       auto eventsBuilder = builder.initEvents(current->queue.size());
       size_t n = 0;
+
+      // We're synchronously draining the queue – reset its size.
+      current->queueSize = 0;
       current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
 
       auto result = co_await builder.send();
@@ -1128,8 +1178,10 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
   return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks);
 }
 
-void TailStreamWriter::report(
-    const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
+void TailStreamWriter::report(const InvocationSpanContext& context,
+    TailEvent::Event&& event,
+    kj::Date timestamp,
+    size_t sizeHint) {
   // Becomes a no-op if a terminal event (close) has been reported, or if the stream closed due to
   // not receiving a well-formed event handler. We need to disambiguate these cases as the former
   // indicates an implementation error resulting in trailing events whereas the latter case is
@@ -1195,7 +1247,7 @@ void TailStreamWriter::report(
 
   // The state is determined to be closing when it receives a terminal event (tracing::Outcome),
   // or if there are no active tail workers left, we can close the internal state at that point.
-  if (reportImpl(kj::mv(tailEvent))) {
+  if (reportImpl(kj::mv(tailEvent), sizeHint)) {
     inner = Closed{};
   }
 }

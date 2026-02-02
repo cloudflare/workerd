@@ -179,7 +179,13 @@ export default {
   'textdecoder-arguments.any.js': {},
   'textdecoder-byte-order-marks.any.js': {},
   'textdecoder-copy.any.js': {},
-  'textdecoder-eof.any.js': {},
+  'textdecoder-eof.any.js': {
+    comment: 'TextDecoder end-of-queue handling differs from spec',
+    expectedFailures: [
+      'TextDecoder end-of-queue handling',
+      'TextDecoder end-of-queue handling using stream: true',
+    ],
+  },
   'textdecoder-fatal-single-byte.any.js': {},
   'textdecoder-fatal-streaming.any.js': {},
   'textdecoder-fatal.any.js': {},

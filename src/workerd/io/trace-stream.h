@@ -67,6 +67,13 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
 // A utility class that receives tracing events and generates/reports TailEvents.
 class TailStreamWriter final {
  public:
+  // The maximum size of the queue, in bytes.
+  const size_t maxQueueSize = 2 * 1024 * 1024;
+  // The estimated overhead of TailEvent wrapping per message. This does not need to be very
+  // accurate, but should be enough to avoid allocating too much memory/hitting capnp RPC message
+  // size limits when sending many tiny events.
+  const size_t tailSerializationOverhead = 64;
+
   // The initial state of our tail worker writer is that it is pending the first onset event. During
   // this time we will only have a collection of WorkerInterface instances. When our first event is
   // reported (the onset) we will arrange to acquire tailStream capabilities from each then use
@@ -75,7 +82,10 @@ class TailStreamWriter final {
   TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  void report(const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date time);
+  void report(const InvocationSpanContext& context,
+      TailEvent::Event&& event,
+      kj::Date time,
+      size_t sizeHint);
 
  private:
   // Instances of Active are refcounted. The TailStreamWriter itself holds the initial ref. Whenever
@@ -87,6 +97,11 @@ class TailStreamWriter final {
     kj::Maybe<rpc::TailStreamTarget::Client> capability;
     bool pumping = false;
     bool onsetSeen = false;
+    // Estimated byte size of the queue, used to drop events to avoid excessive memory usage.
+    size_t queueSize = 0;
+    // The number of tail events we had to drop. We'll send a warning indicating this at the end of
+    // the stream.
+    uint32_t droppedEvents = 0;
     workerd::util::Queue<TailEvent> queue;
 
     Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
@@ -98,7 +113,9 @@ class TailStreamWriter final {
   kj::TaskSet& waitUntilTasks;
 
   static kj::Promise<void> pump(kj::Own<Active> current);
-  bool reportImpl(TailEvent&& event);
+  // Report an event to the tail stream writer.
+  // sizeHint: The approximate size of the event, in bytes.
+  bool reportImpl(TailEvent&& event, size_t sizeHint);
 
   uint32_t sequence = 0;
   bool onsetSeen = false;

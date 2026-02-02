@@ -83,6 +83,11 @@ wpt_test(
 wpt_test(
     name = "compression",
     config = "compression-test.ts",
+    start_server = True,
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     wpt_directory = "@wpt//:compression@module",
 )
 
