@@ -1199,7 +1199,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     liftKj(info, [&]() -> v8::Local<v8::Value> {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.This();
+      auto obj = info.HolderV2();
       auto& wrapper = TypeWrapper::from(isolate);
       if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
@@ -1249,7 +1249,7 @@ struct ResourceTypeBuilder {
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() {
-    prototype->SetHandler(
+    instance->SetHandler(
         WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>{});
   }
 
