@@ -1305,7 +1305,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         return object.get(js, jsName);
       } else {
         // This is an instance of a valid RPC target class.
-        if (object.has(js, jsName, jsg::JsObject::HasOption::OWN_SKIP_INTERCEPTOR)) {
+        if (object.has(js, jsName, jsg::JsObject::HasOption::OWN)) {
           // We do NOT allow own properties, only class properties.
           failLookup(kjName);
         }
