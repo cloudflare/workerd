@@ -5,7 +5,7 @@ const unitTests :Workerd.Config = (
     ( name = "nodejs-zstd-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "zstd-nodejs-test.js")
+          (name = "worker", esModule = embed "zlib-zstd-nodejs-test.js")
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "nodejs_compat_v2", "nodejs_zlib"],
       )

@@ -1,11 +1,6 @@
 import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
-import { promisify } from 'node:util';
 import zlib from 'node:zlib';
-
-// Helper function to promisify callbacks
-const zstdCompressAsync = promisify(zlib.zstdCompress);
-const zstdDecompressAsync = promisify(zlib.zstdDecompress);
 
 // Basic sync compress/decompress test
 export const zstdBasicSyncTest = {
@@ -25,11 +20,26 @@ export const zstdBasicSyncTest = {
 export const zstdBasicAsyncTest = {
   async test() {
     const input = Buffer.from('Hello, async Zstd compression!');
-    const compressed = await zstdCompressAsync(input);
+
+    const { promise: compressPromise, resolve: compressResolve, reject: compressReject } =
+      Promise.withResolvers();
+    zlib.zstdCompress(input, (err, res) => {
+      if (err) compressReject(err);
+      else compressResolve(res);
+    });
+    const compressed = await compressPromise;
+
     assert(Buffer.isBuffer(compressed), 'Compressed output should be a buffer');
     assert(compressed.length > 0, 'Compressed output should not be empty');
 
-    const decompressed = await zstdDecompressAsync(compressed);
+    const { promise: decompressPromise, resolve: decompressResolve, reject: decompressReject } =
+      Promise.withResolvers();
+    zlib.zstdDecompress(compressed, (err, res) => {
+      if (err) decompressReject(err);
+      else decompressResolve(res);
+    });
+    const decompressed = await decompressPromise;
+
     assert(Buffer.isBuffer(decompressed), 'Decompressed output should be a buffer');
     assert.strictEqual(decompressed.toString(), input.toString(), 'Round-trip should match');
   },
@@ -237,8 +247,14 @@ export const zstdCallbackErrorTest = {
   async test() {
     const invalidData = Buffer.from('invalid zstd data');
 
+    const { promise, resolve, reject } = Promise.withResolvers();
+    zlib.zstdDecompress(invalidData, (err, res) => {
+      if (err) reject(err);
+      else resolve(res);
+    });
+
     try {
-      await zstdDecompressAsync(invalidData);
+      await promise;
       assert.fail('Should have thrown');
     } catch (err) {
       assert(err instanceof Error, 'Should receive an error');
