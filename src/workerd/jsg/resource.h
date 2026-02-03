@@ -1182,7 +1182,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
   WildcardPropertyCallbacks()
       : v8::NamedPropertyHandlerConfiguration(getter,
             nullptr,
-            nullptr,
+            query,
             nullptr,
             nullptr,
             nullptr,
@@ -1192,6 +1192,13 @@ struct WildcardPropertyCallbacks<TypeWrapper,
                 static_cast<int>(v8::PropertyHandlerFlags::kNonMasking) |
                 static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
                 static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
+
+  // Query callback is needed for V8 to properly handle property creation with correct
+  // enumerable attributes when the interceptor is on the instance template.
+  static v8::Intercepted query(
+      v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info) {
+    return v8::Intercepted::kNo;
+  }
 
   static v8::Intercepted getter(
       v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
