@@ -97,6 +97,10 @@ wd_capnp_library(src = "compatibility-date-dump.schema.capnp")
 wd_cc_binary(
     name = "compatibility-date-dump",
     srcs = ["compatibility-date-dump.c++"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":compatibility-date-dump.schema_capnp",
@@ -110,6 +114,10 @@ wd_cc_binary(
 
 kj_test(
     src = "compatibility-date-dump-test.c++",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     deps = [
         ":compatibility-date-dump.schema_capnp",
         "//src/workerd/io",
