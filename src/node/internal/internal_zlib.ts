@@ -7,11 +7,17 @@ import {
   default as zlibUtil,
   type ZlibOptions,
   type BrotliOptions,
+  type ZstdOptions,
 } from 'node-internal:zlib';
 import { Buffer } from 'node-internal:internal_buffer';
 import { validateUint32 } from 'node-internal:validators';
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
-import { Zlib, Brotli, type ZlibBase } from 'node-internal:internal_zlib_base';
+import {
+  Zlib,
+  Brotli,
+  Zstd,
+  type ZlibBase,
+} from 'node-internal:internal_zlib_base';
 
 type ZlibResult = Buffer | { buffer: Buffer; engine: ZlibBase };
 type CompressCallback = (err: Error | null, result?: ZlibResult) => void;
@@ -26,6 +32,8 @@ const {
   CONST_UNZIP,
   CONST_BROTLI_DECODE,
   CONST_BROTLI_ENCODE,
+  CONST_ZSTD_ENCODE,
+  CONST_ZSTD_DECODE,
 } = zlibUtil;
 
 const ZlibMode = {
@@ -328,6 +336,88 @@ export function brotliCompress(
 
   processChunkCaptureError(new BrotliCompress(options), data, callback);
 }
+
+export function zstdDecompressSync(
+  data: ArrayBufferView | string,
+  options: ZstdOptions = {}
+): ZlibResult {
+  if (!options.info) {
+    // Fast path, where we send the data directly to C++
+    return Buffer.from(zlibUtil.zstdDecompressSync(data, options));
+  }
+
+  // Else, use the Engine class in sync mode
+  return processChunk(new ZstdDecompress(options), data);
+}
+
+export function zstdCompressSync(
+  data: ArrayBufferView | string,
+  options: ZstdOptions = {}
+): ZlibResult {
+  if (!options.info) {
+    // Fast path, where we send the data directly to C++
+    return Buffer.from(zlibUtil.zstdCompressSync(data, options));
+  }
+
+  // Else, use the Engine class in sync mode
+  return processChunk(new ZstdCompress(options), data);
+}
+
+export function zstdDecompress(
+  data: ArrayBufferView | string,
+  optionsOrCallback: ZstdOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
+): void {
+  const [options, callback] = normalizeArgs(
+    optionsOrCallback,
+    callbackOrUndefined
+  );
+
+  if (!options.info) {
+    // Fast path
+    zlibUtil.zstdDecompress(data, options, (res) => {
+      queueMicrotask(() => {
+        if (res instanceof Error) {
+          callback(res);
+        } else {
+          callback(null, Buffer.from(res));
+        }
+      });
+    });
+
+    return;
+  }
+
+  processChunkCaptureError(new ZstdDecompress(options), data, callback);
+}
+
+export function zstdCompress(
+  data: ArrayBufferView | string,
+  optionsOrCallback: ZstdOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
+): void {
+  const [options, callback] = normalizeArgs(
+    optionsOrCallback,
+    callbackOrUndefined
+  );
+
+  if (!options.info) {
+    // Fast path
+    zlibUtil.zstdCompress(data, options, (res) => {
+      queueMicrotask(() => {
+        if (res instanceof Error) {
+          callback(res);
+        } else {
+          callback(null, Buffer.from(res));
+        }
+      });
+    });
+
+    return;
+  }
+
+  processChunkCaptureError(new ZstdCompress(options), data, callback);
+}
 export class Gzip extends Zlib {
   constructor(options: ZlibOptions) {
     super(options, CONST_GZIP);
@@ -385,6 +475,18 @@ export class BrotliDecompress extends Brotli {
   }
 }
 
+export class ZstdCompress extends Zstd {
+  constructor(options: ZstdOptions) {
+    super(options, CONST_ZSTD_ENCODE);
+  }
+}
+
+export class ZstdDecompress extends Zstd {
+  constructor(options: ZstdOptions) {
+    super(options, CONST_ZSTD_DECODE);
+  }
+}
+
 const CLASS_BY_MODE: Record<
   (typeof ZlibMode)[keyof typeof ZlibMode],
   | typeof Deflate
@@ -439,4 +541,12 @@ export function createBrotliDecompress(
   options: BrotliOptions
 ): BrotliDecompress {
   return new BrotliDecompress(options);
+}
+
+export function createZstdCompress(options: ZstdOptions): ZstdCompress {
+  return new ZstdCompress(options);
+}
+
+export function createZstdDecompress(options: ZstdOptions): ZstdDecompress {
+  return new ZstdDecompress(options);
 }

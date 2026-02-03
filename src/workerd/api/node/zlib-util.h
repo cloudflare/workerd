@@ -10,6 +10,8 @@
 #include <brotli/decode.h>
 #include <brotli/encode.h>
 #include <zlib.h>
+#include <zstd.h>
+#include <zstd_errors.h>
 
 #include <kj/array.h>
 #include <kj/one-of.h>
@@ -71,7 +73,9 @@ enum class ZlibMode : ZlibModeValue {
   INFLATERAW,
   UNZIP,
   BROTLI_DECODE,
-  BROTLI_ENCODE
+  BROTLI_ENCODE,
+  ZSTD_ENCODE,
+  ZSTD_DECODE
 };
 
 // When possible, we intentionally override chunkSize to a value that is likely to perform better
@@ -283,6 +287,76 @@ class BrotliDecoderContext final: public BrotliContext {
   kj::Own<BrotliDecoderStateStruct> state;
 };
 
+class ZstdContext {
+ public:
+  explicit ZstdContext(ZlibMode _mode): mode(_mode) {}
+  KJ_DISALLOW_COPY(ZstdContext);
+
+  void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
+  void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
+  void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
+  void setFlush(int flush);
+  kj::uint getAvailOut() const;
+  void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const;
+  void setMode(ZlibMode _mode) {
+    mode = _mode;
+  }
+
+  struct Options {
+    jsg::Optional<int> flush;
+    jsg::Optional<int> finishFlush;
+    jsg::Optional<kj::uint> chunkSize;
+    jsg::Optional<jsg::Dict<int>> params;
+    jsg::Optional<kj::uint> maxOutputLength;
+    jsg::Optional<uint64_t> pledgedSrcSize;
+    JSG_STRUCT(flush, finishFlush, chunkSize, params, maxOutputLength, pledgedSrcSize);
+  };
+
+ protected:
+  ZlibMode mode;
+  ZSTD_inBuffer input_{nullptr, 0, 0};
+  ZSTD_outBuffer output_{nullptr, 0, 0};
+  ZSTD_EndDirective flush_ = ZSTD_e_continue;
+};
+
+class ZstdEncoderContext final: public ZstdContext {
+ public:
+  static const ZlibMode Mode = ZlibMode::ZSTD_ENCODE;
+  explicit ZstdEncoderContext(ZlibMode _mode);
+  ~ZstdEncoderContext();
+  KJ_DISALLOW_COPY_AND_MOVE(ZstdEncoderContext);
+
+  void work();
+  kj::Maybe<CompressionError> initialize(uint64_t pledgedSrcSize);
+  kj::Maybe<CompressionError> resetStream();
+  kj::Maybe<CompressionError> setParams(int key, int value);
+  kj::Maybe<CompressionError> getError() const;
+
+ private:
+  size_t lastResult = 0;
+  ZSTD_CCtx* cctx_ = nullptr;
+  ZSTD_ErrorCode error_ = ZSTD_error_no_error;
+};
+
+class ZstdDecoderContext final: public ZstdContext {
+ public:
+  static const ZlibMode Mode = ZlibMode::ZSTD_DECODE;
+  explicit ZstdDecoderContext(ZlibMode _mode);
+  ~ZstdDecoderContext();
+  KJ_DISALLOW_COPY_AND_MOVE(ZstdDecoderContext);
+
+  void work();
+  kj::Maybe<CompressionError> initialize();
+  kj::Maybe<CompressionError> resetStream();
+  kj::Maybe<CompressionError> setParams(int key, int value);
+  kj::Maybe<CompressionError> getError() const;
+
+ private:
+  size_t lastResult = 0;
+  ZSTD_DCtx* dctx_ = nullptr;
+  ZSTD_ErrorCode error_ = ZSTD_error_no_error;
+};
+
 // Implements utilities in support of the Node.js Zlib
 class ZlibUtil final: public jsg::Object {
  public:
@@ -417,6 +491,37 @@ class ZlibUtil final: public jsg::Object {
     }
   };
 
+  template <typename CompressionContext>
+  class ZstdCompressionStream: public CompressionStream<CompressionContext> {
+   public:
+    explicit ZstdCompressionStream(
+        ZlibMode _mode, kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        : CompressionStream<CompressionContext>(_mode, kj::mv(externalMemoryTarget)) {}
+    KJ_DISALLOW_COPY_AND_MOVE(ZstdCompressionStream);
+    static jsg::Ref<ZstdCompressionStream> constructor(jsg::Lock& js, ZlibModeValue mode);
+
+    bool initialize(jsg::Lock& js,
+        jsg::BufferSource params,
+        jsg::BufferSource writeResult,
+        jsg::Function<void()> writeCallback,
+        jsg::Optional<uint64_t> pledgedSrcSize);
+
+    void params() {
+      // Currently a no-op, and not accessed from JS land.
+    }
+
+    JSG_RESOURCE_TYPE(ZstdCompressionStream) {
+      JSG_INHERIT(CompressionStream<CompressionContext>);
+
+      JSG_METHOD(initialize);
+      JSG_METHOD(params);
+    }
+
+    CompressionContext* context() {
+      return this->CompressionStream<CompressionContext>::context();
+    }
+  };
+
   using InputSource = kj::OneOf<jsg::NonCoercible<kj::String>, kj::Array<kj::byte>>;
   using CompressCallbackArg = kj::OneOf<jsg::JsValue, kj::Array<kj::byte>>;
   using CompressCallback = jsg::Function<void(CompressCallbackArg)>;
@@ -436,6 +541,12 @@ class ZlibUtil final: public jsg::Object {
   void brotliWithCallback(
       jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);
 
+  template <typename Context>
+  kj::Array<kj::byte> zstdSync(jsg::Lock& js, InputSource data, ZstdContext::Options options);
+  template <typename Context>
+  void zstdWithCallback(
+      jsg::Lock& js, InputSource data, ZstdContext::Options options, CompressCallback cb);
+
   JSG_RESOURCE_TYPE(ZlibUtil) {
     JSG_METHOD_NAMED(crc32, crc32Sync);
     JSG_METHOD(zlibSync);
@@ -446,9 +557,16 @@ class ZlibUtil final: public jsg::Object {
     JSG_METHOD_NAMED(brotliDecompress, template brotliWithCallback<BrotliDecoderContext>);
     JSG_METHOD_NAMED(brotliCompress, template brotliWithCallback<BrotliEncoderContext>);
 
+    JSG_METHOD_NAMED(zstdDecompressSync, template zstdSync<ZstdDecoderContext>);
+    JSG_METHOD_NAMED(zstdCompressSync, template zstdSync<ZstdEncoderContext>);
+    JSG_METHOD_NAMED(zstdDecompress, template zstdWithCallback<ZstdDecoderContext>);
+    JSG_METHOD_NAMED(zstdCompress, template zstdWithCallback<ZstdEncoderContext>);
+
     JSG_NESTED_TYPE(ZlibStream);
     JSG_NESTED_TYPE_NAMED(BrotliCompressionStream<BrotliEncoderContext>, BrotliEncoder);
     JSG_NESTED_TYPE_NAMED(BrotliCompressionStream<BrotliDecoderContext>, BrotliDecoder);
+    JSG_NESTED_TYPE_NAMED(ZstdCompressionStream<ZstdEncoderContext>, ZstdEncoder);
+    JSG_NESTED_TYPE_NAMED(ZstdCompressionStream<ZstdDecoderContext>, ZstdDecoder);
 
     // zlib.constants (part of the API contract for node:zlib)
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_NO_FLUSH, Z_NO_FLUSH);
@@ -597,6 +715,54 @@ class ZlibUtil final: public jsg::Object {
         BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES);
     JSG_STATIC_CONSTANT_NAMED(
         CONST_BROTLI_DECODER_ERROR_UNREACHABLE, BROTLI_DECODER_ERROR_UNREACHABLE);
+
+    // Zstd mode constants
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_ENCODE, static_cast<ZlibModeValue>(ZlibMode::ZSTD_ENCODE));
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_DECODE, static_cast<ZlibModeValue>(ZlibMode::ZSTD_DECODE));
+
+    // Zstd flush directives
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_e_continue, ZSTD_e_continue);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_e_flush, ZSTD_e_flush);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_e_end, ZSTD_e_end);
+
+    // Zstd compression parameters
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_compressionLevel, ZSTD_c_compressionLevel);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_windowLog, ZSTD_c_windowLog);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_hashLog, ZSTD_c_hashLog);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_chainLog, ZSTD_c_chainLog);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_searchLog, ZSTD_c_searchLog);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_minMatch, ZSTD_c_minMatch);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_targetLength, ZSTD_c_targetLength);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_strategy, ZSTD_c_strategy);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_enableLongDistanceMatching,
+        ZSTD_c_enableLongDistanceMatching);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_ldmHashLog, ZSTD_c_ldmHashLog);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_ldmMinMatch, ZSTD_c_ldmMinMatch);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_ldmBucketSizeLog, ZSTD_c_ldmBucketSizeLog);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_ldmHashRateLog, ZSTD_c_ldmHashRateLog);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_contentSizeFlag, ZSTD_c_contentSizeFlag);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_checksumFlag, ZSTD_c_checksumFlag);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_dictIDFlag, ZSTD_c_dictIDFlag);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_nbWorkers, ZSTD_c_nbWorkers);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_jobSize, ZSTD_c_jobSize);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_overlapLog, ZSTD_c_overlapLog);
+
+    // Zstd decompression parameters
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_d_windowLogMax, ZSTD_d_windowLogMax);
+
+    // Zstd strategy constants
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_fast, ZSTD_fast);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_dfast, ZSTD_dfast);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_greedy, ZSTD_greedy);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_lazy, ZSTD_lazy);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_lazy2, ZSTD_lazy2);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_btlazy2, ZSTD_btlazy2);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_btopt, ZSTD_btopt);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_btultra, ZSTD_btultra);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_btultra2, ZSTD_btultra2);
+
+    // Zstd default compression level
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_CLEVEL_DEFAULT, ZSTD_CLEVEL_DEFAULT);
   }
 };
 
@@ -604,10 +770,15 @@ class ZlibUtil final: public jsg::Object {
   api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream,                                            \
       api::node::ZlibUtil::BrotliCompressionStream<api::node::BrotliEncoderContext>,               \
       api::node::ZlibUtil::BrotliCompressionStream<api::node::BrotliDecoderContext>,               \
+      api::node::ZlibUtil::ZstdCompressionStream<api::node::ZstdEncoderContext>,                   \
+      api::node::ZlibUtil::ZstdCompressionStream<api::node::ZstdDecoderContext>,                   \
       api::node::ZlibUtil::CompressionStream<api::node::ZlibContext>,                              \
       api::node::ZlibUtil::CompressionStream<api::node::BrotliEncoderContext>,                     \
       api::node::ZlibUtil::CompressionStream<api::node::BrotliDecoderContext>,                     \
-      api::node::ZlibContext::Options, api::node::BrotliContext::Options
+      api::node::ZlibUtil::CompressionStream<api::node::ZstdEncoderContext>,                       \
+      api::node::ZlibUtil::CompressionStream<api::node::ZstdDecoderContext>,                       \
+      api::node::ZlibContext::Options, api::node::BrotliContext::Options,                          \
+      api::node::ZstdContext::Options
 
 }  // namespace workerd::api::node
 

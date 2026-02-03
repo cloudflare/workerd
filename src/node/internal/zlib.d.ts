@@ -36,6 +36,26 @@ export function brotliCompress(
   cb: InternalCompressCallback
 ): void;
 
+export function zstdDecompressSync(
+  data: ArrayBufferView | string,
+  options: ZstdOptions
+): ArrayBuffer;
+export function zstdDecompress(
+  data: ArrayBufferView | string,
+  options: ZstdOptions,
+  cb: InternalCompressCallback
+): void;
+
+export function zstdCompressSync(
+  data: ArrayBufferView | string,
+  options: ZstdOptions
+): ArrayBuffer;
+export function zstdCompress(
+  data: ArrayBufferView | string,
+  options: ZstdOptions,
+  cb: InternalCompressCallback
+): void;
+
 // zlib.constants (part of the API contract for node:zlib)
 export const CONST_Z_NO_FLUSH: number;
 export const CONST_Z_PARTIAL_FLUSH: number;
@@ -74,6 +94,8 @@ export const CONST_INFLATERAW: number;
 export const CONST_UNZIP: number;
 export const CONST_BROTLI_DECODE: number;
 export const CONST_BROTLI_ENCODE: number;
+export const CONST_ZSTD_ENCODE: number;
+export const CONST_ZSTD_DECODE: number;
 
 export const CONST_Z_MIN_WINDOWBITS: number;
 export const CONST_Z_MAX_WINDOWBITS: number;
@@ -150,6 +172,49 @@ export const CONST_BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2: number;
 export const CONST_BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES: number;
 export const CONST_BROTLI_DECODER_ERROR_UNREACHABLE: number;
 
+// Zstd flush directives
+export const CONST_ZSTD_e_continue: number;
+export const CONST_ZSTD_e_flush: number;
+export const CONST_ZSTD_e_end: number;
+
+// Zstd compression parameters
+export const CONST_ZSTD_c_compressionLevel: number;
+export const CONST_ZSTD_c_windowLog: number;
+export const CONST_ZSTD_c_hashLog: number;
+export const CONST_ZSTD_c_chainLog: number;
+export const CONST_ZSTD_c_searchLog: number;
+export const CONST_ZSTD_c_minMatch: number;
+export const CONST_ZSTD_c_targetLength: number;
+export const CONST_ZSTD_c_strategy: number;
+export const CONST_ZSTD_c_enableLongDistanceMatching: number;
+export const CONST_ZSTD_c_ldmHashLog: number;
+export const CONST_ZSTD_c_ldmMinMatch: number;
+export const CONST_ZSTD_c_ldmBucketSizeLog: number;
+export const CONST_ZSTD_c_ldmHashRateLog: number;
+export const CONST_ZSTD_c_contentSizeFlag: number;
+export const CONST_ZSTD_c_checksumFlag: number;
+export const CONST_ZSTD_c_dictIDFlag: number;
+export const CONST_ZSTD_c_nbWorkers: number;
+export const CONST_ZSTD_c_jobSize: number;
+export const CONST_ZSTD_c_overlapLog: number;
+
+// Zstd decompression parameters
+export const CONST_ZSTD_d_windowLogMax: number;
+
+// Zstd strategy constants
+export const CONST_ZSTD_fast: number;
+export const CONST_ZSTD_dfast: number;
+export const CONST_ZSTD_greedy: number;
+export const CONST_ZSTD_lazy: number;
+export const CONST_ZSTD_lazy2: number;
+export const CONST_ZSTD_btlazy2: number;
+export const CONST_ZSTD_btopt: number;
+export const CONST_ZSTD_btultra: number;
+export const CONST_ZSTD_btultra2: number;
+
+// Zstd default compression level
+export const CONST_ZSTD_CLEVEL_DEFAULT: number;
+
 export interface ZlibOptions {
   flush?: number | undefined;
   finishFlush?: number | undefined;
@@ -173,6 +238,21 @@ export interface BrotliOptions {
       }
     | undefined;
   maxOutputLength?: number | undefined;
+  // Not specified in NodeJS docs but the tests expect it
+  info?: boolean | undefined;
+}
+
+export interface ZstdOptions {
+  flush?: number | undefined;
+  finishFlush?: number | undefined;
+  chunkSize?: number | undefined;
+  params?:
+    | {
+        [key: number]: boolean | number;
+      }
+    | undefined;
+  maxOutputLength?: number | undefined;
+  pledgedSrcSize?: number | undefined;
   // Not specified in NodeJS docs but the tests expect it
   info?: boolean | undefined;
 }
@@ -243,6 +323,26 @@ export class BrotliEncoder extends CompressionStream {
     params: Uint32Array,
     writeResult: Uint32Array,
     writeCallback: () => void
+  ): boolean;
+  params(): void;
+}
+
+export class ZstdDecoder extends CompressionStream {
+  initialize(
+    params: Int32Array,
+    writeResult: Uint32Array,
+    writeCallback: () => void,
+    pledgedSrcSize?: number
+  ): boolean;
+  params(): void;
+}
+
+export class ZstdEncoder extends CompressionStream {
+  initialize(
+    params: Int32Array,
+    writeResult: Uint32Array,
+    writeCallback: () => void,
+    pledgedSrcSize?: number
   ): boolean;
   params(): void;
 }

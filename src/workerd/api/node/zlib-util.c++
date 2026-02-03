@@ -755,6 +755,238 @@ kj::Maybe<CompressionError> BrotliDecoderContext::getError() const {
   return kj::none;
 }
 
+// =======================================================================================
+// Zstd Implementation
+
+void ZstdContext::setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output) {
+  input_.src = input.begin();
+  input_.size = input.size();
+  input_.pos = 0;
+  output_.dst = output.begin();
+  output_.size = output.size();
+  output_.pos = 0;
+}
+
+void ZstdContext::setInputBuffer(kj::ArrayPtr<const kj::byte> input) {
+  input_.src = input.begin();
+  input_.size = input.size();
+  input_.pos = 0;
+}
+
+void ZstdContext::setOutputBuffer(kj::ArrayPtr<kj::byte> output) {
+  output_.dst = output.begin();
+  output_.size = output.size();
+  output_.pos = 0;
+}
+
+void ZstdContext::setFlush(int flush) {
+  flush_ = static_cast<ZSTD_EndDirective>(flush);
+}
+
+kj::uint ZstdContext::getAvailOut() const {
+  return output_.size - output_.pos;
+}
+
+void ZstdContext::getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const {
+  *availIn = input_.size - input_.pos;
+  *availOut = output_.size - output_.pos;
+}
+
+ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode): ZstdContext(_mode) {
+  cctx_ = ZSTD_createCCtx();
+}
+
+ZstdEncoderContext::~ZstdEncoderContext() {
+  if (cctx_ != nullptr) {
+    ZSTD_freeCCtx(cctx_);
+    cctx_ = nullptr;
+  }
+}
+
+kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSize) {
+  if (cctx_ == nullptr) {
+    cctx_ = ZSTD_createCCtx();
+  }
+
+  if (cctx_ == nullptr) {
+    return CompressionError(
+        "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
+  }
+
+  if (pledgedSrcSize != ZSTD_CONTENTSIZE_UNKNOWN) {
+    size_t result = ZSTD_CCtx_setPledgedSrcSize(cctx_, pledgedSrcSize);
+    if (ZSTD_isError(result)) {
+      error_ = ZSTD_getErrorCode(result);
+      return CompressionError(kj::str(ZSTD_getErrorName(result)),
+          kj::str("ERR_ZSTD_COMPRESSION_FAILED"), -1);
+    }
+  }
+
+  return kj::none;
+}
+
+void ZstdEncoderContext::work() {
+  JSG_REQUIRE(mode == ZlibMode::ZSTD_ENCODE, Error, "Mode should be ZSTD_ENCODE"_kj);
+  JSG_REQUIRE(cctx_ != nullptr, Error, "Zstd context should not be null"_kj);
+
+  lastResult = ZSTD_compressStream2(cctx_, &output_, &input_, flush_);
+
+  if (ZSTD_isError(lastResult)) {
+    error_ = ZSTD_getErrorCode(lastResult);
+  }
+}
+
+kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
+  if (cctx_ != nullptr) {
+    size_t result = ZSTD_CCtx_reset(cctx_, ZSTD_reset_session_only);
+    if (ZSTD_isError(result)) {
+      error_ = ZSTD_getErrorCode(result);
+      return CompressionError(kj::str(ZSTD_getErrorName(result)),
+          kj::str("ERR_ZSTD_COMPRESSION_FAILED"), -1);
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> ZstdEncoderContext::setParams(int key, int value) {
+  size_t result = ZSTD_CCtx_setParameter(cctx_, static_cast<ZSTD_cParameter>(key), value);
+  if (ZSTD_isError(result)) {
+    return CompressionError(
+        kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
+        "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);
+  }
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
+  if (error_ != ZSTD_error_no_error) {
+    return CompressionError(kj::str("Zstd compression failed: ", ZSTD_getErrorString(error_)),
+        kj::str("ERR_ZSTD_COMPRESSION_FAILED"), -1);
+  }
+
+  if (flush_ == ZSTD_e_end && lastResult != 0) {
+    // lastResult > 0 means more output is needed, which shouldn't happen at end
+    return CompressionError("Unexpected end of file"_kj, "Z_BUF_ERROR"_kj, Z_BUF_ERROR);
+  }
+
+  return kj::none;
+}
+
+ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode): ZstdContext(_mode) {
+  dctx_ = ZSTD_createDCtx();
+}
+
+ZstdDecoderContext::~ZstdDecoderContext() {
+  if (dctx_ != nullptr) {
+    ZSTD_freeDCtx(dctx_);
+    dctx_ = nullptr;
+  }
+}
+
+kj::Maybe<CompressionError> ZstdDecoderContext::initialize() {
+  if (dctx_ == nullptr) {
+    dctx_ = ZSTD_createDCtx();
+  }
+
+  if (dctx_ == nullptr) {
+    return CompressionError(
+        "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
+  }
+
+  return kj::none;
+}
+
+void ZstdDecoderContext::work() {
+  JSG_REQUIRE(mode == ZlibMode::ZSTD_DECODE, Error, "Mode should be ZSTD_DECODE"_kj);
+  JSG_REQUIRE(dctx_ != nullptr, Error, "Zstd context should not be null"_kj);
+
+  lastResult = ZSTD_decompressStream(dctx_, &output_, &input_);
+
+  if (ZSTD_isError(lastResult)) {
+    error_ = ZSTD_getErrorCode(lastResult);
+  }
+}
+
+kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
+  if (dctx_ != nullptr) {
+    size_t result = ZSTD_DCtx_reset(dctx_, ZSTD_reset_session_only);
+    if (ZSTD_isError(result)) {
+      error_ = ZSTD_getErrorCode(result);
+      return CompressionError(kj::str(ZSTD_getErrorName(result)),
+          kj::str("ERR_ZSTD_DECOMPRESSION_FAILED"), -1);
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> ZstdDecoderContext::setParams(int key, int value) {
+  size_t result = ZSTD_DCtx_setParameter(dctx_, static_cast<ZSTD_dParameter>(key), value);
+  if (ZSTD_isError(result)) {
+    return CompressionError(
+        kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
+        "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);
+  }
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> ZstdDecoderContext::getError() const {
+  if (error_ != ZSTD_error_no_error) {
+    return CompressionError(kj::str("Zstd decompression failed: ", ZSTD_getErrorString(error_)),
+        kj::str("ERR_ZSTD_DECOMPRESSION_FAILED"), -1);
+  }
+
+  // For decompression, lastResult == 0 means frame is complete
+  // If we have flush_ == ZSTD_e_end equivalent and there's input left, that's an error
+  if (flush_ == ZSTD_e_end && input_.pos < input_.size && lastResult == 0) {
+    // Frame completed but there's still input - could be trailing data
+  }
+
+  return kj::none;
+}
+
+template <typename CompressionContext>
+jsg::Ref<ZlibUtil::ZstdCompressionStream<CompressionContext>> ZlibUtil::ZstdCompressionStream<
+    CompressionContext>::constructor(jsg::Lock& js, ZlibModeValue mode) {
+  return js.alloc<ZstdCompressionStream>(static_cast<ZlibMode>(mode), js.getExternalMemoryTarget());
+}
+
+template <typename CompressionContext>
+bool ZlibUtil::ZstdCompressionStream<CompressionContext>::initialize(jsg::Lock& js,
+    jsg::BufferSource params,
+    jsg::BufferSource writeResult,
+    jsg::Function<void()> writeCallback,
+    jsg::Optional<uint64_t> pledgedSrcSize) {
+  this->initializeStream(kj::mv(writeResult), kj::mv(writeCallback));
+
+  uint64_t srcSize = pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
+
+  kj::Maybe<CompressionError> maybeError;
+  if constexpr (CompressionContext::Mode == ZlibMode::ZSTD_ENCODE) {
+    maybeError = this->context()->initialize(srcSize);
+  } else {
+    maybeError = this->context()->initialize();
+  }
+
+  KJ_IF_SOME(err, maybeError) {
+    this->emitError(js, kj::mv(err));
+    return false;
+  }
+
+  auto results = params.template asArrayPtr<int>();
+
+  for (size_t i = 0; i < results.size(); i++) {
+    if (results[i] == -1) {
+      continue;
+    }
+
+    KJ_IF_SOME(err, this->context()->setParams(i, results[i])) {
+      this->emitError(js, kj::mv(err));
+      return false;
+    }
+  }
+  return true;
+}
+
 template <typename CompressionContext>
 jsg::Ref<ZlibUtil::BrotliCompressionStream<CompressionContext>> ZlibUtil::BrotliCompressionStream<
     CompressionContext>::constructor(jsg::Lock& js, ZlibModeValue mode) {
@@ -934,6 +1166,72 @@ void ZlibUtil::brotliWithCallback(
   cb(js, kj::mv(res));
 }
 
+template <typename Context>
+kj::Array<kj::byte> ZlibUtil::zstdSync(
+    jsg::Lock& js, InputSource data, ZstdContext::Options opts) {
+  Context ctx(Context::Mode);
+
+  auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
+  auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
+
+  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, RangeError,
+      kj::str("The value of \"options.chunkSize\" is out of range. It must be >= ", Z_MIN_CHUNK,
+          " and <= ", Z_MAX_CHUNK, ". Received ", chunkSize));
+  JSG_REQUIRE(maxOutputLength >= 1 && maxOutputLength <= Z_MAX_CHUNK, RangeError,
+      kj::str("The value of \"options.maxOutputLength\" is out of range. It must be >= 1 and <= ",
+          Z_MAX_CHUNK, ". Received ", maxOutputLength));
+  GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
+
+  // Initialize the context
+  if constexpr (Context::Mode == ZlibMode::ZSTD_ENCODE) {
+    uint64_t pledgedSrcSize = opts.pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
+    KJ_IF_SOME(err, ctx.initialize(pledgedSrcSize)) {
+      JSG_FAIL_REQUIRE(Error, err.message);
+    }
+  } else {
+    KJ_IF_SOME(err, ctx.initialize()) {
+      JSG_FAIL_REQUIRE(Error, err.message);
+    }
+  }
+
+  // Set parameters
+  KJ_IF_SOME(params, opts.params) {
+    for (const auto& field: params.fields) {
+      KJ_IF_SOME(err, ctx.setParams(field.name.parseAs<int>(), field.value)) {
+        JSG_FAIL_REQUIRE(Error, err.message);
+      }
+    }
+  }
+
+  auto flush = opts.flush.orDefault(ZSTD_e_continue);
+  JSG_REQUIRE(ZSTD_e_continue <= flush && flush <= ZSTD_e_end, RangeError,
+      kj::str("The value of \"options.flush\" is out of range. It must be >= ", ZSTD_e_continue,
+          " and <= ", ZSTD_e_end, ". Received ", flush));
+
+  auto finishFlush = opts.finishFlush.orDefault(ZSTD_e_end);
+  JSG_REQUIRE(ZSTD_e_continue <= finishFlush && finishFlush <= ZSTD_e_end, RangeError,
+      kj::str("The value of \"options.finishFlush\" is out of range. It must be >= ",
+          ZSTD_e_continue, " and <= ", ZSTD_e_end, ". Received ", finishFlush));
+
+  ctx.setFlush(finishFlush);
+  ctx.setInputBuffer(getInputFromSource(data));
+  return syncProcessBuffer(ctx, result);
+}
+
+template <typename Context>
+void ZlibUtil::zstdWithCallback(
+    jsg::Lock& js, InputSource data, ZstdContext::Options options, CompressCallback cb) {
+  // Capture only relevant errors so they can be passed to the callback
+  auto res = js.tryCatch([&]() {
+    return CompressCallbackArg(zstdSync<Context>(js, kj::mv(data), kj::mv(options)));
+  }, [&](jsg::Value&& exception) {
+    return CompressCallbackArg(jsg::JsValue(exception.getHandle(js)));
+  });
+
+  // Ensure callback is invoked only once
+  cb(js, kj::mv(res));
+}
+
 #ifndef CREATE_TEMPLATE
 #define CREATE_TEMPLATE(T)                                                                         \
   template class ZlibUtil::CompressionStream<T>;                                                   \
@@ -947,9 +1245,14 @@ void ZlibUtil::brotliWithCallback(
 CREATE_TEMPLATE(ZlibContext)
 CREATE_TEMPLATE(BrotliEncoderContext)
 CREATE_TEMPLATE(BrotliDecoderContext)
+CREATE_TEMPLATE(ZstdEncoderContext)
+CREATE_TEMPLATE(ZstdDecoderContext)
 
 template class ZlibUtil::BrotliCompressionStream<BrotliEncoderContext>;
 template class ZlibUtil::BrotliCompressionStream<BrotliDecoderContext>;
+
+template class ZlibUtil::ZstdCompressionStream<ZstdEncoderContext>;
+template class ZlibUtil::ZstdCompressionStream<ZstdDecoderContext>;
 
 template kj::Array<kj::byte> ZlibUtil::brotliSync<BrotliEncoderContext>(
     jsg::Lock& js, InputSource data, BrotliContext::Options opts);
@@ -959,6 +1262,15 @@ template void ZlibUtil::brotliWithCallback<BrotliEncoderContext>(
     jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);
 template void ZlibUtil::brotliWithCallback<BrotliDecoderContext>(
     jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);
+
+template kj::Array<kj::byte> ZlibUtil::zstdSync<ZstdEncoderContext>(
+    jsg::Lock& js, InputSource data, ZstdContext::Options opts);
+template kj::Array<kj::byte> ZlibUtil::zstdSync<ZstdDecoderContext>(
+    jsg::Lock& js, InputSource data, ZstdContext::Options opts);
+template void ZlibUtil::zstdWithCallback<ZstdEncoderContext>(
+    jsg::Lock& js, InputSource data, ZstdContext::Options options, CompressCallback cb);
+template void ZlibUtil::zstdWithCallback<ZstdDecoderContext>(
+    jsg::Lock& js, InputSource data, ZstdContext::Options options, CompressCallback cb);
 #undef CREATE_TEMPLATE
 #endif
 }  // namespace workerd::api::node
