@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "14.3.127.16"
+VERSION = "14.5.201.6"
 
-INTEGRITY = "sha256-4dMw1ahFEEgUAyDlDgbintH78BizOk4VWMiCRrWt6Rs="
+INTEGRITY = "sha256-IL8zV72yG5TUbY8HHW9fPoaOYNLiY8FtRkPtkJ6SiLo="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -51,9 +51,8 @@ PATCHES = [
     "0026-Implement-additional-Exception-construction-methods.patch",
     "0027-Export-icudata-file-to-facilitate-embedding-it.patch",
     "0028-bind-icu-to-googlesource.patch",
-    "0029-optimize-ascii-fast-path-in-WriteUtf8V2.patch",
-    "0030-Add-v8-String-IsFlat-API.patch",
-    "0031-Expose-AdjustAmountOfExternalAllocatedMemoryImpl.patch",
+    "0029-Add-v8-String-IsFlat-API.patch",
+    "0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch",
 ]
 
 http_archive(
@@ -68,7 +67,7 @@ http_archive(
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "f27805b7d7d8618fa73ce89e9d28e0a8b2216fec",
+    commit = "a86a32e67b8d1384b33f8fa48c83a6079b86f8cd",
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",

@@ -6,7 +6,7 @@ Subject: Implement additional Exception construction methods
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-exception.h b/include/v8-exception.h
-index 5441a0ab6a403c566e7b0b6002e720c971480893..b9933027aaf9f7842740d6a6742a2c73da65a46a 100644
+index f240d9a609e92b4a3055256996ad69d8fc14ac49..f8546f34d207e4e2e6fd1c5d8b87b83b956e4e23 100644
 --- a/include/v8-exception.h
 +++ b/include/v8-exception.h
 @@ -48,6 +48,14 @@ class V8_EXPORT Exception {
@@ -25,10 +25,10 @@ index 5441a0ab6a403c566e7b0b6002e720c971480893..b9933027aaf9f7842740d6a6742a2c73
    /**
     * Creates an error message for the given exception.
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 30b165124fcd739dea2ad75fb358306f47034daf..3012edb6ce08c6417175c16e796eb4fb26b18af4 100644
+index 0505bb00fd6c66a9e1cdf9d90f5e87419edff5f7..be9892e8667f3e87185c4959300e4117d96954b8 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -11120,6 +11120,10 @@ DEFINE_ERROR(WasmCompileError, wasm_compile_error)
+@@ -11208,6 +11208,10 @@ DEFINE_ERROR(WasmCompileError, wasm_compile_error)
  DEFINE_ERROR(WasmLinkError, wasm_link_error)
  DEFINE_ERROR(WasmRuntimeError, wasm_runtime_error)
  DEFINE_ERROR(WasmSuspendError, wasm_suspend_error)
@@ -40,7 +40,7 @@ index 30b165124fcd739dea2ad75fb358306f47034daf..3012edb6ce08c6417175c16e796eb4fb
  
  #undef DEFINE_ERROR
 diff --git a/src/logging/runtime-call-stats.h b/src/logging/runtime-call-stats.h
-index 649080e147d1465ae9319d1d181989e9b5547306..df729e9d2013c062f0c09590f758c14647e80172 100644
+index d4b8b5c61762cf4981cbc68a93867f13d110a116..239f431cf29d73f0d2ec467e8714584f589d9084 100644
 --- a/src/logging/runtime-call-stats.h
 +++ b/src/logging/runtime-call-stats.h
 @@ -218,7 +218,11 @@ namespace v8::internal {

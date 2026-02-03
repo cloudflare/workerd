@@ -6,10 +6,10 @@ Subject: Allow Windows builds under Bazel
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d49da552c42612116ad032b532563c0420777a8e..5dcaecb19485e07453c90e9b98eaa565e47e03a2 100644
+index ab41feeb1b889087a78729d934c32cf4aa98220f..050374d1020d2a8b6e0548baf93cab3458365fba 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3993,6 +3993,8 @@ filegroup(
+@@ -4029,6 +4029,8 @@ filegroup(
          "@v8//bazel/config:is_inline_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm": ["src/heap/base/asm/arm/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],
@@ -19,7 +19,7 @@ index d49da552c42612116ad032b532563c0420777a8e..5dcaecb19485e07453c90e9b98eaa565
          "@v8//bazel/config:is_inline_asm_riscv64": ["src/heap/base/asm/riscv64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_ppc64le": ["src/heap/base/asm/ppc/push_registers_asm.cc"],
 diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
-index c81f278203126913c3bad74d31348706678ccf06..96e0f9cdb61d0d8f6597d337c2dd965ba67de12c 100644
+index 17e379b8e27baaa33f58ee852cfd919a9b39d729..7c2154b8ac2e817abebf89f5fa7d30354591d381 100644
 --- a/bazel/config/BUILD.bazel
 +++ b/bazel/config/BUILD.bazel
 @@ -270,6 +270,7 @@ selects.config_setting_group(
@@ -88,10 +88,10 @@ index c81f278203126913c3bad74d31348706678ccf06..96e0f9cdb61d0d8f6597d337c2dd965b
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index a7e1e2af786ce4ab34764292092d10a861fa5028..52037382b78a50aea49d9401b88801845f67d30c 100644
+index 26bb03fa5f5c16d766680905b9292734dabce3da..e18a91baa200d07dd549c15a0833e965fd645bf7 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -125,6 +125,24 @@ def _default_args():
+@@ -126,6 +126,24 @@ def _default_args():
                  "-Wno-unnecessary-virtual-specifier",
                  "-isystem .",
              ],
@@ -116,7 +116,7 @@ index a7e1e2af786ce4ab34764292092d10a861fa5028..52037382b78a50aea49d9401b8880184
              "//conditions:default": [],
          }) + select({
              "@v8//bazel/config:is_clang": [
-@@ -174,13 +192,23 @@ def _default_args():
+@@ -175,13 +193,23 @@ def _default_args():
              ],
              "//conditions:default": [
              ],
