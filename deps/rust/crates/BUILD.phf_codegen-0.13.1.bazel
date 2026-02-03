@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "phf_shared",
+    name = "phf_codegen",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,10 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -39,13 +35,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=phf_shared",
+        "crate-name=phf_codegen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.11.3",
+    version = "0.13.1",
     deps = [
-        "@crates_vendor__siphasher-1.0.2//:siphasher",
+        "@crates_vendor__phf_generator-0.13.1//:phf_generator",
+        "@crates_vendor__phf_shared-0.13.1//:phf_shared",
     ],
 )

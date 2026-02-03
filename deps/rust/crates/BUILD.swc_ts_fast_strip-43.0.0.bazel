@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "phf_shared",
+    name = "swc_ts_fast_strip",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,7 +30,6 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -39,13 +38,24 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=phf_shared",
+        "crate-name=swc_ts_fast_strip",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.11.3",
+    version = "43.0.0",
     deps = [
-        "@crates_vendor__siphasher-1.0.2//:siphasher",
+        "@crates_vendor__anyhow-1.0.100//:anyhow",
+        "@crates_vendor__bytes-str-0.2.7//:bytes_str",
+        "@crates_vendor__serde-1.0.228//:serde",
+        "@crates_vendor__swc_atoms-9.0.0//:swc_atoms",
+        "@crates_vendor__swc_common-18.0.1//:swc_common",
+        "@crates_vendor__swc_ecma_ast-20.0.1//:swc_ecma_ast",
+        "@crates_vendor__swc_ecma_codegen-23.0.0//:swc_ecma_codegen",
+        "@crates_vendor__swc_ecma_parser-33.0.1//:swc_ecma_parser",
+        "@crates_vendor__swc_ecma_transforms_base-36.0.1//:swc_ecma_transforms_base",
+        "@crates_vendor__swc_ecma_transforms_react-40.0.0//:swc_ecma_transforms_react",
+        "@crates_vendor__swc_ecma_transforms_typescript-40.0.0//:swc_ecma_transforms_typescript",
+        "@crates_vendor__swc_ecma_visit-20.0.0//:swc_ecma_visit",
     ],
 )

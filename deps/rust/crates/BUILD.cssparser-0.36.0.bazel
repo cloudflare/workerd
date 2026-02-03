@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "phf_shared",
+    name = "cssparser",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,24 +28,26 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
+    proc_macro_deps = [
+        "@crates_vendor__cssparser-macros-0.6.1//:cssparser_macros",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=phf_shared",
+        "crate-name=cssparser",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.11.3",
+    version = "0.36.0",
     deps = [
-        "@crates_vendor__siphasher-1.0.2//:siphasher",
+        "@crates_vendor__dtoa-short-0.3.5//:dtoa_short",
+        "@crates_vendor__itoa-1.0.17//:itoa",
+        "@crates_vendor__phf-0.13.1//:phf",
+        "@crates_vendor__smallvec-1.15.1//:smallvec",
     ],
 )

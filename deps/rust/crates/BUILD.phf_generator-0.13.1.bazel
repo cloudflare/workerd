@@ -6,13 +6,16 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load(
+    "@rules_rust//rust:defs.bzl",
+    "rust_binary",
+    "rust_library",
+)
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "serde_json",
+    name = "phf_generator",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,12 +32,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "raw_value",
-        "std",
-        "unbounded_depth",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -42,23 +39,20 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=phf_generator",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.149",
+    version = "0.13.1",
     deps = [
-        "@crates_vendor__itoa-1.0.17//:itoa",
-        "@crates_vendor__memchr-2.7.6//:memchr",
-        "@crates_vendor__serde_core-1.0.228//:serde_core",
-        "@crates_vendor__serde_json-1.0.149//:build_script_build",
-        "@crates_vendor__zmij-1.0.19//:zmij",
+        "@crates_vendor__fastrand-2.3.0//:fastrand",
+        "@crates_vendor__phf_shared-0.13.1//:phf_shared",
     ],
 )
 
-cargo_build_script(
-    name = "_bs",
+rust_binary(
+    name = "gen_hash_test__bin",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -68,7 +62,6 @@ cargo_build_script(
         allow_empty = True,
         exclude = [
             "**/* *",
-            "**/*.rs",
             ".tmp_git_root/**/*",
             "BUILD",
             "BUILD.bazel",
@@ -76,44 +69,22 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "raw_value",
-        "std",
-        "unbounded_depth",
-    ],
-    crate_name = "build_script_build",
-    crate_root = "build.rs",
-    data = glob(
-        include = ["**"],
-        allow_empty = True,
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
+    crate_root = "src/bin/gen_hash_test.rs",
     edition = "2021",
-    pkg_name = "serde_json",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=phf_generator",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.149",
-    visibility = ["//visibility:private"],
-)
-
-alias(
-    name = "build_script_build",
-    actual = ":_bs",
-    tags = ["manual"],
+    version = "0.13.1",
+    deps = [
+        ":phf_generator",
+        "@crates_vendor__fastrand-2.3.0//:fastrand",
+        "@crates_vendor__phf_shared-0.13.1//:phf_shared",
+    ],
 )
