@@ -115,7 +115,7 @@ export default {
     obj.baz = () => {
       return 'called baz';
     };
-    assert.equal(Object.getOwnPropertyNames(obj).length, 3);
+    assert.equal(Object.keys(obj).length, 3);
     assert.equal(typeof obj.baz, 'function');
     assert.equal(obj.baz(), 'called baz');
 
