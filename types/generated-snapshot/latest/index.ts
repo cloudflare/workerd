@@ -1918,7 +1918,9 @@ export type BodyInit =
   | ArrayBufferView
   | Blob
   | URLSearchParams
-  | FormData;
+  | FormData
+  | Iterable<ArrayBuffer | ArrayBufferView>
+  | AsyncIterable<ArrayBuffer | ArrayBufferView>;
 export declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
   get body(): ReadableStream | null;
