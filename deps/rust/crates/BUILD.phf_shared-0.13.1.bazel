@@ -44,7 +44,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.11.3",
+    version = "0.13.1",
     deps = [
         "@crates_vendor__siphasher-1.0.2//:siphasher",
     ],

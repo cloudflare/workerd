@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "serde_json",
+    name = "selectors",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,31 +29,31 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "raw_value",
-        "std",
-        "unbounded_depth",
-    ],
-    crate_root = "src/lib.rs",
+    crate_root = "lib.rs",
     edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=selectors",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.149",
+    version = "0.33.0",
     deps = [
-        "@crates_vendor__itoa-1.0.17//:itoa",
-        "@crates_vendor__memchr-2.7.6//:memchr",
-        "@crates_vendor__serde_core-1.0.228//:serde_core",
-        "@crates_vendor__serde_json-1.0.149//:build_script_build",
-        "@crates_vendor__zmij-1.0.19//:zmij",
+        "@crates_vendor__bitflags-2.10.0//:bitflags",
+        "@crates_vendor__cssparser-0.36.0//:cssparser",
+        "@crates_vendor__derive_more-2.1.1//:derive_more",
+        "@crates_vendor__log-0.4.29//:log",
+        "@crates_vendor__new_debug_unreachable-1.0.6//:debug_unreachable",
+        "@crates_vendor__phf-0.13.1//:phf",
+        "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
+        "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
+        "@crates_vendor__selectors-0.33.0//:build_script_build",
+        "@crates_vendor__servo_arc-0.4.3//:servo_arc",
+        "@crates_vendor__smallvec-1.15.1//:smallvec",
     ],
 )
 
@@ -76,12 +76,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "raw_value",
-        "std",
-        "unbounded_depth",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -97,19 +91,22 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "serde_json",
+    pkg_name = "selectors",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=selectors",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.149",
+    version = "0.33.0",
     visibility = ["//visibility:private"],
+    deps = [
+        "@crates_vendor__phf_codegen-0.13.1//:phf_codegen",
+    ],
 )
 
 alias(
