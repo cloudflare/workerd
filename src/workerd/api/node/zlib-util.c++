@@ -790,6 +790,19 @@ void ZstdContext::getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) con
   *availOut = output_.size - output_.pos;
 }
 
+namespace {
+// Helper to check ZSTD errors and return a CompressionError if present.
+// Also sets the error code in the provided reference for later retrieval.
+kj::Maybe<CompressionError> zstdCheckError(
+    size_t result, ZSTD_ErrorCode& error, kj::StringPtr errorCode) {
+  if (ZSTD_isError(result)) {
+    error = ZSTD_getErrorCode(result);
+    return CompressionError(ZSTD_getErrorName(result), errorCode, -1);
+  }
+  return kj::none;
+}
+}  // namespace
+
 ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode):
   ZstdContext(_mode),
   cctx_(ZSTD_createCCtx()) {}
@@ -810,10 +823,8 @@ kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSi
 
   if (pledgedSrcSize != ZSTD_CONTENTSIZE_UNKNOWN) {
     size_t result = ZSTD_CCtx_setPledgedSrcSize(cctx_, pledgedSrcSize);
-    if (ZSTD_isError(result)) {
-      error_ = ZSTD_getErrorCode(result);
-      return CompressionError(kj::str(ZSTD_getErrorName(result)),
-          kj::str("ERR_ZSTD_COMPRESSION_FAILED"), -1);
+    KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
+      return kj::mv(err);
     }
   }
 
@@ -834,10 +845,8 @@ void ZstdEncoderContext::work() {
 kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
   if (cctx_ != nullptr) {
     size_t result = ZSTD_CCtx_reset(cctx_, ZSTD_reset_session_only);
-    if (ZSTD_isError(result)) {
-      error_ = ZSTD_getErrorCode(result);
-      return CompressionError(kj::str(ZSTD_getErrorName(result)),
-          kj::str("ERR_ZSTD_COMPRESSION_FAILED"), -1);
+    KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
+      return kj::mv(err);
     }
   }
   return kj::none;
@@ -905,10 +914,8 @@ void ZstdDecoderContext::work() {
 kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
   if (dctx_ != nullptr) {
     size_t result = ZSTD_DCtx_reset(dctx_, ZSTD_reset_session_only);
-    if (ZSTD_isError(result)) {
-      error_ = ZSTD_getErrorCode(result);
-      return CompressionError(kj::str(ZSTD_getErrorName(result)),
-          kj::str("ERR_ZSTD_DECOMPRESSION_FAILED"), -1);
+    KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_DECOMPRESSION_FAILED"_kj)) {
+      return kj::mv(err);
     }
   }
   return kj::none;
