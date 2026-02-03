@@ -801,28 +801,28 @@ kj::Maybe<CompressionError> zstdCheckError(
   }
   return kj::none;
 }
+
+// Wrappers for ZSTD free functions that return void (for use with kj::disposeWith).
+void zstdFreeCCtx(ZSTD_CCtx* cctx) {
+  ZSTD_freeCCtx(cctx);
+}
+void zstdFreeDCtx(ZSTD_DCtx* dctx) {
+  ZSTD_freeDCtx(dctx);
+}
 }  // namespace
 
 ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode):
-  ZstdContext(_mode),
-  cctx_(ZSTD_createCCtx()) {}
-
-ZstdEncoderContext::~ZstdEncoderContext() {
-  if (cctx_ != nullptr) {
-    ZSTD_freeCCtx(cctx_);
-    cctx_ = nullptr;
-  }
-}
+    ZstdContext(_mode),
+    cctx_(kj::disposeWith<zstdFreeCCtx>(ZSTD_createCCtx())) {}
 
 kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSize) {
-
-  if (cctx_ == nullptr) {
+  if (cctx_.get() == nullptr) {
     return CompressionError(
         "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
   }
 
   if (pledgedSrcSize != ZSTD_CONTENTSIZE_UNKNOWN) {
-    size_t result = ZSTD_CCtx_setPledgedSrcSize(cctx_, pledgedSrcSize);
+    size_t result = ZSTD_CCtx_setPledgedSrcSize(cctx_.get(), pledgedSrcSize);
     KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
       return kj::mv(err);
     }
@@ -833,9 +833,9 @@ kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSi
 
 void ZstdEncoderContext::work() {
   JSG_REQUIRE(mode == ZlibMode::ZSTD_ENCODE, Error, "Mode should be ZSTD_ENCODE"_kj);
-  JSG_REQUIRE(cctx_ != nullptr, Error, "Zstd context should not be null"_kj);
+  JSG_REQUIRE(cctx_.get() != nullptr, Error, "Zstd context should not be null"_kj);
 
-  lastResult = ZSTD_compressStream2(cctx_, &output_, &input_, flush_);
+  lastResult = ZSTD_compressStream2(cctx_.get(), &output_, &input_, flush_);
 
   if (ZSTD_isError(lastResult)) {
     error_ = ZSTD_getErrorCode(lastResult);
@@ -843,8 +843,8 @@ void ZstdEncoderContext::work() {
 }
 
 kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
-  if (cctx_ != nullptr) {
-    size_t result = ZSTD_CCtx_reset(cctx_, ZSTD_reset_session_only);
+  if (cctx_.get() != nullptr) {
+    size_t result = ZSTD_CCtx_reset(cctx_.get(), ZSTD_reset_session_only);
     KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
       return kj::mv(err);
     }
@@ -855,7 +855,7 @@ kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
 kj::Maybe<CompressionError> ZstdEncoderContext::setParams(int key, int value) {
   KJ_DASSERT(key >= ZSTD_c_compressionLevel,
       "key must be a valid ZSTD_cParameter (first valid value is ZSTD_c_compressionLevel)");
-  size_t result = ZSTD_CCtx_setParameter(cctx_, static_cast<ZSTD_cParameter>(key), value);
+  size_t result = ZSTD_CCtx_setParameter(cctx_.get(), static_cast<ZSTD_cParameter>(key), value);
   if (ZSTD_isError(result)) {
     return CompressionError(
         kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
@@ -880,19 +880,12 @@ kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
 
 ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode):
     ZstdContext(_mode),
-    dctx_(ZSTD_createDCtx()) {}
-
-ZstdDecoderContext::~ZstdDecoderContext() {
-  if (dctx_ != nullptr) {
-    ZSTD_freeDCtx(dctx_);
-    dctx_ = nullptr;
-  }
-}
+    dctx_(kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx())) {}
 
 kj::Maybe<CompressionError> ZstdDecoderContext::initialize() {
   // dctx_ is created in the constructor. It can only be nullptr if ZSTD_createDCtx()
   // failed due to memory allocation failure.
-  if (dctx_ == nullptr) {
+  if (dctx_.get() == nullptr) {
     return CompressionError(
         "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
   }
@@ -902,9 +895,9 @@ kj::Maybe<CompressionError> ZstdDecoderContext::initialize() {
 
 void ZstdDecoderContext::work() {
   JSG_REQUIRE(mode == ZlibMode::ZSTD_DECODE, Error, "Mode should be ZSTD_DECODE"_kj);
-  JSG_REQUIRE(dctx_ != nullptr, Error, "Zstd context should not be null"_kj);
+  JSG_REQUIRE(dctx_.get() != nullptr, Error, "Zstd context should not be null"_kj);
 
-  lastResult = ZSTD_decompressStream(dctx_, &output_, &input_);
+  lastResult = ZSTD_decompressStream(dctx_.get(), &output_, &input_);
 
   if (ZSTD_isError(lastResult)) {
     error_ = ZSTD_getErrorCode(lastResult);
@@ -912,8 +905,8 @@ void ZstdDecoderContext::work() {
 }
 
 kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
-  if (dctx_ != nullptr) {
-    size_t result = ZSTD_DCtx_reset(dctx_, ZSTD_reset_session_only);
+  if (dctx_.get() != nullptr) {
+    size_t result = ZSTD_DCtx_reset(dctx_.get(), ZSTD_reset_session_only);
     KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_DECOMPRESSION_FAILED"_kj)) {
       return kj::mv(err);
     }
@@ -922,7 +915,7 @@ kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
 }
 
 kj::Maybe<CompressionError> ZstdDecoderContext::setParams(int key, int value) {
-  size_t result = ZSTD_DCtx_setParameter(dctx_, static_cast<ZSTD_dParameter>(key), value);
+  size_t result = ZSTD_DCtx_setParameter(dctx_.get(), static_cast<ZSTD_dParameter>(key), value);
   if (ZSTD_isError(result)) {
     return CompressionError(
         kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),

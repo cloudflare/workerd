@@ -323,7 +323,6 @@ class ZstdEncoderContext final: public ZstdContext {
  public:
   static const ZlibMode Mode = ZlibMode::ZSTD_ENCODE;
   explicit ZstdEncoderContext(ZlibMode _mode);
-  ~ZstdEncoderContext();
   KJ_DISALLOW_COPY_AND_MOVE(ZstdEncoderContext);
 
   void work();
@@ -334,7 +333,7 @@ class ZstdEncoderContext final: public ZstdContext {
 
  private:
   size_t lastResult = 0;
-  ZSTD_CCtx* cctx_ = nullptr;
+  kj::Own<ZSTD_CCtx> cctx_;
   ZSTD_ErrorCode error_ = ZSTD_error_no_error;
 };
 
@@ -342,7 +341,6 @@ class ZstdDecoderContext final: public ZstdContext {
  public:
   static const ZlibMode Mode = ZlibMode::ZSTD_DECODE;
   explicit ZstdDecoderContext(ZlibMode _mode);
-  ~ZstdDecoderContext();
   KJ_DISALLOW_COPY_AND_MOVE(ZstdDecoderContext);
 
   void work();
@@ -353,7 +351,7 @@ class ZstdDecoderContext final: public ZstdContext {
 
  private:
   size_t lastResult = 0;
-  ZSTD_DCtx* dctx_ = nullptr;
+  kj::Own<ZSTD_DCtx> dctx_;
   ZSTD_ErrorCode error_ = ZSTD_error_no_error;
 };
 
@@ -784,3 +782,5 @@ class ZlibUtil final: public jsg::Object {
 
 KJ_DECLARE_NON_POLYMORPHIC(BrotliEncoderStateStruct)
 KJ_DECLARE_NON_POLYMORPHIC(BrotliDecoderStateStruct)
+KJ_DECLARE_NON_POLYMORPHIC(ZSTD_CCtx)
+KJ_DECLARE_NON_POLYMORPHIC(ZSTD_DCtx)
