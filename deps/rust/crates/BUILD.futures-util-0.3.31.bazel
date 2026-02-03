@@ -68,6 +68,6 @@ rust_library(
         "@crates_vendor__memchr-2.7.6//:memchr",
         "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
         "@crates_vendor__pin-utils-0.1.0//:pin_utils",
-        "@crates_vendor__slab-0.4.11//:slab",
+        "@crates_vendor__slab-0.4.12//:slab",
     ],
 )
