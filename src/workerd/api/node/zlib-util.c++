@@ -759,12 +759,8 @@ kj::Maybe<CompressionError> BrotliDecoderContext::getError() const {
 // Zstd Implementation
 
 void ZstdContext::setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output) {
-  input_.src = input.begin();
-  input_.size = input.size();
-  input_.pos = 0;
-  output_.dst = output.begin();
-  output_.size = output.size();
-  output_.pos = 0;
+  setInputBuffer(input);
+  setOutputBuffer(output);
 }
 
 void ZstdContext::setInputBuffer(kj::ArrayPtr<const kj::byte> input) {
@@ -780,6 +776,8 @@ void ZstdContext::setOutputBuffer(kj::ArrayPtr<kj::byte> output) {
 }
 
 void ZstdContext::setFlush(int flush) {
+  KJ_DASSERT(flush >= ZSTD_e_continue && flush <= ZSTD_e_end,
+      "flush must be a valid ZSTD_EndDirective value");
   flush_ = static_cast<ZSTD_EndDirective>(flush);
 }
 
@@ -792,9 +790,9 @@ void ZstdContext::getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) con
   *availOut = output_.size - output_.pos;
 }
 
-ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode): ZstdContext(_mode) {
-  cctx_ = ZSTD_createCCtx();
-}
+ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode):
+  ZstdContext(_mode),
+  cctx_(ZSTD_createCCtx()) {}
 
 ZstdEncoderContext::~ZstdEncoderContext() {
   if (cctx_ != nullptr) {
@@ -804,9 +802,6 @@ ZstdEncoderContext::~ZstdEncoderContext() {
 }
 
 kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSize) {
-  if (cctx_ == nullptr) {
-    cctx_ = ZSTD_createCCtx();
-  }
 
   if (cctx_ == nullptr) {
     return CompressionError(
@@ -849,6 +844,8 @@ kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
 }
 
 kj::Maybe<CompressionError> ZstdEncoderContext::setParams(int key, int value) {
+  KJ_DASSERT(key >= ZSTD_c_compressionLevel,
+      "key must be a valid ZSTD_cParameter (first valid value is ZSTD_c_compressionLevel)");
   size_t result = ZSTD_CCtx_setParameter(cctx_, static_cast<ZSTD_cParameter>(key), value);
   if (ZSTD_isError(result)) {
     return CompressionError(
@@ -872,9 +869,9 @@ kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
   return kj::none;
 }
 
-ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode): ZstdContext(_mode) {
-  dctx_ = ZSTD_createDCtx();
-}
+ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode):
+    ZstdContext(_mode),
+    dctx_(ZSTD_createDCtx()) {}
 
 ZstdDecoderContext::~ZstdDecoderContext() {
   if (dctx_ != nullptr) {
@@ -884,10 +881,8 @@ ZstdDecoderContext::~ZstdDecoderContext() {
 }
 
 kj::Maybe<CompressionError> ZstdDecoderContext::initialize() {
-  if (dctx_ == nullptr) {
-    dctx_ = ZSTD_createDCtx();
-  }
-
+  // dctx_ is created in the constructor. It can only be nullptr if ZSTD_createDCtx()
+  // failed due to memory allocation failure.
   if (dctx_ == nullptr) {
     return CompressionError(
         "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
