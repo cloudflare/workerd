@@ -11359,7 +11359,9 @@ declare namespace Rpc {
     | Set<T extends Set<infer U> ? Serializable<U> : never>
     | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
     | {
-        [K in keyof T as K extends string | number ? K : never]: Serializable<T[K]>;
+        [K in keyof T as K extends string | number ? K : never]: Serializable<
+          T[K]
+        >;
       }
     // Special types
     | Stub<Stubable>
