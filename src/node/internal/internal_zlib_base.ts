@@ -812,12 +812,20 @@ export class Brotli extends ZlibBase {
   }
 }
 
-const kMaxZstdParam = Math.max(
+export const kMaxZstdCParam = Math.max(
   ...Object.entries(constants).map(([key, value]) =>
-    key.startsWith('ZSTD_c_') || key.startsWith('ZSTD_d_') ? value : 0
+    key.startsWith('ZSTD_c_') ? value : 0
   )
 );
-const zstdInitParamsArray = new Int32Array(kMaxZstdParam + 1);
+export const zstdInitCParamsArray = new Int32Array(kMaxZstdCParam + 1);
+
+export const kMaxZstdDParam = Math.max(
+  ...Object.entries(constants).map(([key, value]) =>
+    key.startsWith('ZSTD_d_') ? value : 0
+  )
+);
+export const zstdInitDParamsArray = new Int32Array(kMaxZstdDParam + 1);
+
 const zstdDefaultOptions: ZlibDefaultOptions = {
   flush: CONST_ZSTD_e_continue,
   finishFlush: CONST_ZSTD_e_end,
@@ -825,9 +833,14 @@ const zstdDefaultOptions: ZlibDefaultOptions = {
 };
 
 export class Zstd extends ZlibBase {
-  constructor(options: ZstdOptions | undefined | null, mode: number) {
+  constructor(
+    options: ZstdOptions | undefined | null,
+    mode: number,
+    initParamsArray: Int32Array,
+    maxParam: number
+  ) {
     ok(mode === CONST_ZSTD_DECODE || mode === CONST_ZSTD_ENCODE);
-    zstdInitParamsArray.fill(-1);
+    initParamsArray.fill(-1);
 
     if (options?.params) {
       for (const [origKey, value] of Object.entries(options.params)) {
@@ -835,8 +848,8 @@ export class Zstd extends ZlibBase {
         if (
           Number.isNaN(key) ||
           key < 0 ||
-          key > kMaxZstdParam ||
-          ((zstdInitParamsArray[key] as number) | 0) !== -1
+          key > maxParam ||
+          ((initParamsArray[key] as number) | 0) !== -1
         ) {
           throw new ERR_ZSTD_INVALID_PARAM(origKey);
         }
@@ -850,7 +863,7 @@ export class Zstd extends ZlibBase {
         }
         // as number is required to avoid force type coercion on runtime.
         // boolean has number representation, but typescript doesn't understand it.
-        zstdInitParamsArray[key] = value as number;
+        initParamsArray[key] = value as number;
       }
     }
 
@@ -865,7 +878,7 @@ export class Zstd extends ZlibBase {
 
     if (
       !handle.initialize(
-        zstdInitParamsArray,
+        initParamsArray,
         _writeState,
         processCallback.bind(handle),
         pledgedSrcSize

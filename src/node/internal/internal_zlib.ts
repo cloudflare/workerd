@@ -16,6 +16,10 @@ import {
   Zlib,
   Brotli,
   Zstd,
+  zstdInitCParamsArray,
+  zstdInitDParamsArray,
+  kMaxZstdCParam,
+  kMaxZstdDParam,
   type ZlibBase,
 } from 'node-internal:internal_zlib_base';
 
@@ -477,13 +481,13 @@ export class BrotliDecompress extends Brotli {
 
 export class ZstdCompress extends Zstd {
   constructor(options: ZstdOptions) {
-    super(options, CONST_ZSTD_ENCODE);
+    super(options, CONST_ZSTD_ENCODE, zstdInitCParamsArray, kMaxZstdCParam);
   }
 }
 
 export class ZstdDecompress extends Zstd {
   constructor(options: ZstdOptions) {
-    super(options, CONST_ZSTD_DECODE);
+    super(options, CONST_ZSTD_DECODE, zstdInitDParamsArray, kMaxZstdDParam);
   }
 }
 
