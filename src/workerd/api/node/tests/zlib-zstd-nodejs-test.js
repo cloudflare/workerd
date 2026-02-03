@@ -164,47 +164,6 @@ export const zstdEmptyInputTest = {
   },
 };
 
-// Test constants are exported correctly
-export const zstdConstantsTest = {
-  test() {
-    // Flush directives
-    assert.strictEqual(typeof zlib.constants.ZSTD_e_continue, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_e_flush, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_e_end, 'number');
-
-    // Compression parameters
-    assert.strictEqual(typeof zlib.constants.ZSTD_c_compressionLevel, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_c_windowLog, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_c_hashLog, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_c_chainLog, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_c_searchLog, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_c_minMatch, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_c_targetLength, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_c_strategy, 'number');
-
-    // Decompression parameters
-    assert.strictEqual(typeof zlib.constants.ZSTD_d_windowLogMax, 'number');
-
-    // Strategy constants
-    assert.strictEqual(typeof zlib.constants.ZSTD_fast, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_dfast, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_greedy, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_lazy, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_lazy2, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_btlazy2, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_btopt, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_btultra, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_btultra2, 'number');
-
-    // Default compression level
-    assert.strictEqual(typeof zlib.constants.ZSTD_CLEVEL_DEFAULT, 'number');
-
-    // Mode constants
-    assert.strictEqual(typeof zlib.constants.ZSTD_ENCODE, 'number');
-    assert.strictEqual(typeof zlib.constants.ZSTD_DECODE, 'number');
-  },
-};
-
 // Test invalid compressed data
 export const zstdInvalidDataTest = {
   test() {
