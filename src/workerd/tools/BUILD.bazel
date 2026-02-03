@@ -114,10 +114,6 @@ wd_cc_binary(
 
 kj_test(
     src = "compatibility-date-dump-test.c++",
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":compatibility-date-dump.schema_capnp",
         "//src/workerd/io",

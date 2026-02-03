@@ -61,61 +61,10 @@ jobs:
       - name: Validate new flag dates
         id: validate
         run: |
-          MIN_DAYS="${{ inputs.min_days || '7' }}"
-          MIN_DATE=$(date -d "+${MIN_DAYS} days" +%Y-%m-%d)
-
-          echo "Minimum allowed date: $MIN_DATE (today + $MIN_DAYS days)"
-
-          # Find flags in PR but not in baseline (new flags)
-          NEW_FLAGS=$(jq -s '
-            (.[1].flags | map(.enableFlag)) as $base |
-            .[0].flags | map(select(.enableFlag as $f | $base | index($f) | not))
-          ' pr-flags.json baseline-flags.json)
-
-          echo "New flags found:"
-          echo "$NEW_FLAGS" | jq -r '.[] | "  - \(.enableFlag)"'
-
-          # Check each new flag's date
-          VIOLATIONS=$(echo "$NEW_FLAGS" | jq --arg min "$MIN_DATE" '
-            map(select(.date != "" and .date < $min)) |
-            map({
-              field: .field,
-              enableFlag: .enableFlag,
-              date: .date,
-              minDate: $min
-            })
-          ')
-
-          VIOLATION_COUNT=$(echo "$VIOLATIONS" | jq 'length')
-
-          if [ "$VIOLATION_COUNT" -gt 0 ]; then
-            echo "has_violations=true" >> $GITHUB_OUTPUT
-
-            # Create markdown table for the error message
-            {
-              echo "## ⚠️ Compatibility Date Validation Failed"
-              echo ""
-              echo "New compatibility flags must have dates at least **$MIN_DAYS days** in the future."
-              echo ""
-              echo "| Field | Flag Name | Current Date | Minimum Required |"
-              echo "|-------|-----------|--------------|------------------|"
-              echo "$VIOLATIONS" | jq -r '.[] | "| `\(.field)` | `\(.enableFlag)` | \(.date) | \(.minDate) |"'
-              echo ""
-              echo "### How to fix"
-              echo "Update the \`\$compatEnableDate\` in \`compatibility-date.capnp\` to a date >= **$MIN_DATE**."
-              echo ""
-              echo "### Bypass"
-              echo "If this is urgent, add the \`urgent-compat-flag\` label to bypass this check."
-            } > violation-report.md
-
-            cat violation-report.md
-
-            echo "::error::New compatibility flags must have dates at least $MIN_DAYS days in the future"
-            exit 1
-          fi
-
-          echo "has_violations=false" >> $GITHUB_OUTPUT
-          echo "✓ All new compatibility flag dates are valid (>= $MIN_DATE)"
+          python3 src/workerd/tools/compare-compat-dates.py \
+            pr-flags.json \
+            baseline-flags.json \
+            --min-days ${{ inputs.min_days || '7' }}
 
       - name: Post comment on failure
         if: failure() && steps.validate.outputs.has_violations == 'true'
