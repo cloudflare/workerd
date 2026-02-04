@@ -320,6 +320,16 @@ def _is_js_instance(val, js_cls_name):
     return hasattr(val, "constructor") and val.constructor.name == js_cls_name
 
 
+try:
+    import _cloudflare_compat_flags
+except ImportError:
+    _cloudflare_compat_flags = object()
+
+
+def get_compat_flag(flag: str) -> bool:
+    return getattr(_cloudflare_compat_flags, flag, False)
+
+
 def _to_js_headers(headers: Headers):
     if isinstance(headers, list):
         # We should have a list[tuple[str, str]]
@@ -777,10 +787,26 @@ class Request:
         import http.client
 
         result = http.client.HTTPMessage()
+        if not get_compat_flag("python_request_headers_preserve_commas"):
+            for key, val in self.js_object.headers:
+                result[key] = val.strip()
 
-        for key, val in self.js_object.headers:
-            for subval in val.split(","):
-                result[key] = subval.strip()
+            return result
+
+        # With the exception of Set-Cookie, duplicate headers can and are combined with a comma
+        # in the JS Headers API. We do the same when returning the headers to Python.
+        #
+        # See https://httpwg.org/specs/rfc9110.html#rfc.section.5.3.
+        js_headers = self.js_object.headers
+        set_cookie_headers = js_headers.getSetCookie()
+        if set_cookie_headers:
+            for value in set_cookie_headers:
+                result.add_header("Set-Cookie", value.strip())
+
+        for key, val in js_headers:
+            if key.lower() == "set-cookie":
+                continue
+            result.add_header(key, val.strip())
 
         return result
 

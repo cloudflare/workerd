@@ -52,12 +52,13 @@ InputGate::Waiter::~Waiter() noexcept(false) {
 }
 
 kj::Promise<InputGate::Lock> InputGate::wait(SpanParent parentSpan) {
+  auto methodSpan = parentSpan.newChild("input_gate_wait_attempt"_kjc);
   KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
     return kj::cp(e);
   } else if (lockCount == 0) {
-    return Lock(*this, kj::mv(parentSpan));
+    return Lock(*this, methodSpan);
   } else {
-    return kj::newAdaptedPromise<Lock, Waiter>(*this, false, kj::mv(parentSpan));
+    return kj::newAdaptedPromise<Lock, Waiter>(*this, false, methodSpan);
   }
 }
 
@@ -173,6 +174,7 @@ InputGate::CriticalSection::~CriticalSection() noexcept(false) {
 }
 
 kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentSpan) {
+  auto methodSpan = parentSpan.newChild("input_gate_critical_section_wait_attempt"_kjc);
   for (;;) {
     switch (state) {
       case NOT_STARTED: {
@@ -188,12 +190,11 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
         // Add ourselves to this parent's child waiter list.
         if (target.lockCount == 0) {
           state = RUNNING;
-          parentLock = Lock(target, parentSpan.addRef());
+          parentLock = Lock(target, methodSpan);
           continue;
         } else {
           try {
-            auto lock =
-                co_await kj::newAdaptedPromise<Lock, Waiter>(target, true, parentSpan.addRef());
+            auto lock = co_await kj::newAdaptedPromise<Lock, Waiter>(target, true, methodSpan);
             state = RUNNING;
             parentLock = kj::mv(lock);
             continue;
@@ -212,7 +213,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
         KJ_FAIL_REQUIRE("CriticalSection::wait() should be called once initially");
       case RUNNING:
         // CriticalSection is active, so defer to InputGate implementation.
-        co_return co_await InputGate::wait(kj::mv(parentSpan));
+        co_return co_await InputGate::wait(methodSpan);
       case REPARENTED:
         // Once the CriticalSection has declared itself done, then any straggler tasks it initiated
         // are adopted by the parent.
@@ -220,10 +221,10 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
         //   the parent is a CriticalSection itself.
         KJ_SWITCH_ONEOF(parent) {
           KJ_CASE_ONEOF(p, InputGate*) {
-            co_return co_await p->wait(kj::mv(parentSpan));
+            co_return co_await p->wait(methodSpan);
           }
           KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
-            co_return co_await c->wait(kj::mv(parentSpan));
+            co_return co_await c->wait(methodSpan);
           }
         }
         KJ_UNREACHABLE;

@@ -284,18 +284,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     //   promise resolves in JavaScript space, so won't be canceled. So we need to track
     //   cancellation separately. We use a weird refcounted boolean.
     // TODO(cleanup): Is there something less ugly we can do here?
-    struct RefcountedBool: public kj::Refcounted {
-      bool value;
-      RefcountedBool(bool value): value(value) {}
-    };
-    auto canceled = kj::refcounted<RefcountedBool>(false);
+    auto canceled = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
 
     return ioContext
         .awaitJs(lock,
             promise.then(kj::implicitCast<jsg::Lock&>(lock),
                 ioContext.addFunctor(
                     [&response, allowWebSocket = headers.isWebSocket(),
-                        canceled = kj::addRef(*canceled), &headers, span = kj::mv(span)](
+                        canceled = canceled->addWrappedRef(), &headers, span = kj::mv(span)](
                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
@@ -304,7 +300,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       auto& context = IoContext::current();
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
-      if (canceled->value) {
+      if (*canceled) {
         // Oops, the client disconnected before the response was ready to send. `response` is
         // a dangling reference, let's not use it.
         return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
@@ -313,7 +309,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
             innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers)));
       }
     })))
-        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
+        .attach(
+            kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->getWrapped() = true; }))
         .then(
             [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {
