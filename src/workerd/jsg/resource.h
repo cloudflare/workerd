@@ -29,9 +29,6 @@
 #include <type_traits>
 #include <typeindex>
 
-// TODO(dcarney): remove once stable
-#define WORKERD_INSTANCE_WILDCARDS
-
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
   // Make std::type_index (which points to std::type_info) usable as a kj::HashMap key.
@@ -1191,7 +1188,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
                 static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
 
   // Query callback is needed for V8 to properly handle property creation with correct
-  // enumerable attributes when the interceptor is on the instance template.
+  // enumerable attributes when the interceptor is on the instance template. Additionally, we want to ensure wildcard properties basically act as phantom properties om the instance. They should not be visible from javascript, only gettable.
   static v8::Intercepted query(
       v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info) {
     return v8::Intercepted::kNo;
@@ -1453,7 +1450,7 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() {
-    using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    using Gcb = PropertyGetterCallback<TypeWrapper, name, Getter, getter, isContext>;
 
     auto v8Name = v8StrIntern(isolate, name);
 
@@ -1461,7 +1458,8 @@ struct ResourceTypeBuilder {
     auto symbol = v8::Symbol::New(isolate, v8Name);
     inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
 
-    instance->SetNativeDataProperty(symbol, &Gcb::callback, nullptr, v8::Local<v8::Value>(),
+    auto getterFn = v8::FunctionTemplate::New(isolate, &Gcb::callback);
+    prototype->SetAccessorProperty(symbol, getterFn, {},
         static_cast<v8::PropertyAttribute>(
             v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }
