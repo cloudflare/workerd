@@ -538,8 +538,9 @@ class CompressionStreamImplV2 final: public CompressionStreamBase<mode> {
   }
 
   void transitionToEnded() override {
-    // Use transitionFromTo to ensure we're in Open state before ending.
-    // This provides a clearer error if end() is called twice.
+    // If already in a terminal state (Ended or Exception), this is a no-op.
+    // This matches the V1 behavior where calling end() multiple times was allowed.
+    if (state.isTerminal()) return;
     auto result = state.template transitionFromTo<Open, Ended>();
     KJ_REQUIRE(result != kj::none, "Stream already ended or errored");
   }
