@@ -29,7 +29,8 @@ static constexpr kj::StringPtr HDR_MSG_DELAY = "X-Msg-Delay-Secs"_kj;
 auto buildQueueErrorMessage(
     const kj::HttpClient::Response& response, const ThreadContext::HeaderIdBundle& headerIds) {
   auto errorCode = response.headers->get(headerIds.cfQueuesErrorCode).orDefault("15000"_kj);
-  auto errorCause = response.headers->get(headerIds.cfQueuesErrorCause).orDefault("Unknown Internal Error"_kj);
+  auto errorCause =
+      response.headers->get(headerIds.cfQueuesErrorCause).orDefault("Unknown Internal Error"_kj);
 
   return kj::str(errorCause, " (", errorCode, ")");
 }
@@ -238,8 +239,7 @@ kj::Promise<void> WorkerQueue::send(
     co_await response.body->readAllBytes().ignoreResult();
   };
 
-  return handleSend(
-      kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes)
+  return handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes)
       .attach(context.registerPendingEvent());
 };
 
