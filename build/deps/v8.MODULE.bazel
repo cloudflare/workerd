@@ -53,6 +53,7 @@ PATCHES = [
     "0028-bind-icu-to-googlesource.patch",
     "0029-Add-v8-String-IsFlat-API.patch",
     "0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch",
+    "0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch",
 ]
 
 http_archive(
