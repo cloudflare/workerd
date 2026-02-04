@@ -24,33 +24,43 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import { EventEmitter } from 'node-internal:events';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+import type { Abortable } from 'node:events';
 import type Readline from 'node:readline';
 
+// This class provides a no-op stub implementation that matches unenv's behavior.
+// See: https://github.com/unjs/unenv/blob/main/src/runtime/node/internal/readline/interface.ts
+// Methods are no-ops or return sensible defaults rather than throwing errors,
+// which allows code that depends on readline to work without crashing.
 export class Interface extends EventEmitter implements Readline.Interface {
-  terminal: boolean;
-  line: string;
-  cursor: number;
-
-  constructor() {
-    super();
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface');
-  }
+  terminal = false;
+  line = '';
+  cursor = 0;
 
   getPrompt(): string {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.getPrompt');
+    return '';
   }
 
   setPrompt(_prompt: string): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.setPrompt');
+    // No-op
   }
 
   prompt(_preserveCursor?: boolean): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.prompt');
+    // No-op
   }
 
+  question(query: string, callback: (answer: string) => void): void;
+  question(
+    query: string,
+    options: Abortable,
+    callback: (answer: string) => void
+  ): void;
   question(_query: unknown, _options: unknown, _callback?: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.question');
+    // If callback is the second argument (no options)
+    if (typeof _options === 'function') {
+      (_options as (answer: string) => void)('');
+    } else if (typeof _callback === 'function') {
+      (_callback as (answer: string) => void)('');
+    }
   }
 
   pause(): this {
@@ -62,15 +72,18 @@ export class Interface extends EventEmitter implements Readline.Interface {
   }
 
   close(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.close');
+    // No-op
   }
 
   write(_data: unknown, _key?: unknown): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.write');
+    // No-op
   }
 
   getCursorPos(): Readline.CursorPos {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.getCursorPos');
+    return {
+      rows: 0,
+      cols: 0,
+    };
   }
 
   [Symbol.dispose](): void {
@@ -82,8 +95,7 @@ export class Interface extends EventEmitter implements Readline.Interface {
     this.close();
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [Symbol.asyncIterator](): NodeJS.AsyncIterator<string, undefined, any> {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('Interface[Symbol.asyncIterator]');
+  async *[Symbol.asyncIterator](): NodeJS.AsyncIterator<string> {
+    yield '';
   }
 }
