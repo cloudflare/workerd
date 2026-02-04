@@ -8,10 +8,10 @@ Similar to fp16, these dependencies now needs to be downloaded by bazel.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 89473bb418f5949917f40761e42a72e1a0faac9d..4391b14790c1e8bdea5d63cf832cf69a7906f8e4 100644
+index 35a076ee7c124f33afc4f63aeace1eb928be643b..881f0ae62987d7737e91a8638a5e9d0b0a2b6af2 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4500,17 +4500,19 @@ cc_library(
+@@ -4536,17 +4536,19 @@ cc_library(
      ],
  )
  
@@ -42,7 +42,7 @@ index 89473bb418f5949917f40761e42a72e1a0faac9d..4391b14790c1e8bdea5d63cf832cf69a
  
  v8_library(
      name = "v8_libshared",
-@@ -4541,15 +4543,15 @@ v8_library(
+@@ -4577,15 +4579,15 @@ v8_library(
      ],
      deps = [
          ":lib_dragonbox",
@@ -61,7 +61,7 @@ index 89473bb418f5949917f40761e42a72e1a0faac9d..4391b14790c1e8bdea5d63cf832cf69a
  )
  
 diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index 146e3f2854159cef6daa5820d25373cef07031f4..5b22cc10cdc23d3f524d63293ec20bed20874722 100644
+index d283ace0bb0ad143de3d6d2f8d83a2e18a204cc5..fc17478770ff46d919adc473a1f3832c02134f1d 100644
 --- a/src/builtins/builtins-typed-array.cc
 +++ b/src/builtins/builtins-typed-array.cc
 @@ -2,6 +2,7 @@
@@ -72,7 +72,7 @@ index 146e3f2854159cef6daa5820d25373cef07031f4..5b22cc10cdc23d3f524d63293ec20bed
  #include "src/base/logging.h"
  #include "src/base/macros.h"
  #include "src/builtins/builtins-utils-inl.h"
-@@ -14,7 +15,6 @@
+@@ -15,7 +16,6 @@
  #include "src/objects/objects-inl.h"
  #include "src/objects/option-utils.h"
  #include "src/objects/simd.h"
@@ -81,7 +81,7 @@ index 146e3f2854159cef6daa5820d25373cef07031f4..5b22cc10cdc23d3f524d63293ec20bed
  namespace v8::internal {
  
 diff --git a/src/objects/string-inl.h b/src/objects/string-inl.h
-index e80cec42c33bd280f6083aea09c555256408b1c6..d9bfb2a3bcf360eb54f12eba1886f2faf46c59ce 100644
+index 829d678168cf194d06832db7b1d27c5c13e7ab2a..0193ad2176f2aa3e608b087a42af4cba975f76de 100644
 --- a/src/objects/string-inl.h
 +++ b/src/objects/string-inl.h
 @@ -12,6 +12,8 @@
@@ -102,7 +102,7 @@ index e80cec42c33bd280f6083aea09c555256408b1c6..d9bfb2a3bcf360eb54f12eba1886f2fa
  // Has to be the last include (doesn't have include guards):
  #include "src/objects/object-macros.h"
 diff --git a/src/objects/string.h b/src/objects/string.h
-index c09211a9823d8d21cf6a667a995621dbe80f42d5..5579468c41d154a8f161be7988285eb3914dc92f 100644
+index c6003839758fa44cce5dbb1359b95605080ba22f..c8ef0434577d960f2d666b79e4b3896390ad270d 100644
 --- a/src/objects/string.h
 +++ b/src/objects/string.h
 @@ -8,6 +8,7 @@
@@ -122,7 +122,7 @@ index c09211a9823d8d21cf6a667a995621dbe80f42d5..5579468c41d154a8f161be7988285eb3
  // Has to be the last include (doesn't have include guards):
  #include "src/objects/object-macros.h"
 diff --git a/src/strings/unicode-inl.h b/src/strings/unicode-inl.h
-index b210e18ebec6a6325233b8d4753ec5856250dd5c..f45cee3d7c0203ce710699668e3b280bb4f0c750 100644
+index 25f3d0375e7f1a71cb1e58f6244b3000b81a5bb2..3f1b5b33f3432ad8046d69382e25326a9776a9f9 100644
 --- a/src/strings/unicode-inl.h
 +++ b/src/strings/unicode-inl.h
 @@ -8,9 +8,9 @@
@@ -137,13 +137,13 @@ index b210e18ebec6a6325233b8d4753ec5856250dd5c..f45cee3d7c0203ce710699668e3b280b
  namespace unibrow {
  
 diff --git a/src/strings/unicode.cc b/src/strings/unicode.cc
-index 3f318556787f2a5b6955191eb884392f7f3e385b..75b86513c6eb615289b24071f8691391fa0a10d3 100644
+index d213ea68e8ad1dde4eec3ba97b6f9f23db6173e5..74687f7463e3a133095a3cfd7a00e0bf7da0132b 100644
 --- a/src/strings/unicode.cc
 +++ b/src/strings/unicode.cc
-@@ -21,7 +21,7 @@
- #include "unicode/uchar.h"
+@@ -22,7 +22,7 @@
  #endif
  
+ #include "hwy/highway.h"
 -#include "third_party/simdutf/simdutf.h"
 +#include "simdutf.h"
  

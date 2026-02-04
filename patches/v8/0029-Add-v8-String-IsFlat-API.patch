@@ -8,7 +8,7 @@ Tells us if a string is already flattened or not.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-primitive.h b/include/v8-primitive.h
-index 87215cf6ece31d4d10392d93c3925ec10c3c138c..360bbe0bb33b58200f05f6d98b03e17316de9cce 100644
+index 457a8838461faa9fcb16af05f0f06fa01a6d93bb..28cf8b61f08563c3359fee37d50b6ec1df11439c 100644
 --- a/include/v8-primitive.h
 +++ b/include/v8-primitive.h
 @@ -157,6 +157,11 @@ class V8_EXPORT String : public Name {
@@ -24,10 +24,10 @@ index 87215cf6ece31d4d10392d93c3925ec10c3c138c..360bbe0bb33b58200f05f6d98b03e173
      enum {
        kNone = 0,
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 3012edb6ce08c6417175c16e796eb4fb26b18af4..946a2154e793b1def5e783fd0eea2a286fa4ee54 100644
+index be9892e8667f3e87185c4959300e4117d96954b8..16453b6589fdf753f5e11d98345cf44fdecff2a1 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -5591,6 +5591,10 @@ bool String::IsOneByte() const {
+@@ -5687,6 +5687,10 @@ bool String::IsOneByte() const {
    return Utils::OpenDirectHandle(this)->IsOneByteRepresentation();
  }
  
@@ -35,6 +35,6 @@ index 3012edb6ce08c6417175c16e796eb4fb26b18af4..946a2154e793b1def5e783fd0eea2a28
 +  return Utils::OpenDirectHandle(this)->IsFlat();
 +}
 +
- // Helpers for ContainsOnlyOneByteHelper
- template <size_t size>
- struct OneByteMask;
+ class ContainsOnlyOneByteHelper {
+  public:
+   ContainsOnlyOneByteHelper() : is_one_byte_(true) {}
