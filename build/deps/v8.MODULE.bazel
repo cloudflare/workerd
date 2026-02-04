@@ -54,6 +54,7 @@ PATCHES = [
     "0029-Add-v8-String-IsFlat-API.patch",
     "0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch",
     "0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch",
+    "0032-Change-lamba-signature-to-get-around-windows-build-f.patch",
 ]
 
 http_archive(
