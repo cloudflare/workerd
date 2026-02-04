@@ -4,18 +4,32 @@
 
 #include "export-loopback.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
 
 namespace workerd::api {
+
+IoChannelFactory::VersionRequest LoopbackServiceStub::VersionOptions::toVersionRequest() const {
+  return {
+    .cohort = cohort.map([](const kj::String& s) { return kj::str(s); }),
+  };
+}
 
 jsg::Ref<Fetcher> LoopbackServiceStub::call(jsg::Lock& js, Options options) {
   Frankenvalue props;
   KJ_IF_SOME(p, options.props) {
     props = Frankenvalue::fromJs(js, p.getHandle(js));
   }
+  IoChannelFactory::VersionRequest versionRequest;
+  KJ_IF_SOME(version, options.version) {
+    JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), Error,
+        "Version request in loopback bindings requires the 'experimental' compat flag.");
+    versionRequest = version.toVersionRequest();
+  }
 
   IoContext& ioctx = IoContext::current();
-  auto channelObj = ioctx.getIoChannelFactory().getSubrequestChannel(channel, kj::mv(props));
+  auto channelObj = ioctx.getIoChannelFactory().getSubrequestChannel(
+      channel, kj::mv(props), kj::mv(versionRequest));
   return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channelObj)));
 }
 

@@ -7,6 +7,8 @@
 #include "actor.h"
 #include "http.h"
 
+#include <workerd/io/io-channels.h>
+
 namespace workerd::api {
 
 // LoopbackServiceStub is the type of a property of `ctx.exports` which points back at a stateless
@@ -20,10 +22,19 @@ class LoopbackServiceStub: public Fetcher {
       : Fetcher(channel, RequiresHostAndProtocol::YES, /*isInHouse=*/true),
         channel(channel) {}
 
+  struct VersionOptions {
+    jsg::Optional<kj::String> cohort;
+
+    IoChannelFactory::VersionRequest toVersionRequest() const;
+
+    JSG_STRUCT(cohort);
+  };
+
   struct Options {
     jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
+    jsg::Optional<VersionOptions> version;
 
-    JSG_STRUCT(props);
+    JSG_STRUCT(props, version);
   };
 
   // Create a specialized Fetcher which can be passed over RPC.
@@ -43,8 +54,8 @@ class LoopbackServiceStub: public Fetcher {
         T extends Rpc.WorkerEntrypointBranded | undefined = undefined
       > = Fetcher<T> &
         ( T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props>
-        ? (opts: {props?: Props}) => Fetcher<T>
-        : (opts: {props?: any}) => Fetcher<T>);
+        ? (opts: {props?: Props, version?: { cohort?: string }}) => Fetcher<T>
+        : (opts: {props?: any, version?: { cohort?: string }}) => Fetcher<T>);
     );
 
     // LoopbackForExport takes the type of an exported value and evaluates to the appropriate
@@ -170,7 +181,8 @@ class LoopbackColoLocalActorNamespace: public ColoLocalActorNamespace {
 };
 
 #define EW_EXPORT_LOOPBACK_ISOLATE_TYPES                                                           \
-  api::LoopbackServiceStub, api::LoopbackServiceStub::Options, api::LoopbackDurableObjectClass,    \
+  api::LoopbackServiceStub, api::LoopbackServiceStub::VersionOptions,                              \
+      api::LoopbackServiceStub::Options, api::LoopbackDurableObjectClass,                          \
       api::LoopbackDurableObjectClass::Options, api::LoopbackDurableObjectNamespace,               \
       api::LoopbackColoLocalActorNamespace
 
