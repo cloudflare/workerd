@@ -1,6 +1,10 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
+    {
+      "name": "ada-url",
+      "type": "bazel_dep"
+    },
     // BoringSSL is more likely to break than other dependencies, because our downstream build uses
     // a custom-built version of BoringSSL in FIPS mode.
     {
