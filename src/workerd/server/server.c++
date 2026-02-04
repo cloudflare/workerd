@@ -156,10 +156,6 @@ static kj::String escapeJsonString(kj::StringPtr text) {
   return kj::str("\"", escaped.releaseAsArray(), "\"");
 }
 
-// TODO(now): Temporary
-class ServerResolveObserver final: public jsg::ResolveObserver {};
-const ServerResolveObserver serverResolveObserver;
-
 template <typename T>
 static inline kj::Own<T> fakeOwn(T& ref) {
   return kj::Own<T>(&ref, kj::NullDisposer::instance);

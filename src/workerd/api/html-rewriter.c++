@@ -63,15 +63,6 @@ class LolString {
     lol_html_str_free({chars.begin(), chars.size()});
   }
   KJ_DISALLOW_COPY(LolString);
-  LolString(LolString&& other): chars(other.chars) {
-    other.chars = nullptr;
-  }
-  LolString& operator=(LolString&& other) {
-    LolString old(kj::mv(*this));
-    chars = other.chars;
-    other.chars = nullptr;
-    return *this;
-  }
 
   kj::ArrayPtr<const char> asChars() const {
     return chars;
@@ -1263,8 +1254,14 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   //   after we know that nothing else (like invalid encoding) could cause an exception.
 
   // Drive and flush the parser asynchronously.
-  ioContext.addTask(ioContext.waitForDeferredProxy(
-      KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true)));
+  ioContext.addTask(
+      ioContext
+          .waitForDeferredProxy(KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true))
+          .catch_([](kj::Exception&& e) {
+    // Errors in pumpTo() are already propagated to the destination stream. We don't want to
+    // throw them from here since it'll cause an uncaught exception to be reported via taskFailed(),
+    // which would poison the IoContext even though the application may have handled the error.
+  }));
 
   // TODO(soon): EW-2025 Make Rewriter a proper wrapper object and put it in hidden property on the
   //   response so the GC can find the handlers which Rewriter co-owns.

@@ -45,7 +45,9 @@ import {
   ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 
-export const cachedDataVersionTag = 0;
+export function cachedDataVersionTag(): number {
+  return 0;
+}
 
 function getHeapSnapshotOptions(options: HeapSnapshotOptions = {}): void {
   validateObject(options, 'options');

@@ -876,13 +876,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Own<kj::HttpClient> getHttpClient(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
-
-  // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
-  // to HttpClient.
-  kj::Own<kj::HttpClient> getHttpClientNoChecks(uint channel,
-      bool isInHouse,
-      kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::ConstString> operationName = kj::none);
   // TODO(cleanup): Make it the caller's job to call asHttpClient() on the result of
   //   getSubrequest*().
 

@@ -104,14 +104,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.54",
-    actual = "@crates_vendor__cc-1.2.54//:cc",
+    name = "cc-1.2.55",
+    actual = "@crates_vendor__cc-1.2.55//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.54//:cc",
+    actual = "@crates_vendor__cc-1.2.55//:cc",
     tags = ["manual"],
 )
 
@@ -128,14 +128,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.54",
-    actual = "@crates_vendor__clap-4.5.54//:clap",
+    name = "clap-4.5.57",
+    actual = "@crates_vendor__clap-4.5.57//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.54//:clap",
+    actual = "@crates_vendor__clap-4.5.57//:clap",
     tags = ["manual"],
 )
 
@@ -152,14 +152,14 @@ alias(
 )
 
 alias(
-    name = "flate2-1.1.8",
-    actual = "@crates_vendor__flate2-1.1.8//:flate2",
+    name = "flate2-1.1.9",
+    actual = "@crates_vendor__flate2-1.1.9//:flate2",
     tags = ["manual"],
 )
 
 alias(
     name = "flate2",
-    actual = "@crates_vendor__flate2-1.1.8//:flate2",
+    actual = "@crates_vendor__flate2-1.1.9//:flate2",
     tags = ["manual"],
 )
 
@@ -188,14 +188,14 @@ alias(
 )
 
 alias(
-    name = "lol_html_c_api-1.3.0",
-    actual = "@crates_vendor__lol_html_c_api-1.3.0//:lolhtml",
+    name = "lol_html_c_api-1.3.1",
+    actual = "@crates_vendor__lol_html_c_api-1.3.1//:lolhtml",
     tags = ["manual"],
 )
 
 alias(
     name = "lol_html_c_api",
-    actual = "@crates_vendor__lol_html_c_api-1.3.0//:lolhtml",
+    actual = "@crates_vendor__lol_html_c_api-1.3.1//:lolhtml",
     tags = ["manual"],
 )
 
@@ -344,14 +344,14 @@ alias(
 )
 
 alias(
-    name = "swc_ts_fast_strip-41.0.0",
-    actual = "@crates_vendor__swc_ts_fast_strip-41.0.0//:swc_ts_fast_strip",
+    name = "swc_ts_fast_strip-43.0.0",
+    actual = "@crates_vendor__swc_ts_fast_strip-43.0.0//:swc_ts_fast_strip",
     tags = ["manual"],
 )
 
 alias(
     name = "swc_ts_fast_strip",
-    actual = "@crates_vendor__swc_ts_fast_strip-41.0.0//:swc_ts_fast_strip",
+    actual = "@crates_vendor__swc_ts_fast_strip-43.0.0//:swc_ts_fast_strip",
     tags = ["manual"],
 )
 
@@ -418,12 +418,18 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.54//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.57//:stdio-fixture__bin",
     tags = ["manual"],
 )
 
 alias(
-    name = "phf_generator__gen_hash_test",
+    name = "phf_generator-0.11.3__gen_hash_test",
     actual = "@crates_vendor__phf_generator-0.11.3//:gen_hash_test__bin",
+    tags = ["manual"],
+)
+
+alias(
+    name = "phf_generator-0.13.1__gen_hash_test",
+    actual = "@crates_vendor__phf_generator-0.13.1//:gen_hash_test__bin",
     tags = ["manual"],
 )

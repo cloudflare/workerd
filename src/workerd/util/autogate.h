@@ -20,8 +20,6 @@ enum class AutogateKey {
   STREAMING_TAIL_WORKER,
   // Enable refactor used to consolidate the different tail worker stream implementations.
   TAIL_STREAM_REFACTOR,
-  // Enable the BodyBufferInputStream replacement
-  BODY_BUFFER_INPUT_STREAM_REPLACEMENT,
   // Enable the fetch request memory adjustment
   FETCH_REQUEST_MEMORY_ADJUSTMENT,
   // Enable Rust-backed Node.js DNS implementation

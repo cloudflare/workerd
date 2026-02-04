@@ -1025,14 +1025,6 @@ kj::Own<kj::HttpClient> IoContext::getHttpClient(
   return asHttpClient(getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), traceContext));
 }
 
-kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<kj::ConstString> operationName) {
-  return asHttpClient(
-      getSubrequestChannelNoChecks(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
-}
-
 kj::Own<CacheClient> IoContext::getCacheClient() {
   // TODO(someday): Should Cache API requests be considered in-house? They are already not counted
   //   as subrequests in metrics and logs (like in-house requests aren't), but historically the
