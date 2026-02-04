@@ -54,12 +54,16 @@ export class Interface extends EventEmitter implements Readline.Interface {
     options: Abortable,
     callback: (answer: string) => void
   ): void;
-  question(_query: unknown, _options: unknown, _callback?: unknown): void {
+  question(
+    _query: string,
+    _optionsOrCallback: Abortable | ((answer: string) => void),
+    _callback?: (answer: string) => void
+  ): void {
     // If callback is the second argument (no options)
-    if (typeof _options === 'function') {
-      (_options as (answer: string) => void)('');
+    if (typeof _optionsOrCallback === 'function') {
+      _optionsOrCallback('');
     } else if (typeof _callback === 'function') {
-      (_callback as (answer: string) => void)('');
+      _callback('');
     }
   }
 
@@ -95,6 +99,8 @@ export class Interface extends EventEmitter implements Readline.Interface {
     this.close();
   }
 
+  // Yield a single empty string so that `for await...of` loops complete
+  // immediately without blocking, consistent with no-op stub behavior.
   async *[Symbol.asyncIterator](): NodeJS.AsyncIterator<string> {
     yield '';
   }

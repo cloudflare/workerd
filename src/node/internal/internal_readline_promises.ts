@@ -51,7 +51,7 @@ export class Interface extends EventEmitter implements ReadlineType.Interface {
 
   question(query: string): Promise<string>;
   question(query: string, options: Abortable): Promise<string>;
-  question(_query: unknown, _options?: unknown): Promise<string> {
+  question(_query: string, _options?: Abortable): Promise<string> {
     return Promise.resolve('');
   }
 
@@ -87,6 +87,8 @@ export class Interface extends EventEmitter implements ReadlineType.Interface {
     this.close();
   }
 
+  // Yield a single empty string so that `for await...of` loops complete
+  // immediately without blocking, consistent with no-op stub behavior.
   async *[Symbol.asyncIterator](): NodeJS.AsyncIterator<string> {
     yield '';
   }
