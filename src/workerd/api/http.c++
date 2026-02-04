@@ -74,52 +74,6 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
 // capitalization). So, it's certainly not worth it to try to keep the original capitalization
 // across serialization.
 
-namespace {
-
-class BodyBufferInputStream final: public ReadableStreamSource {
- public:
-  BodyBufferInputStream(Body::Buffer buffer)
-      : unread(buffer.view),
-        ownBytes(kj::mv(buffer.ownBytes)) {}
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    if (unread != nullptr) {
-      size_t amount = kj::min(maxBytes, unread.size());
-      memcpy(buffer, unread.begin(), amount);
-      unread = unread.slice(amount, unread.size());
-      return amount;
-    }
-
-    return static_cast<size_t>(0);
-  }
-
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-    if (encoding == StreamEncoding::IDENTITY) {
-      return unread.size();
-    } else {
-      // Who knows what the compressed size will be?
-      return kj::none;
-    }
-  }
-
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    if (unread != nullptr) {
-      auto data = unread;
-      unread = nullptr;
-      co_await output.write(data);
-      if (end) co_await output.end();
-    }
-
-    co_return;
-  }
-
- private:
-  kj::ArrayPtr<const byte> unread;
-  kj::OneOf<kj::Own<Body::RefcountedBytes>, jsg::Ref<Blob>> ownBytes;
-};
-
-}  // namespace
-
 Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
   Buffer result;
   result.view = view;
@@ -202,23 +156,15 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
 
   auto buf = buffer.clone(js);
 
-  if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
-    // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
-    // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
-    // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
-    // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
-    // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
-    auto rs = streams::newMemorySource(buf.view, kj::heap(kj::mv(buf.ownBytes)));
+  // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
+  // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
+  // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
+  // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
+  // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+  auto rs = streams::newMemorySource(buf.view, kj::heap(kj::mv(buf.ownBytes)));
 
-    return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
-      kj::mv(contentType)};
-  } else {
-    // TODO(cleanup): Remove once the Autogate is removed.
-    auto bodyStream = kj::heap<BodyBufferInputStream>(kj::mv(buf));
-
-    return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream)), kj::mv(buffer),
-      kj::mv(contentType)};
-  }
+  return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
+    kj::mv(contentType)};
 }
 
 Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
@@ -265,19 +211,14 @@ void Body::rewindBody(jsg::Lock& js) {
 
   KJ_IF_SOME(i, impl) {
     auto bufferCopy = KJ_ASSERT_NONNULL(i.buffer).clone(js);
-    if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
-      // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
-      // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
-      // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
-      // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
-      // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
-      auto rs = streams::newMemorySource(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
-      i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
-    } else {
-      // TODO(cleanup): Remove once the Autogate is removed.
-      auto bodyStream = kj::heap<BodyBufferInputStream>(kj::mv(bufferCopy));
-      i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream));
-    }
+
+    // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
+    // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
+    // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
+    // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
+    // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+    auto rs = streams::newMemorySource(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
+    i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
   }
 }
 
