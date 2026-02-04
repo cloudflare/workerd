@@ -22,8 +22,9 @@ class LoopbackServiceStub: public Fetcher {
 
   struct Options {
     jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
+    jsg::Optional<kj::String> cohort;
 
-    JSG_STRUCT(props);
+    JSG_STRUCT(props, cohort);
   };
 
   // Create a specialized Fetcher which can be passed over RPC.
@@ -43,8 +44,8 @@ class LoopbackServiceStub: public Fetcher {
         T extends Rpc.WorkerEntrypointBranded | undefined = undefined
       > = Fetcher<T> &
         ( T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props>
-        ? (opts: {props?: Props}) => Fetcher<T>
-        : (opts: {props?: any}) => Fetcher<T>);
+        ? (opts: {props?: Props, cohort?: string}) => Fetcher<T>
+        : (opts: {props?: any, cohort?: string}) => Fetcher<T>);
     );
 
     // LoopbackForExport takes the type of an exported value and evaluates to the appropriate
@@ -77,8 +78,9 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
 
   struct Options {
     jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
+    jsg::Optional<kj::String> cohort;
 
-    JSG_STRUCT(props);
+    JSG_STRUCT(props, cohort);
   };
 
   // Create a specialized DurableObjectClass which can be passed over RPC.
@@ -96,8 +98,8 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
           | undefined = undefined
       > = DurableObjectClass<T> &
         ( T extends CloudflareWorkersModule.DurableObject<any, infer Props>
-        ? (opts: {props?: Props}) => DurableObjectClass<T>
-        : (opts: {props?: any}) => DurableObjectClass<T>);
+        ? (opts: {props?: Props, cohort?: string}) => DurableObjectClass<T>
+        : (opts: {props?: any, cohort?: string}) => DurableObjectClass<T>);
     );
   }
 

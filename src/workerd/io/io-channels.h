@@ -195,9 +195,13 @@ class IoChannelFactory {
   // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
   // other channel, it will throw.
   //
+  // `cohort` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
+  // other channel, it will throw. The cohort influences routing decisions in RouterStage.
+  //
   // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
-  virtual kj::Own<SubrequestChannel> getSubrequestChannel(
-      uint channel, kj::Maybe<Frankenvalue> props = kj::none) = 0;
+  virtual kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+      kj::Maybe<Frankenvalue> props = kj::none,
+      kj::Maybe<kj::String> cohort = kj::none) = 0;
 
   // Stub for a remote actor. Allows sending requests to the actor.
   class ActorChannel: public SubrequestChannel {
@@ -249,8 +253,12 @@ class IoChannelFactory {
   //
   // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
   // other channel, it will throw.
-  virtual kj::Own<ActorClassChannel> getActorClass(
-      uint channel, kj::Maybe<Frankenvalue> props = kj::none) {
+  //
+  // `cohort` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
+  // other channel, it will throw. The cohort influences routing decisions in RouterStage.
+  virtual kj::Own<ActorClassChannel> getActorClass(uint channel,
+      kj::Maybe<Frankenvalue> props = kj::none,
+      kj::Maybe<kj::String> cohort = kj::none) {
     // TODO(cleanup): Remove this once the production runtime has implemented this.
     KJ_UNIMPLEMENTED("This runtime doesn't support actor class channels.");
   }

@@ -105,7 +105,7 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
   }
 
   kj::Own<SubrequestChannel> getSubrequestChannel(
-      uint channel, kj::Maybe<Frankenvalue> props) override {
+      uint channel, kj::Maybe<Frankenvalue> props, kj::Maybe<kj::String> cohort) override {
     KJ_FAIL_ASSERT("no subrequests");
   }
 
