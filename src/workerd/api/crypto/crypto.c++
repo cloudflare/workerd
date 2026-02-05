@@ -806,13 +806,16 @@ DigestStream::DigestStream(kj::Own<WritableStreamController> controller,
       state(Ready(kj::mv(algorithm), kj::mv(resolver))) {}
 
 void DigestStream::dispose(jsg::Lock& js) {
-  js.tryCatch([&] {
+  JSG_TRY(js) {
     KJ_IF_SOME(ready, state.tryGet<Ready>()) {
       auto reason = js.typeError("The DigestStream was disposed.");
       ready.resolver.reject(js, reason);
       state.init<StreamStates::Errored>(js.v8Ref<v8::Value>(reason));
     }
-  }, [&](jsg::Value exception) { js.throwException(kj::mv(exception)); });
+  }
+  JSG_CATCH(exception) {
+    js.throwException(kj::mv(exception));
+  }
 }
 
 void DigestStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

@@ -430,11 +430,12 @@ void SharedMemoryCache::Use::delete_(const kj::String& key) const {
 // Attempts to serialize a JavaScript value. If that fails, this function throws
 // a tunneled exception, see jsg::createTunneledException().
 static kj::Own<CacheValue> hackySerialize(jsg::Lock& js, jsg::JsRef<jsg::JsValue>& value) {
-  return js.tryCatch([&]() -> kj::Own<CacheValue> {
+  JSG_TRY(js) {
     jsg::Serializer serializer(js);
     serializer.write(js, value.getHandle(js));
     return kj::atomicRefcounted<CacheValue>(serializer.release().data);
-  }, [&](jsg::Value&& exception) -> kj::Own<CacheValue> {
+  }
+  JSG_CATCH(exception) {
     // We run into big problems with tunneled exceptions here. When
     // the toString() function of the JavaScript error is not marked
     // as side effect free, tunneling the exception fails entirely
@@ -450,7 +451,7 @@ static kj::Own<CacheValue> hackySerialize(jsg::Lock& js, jsg::JsRef<jsg::JsValue
     // This is still pretty bad. We lose the original error stack.
     // TODO(later): remove string-based error tunneling
     throw js.exceptionToKj(kj::mv(exception));
-  });
+  }
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
