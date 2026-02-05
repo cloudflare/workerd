@@ -89,10 +89,10 @@ class DurableObjectId: public jsg::Object {
   friend class DurableObjectNamespace;
 };
 
-// Stub object used to send messages to a remote durable object.
-class DurableObject final: public Fetcher {
+// DurableObjectStub type seen by JavaScript.
+class DurableObjectStub final: public Fetcher {
  public:
-  DurableObject(jsg::Ref<DurableObjectId> id,
+  DurableObjectStub(jsg::Ref<DurableObjectId> id,
       IoOwn<OutgoingFactory> outgoingFactory,
       RequiresHostAndProtocol requiresHost)
       : Fetcher(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
@@ -106,7 +106,7 @@ class DurableObject final: public Fetcher {
     return id->getName();
   }
 
-  JSG_RESOURCE_TYPE(DurableObject) {
+  JSG_RESOURCE_TYPE(DurableObjectStub) {
     JSG_INHERIT(Fetcher);
 
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
@@ -127,8 +127,6 @@ class DurableObject final: public Fetcher {
           readonly name?: string;
         }
     );
-    // Rename this resource type to DurableObjectStub, and make DurableObject
-    // the interface implemented by users' Durable Object classes.
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -216,18 +214,18 @@ class DurableObjectNamespace: public jsg::Object {
   };
 
   // Gets a durable object by ID or creates it if it doesn't already exist.
-  jsg::Ref<DurableObject> get(
+  jsg::Ref<DurableObjectStub> get(
       jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
 
   // Gets a durable object by name or creates it if it doesn't already exist.
   //
   // Short for `idFromName()` followed by `get()`.
-  jsg::Ref<DurableObject> getByName(
+  jsg::Ref<DurableObjectStub> getByName(
       jsg::Lock& js, kj::String name, jsg::Optional<GetDurableObjectOptions> options);
 
   // Experimental. Gets a durable object by ID if it already exists. Currently, gated for use
   // by cloudflare only.
-  jsg::Ref<DurableObject> getExisting(
+  jsg::Ref<DurableObjectStub> getExisting(
       jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
 
   // Creates a subnamespace with the jurisdiction hardcoded.
@@ -266,7 +264,7 @@ class DurableObjectNamespace: public jsg::Object {
   kj::OneOf<uint, IoOwn<ActorChannelFactory>> channel;
   kj::Own<ActorIdFactory> idFactory;
 
-  jsg::Ref<DurableObject> getImpl(jsg::Lock& js,
+  jsg::Ref<DurableObjectStub> getImpl(jsg::Lock& js,
       ActorGetMode mode,
       jsg::Ref<DurableObjectId> id,
       jsg::Optional<GetDurableObjectOptions> options);
@@ -365,7 +363,7 @@ class DurableObjectClass: public jsg::Object {
 };
 
 #define EW_ACTOR_ISOLATE_TYPES                                                                     \
-  api::ColoLocalActorNamespace, api::DurableObject, api::DurableObjectId,                          \
+  api::ColoLocalActorNamespace, api::DurableObjectStub, api::DurableObjectId,                      \
       api::DurableObjectNamespace, api::DurableObjectNamespace::NewUniqueIdOptions,                \
       api::DurableObjectNamespace::GetDurableObjectOptions, api::DurableObjectClass
 
