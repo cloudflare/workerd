@@ -1,4 +1,5 @@
 use jsg::ExceptionType;
+use jsg::Number;
 use jsg::ResourceState;
 use jsg::ResourceTemplate;
 use jsg_macros::jsg_method;
@@ -9,13 +10,13 @@ use jsg_macros::jsg_resource;
 #[derive(Debug, Clone, PartialEq)]
 enum StringOrNumber {
     String(String),
-    Number(f64),
+    Number(Number),
 }
 
 #[jsg_oneof]
 #[derive(Debug, Clone, PartialEq)]
 enum NumberOrString {
-    Number(f64),
+    Number(Number),
     String(String),
 }
 
@@ -30,7 +31,7 @@ enum StringOrBool {
 #[derive(Debug, Clone, PartialEq)]
 enum ThreeTypes {
     String(String),
-    Number(f64),
+    Number(Number),
     Bool(bool),
 }
 
