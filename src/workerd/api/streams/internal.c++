@@ -615,11 +615,24 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             js.v8TypeError("Unable to allocate memory for read"_kj));
       }
 
-      auto ptr = static_cast<kj::byte*>(theStore->Data());
+      // In the case the ArrayBuffer is detached/transfered while the read is pending, we
+      // need to make sure that the ptr remains stable, so we grab a shared ptr to the
+      // backing store and use that to get the pointer to the data. If the buffer is detached
+      // while the read is pending, this does mean that the read data will end up being lost,
+      // but there's not really a better option. The best we can do here is warn the user
+      // that this is happening so they can avoid doing it in the future.
+      // Also, the user really shouldn't do this because the read will end up completing into
+      // the detached backing store still which could cause issues with whatever code now actually
+      // owns the transfered buffer. Below we'll warn the user about this if it happens so they
+      // can avoid doing it in the future.
+      auto backing = theStore->GetBackingStore();
+
+      auto ptr = static_cast<kj::byte*>(backing->Data());
       auto bytes = kj::arrayPtr(ptr + byteOffset, byteLength);
 
-      auto promise =
-          kj::evalNow([&] { return readable->tryRead(bytes.begin(), atLeast, bytes.size()); });
+      auto promise = kj::evalNow([&] {
+        return readable->tryRead(bytes.begin(), atLeast, bytes.size()).attach(kj::mv(backing));
+      });
       KJ_IF_SOME(readerLock, readState.tryGet<ReaderLocked>()) {
         promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
       }
@@ -659,6 +672,44 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           return js.resolvedPromise(ReadResult{.done = true});
         }
         // Return a slice so the script can see how many bytes were read.
+
+        // We have to check to see if the store was detached or resized while we were waiting
+        // for the read to complete.
+        auto handle = store.getHandle(js);
+        if (handle->WasDetached()) {
+          // If the buffer was detached, we resolve with a new zero-length ArrayBuffer.
+          // The bytes that were read are lost, but this is a valid result.
+
+          // Silly user, trix are for kids.
+          IoContext::current().logWarningOnce(
+              "A buffer that was being used for a read operation on a ReadableStream was detached "
+              "while the read was pending. The read completed with a zero-length buffer and the data "
+              "that was read is lost. Avoid detaching buffers that are being used for active read "
+              "operations on streams, or use the streams_byob_reader_detaches_buffer compatibility "
+              "flag, to prevent this from happening."_kj);
+
+          auto buffer = v8::ArrayBuffer::New(js.v8Isolate, 0);
+          return js.resolvedPromise(ReadResult{
+            .value = js.v8Ref(v8::Uint8Array::New(buffer, 0, 0).As<v8::Value>()),
+            .done = false,
+          });
+        }
+
+        if (byteOffset + amount > handle->ByteLength()) {
+          // If the buffer was resized smaller, we return a truncated result.
+          // Any bytes that would have been written past the new end are lost.
+
+          IoContext::current().logWarningOnce(
+              "A buffer that was being used for a read operation on a ReadableStream was resized "
+              "smaller while the read was pending. The read completed with a truncated buffer "
+              "containing only the bytes that fit within the new size. Avoid resizing buffers that "
+              "are being used for active read operations on streams, or use the "
+              "streams_byob_reader_detaches_buffer compatibility flag, to prevent this from "
+              "happening."_kj);
+
+          amount = handle->ByteLength() > byteOffset ? handle->ByteLength() - byteOffset : 0;
+        }
+
         return js.resolvedPromise(ReadResult{
           .value = js.v8Ref(
               v8::Uint8Array::New(store.getHandle(js), byteOffset, amount).As<v8::Value>()),
