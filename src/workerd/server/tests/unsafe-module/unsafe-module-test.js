@@ -1,6 +1,6 @@
-import assert from "node:assert";
-import unsafe from "workerd:unsafe";
-import { DurableObject } from "cloudflare:workers";
+import assert from 'node:assert';
+import unsafe from 'workerd:unsafe';
+import { DurableObject } from 'cloudflare:workers';
 
 function createTestObject(type) {
   return class {
@@ -93,9 +93,12 @@ export const test_abort_all_durable_objects = {
 
     // Response from objects in namespaces that have prevent eviction set shouldn't change
     assert.strictEqual(durablePreventEvictionRes1, durablePreventEvictionRes2);
-    assert.strictEqual(ephemeralPreventEvictionRes1, ephemeralPreventEvictionRes2);
-  }
-}
+    assert.strictEqual(
+      ephemeralPreventEvictionRes1,
+      ephemeralPreventEvictionRes2
+    );
+  },
+};
 
 export const test_abort_all_durable_objects_alarms = {
   async test(ctrl, env, ctx) {
@@ -116,5 +119,5 @@ export const test_abort_all_durable_objects_alarms = {
     assert.strictEqual(await stub.scheduledTime, null);
     await scheduler.wait(1000);
     assert.strictEqual(alarmTriggers, 1); // (same as before)
-  }
-}
+  },
+};
