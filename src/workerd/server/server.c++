@@ -591,7 +591,7 @@ class PromisedNetworkAddress final: public kj::NetworkAddress {
  public:
   PromisedNetworkAddress(kj::Promise<kj::Own<kj::NetworkAddress>> promise)
       : promise(promise.then([this](kj::Own<kj::NetworkAddress> result) { addr = kj::mv(result); })
-                    .fork()) {}
+                .fork()) {}
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
     KJ_IF_SOME(a, addr) {
@@ -2267,7 +2267,7 @@ class Server::WorkerService final: public Service,
             tracker(kj::refcounted<RequestTracker>(*this)),
             ns(ns),
             root(parent.map([](ActorContainer& p) -> ActorContainer& { return p.root; })
-                     .orDefault(*this)),
+                    .orDefault(*this)),
             parent(parent),
             timer(timer),
             lastAccess(timer.now()) {
@@ -3872,6 +3872,11 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
     }
   }
 
+  // When using vitest-pool-workers and DOs have alarms, alarms can still attempt to run after the tests
+  // end running that leads to internal reference errors.
+  // On more complex setups with multiple DOs that have alarms and all of them communicate with one another,
+  // there might be cases where there are isolated storage errors when calling DOs wake one another.
+  // Deleting all of them at the same time guarantees that user's implementations don't affect tests runs
   alarmScheduler->deleteAllAlarms();
 }
 
@@ -4426,7 +4431,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
               jsg::Lock& js, kj::StringPtr specifier, kj::Maybe<kj::String> referrer,
               jsg::CompilationObserver& observer, jsg::ModuleRegistry::ResolveMethod method,
               kj::Maybe<kj::StringPtr> rawSpecifier) mutable
-          -> kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>> {
+              -> kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>> {
         kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
         KJ_IF_SOME(moduleOrRedirect,
             workerd::fallback::tryResolve(workerd::fallback::Version::V1,
