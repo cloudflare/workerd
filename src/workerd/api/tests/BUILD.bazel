@@ -14,6 +14,12 @@ wd_test(
 )
 
 wd_test(
+    src = "delete-all-deletes-alarm-test.wd-test",
+    args = ["--experimental"],
+    data = ["delete-all-deletes-alarm-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-test.js"],

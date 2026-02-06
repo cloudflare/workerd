@@ -568,7 +568,10 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_deleteAll"_kjc);
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
 
-  auto deleteAll = cache->deleteAll(options, context.getCurrentTraceSpan());
+  DeleteAllOptions deleteAllOptions{
+    .deleteAlarm = FeatureFlags::get(js).getDeleteAllDeletesAlarm(),
+  };
+  auto deleteAll = cache->deleteAll(options, context.getCurrentTraceSpan(), deleteAllOptions);
 
   context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 

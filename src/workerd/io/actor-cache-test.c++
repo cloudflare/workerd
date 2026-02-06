@@ -5123,6 +5123,299 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   }
 }
 
+KJ_TEST("ActorCache deleteAll() with deleteAlarm deletes alarm after deleteAll succeeds") {
+  // Tests that deleteAll() with deleteAlarm=true deletes the alarm in the post-deleteAll
+  // flush, ensuring the alarm is only deleted after the deleteAll RPC succeeds.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // First, set an alarm so we have something to delete.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  // Call deleteAll() with deleteAlarm=true.
+  auto deleteAll = test.cache.deleteAll({}, nullptr, {.deleteAlarm = true});
+
+  // The deleteAll RPC goes through first.
+  mockStorage->expectCall("deleteAll", ws).thenReturn(CAPNP(numDeleted = 0));
+
+  KJ_ASSERT(deleteAll.count.wait(ws) == 0);
+
+  // After deleteAll succeeds, the alarm deletion is flushed in the post-deleteAll flush.
+  mockStorage->expectCall("deleteAlarm", ws)
+      .withParams(CAPNP(timeToDeleteMs = 0))
+      .thenReturn(CAPNP(deleted = true));
+  test.gate.wait(nullptr).wait(test.ws);
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == kj::none);
+  }
+}
+
+KJ_TEST("ActorCache deleteAll() without deleteAlarm preserves alarm") {
+  // Tests that deleteAll() without deleteAlarm (the default) does not delete the alarm.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // First, set an alarm.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  // Call deleteAll() without deleteAlarm (default).
+  auto deleteAll = test.cache.deleteAll({}, nullptr);
+
+  // The deleteAll RPC goes through.
+  mockStorage->expectCall("deleteAll", ws).thenReturn(CAPNP(numDeleted = 0));
+
+  KJ_ASSERT(deleteAll.count.wait(ws) == 0);
+
+  // Wait for the output gate to complete.
+  test.gate.wait(nullptr).wait(test.ws);
+
+  // The alarm should still be set.
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+}
+
+KJ_TEST("ActorCache deleteAll() with deleteAlarm does not overwrite subsequent setAlarm") {
+  // Tests that if setAlarm() is called after deleteAll({.deleteAlarm = true}) but before the
+  // deleteAll RPC completes, the new alarm is preserved rather than being clobbered by the
+  // post-deleteAll alarm deletion.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+  auto twoMs = 2 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // First, set an alarm so we have something to delete.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  // Call deleteAll() with deleteAlarm=true.
+  auto deleteAll = test.cache.deleteAll({}, nullptr, {.deleteAlarm = true});
+
+  // Hold the deleteAll RPC in flight.
+  auto mockDeleteAll = mockStorage->expectCall("deleteAll", ws);
+
+  // While the deleteAll RPC is in flight, set a new alarm. This simulates the user's JS code
+  // calling setAlarm() after deleteAll() but before the deleteAll RPC has completed.
+  test.setAlarm(twoMs);
+
+  // Now complete the deleteAll RPC.
+  kj::mv(mockDeleteAll).thenReturn(CAPNP(numDeleted = 0));
+
+  KJ_ASSERT(deleteAll.count.wait(ws) == 0);
+
+  // The post-deleteAll flush should send setAlarm for the new time, not deleteAlarm.
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 2))
+      .thenReturn(CAPNP());
+  test.gate.wait(nullptr).wait(test.ws);
+
+  // Verify the alarm is set to the new time.
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == twoMs);
+  }
+}
+
+KJ_TEST("ActorCache deleteAll() with deleteAlarm during alarm handler cancels deferred delete") {
+  // Tests that calling deleteAll() with deleteAlarm=true while an alarm handler is running
+  // overwrites the DeferredAlarmDelete state, so when the handler finishes and the
+  // DeferredAlarmDeleter fires, it does nothing (since currentAlarmTime is no longer
+  // DeferredAlarmDelete). The alarm deletion instead happens via the normal post-deleteAll
+  // flush path.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+  auto testCurrentTime = kj::UNIX_EPOCH;
+
+  // Set an alarm so we have something to delete.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  {
+    // Arm the alarm handler, putting us in DeferredAlarmDelete state.
+    auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
+
+    // During the handler, getAlarm() should return none (deferred delete is active).
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == kj::none);
+
+    // Call deleteAll() with deleteAlarm=true while the handler is running. This overwrites
+    // currentAlarmTime from DeferredAlarmDelete to KnownAlarmTime{CLEAN, none}.
+    auto deleteAll = test.cache.deleteAll({}, nullptr, {.deleteAlarm = true});
+
+    // getAlarm() should still return none.
+    {
+      auto time = expectCached(test.getAlarm());
+      KJ_ASSERT(time == kj::none);
+    }
+
+    // Drop the RunAlarmHandler. Since currentAlarmTime is no longer DeferredAlarmDelete,
+    // the DeferredAlarmDeleter does nothing.
+  }
+
+  // The deleteAll RPC goes through.
+  mockStorage->expectCall("deleteAll", ws).thenReturn(CAPNP(numDeleted = 0));
+
+  // After deleteAll succeeds, the alarm deletion is flushed in the post-deleteAll flush.
+  mockStorage->expectCall("deleteAlarm", ws)
+      .withParams(CAPNP(timeToDeleteMs = 0))
+      .thenReturn(CAPNP(deleted = true));
+  test.gate.wait(nullptr).wait(test.ws);
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == kj::none);
+  }
+}
+
+KJ_TEST(
+    "ActorCache deleteAll() without deleteAlarm during alarm handler preserves deferred delete") {
+  // Tests that calling deleteAll() without deleteAlarm while an alarm handler is running
+  // leaves the DeferredAlarmDelete state intact. When the handler finishes, the deferred
+  // deletion fires normally and the alarm is deleted via the pre-deleteAll flush.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+  auto testCurrentTime = kj::UNIX_EPOCH;
+
+  // Set an alarm so we have something to delete.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  {
+    // Arm the alarm handler, putting us in DeferredAlarmDelete state.
+    auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
+
+    // During the handler, getAlarm() should return none (deferred delete is active).
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == kj::none);
+
+    // Call deleteAll() without deleteAlarm while the handler is running.
+    // This does NOT touch currentAlarmTime, so DeferredAlarmDelete is preserved.
+    auto deleteAll = test.cache.deleteAll({}, nullptr);
+
+    // getAlarm() still returns none because DeferredAlarmDelete is still active.
+    {
+      auto time = expectCached(test.getAlarm());
+      KJ_ASSERT(time == kj::none);
+    }
+
+    // Drop the RunAlarmHandler. DeferredAlarmDeleter fires, sets status to READY,
+    // and calls ensureFlushScheduled().
+  }
+
+  // The deferred alarm delete is flushed in the pre-deleteAll flush, using the original
+  // alarm time as the timeToDeleteMs.
+  mockStorage->expectCall("deleteAlarm", ws)
+      .withParams(CAPNP(timeToDeleteMs = 1))
+      .thenReturn(CAPNP(deleted = true));
+
+  // Then the deleteAll RPC goes through.
+  mockStorage->expectCall("deleteAll", ws).thenReturn(CAPNP(numDeleted = 0));
+
+  test.gate.wait(nullptr).wait(test.ws);
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == kj::none);
+  }
+}
+
+KJ_TEST("ActorCache deleteAll() failure with deleteAlarm does not delete alarm") {
+  // Tests that if the deleteAll RPC fails, the alarm deletion RPC is never sent.
+  ActorCacheTest test({.monitorOutputGate = false});
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto brokenPromise = test.gate.onBroken();
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // First, set an alarm so we have something to delete.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  // Call deleteAll() with deleteAlarm=true.
+  auto deleteAll = test.cache.deleteAll({}, nullptr, {.deleteAlarm = true});
+
+  // The deleteAll RPC fails.
+  mockStorage->expectCall("deleteAll", ws)
+      .thenThrow(KJ_EXCEPTION(FAILED, "jsg.Error: deleteAll failed"));
+
+  // The output gate should be broken due to the failure.
+  KJ_EXPECT_THROW_MESSAGE("deleteAll failed", brokenPromise.wait(ws));
+
+  // No deleteAlarm RPC should have been sent since the deleteAll failed.
+  mockStorage->expectNoActivity(ws);
+}
+
 KJ_TEST("ActorCache can wait for flush") {
   // This test confirms that `onNoPendingFlush()` will return a promise that resolves when any
   // scheduled or in-flight flush completes.
