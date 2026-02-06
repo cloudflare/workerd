@@ -7,6 +7,7 @@
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/server/channel-token.h>
+#include <workerd/server/docker-api.capnp.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/list.h>
@@ -52,7 +53,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
-  kj::Promise<void> setEgressTcp(SetEgressTcpContext context) override;
   kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;
 
   kj::Own<ContainerClient> addRef();
@@ -92,6 +92,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
     kj::HashMap<uint16_t, uint16_t> ports;
   };
 
+  struct IPAMConfigResult {
+    kj::String gateway;
+    kj::String subnet;
+  };
+
   // Docker API v1.50 helper methods
   static kj::Promise<Response> dockerApiRequest(kj::Network& network,
       kj::String dockerPath,
@@ -108,7 +113,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> destroyContainer();
 
   // Sidecar container management (for egress proxy)
-  kj::Promise<void> createSidecarContainer(uint16_t egressPort);
+  kj::Promise<void> createSidecarContainer(uint16_t egressPort, kj::String networkCidr);
   kj::Promise<void> startSidecarContainer();
   kj::Promise<void> destroySidecarContainer();
   kj::Promise<void> monitorSidecarContainer();
@@ -151,8 +156,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // Mutex to serialize setEgressHttp() calls (sidecar setup must complete before adding mappings)
   kj::Maybe<kj::ForkedPromise<void>> egressSetupLock;
 
-  // Get the Docker bridge network gateway IP (e.g., "172.17.0.1")
-  kj::Promise<kj::String> getDockerBridgeGateway();
+  // Get the Docker bridge network gateway IP and subnet.
+  // Prefers the "workerd-network" bridge, creating it if needed
+  kj::Promise<IPAMConfigResult> getDockerBridgeIPAMConfig();
+  // Create the workerd-network Docker bridge network with IPv6 support
+  kj::Promise<void> createWorkerdNetwork();
   // Start the egress listener on the specified address, returns the chosen port
   kj::Promise<uint16_t> startEgressListener(kj::StringPtr listenAddress);
   // Stop the egress listener
