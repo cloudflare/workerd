@@ -731,6 +731,10 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
 }
 
 function addAggregatedD1MetaToSpan(span: Span, metas: D1Meta[]): void {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!metas?.length) {
+    return;
+  }
   const aggregatedMeta = aggregateD1Meta(metas);
   addD1MetaToSpan(span, aggregatedMeta);
 }
@@ -775,12 +779,22 @@ function aggregateD1Meta(metas: D1Meta[]): D1Meta {
   };
 
   for (const meta of metas) {
-    aggregatedMeta.duration += meta.duration;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (!meta) {
+      continue;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    aggregatedMeta.duration += meta.duration ?? 0;
     // for size_after, we only want the last value
-    aggregatedMeta.size_after = meta.size_after;
-    aggregatedMeta.rows_read += meta.rows_read;
-    aggregatedMeta.rows_written += meta.rows_written;
-    aggregatedMeta.last_row_id = meta.last_row_id;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    aggregatedMeta.size_after = meta.size_after ?? 0;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    aggregatedMeta.rows_read += meta.rows_read ?? 0;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    aggregatedMeta.rows_written += meta.rows_written ?? 0;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    aggregatedMeta.last_row_id = meta.last_row_id ?? 0;
     if (meta.served_by_region) {
       aggregatedMeta.served_by_region = meta.served_by_region;
     }
@@ -798,7 +812,8 @@ function aggregateD1Meta(metas: D1Meta[]): D1Meta {
       aggregatedMeta.total_attempts =
         (aggregatedMeta.total_attempts ?? 0) + meta.total_attempts;
     }
-    aggregatedMeta.changes += meta.changes;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    aggregatedMeta.changes += meta.changes ?? 0;
     if (meta.changed_db) {
       aggregatedMeta.changed_db = true;
     }
