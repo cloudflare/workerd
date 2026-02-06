@@ -9,8 +9,13 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/docker-api.capnp.h>
 
+#if _WIN32
+#include <ws2tcpip.h>
+#undef DELETE
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#endif
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
@@ -371,25 +376,60 @@ class ContainerClient::EgressHttpService final: public kj::HttpService {
   kj::HttpHeaderTable& headerTable;
 };
 
-kj::Promise<kj::String> ContainerClient::getDockerBridgeGateway() {
-  // Docker API: GET /networks/bridge
-  auto response = co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/networks/bridge"));
+// The name of the docker workerd network. All containers spawned by Workerd
+// will be attached to this network.
+constexpr kj::StringPtr WORKERD_NETWORK_NAME = "workerd-network"_kj;
+
+kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeIPAMConfig() {
+  // First, try to find or create the workerd-network
+  // Docker API: GET /networks/workerd-network
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+      kj::str("/networks/", WORKERD_NETWORK_NAME));
+
+  if (response.statusCode == 404) {
+    // Network doesn't exist, create it
+    // Equivalent to: docker network create -d bridge --ipv6 workerd-network
+    co_await createWorkerdNetwork();
+    // Re-fetch the network to get the gateway
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+        kj::str("/networks/", WORKERD_NETWORK_NAME));
+  }
 
   if (response.statusCode == 200) {
     auto jsonRoot = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
     auto ipamConfig = jsonRoot.getIpam().getConfig();
     if (ipamConfig.size() > 0) {
-      auto gateway = ipamConfig[0].getGateway();
-      if (gateway.size() > 0) {
-        co_return kj::str(gateway);
-      }
+      auto config = ipamConfig[0];
+      co_return IPAMConfigResult{
+        .gateway = kj::str(config.getGateway()),
+        .subnet = kj::str(config.getSubnet()),
+      };
     }
   }
 
-  // Fallback to default Docker bridge gateway
-  KJ_LOG(WARNING, "Could not determine Docker bridge gateway, using default 172.17.0.1");
-  co_return kj::str("172.17.0.1");
+  JSG_FAIL_REQUIRE(Error,
+      "Failed to get or create workerd-network. "
+      "Status: ",
+      response.statusCode, ", Body: ", response.body);
+}
+
+kj::Promise<void> ContainerClient::createWorkerdNetwork() {
+  // Docker API: POST /networks/create
+  // Equivalent to: docker network create -d bridge --ipv6 workerd-network
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::NetworkCreateRequest>();
+  capnp::MallocMessageBuilder message;
+  auto jsonRoot = message.initRoot<docker_api::Docker::NetworkCreateRequest>();
+  jsonRoot.setName(WORKERD_NETWORK_NAME);
+  jsonRoot.setDriver("bridge");
+  jsonRoot.setEnableIpv6(true);
+
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/networks/create"), codec.encode(jsonRoot));
+
+  if (response.statusCode != 201 && response.statusCode != 409) {
+    KJ_LOG(WARNING, "Failed to create workerd-network", response.statusCode, response.body);
+  }
 }
 
 kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenAddress) {
@@ -536,6 +576,8 @@ kj::Promise<void> ContainerClient::createContainer(
   auto envSize = environment.map([](auto& env) { return env.size(); }).orDefault(0);
   auto jsonEnv = jsonRoot.initEnv(envSize + kj::size(defaultEnv));
 
+  co_await createWorkerdNetwork();
+
   KJ_IF_SOME(env, environment) {
     for (uint32_t i: kj::zeroTo(env.size())) {
       jsonEnv.set(i, env[i]);
@@ -555,7 +597,10 @@ kj::Promise<void> ContainerClient::createContainer(
   // Add host.docker.internal mapping so containers can reach the host
   // This is equivalent to --add-host=host.docker.internal:host-gateway
   auto extraHosts = hostConfig.initExtraHosts(1);
-  extraHosts.set(0, "host.docker.internal:host-gateway");
+  auto ipamConfigForHost = co_await getDockerBridgeIPAMConfig();
+  extraHosts.set(0, kj::str("host.docker.internal:", ipamConfigForHost.gateway));
+  // Connect the container to the workerd-network for IPv6 support and container isolation
+  hostConfig.setNetworkMode(WORKERD_NETWORK_NAME);
 
   // When containersPidNamespace is NOT enabled, use host PID namespace for backwards compatibility.
   // This allows the container to see processes on the host.
@@ -650,7 +695,8 @@ kj::Promise<void> ContainerClient::destroyContainer() {
 // Creates the sidecar container for egress proxy.
 // The sidecar shares the network namespace with the main container and runs
 // proxy-everything to intercept and proxy egress traffic.
-kj::Promise<void> ContainerClient::createSidecarContainer(uint16_t egressPort) {
+kj::Promise<void> ContainerClient::createSidecarContainer(
+    uint16_t egressPort, kj::String networkCidr) {
   // Docker API: POST /containers/create
   // Equivalent to: docker run --cap-add=NET_ADMIN --network container:$(CONTAINER) ...
   capnp::JsonCodec codec;
@@ -660,9 +706,11 @@ kj::Promise<void> ContainerClient::createSidecarContainer(uint16_t egressPort) {
   jsonRoot.setImage(containerEgressInterceptorImage);
 
   // Pass the egress port to the sidecar via command line flag
-  auto cmd = jsonRoot.initCmd(2);
+  auto cmd = jsonRoot.initCmd(4);
   cmd.set(0, "--http-egress-port");
   cmd.set(1, kj::str(egressPort));
+  cmd.set(2, "--docker-gateway-cidr");
+  cmd.set(3, networkCidr);
 
   auto hostConfig = jsonRoot.initHostConfig();
   // Share network namespace with the main container
@@ -901,16 +949,16 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
     KJ_DEFER(paf.fulfiller->fulfill());
 
     // Get the Docker bridge gateway IP to listen on (only accessible from containers)
-    auto bridgeGateway = co_await getDockerBridgeGateway();
+    auto ipamConfig = co_await getDockerBridgeIPAMConfig();
 
     // Start the egress listener first so it's ready when the sidecar starts.
     // Use port 0 to let the OS pick a free port dynamically.
-    egressListenerPort = co_await startEgressListener(bridgeGateway);
+    egressListenerPort = co_await startEgressListener(ipamConfig.gateway);
 
     // Create and start the sidecar container that shares the network namespace
     // with the main container and intercepts egress traffic.
     // Pass the dynamically chosen port so the sidecar knows where to connect.
-    co_await createSidecarContainer(egressListenerPort);
+    co_await createSidecarContainer(egressListenerPort, kj::mv(ipamConfig.subnet));
     co_await startSidecarContainer();
 
     // Monitor the sidecar container for unexpected exits
@@ -929,10 +977,6 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   });
 
   co_return;
-}
-
-kj::Promise<void> ContainerClient::setEgressTcp(SetEgressTcpContext context) {
-  KJ_UNIMPLEMENTED("setEgressTcp not implemented - use setEgressHttp for now");
 }
 
 kj::Own<ContainerClient> ContainerClient::addRef() {

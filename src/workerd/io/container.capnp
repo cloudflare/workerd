@@ -115,15 +115,12 @@ interface Container @0x9aaceefc06523bca {
   # If there is no activity timeout duration configured and no container connection, it's up to the runtime
   # to decide when to signal the container to exit.
 
-  setEgressTcp @8 (addr :Text, channelToken :Data);
-  # TODO: This method is unimplemented.
-  #
-  # Configures egress TCP routing for the container. When the container attempts to connect to the
-  # specified address, the connection should be routed back to the Workers runtime using the channel token.
-
-  setEgressHttp @9 (hostPort :Text, channelToken :Data);
+  setEgressHttp @8 (hostPort :Text, channelToken :Data);
   # Configures egress HTTP routing for the container. When the container attempts to connect to the
   # specified host:port, the connection should be routed back to the Workers runtime using the channel token.
   # The format of hostPort can be '<ip|cidr>[':'<port>]'. If port is omitted, it's assumed to only cover port 80.
   # This method does not support HTTPs yet.
+
+
+  # TODO: setEgressTcp
 }
