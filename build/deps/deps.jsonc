@@ -86,10 +86,9 @@
     },
     {
       "name": "ncrypto",
-      "type": "github_tarball",
+      "type": "github_release",
       "owner": "nodejs",
-      "repo": "ncrypto",
-      "commit": "ba39e40ed1c1231902a676f53906cdd2f6119648",
+      "repo": "ncrypto"
     },
     {
       "name": "perfetto",

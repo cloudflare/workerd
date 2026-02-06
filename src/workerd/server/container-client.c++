@@ -365,12 +365,14 @@ kj::Promise<void> ContainerClient::destroyContainer() {
       network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
   // statusCode 204 refers to "no error"
   // statusCode 404 refers to "no such container"
-  // Both of which are fine for us since we're tearing down the container anyway.
-  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
+  // statusCode 409 refers to "removal already in progress" (race between concurrent destroys)
+  // All of which are fine for us since we're tearing down the container anyway.
+  JSG_REQUIRE(
+      response.statusCode == 204 || response.statusCode == 404 || response.statusCode == 409, Error,
       "Removing a container failed with: ", response.body);
   // Do not send a wait request if container doesn't exist. This avoids sending an
   // unnecessary request.
-  if (response.statusCode == 204) {
+  if (response.statusCode == 204 || response.statusCode == 409) {
     response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
         kj::str("/containers/", containerName, "/wait?condition=removed"));
     JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,

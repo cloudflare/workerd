@@ -336,11 +336,28 @@ export const testAlarm = {
       // Expected to throw
     }
 
-    // Wait for alarm to run after abort
-    await scheduler.wait(1500);
-
+    // Poll for the alarm to run after abort. The DO must be re-created and the
+    // alarm handler must fire, which can take variable time on CI.
+    // 50 iterations * 200ms = 10s max wait, which gives plenty of headroom for
+    // slow CI environments where Docker and DO reconstruction add latency.
     stub = env.MY_CONTAINER.get(id);
-    await stub.checkAlarmAbortConfirmation();
+    let confirmed = false;
+    for (let i = 0; i < 50 && !confirmed; i++) {
+      await scheduler.wait(200);
+      try {
+        await stub.checkAlarmAbortConfirmation();
+        confirmed = true;
+      } catch (e) {
+        assert.match(
+          e.message,
+          /Abort confirmation did not get inserted/,
+          `Unexpected error while polling for alarm: ${e.message}`
+        );
+      }
+    }
+    if (!confirmed) {
+      await stub.checkAlarmAbortConfirmation();
+    }
   },
 };
 
