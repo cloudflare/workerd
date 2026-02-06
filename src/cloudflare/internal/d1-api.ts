@@ -390,11 +390,6 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       const _exec = await this._send('/execute', lines, [], 'NONE', span);
       const exec = Array.isArray(_exec) ? _exec : [_exec];
 
-      addAggregatedD1MetaToSpan(
-        span,
-        exec.map((e) => e.meta)
-      );
-
       const error = exec
         .map((r) => {
           return r.error ? 1 : 0;
@@ -413,6 +408,10 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
           }
         );
       } else {
+        addAggregatedD1MetaToSpan(
+          span,
+          exec.map((e) => e.meta)
+        );
         return {
           count: exec.length,
           duration: exec.reduce((p, c) => {

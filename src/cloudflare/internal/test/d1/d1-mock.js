@@ -21,10 +21,18 @@ export class D1MockDO {
           : resultsFormatParam === 'NONE'
             ? 'NONE'
             : 'ARRAY_OF_OBJECTS';
+      const safeRunQuery = (query) => {
+        try {
+          return this.runQuery(query, resultsFormat);
+        } catch (e) {
+          // Reproduce the production behavior by catching any error and returning a V4Failure
+          return { success: false, error: String(e.message) };
+        }
+      };
       return Response.json(
         Array.isArray(body)
-          ? body.map((query) => this.runQuery(query, resultsFormat))
-          : this.runQuery(body, resultsFormat)
+          ? body.map((query) => safeRunQuery(query))
+          : safeRunQuery(body)
       );
     } else {
       return Response.json({ error: 'Not found' }, { status: 404 });
