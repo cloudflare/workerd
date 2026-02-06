@@ -756,7 +756,7 @@ kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
 }
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
-    WriteOptions options, SpanParent traceSpan) {
+    WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions) {
   requireNotBroken();
   disableAllowUnconfirmed(options, "deleteAll is not supported");
 
@@ -764,8 +764,7 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
   currentCommitSpan = kj::mv(traceSpan);
 
   // kv.deleteAll() clears the database, so we need to save and possibly restore alarm state in
-  // the metadata table, to try to match the behavior of ActorCache, which preserves the set alarm
-  // when running deleteAll().
+  // the metadata table to maintain behavior from before the deleteAllDeletesAlarm compat flag.
   auto localAlarmState = metadata.getAlarm();
 
   // deleteAll() cannot be part of a transaction because it deletes the database altogether. So,
@@ -810,7 +809,12 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
         // We don't want to commit the deletion without that transaction.
         return kj::READY_NOW;
       } else {
-        return commitCallback();
+        // Use commitImpl() rather than commitCallback() so that alarm scheduling is handled.
+        // This is important when deleteAll() deletes an alarm: commitImpl() detects that
+        // metadata.getAlarm() moved to kj::none and notifies the scheduler via
+        // requestScheduledAlarm(kj::none, ...).
+        auto precommitAlarmState = startPrecommitAlarmScheduling();
+        return commitImpl(kj::mv(precommitAlarmState), currentCommitSpan.addRef());
       }
     }),
         currentCommitSpan.addRef()));
@@ -819,19 +823,28 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
 
   uint count = kv.deleteAll();
 
-  // TODO(correctness): Since workerd doesn't have a separate durability step, in the unlikely
-  // event of a failure here, between deleteAll() and setAlarm(), we could theoretically lose the
-  // current alarm state when running under workerd.  Not sure if there's a practical way to avoid
-  // this.
-
   // Reset alarm state, if necessary.  If no alarm is set, OK to just leave metadata table
   // uninitialized.
   if (localAlarmState != kj::none) {
-    if (metadata.setAlarm(localAlarmState, options.allowUnconfirmed)) {
+    if (deleteAllOptions.deleteAlarm) {
+      // The caller wants the alarm deleted along with KV data. Since kv.deleteAll() already
+      // wiped the database (including the alarm metadata), metadata.getAlarm() will naturally
+      // return kj::none without creating any tables or rows. We just need to increment
+      // alarmVersion so the deleteAllCommitScheduled callback triggers alarm scheduling in
+      // commitImpl(), which will detect the alarm moved to kj::none and notify the scheduler.
       ++alarmVersion;
-      if (debugAlarmSync) {
-        KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: deleteAll restored alarm", logDate(localAlarmState),
-            alarmVersion);
+      haveDeferredDelete = false;
+    } else {
+      // TODO(correctness): Since workerd doesn't have a separate durability step, in the unlikely
+      // event of a failure here, between deleteAll() and setAlarm(), we could theoretically lose the
+      // current alarm state when running under workerd.  Not sure if there's a practical way to avoid
+      // this.
+      if (metadata.setAlarm(localAlarmState, options.allowUnconfirmed)) {
+        ++alarmVersion;
+        if (debugAlarmSync) {
+          KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: deleteAll restored alarm",
+              logDate(localAlarmState), alarmVersion);
+        }
       }
     }
   }
