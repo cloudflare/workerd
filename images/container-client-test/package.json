@@ -4,8 +4,7 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {},
-  "packageManager": "pnpm@10.18.3",
   "devDependencies": {
-    "ws": "^8.18.3"
+    "ws": "^8.19.0"
   }
 }

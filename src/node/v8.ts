@@ -102,6 +102,7 @@ export function getHeapStatistics(): HeapInfo {
     total_global_handles_size: 0,
     used_global_handles_size: 0,
     external_memory: 0,
+    total_allocated_bytes: 0,
   };
 }
 

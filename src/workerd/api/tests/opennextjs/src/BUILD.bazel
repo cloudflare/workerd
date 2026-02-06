@@ -1,0 +1,75 @@
+load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//src/workerd/api/tests/opennextjs/src:@opennextjs/cloudflare/package_json.bzl", opennext_bin = "bin")
+load("@npm//src/workerd/api/tests/opennextjs/src:wrangler/package_json.bzl", wrangler_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+opennext_bin.opennextjs_cloudflare_binary(
+    name = "opennextjs_cloudflare_bin",
+)
+
+wrangler_bin.wrangler_binary(
+    name = "wrangler_bin",
+)
+
+js_run_binary(
+    name = "opennextjs-build",
+    srcs = [
+        "jsconfig.json",
+        "next.config.mjs",
+        "open-next.config.mjs",
+        "package.json",
+        "wrangler.jsonc",
+        ":node_modules/@opennextjs/cloudflare",
+        ":node_modules/esbuild",
+        ":node_modules/next",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+    ] + glob([
+        "app/**/*.js",
+        "app/**/*.jsx",
+    ]),
+    args = [
+        "build",
+        "--openNextConfigPath",
+        "open-next.config.mjs",
+    ],
+    chdir = package_name(),
+    execution_requirements = {"no-sandbox": "1"},
+    out_dirs = [".open-next"],
+    patch_node_fs = False,
+    tags = ["no-downstream"],
+    target_compatible_with = ["@platforms//os:linux"],
+    tool = ":opennextjs_cloudflare_bin",
+    visibility = ["//visibility:public"],
+)
+
+# wrangler deploy --dry-run --outdir=dist
+js_run_binary(
+    name = "opennextjs-worker",
+    srcs = [
+        "wrangler.jsonc",
+        ":node_modules/@opennextjs/cloudflare",
+        ":node_modules/esbuild",
+        ":node_modules/wrangler",
+        ":opennextjs-build",
+    ],
+    outs = [
+        "dist/README.md",
+        "dist/worker.js",
+        "dist/worker.js.map",
+    ],
+    args = [
+        "deploy",
+        "--dry-run",
+        "--outdir=dist",
+    ],
+    chdir = package_name(),
+    execution_requirements = {"no-sandbox": "1"},
+    patch_node_fs = False,
+    tags = ["no-downstream"],
+    target_compatible_with = ["@platforms//os:linux"],
+    tool = ":wrangler_bin",
+    visibility = ["//visibility:public"],
+)

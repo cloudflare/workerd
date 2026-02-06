@@ -1,0 +1,21 @@
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("//:build/wd_test.bzl", "wd_test")
+
+copy_file(
+    name = "opennext-ssr-worker",
+    src = "//src/workerd/api/tests/opennextjs/src:dist/worker.js",
+    out = "opennext-ssr-worker.js",
+    tags = ["no-downstream"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+wd_test(
+    src = "opennext-ssr-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "opennext-ssr-test.js",
+        ":opennext-ssr-worker",
+    ],
+    tags = ["no-downstream"],
+    target_compatible_with = ["@platforms//os:linux"],
+)

@@ -645,6 +645,89 @@ export const allTheDecoders = {
   },
 };
 
+// Test that windows-1252 correctly decodes bytes 0x80-0x9F.
+// These bytes differ between windows-1252 and ISO-8859-1/Latin-1.
+// Per the WHATWG Encoding Standard, labels like "ascii", "latin1", and
+// "iso-8859-1" all map to windows-1252, so they must produce the
+// windows-1252 code points — not the raw byte values (C1 control chars).
+// See: https://encoding.spec.whatwg.org/#names-and-labels
+export const windows1252Decode = {
+  test() {
+    // The windows-1252 mapping for bytes 0x80-0x9F per the WHATWG Encoding Standard.
+    // See: https://encoding.spec.whatwg.org/index-windows-1252.txt
+    // Bytes 0x81, 0x8D, 0x8F, 0x90, 0x9D map to their C1 control character
+    // code points (identity) rather than being undefined.
+    const win1252UpperTable = {
+      0x80: 0x20ac, // € Euro Sign
+      0x81: 0x0081, // <control>
+      0x82: 0x201a, // ‚ Single Low-9 Quotation Mark
+      0x83: 0x0192, // ƒ Latin Small Letter F With Hook
+      0x84: 0x201e, // „ Double Low-9 Quotation Mark
+      0x85: 0x2026, // … Horizontal Ellipsis
+      0x86: 0x2020, // † Dagger
+      0x87: 0x2021, // ‡ Double Dagger
+      0x88: 0x02c6, // ˆ Modifier Letter Circumflex Accent
+      0x89: 0x2030, // ‰ Per Mille Sign
+      0x8a: 0x0160, // Š Latin Capital Letter S With Caron
+      0x8b: 0x2039, // ‹ Single Left-Pointing Angle Quotation Mark
+      0x8c: 0x0152, // Œ Latin Capital Ligature OE
+      0x8d: 0x008d, // <control>
+      0x8e: 0x017d, // Ž Latin Capital Letter Z With Caron
+      0x8f: 0x008f, // <control>
+      0x90: 0x0090, // <control>
+      0x91: 0x2018, // ' Left Single Quotation Mark
+      0x92: 0x2019, // ' Right Single Quotation Mark
+      0x93: 0x201c, // " Left Double Quotation Mark
+      0x94: 0x201d, // " Right Double Quotation Mark
+      0x95: 0x2022, // • Bullet
+      0x96: 0x2013, // – En Dash
+      0x97: 0x2014, // — Em Dash
+      0x98: 0x02dc, // ˜ Small Tilde
+      0x99: 0x2122, // ™ Trade Mark Sign
+      0x9a: 0x0161, // š Latin Small Letter S With Caron
+      0x9b: 0x203a, // › Single Right-Pointing Angle Quotation Mark
+      0x9c: 0x0153, // œ Latin Small Ligature OE
+      0x9d: 0x009d, // <control>
+      0x9e: 0x017e, // ž Latin Small Letter Z With Caron
+      0x9f: 0x0178, // Ÿ Latin Capital Letter Y With Diaeresis
+    };
+
+    // Test with all aliases that map to windows-1252
+    for (const label of [
+      'windows-1252',
+      'ascii',
+      'latin1',
+      'iso-8859-1',
+      'us-ascii',
+    ]) {
+      const decoder = new TextDecoder(label);
+      for (const [byte, expectedCodePoint] of Object.entries(
+        win1252UpperTable
+      )) {
+        const byteVal = Number(byte);
+        const decoded = decoder.decode(Uint8Array.of(byteVal));
+        const actualCodePoint = decoded.codePointAt(0);
+        strictEqual(
+          actualCodePoint,
+          expectedCodePoint,
+          `${label}: byte 0x${byteVal.toString(16)} should decode to ` +
+            `U+${expectedCodePoint.toString(16).toUpperCase().padStart(4, '0')}, ` +
+            `got U+${actualCodePoint.toString(16).toUpperCase().padStart(4, '0')}`
+        );
+      }
+    }
+
+    // Verify that bytes outside 0x80-0x9F still work correctly
+    const decoder = new TextDecoder('windows-1252');
+    // ASCII range (0x00-0x7F) should be identity
+    strictEqual(decoder.decode(Uint8Array.of(0x41)).codePointAt(0), 0x41); // 'A'
+    strictEqual(decoder.decode(Uint8Array.of(0x7f)).codePointAt(0), 0x7f);
+    // 0xA0-0xFF range is identical between latin-1 and windows-1252
+    strictEqual(decoder.decode(Uint8Array.of(0xa2)).codePointAt(0), 0xa2); // ¢
+    strictEqual(decoder.decode(Uint8Array.of(0xff)).codePointAt(0), 0xff); // ÿ
+  },
+};
+
 export const textDecoderStream = {
   test() {
     const stream = new TextDecoderStream('utf-16', {
