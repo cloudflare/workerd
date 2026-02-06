@@ -3841,7 +3841,8 @@ interface Container {
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
-  setEgressHttp(addr: string, binding: Fetcher): void;
+  interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
+  interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
