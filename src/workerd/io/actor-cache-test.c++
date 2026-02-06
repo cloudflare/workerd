@@ -5123,6 +5123,58 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   }
 }
 
+KJ_TEST("ActorCache deleteAll() then setAlarm(none) deletes alarm") {
+  // This tests that calling setAlarm(kj::none) after deleteAll() correctly queues alarm deletion
+  // in the post-deleteAll flush, which is the storage-layer behavior that underpins the API-layer
+  // change where deleteAll() conditionally deletes alarms when gated by a compat flag.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // First, set an alarm so we have something to delete.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  // Now do a deleteAll(), followed immediately by setAlarm(none).
+  auto deleteAll = test.cache.deleteAll({}, nullptr);
+
+  // The alarm is not affected by deleteAll alone (it goes into the pre-deleteAll flush).
+  // But now we explicitly clear it, which should go into the post-deleteAll flush.
+  test.setAlarm(kj::none);
+
+  // The cached alarm value should now be none.
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == kj::none);
+  }
+
+  // The deleteAll call goes through.
+  mockStorage->expectCall("deleteAll", ws).thenReturn(CAPNP(numDeleted = 0));
+
+  KJ_ASSERT(deleteAll.count.wait(ws) == 0);
+
+  // Post-deleteAll flush should include the alarm deletion.
+  mockStorage->expectCall("deleteAlarm", ws)
+      .withParams(CAPNP(timeToDeleteMs = 0))
+      .thenReturn(CAPNP(deleted = true));
+  test.gate.wait(nullptr).wait(test.ws);
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == kj::none);
+  }
+}
+
 KJ_TEST("ActorCache can wait for flush") {
   // This test confirms that `onNoPendingFlush()` will return a promise that resolves when any
   // scheduled or in-flight flush completes.

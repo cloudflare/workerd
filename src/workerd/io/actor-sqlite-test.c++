@@ -1341,6 +1341,37 @@ KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm stat
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
+KJ_TEST("calling deleteAll() then setAlarm(none) deletes alarm") {
+  // This tests the storage-layer behavior that underpins the API-layer change where
+  // deleteAll() conditionally deletes alarms when gated by a compat flag.
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Call deleteAll(), which preserves the alarm.
+  ActorCache::DeleteAllResults results = test.actor.deleteAll({}, nullptr);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Now explicitly clear the alarm (as the API layer would do with the compat flag).
+  test.setAlarm(kj::none);
+
+  // The alarm should now read as none.
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+  // Commit all pending work.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(results.count.wait(test.ws) == 0);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
 KJ_TEST("rolling back transaction leaves alarm in expected state") {
   ActorSqliteTest test;
 

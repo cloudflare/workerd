@@ -572,6 +572,10 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
 
   context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
+  if (FeatureFlags::get(js).getDeleteAllDeletesAlarm()) {
+    cache->setAlarm(kj::none, options, context.getCurrentTraceSpan());
+  }
+
   return context.attachSpans(js,
       transformMaybeBackpressure(js, options, kj::mv(deleteAll.backpressure)),
       kj::mv(traceContext));
