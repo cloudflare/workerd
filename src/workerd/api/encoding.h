@@ -74,7 +74,11 @@ class Decoder {
   virtual void reset() {}
 };
 
-// Decoder implementation that provides a fast-track for US-ASCII.
+// Decoder implementation that provides a fast-track for windows-1252.
+// When the input contains only bytes <= 0x7F or >= 0xA0, these are
+// identical between Latin-1 and windows-1252 so we can use V8's
+// efficient NewFromOneByte. For bytes in 0x80-0x9F, we remap them
+// to the correct windows-1252 code points using NewFromTwoByte.
 class AsciiDecoder final: public Decoder {
  public:
   AsciiDecoder() = default;
