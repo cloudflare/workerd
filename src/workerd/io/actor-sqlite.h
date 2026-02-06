@@ -91,7 +91,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // See ActorCacheOps.
 
   kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
-  DeleteAllResults deleteAll(WriteOptions options, SpanParent traceSpan) override;
+  DeleteAllResults deleteAll(
+      WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions = {}) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
