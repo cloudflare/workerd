@@ -1341,6 +1341,59 @@ KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm stat
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
+KJ_TEST("deleteAll with deleteAlarm option deletes alarm") {
+  // Tests that deleteAll() with deleteAlarm=true deletes the alarm along with KV data,
+  // instead of preserving the alarm as it does by default.
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Call deleteAll() with deleteAlarm=true.
+  ActorCache::DeleteAllResults results =
+      test.actor.deleteAll({}, nullptr, {.deleteAlarm = true});
+
+  // The alarm should now be deleted.
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+  // Commit should include scheduling the alarm cancellation.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(results.count.wait(test.ws) == 0);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
+KJ_TEST("deleteAll without deleteAlarm option preserves alarm") {
+  // Tests that deleteAll() without deleteAlarm (the default) preserves the alarm,
+  // which is the existing behavior.
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Call deleteAll() without deleteAlarm (default behavior).
+  ActorCache::DeleteAllResults results = test.actor.deleteAll({}, nullptr);
+
+  // The alarm should be preserved.
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(results.count.wait(test.ws) == 0);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
 KJ_TEST("rolling back transaction leaves alarm in expected state") {
   ActorSqliteTest test;
 

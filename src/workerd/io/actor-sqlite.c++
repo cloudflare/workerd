@@ -756,7 +756,7 @@ kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
 }
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
-    WriteOptions options, SpanParent traceSpan) {
+    WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions) {
   requireNotBroken();
   disableAllowUnconfirmed(options, "deleteAll is not supported");
 
@@ -827,11 +827,18 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
   // Reset alarm state, if necessary.  If no alarm is set, OK to just leave metadata table
   // uninitialized.
   if (localAlarmState != kj::none) {
-    if (metadata.setAlarm(localAlarmState, options.allowUnconfirmed)) {
-      ++alarmVersion;
-      if (debugAlarmSync) {
-        KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: deleteAll restored alarm", logDate(localAlarmState),
-            alarmVersion);
+    if (deleteAllOptions.deleteAlarm) {
+      // The caller wants the alarm deleted along with KV data. Since kv.deleteAll() already
+      // wiped the database (including the alarm metadata), we just need to schedule the alarm
+      // cancellation so the scheduler is notified.
+      setAlarm(kj::none, options, currentCommitSpan.addRef());
+    } else {
+      if (metadata.setAlarm(localAlarmState, options.allowUnconfirmed)) {
+        ++alarmVersion;
+        if (debugAlarmSync) {
+          KJ_LOG(WARNING, "NOSENTRY DEBUG_ALARM: deleteAll restored alarm",
+              logDate(localAlarmState), alarmVersion);
+        }
       }
     }
   }

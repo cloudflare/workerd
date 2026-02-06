@@ -1369,4 +1369,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableFlag("queue_expose_error_codes")
     $compatDisableFlag("no_queue_expose_error_codes");
   # When enabled, queue operations will include detailed error information (error code and cause)
+
+  deleteAllDeletesAlarm @159 :Bool
+    $compatEnableFlag("delete_all_deletes_alarm")
+    $compatDisableFlag("delete_all_preserves_alarm")
+    $compatEnableDate("2026-03-01");
+  # When enabled, calling storage.deleteAll() on a Durable Object also deletes
+  # any scheduled alarm, in addition to deleting all stored key-value data.
+  #
+  # Previously, deleteAll() preserved the alarm state. This was surprising
+  # behavior since the intent of deleteAll() is to clear all state.
 }

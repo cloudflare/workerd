@@ -5123,6 +5123,85 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   }
 }
 
+KJ_TEST("ActorCache deleteAll() with deleteAlarm deletes alarm after deleteAll succeeds") {
+  // Tests that deleteAll() with deleteAlarm=true deletes the alarm in the post-deleteAll
+  // flush, ensuring the alarm is only deleted after the deleteAll RPC succeeds.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // First, set an alarm so we have something to delete.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  // Call deleteAll() with deleteAlarm=true.
+  auto deleteAll = test.cache.deleteAll({}, nullptr, {.deleteAlarm = true});
+
+  // The deleteAll RPC goes through first.
+  mockStorage->expectCall("deleteAll", ws).thenReturn(CAPNP(numDeleted = 0));
+
+  KJ_ASSERT(deleteAll.count.wait(ws) == 0);
+
+  // After deleteAll succeeds, the alarm deletion is flushed in the post-deleteAll flush.
+  mockStorage->expectCall("deleteAlarm", ws)
+      .withParams(CAPNP(timeToDeleteMs = 0))
+      .thenReturn(CAPNP(deleted = true));
+  test.gate.wait(nullptr).wait(test.ws);
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == kj::none);
+  }
+}
+
+KJ_TEST("ActorCache deleteAll() without deleteAlarm preserves alarm") {
+  // Tests that deleteAll() without deleteAlarm (the default) does not delete the alarm.
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // First, set an alarm.
+  test.setAlarm(oneMs);
+
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+
+  // Call deleteAll() without deleteAlarm (default).
+  auto deleteAll = test.cache.deleteAll({}, nullptr);
+
+  // The deleteAll RPC goes through.
+  mockStorage->expectCall("deleteAll", ws).thenReturn(CAPNP(numDeleted = 0));
+
+  KJ_ASSERT(deleteAll.count.wait(ws) == 0);
+
+  // Wait for the output gate to complete.
+  test.gate.wait(nullptr).wait(test.ws);
+
+  // The alarm should still be set.
+  {
+    auto time = expectCached(test.getAlarm());
+    KJ_ASSERT(time == oneMs);
+  }
+}
+
 KJ_TEST("ActorCache can wait for flush") {
   // This test confirms that `onNoPendingFlush()` will return a promise that resolves when any
   // scheduled or in-flight flush completes.
