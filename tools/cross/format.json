@@ -6,12 +6,7 @@
   },
   {
     "directory": "src",
-    "globs": ["*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"],
-    "formatter": "prettier"
-  },
-  {
-    "directory": "src",
-    "globs": ["*.json"],
+    "globs": ["*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs", "*.json"],
     "formatter": "prettier"
   },
   {
