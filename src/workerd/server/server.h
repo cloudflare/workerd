@@ -38,6 +38,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
  public:
   Server(kj::Filesystem& fs,
       kj::Timer& timer,
+      const kj::MonotonicClock& monotonicClock,
       kj::Network& network,
       kj::EntropySource& entropySource,
       Worker::LoggingOptions loggingOptions,
@@ -134,6 +135,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
  private:
   kj::Filesystem& fs;
   kj::Timer& timer;
+  // monotonicClock must produce time values consistent with those produced by timer whenever
+  // timer updates, but monotonicClock updates continuously (not just when system I/O is polled).
+  const kj::MonotonicClock& monotonicClock;
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
