@@ -1364,9 +1364,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableDate("2026-02-17");
   # Preserve commas in Python Request headers rather than treating them as separators,
   # while still exposing multiple Set-Cookie headers as distinct values.
-    
+
   queueExposeErrorCodes @158 :Bool
     $compatEnableFlag("queue_expose_error_codes")
     $compatDisableFlag("no_queue_expose_error_codes");
   # When enabled, queue operations will include detailed error information (error code and cause)
+
+  textDecoderReplaceSurrogates @159 :Bool
+    $compatEnableFlag("text_decoder_replace_surrogates")
+    $compatDisableFlag("disable_text_decoder_replace_surrogates")
+    $compatEnableDate("2026-02-24")
+    $impliedByAfterDate(name = "pedanticWpt", date = "2026-02-24");
+  # When enabled, the UTF-16le TextDecoder will replace lone surrogates with U+FFFD
+  # (the Unicode replacement character) as required by the spec. Previously, lone
+  # surrogates were passed through unchanged, producing non-well-formed strings.
 }

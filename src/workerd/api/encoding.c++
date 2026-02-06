@@ -355,9 +355,9 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
 
         auto slice = data.slice(omitInitialBom ? 1 : 0, data.size());
 
-        // If pedanticWpt flag is enabled, then we follow the spec and fix invalid
-        // surrogates on the UTF-16 input.
-        if (slice.size() == 0 || !FeatureFlags::get(js).getPedanticWpt()) {
+        // If textDecoderReplaceSurrogates flag is enabled, then we follow the spec
+        // and fix invalid surrogates on the UTF-16 input.
+        if (slice.size() == 0 || !FeatureFlags::get(js).getTextDecoderReplaceSurrogates()) {
           return js.str(slice);
         }
 
