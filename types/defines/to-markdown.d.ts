@@ -4,12 +4,14 @@ export type MarkdownDocument = {
 }
 
 export type ConversionResponse = {
+  id: string;
   name: string;
   mimeType: string;
   format: 'markdown';
   tokens: number;
   data: string;
 } | {
+  id: string;
   name: string;
   mimeType: string;
   format: 'error';

@@ -668,6 +668,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams/identitytransformstream-byob-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/identitytransformstream-byob-test.js"],
+)
+
+wd_test(
     src = "streams/streams-test.wd-test",
     args = ["--experimental"],
     data = ["streams/streams-test.js"],
