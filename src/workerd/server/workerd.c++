@@ -685,6 +685,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         argv(argv),
         server(kj::heap<Server>(*fs,
             io.provider->getTimer(),
+            kj::systemPreciseMonotonicClock(),
             network,
             entropySource,
             Worker::LoggingOptions(Worker::ConsoleMode::STDOUT),

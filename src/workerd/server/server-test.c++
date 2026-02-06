@@ -332,6 +332,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
         timer(kj::origin<kj::TimePoint>()),
         server(*this,
             timer,
+            timer,
             mockNetwork,
             *this,
             Worker::LoggingOptions(consoleMode),

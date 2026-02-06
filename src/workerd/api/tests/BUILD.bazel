@@ -2,6 +2,12 @@ load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    src = "settimeout-test.wd-test",
+    args = ["--experimental"],
+    data = ["settimeout-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-delete-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-delete-test.js"],
