@@ -12324,6 +12324,7 @@ type ConversionOptions = {
     images?: EmbeddedImageConversionOptions & {
       convertOGImage?: boolean;
     };
+    hostname?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;
