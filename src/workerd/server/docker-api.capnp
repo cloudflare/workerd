@@ -304,4 +304,18 @@ struct Docker {
       }
     }
   }
+
+  # Network create request (POST /networks/create)
+  # Equivalent to: docker network create -d bridge --ipv6 workerd-network
+  struct NetworkCreateRequest {
+    name @0 :Text $Json.name("Name");
+    driver @1 :Text $Json.name("Driver");  # "bridge", "overlay", etc.
+    enableIpv6 @2 :Bool $Json.name("EnableIPv6");
+  }
+
+  # Network create response
+  struct NetworkCreateResponse {
+    id @0 :Text $Json.name("Id");
+    warning @1 :Text $Json.name("Warning");
+  }
 }
