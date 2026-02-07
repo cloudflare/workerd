@@ -2,24 +2,28 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
+    ( name = "TEST_TMPDIR", disk = (writable = true) ),
     ( name = "unsafe-module-test",
       worker = (
         modules = [
           ( name = "worker", esModule = embed "unsafe-module-test.js" ),
         ],
-        compatibilityFlags = ["nodejs_compat", "unsafe_module"],
+        compatibilityDate = "2023-12-06",
+        compatibilityFlags = ["nodejs_compat", "unsafe_module", "rpc"],
         durableObjectNamespaces = [
           ( className = "TestDurableObject", uniqueKey = "durable" ),
           ( className = "TestDurableObjectPreventEviction", uniqueKey = "durable-prevent-eviction", preventEviction = true ),
           ( className = "TestEphemeralObject", ephemeralLocal = void ),
           ( className = "TestEphemeralObjectPreventEviction", ephemeralLocal = void, preventEviction = true ),
+          ( className = "AlarmObject",  uniqueKey = "alarm" ),
         ],
-        durableObjectStorage = (inMemory = void),
+        durableObjectStorage = ( localDisk = "TEST_TMPDIR" ),
         bindings = [
           ( name = "DURABLE", durableObjectNamespace = "TestDurableObject" ),
           ( name = "DURABLE_PREVENT_EVICTION", durableObjectNamespace = "TestDurableObjectPreventEviction" ),
           ( name = "EPHEMERAL", durableObjectNamespace = "TestEphemeralObject" ),
           ( name = "EPHEMERAL_PREVENT_EVICTION", durableObjectNamespace = "TestEphemeralObjectPreventEviction" ),
+          ( name = "ALARM", durableObjectNamespace = "AlarmObject" ),
         ],
      )
     ),
