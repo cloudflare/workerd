@@ -1382,9 +1382,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
             } else if (object.isInstanceOf<JsRpcStub>(js) || object.isInstanceOf<Fetcher>(js) ||
                 (inStub && object.isInstanceOf<JsRpcProperty>(js))) {
               // Yes. It's a JsRpcStub or Fetcher. We should allow descending into the stub.
-              // Note that the wildcard property of a stub is a prototype property, not an instance
-              // property, so setting allowInstanceProperties = false here gets the behavior we
-              // want.
+              // The wildcard property interceptor is on the instance template, so properties
+              // accessed via the interceptor appear as instance properties.
               // TODO(someday): We'll need to support JsRpcPromise here if someday we allow it to
               //    be serialized.
               allowInstanceProperties = false;

@@ -36,6 +36,8 @@ class LoopbackServiceStub: public Fetcher {
   JSG_RESOURCE_TYPE(LoopbackServiceStub) {
     JSG_INHERIT(Fetcher);
     JSG_CALLABLE(call);
+    // Need to inherit getRpcMethod interceptor since we need it on the holder.
+    JSG_WILDCARD_PROPERTY(getRpcMethod);
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE(
