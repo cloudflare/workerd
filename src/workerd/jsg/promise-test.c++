@@ -192,5 +192,175 @@ KJ_TEST("thenable") {
   e.expectEval("thenable({ then(res) { res(123) } })", "number", "123");
 }
 
+// =======================================================================================
+// LazyPromise Tests
+
+struct LazyPromiseContext: public jsg::Object, public jsg::ContextGlobal {
+  // Store LazyPromise instances and their resolvers as members
+  kj::Maybe<LazyPromiseResolverPair<int>> intPair;
+  kj::Maybe<LazyPromiseResolverPair<void>> voidPair;
+
+  void createIntPromise(jsg::Lock& js) {
+    intPair = LazyPromiseResolverPair<int>();
+  }
+
+  void resolveIntPromise(jsg::Lock& js, int value) {
+    KJ_ASSERT_NONNULL(intPair).resolver.resolve(js, kj::mv(value));
+  }
+
+  void rejectIntPromise(jsg::Lock& js, jsg::Value reason) {
+    KJ_ASSERT_NONNULL(intPair).resolver.reject(js, kj::mv(reason));
+  }
+
+  MemoizedIdentity<Promise<int>>& getIntPromise(jsg::Lock& js) {
+    return KJ_ASSERT_NONNULL(intPair).promise.getPromise(js);
+  }
+
+  void createVoidPromise(jsg::Lock& js) {
+    voidPair = LazyPromiseResolverPair<void>();
+  }
+
+  void resolveVoidPromise(jsg::Lock& js) {
+    KJ_ASSERT_NONNULL(voidPair).resolver.resolve(js);
+  }
+
+  void rejectVoidPromise(jsg::Lock& js, jsg::Value reason) {
+    KJ_ASSERT_NONNULL(voidPair).resolver.reject(js, kj::mv(reason));
+  }
+
+  MemoizedIdentity<Promise<void>>& getVoidPromise(jsg::Lock& js) {
+    return KJ_ASSERT_NONNULL(voidPair).promise.getPromise(js);
+  }
+
+  bool multipleGetPromiseReturnSame(jsg::Lock& js) {
+    LazyPromiseResolverPair<int> pair;
+
+    // Get the promise twice
+    auto& memoized1 = pair.promise.getPromise(js);
+    auto& memoized2 = pair.promise.getPromise(js);
+
+    // They should be the same object
+    return &memoized1 == &memoized2;
+  }
+
+  void testDoubleResolve(jsg::Lock& js) {
+    // Double resolve is a no-op (matches jsg::Promise behavior)
+    LazyPromiseResolverPair<int> pair;
+    pair.resolver.resolve(js, 42);
+    pair.resolver.resolve(js, 100);  // Should be ignored
+  }
+
+  void testResolveAfterReject(jsg::Lock& js) {
+    // Resolve after reject is a no-op (matches jsg::Promise behavior)
+    LazyPromiseResolverPair<int> pair;
+    pair.resolver.reject(js, Value(js.v8Isolate, v8StrIntern(js.v8Isolate, "error")));
+    pair.resolver.resolve(js, 100);  // Should be ignored
+  }
+
+  void testRejectAfterResolve(jsg::Lock& js) {
+    // Reject after resolve is a no-op (matches jsg::Promise behavior)
+    LazyPromiseResolverPair<int> pair;
+    pair.resolver.resolve(js, 42);
+    pair.resolver.reject(
+        js, Value(js.v8Isolate, v8StrIntern(js.v8Isolate, "error")));  // Should be ignored
+  }
+
+  JSG_RESOURCE_TYPE(LazyPromiseContext) {
+    JSG_METHOD(createIntPromise);
+    JSG_METHOD(resolveIntPromise);
+    JSG_METHOD(rejectIntPromise);
+    JSG_METHOD(getIntPromise);
+    JSG_METHOD(createVoidPromise);
+    JSG_METHOD(resolveVoidPromise);
+    JSG_METHOD(rejectVoidPromise);
+    JSG_METHOD(getVoidPromise);
+    JSG_METHOD(multipleGetPromiseReturnSame);
+    JSG_METHOD(testDoubleResolve);
+    JSG_METHOD(testResolveAfterReject);
+    JSG_METHOD(testRejectAfterResolve);
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    KJ_IF_SOME(pair, intPair) {
+      visitor.visit(pair);
+    }
+    KJ_IF_SOME(pair, voidPair) {
+      visitor.visit(pair);
+    }
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(LazyPromiseIsolate, LazyPromiseContext);
+
+KJ_TEST("LazyPromise<int> resolve before getPromise") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("createIntPromise();"
+               "resolveIntPromise(42);"
+               "getIntPromise().then(v => v)",
+      "object", "[object Promise]");
+}
+
+KJ_TEST("LazyPromise<int> resolve after getPromise") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("createIntPromise();"
+               "let p = getIntPromise();"
+               "resolveIntPromise(123);"
+               "p.then(v => v)",
+      "object", "[object Promise]");
+}
+
+KJ_TEST("LazyPromise<int> reject before getPromise") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("createIntPromise();"
+               "rejectIntPromise('test error');"
+               "getIntPromise().catch(e => 'caught: ' + e)",
+      "object", "[object Promise]");
+}
+
+KJ_TEST("LazyPromise<int> reject after getPromise") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("createIntPromise();"
+               "let p = getIntPromise();"
+               "rejectIntPromise('test error');"
+               "p.catch(e => 'caught: ' + e)",
+      "object", "[object Promise]");
+}
+
+KJ_TEST("LazyPromise<int> multiple getPromise calls return same object") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("multipleGetPromiseReturnSame()", "boolean", "true");
+}
+
+KJ_TEST("LazyPromise<void> resolve before getPromise") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("createVoidPromise();"
+               "resolveVoidPromise();"
+               "getVoidPromise().then(() => 'resolved')",
+      "object", "[object Promise]");
+}
+
+KJ_TEST("LazyPromise<void> resolve after getPromise") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("createVoidPromise();"
+               "let p = getVoidPromise();"
+               "resolveVoidPromise();"
+               "p.then(() => 'resolved')",
+      "object", "[object Promise]");
+}
+
+KJ_TEST("LazyPromise double resolve is no-op") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("testDoubleResolve()", "undefined", "undefined");
+}
+
+KJ_TEST("LazyPromise resolve after reject is no-op") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("testResolveAfterReject()", "undefined", "undefined");
+}
+
+KJ_TEST("LazyPromise reject after resolve is no-op") {
+  Evaluator<LazyPromiseContext, LazyPromiseIsolate> e(v8System);
+  e.expectEval("testRejectAfterResolve()", "undefined", "undefined");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test
