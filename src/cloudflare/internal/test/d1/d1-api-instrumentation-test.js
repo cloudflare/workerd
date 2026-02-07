@@ -31,6 +31,29 @@ export const test = {
 };
 
 const expectedSpans = [
+  // testExecWithInvalidSQL: exec() with invalid SQL should throw a proper
+  // error, not a TypeError on undefined meta (regression test for #5218).
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'http://d1/execute?resultsFormat=NONE',
+    'http.request.header.content-type': 'application/json',
+    'http.request.body.size': 23n,
+    'http.response.status_code': 200n,
+    'http.response.body.size': 0n,
+    closed: true,
+  },
+  {
+    name: 'd1_exec',
+    'db.system.name': 'cloudflare-d1',
+    'db.operation.name': 'exec',
+    'db.query.text': 'INVALID SQL',
+    'cloudflare.binding.type': 'D1',
+    'error.type': 'Error in line 1',
+    closed: true,
+  },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
