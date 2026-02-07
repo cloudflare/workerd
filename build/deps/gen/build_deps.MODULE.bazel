@@ -15,6 +15,13 @@ bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
 
 # aspect_rules_js
 bazel_dep(name = "aspect_rules_js", version = "2.9.2")
+archive_override(
+    module_name = "aspect_rules_js",
+    integrity = "sha256-OsWVcoTGKM9zTkkwGq+gobXmXPSr/QzoJq7CYMwsPo0=",
+    strip_prefix = "aspect-build-rules_js-5a20c3a",
+    type = "tgz",
+    url = "https://github.com/aspect-build/rules_js/tarball/5a20c3a48a442ecaad5ff91f28ad1afe5c911a25",
+)
 
 # aspect_rules_lint
 bazel_dep(name = "aspect_rules_lint", version = "1.13.0")
