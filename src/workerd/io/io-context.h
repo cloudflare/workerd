@@ -166,7 +166,7 @@ class IoContext_IncomingRequest final {
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
   // based on setTimeout() when needed.
-  kj::Date now();
+  kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none);
 
   RequestObserver& getMetrics() {
     return *metrics;
