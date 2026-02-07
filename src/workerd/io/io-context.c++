@@ -730,9 +730,14 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
   auto paf = kj::newPromiseAndFulfiller<void>();
 
-  // Always schedule the timeout relative to what Date.now() currently returns, so that the delay
-  // appear exact. Otherwise, the delay could reveal non-determinism containing side channels.
-  auto when = context.now() + state.params.msDelay * kj::MILLISECONDS;
+  // Use the raw timer channel time rather than context.now() for computing the target time.
+  // context.now() clamps to getNextTimeout() as a Spectre mitigation, but during a callback
+  // triggered by a fired timeout whose entry hasn't been cleaned up yet, getNextTimeout()
+  // returns a stale past time. Computing `when` from that clamped value would place the new
+  // timeout in the past, causing atTime() to resolve it immediately (see #6037). The raw
+  // timer time is always current, so the requested delay is measured from the real present.
+  auto when =
+      context.getIoChannelFactory().getTimer().now() + state.params.msDelay * kj::MILLISECONDS;
   // TODO(cleanup): The manual use of run() here (including carrying over the critical section) is
   //   kind of ugly, but using awaitIo() doesn't work here because we need the ability to cancel
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
