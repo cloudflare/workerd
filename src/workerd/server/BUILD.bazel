@@ -205,18 +205,28 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "channel-token",
+    srcs = ["channel-token.c++"],
+    hdrs = ["channel-token.h"],
+    deps = [
+        ":channel-token_capnp",
+        "//src/workerd/io",
+        "//src/workerd/util:entropy",
+    ],
+)
+
+wd_cc_library(
     name = "server",
     srcs = [
-        "channel-token.c++",
         "server.c++",
     ],
     hdrs = [
-        "channel-token.h",
         "server.h",
     ],
     deps = [
         ":actor-id-impl",
         ":alarm-scheduler",
+        ":channel-token",
         ":channel-token_capnp",
         ":container-client",
         ":facet-tree-index",
@@ -268,7 +278,9 @@ wd_cc_library(
     hdrs = ["container-client.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":channel-token",
         ":docker-api_capnp",
+        "//src/workerd/io",
         "//src/workerd/io:container_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",

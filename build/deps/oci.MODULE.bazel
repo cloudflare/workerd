@@ -12,4 +12,12 @@ oci.pull(
         "linux/arm64/v8",
     ],
 )
-use_repo(oci, "node_25_slim", "node_25_slim_linux_amd64", "node_25_slim_linux_arm64_v8")
+oci.pull(
+    name = "proxy_everything",
+    image = "docker.io/cloudflare/proxy-everything:main",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
+)
+use_repo(oci, "node_25_slim", "node_25_slim_linux_amd64", "node_25_slim_linux_arm64_v8", "proxy_everything", "proxy_everything_linux_amd64", "proxy_everything_linux_arm64")
