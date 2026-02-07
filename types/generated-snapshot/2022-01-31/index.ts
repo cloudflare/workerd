@@ -342,14 +342,7 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
-  MessageChannel: typeof MessageChannel;
-  MessagePort: typeof MessagePort;
   EventSource: typeof EventSource;
-  ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
-  ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
-  ReadableByteStreamController: typeof ReadableByteStreamController;
-  WritableStreamDefaultController: typeof WritableStreamDefaultController;
-  TransformStreamDefaultController: typeof TransformStreamDefaultController;
   CompressionStream: typeof CompressionStream;
   DecompressionStream: typeof DecompressionStream;
   TextEncoderStream: typeof TextEncoderStream;
@@ -365,8 +358,6 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   AbortSignal: typeof AbortSignal;
   TextDecoder: typeof TextDecoder;
   TextEncoder: typeof TextEncoder;
-  navigator: Navigator;
-  Navigator: typeof Navigator;
   URL: typeof URL;
   URLSearchParams: typeof URLSearchParams;
   URLPattern: typeof URLPattern;
@@ -474,12 +465,10 @@ export declare const scheduler: Scheduler;
 export declare const performance: Performance;
 export declare const Cloudflare: Cloudflare;
 export declare const origin: string;
-export declare const navigator: Navigator;
 export interface TestController {}
 export interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
-  readonly exports: Cloudflare.Exports;
   readonly props: Props;
 }
 export type ExportedHandlerFetchHandler<
@@ -536,13 +525,6 @@ export interface ExportedHandler<
 }
 export interface StructuredSerializeOptions {
   transfer?: any[];
-}
-export declare abstract class Navigator {
-  sendBeacon(url: string, body?: BodyInit): boolean;
-  readonly userAgent: string;
-  readonly hardwareConcurrency: number;
-  readonly language: string;
-  readonly languages: string[];
 }
 export interface AlarmInvocationInfo {
   readonly isRetry: boolean;
@@ -614,17 +596,14 @@ export type DurableObjectLocationHint =
   | "oc"
   | "afr"
   | "me";
-export type DurableObjectRoutingMode = "primary-only";
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
-  routingMode?: DurableObjectRoutingMode;
 }
 export interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
-  readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
@@ -1653,12 +1632,6 @@ export declare class FormData {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
    */
-  append(name: string, value: string | Blob): void;
-  /**
-   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
-   */
   append(name: string, value: string): void;
   /**
    * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
@@ -1690,12 +1663,6 @@ export declare class FormData {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/has)
    */
   has(name: string): boolean;
-  /**
-   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set)
-   */
-  set(name: string, value: string | Blob): void;
   /**
    * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
    *
@@ -1870,12 +1837,6 @@ export declare class Headers {
   get(name: string): string | null;
   getAll(name: string): string[];
   /**
-   * The **`getSetCookie()`** method of the Headers interface returns an array containing the values of all Set-Cookie headers associated with a response.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie)
-   */
-  getSetCookie(): string[];
-  /**
    * The **`has()`** method of the Headers interface returns a boolean stating whether a `Headers` object contains a certain header.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has)
@@ -1918,9 +1879,7 @@ export type BodyInit =
   | ArrayBufferView
   | Blob
   | URLSearchParams
-  | FormData
-  | Iterable<ArrayBuffer | ArrayBufferView>
-  | AsyncIterable<ArrayBuffer | ArrayBufferView>;
+  | FormData;
 export declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
   get body(): ReadableStream | null;
@@ -2078,7 +2037,7 @@ export interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/signal)
    */
   signal: AbortSignal;
-  cf?: Cf;
+  cf: Cf | undefined;
   /**
    * The **`integrity`** read-only property of the Request interface contains the subresource integrity value of the request.
    *
@@ -2091,12 +2050,6 @@ export interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
    */
   keepalive: boolean;
-  /**
-   * The **`cache`** read-only property of the Request interface contains the cache mode of the request.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
-   */
-  cache?: "no-store" | "no-cache";
 }
 export interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -2109,8 +2062,6 @@ export interface RequestInit<Cf = CfProperties> {
   redirect?: string;
   fetcher?: Fetcher | null;
   cf?: Cf;
-  /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store" | "no-cache";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
@@ -2139,6 +2090,10 @@ export type Fetcher<
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   connect(address: SocketAddress | string, options?: SocketOptions): Socket;
 };
+export interface FetcherPutOptions {
+  expiration?: number;
+  expirationTtl?: number;
+}
 export interface KVNamespaceListKey<Metadata, Key extends string = string> {
   name: Key;
   expiration?: number;
@@ -2346,7 +2301,6 @@ export interface R2ListOptions {
   cursor?: string;
   delimiter?: string;
   startAfter?: string;
-  include?: ("httpMetadata" | "customMetadata")[];
 }
 export declare abstract class R2Bucket {
   head(key: string): Promise<R2Object | null>;
@@ -2617,8 +2571,6 @@ export interface Transformer<I = any, O = any> {
   expectedLength?: number;
 }
 export interface StreamPipeOptions {
-  preventAbort?: boolean;
-  preventCancel?: boolean;
   /**
    * Pipes this readable stream to a given writable stream destination. The way in which the piping process behaves under various error conditions can be customized with a number of passed options. It returns a promise that fulfills when the piping process completes successfully, or rejects if any errors were encountered.
    *
@@ -2637,6 +2589,8 @@ export interface StreamPipeOptions {
    * The signal option can be set to an AbortSignal to allow aborting an ongoing pipe operation via the corresponding AbortController. In this case, this source readable stream will be canceled, and destination aborted, unless the respective options preventCancel or preventAbort are set.
    */
   preventClose?: boolean;
+  preventAbort?: boolean;
+  preventCancel?: boolean;
   signal?: AbortSignal;
 }
 export type ReadableStreamReadResult<R = any> =
@@ -2789,7 +2743,7 @@ export interface ReadableStreamGetReaderOptions {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest)
  */
-export declare abstract class ReadableStreamBYOBRequest {
+export interface ReadableStreamBYOBRequest {
   /**
    * The **`view`** getter property of the ReadableStreamBYOBRequest interface returns the current view.
    *
@@ -2815,7 +2769,7 @@ export declare abstract class ReadableStreamBYOBRequest {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController)
  */
-export declare abstract class ReadableStreamDefaultController<R = any> {
+export interface ReadableStreamDefaultController<R = any> {
   /**
    * The **`desiredSize`** read-only property of the required to fill the stream's internal queue.
    *
@@ -2846,7 +2800,7 @@ export declare abstract class ReadableStreamDefaultController<R = any> {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController)
  */
-export declare abstract class ReadableByteStreamController {
+export interface ReadableByteStreamController {
   /**
    * The **`byobRequest`** read-only property of the ReadableByteStreamController interface returns the current BYOB request, or `null` if there are no pending requests.
    *
@@ -2883,7 +2837,7 @@ export declare abstract class ReadableByteStreamController {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController)
  */
-export declare abstract class WritableStreamDefaultController {
+export interface WritableStreamDefaultController {
   /**
    * The read-only **`signal`** property of the WritableStreamDefaultController interface returns the AbortSignal associated with the controller.
    *
@@ -2902,7 +2856,7 @@ export declare abstract class WritableStreamDefaultController {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController)
  */
-export declare abstract class TransformStreamDefaultController<O = any> {
+export interface TransformStreamDefaultController<O = any> {
   /**
    * The **`desiredSize`** read-only property of the TransformStreamDefaultController interface returns the desired size to fill the queue of the associated ReadableStream.
    *
@@ -2929,13 +2883,13 @@ export declare abstract class TransformStreamDefaultController<O = any> {
   terminate(): void;
 }
 export interface ReadableWritablePair<R = any, W = any> {
-  readable: ReadableStream<R>;
   /**
    * Provides a convenient, chainable way of piping this readable stream through a transform stream (or any other { writable, readable } pair). It simply pipes the stream into the writable side of the supplied pair, and returns the readable side for further use.
    *
    * Piping a stream will lock it for the duration of the pipe, preventing any other consumer from acquiring a reader.
    */
   writable: WritableStream<W>;
+  readable: ReadableStream<R>;
 }
 /**
  * The **`WritableStream`** interface of the Streams API provides a standard abstraction for writing streaming data to a destination, known as a sink.
@@ -3121,7 +3075,9 @@ export interface TextDecoderStreamTextDecoderStreamInit {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy)
  */
-export declare class ByteLengthQueuingStrategy implements QueuingStrategy<ArrayBufferView> {
+export declare class ByteLengthQueuingStrategy
+  implements QueuingStrategy<ArrayBufferView>
+{
   constructor(init: QueuingStrategyInit);
   /**
    * The read-only **`ByteLengthQueuingStrategy.highWaterMark`** property returns the total number of bytes that can be contained in the internal queue before backpressure is applied.
@@ -3283,12 +3239,6 @@ export interface UnsafeTraceMetrics {
 export declare class URL {
   constructor(url: string | URL, base?: string | URL);
   /**
-   * The **`origin`** read-only property of the URL interface returns a string containing the Unicode serialization of the origin of the represented URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin)
-   */
-  get origin(): string;
-  /**
    * The **`href`** property of the URL interface is a string containing the whole URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
@@ -3300,6 +3250,12 @@ export declare class URL {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href)
    */
   set href(value: string);
+  /**
+   * The **`origin`** read-only property of the URL interface returns a string containing the Unicode serialization of the origin of the represented URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin)
+   */
+  get origin(): string;
   /**
    * The **`protocol`** property of the URL interface is a string containing the protocol or scheme of the URL, including the final `':'`.
    *
@@ -3397,6 +3353,12 @@ export declare class URL {
    */
   set search(value: string);
   /**
+   * The **`searchParams`** read-only property of the access to the [MISSING: httpmethod('GET')] decoded query arguments contained in the URL.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
+   */
+  get searchParams(): URLSearchParams;
+  /**
    * The **`hash`** property of the URL interface is a string containing a `'#'` followed by the fragment identifier of the URL.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
@@ -3408,44 +3370,14 @@ export declare class URL {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash)
    */
   set hash(value: string);
-  /**
-   * The **`searchParams`** read-only property of the access to the [MISSING: httpmethod('GET')] decoded query arguments contained in the URL.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams)
-   */
-  get searchParams(): URLSearchParams;
+  /*function toString() { [native code] }*/
+  toString(): string;
   /**
    * The **`toJSON()`** method of the URL interface returns a string containing a serialized version of the URL, although in practice it seems to have the same effect as ```js-nolint toJSON() ``` None.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON)
    */
   toJSON(): string;
-  /*function toString() { [native code] }*/
-  toString(): string;
-  /**
-   * The **`URL.canParse()`** static method of the URL interface returns a boolean indicating whether or not an absolute URL, or a relative URL combined with a base URL, are parsable and valid.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static)
-   */
-  static canParse(url: string, base?: string): boolean;
-  /**
-   * The **`URL.parse()`** static method of the URL interface returns a newly created URL object representing the URL defined by the parameters.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static)
-   */
-  static parse(url: string, base?: string): URL | null;
-  /**
-   * The **`createObjectURL()`** static method of the URL interface creates a string containing a URL representing the object given in the parameter.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static)
-   */
-  static createObjectURL(object: File | Blob): string;
-  /**
-   * The **`revokeObjectURL()`** static method of the URL interface releases an existing object URL which was previously created by calling Call this method when you've finished using an object URL to let the browser know not to keep the reference to the file any longer.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static)
-   */
-  static revokeObjectURL(object_url: string): void;
 }
 /**
  * The **`URLSearchParams`** interface defines utility methods to work with the query string of a URL.
@@ -3454,7 +3386,11 @@ export declare class URL {
  */
 export declare class URLSearchParams {
   constructor(
-    init?: Iterable<Iterable<string>> | Record<string, string> | string,
+    init?:
+      | URLSearchParams
+      | string
+      | Record<string, string>
+      | [key: string, value: string][],
   );
   /**
    * The **`size`** read-only property of the URLSearchParams interface indicates the total number of search parameter entries.
@@ -3473,7 +3409,7 @@ export declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
    */
-  delete(name: string, value?: string): void;
+  delete(name: string): void;
   /**
    * The **`get()`** method of the URLSearchParams interface returns the first value associated to the given search parameter.
    *
@@ -3491,7 +3427,7 @@ export declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
    */
-  has(name: string, value?: string): boolean;
+  has(name: string): boolean;
   /**
    * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value.
    *
@@ -3537,7 +3473,6 @@ export declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
-  get hasRegExpGroups(): boolean;
   test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
     input?: string | URLPatternInit,
@@ -3808,7 +3743,7 @@ export interface ContainerStartupOptions {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
  */
-export declare abstract class MessagePort extends EventTarget {
+export interface MessagePort extends EventTarget {
   /**
    * The **`postMessage()`** method of the transfers ownership of objects to other browsing contexts.
    *
@@ -3832,26 +3767,6 @@ export declare abstract class MessagePort extends EventTarget {
   start(): void;
   get onmessage(): any | null;
   set onmessage(value: any | null);
-}
-/**
- * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
- */
-export declare class MessageChannel {
-  constructor();
-  /**
-   * The **`port1`** read-only property of the the port attached to the context that originated the channel.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
-   */
-  readonly port1: MessagePort;
-  /**
-   * The **`port2`** read-only property of the the port attached to the context at the other end of the channel, which the message is initially sent to.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
-   */
-  readonly port2: MessagePort;
 }
 export interface MessagePortPostMessageOptions {
   transfer?: any[];
@@ -3905,7 +3820,7 @@ export interface WorkerStubEntrypointOptions {
 }
 export interface WorkerLoader {
   get(
-    name: string | null,
+    name: string,
     getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
   ): WorkerStub;
 }
@@ -6269,7 +6184,7 @@ export interface Ai_Cf_Qwen_Qwq_32B_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -6543,7 +6458,7 @@ export interface Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -6636,7 +6551,7 @@ export interface Ai_Cf_Google_Gemma_3_12B_It_Prompt {
    */
   prompt: string;
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -6800,7 +6715,7 @@ export interface Ai_Cf_Google_Gemma_3_12B_It_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -7081,7 +6996,7 @@ export interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -7320,7 +7235,7 @@ export interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages_Inner {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -8408,7 +8323,7 @@ export interface Ai_Cf_Ai4Bharat_Indictrans2_En_Indic_1B_Input {
    */
   text: string | string[];
   /**
-   * Target language to translate to
+   * Target langauge to translate to
    */
   target_language:
     | "asm_Beng"
@@ -9402,7 +9317,7 @@ export type AiOptions = {
    * Maximum 5 tags are allowed each request.
    * Duplicate tags will removed.
    */
-  tags?: string[];
+  tags: string[];
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
@@ -9812,7 +9727,8 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
    */
   resolveOverride?: string;
 }
-export interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
+export interface RequestInitCfPropertiesImageDraw
+  extends BasicImageTransformations {
   /**
    * Absolute URL of the image file to use for the drawing. It can be any of
    * the supported file formats. For drawing of watermarks or non-rectangular
@@ -9849,7 +9765,8 @@ export interface RequestInitCfPropertiesImageDraw extends BasicImageTransformati
   bottom?: number;
   right?: number;
 }
-export interface RequestInitCfPropertiesImage extends BasicImageTransformations {
+export interface RequestInitCfPropertiesImage
+  extends BasicImageTransformations {
   /**
    * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
    * easier to specify higher-DPI sizes in <img srcset>.
@@ -10034,10 +9951,8 @@ export type IncomingRequestCfProperties<HostMetadata = unknown> =
     IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<HostMetadata> &
     IncomingRequestCfPropertiesGeographicInformation &
     IncomingRequestCfPropertiesCloudflareAccessOrApiShield;
-export interface IncomingRequestCfPropertiesBase extends Record<
-  string,
-  unknown
-> {
+export interface IncomingRequestCfPropertiesBase
+  extends Record<string, unknown> {
   /**
    * [ASN](https://www.iana.org/assignments/as-numbers/as-numbers.xhtml) of the incoming request.
    *
@@ -10154,7 +10069,8 @@ export interface IncomingRequestCfPropertiesBotManagement {
    */
   clientTrustScore: number;
 }
-export interface IncomingRequestCfPropertiesBotManagementEnterprise extends IncomingRequestCfPropertiesBotManagement {
+export interface IncomingRequestCfPropertiesBotManagementEnterprise
+  extends IncomingRequestCfPropertiesBotManagement {
   /**
    * Results of Cloudflare's Bot Management analysis
    */
@@ -10719,10 +10635,6 @@ export interface D1Meta {
    */
   served_by_region?: string;
   /**
-   * The three letters airport code of the colo that executed the query.
-   */
-  served_by_colo?: string;
-  /**
    * True if-and-only-if the database instance that executed the query was the primary.
    */
   served_by_primary?: boolean;
@@ -10807,15 +10719,6 @@ export declare abstract class D1PreparedStatement {
 // ignored when `Disposable` is included in the standard lib.
 export interface Disposable {}
 /**
- * The returned data after sending an email
- */
-export interface EmailSendResult {
-  /**
-   * The Email Message ID
-   */
-  messageId: string;
-}
-/**
  * An email message that can be sent from a Worker.
  */
 export interface EmailMessage {
@@ -10856,52 +10759,19 @@ export interface ForwardableEmailMessage extends EmailMessage {
    * @param headers A [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    * @returns A promise that resolves when the email message is forwarded.
    */
-  forward(rcptTo: string, headers?: Headers): Promise<EmailSendResult>;
+  forward(rcptTo: string, headers?: Headers): Promise<void>;
   /**
    * Reply to the sender of this email message with a new EmailMessage object.
    * @param message The reply message.
    * @returns A promise that resolves when the email message is replied.
    */
-  reply(message: EmailMessage): Promise<EmailSendResult>;
-}
-/** A file attachment for an email message */
-export type EmailAttachment =
-  | {
-      disposition: "inline";
-      contentId: string;
-      filename: string;
-      type: string;
-      content: string | ArrayBuffer | ArrayBufferView;
-    }
-  | {
-      disposition: "attachment";
-      contentId?: undefined;
-      filename: string;
-      type: string;
-      content: string | ArrayBuffer | ArrayBufferView;
-    };
-/** An Email Address */
-export interface EmailAddress {
-  name: string;
-  email: string;
+  reply(message: EmailMessage): Promise<void>;
 }
 /**
  * A binding that allows a Worker to send email messages.
  */
 export interface SendEmail {
-  send(message: EmailMessage): Promise<EmailSendResult>;
-  send(builder: {
-    from: string | EmailAddress;
-    to: string | string[];
-    subject: string;
-    replyTo?: string | EmailAddress;
-    cc?: string | string[];
-    bcc?: string | string[];
-    headers?: Record<string, string>;
-    text?: string;
-    html?: string;
-    attachments?: EmailAttachment[];
-  }): Promise<EmailSendResult>;
+  send(message: EmailMessage): Promise<void>;
 }
 export declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
@@ -10931,7 +10801,7 @@ export interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
    *
-   * Calling this method returns an identical socket to if you call
+   * Calling this method returns an idential socket to if you call
    * `connect("host:port")` using the `host` and `port` fields from this object.
    * Pick whichever approach works better with your preferred DB client library.
    *
@@ -11653,21 +11523,10 @@ export declare namespace CloudflareWorkersModule {
       },
     ): Promise<WorkflowStepEvent<T>>;
   }
-  export type WorkflowInstanceStatus =
-    | "queued"
-    | "running"
-    | "paused"
-    | "errored"
-    | "terminated"
-    | "complete"
-    | "waiting"
-    | "waitingForPause"
-    | "unknown";
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
-  >
-    implements Rpc.WorkflowEntrypointBranded
+  > implements Rpc.WorkflowEntrypointBranded
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
     protected ctx: ExecutionContext;
@@ -11702,7 +11561,6 @@ export type MarkdownDocument = {
 };
 export type ConversionResponse =
   | {
-      id: string;
       name: string;
       mimeType: string;
       format: "markdown";
@@ -11710,7 +11568,6 @@ export type ConversionResponse =
       data: string;
     }
   | {
-      id: string;
       name: string;
       mimeType: string;
       format: "error";
@@ -11894,15 +11751,6 @@ export declare namespace TailStream {
     readonly level: "debug" | "error" | "info" | "log" | "warn";
     readonly message: object;
   }
-  interface DroppedEventsDiagnostic {
-    readonly diagnosticsType: "droppedEvents";
-    readonly count: number;
-  }
-  interface StreamDiagnostic {
-    readonly type: "streamDiagnostic";
-    // To add new diagnostic types, define a new interface and add it to this union type.
-    readonly diagnostic: DroppedEventsDiagnostic;
-  }
   // This marks the worker handler return information.
   // This is separate from Outcome because the worker invocation can live for a long time after
   // returning. For example - Websockets that return an http upgrade response but then continue
@@ -11935,7 +11783,6 @@ export declare namespace TailStream {
     | DiagnosticChannelEvent
     | Exception
     | Log
-    | StreamDiagnostic
     | Return
     | Attributes;
   // Context in which this trace event lives.
@@ -11951,7 +11798,7 @@ export declare namespace TailStream {
     // For Hibernate and Mark this would be the span under which they were emitted.
     // spanId is not set ONLY if:
     //  1. This is an Onset event
-    //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
     readonly spanId?: string;
   }
   interface TailEvent<Event extends EventType> {
