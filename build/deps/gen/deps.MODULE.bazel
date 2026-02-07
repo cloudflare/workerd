@@ -145,3 +145,6 @@ git_override(
     ],
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
+
+# zstd
+bazel_dep(name = "zstd", version = "1.5.7.bcr.1")
