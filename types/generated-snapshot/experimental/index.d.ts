@@ -3841,6 +3841,7 @@ interface Container {
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
+  setEgress(addr: string, binding: Fetcher): void;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
