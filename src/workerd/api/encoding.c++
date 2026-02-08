@@ -500,13 +500,8 @@ kj::Maybe<jsg::JsString> XUserDefinedDecoder::decode(
   // - 0x80-0xFF: code point = 0xF780 + (byte - 0x80) = 0xF700 + byte
 
   // Check if we have any high bytes that need remapping
-  bool hasHighBytes = false;
-  for (auto byte: buffer) {
-    if (byte >= 0x80) {
-      hasHighBytes = true;
-      break;
-    }
-  }
+  bool hasHighBytes =
+      !simdutf::validate_ascii(reinterpret_cast<const char*>(buffer.begin()), buffer.size());
 
   if (!hasHighBytes) {
     // Fast path: all ASCII bytes, identity mapping
@@ -561,8 +556,8 @@ jsg::Ref<TextDecoder> TextDecoder::constructor(jsg::Lock& js,
 
   KJ_IF_SOME(label, maybeLabel) {
     encoding = getEncodingForLabel(label);
-    JSG_REQUIRE(encoding != Encoding::Replacement && encoding != Encoding::INVALID,
-        RangeError, errorMessage(label));
+    JSG_REQUIRE(encoding != Encoding::Replacement && encoding != Encoding::INVALID, RangeError,
+        errorMessage(label));
   }
 
   if (encoding == Encoding::Windows_1252) {
