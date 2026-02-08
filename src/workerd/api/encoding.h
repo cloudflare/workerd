@@ -94,6 +94,25 @@ class AsciiDecoder final: public Decoder {
       jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush = false) override;
 };
 
+// Decoder implementation for x-user-defined encoding.
+// Per WHATWG spec (https://encoding.spec.whatwg.org/#x-user-defined-decoder):
+// - Bytes 0x00-0x7F map to themselves (ASCII identity)
+// - Bytes 0x80-0xFF map to U+F780 + (byte - 0x80) = U+F700 + byte
+class XUserDefinedDecoder final: public Decoder {
+ public:
+  XUserDefinedDecoder() = default;
+  XUserDefinedDecoder(XUserDefinedDecoder&&) = default;
+  XUserDefinedDecoder& operator=(XUserDefinedDecoder&&) = default;
+  KJ_DISALLOW_COPY(XUserDefinedDecoder);
+
+  Encoding getEncoding() override {
+    return Encoding::X_User_Defined;
+  }
+
+  kj::Maybe<jsg::JsString> decode(
+      jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush = false) override;
+};
+
 // Decoder implementation that uses ICU's built-in conversion APIs.
 // ICU's decoder is fairly comprehensive, covering the full range
 // of encodings required by the Encoding specification.
@@ -138,7 +157,7 @@ class IcuDecoder final: public Decoder {
 // https://encoding.spec.whatwg.org/#interface-textdecoder
 class TextDecoder final: public jsg::Object {
  public:
-  using DecoderImpl = kj::OneOf<AsciiDecoder, IcuDecoder>;
+  using DecoderImpl = kj::OneOf<AsciiDecoder, IcuDecoder, XUserDefinedDecoder>;
 
   struct ConstructorOptions {
     bool fatal = false;
