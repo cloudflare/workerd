@@ -71,8 +71,8 @@ class Socket: public jsg::Object {
       kj::String domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
-      : connectionData(context.addObject(
-            kj::heap<ConnectionData>(kj::mv(connectionStream), kj::mv(watchForDisconnectTask)))),
+      : connectionData(context.addObject(kj::heap<ConnectionData>(
+            kj::mv(tlsStarter), kj::mv(connectionStream), kj::mv(watchForDisconnectTask)))),
         readable(kj::mv(readableParam)),
         writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
@@ -80,7 +80,6 @@ class Socket: public jsg::Object {
         closedPromise(kj::mv(closedPrPair.promise)),
         options(kj::mv(options)),
         remoteAddress(kj::mv(remoteAddress)),
-        tlsStarter(context.addObject(kj::mv(tlsStarter))),
         secureTransport(secureTransport),
         domain(kj::mv(domain)),
         isDefaultFetchPort(isDefaultFetchPort),
@@ -163,10 +162,7 @@ class Socket: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackFieldWithSize(
-        "connectionStream", sizeof(IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>>));
-    tracker.trackFieldWithSize("tlsStarter", sizeof(IoOwn<kj::TlsStarterCallback>));
-    tracker.trackFieldWithSize("watchForDisconnectTask", sizeof(IoOwn<kj::Promise<void>>));
+    tracker.trackFieldWithSize("connectionData", sizeof(IoOwn<ConnectionData>));
     tracker.trackField("readable", readable);
     tracker.trackField("writable", writable);
     tracker.trackField("closedResolver", closedResolver);
@@ -180,15 +176,18 @@ class Socket: public jsg::Object {
   }
 
  private:
-  // TODO(cleanup): Combine all the IoOwns here into one, to improve efficiency and make
-  //   shutdown order clearer.
   struct ConnectionData {
     kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
     kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
-    ConnectionData(kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connStream,
+    // tlsStarter must be declared after connectionStream so that it is destroyed first,
+    // since it holds a reference that keeps the connection alive.
+    kj::Own<kj::TlsStarterCallback> tlsStarter;
+    ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
+        kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connStream,
         kj::Promise<void> disconnectTask)
         : connectionStream(kj::mv(connStream)),
-          watchForDisconnectTask(kj::mv(disconnectTask)) {}
+          watchForDisconnectTask(kj::mv(disconnectTask)),
+          tlsStarter(kj::mv(tlsStarter)) {}
   };
   kj::Maybe<IoOwn<ConnectionData>> connectionData;
 
@@ -202,8 +201,6 @@ class Socket: public jsg::Object {
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
   jsg::Optional<SocketOptions> options;
   kj::String remoteAddress;
-  // Callback used to upgrade the existing connection to a secure one.
-  IoOwn<kj::TlsStarterCallback> tlsStarter;
   // Set to true when the socket is upgraded to a secure one.
   bool upgraded = false;
   SecureTransportKind secureTransport;
