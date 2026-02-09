@@ -40,6 +40,7 @@ export type EmbeddedImageConversionOptions = ImageConversionOptions & {
 export type ConversionOptions = {
   html?: {
     images?: EmbeddedImageConversionOptions & { convertOGImage?: boolean };
+    hostname?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;
