@@ -121,16 +121,16 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
       // ready. But we don't want people to actually set their compat date in the future, so let's
       // check against the clock time as well.
       if (CompatDate::today() < parsedCompatDate) {
-        errorReporter.addError(
-            kj::str("Can't set compatibility date in the future: ", parsedCompatDate));
+        errorReporter.addError(kj::str("Can't set compatibility date in the future: \"",
+            parsedCompatDate, "\". Today's date (UTC) is \"", CompatDate::today(), "\"."));
       }
 
       break;
 
     case CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE:
       if (CompatDate::today() < parsedCompatDate) {
-        errorReporter.addError(
-            kj::str("Can't set compatibility date in the future: ", parsedCompatDate));
+        errorReporter.addError(kj::str("Can't set compatibility date in the future: \"",
+            parsedCompatDate, "\". Today's date (UTC) is \"", CompatDate::today(), "\"."));
       }
       break;
 
