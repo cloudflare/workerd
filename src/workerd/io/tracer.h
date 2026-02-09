@@ -37,6 +37,7 @@ class BaseTracer: public kj::Refcounted {
       tracing::SpanId parentSpanId,
       kj::ConstString& operationName,
       kj::Date startTime) = 0;
+  virtual void addSpanEnd(tracing::CompleteSpan&& span) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -134,6 +135,7 @@ class WorkerTracer final: public BaseTracer {
       tracing::SpanId parentSpanId,
       kj::ConstString& operationName,
       kj::Date startTime) override;
+  void addSpanEnd(tracing::CompleteSpan&& span) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
@@ -189,11 +191,12 @@ class WorkerTracer final: public BaseTracer {
 
 class SpanSubmitter: public kj::Refcounted {
  public:
-  virtual void submitSpan(tracing::SpanId spanId, const Span& span) = 0;
+  virtual void submitSpan(tracing::SpanId context, tracing::SpanId spanId, const Span& span) = 0;
   virtual void submitSpanStart(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString& operationName,
       kj::Date startTime) = 0;
+  virtual void submitSpanEnd(tracing::SpanId spanId, const Span& span) = 0;
 
   virtual tracing::SpanId makeSpanId() = 0;
 };
@@ -216,6 +219,7 @@ class UserSpanObserver final: public SpanObserver {
   kj::Own<SpanObserver> newChild() override;
   void report(const Span& span) override;
   void reportStart(kj::ConstString& operationName, kj::Date startTime) override;
+  void reportEnd(const Span& span) override;
   kj::Date getTime() override;
 
  private:
