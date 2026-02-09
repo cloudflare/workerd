@@ -53,3 +53,17 @@ struct SpanOpenData {
   parentSpanId @3 :UInt64;
 }
 
+struct SpanEndData {
+  # Representation of an event that indicates completion of a user span. This information is
+  # provided to the tail worker in the Attributes and SpanClose events.
+
+  # TODO: These can probably go?
+  operationName @0 :Text;
+  startTimeNs @1 :Int64;
+  # Nanoseconds since Unix epoch
+  endTimeNs @2 :Int64;
+  # Nanoseconds since Unix epoch
+
+  tags @3 :List(Tag);
+  spanId @4 :UInt64;
+}
