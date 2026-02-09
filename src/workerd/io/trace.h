@@ -622,10 +622,8 @@ kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 struct CompleteSpan {
   // Represents a completed span within user tracing.
   tracing::SpanId spanId;
+  tracing::SpanId parentSpanId;
 
-  // TODO(cleanup): operationName and startTime are not used in the spanClose event, but still used
-  // for diagnostics and a fallback timestamp in the implementation. Get rid of them once that is no
-  // longer needed.
   kj::ConstString operationName;
   kj::Date startTime;
   kj::Date endTime;
@@ -634,13 +632,17 @@ struct CompleteSpan {
 
   CompleteSpan(rpc::UserSpanData::Reader reader);
   void copyTo(rpc::UserSpanData::Builder builder) const;
+  // TODO: Is clone() still needed?
+  CompleteSpan clone() const;
   explicit CompleteSpan(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime,
       kj::Date endTime,
       kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
           kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
       : spanId(spanId),
+        parentSpanId(parentSpanId),
         operationName(kj::mv(operationName)),
         startTime(startTime),
         endTime(endTime),
@@ -1133,6 +1135,7 @@ class SpanObserver: public kj::Refcounted {
   // This should always be called exactly once per observer.
   virtual void report(const Span& span) = 0;
   virtual void reportStart(kj::ConstString& operationName, kj::Date startTime) = 0;
+  virtual void reportEnd(const Span& span) = 0;
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available
