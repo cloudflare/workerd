@@ -138,6 +138,45 @@ export const lateHandlerTriggersRejectionhandled = {
   },
 };
 
+// Verifies unhandledrejection handler can trigger another unhandled rejection.
+export const handlerTriggeredUnhandledRejection = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const timeout = new Promise((resolveTimeout) => {
+      setTimeout(resolveTimeout, 25);
+    });
+    const reasons = [];
+    let callCount = 0;
+    const handler = mock.fn((event) => {
+      reasons.push(event.reason);
+      callCount += 1;
+      if (callCount === 1) {
+        queueMicrotask(() => Promise.reject(new Error('second')));
+      }
+      if (callCount === 2) {
+        resolve();
+      }
+    });
+    addEventListener('unhandledrejection', handler);
+    try {
+      Promise.reject(new Error('first'));
+      await Promise.race([promise, timeout]);
+      strictEqual(
+        handler.mock.callCount(),
+        2,
+        'unhandledrejection should fire for rejection triggered by handler'
+      );
+      strictEqual(reasons.length, 2);
+      ok(reasons[0] instanceof Error);
+      strictEqual(reasons[0].message, 'first');
+      ok(reasons[1] instanceof Error);
+      strictEqual(reasons[1].message, 'second');
+    } finally {
+      removeEventListener('unhandledrejection', handler);
+    }
+  },
+};
+
 // Verifies each unhandled rejection emits its own event.
 export const multipleUnhandledRejections = {
   async test() {
