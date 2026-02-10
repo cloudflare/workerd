@@ -1701,8 +1701,9 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
   SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
-    // This code path is workerd-only, we can safely utilize submitSpanOpen here.
-    submitSpanOpen(spanId, parentSpanId, span.operationName.clone(), span.startTime);
+    // parentSpanId is unused here – for user tracing, the parentSpanId is submitted separately in
+    // SpanOpen and not when the span is completed.
+    (void)parentSpanId;
     tracing::SpanEndData span2(spanId, span.startTime, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
