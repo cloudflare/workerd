@@ -97,10 +97,10 @@ use_repo(http, "nbytes")
 # ncrypto
 http.archive(
     name = "ncrypto",
-    sha256 = "3c4185b20ea0a04454adef8bb8d32ca90ddb4aa1d1ddc698bd9ae1439a8e2d6e",
-    strip_prefix = "nodejs-ncrypto-ba39e40",
+    sha256 = "def70950b184c16117a4c1f59bbe290427d71e03fde47e8126b47ec79158c5c3",
+    strip_prefix = "nodejs-ncrypto-c569580",
     type = "tgz",
-    url = "https://github.com/nodejs/ncrypto/tarball/ba39e40ed1c1231902a676f53906cdd2f6119648",
+    url = "https://api.github.com/repos/nodejs/ncrypto/tarball/v1.1.3",
 )
 use_repo(http, "ncrypto")
 
