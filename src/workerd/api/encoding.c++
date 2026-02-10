@@ -282,7 +282,13 @@ const TextDecoder::DecodeOptions TextDecoder::DEFAULT_OPTIONS = TextDecoder::Dec
 
 kj::Maybe<IcuDecoder> IcuDecoder::create(Encoding encoding, bool fatal, bool ignoreBom) {
   UErrorCode status = U_ZERO_ERROR;
-  UConverter* inner = ucnv_open(getEncodingId(encoding).cStr(), &status);
+  // Per the WHATWG encoding spec (section 10.1.1), GBK's decoder is gb18030's decoder.
+  // https://encoding.spec.whatwg.org/#gbk-decoder
+  // We can't change getEncodingId() itself because it is also used for the TextDecoder.encoding
+  // getter, which must still return "gbk" for GBK.
+  auto icuEncoding =
+      encoding == Encoding::Gbk ? getEncodingId(Encoding::Gb18030) : getEncodingId(encoding);
+  UConverter* inner = ucnv_open(icuEncoding.cStr(), &status);
   JSG_REQUIRE(U_SUCCESS(status), RangeError, "Invalid or unsupported encoding");
 
   if (fatal) {
