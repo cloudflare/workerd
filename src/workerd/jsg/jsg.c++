@@ -290,6 +290,15 @@ bool Lock::v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name) {
 
 void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
+
+  auto& isolate = IsolateBase::from(v8Isolate);
+  while (isolate.takeExtraMicrotaskCheckpointRequested({})) {
+    v8Isolate->PerformMicrotaskCheckpoint();
+  }
+}
+
+void Lock::requestExtraMicrotaskCheckpoint() {
+  IsolateBase::from(v8Isolate).requestExtraMicrotaskCheckpoint({});
 }
 
 void Lock::terminateNextExecution() {
