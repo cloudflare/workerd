@@ -632,8 +632,6 @@ struct CompleteSpan {
 
   CompleteSpan(rpc::UserSpanData::Reader reader);
   void copyTo(rpc::UserSpanData::Builder builder) const;
-  // TODO: Is clone() still needed?
-  CompleteSpan clone() const;
   explicit CompleteSpan(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
@@ -667,6 +665,30 @@ struct SpanOpenData {
         parentSpanId(parentSpanId),
         operationName(kj::mv(operationName)),
         startTime(startTime) {}
+};
+
+struct SpanEndData {
+  // Represents the data needed when closing a span, including the Attributes and SpanClose events.
+  tracing::SpanId spanId;
+
+  kj::Date startTime;
+  kj::Date endTime;
+  // Should be Span::TagMap, but we can't forward-declare that.
+  kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
+
+  // Convert CompleteSpan to SpanEndData
+  explicit SpanEndData(CompleteSpan&& span);
+  SpanEndData(rpc::SpanEndData::Reader reader);
+  void copyTo(rpc::SpanEndData::Builder builder) const;
+  explicit SpanEndData(tracing::SpanId spanId,
+      kj::Date startTime,
+      kj::Date endTime,
+      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
+          kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
+      : spanId(spanId),
+        startTime(startTime),
+        endTime(endTime),
+        tags(kj::mv(tags)) {}
 };
 
 // A Return mark is used to mark the point at which a span operation returned
@@ -1132,10 +1154,10 @@ class SpanObserver: public kj::Refcounted {
 
   // Report the span data. Called at the end of the span.
   //
-  // This should always be called exactly once per observer.
+  // This should always be called exactly once per observer at span completion time.
   virtual void report(const Span& span) = 0;
-  virtual void reportStart(kj::ConstString& operationName, kj::Date startTime) = 0;
-  virtual void reportEnd(const Span& span) = 0;
+  // Report information about the span onset.
+  virtual void reportStart(kj::ConstString operationName, kj::Date startTime) = 0;
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available

@@ -1516,14 +1516,11 @@ CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
   }
 }
 
-CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(spanId, parentSpanId, operationName.clone(), startTime, endTime);
-  copy.tags.reserve(tags.size());
-  for (auto& tag: tags) {
-    copy.tags.insert(tag.key.clone(), spanTagClone(tag.value));
-  }
-  return copy;
-}
+SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
+    : spanId(reader.getSpanId()),
+      parentSpanId(reader.getParentSpanId()),
+      operationName(kj::str(reader.getOperationName())),
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {}
 
 void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
   builder.setOperationName(operationName.asPtr());
@@ -1532,12 +1529,37 @@ void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
   builder.setParentSpanId(parentSpanId);
 }
 
-SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
-    : spanId(reader.getSpanId()),
-      parentSpanId(reader.getParentSpanId()),
-      operationName(kj::str(reader.getOperationName())),
-      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {}
+SpanEndData::SpanEndData(CompleteSpan&& span)
+    : spanId(span.spanId),
+      startTime(span.startTime),
+      endTime(span.endTime),
+      tags(kj::mv(span.tags)) {}
 
+SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
+    : spanId(reader.getSpanId()),
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
+      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
+  auto tagsParam = reader.getTags();
+  tags.reserve(tagsParam.size());
+  for (auto tagParam: tagsParam) {
+    tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
+        deserializeTagValue(tagParam.getValue()));
+  }
+}
+
+void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
+  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSpanId(spanId);
+
+  auto tagsParam = builder.initTags(tags.size());
+  auto i = 0;
+  for (auto& tag: tags) {
+    auto tagParam = tagsParam[i++];
+    tagParam.setKey(tag.key.asPtr());
+    serializeTagValue(tagParam.initValue(), tag.value);
+  }
+}
 }  // namespace tracing
 
 // ======================================================================================
