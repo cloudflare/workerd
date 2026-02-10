@@ -17,6 +17,7 @@ using bazel::tools::cpp::runfiles::Runfiles;
 namespace workerd {
 namespace {
 
+#ifdef __linux__
 void print_splitter() {
   printf("---------------------------------\n");
 }
@@ -61,6 +62,7 @@ void expect_failure(struct reprl_context* ctx, const char* code) {
     KJ_FAIL_REQUIRE("Execution unexpectedly succeeded", code);
   }
 }
+#endif  // __linux__
 
 KJ_TEST("REPRL basic functionality") {
 #ifdef __linux__
