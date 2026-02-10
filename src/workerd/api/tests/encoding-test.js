@@ -728,6 +728,42 @@ export const windows1252Decode = {
   },
 };
 
+// Per the WHATWG encoding spec (section 10.1.1), GBK's decoder is gb18030's decoder.
+// The .encoding property must still return "gbk", but decoding results must match gb18030.
+// https://encoding.spec.whatwg.org/#gbk-decoder
+export const gbkDecoderIsGb18030Decoder = {
+  test() {
+    const gbk = new TextDecoder('gbk');
+    const gb18030 = new TextDecoder('gb18030');
+
+    // .encoding property must still distinguish the two
+    strictEqual(gbk.encoding, 'gbk');
+    strictEqual(gb18030.encoding, 'gb18030');
+
+    // Decoding results must be identical. These byte pairs exercise boundary
+    // conditions where gbk and gb18030 would diverge if the ICU converter
+    // for gbk were used directly instead of delegating to gb18030.
+    const testBytes = [
+      [0, 255],
+      [128, 255],
+      [129, 48],
+      [129, 255],
+      [254, 48],
+      [254, 255],
+      [255, 0],
+      [255, 255],
+    ];
+    for (const bytes of testBytes) {
+      const u8 = Uint8Array.from(bytes);
+      strictEqual(
+        gbk.decode(u8),
+        gb18030.decode(u8),
+        `gbk and gb18030 must decode [${bytes}] identically`
+      );
+    }
+  },
+};
+
 export const textDecoderStream = {
   test() {
     const stream = new TextDecoderStream('utf-16', {
