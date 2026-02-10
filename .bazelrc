@@ -69,6 +69,11 @@ build --copt=-Wno-nontrivial-memaccess
 # a bug in Apple LLVM.
 build:macos --per_file_copt=v8/src/heap/heap.cc@-O3
 
+# The macOS Apple toolchain defines -DDEBUG for fastbuild, but the Linux toolchain does not. This
+# activates V8 DCHECK macros that reference symbols only available with V8_VERIFY_WRITE_BARRIERS
+# (a dbg-only define), causing compile errors. Undefine DEBUG to match Linux behavior.
+build:macos --copt=-UDEBUG
+
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
 # python tests. This is useful for both CI and local development and enabled by default, but still
 # kept in a separate configuration to make it easy to disable.
