@@ -266,7 +266,8 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
 
 kj::Promise<void> ContainerClient::createContainer(
     kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
-    kj::Maybe<capnp::List<capnp::Text>::Reader> environment) {
+    kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
+    capnp::List<rpc::Container::StartParams::Namespace>::Reader hostNamespaces) {
   // Docker API: POST /containers/create
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
@@ -300,6 +301,14 @@ kj::Promise<void> ContainerClient::createContainer(
   // We need to set a restart policy to avoid having ambiguous states
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
+  // Configure host namespace sharing
+  for (auto ns: hostNamespaces) {
+    switch (ns) {
+      case rpc::Container::StartParams::Namespace::PID:
+        hostConfig.setPidMode("host");
+        break;
+    }
+  }
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
@@ -397,7 +406,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     environment = params.getEnvironmentVariables();
   }
 
-  co_await createContainer(entrypoint, environment);
+  co_await createContainer(entrypoint, environment, params.getHostNamespaces());
   co_await startContainer();
 }
 

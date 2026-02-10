@@ -9,6 +9,14 @@ const server = createServer(function (req, res) {
     return;
   }
 
+  // Endpoint to get the PID of the current process
+  if (req.url === '/pid') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.write(String(process.pid));
+    res.end();
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.write('Hello World!');
   res.end();

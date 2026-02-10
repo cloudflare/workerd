@@ -270,12 +270,41 @@ export class DurableObjectExample extends DurableObject {
     }
     assert.strictEqual(container.running, false);
 
-    // Test with valid hostNamespaces
+    // Test with valid hostNamespaces - should share host PID namespace
     container.start({
       hostNamespaces: ['pid'],
     });
 
     assert.strictEqual(container.running, true);
+
+    // Verify the container process is NOT PID 1 (indicating host PID namespace is shared)
+    let resp;
+    const maxRetries = 6;
+    for (let i = 1; i <= maxRetries; i++) {
+      try {
+        resp = await container.getTcpPort(8080).fetch('http://foo/pid');
+        break;
+      } catch (e) {
+        if (!e.message.includes('container port not found')) {
+          throw e;
+        }
+        if (i === maxRetries) {
+          throw e;
+        }
+        await scheduler.wait(500);
+      }
+    }
+
+    assert.strictEqual(resp.status, 200);
+    const pid = parseInt(await resp.text(), 10);
+
+    // With host PID namespace, the entrypoint process should NOT be PID 1
+    assert.notStrictEqual(
+      pid,
+      1,
+      'Expected pid != 1 when host PID namespace is shared'
+    );
+
     await container.destroy();
   }
 
