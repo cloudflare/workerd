@@ -43,7 +43,7 @@ struct UserSpanData {
 }
 
 struct SpanOpenData {
-  # Representation of a SpanOpen event
+  # Representation of a SpanOpen event, created when a user span is opened.
   operationName @0 :Text;
 
   startTimeNs @1 :Int64;
@@ -55,15 +55,15 @@ struct SpanOpenData {
 
 struct SpanEndData {
   # Representation of an event that indicates completion of a user span. This information is
-  # provided to the tail worker in the Attributes and SpanClose events.
+  # provided to the streaming tail worker in the Attributes and SpanClose events.
 
-  # TODO: These can probably go?
-  operationName @0 :Text;
-  startTimeNs @1 :Int64;
+  # TODO(cleanup): startTimeNs is merely used as a fallback timestamp, consider obsoleting it.
+  startTimeNs @0 :Int64;
   # Nanoseconds since Unix epoch
-  endTimeNs @2 :Int64;
+  endTimeNs @1 :Int64;
   # Nanoseconds since Unix epoch
 
-  tags @3 :List(Tag);
-  spanId @4 :UInt64;
+  # List of span attributes
+  tags @2 :List(Tag);
+  spanId @3 :UInt64;
 }
