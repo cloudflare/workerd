@@ -537,8 +537,8 @@ def gen_deps_bzl(repo_contents, deps_bzl):
             deps_bzl_content += content
 
     with deps_bzl.open("w") as f:
-        # Strip trailing newline
-        f.write(deps_bzl_content[:-1])
+        # Strip extra trailing newline but keep one for POSIX compliance
+        f.write(deps_bzl_content.rstrip("\n") + "\n")
 
 
 def process_deps(deps, current_deps, deps_bzl):
