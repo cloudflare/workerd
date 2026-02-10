@@ -308,11 +308,8 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     });
   })
       .then(js, [this](jsg::Lock& js) {
-    // Destroy the tlsStarter which is also keeping the connection open.
-    { auto _ = kj::mv(tlsStarter); }
-
-    { auto _ = kj::mv(connectionData); }
     // Destroy the connection stream to close the connection.
+    { auto _ = kj::mv(connectionData); }
     connectionData = kj::none;
 
     resolveFulfiller(js, kj::none);
@@ -341,17 +338,17 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto secureStreamPromise = context.awaitJs(js,
       writable->flush(js).then(js,
           // The openedResolver is a jsg::Promise::Resolver. It should be gc visited here in
-          // case the opened promise is resolves captures a circular references to itself in
+          // case the opened promise it resolves captures a circular references to itself in
           // JavaScript (which is most likely). This prevents a possible memory leak.
           // We also capture a strong reference to the original Socket instance that is being
           // upgraded in order to prevent it from being GC'd while we are waiting for the
           // flush to complete. While it is unlikely to be GC'd while we are waiting because
           // the user code *likely* is holding a active reference to it at this point, we
           // don't want to take any chances. This prevents a possible UAF.
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(domain),
-                                   tlsOptions = kj::mv(tlsOptions), tlsStarter = kj::mv(tlsStarter),
-                                   openedResolver = openedPrPair.resolver.addRef(js),
-                                   remoteAddress = kj::str(remoteAddress)),
+          JSG_VISITABLE_LAMBDA(
+              (self = JSG_THIS, domain = kj::heapString(domain), tlsOptions = kj::mv(tlsOptions),
+                  openedResolver = openedPrPair.resolver.addRef(js),
+                  remoteAddress = kj::str(remoteAddress)),
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
@@ -372,12 +369,14 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 } else {
                 }  // Needed to avoid compiler error/warning
 
-                // All non-secure sockets should have a tlsStarter. Though since tlsStarter is an
-                // IoOwn, if the request's IoContext has ended then `tlsStarter` will be null. This
-                // can happen if the flush operation is taking a particularly long time (EW-8538),
-                // so we throw a JSG error if that's the case.
-                JSG_REQUIRE(*tlsStarter != kj::none, TypeError,
-                    "The request has finished before startTls completed.");
+                // All non-secure sockets should have `connectionData` with a `tlsStarter`.
+                // Though since it's inside an IoOwn, if the request's IoContext has ended
+                // then `connectionData` will be null. This can happen if the flush operation is taking
+                // a particularly long time (EW-8538), so we throw a JSG error if that's the case.
+                auto& connData = JSG_REQUIRE_NONNULL(self->connectionData, TypeError,
+                    "The connection was closed before startTls completed.");
+
+                auto& tlsStarter = connData->tlsStarter;
 
                 // Fork the starter promise because we need to create two separate things waiting
                 // on it below. The first is resolving the openedResolver with a JS promise that
@@ -398,8 +397,6 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
                 // Move the stream out of the plain text socket, to ensure the stream is properly
                 // destroyed when the socket is closed.
-                auto& connData = JSG_REQUIRE_NONNULL(self->connectionData, TypeError,
-                    "The connection was closed before startTls completed.");
                 kj::Own<kj::AsyncIoStream> stream = connData->connectionStream->addWrappedRef();
                 self->connectionData = kj::none;
 
