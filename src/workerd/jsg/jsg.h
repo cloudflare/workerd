@@ -2800,6 +2800,9 @@ class Lock {
 
   void runMicrotasks();
 
+  // Request an extra microtask checkpoint after the current one completes.
+  void requestExtraMicrotaskCheckpoint();
+
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible
   // some code will actually execute before termination kicks in.)
