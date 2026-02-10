@@ -35,6 +35,22 @@ export function writer(): ReplType.REPLWriter & { options: InspectOptions } {
   throw new ERR_METHOD_NOT_IMPLEMENTED('writer');
 }
 
+const writerOptions: InspectOptions = {
+  showHidden: false,
+  depth: 2,
+  colors: true,
+  customInspect: true,
+  showProxy: true,
+  maxArrayLength: 100,
+  maxStringLength: 10000,
+  breakLength: 80,
+  compact: 3,
+  sorted: false,
+  getters: false,
+  numericSeparator: false,
+};
+Object.assign(writer, { options: writerOptions });
+
 export function start(): ReplType.REPLServer {
   throw new ERR_METHOD_NOT_IMPLEMENTED('start');
 }
