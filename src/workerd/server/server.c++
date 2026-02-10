@@ -1701,10 +1701,9 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
   SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
-    // This code path is workerd-only, we can safely decompose this span into its components and
-    // call submitSpanOpen/submitSpanEnd instead of reimplementing them here.
-    submitSpanOpen(spanId, parentSpanId, span.operationName.clone(), span.startTime);
-    submitSpanEnd(spanId, span);
+    // SpanOpen and SpanClose are reported separately, this function is not used in user tracing and
+    // should never be called.
+    KJ_FAIL_ASSERT("submitSpan() should never be invoked for user tracing");
   }
 
   void submitSpanOpen(tracing::SpanId spanId,

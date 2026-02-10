@@ -619,34 +619,6 @@ struct Attribute final {
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 
-struct CompleteSpan {
-  // Represents a completed span within user tracing.
-  tracing::SpanId spanId;
-  tracing::SpanId parentSpanId;
-
-  kj::ConstString operationName;
-  kj::Date startTime;
-  kj::Date endTime;
-  // Should be Span::TagMap, but we can't forward-declare that.
-  kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
-
-  CompleteSpan(rpc::UserSpanData::Reader reader);
-  void copyTo(rpc::UserSpanData::Builder builder) const;
-  explicit CompleteSpan(tracing::SpanId spanId,
-      tracing::SpanId parentSpanId,
-      kj::ConstString operationName,
-      kj::Date startTime,
-      kj::Date endTime,
-      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
-          kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
-      : spanId(spanId),
-        parentSpanId(parentSpanId),
-        operationName(kj::mv(operationName)),
-        startTime(startTime),
-        endTime(endTime),
-        tags(kj::mv(tags)) {}
-};
-
 struct SpanOpenData {
   // Represents the data needed for a SpanOpen event
   tracing::SpanId spanId;
@@ -676,8 +648,6 @@ struct SpanEndData {
   // Should be Span::TagMap, but we can't forward-declare that.
   kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
 
-  // Convert CompleteSpan to SpanEndData
-  explicit SpanEndData(CompleteSpan&& span);
   SpanEndData(rpc::SpanEndData::Reader reader);
   void copyTo(rpc::SpanEndData::Builder builder) const;
   explicit SpanEndData(tracing::SpanId spanId,
@@ -1154,7 +1124,8 @@ class SpanObserver: public kj::Refcounted {
 
   // Report the span data. Called at the end of the span.
   //
-  // This should always be called exactly once per observer at span completion time.
+  // This should always be called exactly once per observer at span completion time. For user
+  // tracing, this is only used to transmit the span end data.
   virtual void report(const Span& span) = 0;
   // Report information about the span onset.
   virtual void reportStart(kj::ConstString operationName, kj::Date startTime) = 0;
