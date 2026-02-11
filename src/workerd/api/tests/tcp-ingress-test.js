@@ -7,14 +7,14 @@ export const newFunction = {
     await socket.opened;
     const dec = new TextDecoder();
     let result = '';
-    /*for await (const chunk of socket.readable) {
-      console.log("chunk:", chunk);
+    for await (const chunk of socket.readable) {
+      console.log('chunk:', chunk);
       dec.decode(chunk, { stream: true });
       result += dec.decode(chunk, { stream: true });
     }
     result += dec.decode();
-    strictEqual(result, 'hello');*/
-    //await socket.closed;
+    strictEqual(result, 'hello');
+    await socket.closed;
   },
 };
 

@@ -159,11 +159,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoSt
     auto event = jsg::alloc<ConnectEvent>(kj::mv(jsInbound), kj::mv(cf));
     auto promise = handler(js, kj::mv(event), eh.env.addRef(js), eh.getCtx());
 
-    struct RefcountedBool: public kj::Refcounted {
-      bool value;
-      RefcountedBool(bool value): value(value) {}
-    };
-    auto canceled = kj::refcounted<RefcountedBool>(false);
+    kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+    auto canceled = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
 
     return ioContext
         .awaitJs(js,
@@ -174,7 +171,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoSt
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       auto& context = IoContext::current();
       span = kj::none;
-      if (canceled->value) {
+      if (canceled->getWrapped()) {
         // The client disconnected before the response was ready. The outbound
         // is a dangling reference, let's not use it.
         return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
@@ -182,7 +179,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoSt
         return context.addObject(kj::heap(jsOutbound->pumpTo(js, kj::mv(outbound), true)));
       }
     })))
-        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
+        .attach(kj::defer([canceled = canceled->addWrappedRef()]() mutable { *canceled = true; }))
         .then(
             [ownConnection = kj::mv(ownConnection), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {

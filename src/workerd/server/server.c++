@@ -5289,16 +5289,19 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::HttpHeaderTable& headerTable;
   kj::Own<HttpRewriter> rewriter;
 
+  // TODO: Would using a plain ConnectResponse work here too?
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
     void accept(
         uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
       // Ok.. we're accepting the connection... anything to do?
+      KJ_LOG(WARNING, "accepted TCP stream", statusCode, statusText);
     }
     kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
         kj::StringPtr statusText,
         const kj::HttpHeaders& headers,
         kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
       // Doh... we're rejecting the connection... anything to do?
+      KJ_LOG(WARNING, "rejected TCP stream");
       return newNullOutputStream();
     }
   };

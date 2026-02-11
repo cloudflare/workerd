@@ -242,7 +242,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
                         .attach(kj::mv(actor));
 }
 
-kj::Exception exceptionToPropagate2(bool isInternalException, kj::Exception&& exception) {
+kj::Exception exceptionToPropagate(bool isInternalException, kj::Exception&& exception) {
   if (isInternalException) {
     // We've already logged it here, the only thing that matters to the client is that we failed
     // due to an internal error. Note that this does not need to be labeled "remote." since jsg
@@ -461,7 +461,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
-      return exceptionToPropagate2(isInternalException, kj::mv(exception));
+      return exceptionToPropagate(isInternalException, kj::mv(exception));
     } else KJ_IF_SOME(service, failOpenService) {
       // Fall back to origin.
 
@@ -495,7 +495,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       // Like with the isActor check, we want to return exceptions back to the caller.
       // We don't want to handle this case the same as the isActor case though, since we want
       // fail-open to operate normally, which means this case must happen after fail-open handling.
-      return exceptionToPropagate2(isInternalException, kj::mv(exception));
+      return exceptionToPropagate(isInternalException, kj::mv(exception));
     } else {
       // Return error.
 
@@ -640,7 +640,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
-      return exceptionToPropagate2(isInternalException, kj::mv(exception));
+      return exceptionToPropagate(isInternalException, kj::mv(exception));
     } else {
       // Return error.
 
