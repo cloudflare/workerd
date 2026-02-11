@@ -19,6 +19,8 @@
 #include <kj/refcount.h>
 #include <kj/string.h>
 
+#include <atomic>
+
 namespace workerd::server {
 
 // Docker-based implementation that implements the rpc::Container::Server interface
@@ -28,7 +30,7 @@ namespace workerd::server {
 //
 // ContainerClient is reference-counted to support actor reconnection with inactivity timeouts.
 // When setInactivityTimeout() is called, a timer holds a reference to prevent premature
-// destruction. The ContainerClient can be shared across multiple actor lifetimes.
+// destruction. The ContainerClient can be shared across multiple actor lifetimes
 class ContainerClient final: public rpc::Container::Server, public kj::Refcounted {
  public:
   ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
@@ -59,7 +61,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
-  // Create header table for HTTP parsing
   kj::HttpHeaderTable headerTable;
   kj::Timer& timer;
   kj::Network& network;
@@ -81,6 +82,9 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Docker-specific Port implementation
   class DockerPort;
+
+  // EgressHttpService handles CONNECT requests from proxy-anything sidecar
+  friend class EgressHttpService;
 
   struct Response {
     kj::uint statusCode;
@@ -126,15 +130,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Represents a parsed egress mapping with CIDR and port matching
   struct EgressMapping {
-    // The cidr to match this mapping on
     kj::CidrRange cidr;
-    // Port to match (0 means match all ports)
-    uint16_t port;
-    // The channel to route matching connections to
+    uint16_t port;  // 0 means match all ports
     kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
   };
 
-  // Egress HTTP mappings - list of CIDR/port rules to match against
   kj::Vector<EgressMapping> egressMappings;
 
   // Find a matching egress mapping for the given destination address (host:port format)
@@ -144,17 +144,13 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // Whether general internet access is enabled for this container
   bool internetEnabled = false;
 
-  // Egress HTTP listener for handling container egress via HTTP CONNECT from sidecar
-  class EgressHttpService;
-  class InnerEgressService;
+  std::atomic_bool containerStarted = false;
+  std::atomic_bool containerSidecarStarted = false;
+
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
   kj::Maybe<kj::Promise<void>> egressListenerTask;
 
-  // The dynamically chosen port for the egress listener
   uint16_t egressListenerPort = 0;
-
-  // Mutex to serialize setEgressHttp() calls (sidecar setup must complete before adding mappings)
-  kj::Maybe<kj::ForkedPromise<void>> egressSetupLock;
 
   // Get the Docker bridge network gateway IP and subnet.
   // Prefers the "workerd-network" bridge, creating it if needed
@@ -163,8 +159,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> createWorkerdNetwork();
   // Start the egress listener on the specified address, returns the chosen port
   kj::Promise<uint16_t> startEgressListener(kj::StringPtr listenAddress);
-  // Stop the egress listener
   void stopEgressListener();
+  // Ensure the egress listener and sidecar container are started exactly once.
+  // Uses containerSidecarStarted as a guard. Called from both start() and setEgressHttp().
+  kj::Promise<void> ensureSidecarStarted();
 };
 
 }  // namespace workerd::server
