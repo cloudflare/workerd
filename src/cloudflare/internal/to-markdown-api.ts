@@ -13,6 +13,7 @@ export type MarkdownDocument = {
 
 export type ConversionResponse =
   | {
+      id: string;
       name: string;
       mimeType: string;
       format: 'markdown';
@@ -20,6 +21,7 @@ export type ConversionResponse =
       data: string;
     }
   | {
+      id: string;
       name: string;
       mimeType: string;
       format: 'error';
@@ -38,6 +40,7 @@ export type EmbeddedImageConversionOptions = ImageConversionOptions & {
 export type ConversionOptions = {
   html?: {
     images?: EmbeddedImageConversionOptions & { convertOGImage?: boolean };
+    hostname?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;

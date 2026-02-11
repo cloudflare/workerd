@@ -19,9 +19,12 @@ std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatt
   // std::string_view is not guaranteed to be null-terminated, but kj::StringPtr requires it.
   // We need to create a null-terminated copy.
   auto str = kj::str(kj::arrayPtr(pattern.data(), pattern.size()));
-  return js.tryCatch([&]() -> std::optional<regex_type> {
+  JSG_TRY(js) {
     return jsg::JsRef(js, js.regexp(str, flags));
-  }, [&](auto reason) -> std::optional<regex_type> { return std::nullopt; });
+  }
+  JSG_CATCH(_) {
+    return std::nullopt;
+  }
 }
 
 bool URLPattern::URLPatternRegexEngine::regex_match(

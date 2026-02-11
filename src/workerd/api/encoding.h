@@ -16,7 +16,7 @@ namespace workerd::api {
 // the second label is the public identifier.
 #define EW_ENCODINGS(V)                                                                            \
   V(Utf8, "utf-8")                                                                                 \
-  V(Ibm866, "ibm-866")                                                                             \
+  V(Ibm866, "ibm866")                                                                              \
   V(Iso8859_2, "iso-8859-2")                                                                       \
   V(Iso8859_3, "iso-8859-3")                                                                       \
   V(Iso8859_4, "iso-8859-4")                                                                       \
@@ -49,7 +49,7 @@ namespace workerd::api {
   V(Big5, "big5")                                                                                  \
   V(Euc_Jp, "euc-jp")                                                                              \
   V(Iso2022_Jp, "iso-2022-jp")                                                                     \
-  V(Shift_Jis, "shift-jis")                                                                        \
+  V(Shift_Jis, "shift_jis")                                                                        \
   V(Euc_Kr, "euc-kr")                                                                              \
   V(Replacement, "replacement")                                                                    \
   V(Utf16be, "utf-16be")                                                                           \
@@ -74,7 +74,11 @@ class Decoder {
   virtual void reset() {}
 };
 
-// Decoder implementation that provides a fast-track for US-ASCII.
+// Decoder implementation that provides a fast-track for windows-1252.
+// When the input contains only bytes <= 0x7F or >= 0xA0, these are
+// identical between Latin-1 and windows-1252 so we can use V8's
+// efficient NewFromOneByte. For bytes in 0x80-0x9F, we remap them
+// to the correct windows-1252 code points using NewFromTwoByte.
 class AsciiDecoder final: public Decoder {
  public:
   AsciiDecoder() = default;

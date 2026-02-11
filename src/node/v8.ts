@@ -45,7 +45,9 @@ import {
   ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 
-export const cachedDataVersionTag = 0;
+export function cachedDataVersionTag(): number {
+  return 0;
+}
 
 function getHeapSnapshotOptions(options: HeapSnapshotOptions = {}): void {
   validateObject(options, 'options');
@@ -100,6 +102,7 @@ export function getHeapStatistics(): HeapInfo {
     total_global_handles_size: 0,
     used_global_handles_size: 0,
     external_memory: 0,
+    total_allocated_bytes: 0,
   };
 }
 

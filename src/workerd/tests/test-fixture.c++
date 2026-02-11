@@ -57,7 +57,7 @@ class DummyErrorHandler final: public kj::TaskSet::ErrorHandler {
 struct MockTimerChannel final: public TimerChannel {
   void syncTime() override {}
 
-  kj::Date now() override {
+  kj::Date now(kj::Maybe<kj::Date>) override {
     return kj::systemPreciseCalendarClock().now();
   }
 
@@ -78,7 +78,7 @@ struct RealTimerChannel final: public TimerChannel {
 
   void syncTime() override {}
 
-  kj::Date now() override {
+  kj::Date now(kj::Maybe<kj::Date>) override {
     return kj::systemPreciseCalendarClock().now();
   }
 

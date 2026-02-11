@@ -12,6 +12,40 @@ using namespace kj_rs;
 
 namespace workerd::rust::jsg {
 
+#define DEFINE_TYPED_ARRAY_NEW(name, v8_type, elem_type)                                           \
+  Local local_new_##name(Isolate* isolate, const elem_type* data, size_t length) {                 \
+    auto backingStore = v8::ArrayBuffer::NewBackingStore(isolate, length * sizeof(elem_type));     \
+    memcpy(backingStore->Data(), data, length * sizeof(elem_type));                                \
+    auto arrayBuffer = v8::ArrayBuffer::New(isolate, std::move(backingStore));                     \
+    return to_ffi(v8::v8_type::New(arrayBuffer, 0, length));                                       \
+  }
+
+#define DEFINE_TYPED_ARRAY_UNWRAP(name, v8_type, elem_type)                                        \
+  ::rust::Vec<elem_type> unwrap_##name(Isolate* isolate, Local value) {                            \
+    auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));                                         \
+    KJ_REQUIRE(v8Val->Is##v8_type());                                                              \
+    auto typed = v8Val.As<v8::v8_type>();                                                          \
+    ::rust::Vec<elem_type> result;                                                                 \
+    result.reserve(typed->Length());                                                               \
+    auto data = reinterpret_cast<elem_type*>(                                                      \
+        static_cast<uint8_t*>(typed->Buffer()->Data()) + typed->ByteOffset());                     \
+    for (size_t i = 0; i < typed->Length(); i++) {                                                 \
+      result.push_back(data[i]);                                                                   \
+    }                                                                                              \
+    return result;                                                                                 \
+  }
+
+#define DEFINE_TYPED_ARRAY_GET(name, v8_type, elem_type)                                           \
+  elem_type local_##name##_get(Isolate* isolate, const Local& array, size_t index) {               \
+    auto typed = local_as_ref_from_ffi<v8::v8_type>(array);                                        \
+    KJ_REQUIRE(index < typed->Length(), "index out of bounds");                                    \
+    auto data = reinterpret_cast<elem_type*>(                                                      \
+        static_cast<uint8_t*>(typed->Buffer()->Data()) + typed->ByteOffset());                     \
+    return data[index];                                                                            \
+  }
+
+// =============================================================================
+
 // Local<T>
 void local_drop(Local value) {
   // Convert from FFI representation and let v8::Local destructor handle cleanup
@@ -98,6 +132,58 @@ bool local_is_native_error(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsNativeError();
 }
 
+bool local_is_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsArray();
+}
+
+bool local_is_uint8_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUint8Array();
+}
+
+bool local_is_uint16_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUint16Array();
+}
+
+bool local_is_uint32_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUint32Array();
+}
+
+bool local_is_int8_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsInt8Array();
+}
+
+bool local_is_int16_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsInt16Array();
+}
+
+bool local_is_int32_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsInt32Array();
+}
+
+bool local_is_float32_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsFloat32Array();
+}
+
+bool local_is_float64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsFloat64Array();
+}
+
+bool local_is_bigint64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigInt64Array();
+}
+
+bool local_is_biguint64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigUint64Array();
+}
+
+bool local_is_array_buffer(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsArrayBuffer();
+}
+
+bool local_is_array_buffer_view(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsArrayBufferView();
+}
+
 ::rust::String local_type_of(Isolate* isolate, const Local& val) {
   auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
   v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
@@ -133,6 +219,39 @@ kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object
   }
   return to_ffi(kj::mv(result));
 }
+
+// Local<Array>
+Local local_new_array(Isolate* isolate, size_t length) {
+  return to_ffi(v8::Array::New(isolate, length));
+}
+
+uint32_t local_array_length(Isolate* isolate, const Local& array) {
+  return local_as_ref_from_ffi<v8::Array>(array)->Length();
+}
+
+Local local_array_get(Isolate* isolate, const Local& array, uint32_t index) {
+  auto context = isolate->GetCurrentContext();
+  auto v8Array = local_as_ref_from_ffi<v8::Array>(array);
+  return to_ffi(::workerd::jsg::check(v8Array->Get(context, index)));
+}
+
+void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value) {
+  auto context = isolate->GetCurrentContext();
+  auto v8Array = local_as_ref_from_ffi<v8::Array>(array);
+  ::workerd::jsg::check(v8Array->Set(context, index, local_from_ffi<v8::Value>(kj::mv(value))));
+}
+
+// TypedArray creation functions
+DEFINE_TYPED_ARRAY_NEW(uint8_array, Uint8Array, uint8_t)
+DEFINE_TYPED_ARRAY_NEW(uint16_array, Uint16Array, uint16_t)
+DEFINE_TYPED_ARRAY_NEW(uint32_array, Uint32Array, uint32_t)
+DEFINE_TYPED_ARRAY_NEW(int8_array, Int8Array, int8_t)
+DEFINE_TYPED_ARRAY_NEW(int16_array, Int16Array, int16_t)
+DEFINE_TYPED_ARRAY_NEW(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_NEW(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_NEW(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
 Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
@@ -184,8 +303,67 @@ size_t unwrap_resource(Isolate* isolate, Local value) {
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 }
 
-// Global<T>
+// TypedArray unwrap functions
+DEFINE_TYPED_ARRAY_UNWRAP(uint8_array, Uint8Array, uint8_t)
+DEFINE_TYPED_ARRAY_UNWRAP(uint16_array, Uint16Array, uint16_t)
+DEFINE_TYPED_ARRAY_UNWRAP(uint32_array, Uint32Array, uint32_t)
+DEFINE_TYPED_ARRAY_UNWRAP(int8_array, Int8Array, int8_t)
+DEFINE_TYPED_ARRAY_UNWRAP(int16_array, Int16Array, int16_t)
+DEFINE_TYPED_ARRAY_UNWRAP(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_UNWRAP(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_UNWRAP(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_UNWRAP(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 
+// Uses V8's Array::Iterate() which is faster than indexed access.
+// Returns Global handles because Local handles get reused during iteration.
+::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value) {
+  auto context = isolate->GetCurrentContext();
+  auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
+
+  KJ_REQUIRE(v8Val->IsArray(), "Value must be an array");
+  auto arr = v8Val.As<v8::Array>();
+
+  struct Data {
+    Isolate* isolate;
+    ::rust::Vec<Global>* result;
+  };
+
+  ::rust::Vec<Global> result;
+  result.reserve(arr->Length());
+  Data data{isolate, &result};
+
+  auto iterateResult = arr->Iterate(context,
+      [](uint32_t index, v8::Local<v8::Value> element,
+          void* userData) -> v8::Array::CallbackResult {
+    auto* d = static_cast<Data*>(userData);
+    d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
+    return v8::Array::CallbackResult::kContinue;
+  },
+      &data);
+
+  KJ_REQUIRE(iterateResult.IsJust(), "Iteration failed");
+  return result;
+}
+
+// Local<TypedArray>
+size_t local_typed_array_length(Isolate* isolate, const Local& array) {
+  return local_as_ref_from_ffi<v8::TypedArray>(array)->Length();
+}
+
+// TypedArray element getter functions
+DEFINE_TYPED_ARRAY_GET(uint8_array, Uint8Array, uint8_t)
+DEFINE_TYPED_ARRAY_GET(uint16_array, Uint16Array, uint16_t)
+DEFINE_TYPED_ARRAY_GET(uint32_array, Uint32Array, uint32_t)
+DEFINE_TYPED_ARRAY_GET(int8_array, Int8Array, int8_t)
+DEFINE_TYPED_ARRAY_GET(int16_array, Int16Array, int16_t)
+DEFINE_TYPED_ARRAY_GET(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_GET(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_GET(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_GET(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_GET(biguint64_array, BigUint64Array, uint64_t)
+
+// Global<T>
 void global_drop(Global value) {
   global_from_ffi<v8::Value>(kj::mv(value));
 }

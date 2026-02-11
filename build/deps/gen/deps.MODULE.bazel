@@ -4,6 +4,9 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
+# ada-url
+bazel_dep(name = "ada-url", version = "3.4.2")
+
 # boringssl
 bazel_dep(name = "boringssl", repo_name = "ssl")
 archive_override(
@@ -94,10 +97,10 @@ use_repo(http, "nbytes")
 # ncrypto
 http.archive(
     name = "ncrypto",
-    sha256 = "8039df71335e7a810b9d7bf3fdf5adf05e81d7ae4e254d14b0f8d98b8245240e",
-    strip_prefix = "nodejs-ncrypto-7babbbb",
+    sha256 = "def70950b184c16117a4c1f59bbe290427d71e03fde47e8126b47ec79158c5c3",
+    strip_prefix = "nodejs-ncrypto-c569580",
     type = "tgz",
-    url = "https://github.com/nodejs/ncrypto/tarball/7babbbba3bda529189c0ae8801b27f4167889108",
+    url = "https://api.github.com/repos/nodejs/ncrypto/tarball/v1.1.3",
 )
 use_repo(http, "ncrypto")
 

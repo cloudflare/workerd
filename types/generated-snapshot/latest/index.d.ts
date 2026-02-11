@@ -1913,7 +1913,9 @@ type BodyInit =
   | ArrayBufferView
   | Blob
   | URLSearchParams
-  | FormData;
+  | FormData
+  | Iterable<ArrayBuffer | ArrayBufferView>
+  | AsyncIterable<ArrayBuffer | ArrayBufferView>;
 declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
   get body(): ReadableStream | null;
@@ -11633,6 +11635,16 @@ declare namespace CloudflareWorkersModule {
       },
     ): Promise<WorkflowStepEvent<T>>;
   }
+  export type WorkflowInstanceStatus =
+    | "queued"
+    | "running"
+    | "paused"
+    | "errored"
+    | "terminated"
+    | "complete"
+    | "waiting"
+    | "waitingForPause"
+    | "unknown";
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
@@ -11682,6 +11694,7 @@ type MarkdownDocument = {
 };
 type ConversionResponse =
   | {
+      id: string;
       name: string;
       mimeType: string;
       format: "markdown";
@@ -11689,6 +11702,7 @@ type ConversionResponse =
       data: string;
     }
   | {
+      id: string;
       name: string;
       mimeType: string;
       format: "error";
@@ -11706,6 +11720,7 @@ type ConversionOptions = {
     images?: EmbeddedImageConversionOptions & {
       convertOGImage?: boolean;
     };
+    hostname?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;

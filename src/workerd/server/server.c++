@@ -175,12 +175,14 @@ void throwDynamicEntrypointTransferError() {
 
 Server::Server(kj::Filesystem& fs,
     kj::Timer& timer,
+    const kj::MonotonicClock& monotonicClock,
     kj::Network& network,
     kj::EntropySource& entropySource,
     Worker::LoggingOptions loggingOptions,
     kj::Function<void(kj::String)> reportConfigError)
     : fs(fs),
       timer(timer),
+      monotonicClock(monotonicClock),
       network(network),
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
@@ -1886,6 +1888,7 @@ class Server::WorkerService final: public Service,
   WorkerService(ChannelTokenHandler& channelTokenHandler,
       kj::Maybe<kj::StringPtr> serviceName,
       ThreadContext& threadContext,
+      const kj::MonotonicClock& monotonicClock,
       kj::Own<const Worker> worker,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
@@ -1897,6 +1900,7 @@ class Server::WorkerService final: public Service,
       : channelTokenHandler(channelTokenHandler),
         serviceName(serviceName),
         threadContext(threadContext),
+        monotonicClock(monotonicClock),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
@@ -3124,6 +3128,7 @@ class Server::WorkerService final: public Service,
   kj::Maybe<kj::StringPtr> serviceName;
 
   ThreadContext& threadContext;
+  const kj::MonotonicClock& monotonicClock;
 
   // LinkedIoChannels owns the SqliteDatabase::Vfs, so make sure it is destroyed last.
   kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
@@ -3376,12 +3381,20 @@ class Server::WorkerService final: public Service,
     // Nothing to do
   }
 
-  kj::Date now() override {
+  kj::Date now(kj::Maybe<kj::Date>) override {
     return kj::systemPreciseCalendarClock().now();
   }
 
   kj::Promise<void> atTime(kj::Date when) override {
-    return threadContext.getUnsafeTimer().afterDelay(when - now());
+    auto delay = when - now(kj::none);
+    // We can't use `afterDelay(delay)` here because kj::Timer::afterDelay() is equivalent to
+    // `atTime(timer.now() + delay)`, and kj::Timer::now() only advances when the event loop
+    // polls for I/O. If JavaScript executed for a significant amount of time since the last
+    // poll (e.g. compiling/running a script before the first setTimeout), timer.now() will be
+    // stale and the delay will effectively be shortened by that staleness, causing the timer
+    // to fire too early. Instead, we compute the target time using a fresh reading from the
+    // monotonic clock so the delay is measured from the actual present.
+    return threadContext.getUnsafeTimer().atTime(monotonicClock.now() + delay);
   }
 
   kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
@@ -4721,10 +4734,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   if (!def.isDynamic) serviceName = name;
 
   auto result = kj::refcounted<WorkerService>(channelTokenHandler, serviceName,
-      globalContext->threadContext, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
-      kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
-      kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath),
-      def.isDynamic);
+      globalContext->threadContext, monotonicClock, kj::mv(worker),
+      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
+      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
+      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath), def.isDynamic);
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }
@@ -5875,7 +5888,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     //   stderr wouldn't work.
     KJ_LOG(DBG, kj::str("[ TEST ] "_kj, name));
     auto req = service.startRequest({});
-    auto start = kj::systemPreciseMonotonicClock().now();
+    auto start = monotonicClock.now();
 
     bool result = co_await req->test();
     if (result) {
@@ -5884,7 +5897,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
       ++failCount;
     }
 
-    auto end = kj::systemPreciseMonotonicClock().now();
+    auto end = monotonicClock.now();
     auto duration = end - start;
 
     KJ_LOG(DBG, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name, " (", duration, ")"));

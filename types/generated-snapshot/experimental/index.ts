@@ -12207,6 +12207,16 @@ export declare namespace CloudflareWorkersModule {
       },
     ): Promise<WorkflowStepEvent<T>>;
   }
+  export type WorkflowInstanceStatus =
+    | "queued"
+    | "running"
+    | "paused"
+    | "errored"
+    | "terminated"
+    | "complete"
+    | "waiting"
+    | "waitingForPause"
+    | "unknown";
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
@@ -12246,6 +12256,7 @@ export type MarkdownDocument = {
 };
 export type ConversionResponse =
   | {
+      id: string;
       name: string;
       mimeType: string;
       format: "markdown";
@@ -12253,6 +12264,7 @@ export type ConversionResponse =
       data: string;
     }
   | {
+      id: string;
       name: string;
       mimeType: string;
       format: "error";
@@ -12270,6 +12282,7 @@ export type ConversionOptions = {
     images?: EmbeddedImageConversionOptions & {
       convertOGImage?: boolean;
     };
+    hostname?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;

@@ -1,3 +1,4 @@
+use jsg::Number;
 use jsg::v8::ToLocalValue;
 
 #[test]
@@ -27,7 +28,7 @@ fn v8_is_boolean_returns_true_for_booleans() {
 fn v8_is_number_returns_true_for_numbers() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let float_val = 2.5f64.to_local(lock);
+        let float_val = Number::new(2.5).to_local(lock);
         assert!(float_val.is_number());
 
         let int_val = 42u32.to_local(lock);
@@ -52,7 +53,7 @@ fn v8_type_checks_are_mutually_exclusive() {
         assert!(!b.is_string() && b.is_boolean() && !b.is_number());
 
         // Number is only number
-        let n = 42.0f64.to_local(lock);
+        let n = Number::new(42.0).to_local(lock);
         assert!(!n.is_string() && !n.is_boolean() && n.is_number());
         Ok(())
     });
@@ -79,17 +80,17 @@ fn v8_unwrap_boolean_returns_correct_values() {
 fn v8_unwrap_number_returns_correct_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let num = 2.5f64.to_local(lock);
+        let num = Number::new(2.5).to_local(lock);
         let unwrapped =
             unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), num.into_ffi()) };
         assert!((unwrapped - 2.5).abs() < f64::EPSILON);
 
-        let zero = 0.0f64.to_local(lock);
+        let zero = Number::new(0.0).to_local(lock);
         let unwrapped_zero =
             unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), zero.into_ffi()) };
         assert!(unwrapped_zero.abs() < f64::EPSILON);
 
-        let negative = (-42.5f64).to_local(lock);
+        let negative = Number::new(-42.5).to_local(lock);
         let unwrapped_neg =
             unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), negative.into_ffi()) };
         assert!((unwrapped_neg - (-42.5)).abs() < f64::EPSILON);
