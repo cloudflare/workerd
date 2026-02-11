@@ -37,7 +37,8 @@ built around them.
 
 In order to execute JavaScript on the current thread, a lock must be acquired on the `v8::Isolate`.
 The `jsg::Lock&` represents the current lock. It is passed as an argument to many methods that
-require access to the JavaScript isolate and context.
+require access to the JavaScript isolate and context. By convention, this argument is always named
+`js`.
 
 The `jsg::Lock` interface itself provides access to basic JavaScript functionality, such as the
 ability to construct basic JavaScript values and call JavaScript functions.
@@ -2534,14 +2535,11 @@ The `jsErrorType` parameter can be one of:
 Unlike `KJ_REQUIRE`, `JSG_REQUIRE` passes all message arguments through `kj::str()`, so you are
 responsible for formatting the entire message string.
 
-#### `JsExceptionThrown`
+#### `js.error()`, `js.throwException()`, and `JsExceptionThrown`
 
-When C++ code needs to throw a JavaScript exception, it should:
-1. Call `isolate->ThrowException()` to set the JavaScript error value
-2. Throw `JsExceptionThrown()` as a C++ exception
-
-This C++ exception is caught by JSG's callback glue before returning to V8. This approach is
-more ergonomic than V8's convention of returning `v8::Maybe` values.
+When C++ code needs to throw a JavaScript exception:
+1. Create the error object with `js.error("Error reason")`
+2. Throw using `js.throwException()`
 
 ```cpp
 void someMethod(jsg::Lock& js) {
@@ -2553,6 +2551,36 @@ void someMethod(jsg::Lock& js) {
   }
 }
 ```
+
+Under the hood, `js.throwException()` uses V8's lower level API, `isolate->ThrowException()`, to
+throw the exception in the V8 engine. It then throws a special C++ object of type
+`JsExceptionThrown`, whose purpose is to unwind the C++ stack back to the point where JavaScript
+called into C++. This C++ exception is caught by JSG's callback glue before returning to V8. This
+approach is more ergonomic than V8's convention of returning `v8::Maybe` values.
+
+#### `JSG_TRY` and `JSG_CATCH`
+
+JSG provides `JSG_TRY` and `JSG_CATCH` macros which replace the normal `try` and `catch` keywords
+when you need to catch exceptions as JavaScript exceptions. Each take one argument: `JSG_TRY` takes
+the `jsg::Lock&` reference, and `JSG_CATCH` takes your desired variable name for the caught
+exception.
+
+```cpp
+void someMethod(jsg::Lock& js) {
+  JSG_TRY(js) {
+    someThrowyCode();
+  }
+  JSG_CATCH(e) {
+    // Just rethrow.
+    js.throwException(kj::mv(e));
+  }
+}
+```
+
+The example above actually illustrates a common, useful scenario of coercing any exception thrown
+into a JavaScript Error object. That is, if `someThrowyCode()` in the example above throws a KJ C++
+exception, `JSG_CATCH(e)` will catch it and convert it to a JavaScript error by calling
+`js.exceptionToJs()`.
 
 #### `makeInternalError()` and `throwInternalError()`
 
