@@ -40,6 +40,9 @@ interface API {
   serializeHiwireState(serializer: (obj: any) => any): SnapshotConfig;
   pyVersionTuple: [number, number, number];
   scheduleCallback: (callback: () => void, timeout: number) => void;
+  // Callback invoked when Pyodide encounters a fatal error. Setting this allows
+  // the runtime to handle fatal errors (e.g., by condemning the isolate).
+  on_fatal?: (error: any) => void;
 }
 
 interface LDSO {
