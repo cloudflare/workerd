@@ -278,9 +278,9 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   }
 }
 
-kj::Date IoContext::IncomingRequest::now() {
+kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> nextTimeout) {
   metrics->clockRead();
-  return ioChannelFactory->getTimer().now();
+  return ioChannelFactory->getTimer().now(kj::mv(nextTimeout));
 }
 
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
@@ -730,8 +730,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
   auto paf = kj::newPromiseAndFulfiller<void>();
 
-  // Always schedule the timeout relative to what Date.now() currently returns, so that the delay
-  // appear exact. Otherwise, the delay could reveal non-determinism containing side channels.
+  // Schedule relative to Date.now() so the delay appears exact to the application.
   auto when = context.now() + state.params.msDelay * kj::MILLISECONDS;
   // TODO(cleanup): The manual use of run() here (including carrying over the critical section) is
   //   kind of ugly, but using awaitIo() doesn't work here because we need the ability to cancel
@@ -892,17 +891,9 @@ kj::Date IoContext::now(IncomingRequest& incomingRequest) {
     return kj::UNIX_EPOCH + roundedMs * kj::MILLISECONDS;
   }
 
-  kj::Date adjustedTime = incomingRequest.now();
-
-  KJ_IF_SOME(maybeNextTimeout, timeoutManager->getNextTimeout()) {
-    // Don't return a time beyond when the next setTimeout() callback is intended to run. This
-    // ensures that Date.now() inside the callback itself always returns exactly the time at which
-    // the callback was scheduled (hiding non-determinism which could contain side channels), and
-    // that the time returned by Date.now() never goes backwards.
-    return kj::min(adjustedTime, maybeNextTimeout);
-  } else {
-    return adjustedTime;
-  }
+  // Let TimerChannel decide whether to clamp to the next timeout time. This is how Spectre
+  // mitigations ensure Date.now() inside a callback returns exactly the scheduled time.
+  return incomingRequest.now(timeoutManager->getNextTimeout());
 }
 
 kj::Date IoContext::now() {
