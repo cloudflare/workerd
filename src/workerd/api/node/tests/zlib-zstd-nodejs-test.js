@@ -11,8 +11,15 @@ export const zstdBasicSyncTest = {
     assert(compressed.length > 0, 'Compressed output should not be empty');
 
     const decompressed = zlib.zstdDecompressSync(compressed);
-    assert(Buffer.isBuffer(decompressed), 'Decompressed output should be a buffer');
-    assert.strictEqual(decompressed.toString(), input.toString(), 'Round-trip should match');
+    assert(
+      Buffer.isBuffer(decompressed),
+      'Decompressed output should be a buffer'
+    );
+    assert.strictEqual(
+      decompressed.toString(),
+      input.toString(),
+      'Round-trip should match'
+    );
   },
 };
 
@@ -21,8 +28,11 @@ export const zstdBasicAsyncTest = {
   async test() {
     const input = Buffer.from('Hello, async Zstd compression!');
 
-    const { promise: compressPromise, resolve: compressResolve, reject: compressReject } =
-      Promise.withResolvers();
+    const {
+      promise: compressPromise,
+      resolve: compressResolve,
+      reject: compressReject,
+    } = Promise.withResolvers();
     zlib.zstdCompress(input, (err, res) => {
       if (err) compressReject(err);
       else compressResolve(res);
@@ -32,16 +42,26 @@ export const zstdBasicAsyncTest = {
     assert(Buffer.isBuffer(compressed), 'Compressed output should be a buffer');
     assert(compressed.length > 0, 'Compressed output should not be empty');
 
-    const { promise: decompressPromise, resolve: decompressResolve, reject: decompressReject } =
-      Promise.withResolvers();
+    const {
+      promise: decompressPromise,
+      resolve: decompressResolve,
+      reject: decompressReject,
+    } = Promise.withResolvers();
     zlib.zstdDecompress(compressed, (err, res) => {
       if (err) decompressReject(err);
       else decompressResolve(res);
     });
     const decompressed = await decompressPromise;
 
-    assert(Buffer.isBuffer(decompressed), 'Decompressed output should be a buffer');
-    assert.strictEqual(decompressed.toString(), input.toString(), 'Round-trip should match');
+    assert(
+      Buffer.isBuffer(decompressed),
+      'Decompressed output should be a buffer'
+    );
+    assert.strictEqual(
+      decompressed.toString(),
+      input.toString(),
+      'Round-trip should match'
+    );
   },
 };
 
@@ -51,7 +71,11 @@ export const zstdStringInputTest = {
     const input = 'This is a string input for Zstd compression';
     const compressed = zlib.zstdCompressSync(input);
     const decompressed = zlib.zstdDecompressSync(compressed);
-    assert.strictEqual(decompressed.toString(), input, 'String input round-trip should match');
+    assert.strictEqual(
+      decompressed.toString(),
+      input,
+      'String input round-trip should match'
+    );
   },
 };
 
@@ -65,7 +89,10 @@ export const zstdLargeDataTest = {
     }
 
     const compressed = zlib.zstdCompressSync(input);
-    assert(compressed.length < input.length, 'Compressed should be smaller than input');
+    assert(
+      compressed.length < input.length,
+      'Compressed should be smaller than input'
+    );
 
     const decompressed = zlib.zstdDecompressSync(compressed);
     assert(input.equals(decompressed), 'Large data round-trip should match');
@@ -75,7 +102,9 @@ export const zstdLargeDataTest = {
 // Test with different compression levels
 export const zstdCompressionLevelsTest = {
   test() {
-    const input = Buffer.from('Test data for compression level testing'.repeat(100));
+    const input = Buffer.from(
+      'Test data for compression level testing'.repeat(100)
+    );
 
     // Test compression level 1 (fastest)
     const compressedFast = zlib.zstdCompressSync(input, {
@@ -91,8 +120,14 @@ export const zstdCompressionLevelsTest = {
     const decompressedFast = zlib.zstdDecompressSync(compressedFast);
     const decompressedBest = zlib.zstdDecompressSync(compressedBest);
 
-    assert(input.equals(decompressedFast), 'Fast compression should decompress correctly');
-    assert(input.equals(decompressedBest), 'Best compression should decompress correctly');
+    assert(
+      input.equals(decompressedFast),
+      'Fast compression should decompress correctly'
+    );
+    assert(
+      input.equals(decompressedBest),
+      'Best compression should decompress correctly'
+    );
 
     // Higher compression level should typically produce smaller output
     assert(
@@ -160,7 +195,11 @@ export const zstdEmptyInputTest = {
     const input = Buffer.alloc(0);
     const compressed = zlib.zstdCompressSync(input);
     const decompressed = zlib.zstdDecompressSync(compressed);
-    assert.strictEqual(decompressed.length, 0, 'Empty input should produce empty output');
+    assert.strictEqual(
+      decompressed.length,
+      0,
+      'Empty input should produce empty output'
+    );
   },
 };
 
@@ -181,8 +220,13 @@ export const zstdChunkSizeTest = {
   test() {
     const input = Buffer.from('Testing chunk size option'.repeat(100));
     const compressed = zlib.zstdCompressSync(input, { chunkSize: 1024 });
-    const decompressed = zlib.zstdDecompressSync(compressed, { chunkSize: 1024 });
-    assert(input.equals(decompressed), 'Custom chunkSize should work correctly');
+    const decompressed = zlib.zstdDecompressSync(compressed, {
+      chunkSize: 1024,
+    });
+    assert(
+      input.equals(decompressed),
+      'Custom chunkSize should work correctly'
+    );
   },
 };
 
@@ -245,7 +289,10 @@ export const zstdInfoOptionTest = {
     const result = zlib.zstdCompressSync(input, { info: true });
 
     // When info is true, result should be an object with buffer and engine properties
-    assert(typeof result === 'object', 'Result should be an object when info is true');
+    assert(
+      typeof result === 'object',
+      'Result should be an object when info is true'
+    );
     assert(result.buffer, 'Result should have a buffer property');
     assert(result.engine, 'Result should have an engine property');
   },
@@ -254,8 +301,16 @@ export const zstdInfoOptionTest = {
 // Test classes are exported
 export const zstdClassesExportedTest = {
   test() {
-    assert.strictEqual(typeof zlib.ZstdCompress, 'function', 'ZstdCompress should be exported');
-    assert.strictEqual(typeof zlib.ZstdDecompress, 'function', 'ZstdDecompress should be exported');
+    assert.strictEqual(
+      typeof zlib.ZstdCompress,
+      'function',
+      'ZstdCompress should be exported'
+    );
+    assert.strictEqual(
+      typeof zlib.ZstdDecompress,
+      'function',
+      'ZstdDecompress should be exported'
+    );
     assert.strictEqual(
       typeof zlib.createZstdCompress,
       'function',
@@ -282,7 +337,15 @@ export const zstdSyncFunctionsExportedTest = {
       'function',
       'zstdDecompressSync should be exported'
     );
-    assert.strictEqual(typeof zlib.zstdCompress, 'function', 'zstdCompress should be exported');
-    assert.strictEqual(typeof zlib.zstdDecompress, 'function', 'zstdDecompress should be exported');
+    assert.strictEqual(
+      typeof zlib.zstdCompress,
+      'function',
+      'zstdCompress should be exported'
+    );
+    assert.strictEqual(
+      typeof zlib.zstdDecompress,
+      'function',
+      'zstdDecompress should be exported'
+    );
   },
 };

@@ -732,8 +732,8 @@ class ZlibUtil final: public jsg::Object {
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_minMatch, ZSTD_c_minMatch);
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_targetLength, ZSTD_c_targetLength);
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_strategy, ZSTD_c_strategy);
-    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_enableLongDistanceMatching,
-        ZSTD_c_enableLongDistanceMatching);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_c_enableLongDistanceMatching, ZSTD_c_enableLongDistanceMatching);
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_ldmHashLog, ZSTD_c_ldmHashLog);
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_ldmMinMatch, ZSTD_c_ldmMinMatch);
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_c_ldmBucketSizeLog, ZSTD_c_ldmBucketSizeLog);

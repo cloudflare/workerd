@@ -811,9 +811,9 @@ void zstdFreeDCtx(ZSTD_DCtx* dctx) {
 }
 }  // namespace
 
-ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode):
-    ZstdContext(_mode),
-    cctx_(kj::disposeWith<zstdFreeCCtx>(ZSTD_createCCtx())) {}
+ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode)
+    : ZstdContext(_mode),
+      cctx_(kj::disposeWith<zstdFreeCCtx>(ZSTD_createCCtx())) {}
 
 kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSize) {
   if (cctx_.get() == nullptr) {
@@ -857,8 +857,7 @@ kj::Maybe<CompressionError> ZstdEncoderContext::setParams(int key, int value) {
       "key must be a valid ZSTD_cParameter (first valid value is ZSTD_c_compressionLevel)");
   size_t result = ZSTD_CCtx_setParameter(cctx_.get(), static_cast<ZSTD_cParameter>(key), value);
   if (ZSTD_isError(result)) {
-    return CompressionError(
-        kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
+    return CompressionError(kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
         "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);
   }
   return kj::none;
@@ -878,9 +877,9 @@ kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
   return kj::none;
 }
 
-ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode):
-    ZstdContext(_mode),
-    dctx_(kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx())) {}
+ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode)
+    : ZstdContext(_mode),
+      dctx_(kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx())) {}
 
 kj::Maybe<CompressionError> ZstdDecoderContext::initialize() {
   // dctx_ is created in the constructor. It can only be nullptr if ZSTD_createDCtx()
@@ -917,8 +916,7 @@ kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
 kj::Maybe<CompressionError> ZstdDecoderContext::setParams(int key, int value) {
   size_t result = ZSTD_DCtx_setParameter(dctx_.get(), static_cast<ZSTD_dParameter>(key), value);
   if (ZSTD_isError(result)) {
-    return CompressionError(
-        kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
+    return CompressionError(kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
         "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);
   }
   return kj::none;
@@ -1162,8 +1160,7 @@ void ZlibUtil::brotliWithCallback(
 }
 
 template <typename Context>
-kj::Array<kj::byte> ZlibUtil::zstdSync(
-    jsg::Lock& js, InputSource data, ZstdContext::Options opts) {
+kj::Array<kj::byte> ZlibUtil::zstdSync(jsg::Lock& js, InputSource data, ZstdContext::Options opts) {
   Context ctx(Context::Mode);
 
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
