@@ -1378,4 +1378,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, the UTF-16le TextDecoder will replace lone surrogates with U+FFFD
   # (the Unicode replacement character) as required by the spec. Previously, lone
   # surrogates were passed through unchanged, producing non-well-formed strings.
+
+  containersPidNamespace @160 :Bool
+    $compatEnableFlag("containers_pid_namespace")
+    $compatDisableFlag("no_containers_pid_namespace")
+    $experimental;
+  # When enabled, containers attached to Durable Objects do NOT share the host PID namespace
+  # (they get their own isolated PID namespace). When disabled (the default), containers share
+  # the host PID namespace.
 }
