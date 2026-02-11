@@ -1,6 +1,6 @@
-load("//:build/wd_test.bzl", "wd_test")
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
     size = "enormous",
