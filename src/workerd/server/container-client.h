@@ -85,7 +85,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::Maybe<kj::String> body = kj::none);
   kj::Promise<InspectResponse> inspectContainer();
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
-      kj::Maybe<capnp::List<capnp::Text>::Reader> environment);
+      kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
+      rpc::Container::StartParams::Reader params);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
