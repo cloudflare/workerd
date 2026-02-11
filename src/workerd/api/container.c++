@@ -100,8 +100,8 @@ jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<F
   reqV6.setHostPort("::/0"_kj);
   reqV6.setChannelToken(token);
 
-  return ioctx.awaitIo(
-      js, kj::joinPromises(kj::arr(reqV4.sendIgnoringResult(), reqV6.sendIgnoringResult())));
+  return ioctx.awaitIo(js,
+      kj::joinPromisesFailFast(kj::arr(reqV4.sendIgnoringResult(), reqV6.sendIgnoringResult())));
 }
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
