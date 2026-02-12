@@ -3714,8 +3714,9 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
 }
 
 void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-  // Clear algorithms to break circular references before changing state
+  // Clear algorithms and reject pending writes before changing state
   KJ_IF_SOME(controller, state.tryGet<Controller>()) {
+    controller->cancelPendingWrites(js, jsg::JsValue(reason));
     controller->clearAlgorithms();
   }
 

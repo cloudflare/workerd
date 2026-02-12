@@ -994,6 +994,23 @@ export const concurrentReadsRejected = {
   },
 };
 
+export const transformStreamCancelPropagation = {
+  async test() {
+    let { readable, writable } = new TransformStream();
+
+    // Initiate a write to the writable side.
+    let writer = writable.getWriter();
+    let promise = writer.write('hi');
+
+    // Cancel the readable side.
+    readable.cancel(new Error('test cancel'));
+
+    // Now the write, and all new writes, should fail with the cancellation exception.
+    await rejects(promise, new Error('test cancel'));
+    await rejects(writer.write('hi2'), new Error('test cancel'));
+  },
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
