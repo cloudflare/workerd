@@ -111,8 +111,6 @@ class DurableObject final: public Fetcher {
 
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
-    // Need to inherit getRpcMethod interceptor since we need it on the holder.
-    JSG_WILDCARD_PROPERTY(getRpcMethod);
 
     JSG_TS_DEFINE(interface DurableObject {
       fetch(request: Request): Response | Promise<Response>;

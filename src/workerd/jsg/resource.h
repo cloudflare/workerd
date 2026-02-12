@@ -29,6 +29,10 @@
 #include <type_traits>
 #include <typeindex>
 
+// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
   // Make std::type_index (which points to std::type_info) usable as a kj::HashMap key.
@@ -1176,7 +1180,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
   WildcardPropertyCallbacks()
       : v8::NamedPropertyHandlerConfiguration(getter,
             nullptr,
-            query,
+            nullptr,
             nullptr,
             nullptr,
             nullptr,
@@ -1187,20 +1191,13 @@ struct WildcardPropertyCallbacks<TypeWrapper,
                 static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
                 static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
 
-  // Query callback is needed for V8 to properly handle property creation with correct
-  // enumerable attributes when the interceptor is on the instance template. Additionally, we want to ensure wildcard properties basically act as phantom properties om the instance. They should not be visible from javascript, only gettable.
-  static v8::Intercepted query(
-      v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info) {
-    return v8::Intercepted::kNo;
-  }
-
   static v8::Intercepted getter(
       v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
     v8::Intercepted result = v8::Intercepted::kNo;
     liftKj(info, [&]() -> v8::Local<v8::Value> {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.HolderV2();
+      auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
@@ -1250,7 +1247,7 @@ struct ResourceTypeBuilder {
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() {
-    instance->SetHandler(
+    prototype->SetHandler(
         WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>{});
   }
 
@@ -2005,5 +2002,8 @@ class ObjectWrapper {
       Ref<Object>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
 };
+
+// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
+#pragma clang diagnostic pop
 
 }  // namespace workerd::jsg

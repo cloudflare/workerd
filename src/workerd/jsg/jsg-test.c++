@@ -395,7 +395,7 @@ JSG_DECLARE_ISOLATE_TYPE(InterceptIsolate, InterceptContext, InterceptContext::P
 KJ_TEST("Named interceptor") {
   Evaluator<InterceptContext, InterceptIsolate> e(v8System);
   e.expectEval("p = new ProxyImpl; p.bar", "number", "123");
-  e.expectEval("p = new ProxyImpl; Reflect.has(p, 'foo')", "boolean", "false");
+  e.expectEval("p = new ProxyImpl; Reflect.has(p, 'foo')", "boolean", "true");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'bar')", "boolean", "true");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'baz')", "boolean", "false");
   e.expectEval("p = new ProxyImpl; p.abc", "throws", "TypeError: boom");
