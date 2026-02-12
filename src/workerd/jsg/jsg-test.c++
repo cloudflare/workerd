@@ -236,6 +236,11 @@ KJ_TEST("can't use builtin as prototype") {
                "new JsType().value",
       "number", "123");
   e.expectEval("function JsType() {}\n"
+               "JsType.prototype = new NumberBox(123);\n"
+               "let t = new JsType();\n"
+               "Reflect.get(JsType.prototype, 'value', t)\n",
+      "number", "123");
+  e.expectEval("function JsType() {}\n"
                "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
                "new JsType().value",
       "number", "123");
