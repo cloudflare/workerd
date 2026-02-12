@@ -148,6 +148,7 @@ WriteStream.prototype.clearScreenDown = function (
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 WriteStream.prototype.getWindowSize = function (): [number, number] {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   return [this.columns ?? 0, this.rows ?? 0];
 };
 
