@@ -89,6 +89,23 @@ export const genuineUnhandledRejectionStillFires = {
   },
 };
 
+// Verifies unhandledrejection fires after a Promise.resolve tick.
+export const unhandledRejectionAfterPromiseResolve = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const handler = mock.fn(() => resolve());
+    addEventListener('unhandledrejection', handler, { once: true });
+    Promise.reject('boom');
+    await Promise.resolve();
+    await promise;
+    strictEqual(
+      handler.mock.callCount(),
+      1,
+      'unhandledrejection should fire after Promise.resolve'
+    );
+  },
+};
+
 // Verifies unhandledrejection followed by rejectionhandled on late catch.
 export const lateHandlerTriggersRejectionhandled = {
   async test() {

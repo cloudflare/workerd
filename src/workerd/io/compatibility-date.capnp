@@ -1396,4 +1396,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # Previously, deleteAll() preserved the alarm state. This was surprising
   # behavior since the intent of deleteAll() is to clear all state.
+
+  unhandledRejectionAfterMicrotaskCheckpoint @162 :Bool
+    $compatEnableFlag("unhandled_rejection_after_microtask_checkpoint")
+    $compatDisableFlag("no_unhandled_rejection_after_microtask_checkpoint")
+    $compatEnableDate("2026-03-03");
+  # When enabled, unhandledrejection processing is deferred until the microtask
+  # checkpoint completes, avoiding misfires on multi-tick promise chains.
 }

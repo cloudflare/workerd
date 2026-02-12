@@ -734,6 +734,8 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
   };
 
   if (hasHandlers() || hasInspector()) {
+    unhandledRejections.setUseMicrotasksCompletedCallback(
+        FeatureFlags::get(js).getUnhandledRejectionAfterMicrotaskCheckpoint());
     unhandledRejections.report(js, event, kj::mv(promise), kj::mv(value));
   }
 }

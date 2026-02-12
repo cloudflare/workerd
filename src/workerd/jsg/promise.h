@@ -712,6 +712,10 @@ class UnhandledRejectionHandler {
       jsg::V8Ref<v8::Promise> promise,
       jsg::Value value);
 
+  void setUseMicrotasksCompletedCallback(bool value) {
+    useMicrotasksCompletedCallback = value;
+  }
+
   void clear();
 
   JSG_MEMORY_INFO(UnhandledRejectionHandler) {
@@ -804,6 +808,8 @@ class UnhandledRejectionHandler {
 
   kj::Function<Handler> handler;
   bool scheduled = false;
+  // Controlled by the unhandled_rejection_after_microtask_checkpoint compat flag.
+  bool useMicrotasksCompletedCallback = false;
 
   using UnhandledRejectionsTable =
       kj::Table<UnhandledRejection, kj::HashIndex<UnhandledRejectionCallbacks>>;

@@ -132,13 +132,20 @@ void UnhandledRejectionHandler::ensureProcessingWarnings(jsg::Lock& js) {
     return;
   }
   scheduled = true;
-  // Schedule processing to run after the microtask checkpoint completes.
-  // This ensures that promise chains like `.then().catch()` have fully settled
-  // before we decide a rejection is unhandled. Using a microtask would race
-  // with V8's internal promise adoption microtasks and fire too early.
-  // See https://github.com/cloudflare/workerd/issues/6020
-  js.v8Isolate->AddMicrotasksCompletedCallback(
-      &UnhandledRejectionHandler::onMicrotasksCompleted, this);
+  if (useMicrotasksCompletedCallback) {
+    // Schedule processing to run after the microtask checkpoint completes.
+    // This ensures that promise chains like `.then().catch()` have fully settled
+    // before we decide a rejection is unhandled. Using a microtask would race
+    // with V8's internal promise adoption microtasks and fire too early.
+    // See https://github.com/cloudflare/workerd/issues/6020
+    js.v8Isolate->AddMicrotasksCompletedCallback(
+        &UnhandledRejectionHandler::onMicrotasksCompleted, this);
+    // Ensure we get another microtask checkpoint to deliver the callback even if
+    // we're already past the current one.
+    js.requestExtraMicrotaskCheckpoint();
+  } else {
+    js.resolvedPromise().then(js, [this](jsg::Lock& js) { processWarnings(js); });
+  }
 }
 
 void UnhandledRejectionHandler::onMicrotasksCompleted(v8::Isolate* isolate, void* data) {
