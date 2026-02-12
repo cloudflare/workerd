@@ -18,20 +18,6 @@
 namespace workerd::api {
 
 namespace {
-// Use this in places where the exception thrown would cause finalizers to run. Your exception
-// will not go anywhere, but we'll log the exception message to the console until the problem this
-// papers over is fixed.
-[[noreturn]] void throwTypeErrorAndConsoleWarn(kj::StringPtr message) {
-  KJ_IF_SOME(context, IoContext::tryCurrent()) {
-    if (context.isInspectorEnabled()) {
-      context.logWarning(message);
-    }
-  }
-
-  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-      kj::str(JSG_EXCEPTION(TypeError) ": ", message)));
-}
-
 kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, bool end) {
   kj::byte buffer[4096]{};
 
@@ -1072,8 +1058,18 @@ jsg::Promise<void> WritableStreamInternalController::write(
       return js.rejectedPromise<void>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(writable, IoOwn<Writable>) {
+      // Byte streams must reject invalid chunks and error the stream so reads fail too.
+      auto rejectInvalidChunk = [&](kj::StringPtr message) {
+        auto reason = js.v8TypeError(message);
+        writable->abort(js.exceptionToKj(js.v8Ref(reason)));
+        doError(js, reason);
+        return js.rejectedPromise<void>(reason);
+      };
+
       if (value == kj::none) {
-        return js.resolvedPromise();
+        return rejectInvalidChunk(
+            "This TransformStream is being used as a byte stream, but received an object of "
+            "non-ArrayBuffer/ArrayBufferView type on its writable side.");
       }
       auto chunk = KJ_ASSERT_NONNULL(value);
 
@@ -1090,16 +1086,14 @@ jsg::Promise<void> WritableStreamInternalController::write(
         byteLength = view->ByteLength();
         byteOffset = view->ByteOffset();
       } else if (chunk->IsString()) {
-        // TODO(later): This really ought to return a rejected promise and not a sync throw.
         // This case caused me a moment of confusion during testing, so I think it's worth
         // a specific error message.
-        throwTypeErrorAndConsoleWarn(
+        return rejectInvalidChunk(
             "This TransformStream is being used as a byte stream, but received a string on its "
             "writable side. If you wish to write a string, you'll probably want to explicitly "
             "UTF-8-encode it with TextEncoder.");
       } else {
-        // TODO(later): This really ought to return a rejected promise and not a sync throw.
-        throwTypeErrorAndConsoleWarn(
+        return rejectInvalidChunk(
             "This TransformStream is being used as a byte stream, but received an object of "
             "non-ArrayBuffer/ArrayBufferView type on its writable side.");
       }
@@ -1116,8 +1110,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
       auto ptr =
           kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset, byteLength);
       if (store->IsShared()) {
-        throwTypeErrorAndConsoleWarn(
-            "Cannot construct an array buffer from a shared backing store");
+        return rejectInvalidChunk("Cannot construct an array buffer from a shared backing store");
       }
       queue.push_back(
           WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),

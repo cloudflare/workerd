@@ -12,6 +12,9 @@
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/state-machine.h>
 
+#include <brotli/decode.h>
+#include <brotli/encode.h>
+
 namespace workerd::api {
 CompressionAllocator::CompressionAllocator(
     kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
@@ -51,6 +54,21 @@ void CompressionAllocator::FreeForZlib(void* opaque, void* pointer) {
 
 namespace {
 
+enum class Format {
+  GZIP,
+  DEFLATE,
+  DEFLATE_RAW,
+  BROTLI,
+};
+
+static Format parseFormat(kj::StringPtr format) {
+  if (format == "gzip") return Format::GZIP;
+  if (format == "deflate") return Format::DEFLATE;
+  if (format == "deflate-raw") return Format::DEFLATE_RAW;
+  if (format == "brotli") return Format::BROTLI;
+  KJ_UNREACHABLE;
+}
+
 class Context {
  public:
   enum class Mode {
@@ -74,20 +92,26 @@ class Context {
       kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
       : allocator(kj::mv(externalMemoryTarget)),
         mode(mode),
-        strictCompression(flags)
+        strictCompression(flags),
+        format(parseFormat(format))
 
   {
+    if (this->format == Format::BROTLI) {
+      initBrotli();
+      return;
+    }
+
     // Configure allocator before any stream operations.
     allocator.configure(&ctx);
     int result = Z_OK;
     switch (mode) {
       case Mode::COMPRESS:
-        result = deflateInit2(&ctx, Z_DEFAULT_COMPRESSION, Z_DEFLATED, getWindowBits(format),
+        result = deflateInit2(&ctx, Z_DEFAULT_COMPRESSION, Z_DEFLATED, getWindowBits(this->format),
             8,  // memLevel = 8 is the default
             Z_DEFAULT_STRATEGY);
         break;
       case Mode::DECOMPRESS:
-        result = inflateInit2(&ctx, getWindowBits(format));
+        result = inflateInit2(&ctx, getWindowBits(this->format));
         break;
       default:
         KJ_UNREACHABLE;
@@ -96,6 +120,21 @@ class Context {
   }
 
   ~Context() noexcept(false) {
+    if (format == Format::BROTLI) {
+      switch (mode) {
+        case Mode::COMPRESS:
+          if (brotliEncoderState != nullptr) {
+            BrotliEncoderDestroyInstance(brotliEncoderState);
+          }
+          break;
+        case Mode::DECOMPRESS:
+          if (brotliDecoderState != nullptr) {
+            BrotliDecoderDestroyInstance(brotliDecoderState);
+          }
+          break;
+      }
+      return;
+    }
     switch (mode) {
       case Mode::COMPRESS:
         deflateEnd(&ctx);
@@ -109,11 +148,19 @@ class Context {
   KJ_DISALLOW_COPY_AND_MOVE(Context);
 
   void setInput(const void* in, size_t size) {
+    if (format == Format::BROTLI) {
+      brotliNextIn = reinterpret_cast<const uint8_t*>(in);
+      brotliAvailIn = size;
+      return;
+    }
     ctx.next_in = const_cast<byte*>(reinterpret_cast<const byte*>(in));
     ctx.avail_in = size;
   }
 
   Result pumpOnce(int flush) {
+    if (format == Format::BROTLI) {
+      return pumpBrotliOnce(flush);
+    }
     ctx.next_out = buffer;
     ctx.avail_out = sizeof(buffer);
 
@@ -151,11 +198,76 @@ class Context {
     };
   }
 
+  bool hasTrailingError() const {
+    return brotliTrailingError;
+  }
+
  protected:
   CompressionAllocator allocator;
 
  private:
-  static int getWindowBits(kj::StringPtr format) {
+  void initBrotli() {
+    if (mode == Mode::COMPRESS) {
+      auto* instance = BrotliEncoderCreateInstance(
+          CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator);
+      JSG_REQUIRE(instance != nullptr, Error, "Failed to initialize compression context."_kj);
+      brotliEncoderState = instance;
+      return;
+    }
+
+    auto* instance = BrotliDecoderCreateInstance(
+        CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator);
+    JSG_REQUIRE(instance != nullptr, Error, "Failed to initialize compression context."_kj);
+    brotliDecoderState = instance;
+  }
+
+  Result pumpBrotliOnce(int flush) {
+    uint8_t* nextOut = buffer;
+    size_t availOut = sizeof(buffer);
+
+    if (mode == Mode::COMPRESS) {
+      auto op = flush == Z_FINISH ? BROTLI_OPERATION_FINISH : BROTLI_OPERATION_PROCESS;
+      auto ok = BrotliEncoderCompressStream(
+          brotliEncoderState, op, &brotliAvailIn, &brotliNextIn, &availOut, &nextOut, nullptr);
+      JSG_REQUIRE(ok == BROTLI_TRUE, TypeError, "Compression failed.");
+
+      bool shouldContinue = brotliAvailIn > 0 || BrotliEncoderHasMoreOutput(brotliEncoderState);
+      if (op == BROTLI_OPERATION_FINISH && !BrotliEncoderIsFinished(brotliEncoderState)) {
+        shouldContinue = true;
+      }
+
+      return Result{
+        .success = shouldContinue,
+        .buffer = kj::arrayPtr(buffer, sizeof(buffer) - availOut),
+      };
+    }
+
+    auto result = BrotliDecoderDecompressStream(
+        brotliDecoderState, &brotliAvailIn, &brotliNextIn, &availOut, &nextOut, nullptr);
+    JSG_REQUIRE(result != BROTLI_DECODER_RESULT_ERROR, TypeError, "Decompression failed.");
+
+    if (strictCompression == ContextFlags::STRICT) {
+      // Track trailing data so we can surface the error after buffered output drains.
+      if (BrotliDecoderIsFinished(brotliDecoderState) && brotliAvailIn > 0) {
+        brotliTrailingError = true;
+      }
+      if (flush == Z_FINISH && result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT &&
+          availOut == sizeof(buffer)) {
+        JSG_FAIL_REQUIRE(
+            TypeError, "Called close() on a decompression stream with incomplete data");
+      }
+    }
+
+    bool shouldContinue = result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT ||
+        BrotliDecoderHasMoreOutput(brotliDecoderState);
+
+    return Result{
+      .success = shouldContinue,
+      .buffer = kj::arrayPtr(buffer, sizeof(buffer) - availOut),
+    };
+  }
+
+  static int getWindowBits(Format format) {
     // We use a windowBits value of 15 combined with the magic value
     // for the compression format type. For gzip, the magic value is
     // 16, so the value returned is 15 + 16. For deflate, the magic
@@ -165,12 +277,16 @@ class Context {
     static constexpr auto GZIP = 16;
     static constexpr auto DEFLATE = 15;
     static constexpr auto DEFLATE_RAW = -15;
-    if (format == "gzip")
-      return DEFLATE + GZIP;
-    else if (format == "deflate")
-      return DEFLATE;
-    else if (format == "deflate-raw")
-      return DEFLATE_RAW;
+    switch (format) {
+      case Format::GZIP:
+        return DEFLATE + GZIP;
+      case Format::DEFLATE:
+        return DEFLATE;
+      case Format::DEFLATE_RAW:
+        return DEFLATE_RAW;
+      case Format::BROTLI:
+        KJ_UNREACHABLE;
+    }
     KJ_UNREACHABLE;
   }
 
@@ -180,6 +296,14 @@ class Context {
 
   // For the eponymous compatibility flag
   ContextFlags strictCompression;
+  Format format;
+  const uint8_t* brotliNextIn = nullptr;
+  size_t brotliAvailIn = 0;
+  // Brotli state structs are opaque, so kj::Own would require complete types.
+  BrotliEncoderState* brotliEncoderState = nullptr;
+  BrotliDecoderState* brotliDecoderState = nullptr;
+  // Defer reporting of trailing brotli bytes until output is drained.
+  bool brotliTrailingError = false;
 };
 
 // Buffer class based on std::vector that erases data that has been read from it lazily to avoid
@@ -289,9 +413,18 @@ class CompressionStreamBase: public kj::Refcounted,
     KJ_ASSERT(minBytes <= maxBytes);
     // Re-throw any stored exception
     throwIfException();
-    // If stream has ended normally and no buffered data, return EOF
-    if (isInTerminalState() && output.empty()) {
-      co_return static_cast<size_t>(0);
+    if (output.empty()) {
+      // For brotli we defer trailing-data errors until buffered output is drained.
+      if (context.hasTrailingError()) {
+        auto ex =
+            JSG_KJ_EXCEPTION(FAILED, TypeError, "Trailing bytes after end of compressed data");
+        cancelInternal(kj::cp(ex));
+        kj::throwFatalException(kj::mv(ex));
+      }
+      // If stream has ended normally and no buffered data, return EOF.
+      if (isInTerminalState()) {
+        co_return static_cast<size_t>(0);
+      }
     }
     // Active or terminal with data remaining
     co_return co_await tryReadInternal(
@@ -659,8 +792,10 @@ kj::Rc<CompressionStreamBase<Context::Mode::DECOMPRESS>> createDecompressionStre
 }  // namespace
 
 jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
-  JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
-      "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+  JSG_REQUIRE(
+      format == "deflate" || format == "gzip" || format == "deflate-raw" || format == "brotli",
+      TypeError,
+      "The compression format must be either 'deflate', 'deflate-raw', 'gzip', or 'brotli'.");
 
   // TODO(cleanup): Once the autogate is removed, we can delete CompressionStreamImpl
   kj::Rc<CompressionStreamBase<Context::Mode::COMPRESS>> impl = createCompressionStreamImpl(
@@ -679,8 +814,10 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::St
 }
 
 jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj::String format) {
-  JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
-      "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+  JSG_REQUIRE(
+      format == "deflate" || format == "gzip" || format == "deflate-raw" || format == "brotli",
+      TypeError,
+      "The compression format must be either 'deflate', 'deflate-raw', 'gzip', or 'brotli'.");
 
   kj::Rc<CompressionStreamBase<Context::Mode::DECOMPRESS>> impl =
       createDecompressionStreamImpl(kj::mv(format),

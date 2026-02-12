@@ -82,6 +82,7 @@ wpt_test(
 
 wpt_test(
     name = "compression",
+    size = "enormous",
     config = "compression-test.ts",
     start_server = True,
     target_compatible_with = select({
