@@ -177,7 +177,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String dockerPath,
     kj::String containerName,
     kj::String imageName,
-    kj::String containerEgressInterceptorImage,
+    kj::Maybe<kj::String> containerEgressInterceptorImage,
     kj::TaskSet& waitUntilTasks,
     kj::Function<void()> cleanupCallback,
     ChannelTokenHandler& channelTokenHandler)
@@ -314,8 +314,7 @@ class EgressHttpService final: public kj::HttpService {
       auto innerServer =
           kj::heap<kj::HttpServer>(containerClient.timer, headerTable, *innerService);
 
-      co_await innerServer->listenHttpCleanDrain(connection)
-          .attach(kj::mv(innerServer), kj::mv(innerService));
+      co_await innerServer->listenHttpCleanDrain(connection);
 
       co_return;
     }
@@ -351,7 +350,6 @@ constexpr kj::StringPtr WORKERD_NETWORK_NAME = "workerd-network"_kj;
 
 kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeIPAMConfig() {
   // First, try to find or create the workerd-network
-  // Docker API: GET /networks/workerd-network
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
       kj::str("/networks/", WORKERD_NETWORK_NAME));
 
@@ -383,7 +381,6 @@ kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeI
 }
 
 kj::Promise<void> ContainerClient::createWorkerdNetwork() {
-  // Docker API: POST /networks/create
   // Equivalent to: docker network create -d bridge --ipv6 workerd-network
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::NetworkCreateRequest>();
@@ -466,7 +463,6 @@ kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Net
 }
 
 kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer() {
-  // Docker API: GET /containers/{id}/json
   auto endpoint = kj::str("/containers/", containerName, "/json");
 
   auto response = co_await dockerApiRequest(
@@ -526,7 +522,6 @@ kj::Promise<void> ContainerClient::createContainer(
     kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
     kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
     rpc::Container::StartParams::Reader params) {
-  // Docker API: POST /containers/create
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
@@ -601,7 +596,6 @@ kj::Promise<void> ContainerClient::createContainer(
 }
 
 kj::Promise<void> ContainerClient::startContainer() {
-  // Docker API: POST /containers/{id}/start
   auto endpoint = kj::str("/containers/", containerName, "/start");
   // We have to send an empty body since docker API will throw an error if we don't.
   auto response = co_await dockerApiRequest(
@@ -613,7 +607,6 @@ kj::Promise<void> ContainerClient::startContainer() {
 }
 
 kj::Promise<void> ContainerClient::stopContainer() {
-  // Docker API: POST /containers/{id}/stop
   auto endpoint = kj::str("/containers/", containerName, "/stop");
   auto response = co_await dockerApiRequest(
       network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
@@ -625,7 +618,6 @@ kj::Promise<void> ContainerClient::stopContainer() {
 }
 
 kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
-  // Docker API: POST /containers/{id}/kill
   auto endpoint = kj::str("/containers/", containerName, "/kill?signal=", signalToString(signal));
   auto response = co_await dockerApiRequest(
       network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
@@ -669,7 +661,10 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(containerEgressInterceptorImage);
+  auto& image = KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
+      "containerEgressInterceptorImage must be configured to use egress interception. "
+      "Set it in the localDocker configuration.");
+  jsonRoot.setImage(image);
 
   auto cmd = jsonRoot.initCmd(4);
   cmd.set(0, "--http-egress-port");
@@ -695,8 +690,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   }
 
   if (response.statusCode != 201) {
-    JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ",
-        containerEgressInterceptorImage,
+    JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ", image,
         ". Please ensure the container egress interceptor image is built and available.");
     JSG_FAIL_REQUIRE(Error, "Failed to create the networking sidecar [", response.statusCode, "] ",
         response.body);
@@ -744,14 +738,17 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   internetEnabled = params.getEnableInternet();
 
   co_await createContainer(entrypoint, environment, params);
+  co_await startContainer();
 
   // Opt in to the proxy sidecar container only if the user has configured egressMappings
   // for now. In the future, it will always run when a user container is running
   if (!egressMappings.empty()) {
+    // The user container will be blocked on network connectivity until this finishes.
+    // When workerd-network is more battle-tested and goes out of experimental so it's non-optional,
+    // we should make the sidecar start first and _then_ make the user container join the sidecar network.
     co_await ensureSidecarStarted();
   }
 
-  co_await startContainer();
   containerStarted.store(true, std::memory_order_release);
 }
 
@@ -861,7 +858,6 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   auto params = context.getParams();
   auto hostPortStr = kj::str(params.getHostPort());
   auto tokenBytes = params.getChannelToken();
-  JSG_REQUIRE(containerEgressInterceptorImage != "", Error, "should be set for setEgressHttp");
 
   auto parsed = parseHostPort(hostPortStr);
   uint16_t port = parsed.port.orDefault(80);

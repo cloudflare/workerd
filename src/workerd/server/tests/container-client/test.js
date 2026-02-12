@@ -355,13 +355,15 @@ export class DurableObjectExample extends DurableObject {
       await container.destroy();
       await monitor;
     }
-    assert.strictEqual(container.running, false);
-
-    container.start({
-      enableInternet: true,
-    });
 
     assert.strictEqual(container.running, false);
+
+    // Set up egress TCP mapping to route requests to the binding
+    // We can configure this even before the container starts.
+    await container.interceptOutboundHttp(
+      '1.2.3.4',
+      this.ctx.exports.TestService({ props: { id: 1234 } })
+    );
 
     // Start container
     container.start();
@@ -387,6 +389,16 @@ export class DurableObjectExample extends DurableObject {
     await container.interceptAllOutboundHttp(
       this.ctx.exports.TestService({ props: { id: 3 } })
     );
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '1.2.3.4:80' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 1234');
+    }
 
     {
       const response = await container
