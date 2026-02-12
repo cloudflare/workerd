@@ -1466,12 +1466,11 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   kj::Own<kj::HttpClient> client = asHttpClient(kj::mv(clientWithTracing.client));
 
   // fetch() requests use a lot of unaccounted C++ memory, so we adjust memory usage to pressure
-  // the GC and protect against OOMs.
-  size_t adjustmentBytes = 3 * 1024;  // 3 KiB default
-  if (util::Autogate::isEnabled(util::AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH)) {
-    adjustmentBytes = 8 * 1024;
+  // the GC and protect against OOMs. When the autogate is enabled, this adjustment is applied
+  // centrally to all subrequests in IoContext::getSubrequestNoChecks() instead.
+  if (!util::Autogate::isEnabled(util::AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH)) {
+    client = client.attach(js.getExternalMemoryAdjustment(3 * 1024));
   }
-  client = client.attach(js.getExternalMemoryAdjustment(adjustmentBytes));
 
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   jsRequest->shallowCopyHeadersTo(headers);
