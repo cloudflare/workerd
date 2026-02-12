@@ -89,7 +89,7 @@
       "type": "github_tarball",
       "owner": "nodejs",
       "repo": "ncrypto",
-      "commit": "ba39e40ed1c1231902a676f53906cdd2f6119648",
+      "freeze_commit": "ba39e40ed1c1231902a676f53906cdd2f6119648",
     },
     {
       "name": "perfetto",
