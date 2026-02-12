@@ -2860,12 +2860,10 @@ class Server::WorkerService final: public Service,
         containerClients.erase(containerId);
       };
 
-      auto& interceptorImage = KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
-          "containerEgressInterceptorImage must be defined when docker is enabled.");
-
       auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
           kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
-          kj::str(interceptorImage), waitUntilTasks, kj::mv(cleanupCallback), channelTokenHandler);
+          containerEgressInterceptorImage.map([](kj::StringPtr s) { return kj::str(s); }),
+          waitUntilTasks, kj::mv(cleanupCallback), channelTokenHandler);
 
       // Store raw pointer in map (does not own)
       containerClients.insert(kj::str(containerId), client.get());

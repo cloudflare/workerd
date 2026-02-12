@@ -177,7 +177,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String dockerPath,
     kj::String containerName,
     kj::String imageName,
-    kj::String containerEgressInterceptorImage,
+    kj::Maybe<kj::String> containerEgressInterceptorImage,
     kj::TaskSet& waitUntilTasks,
     kj::Function<void()> cleanupCallback,
     ChannelTokenHandler& channelTokenHandler)
@@ -669,7 +669,10 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(containerEgressInterceptorImage);
+  auto& image = KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
+      "containerEgressInterceptorImage must be configured to use egress interception. "
+      "Set it in the localDocker configuration.");
+  jsonRoot.setImage(image);
 
   auto cmd = jsonRoot.initCmd(4);
   cmd.set(0, "--http-egress-port");
@@ -695,8 +698,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   }
 
   if (response.statusCode != 201) {
-    JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ",
-        containerEgressInterceptorImage,
+    JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ", image,
         ". Please ensure the container egress interceptor image is built and available.");
     JSG_FAIL_REQUIRE(Error, "Failed to create the networking sidecar [", response.statusCode, "] ",
         response.body);
@@ -744,14 +746,17 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   internetEnabled = params.getEnableInternet();
 
   co_await createContainer(entrypoint, environment, params);
+  co_await startContainer();
 
   // Opt in to the proxy sidecar container only if the user has configured egressMappings
   // for now. In the future, it will always run when a user container is running
   if (!egressMappings.empty()) {
+    // The user container will be blocked on network connectivity until this finishes.
+    // When workerd-network is more battle-tested and goes out of experimental so it's non-optional,
+    // we should make the sidecar start first and _then_ make the user container join the sidecar network.
     co_await ensureSidecarStarted();
   }
 
-  co_await startContainer();
   containerStarted.store(true, std::memory_order_release);
 }
 
@@ -861,7 +866,6 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   auto params = context.getParams();
   auto hostPortStr = kj::str(params.getHostPort());
   auto tokenBytes = params.getChannelToken();
-  JSG_REQUIRE(containerEgressInterceptorImage != "", Error, "should be set for setEgressHttp");
 
   auto parsed = parseHostPort(hostPortStr);
   uint16_t port = parsed.port.orDefault(80);
