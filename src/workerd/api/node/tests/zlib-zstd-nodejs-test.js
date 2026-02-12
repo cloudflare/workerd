@@ -349,3 +349,29 @@ export const zstdSyncFunctionsExportedTest = {
     );
   },
 };
+
+// Test stream decompression with large output and small chunkSize to exercise
+// the processCallback recursion path; verify we don't get a stack overflow.
+export const zstdStreamLargeDecompressTest = {
+  async test() {
+    // 1MB of compressible data — compresses small, decompresses large.
+    // With chunkSize=64, this requires ~16,000 output chunks, which triggers
+    // deep recursion in processCallback if the callback is synchronous.
+    const input = Buffer.alloc(1024 * 1024, 'A');
+    const compressed = zlib.zstdCompressSync(input);
+
+    const decompress = zlib.createZstdDecompress({ chunkSize: 64 });
+    let totalBytes = 0;
+
+    decompress.end(compressed);
+    for await (const chunk of decompress) {
+      totalBytes += chunk.length;
+    }
+
+    assert.strictEqual(
+      totalBytes,
+      input.length,
+      `Decompressed size should be ${input.length}, got ${totalBytes}`
+    );
+  },
+};

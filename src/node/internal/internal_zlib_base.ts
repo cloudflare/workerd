@@ -880,7 +880,9 @@ export class Zstd extends ZlibBase {
       !handle.initialize(
         initParamsArray,
         _writeState,
-        processCallback.bind(handle),
+        () => {
+          queueMicrotask(processCallback.bind(handle));
+        },
         pledgedSrcSize
       )
     ) {
