@@ -39,7 +39,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::String dockerPath,
       kj::String containerName,
       kj::String imageName,
-      kj::String containerEgressInterceptorImage,
+      kj::Maybe<kj::String> containerEgressInterceptorImage,
       kj::TaskSet& waitUntilTasks,
       kj::Function<void()> cleanupCallback,
       ChannelTokenHandler& channelTokenHandler);
@@ -70,7 +70,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::String imageName;
 
   // Container egress interceptor image name (sidecar for egress proxy)
-  kj::String containerEgressInterceptorImage;
+  kj::Maybe<kj::String> containerEgressInterceptorImage;
 
   kj::TaskSet& waitUntilTasks;
 
