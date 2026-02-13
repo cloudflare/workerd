@@ -1011,6 +1011,35 @@ export const transformStreamCancelPropagation = {
   },
 };
 
+export const writableStreamControllerErrorsPropagateToIncomingPipe = {
+  async test() {
+    let cancelCalled = false;
+
+    let rs = new ReadableStream({
+      start(controller) {
+        controller.enqueue('chunk');
+      },
+      cancel() {
+        cancelCalled = true;
+      },
+    });
+
+    let ws = new WritableStream({
+      write(chunk, controller) {
+        // Schedule error via the controller (NOT by throwing).
+        controller.error(new Error('test cancel'));
+      },
+      close() {},
+    });
+
+    // The error scheduled on the controller should propagate out of the pipeTo().
+    await rejects(rs.pipeTo(ws), new Error('test cancel'));
+
+    // The ReadableStream should have been canceled.
+    ok(cancelCalled);
+  },
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
