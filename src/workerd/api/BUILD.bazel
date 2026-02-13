@@ -192,6 +192,16 @@ wd_cc_library(
     hdrs = [
         "crypto/crc-impl.h",
     ],
+    # global CPU-specific options are inconvenient to specify with bazel – just set the options we
+    # need for CRC32C in this target for now.
+    copts = select({
+        "@platforms//cpu:aarch64": [
+            "-mcrc",
+        ],
+        "@platforms//cpu:x86_64": [
+            "-msse4.2",
+        ],
+    }),
     visibility = ["//visibility:public"],
 )
 
