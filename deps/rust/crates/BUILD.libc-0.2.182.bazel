@@ -6,16 +6,13 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//rust:defs.bzl",
-    "rust_binary",
-    "rust_library",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clap",
+    name = "libc",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -33,38 +30,55 @@ rust_library(
         ],
     ),
     crate_features = [
-        "derive",
-        "help",
+        "default",
+        "extra_traits",
         "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.55//:clap_derive",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=libc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.57",
+    version = "0.2.182",
     deps = [
-        "@crates_vendor__clap_builder-4.5.57//:clap_builder",
+        "@crates_vendor__libc-0.2.182//:build_script_build",
     ],
 )
 
-rust_binary(
-    name = "stdio-fixture__bin",
+cargo_build_script(
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
     compile_data = glob(
+        include = ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/* *",
+            "**/*.rs",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ),
+    crate_features = [
+        "default",
+        "extra_traits",
+        "std",
+    ],
+    crate_name = "build_script_build",
+    crate_root = "build.rs",
+    data = glob(
         include = ["**"],
         allow_empty = True,
         exclude = [
@@ -76,29 +90,24 @@ rust_binary(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "help",
-        "std",
-    ],
-    crate_root = "src/bin/stdio-fixture.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.55//:clap_derive",
-    ],
+    pkg_name = "libc",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=libc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.57",
-    deps = [
-        ":clap",
-        "@crates_vendor__clap_builder-4.5.57//:clap_builder",
-    ],
+    version = "0.2.182",
+    visibility = ["//visibility:private"],
+)
+
+alias(
+    name = "build_script_build",
+    actual = ":_bs",
+    tags = ["manual"],
 )

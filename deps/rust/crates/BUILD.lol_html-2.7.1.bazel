@@ -48,7 +48,7 @@ rust_library(
         "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
         "@crates_vendor__foldhash-0.2.0//:foldhash",
         "@crates_vendor__hashbrown-0.16.1//:hashbrown",
-        "@crates_vendor__memchr-2.7.6//:memchr",
+        "@crates_vendor__memchr-2.8.0//:memchr",
         "@crates_vendor__mime-0.3.17//:mime",
         "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
         "@crates_vendor__selectors-0.33.0//:selectors",
