@@ -335,7 +335,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       // this behavior. Silently discarding 304s maintains backwards compatibility and is actually
       // still spec-conformant.
 
-      if (context.isInspectorEnabled()) {
+      if (context.hasWarningHandler()) {
         context.logWarning(
             "Ignoring attempt to Cache.put() a 304 status response. 304 responses "
             "are not meaningful to cache, and a potential source of bugs. Consider validating that "

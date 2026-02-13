@@ -273,7 +273,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       // search-and-replace across your whole site and you forgot that it'll apply to images too.
       // When running in the fiddle, let's warn the developer if they do this.
       auto& context = IoContext::current();
-      if (context.isInspectorEnabled()) {
+      if (context.hasWarningHandler()) {
         KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
           maybeWarnIfNotText(js, type);
         }
@@ -1060,7 +1060,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
           "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
       auto& context = IoContext::current();
-      if (context.isInspectorEnabled()) {
+      if (context.hasWarningHandler()) {
         context.logWarning(kj::str("Constructing a Response with a null body status (", statusCode,
             ") and a non-null, "
             "zero-length body. This is technically incorrect, and we recommend you update your "
