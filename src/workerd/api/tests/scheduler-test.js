@@ -63,6 +63,8 @@ export const sequentialAbort = {
   async test(ctrl, env, ctx) {
     // Sequentially wait a very long time 11k times, each time aborting via an
     // AbortController. This exercises the abort path under heavy repetition.
+    // Test ensures that the underlying timer quota is not exceeded when the
+    // timeout is cancelled with an AbortSignal
     const iterations = 11_000;
     let completed = 0;
     for (let i = 0; i < iterations; i++) {
