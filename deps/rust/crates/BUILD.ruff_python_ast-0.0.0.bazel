@@ -49,7 +49,7 @@ rust_library(
         "@crates_vendor__bitflags-2.10.0//:bitflags",
         "@crates_vendor__compact_str-0.9.0//:compact_str",
         "@crates_vendor__itertools-0.14.0//:itertools",
-        "@crates_vendor__memchr-2.7.6//:memchr",
+        "@crates_vendor__memchr-2.8.0//:memchr",
         "@crates_vendor__ruff_python_trivia-0.0.0//:ruff_python_trivia",
         "@crates_vendor__ruff_source_file-0.0.0//:ruff_source_file",
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",

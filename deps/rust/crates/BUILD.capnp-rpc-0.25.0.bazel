@@ -42,8 +42,8 @@ rust_library(
     ],
     version = "0.25.0",
     deps = [
-        "@crates_vendor__capnp-0.25.0//:capnp",
-        "@crates_vendor__capnp-futures-0.25.0//:capnp_futures",
+        "@crates_vendor__capnp-0.25.1//:capnp",
+        "@crates_vendor__capnp-futures-0.25.1//:capnp_futures",
         "@crates_vendor__futures-0.3.31//:futures",
     ],
 )
