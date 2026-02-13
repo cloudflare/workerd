@@ -275,23 +275,7 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
     image: ReadableStream<Uint8Array> | ArrayBuffer,
     options?: ImageUploadOptions
   ): Promise<ImageMetadata> {
-    let processedImage: ReadableStream<Uint8Array> | ArrayBuffer = image;
-
-    if (options?.encoding === 'base64') {
-      const stream =
-        image instanceof ReadableStream
-          ? image
-          : new ReadableStream({
-              start(controller): void {
-                controller.enqueue(new Uint8Array(image));
-                controller.close();
-              },
-            });
-
-      processedImage = stream.pipeThrough(createBase64DecoderTransformStream());
-    }
-
-    return this.#fetcher.upload(processedImage, options);
+    return this.#fetcher.upload(image, options);
   }
 
   async update(
