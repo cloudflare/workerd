@@ -914,6 +914,7 @@ kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
 }
 
 kj::Maybe<CompressionError> ZstdDecoderContext::setParams(int key, int value) {
+  KJ_DASSERT(dctx_.get() != nullptr, "Zstd decompression context should not be null");
   size_t result = ZSTD_DCtx_setParameter(dctx_.get(), static_cast<ZSTD_dParameter>(key), value);
   if (ZSTD_isError(result)) {
     return CompressionError(kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
