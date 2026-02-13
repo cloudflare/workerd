@@ -1070,15 +1070,22 @@ kj::Promise<void> Scheduler::wait(
 
   auto& global =
       jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
-  global.setTimeoutInternal([fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))](
-                                jsg::Lock& lock) mutable { fulfiller->fulfill(); },
-      delay);
+  auto timeoutId = global.setTimeoutInternal(
+      [fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))](jsg::Lock& lock) mutable {
+    fulfiller->fulfill();
+  }, delay);
 
   auto promise = kj::mv(paf.promise);
 
   KJ_IF_SOME(options, maybeOptions) {
     KJ_IF_SOME(s, options.signal) {
       promise = s->wrap(js, kj::mv(promise));
+      // When the signal aborts and the canceler drops the promise, clear the underlying
+      // timeout to free the quota slot. clearTimeoutImpl is a no-op if the timeout has
+      // already fired, so this is safe on the normal completion path as well.
+      promise = promise.attach(kj::defer([timeoutId, &ioContext = IoContext::current()]() {
+        ioContext.clearTimeoutImpl(TimeoutId::fromNumber(timeoutId));
+      }));
     }
   }
 

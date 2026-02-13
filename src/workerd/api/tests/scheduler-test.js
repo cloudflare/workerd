@@ -59,6 +59,32 @@ export const wait = {
   },
 };
 
+export const sequentialAbort = {
+  async test(ctrl, env, ctx) {
+    // Sequentially wait a very long time 11k times, each time aborting via an
+    // AbortController. This exercises the abort path under heavy repetition.
+    const iterations = 11_000;
+    let completed = 0;
+    for (let i = 0; i < iterations; i++) {
+      const ac = new AbortController();
+      const promise = scheduler.wait(1_000_000, { signal: ac.signal });
+      ac.abort();
+      try {
+        await promise;
+        throw new Error('should have thrown');
+      } catch (err) {
+        strictEqual(err.message, 'The operation was aborted');
+      }
+      completed++;
+    }
+    strictEqual(
+      completed,
+      11_000,
+      `Expected 11000 iterations but only completed ${completed}`
+    );
+  },
+};
+
 export default {
   async fetch() {
     // If globalThis.longWait exists, that means the timer fired after the
