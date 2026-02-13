@@ -938,8 +938,7 @@ kj::Maybe<CompressionError> ZstdDecoderContext::getError() const {
   // completed), and the output buffer is not full (decoder had space but
   // couldn't produce more output), the input was truncated.
   if (flush_ == ZSTD_e_end && frameInProgress_ && output_.pos < output_.size) {
-    return CompressionError(
-        "unexpected end of file"_kj, "ERR_ZSTD_DECOMPRESSION_FAILED"_kj, -1);
+    return CompressionError("unexpected end of file"_kj, "ERR_ZSTD_DECOMPRESSION_FAILED"_kj, -1);
   }
 
   return kj::none;

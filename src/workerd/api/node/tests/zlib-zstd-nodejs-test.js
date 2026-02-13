@@ -383,7 +383,10 @@ export const zstdTruncatedAsyncTest = {
       await promise;
       assert.fail('Should have thrown on truncated data');
     } catch (err) {
-      assert(err instanceof Error, 'Should receive an error for truncated data');
+      assert(
+        err instanceof Error,
+        'Should receive an error for truncated data'
+      );
     }
   },
 };
