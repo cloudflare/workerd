@@ -18,6 +18,14 @@ export class DirectProxy extends WorkerEntrypoint {
 }
 
 // Test 2: Proxy constructor pattern (same as miniflare's ExternalServiceProxy)
+//
+// Bug in original version: used `method.apply(fetcher, args)`.
+// JsRpcProperty has JSG_WILDCARD_PROPERTY, so `.apply` creates another
+// JsRpcProperty for the path `ping.apply`. Calling *that* serializes
+// `fetcher` as an RPC argument → Fetcher::serialize() →
+// requireAllowsTransfer() → throws.
+//
+// Fix: call the method directly — `fetcher[methodName](...args)`.
 export class ProxyProxy extends WorkerEntrypoint {
   constructor(ctx, env) {
     super(ctx, env);
@@ -32,11 +40,7 @@ export class ProxyProxy extends WorkerEntrypoint {
             const client =
               await target.env.DEBUG_PORT.connect('127.0.0.1:9230');
             const fetcher = await client.getEntrypoint('target');
-            const method = fetcher[methodName];
-            if (typeof method !== 'function') {
-              throw new Error(`Method "${methodName}" not found`);
-            }
-            return method.apply(fetcher, args);
+            return fetcher[methodName](...args);
           };
         }
         return undefined;
@@ -54,6 +58,7 @@ export class ProxyProxy extends WorkerEntrypoint {
 }
 
 // Test 3: Proxy constructor pattern with props (closest to miniflare)
+// Same .apply() bug as above — fixed with direct call.
 export class ProxyWithProps extends WorkerEntrypoint {
   constructor(ctx, env) {
     super(ctx, env);
@@ -69,11 +74,7 @@ export class ProxyWithProps extends WorkerEntrypoint {
             const client =
               await target.env.DEBUG_PORT.connect('127.0.0.1:9230');
             const fetcher = await client.getEntrypoint('target');
-            const method = fetcher[methodName];
-            if (typeof method !== 'function') {
-              throw new Error(`Method "${methodName}" not found`);
-            }
-            return method.apply(fetcher, args);
+            return fetcher[methodName](...args);
           };
         }
         return undefined;
