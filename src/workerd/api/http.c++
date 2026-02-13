@@ -174,14 +174,16 @@ Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
             headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(ct));
-          } else if (MimeType::FORM_DATA == ct) {
-            // Custom content-type request/responses with FormData are broken since they require a
-            // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
-            IoContext::current().logWarning(
-                "A FormData body was provided with a custom Content-Type header when constructing "
-                "a Request or Response object. This will prevent the recipient of the Request or "
-                "Response from being able to parse the body. Consider omitting the custom "
-                "Content-Type header.");
+          } else KJ_IF_SOME(parsed, MimeType::tryParse(ct)) {
+            if (MimeType::FORM_DATA == parsed) {
+              // Custom content-type request/responses with FormData are broken since they require a
+              // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
+              IoContext::current().logWarning(
+                  "A FormData body was provided with a custom Content-Type header when constructing "
+                  "a Request or Response object. This will prevent the recipient of the Request or "
+                  "Response from being able to parse the body. Consider omitting the custom "
+                  "Content-Type header.");
+            }
           }
         }
         return kj::mv(i.impl);
@@ -271,7 +273,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       // search-and-replace across your whole site and you forgot that it'll apply to images too.
       // When running in the fiddle, let's warn the developer if they do this.
       auto& context = IoContext::current();
-      if (context.isInspectorEnabled()) {
+      if (context.hasWarningHandler()) {
         KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
           maybeWarnIfNotText(js, type);
         }
@@ -1058,7 +1060,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
           "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
       auto& context = IoContext::current();
-      if (context.isInspectorEnabled()) {
+      if (context.hasWarningHandler()) {
         context.logWarning(kj::str("Constructing a Response with a null body status (", statusCode,
             ") and a non-null, "
             "zero-length body. This is technically incorrect, and we recommend you update your "

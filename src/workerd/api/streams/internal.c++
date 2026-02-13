@@ -23,7 +23,7 @@ namespace {
 // papers over is fixed.
 [[noreturn]] void throwTypeErrorAndConsoleWarn(kj::StringPtr message) {
   KJ_IF_SOME(context, IoContext::tryCurrent()) {
-    if (context.isInspectorEnabled()) {
+    if (context.hasWarningHandler()) {
       context.logWarning(message);
     }
   }
@@ -918,7 +918,7 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
       auto makeTee = [&](kj::Own<ReadableStreamSource> b1,
                          kj::Own<ReadableStreamSource> b2) -> Tee {
         doClose(js);
-        if (ioContext.isInspectorEnabled()) {
+        if (ioContext.hasWarningHandler()) {
           b1 = kj::heap<WarnIfUnusedStream>(js, kj::mv(b1), ioContext);
           b2 = kj::heap<WarnIfUnusedStream>(js, kj::mv(b2), ioContext);
         }

@@ -271,6 +271,15 @@ wd_test(
 )
 
 wd_test(
+    src = "warnings-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "warnings-tail.js",
+        "warnings-test.js",
+    ],
+)
+
+wd_test(
     size = "large",
     src = "global-scope-test.wd-test",
     args = ["--experimental"],

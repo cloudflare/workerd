@@ -394,6 +394,11 @@ bool IoContext::isFiddle() {
   return thread.isFiddle();
 }
 
+bool IoContext::hasWarningHandler() {
+  return isInspectorEnabled() || getWorkerTracer() != kj::none ||
+      ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO);
+}
+
 void IoContext::logWarning(kj::StringPtr description) {
   KJ_REQUIRE_NONNULL(currentLock).logWarning(description);
 }

@@ -32,14 +32,6 @@ class ConstMimeType final {
     return this == &other || (type_ == other.type_ && subtype_ == other.subtype_);
   }
 
-  inline bool operator==(kj::StringPtr other) const {
-    KJ_IF_SOME(slashPos, other.findFirst('/')) {
-      return strcaseeq(type_, other.first(slashPos)) &&
-          strcaseeq(subtype_, other.slice(slashPos + 1));
-    }
-    return false;
-  }
-
   bool operator==(const MimeType& other) const;
   operator MimeType() const;
   MimeType clone() const;
