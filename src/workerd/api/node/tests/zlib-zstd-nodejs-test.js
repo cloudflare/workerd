@@ -350,6 +350,71 @@ export const zstdSyncFunctionsExportedTest = {
   },
 };
 
+// Test sync decompression of truncated compressed data (EOF mid-frame)
+export const zstdTruncatedSyncTest = {
+  test() {
+    const input = Buffer.from('Hello, Zstd truncation test!'.repeat(100));
+    const compressed = zlib.zstdCompressSync(input);
+
+    // Cut the compressed data in half
+    const truncated = compressed.subarray(0, Math.floor(compressed.length / 2));
+    assert.throws(
+      () => zlib.zstdDecompressSync(truncated),
+      (err) => err instanceof Error,
+      'Should throw on truncated compressed data'
+    );
+  },
+};
+
+// Test async decompression of truncated compressed data
+export const zstdTruncatedAsyncTest = {
+  async test() {
+    const input = Buffer.from('Hello, Zstd truncation test!'.repeat(100));
+    const compressed = zlib.zstdCompressSync(input);
+    const truncated = compressed.subarray(0, Math.floor(compressed.length / 2));
+
+    const { promise, resolve, reject } = Promise.withResolvers();
+    zlib.zstdDecompress(truncated, (err, res) => {
+      if (err) reject(err);
+      else resolve(res);
+    });
+
+    try {
+      await promise;
+      assert.fail('Should have thrown on truncated data');
+    } catch (err) {
+      assert(err instanceof Error, 'Should receive an error for truncated data');
+    }
+  },
+};
+
+// Test stream decompression of truncated compressed data
+export const zstdTruncatedStreamTest = {
+  async test() {
+    const input = Buffer.from('Stream truncation test data'.repeat(100));
+    const compressed = zlib.zstdCompressSync(input);
+    const truncated = compressed.subarray(0, Math.floor(compressed.length / 2));
+
+    const decompress = zlib.createZstdDecompress();
+
+    let errored = false;
+    decompress.on('error', () => {
+      errored = true;
+    });
+
+    decompress.end(truncated);
+    try {
+      for await (const _chunk of decompress) {
+        // consume chunks
+      }
+    } catch {
+      errored = true;
+    }
+
+    assert(errored, 'Stream should error on truncated compressed data');
+  },
+};
+
 // Test stream decompression with large output and small chunkSize to exercise
 // the processCallback recursion path; verify we don't get a stack overflow.
 export const zstdStreamLargeDecompressTest = {

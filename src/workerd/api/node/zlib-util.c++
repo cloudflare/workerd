@@ -900,6 +900,10 @@ void ZstdDecoderContext::work() {
 
   if (ZSTD_isError(lastResult)) {
     error_ = ZSTD_getErrorCode(lastResult);
+  } else if (input_.size > 0) {
+    // Track whether we're mid-frame: lastResult > 0 means more data needed,
+    // lastResult == 0 means frame is complete.
+    frameInProgress_ = (lastResult > 0);
   }
 }
 
@@ -910,6 +914,7 @@ kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
       return kj::mv(err);
     }
   }
+  frameInProgress_ = false;
   return kj::none;
 }
 
@@ -929,10 +934,12 @@ kj::Maybe<CompressionError> ZstdDecoderContext::getError() const {
         kj::str("ERR_ZSTD_DECOMPRESSION_FAILED"), -1);
   }
 
-  // For decompression, lastResult == 0 means frame is complete
-  // If we have flush_ == ZSTD_e_end equivalent and there's input left, that's an error
-  if (flush_ == ZSTD_e_end && input_.pos < input_.size && lastResult == 0) {
-    // Frame completed but there's still input - could be trailing data
+  // If this is the final flush, we're mid-frame (frame was started but never
+  // completed), and the output buffer is not full (decoder had space but
+  // couldn't produce more output), the input was truncated.
+  if (flush_ == ZSTD_e_end && frameInProgress_ && output_.pos < output_.size) {
+    return CompressionError(
+        "unexpected end of file"_kj, "ERR_ZSTD_DECOMPRESSION_FAILED"_kj, -1);
   }
 
   return kj::none;

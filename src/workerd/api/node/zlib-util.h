@@ -353,6 +353,7 @@ class ZstdDecoderContext final: public ZstdContext {
   size_t lastResult = 0;
   kj::Own<ZSTD_DCtx> dctx_;
   ZSTD_ErrorCode error_ = ZSTD_error_no_error;
+  bool frameInProgress_ = false;
 };
 
 // Implements utilities in support of the Node.js Zlib
