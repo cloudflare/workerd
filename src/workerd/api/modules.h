@@ -6,6 +6,7 @@
 
 #include <workerd/api/base64.h>
 #include <workerd/api/filesystem.h>
+#include <workerd/api/messagechannel.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
@@ -87,6 +88,7 @@ void registerModules(Registry& registry, auto featureFlags) {
   }
   registerSocketsModule(registry, featureFlags);
   registerBase64Module(registry, featureFlags);
+  registerMessageChannelModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerWorkersModule(registry, featureFlags);
   registerTracingModule(registry, featureFlags);
@@ -102,6 +104,7 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
   builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalMessageChannelModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));
 
   builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));

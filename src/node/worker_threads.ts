@@ -35,8 +35,12 @@ import type { Readable, Writable } from 'node:stream';
 import type { Transferable, WorkerPerformance } from 'node:worker_threads';
 import type { CPUProfileHandle, HeapInfo, HeapProfileHandle } from 'node:v8';
 
-export const MessageChannel = globalThis.MessageChannel;
-export const MessagePort = globalThis.MessagePort;
+// Import MessageChannel and MessagePort from the internal module to avoid
+// dependency on the expose_global_message_channel compatibility flag.
+import internalMessageChannel from 'cloudflare-internal:messagechannel';
+
+export const MessageChannel = internalMessageChannel.MessageChannel;
+export const MessagePort = internalMessageChannel.MessagePort;
 
 // TODO(soon): Use globalThis.BroadcastChannel once it's available.
 export class BroadcastChannel {
