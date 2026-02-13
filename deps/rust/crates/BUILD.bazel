@@ -32,26 +32,26 @@ filegroup(
 
 # Workspace Member Dependencies
 alias(
-    name = "ada-url-3.4.1",
-    actual = "@crates_vendor__ada-url-3.4.1//:ada_url",
+    name = "ada-url-3.4.2",
+    actual = "@crates_vendor__ada-url-3.4.2//:ada_url",
     tags = ["manual"],
 )
 
 alias(
     name = "ada-url",
-    actual = "@crates_vendor__ada-url-3.4.1//:ada_url",
+    actual = "@crates_vendor__ada-url-3.4.2//:ada_url",
     tags = ["manual"],
 )
 
 alias(
-    name = "anyhow-1.0.100",
-    actual = "@crates_vendor__anyhow-1.0.100//:anyhow",
+    name = "anyhow-1.0.101",
+    actual = "@crates_vendor__anyhow-1.0.101//:anyhow",
     tags = ["manual"],
 )
 
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.100//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.101//:anyhow",
     tags = ["manual"],
 )
 
@@ -68,14 +68,14 @@ alias(
 )
 
 alias(
-    name = "capnp-0.25.0",
-    actual = "@crates_vendor__capnp-0.25.0//:capnp",
+    name = "capnp-0.25.1",
+    actual = "@crates_vendor__capnp-0.25.1//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.25.0//:capnp",
+    actual = "@crates_vendor__capnp-0.25.1//:capnp",
     tags = ["manual"],
 )
 
@@ -104,14 +104,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.55",
-    actual = "@crates_vendor__cc-1.2.55//:cc",
+    name = "cc-1.2.56",
+    actual = "@crates_vendor__cc-1.2.56//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.55//:cc",
+    actual = "@crates_vendor__cc-1.2.56//:cc",
     tags = ["manual"],
 )
 
@@ -128,14 +128,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.57",
-    actual = "@crates_vendor__clap-4.5.57//:clap",
+    name = "clap-4.5.58",
+    actual = "@crates_vendor__clap-4.5.58//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.57//:clap",
+    actual = "@crates_vendor__clap-4.5.58//:clap",
     tags = ["manual"],
 )
 
@@ -200,14 +200,14 @@ alias(
 )
 
 alias(
-    name = "nix-0.31.1",
-    actual = "@crates_vendor__nix-0.31.1//:nix",
+    name = "nix-0.30.1",
+    actual = "@crates_vendor__nix-0.30.1//:nix",
     tags = ["manual"],
 )
 
 alias(
     name = "nix",
-    actual = "@crates_vendor__nix-0.31.1//:nix",
+    actual = "@crates_vendor__nix-0.30.1//:nix",
     tags = ["manual"],
 )
 
@@ -356,14 +356,14 @@ alias(
 )
 
 alias(
-    name = "syn-2.0.114",
-    actual = "@crates_vendor__syn-2.0.114//:syn",
+    name = "syn-2.0.115",
+    actual = "@crates_vendor__syn-2.0.115//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.114//:syn",
+    actual = "@crates_vendor__syn-2.0.115//:syn",
     tags = ["manual"],
 )
 
@@ -418,7 +418,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.57//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.58//:stdio-fixture__bin",
     tags = ["manual"],
 )
 

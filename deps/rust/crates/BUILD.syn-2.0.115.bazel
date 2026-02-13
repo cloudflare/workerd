@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "ryu",
+    name = "syn",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,19 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "clone-impls",
+        "default",
+        "derive",
+        "extra-traits",
+        "fold",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+        "visit",
+        "visit-mut",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,10 +48,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=ryu",
+        "crate-name=syn",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.22",
+    version = "2.0.115",
+    deps = [
+        "@crates_vendor__proc-macro2-1.0.106//:proc_macro2",
+        "@crates_vendor__quote-1.0.44//:quote",
+        "@crates_vendor__unicode-ident-1.0.23//:unicode_ident",
+    ],
 )

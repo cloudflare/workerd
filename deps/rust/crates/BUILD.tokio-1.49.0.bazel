@@ -61,19 +61,19 @@ rust_library(
         "@crates_vendor__socket2-0.6.2//:socket2",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.180//:libc",  # aarch64-apple-darwin
+            "@crates_vendor__libc-0.2.182//:libc",  # aarch64-apple-darwin
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.180//:libc",  # aarch64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.182//:libc",  # aarch64-unknown-linux-gnu
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.180//:libc",  # x86_64-apple-darwin
+            "@crates_vendor__libc-0.2.182//:libc",  # x86_64-apple-darwin
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # x86_64-pc-windows-msvc
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.180//:libc",  # x86_64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.182//:libc",  # x86_64-unknown-linux-gnu
         ],
         "//conditions:default": [],
     }),
