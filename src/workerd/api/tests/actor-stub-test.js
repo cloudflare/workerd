@@ -86,14 +86,16 @@ export default {
     {
       // Check that DurableObject constructed with `locationHint` is equivalent to `obj`.
       let otherObj = env.ns.get(id, { locationHint: 'wnam' });
-      assert.deepStrictEqual(obj, otherObj);
+      assert.deepStrictEqual(obj.id, otherObj.id);
+      assert.equal(obj.name, otherObj.name);
       checkDurableObject(otherObj);
     }
 
     {
       // Check that DurableObject constructed via `getByName()` is equivalent to `obj`.
       let otherObj = env.ns.getByName('foo');
-      assert.deepStrictEqual(obj, otherObj);
+      assert.deepStrictEqual(obj.id, otherObj.id);
+      assert.equal(obj.name, otherObj.name);
       checkDurableObject(otherObj);
     }
 
@@ -101,7 +103,8 @@ export default {
       // Check that DurableObject constructed with `locationHint` and `getByName()` is equivalent
       // to `obj`.
       let otherObj = env.ns.getByName('foo', { locationHint: 'wnam' });
-      assert.deepStrictEqual(obj, otherObj);
+      assert.deepStrictEqual(obj.id, otherObj.id);
+      assert.equal(obj.name, otherObj.name);
       checkDurableObject(otherObj);
     }
 

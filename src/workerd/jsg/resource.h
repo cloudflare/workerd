@@ -20,6 +20,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 
+#include <v8-proxy.h>
 #include <v8-template.h>
 
 #include <kj/debug.h>
@@ -28,10 +29,6 @@
 
 #include <type_traits>
 #include <typeindex>
-
-// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
@@ -92,6 +89,9 @@ void scheduleUnimplementedMethodError(const v8::FunctionCallbackInfo<v8::Value>&
 void scheduleUnimplementedPropertyError(
     v8::Isolate* isolate, const std::type_info& type, const char* propertyName);
 
+template <typename TypeWrapper, typename T>
+class ResourceWrapper;
+
 // Implements the V8 callback function for calling the static `constructor()` method of the C++
 // class.
 template <typename TypeWrapper,
@@ -121,6 +121,8 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Args...), kj::_::Indexes<index
         ptr->jsgInitReflection(wrapper);
       }
       ptr.attachWrapper(isolate, obj);
+      static_cast<ResourceWrapper<TypeWrapper, T>&>(wrapper).maybeInstallWildcardProxy(
+          isolate, obj);
     });
   }
 };
@@ -148,6 +150,8 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Lock&, Args...), kj::_::Indexe
         ptr->jsgInitReflection(wrapper);
       }
       ptr.attachWrapper(isolate, obj);
+      static_cast<ResourceWrapper<TypeWrapper, T>&>(wrapper).maybeInstallWildcardProxy(
+          isolate, obj);
     });
   }
 };
@@ -179,6 +183,8 @@ struct ConstructorCallback<TypeWrapper,
         ptr->jsgInitReflection(wrapper);
       }
       ptr.attachWrapper(isolate, obj);
+      static_cast<ResourceWrapper<TypeWrapper, T>&>(wrapper).maybeInstallWildcardProxy(
+          isolate, obj);
     });
   }
 };
@@ -1165,6 +1171,11 @@ class DynamicResourceTypeMap {
 
 class JsValue;
 
+using WildcardHandlerFactory = v8::Local<v8::Object> (*)(v8::Isolate*, v8::Local<v8::Object>);
+
+void installWildcardProxy(
+    v8::Isolate* isolate, v8::Local<v8::Object> instance, WildcardHandlerFactory factory);
+
 template <typename TypeWrapper, typename T, typename GetNamedMethod, GetNamedMethod getNamedMethod>
 struct WildcardPropertyCallbacks;
 
@@ -1176,43 +1187,105 @@ template <typename TypeWrapper,
 struct WildcardPropertyCallbacks<TypeWrapper,
     T,
     kj::Maybe<Ret> (U::*)(jsg::Lock&, kj::String),
-    getNamedMethod>: public v8::NamedPropertyHandlerConfiguration {
-  WildcardPropertyCallbacks()
-      : v8::NamedPropertyHandlerConfiguration(getter,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr,
-            v8::Local<v8::Value>(),
-            static_cast<v8::PropertyHandlerFlags>(
-                static_cast<int>(v8::PropertyHandlerFlags::kNonMasking) |
-                static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
-                static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
+    getNamedMethod> {
 
-  static v8::Intercepted getter(
-      v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
-    v8::Intercepted result = v8::Intercepted::kNo;
-    liftKj(info, [&]() -> v8::Local<v8::Value> {
-      auto isolate = info.GetIsolate();
+  // Check the expected shape of the proxy. Unfortunately we can't check that the instance matches.
+  static void validateProxyIntegrity(
+      v8::Isolate* isolate, v8::Local<v8::Object> obj, v8::Local<v8::Object> expectedTarget) {
+    auto proto = obj->GetPrototypeV2();
+    if (!proto->IsProxy() || !proto.As<v8::Proxy>()->GetTarget()->StrictEquals(expectedTarget)) {
+      throwTypeError(isolate, kIllegalInvocation);
+    }
+  }
+
+  static void proxyGetTrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    liftKj(args, [&]() -> v8::Local<v8::Value> {
+      auto isolate = args.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.This();
+      auto reflectGetFn = args.Data().As<v8::Function>();
+      auto target = args[0].As<v8::Object>();
+      auto prop = args[1];
+      auto receiver = args[2];
+      // Check if the property exists on the prototype chain. Call Reflect.get if so.
+      if (check(target->Has(context, prop))) {
+        v8::Local<v8::Value> rArgs[] = {target, prop, receiver};
+        return check(reflectGetFn->Call(context, v8::Undefined(isolate), 3, rArgs));
+      }
+      // Property not on prototype. Only try wildcard for string properties.
+      if (!prop->IsString() || !receiver->IsObject()) {
+        v8::Local<v8::Value> rArgs[] = {target, prop, receiver};
+        return check(reflectGetFn->Call(context, v8::Undefined(isolate), 3, rArgs));
+      }
+      auto obj = receiver.As<v8::Object>();
+      validateProxyIntegrity(isolate, obj, target);
       auto& wrapper = TypeWrapper::from(isolate);
+      // TODO can we install a security check on function directly?
       if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
+      // Now check the wildcard callback.
       auto& self = extractInternalPointer<T, false>(context, obj);
       auto& lock = Lock::from(isolate);
-      KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(name.As<v8::String>()))) {
-        result = v8::Intercepted::kYes;
+      KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(prop.As<v8::String>()))) {
         return wrapper.wrap(lock, context, obj, kj::fwd<Ret>(value));
       } else {
-        // Return an empty handle to indicate the member doesn't exist.
-        return {};
+        v8::Local<v8::Value> rArgs[] = {target, prop, receiver};
+        return check(reflectGetFn->Call(context, v8::Undefined(isolate), 3, rArgs));
       }
     });
-    return result;
+  }
+
+  static void proxyHasTrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    liftKj(args, [&]() -> v8::Local<v8::Value> {
+      auto isolate = args.GetIsolate();
+      auto context = isolate->GetCurrentContext();
+      auto target = args[0].As<v8::Object>();
+      auto prop = args[1];
+      // Check if prop exists anywhere on the target's prototype chain.
+      if (check(target->Has(context, prop))) {
+        return v8::True(isolate).As<v8::Value>();
+      }
+      // Not on prototype. Only try wildcard for string properties.
+      if (!prop->IsString()) {
+        return v8::False(isolate).As<v8::Value>();
+      }
+      auto instance = args.Data().As<v8::Object>();
+      validateProxyIntegrity(isolate, instance, target);
+      auto& wrapper = TypeWrapper::from(isolate);
+      if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(instance)) {
+        throwTypeError(isolate, kIllegalInvocation);
+      }
+      auto& self = extractInternalPointer<T, false>(context, instance);
+      auto& lock = Lock::from(isolate);
+      KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(prop.As<v8::String>()))) {
+        (void)value;
+        return v8::True(isolate).As<v8::Value>();
+      } else {
+        return v8::False(isolate).As<v8::Value>();
+      }
+    });
+  }
+
+  // Forward getPrototypeOf to the target.
+  static void proxyGetPrototypeOfTrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    args.GetReturnValue().Set(args[0]);
+  }
+
+  static v8::Local<v8::Object> createProxyHandler(
+      v8::Isolate* isolate, v8::Local<v8::Object> instance) {
+    auto context = isolate->GetCurrentContext();
+    // Cache Reflect.get
+    auto reflectObj =
+        check(context->Global()->Get(context, v8StrIntern(isolate, "Reflect"))).As<v8::Object>();
+    auto reflectGetFn = check(reflectObj->Get(context, v8StrIntern(isolate, "get")));
+    auto handler = v8::Object::New(isolate);
+    check(handler->Set(context, v8StrIntern(isolate, "get"),
+        v8::Function::New(context, proxyGetTrap, reflectGetFn).ToLocalChecked()));
+    check(handler->Set(context, v8StrIntern(isolate, "has"),
+        v8::Function::New(context, proxyHasTrap, instance.As<v8::Value>()).ToLocalChecked()));
+    check(handler->Set(context, v8StrIntern(isolate, "getPrototypeOf"),
+        v8::Function::New(context, proxyGetPrototypeOfTrap).ToLocalChecked()));
+    return handler;
   }
 };
 
@@ -1247,14 +1320,23 @@ struct ResourceTypeBuilder {
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() {
-    prototype->SetHandler(
-        WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>{});
+    auto& resourceWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
+    resourceWrapper.wildcardHandlerFactory = &WildcardPropertyCallbacks<TypeWrapper, Type,
+        GetNamedMethod, getNamedMethod>::createProxyHandler;
   }
 
   template <typename Type>
   inline void registerInherit() {
     constructor->Inherit(
         typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
+    // Propagate wildcard proxy to children.
+    auto& parentWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
+    if (parentWrapper.wildcardHandlerFactory != nullptr) {
+      auto& selfWrapper = static_cast<ResourceWrapper<TypeWrapper, Self>&>(typeWrapper);
+      if (selfWrapper.wildcardHandlerFactory == nullptr) {
+        selfWrapper.wildcardHandlerFactory = parentWrapper.wildcardHandlerFactory;
+      }
+    }
   }
 
   template <const char* name>
@@ -1655,9 +1737,17 @@ class ResourceWrapper {
   // be that type, otherwise NullConfiguration which accepts any configuration.
   using Configuration = DetectedOr<NullConfiguration, GetConfiguration, T>;
 
+  WildcardHandlerFactory wildcardHandlerFactory = nullptr;
+
   template <typename MetaConfiguration>
   ResourceWrapper(MetaConfiguration&& configuration)
       : configuration(kj::fwd<MetaConfiguration>(configuration)) {}
+
+  void maybeInstallWildcardProxy(v8::Isolate* isolate, v8::Local<v8::Object> instance) {
+    if (wildcardHandlerFactory != nullptr) {
+      installWildcardProxy(isolate, instance, wildcardHandlerFactory);
+    }
+  }
 
   inline void initTypeWrapper() {
     TypeWrapper& wrapper = static_cast<TypeWrapper&>(*this);
@@ -1750,6 +1840,8 @@ class ResourceWrapper {
       }
       v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(context));
       value.attachWrapper(isolate, object);
+      maybeInstallWildcardProxy(isolate, object);
+
       return object;
     }
   }
@@ -2002,8 +2094,5 @@ class ObjectWrapper {
       Ref<Object>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
 };
-
-// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
-#pragma clang diagnostic pop
 
 }  // namespace workerd::jsg

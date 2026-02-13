@@ -5,6 +5,8 @@
 #include "jsg.h"
 #include "setup.h"
 
+#include <v8-proxy.h>
+
 namespace workerd::jsg {
 
 // TODO(cleanup): Factor out toObject(), getInterned() into some sort of v8 tools module?
@@ -59,6 +61,18 @@ void scheduleUnimplementedPropertyError(
   isolate->ThrowError(v8StrIntern(isolate,
       kj::str("Failed to get the '", propertyName, "' property on '", typeName(type),
           "': the property is not implemented.")));
+}
+
+void installWildcardProxy(
+    v8::Isolate* isolate, v8::Local<v8::Object> instance, WildcardHandlerFactory factory) {
+  auto context = isolate->GetCurrentContext();
+  auto protoValue = instance->GetPrototypeV2();
+  // Create a per-instance handler.
+  auto handler = factory(isolate, instance);
+  // Create a Proxy wrapping the original prototype.
+  auto proxy = check(v8::Proxy::New(context, protoValue.As<v8::Object>(), handler));
+  // Replace the instance's prototype with the proxy.
+  check(instance->SetPrototypeV2(context, proxy));
 }
 
 }  // namespace workerd::jsg
