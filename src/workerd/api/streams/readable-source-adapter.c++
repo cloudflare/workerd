@@ -201,7 +201,7 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
   // always be at least as large as minBytes. This should be handled for us by
   // the jsg::BufferSource, but just to be safe, we will double-check with a
   // debug assert here.
-  KJ_DASSERT(buffer.size() % elementSize == 0);
+  KJ_ASSERT(buffer.size() % elementSize == 0);
 
   auto minBytes = kj::min(options.minBytes.orDefault(elementSize), buffer.size());
   // We want to be sure that minBytes is a multiple of the element size
@@ -221,20 +221,27 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
   // We only pass a kj::ArrayPtr to the buffer into the read call, keeping
   // the actual buffer instance alive by attaching it to the JS promise
   // chain that follows the read in order to keep it alive.
+
+  // Unfortunately we have to allocate a kj::Array here to read the data
+  // into then copy that into the provided data when the read completes.
+  // Why? For security! The buffer provided to us is a v8 allocated buffer
+  // that sits within the v8 sandbox but the read happens in kj-space outside
+  // of the isolate lock.
+  // TODO(soon): Use the memory protection key to allow kj-space to write directly
+  // into the v8 buffer without the copy?
+  auto destBuffer = kj::heapArray<kj::byte>(buffer.size());
+
   auto promise = active.enqueue(kj::coCapture(
-      [&active, buffer = buffer.asArrayPtr(), minBytes]() mutable -> kj::Promise<size_t> {
-    // TODO(soon): The underlying kj streams API now supports passing the
-    // kj::ArrayPtr directly to the read call, but ReadableStreamSource has
-    // not yet been updated to do so. When it is, we can update this read to
-    // pass `buffer` directly rather than passing the begin() and size().
+      [&active, buffer = destBuffer.asPtr(), minBytes]() mutable -> kj::Promise<size_t> {
     co_return co_await active.source->read(buffer, minBytes);
   }));
   return ioContext
       .awaitIo(js, kj::mv(promise),
-          [buffer = kj::mv(buffer), self = selfRef.addRef()](jsg::Lock& js,
+          [destBuffer = kj::mv(destBuffer), buffer = kj::mv(buffer), self = selfRef.addRef()](
+              jsg::Lock& js,
               size_t bytesRead) mutable -> jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> {
-    // If the bytesRead is 0, that indicates the stream is closed. We will
-    // move the stream to a closed state and return the empty buffer.
+    // If the bytesRead is 0, that indicates the stream is closed and nothing was
+    // read. We will move the stream to a closed state and return the empty buffer.
     if (bytesRead == 0) {
       self->runIfAlive([](ReadableStreamSourceJsAdapter& self) {
         KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
@@ -259,8 +266,16 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
               buffer.getElementSize())));
     }
 
+    // Now prepare the actual results.
     auto backing = buffer.detach(js);
+
+    // Copy the data from the temporary destBuffer into the backing store.
+    backing.asArrayPtr().first(bytesRead).copyFrom(destBuffer.first(bytesRead));
+
+    // Now trim the backing store to the actual number of bytes read so that we can
+    // return the correct length buffer to the caller.
     backing.limit(bytesRead);
+
     return js.resolvedPromise(ReadResult{
       .buffer = jsg::BufferSource(js, kj::mv(backing)),
       .done = false,
@@ -348,6 +363,8 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> ReadableStreamSourceJsAdapter::readAllTe
   auto holder = kj::heap<Holder>();
 
   auto promise = active.enqueue([&active, &holder = *holder, limit]() -> kj::Promise<size_t> {
+    // We are consuming the entire source here within kj space to prevent having to
+    // hop back and forth between kj and v8 as we read chunks of text.
     auto str = co_await active.source->readAllText(limit);
     size_t amount = str.size();
     holder.result = kj::mv(str);
@@ -409,6 +426,8 @@ jsg::Promise<jsg::BufferSource> ReadableStreamSourceJsAdapter::readAllBytes(
   auto holder = kj::heap<Holder>();
 
   auto promise = active.enqueue([&active, &holder = *holder, limit]() -> kj::Promise<size_t> {
+    // We are consuming the entire source here within kj space to prevent having to
+    // hop back and forth between kj and v8 as we read chunks of text.
     auto str = co_await active.source->readAllBytes(limit);
     size_t amount = str.size();
     holder.result = kj::mv(str);

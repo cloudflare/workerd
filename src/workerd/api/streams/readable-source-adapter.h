@@ -113,6 +113,9 @@ namespace workerd::api::streams {
 //     └───────────────────────────────────────────┘
 
 // Adapts a ReadableStreamSource to a JavaScript-friendly interface.
+// This is considered a heap-owned object and does not need to be held by
+// an IoOwn. It takes ownership of the underlying ReadableSource and will
+// ensure that *it* is held by an IoOwn.
 class ReadableStreamSourceJsAdapter final {
  public:
   ReadableStreamSourceJsAdapter(
