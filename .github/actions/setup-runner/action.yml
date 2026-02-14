@@ -11,26 +11,26 @@ runs:
         wget https://apt.llvm.org/llvm.sh
         sed -i '/apt-get install/d' llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 19
+        sudo ./llvm.sh 21
         # keep in sync with build/ci.bazelrc
         sudo apt-get install -y -qq --no-install-recommends \
-          clang-19 \
-          lld-19 \
-          libunwind-19 \
-          libc++abi1-19 \
-          libc++1-19 \
-          libc++-19-dev \
-          libclang-rt-19-dev \
-          llvm-19
-        sudo ln -s /usr/bin/llvm-symbolizer-19 /usr/bin/llvm-symbolizer
-        sudo ln -s /usr/bin/llvm-profdata-19 /usr/bin/llvm-profdata
-        sudo ln -s /usr/bin/llvm-cov-19 /usr/bin/llvm-cov
-        echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
-        echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
-        echo "build:linux --linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
-        echo "build:linux --host_linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
-        echo "build:linux --action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
-        echo "build:linux --host_action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
+          clang-21 \
+          lld-21 \
+          libunwind-21 \
+          libc++abi1-21 \
+          libc++1-21 \
+          libc++-21-dev \
+          libclang-rt-21-dev \
+          llvm-21
+        sudo ln -s /usr/bin/llvm-symbolizer-21 /usr/bin/llvm-symbolizer
+        sudo ln -s /usr/bin/llvm-profdata-21 /usr/bin/llvm-profdata
+        sudo ln -s /usr/bin/llvm-cov-21 /usr/bin/llvm-cov
+        echo "build:linux --action_env=CC=/usr/lib/llvm-21/bin/clang" >> .bazelrc
+        echo "build:linux --host_action_env=CC=/usr/lib/llvm-21/bin/clang" >> .bazelrc
+        echo "build:linux --linkopt=--ld-path=/usr/lib/llvm-21/bin/ld.lld" >> .bazelrc
+        echo "build:linux --host_linkopt=--ld-path=/usr/lib/llvm-21/bin/ld.lld" >> .bazelrc
+        echo "build:linux --action_env=AR=/usr/lib/llvm-21/bin/llvm-ar" >> .bazelrc
+        echo "build:linux --host_action_env=AR=/usr/lib/llvm-21/bin/llvm-ar" >> .bazelrc
     - name: Setup Windows
       shell: pwsh
       if: runner.os == 'Windows'
@@ -45,6 +45,8 @@ runs:
         git config --show-scope --show-origin core.symlinks
         git config --system core.longpaths true
         [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=\\\\?\\C:\\tmp')
+        # TODO: Test that the build is still compatible with the latest LLVM release
+        # choco upgrade llvm --version=21.1.8
     - name: Setup macOS
       if: runner.os == 'macOS'
       shell: bash
