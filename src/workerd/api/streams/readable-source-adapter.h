@@ -337,7 +337,13 @@ class ReadableSourceKjAdapter final: public ReadableSource {
   // implemented to avoid use-after-free if the adapter is dropped while a read
   // is in progress.
   //
-  // The returned promise will never resolve with more than maxBytes.
+  // The returned promise will never resolve with more than maxBytes
+  //
+  // While we provide an implementation here, the expectation is that most callers
+  // are going to be using the pumpTo method to completely consume the stream rather
+  // than calling read repeatedly, so we don't need to optimize this for high performance.
+  // The main goal of this method is to provide a safe and correct implementation of the
+  // ReadableSource contract.
   kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override;
 
   // Reads all remaining bytes from the stream and returns them.
@@ -352,6 +358,9 @@ class ReadableSourceKjAdapter final: public ReadableSource {
   // Per the contract of pumpTo, it is the caller's responsibility to ensure
   // that both the WritableStreamSink and this adapter remain alive until
   // the returned promise resolves!
+  // DeferredProxy is NOT used here because the data source backing it is a
+  // JavaScript ReadableStream. The IoContext must be kept alive until the pump
+  // is fully complete.
   kj::Promise<DeferredProxy<void>> pumpTo(WritableSink& output, EndAfterPump end) override;
 
   // If the stream is still active, tries to get the total length,
@@ -363,7 +372,7 @@ class ReadableSourceKjAdapter final: public ReadableSource {
   // Cancels the underlying source if it is still active.
   void cancel(kj::Exception reason) override;
 
-  StreamEncoding getEncoding() override {
+  StreamEncoding getEncoding() override final {
     // Our underlying ReadableStream produces non-encoded bytes (for now)
     return StreamEncoding::IDENTITY;
   };

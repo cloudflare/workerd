@@ -1082,6 +1082,10 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
   // available data from the underlying JS stream in each iteration. This minimizes
   // the number of isolate lock acquisitions by getting all available data at once
   // rather than reading into fixed-size buffers.
+  //
+  // This does mean that the pumpToImpl does NOT use the same readImpl method as the
+  // regular read() call, which means that the pumpToImpl does not enforce the minReadPolicy.
+  // Using the DrainingReader is a significant optimization for the pump case.
 
   KJ_DASSERT(active->state.is<Active::Idle>() || active->state.is<Active::Readable>(),
       "pumpToImpl called when stream is not in an active state.");
