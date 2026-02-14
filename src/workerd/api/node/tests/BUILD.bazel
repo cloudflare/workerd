@@ -217,6 +217,13 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
+    src = "zlib-zstd-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-zstd-nodejs-test.js"],
+)
+
+wd_test(
     src = "module-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["module-nodejs-test.js"],

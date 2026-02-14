@@ -46,6 +46,8 @@ const {
   UNZIP,
   BROTLI_DECODE,
   BROTLI_ENCODE,
+  ZSTD_ENCODE,
+  ZSTD_DECODE,
 
   Z_MIN_WINDOWBITS,
   Z_MAX_WINDOWBITS,
@@ -141,6 +143,8 @@ const InflateRaw = protectMethod(zlib.InflateRaw);
 const Unzip = protectMethod(zlib.Unzip);
 const BrotliCompress = protectMethod(zlib.BrotliCompress);
 const BrotliDecompress = protectMethod(zlib.BrotliDecompress);
+const ZstdCompress = protectMethod(zlib.ZstdCompress);
+const ZstdDecompress = protectMethod(zlib.ZstdDecompress);
 
 const createGzip = protectMethod(zlib.createGzip);
 const createGunzip = protectMethod(zlib.createGunzip);
@@ -151,6 +155,8 @@ const createInflateRaw = protectMethod(zlib.createInflateRaw);
 const createUnzip = protectMethod(zlib.createUnzip);
 const createBrotliCompress = protectMethod(zlib.createBrotliCompress);
 const createBrotliDecompress = protectMethod(zlib.createBrotliDecompress);
+const createZstdCompress = protectMethod(zlib.createZstdCompress);
+const createZstdDecompress = protectMethod(zlib.createZstdDecompress);
 
 const inflate = protectMethod(zlib.inflate);
 const inflateSync = protectMethod(zlib.inflateSync);
@@ -170,6 +176,10 @@ const brotliCompress = protectMethod(zlib.brotliCompress);
 const brotliCompressSync = protectMethod(zlib.brotliCompressSync);
 const brotliDecompress = protectMethod(zlib.brotliDecompress);
 const brotliDecompressSync = protectMethod(zlib.brotliDecompressSync);
+const zstdCompress = protectMethod(zlib.zstdCompress);
+const zstdCompressSync = protectMethod(zlib.zstdCompressSync);
+const zstdDecompress = protectMethod(zlib.zstdDecompress);
+const zstdDecompressSync = protectMethod(zlib.zstdDecompressSync);
 
 export {
   crc32,
@@ -186,6 +196,8 @@ export {
   Unzip,
   BrotliCompress,
   BrotliDecompress,
+  ZstdCompress,
+  ZstdDecompress,
 
   // Convenience methods to create classes
   createGzip,
@@ -197,6 +209,8 @@ export {
   createUnzip,
   createBrotliCompress,
   createBrotliDecompress,
+  createZstdCompress,
+  createZstdDecompress,
 
   // One-shot methods
   inflate,
@@ -217,6 +231,10 @@ export {
   brotliDecompressSync,
   brotliCompress,
   brotliCompressSync,
+  zstdCompress,
+  zstdCompressSync,
+  zstdDecompress,
+  zstdDecompressSync,
 
   // NodeJS also exports all constants directly under zlib, but this is deprecated
   Z_NO_FLUSH,
@@ -253,6 +271,8 @@ export {
   UNZIP,
   BROTLI_DECODE,
   BROTLI_ENCODE,
+  ZSTD_ENCODE,
+  ZSTD_DECODE,
   Z_MIN_WINDOWBITS,
   Z_MAX_WINDOWBITS,
   Z_DEFAULT_WINDOWBITS,
@@ -344,6 +364,8 @@ export default {
   Unzip,
   BrotliCompress,
   BrotliDecompress,
+  ZstdCompress,
+  ZstdDecompress,
 
   // Convenience methods to create classes
   createGzip,
@@ -355,6 +377,8 @@ export default {
   createUnzip,
   createBrotliCompress,
   createBrotliDecompress,
+  createZstdCompress,
+  createZstdDecompress,
 
   // One-shot methods
   inflate,
@@ -375,4 +399,8 @@ export default {
   brotliDecompressSync,
   brotliCompress,
   brotliCompressSync,
+  zstdCompress,
+  zstdCompressSync,
+  zstdDecompress,
+  zstdDecompressSync,
 };
