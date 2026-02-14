@@ -443,11 +443,10 @@ class IdentityTransformStreamImplV2 final: public kj::Refcounted,
   }
 
   void cancel(kj::Exception reason) override {
-    // Already errored - nothing to do.
-    if (state.isErrored()) return;
-
-    // Already closed by writable side - nothing to do.
-    if (state.is<Closed>()) return;
+    if (state.isTerminal()) {
+      // Already in a terminal state, nothing to do.
+      return;
+    }
 
     KJ_IF_SOME(request, state.tryGetUnsafe<ReadRequest>()) {
       request.fulfiller->fulfill(static_cast<size_t>(0));
@@ -457,8 +456,6 @@ class IdentityTransformStreamImplV2 final: public kj::Refcounted,
     // Idle state is fine, just transition to error.
 
     state.forceTransitionTo<kj::Exception>(kj::mv(reason));
-
-    // TODO(conform): Proactively put WritableStream into Errored state.
   }
 
   // WritableStreamSink implementation ---------------------------------------------------
