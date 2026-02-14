@@ -9,6 +9,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/ring-buffer.h>
+#include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
@@ -228,7 +229,18 @@ class ReadableImpl {
 
   using Queue = typename Self::QueueType;
 
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue> state;
+  // State machine for ReadableImpl:
+  // Queue is the active state where the stream can accept data
+  // Closed and Errored are terminal states (cannot transition back to Queue)
+  //   Queue -> Closed (close() or doCancel() called)
+  //   Queue -> Errored (doError() called)
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<Queue>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      Queue>;
+  State state;
   Algorithms algorithms;
 
   size_t highWaterMark = 1;
@@ -367,7 +379,25 @@ class WritableImpl {
     }
   };
 
-  struct Writable {};
+  struct Writable {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "writable"_kj;
+  };
+
+  // State machine for WritableImpl:
+  // Writable is the active state where the stream can accept writes
+  // Erroring is a transitional state - waiting for in-flight ops before erroring
+  // Closed and Errored are terminal states
+  //   Writable -> Erroring (startErroring() called)
+  //   Writable -> Closed (finishInFlightClose() succeeds)
+  //   Erroring -> Errored (finishErroring() called)
+  //   Erroring -> Closed (finishInFlightClose() succeeds - close wins)
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<Writable>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      StreamStates::Erroring,
+      Writable>;
 
   // Sadly, we have to use a weak ref here rather than jsg::Ref. This is because
   // the jsg::Ref<WritableStream> (via its internal WritableStreamJsController)
@@ -377,8 +407,7 @@ class WritableImpl {
   // try tracing each other.
   kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
   jsg::Ref<AbortSignal> signal;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, StreamStates::Erroring, Writable> state =
-      Writable();
+  State state = State::template create<Writable>();
   Algorithms algorithms;
 
   size_t highWaterMark = 1;
