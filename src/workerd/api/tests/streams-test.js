@@ -994,6 +994,52 @@ export const concurrentReadsRejected = {
   },
 };
 
+export const transformStreamCancelPropagation = {
+  async test() {
+    let { readable, writable } = new TransformStream();
+
+    // Initiate a write to the writable side.
+    let writer = writable.getWriter();
+    let promise = writer.write('hi');
+
+    // Cancel the readable side.
+    readable.cancel(new Error('test cancel'));
+
+    // Now the write, and all new writes, should fail with the cancellation exception.
+    await rejects(promise, new Error('test cancel'));
+    await rejects(writer.write('hi2'), new Error('test cancel'));
+  },
+};
+
+export const writableStreamControllerErrorsPropagateToIncomingPipe = {
+  async test() {
+    let cancelCalled = false;
+
+    let rs = new ReadableStream({
+      start(controller) {
+        controller.enqueue('chunk');
+      },
+      cancel() {
+        cancelCalled = true;
+      },
+    });
+
+    let ws = new WritableStream({
+      write(chunk, controller) {
+        // Schedule error via the controller (NOT by throwing).
+        controller.error(new Error('test cancel'));
+      },
+      close() {},
+    });
+
+    // The error scheduled on the controller should propagate out of the pipeTo().
+    await rejects(rs.pipeTo(ws), new Error('test cancel'));
+
+    // The ReadableStream should have been canceled.
+    ok(cancelCalled);
+  },
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
