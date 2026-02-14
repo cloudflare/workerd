@@ -8,6 +8,7 @@ const unitTests :Workerd.Config = (
           (name = "main.py", pythonModule = embed "pytest/main.py"),
           (name = "tests/test_env.py", pythonModule = embed "pytest/tests/test_env.py"),
           (name = "tests/test_fs.py", pythonModule = embed "pytest/tests/test_fs.py"),
+          (name = "tests/test_htmlrewriter.py", pythonModule = embed "pytest/tests/test_htmlrewriter.py"),
           (name = "tests/test_import_from_javascript.py", pythonModule = embed "pytest/tests/test_import_from_javascript.py"),
           (name = "tests/test_dynlib_loading.py", pythonModule = embed "pytest/tests/test_dynlib_loading.py"),
           %PYTHON_VENDORED_MODULES%
@@ -16,6 +17,7 @@ const unitTests :Workerd.Config = (
           %PYTHON_FEATURE_FLAGS,
           "python_no_global_handlers",
           "unwrap_custom_thenables",
+          "streams_enable_constructors",
         ],
         bindings = [
           (
