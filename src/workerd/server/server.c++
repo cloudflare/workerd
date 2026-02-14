@@ -1701,10 +1701,24 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
   SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
-    // We largely recreate the span here which feels inefficient, but is hard to avoid given the
-    // mismatch between the Span type and the full span information required for OTel.
-    tracing::CompleteSpan span2(
-        spanId, parentSpanId, span.operationName.clone(), span.startTime, span.endTime);
+    // This code path is workerd-only, we can safely decompose this span into its components and
+    // call submitSpanOpen/submitSpanEnd instead of reimplementing them here.
+    submitSpanOpen(spanId, parentSpanId, span.operationName.clone(), span.startTime);
+    submitSpanEnd(spanId, span);
+  }
+
+  void submitSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) override {
+    if (isPredictableModeForTest()) {
+      startTime = kj::UNIX_EPOCH;
+    }
+    workerTracer->addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+  }
+
+  void submitSpanEnd(tracing::SpanId spanId, const Span& span) override {
+    tracing::SpanEndData span2(spanId, span.startTime, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
       span2.tags.insert(tag.key.clone(), spanTagClone(tag.value));
@@ -1713,7 +1727,7 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       span2.startTime = span2.endTime = kj::UNIX_EPOCH;
     }
 
-    workerTracer->addSpan(kj::mv(span2));
+    workerTracer->addSpanEnd(kj::mv(span2));
   }
 
   tracing::SpanId makeSpanId() override {
