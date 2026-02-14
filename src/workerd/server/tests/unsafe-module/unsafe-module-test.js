@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import unsafe from 'workerd:unsafe';
+import { DurableObject } from 'cloudflare:workers';
 
 function createTestObject(type) {
   return class {
@@ -17,6 +18,19 @@ export const TestEphemeralObject = createTestObject('ephemeral');
 export const TestEphemeralObjectPreventEviction = createTestObject(
   'ephemeral-prevent-eviction'
 );
+
+let alarmTriggers = 0;
+export class AlarmObject extends DurableObject {
+  get scheduledTime() {
+    return this.ctx.storage.getAlarm();
+  }
+  async scheduleIn(delay) {
+    await this.ctx.storage.setAlarm(Date.now() + delay);
+  }
+  alarm() {
+    alarmTriggers++;
+  }
+}
 
 export const test_abort_all_durable_objects = {
   async test(ctrl, env, ctx) {
@@ -83,5 +97,27 @@ export const test_abort_all_durable_objects = {
       ephemeralPreventEvictionRes1,
       ephemeralPreventEvictionRes2
     );
+  },
+};
+
+export const test_abort_all_durable_objects_alarms = {
+  async test(ctrl, env, ctx) {
+    const id = env.ALARM.newUniqueId();
+    const stub = env.ALARM.get(id);
+
+    // Check we can schedule an alarm as usual
+    assert.strictEqual(await stub.scheduledTime, null);
+    await stub.scheduleIn(500);
+    assert.notStrictEqual(await stub.scheduledTime, null);
+    await scheduler.wait(1000);
+    assert.strictEqual(alarmTriggers, 1);
+    assert.strictEqual(await stub.scheduledTime, null);
+
+    // Check `abortAllDurableObjects()` deletes all alarms
+    await stub.scheduleIn(500);
+    await unsafe.abortAllDurableObjects();
+    assert.strictEqual(await stub.scheduledTime, null);
+    await scheduler.wait(1000);
+    assert.strictEqual(alarmTriggers, 1); // (same as before)
   },
 };
