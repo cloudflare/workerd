@@ -8,6 +8,7 @@
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
+#include <workerd/io/io-context.h>
 #include <workerd/util/strings.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
@@ -100,6 +101,23 @@ void PyodideMetadataReader::setCpuLimitNearlyExceededCallback(
     // Set signal handling to on
     wasm_memory[sig_flag] = 1;
   });
+}
+
+[[noreturn]] void PyodideMetadataReader::condemnIsolate(jsg::Lock& js, kj::String reason) {
+  // Condemn the isolate due to a fatal Pyodide error. This marks the isolate as condemned
+  // so that future requests will be routed to a new isolate, aborts the current request context,
+  // and terminates JavaScript execution.
+  auto description = kj::str("Pyodide fatal error: ", reason);
+  kj::Exception error(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description));
+
+  // Condemn the isolate so future requests get a fresh one
+  Worker::Isolate::from(js).getLimitEnforcer().condemn();
+
+  // Abort the current request context
+  IoContext::current().abort(kj::cp(error));
+
+  // Terminate JavaScript execution immediately
+  js.terminateExecutionNow();
 }
 
 kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {

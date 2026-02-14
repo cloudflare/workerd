@@ -70,3 +70,6 @@ export const CHECK_RNG_STATE = !!COMPATIBILITY_FLAGS.python_check_rng_state;
 
 export const setCpuLimitNearlyExceededCallback =
   MetadataReader.setCpuLimitNearlyExceededCallback.bind(MetadataReader);
+
+export const condemnIsolate: (reason: string) => never =
+  MetadataReader.condemnIsolate.bind(MetadataReader);

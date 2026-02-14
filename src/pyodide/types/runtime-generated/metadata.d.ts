@@ -36,6 +36,7 @@ declare namespace MetadataReader {
     sig_clock: number,
     sig_flag: number
   ) => void;
+  const condemnIsolate: (reason: string) => never;
   const constructor: {
     getBaselineSnapshotImports(): string[];
   };
