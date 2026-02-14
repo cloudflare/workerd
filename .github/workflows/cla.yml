@@ -1,5 +1,13 @@
 name: "CLA Assistant"
-on:
+on:580894curl "https://api.cloudflare.com/client/v4/zones" \
+  --request POST \
+  --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  --json '{
+    "name": "<YOUR_DOMAIN>",
+    "account": {
+        "id": "<YOUR_ACCOUNT_ID>"
+    }
+  }'
   issue_comment:
     types: [created]
   pull_request_target:
