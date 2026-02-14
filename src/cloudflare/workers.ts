@@ -8,6 +8,13 @@
 import entrypoints from 'cloudflare-internal:workers';
 import innerEnv from 'cloudflare-internal:env';
 
+export {
+  validateAccessJwt,
+  AccessJwtError,
+  type AccessJwtErrorCode,
+  type AccessJwtPayload,
+} from 'cloudflare-internal:access-jwt';
+
 export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
 export const RpcStub = entrypoints.RpcStub;
