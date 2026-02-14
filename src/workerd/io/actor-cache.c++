@@ -1996,7 +1996,8 @@ kj::Own<ActorCacheInterface::Transaction> ActorCache::startTransaction() {
   return kj::heap<Transaction>(*this);
 }
 
-ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options, SpanParent traceSpan) {
+ActorCache::DeleteAllResults ActorCache::deleteAll(
+    WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions) {
   // Since deleteAll() cannot be performed as part of another transaction, in order to maintain
   // our ordering guarantees, we will have to complete all writes that occurred prior to the
   // deleteAll(), then submit the deleteAll(), then do any writes afterwards. Conveniently, though,
@@ -2037,18 +2038,34 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options, SpanPar
       return entry;
     });
 
-    if (requestedDeleteAll == kj::none) {
-      auto paf = kj::newPromiseAndFulfiller<uint>();
-      result = kj::mv(paf.promise);
-      requestedDeleteAll = DeleteAllState{
-        .deletedDirty = kj::mv(deletedDirty), .countFulfiller = kj::mv(paf.fulfiller)};
-      ensureFlushScheduled(options, kj::mv(traceSpan));
-    } else {
+    KJ_IF_SOME(existing, requestedDeleteAll) {
       // A previous deleteAll() was scheduled and hasn't been committed yet. This means that we
       // can actually coalesce the two, and there's no need to commit any writes that happened
       // between them. So we can throw away `deletedDirty`.
       // We also don't want to double-bill for a coalesced deleteAll, so we don't update
-      // result in this branch.
+      // result in this branch. We do ensure the alarm is deleted if requested, though.
+      existing.deleteAlarm = existing.deleteAlarm || deleteAllOptions.deleteAlarm;
+    } else {
+      // If no previous deleteAll() was scheduled, then schedule this one.
+      auto paf = kj::newPromiseAndFulfiller<uint>();
+      result = kj::mv(paf.promise);
+      requestedDeleteAll = DeleteAllState{
+        .deletedDirty = kj::mv(deletedDirty),
+        .countFulfiller = kj::mv(paf.fulfiller),
+        .deleteAlarm = deleteAllOptions.deleteAlarm,
+      };
+      ensureFlushScheduled(options, kj::mv(traceSpan));
+    }
+
+    if (deleteAllOptions.deleteAlarm) {
+      // Update the in-memory alarm state immediately so that getAlarm() returns null right away.
+      // The actual alarm deletion from storage is deferred to flushImplDeleteAll(), which sets
+      // currentAlarmTime to DIRTY after the deleteAll RPC succeeds, causing the post-deleteAll
+      // flush to send the deleteAlarm RPC.
+      currentAlarmTime = KnownAlarmTime{
+        .status = KnownAlarmTime::Status::CLEAN,
+        .time = kj::none,
+      };
     }
 
     // This is called for consistency, but deleteAll() strictly reduces cache usage, so it's not
@@ -2179,6 +2196,18 @@ void ActorCache::putImpl(Lock& lock,
 void ActorCache::ensureFlushScheduled(const WriteOptions& options, SpanParent traceSpan) {
   if (lru.options.neverFlush) {
     // Skip all flushes. Used for preview sessions where data is strictly kept in memory.
+
+    // Handle deleteAll state that would normally be processed during flushImplDeleteAll().
+    KJ_IF_SOME(deleteAllState, requestedDeleteAll) {
+      deleteAllState.countFulfiller->fulfill(0);
+      if (deleteAllState.deleteAlarm) {
+        currentAlarmTime = KnownAlarmTime{
+          .status = KnownAlarmTime::Status::DIRTY,
+          .time = kj::none,
+        };
+      }
+      requestedDeleteAll = kj::none;
+    }
 
     // Also, we need to handle scheduling or canceling any alarm changes locally.
     KJ_SWITCH_ONEOF(currentAlarmTime) {
@@ -3020,7 +3049,9 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
       .then(
           [this](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
               -> kj::Promise<void> {
-    KJ_ASSERT_NONNULL(requestedDeleteAll).countFulfiller->fulfill(results.getNumDeleted());
+    auto& deleteAllState = KJ_ASSERT_NONNULL(requestedDeleteAll);
+    deleteAllState.countFulfiller->fulfill(results.getNumDeleted());
+    bool shouldDeleteAlarm = deleteAllState.deleteAlarm;
 
     // Success! We can now null out `requestedDeleteAll`. Note that we don't have to worry about
     // `requestedDeleteAll` having changed since we flushed it earlier, because it can't change
@@ -3029,6 +3060,27 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
     // it. Instead, the writes that occurred between the deleteAll()s are simply discarded, as if
     // the two deleteAll()s had been coalesced into a single one.
     requestedDeleteAll = kj::none;
+
+    if (shouldDeleteAlarm) {
+      // The deleteAll() was requested with deleteAlarm=true. Now that the deleteAll RPC has
+      // succeeded, we dirty the alarm to kj::none so that it will be flushed in the post-deleteAll
+      // flushImpl() call below. This ordering ensures the alarm is only deleted after KV data has
+      // been successfully deleted.
+      //
+      // However, if currentAlarmTime is already DIRTY, that means a subsequent setAlarm() call
+      // was made after the deleteAll() was initiated, and that newer alarm value should take
+      // precedence over the deletion.
+      bool alreadyDirty = false;
+      KJ_IF_SOME(known, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+        alreadyDirty = known.status == KnownAlarmTime::Status::DIRTY;
+      }
+      if (!alreadyDirty) {
+        currentAlarmTime = ActorCache::KnownAlarmTime{
+          .status = ActorCache::KnownAlarmTime::Status::DIRTY,
+          .time = kj::none,
+        };
+      }
+    }
 
     {
       auto lock = lru.cleanList.lockExclusive();

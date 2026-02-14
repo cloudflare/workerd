@@ -1378,4 +1378,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, the UTF-16le TextDecoder will replace lone surrogates with U+FFFD
   # (the Unicode replacement character) as required by the spec. Previously, lone
   # surrogates were passed through unchanged, producing non-well-formed strings.
+
+  deleteAllDeletesAlarm @160 :Bool
+    $compatEnableFlag("delete_all_deletes_alarm")
+    $compatDisableFlag("delete_all_preserves_alarm")
+    $compatEnableDate("2026-02-24");
+  # When enabled, calling storage.deleteAll() on a Durable Object also deletes
+  # any scheduled alarm, in addition to deleting all stored key-value data.
+  #
+  # Previously, deleteAll() preserved the alarm state. This was surprising
+  # behavior since the intent of deleteAll() is to clear all state.
 }
