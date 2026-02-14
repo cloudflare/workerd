@@ -32,6 +32,16 @@ const unitTests :Workerd.Config = (
     (name = "alarms", worker = .alarmsWorker),
     (name = "hiber", worker = .hiberWorker),
     (name = "js-rpc-test", worker = .jsRpcWorker),
+    ( name = "connect-handler-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental", "streams_enable_constructors"],
+        streamingTails = ["log"],
+      )
+    ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
     (name = "TEST_TMPDIR", disk = (writable = true)),
     # Dummy buffered tail worker (gets traces from alarms worker and produces trace for main tracer)
     (name = "buffered", worker = .logBuffered, ),
@@ -50,6 +60,9 @@ const unitTests :Workerd.Config = (
       ),
     )
   ],
+  sockets = [
+    (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test")
+  ]
 );
 
 const alarmsWorker :Workerd.Worker = (

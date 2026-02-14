@@ -14,6 +14,12 @@ wd_test(
 )
 
 wd_test(
+    src = "connect-handler-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-handler-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-test.js"],
@@ -36,6 +42,7 @@ wd_test(
         "tail-worker-test-invalid.js",
         "tail-worker-test-jsrpc.js",
         "websocket-hibernation.js",
+        "connect-handler-test.js",
     ],
 )
 
