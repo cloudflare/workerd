@@ -290,6 +290,25 @@ bool Lock::v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name) {
 
 void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
+
+  auto& isolate = IsolateBase::from(v8Isolate);
+  // We only expect at most a handful of extra checkpoints. Keep a generous cap
+  // to flush cascaded microtasks but prevent a potential busy loop.
+  static constexpr uint MAX_EXTRA_MICROTASK_CHECKPOINTS = 64;
+  for (uint i = 0; i < MAX_EXTRA_MICROTASK_CHECKPOINTS; ++i) {
+    if (!isolate.takeExtraMicrotaskCheckpointRequested({})) {
+      return;
+    }
+    v8Isolate->PerformMicrotaskCheckpoint();
+  }
+
+  if (isolate.takeExtraMicrotaskCheckpointRequested({})) {
+    KJ_LOG(WARNING, "extra microtask checkpoint limit reached", MAX_EXTRA_MICROTASK_CHECKPOINTS);
+  }
+}
+
+void Lock::requestExtraMicrotaskCheckpoint() {
+  IsolateBase::from(v8Isolate).requestExtraMicrotaskCheckpoint({});
 }
 
 void Lock::terminateNextExecution() {

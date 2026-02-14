@@ -1378,4 +1378,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, the UTF-16le TextDecoder will replace lone surrogates with U+FFFD
   # (the Unicode replacement character) as required by the spec. Previously, lone
   # surrogates were passed through unchanged, producing non-well-formed strings.
+
+  unhandledRejectionAfterMicrotaskCheckpoint @160 :Bool
+    $compatEnableFlag("unhandled_rejection_after_microtask_checkpoint")
+    $compatDisableFlag("no_unhandled_rejection_after_microtask_checkpoint")
+    $compatEnableDate("2026-03-03");
+  # When enabled, unhandledrejection processing is deferred until the microtask
+  # checkpoint completes, avoiding misfires on multi-tick promise chains.
 }

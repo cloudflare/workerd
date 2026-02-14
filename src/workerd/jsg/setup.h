@@ -133,6 +133,19 @@ class IsolateBase {
     return kj::none;
   }
 
+  // Requests an extra microtask checkpoint after the current one completes.
+  inline void requestExtraMicrotaskCheckpoint(kj::Badge<Lock>) {
+    extraMicrotaskCheckpointRequested = true;
+  }
+
+  // Returns true if an extra microtask checkpoint was requested since the last
+  // call, and clears the flag.
+  inline bool takeExtraMicrotaskCheckpointRequested(kj::Badge<Lock>) {
+    bool requested = extraMicrotaskCheckpointRequested;
+    extraMicrotaskCheckpointRequested = false;
+    return requested;
+  }
+
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
     if (alwaysAllowEval) return;
     evalAllowed = allow;
@@ -354,6 +367,7 @@ class IsolateBase {
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
+  bool extraMicrotaskCheckpointRequested = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
