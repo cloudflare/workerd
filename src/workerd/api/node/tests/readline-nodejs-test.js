@@ -41,20 +41,49 @@ export const readlineEmitKeypressEvents = {
 
 export const readlineCreateInterface = {
   test() {
-    assert.throws(() => readline.createInterface(), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      message: /Interface/,
-    });
+    // createInterface returns a no-op stub that matches unenv behavior
+    const rl = readline.createInterface();
+    assert.ok(rl instanceof readline.Interface);
+    assert.strictEqual(rl.terminal, false);
+    assert.strictEqual(rl.line, '');
+    assert.strictEqual(rl.cursor, 0);
     assert.strictEqual(typeof readline.createInterface, 'function');
   },
 };
 
 export const readlineInterface = {
   test() {
-    assert.throws(() => new readline.Interface(), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      message: /Interface/,
+    // Interface constructor returns a no-op stub that matches unenv behavior
+    const rl = new readline.Interface();
+    assert.ok(rl instanceof readline.Interface);
+    assert.strictEqual(rl.terminal, false);
+    assert.strictEqual(rl.line, '');
+    assert.strictEqual(rl.cursor, 0);
+
+    // Test methods return sensible defaults instead of throwing
+    assert.strictEqual(rl.getPrompt(), '');
+    rl.setPrompt('test'); // Should not throw
+    rl.prompt(); // Should not throw
+    rl.close(); // Should not throw
+    rl.write('test'); // Should not throw
+    assert.deepStrictEqual(rl.getCursorPos(), { rows: 0, cols: 0 });
+    assert.strictEqual(rl.pause(), rl);
+    assert.strictEqual(rl.resume(), rl);
+
+    // question calls callback with empty string
+    let questionAnswer = null;
+    rl.question('test?', (answer) => {
+      questionAnswer = answer;
     });
+    assert.strictEqual(questionAnswer, '');
+
+    // question with options also works
+    let questionAnswer2 = null;
+    rl.question('test?', {}, (answer) => {
+      questionAnswer2 = answer;
+    });
+    assert.strictEqual(questionAnswer2, '');
+
     assert.strictEqual(typeof readline.Interface, 'function');
   },
 };
@@ -99,29 +128,58 @@ export const readlinePromises = {
 };
 
 export const readlinePromisesInterface = {
-  test() {
-    assert.throws(() => new readline.promises.Interface(), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      message: /Interface/,
-    });
+  async test() {
+    // promises.Interface constructor returns a no-op stub that matches unenv behavior
+    const rl = new readline.promises.Interface();
+    assert.ok(rl instanceof readline.promises.Interface);
+    assert.strictEqual(rl.terminal, false);
+    assert.strictEqual(rl.line, '');
+    assert.strictEqual(rl.cursor, 0);
+
+    // Test methods return sensible defaults instead of throwing
+    assert.strictEqual(rl.getPrompt(), '');
+    rl.setPrompt('test'); // Should not throw
+    rl.prompt(); // Should not throw
+    rl.close(); // Should not throw
+    rl.write('test'); // Should not throw
+    assert.deepStrictEqual(rl.getCursorPos(), { rows: 0, cols: 0 });
+    assert.strictEqual(rl.pause(), rl);
+    assert.strictEqual(rl.resume(), rl);
+
+    // question returns a promise that resolves to empty string
+    const answer = await rl.question('test?');
+    assert.strictEqual(answer, '');
   },
 };
 
 export const readlinePromisesCreateInterface = {
   test() {
-    assert.throws(() => readline.promises.createInterface(), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      message: /Interface/,
-    });
+    // promises.createInterface returns a no-op stub that matches unenv behavior
+    const rl = readline.promises.createInterface();
+    assert.ok(rl instanceof readline.promises.Interface);
+    assert.strictEqual(rl.terminal, false);
+    assert.strictEqual(rl.line, '');
+    assert.strictEqual(rl.cursor, 0);
   },
 };
 
 export const readlinePromisesReadline = {
-  test() {
-    assert.throws(() => new readline.promises.Readline(), {
-      code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      message: /Readline/,
-    });
+  async test() {
+    // Readline constructor returns a no-op stub that matches unenv behavior
+    const rl = new readline.promises.Readline(process.stdout);
+    assert.ok(rl instanceof readline.promises.Readline);
+
+    // Test methods return sensible defaults instead of throwing
+    assert.strictEqual(rl.clearLine(0), rl);
+    assert.strictEqual(rl.clearScreenDown(), rl);
+    assert.strictEqual(rl.cursorTo(0), rl);
+    assert.strictEqual(rl.cursorTo(0, 0), rl);
+    assert.strictEqual(rl.moveCursor(1, 1), rl);
+    assert.strictEqual(rl.rollback(), rl);
+
+    // commit returns a promise that resolves to undefined
+    const result = await rl.commit();
+    assert.strictEqual(result, undefined);
   },
 };
 
