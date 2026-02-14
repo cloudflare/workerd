@@ -625,7 +625,7 @@ KJ_TEST("writing small ArrayBuffer") {
     jsg::JsValue handle(source.getHandle(env.js));
 
     auto writePromise = adapter->write(env.js, handle);
-    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should not have been called");
+    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
     KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == 0,
         "Adapter's desired size should be 0 after writing highWaterMark bytes");
 
@@ -698,6 +698,70 @@ KJ_TEST("writing large ArrayBuffer") {
   });
 }
 
+KJ_TEST("writing arrays") {
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto recordingSink = kj::heap<SimpleEventRecordingSink>();
+    auto& state = recordingSink->getState();
+    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
+        newWritableSink(kj::mv(recordingSink)),
+        WritableStreamSinkJsAdapter::Options{
+          .highWaterMark = 5,
+        });
+
+    auto array = env.js.arr(env.js.str("hello"_kj), env.js.str("world"_kj));
+    auto writePromise = adapter->write(env.js, array);
+
+    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
+    KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == -5,
+        "Adapter's desired size should be negative after writing 10 bytes");
+
+    return env.context
+        .awaitJs(env.js, writePromise.then(env.js, [&state, &adapter = *adapter](jsg::Lock& js) {
+      KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
+      KJ_ASSERT(KJ_ASSERT_NONNULL(adapter.getDesiredSize()) == 5,
+          "Back to initial desired size after write completes");
+    })).attach(kj::mv(adapter));
+  });
+}
+
+KJ_TEST("throwing iterable works correctly") {
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto recordingSink = kj::heap<SimpleEventRecordingSink>();
+    auto& state = recordingSink->getState();
+    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
+        newWritableSink(kj::mv(recordingSink)),
+        WritableStreamSinkJsAdapter::Options{
+          .highWaterMark = 5,
+        });
+
+    // We need to construct our iterable...
+    auto getIter = jsg::check(
+        v8::Function::New(env.js.v8Context(), [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+      auto& js = jsg::Lock::from(args.GetIsolate());
+      auto fn = jsg::check(
+          v8::Function::New(js.v8Context(), [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        args.GetIsolate()->ThrowError(v8::String::NewFromUtf8Literal(args.GetIsolate(), "Boom"));
+      }));
+      auto obj = js.obj();
+      obj.set(js, js.str("next"_kj), jsg::JsValue(fn));
+      v8::Local<v8::Value> result = obj;
+      args.GetReturnValue().Set(result);
+    }));
+
+    auto iter = env.js.obj();
+    iter.set(env.js, env.js.symbolIterator(), jsg::JsValue(getIter));
+
+    auto writePromise = adapter->write(env.js, iter);
+    KJ_ASSERT(writePromise.getState(env.js) == jsg::Promise<void>::State::REJECTED,
+        "Write of errored should be rejected");
+    KJ_ASSERT(state.writeCalled == 0, "Underlying sink's write() should not have been called");
+  });
+}
+
 KJ_TEST("writing the wrong types reject") {
   TestFixture fixture;
 
@@ -725,6 +789,11 @@ KJ_TEST("writing the wrong types reject") {
     auto writeObject = adapter->write(env.js, env.js.obj());
     KJ_ASSERT(writeObject.getState(env.js) == jsg::Promise<void>::State::REJECTED,
         "Write of plain object should be rejected");
+
+    auto badArray = env.js.arr(env.js.boolean(true));
+    auto writeBadArray = adapter->write(env.js, badArray);
+    KJ_ASSERT(writeBadArray.getState(env.js) == jsg::Promise<void>::State::REJECTED,
+        "Write of array with non-string, non-ArrayBuffer elements");
   });
 }
 
