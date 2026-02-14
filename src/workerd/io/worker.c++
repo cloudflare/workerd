@@ -3722,7 +3722,8 @@ Worker::Actor::Actor(const Worker& worker,
       // const_cast OK because we're just storing the pointer and will only use this under lock.
       impl->classInstance = const_cast<ActorClassInfo*>(&cls);
     } else {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c));
+      kj::throwFatalException(KJ_EXCEPTION(FAILED,
+          "broken.ignored; worker_do_not_log; jsg.Error: No such Durable Objects class", c));
     }
   } else {
     impl->classInstance = Impl::NoClass();
