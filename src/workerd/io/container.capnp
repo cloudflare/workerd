@@ -5,6 +5,7 @@ $Cxx.namespace("workerd::rpc");
 $Cxx.allowCancellation;
 
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
+using CompatibilityFlags = import "/workerd/io/compatibility-date.capnp".CompatibilityFlags;
 
 interface Container @0x9aaceefc06523bca {
   # RPC interface to talk to a container, for containers attached to Durable Objects.
@@ -40,6 +41,9 @@ interface Container @0x9aaceefc06523bca {
     # The container will be forcefully terminated when this timeout expires, regardless of activity.
     # Unlike inactivity timeout, this is a hard deadline from container startup.
     # If 0 (default), no hard timeout is applied.
+
+    compatibilityFlags @4 :CompatibilityFlags;
+    # Compatibility flags for this worker
   }
 
   monitor @2 () -> (exitCode: Int32);
