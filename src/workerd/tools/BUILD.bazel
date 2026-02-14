@@ -1,6 +1,9 @@
 load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("//:build/cc_ast_dump.bzl", "cc_ast_dump")
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 
 # ========================================================================================
 # Parameter Name Extractor
@@ -81,4 +84,41 @@ run_binary(
     }),
     tool = "param_extractor_bin",
     visibility = ["//visibility:public"],
+)
+
+# ========================================================================================
+# Compatibility Date Dump
+#
+# Dumps all compatibility flags with their dates as JSON for CI validation.
+# Used to ensure new flags have dates sufficiently far in the future.
+
+wd_capnp_library(src = "compatibility-date-dump.schema.capnp")
+
+wd_cc_binary(
+    name = "compatibility-date-dump",
+    srcs = ["compatibility-date-dump.c++"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compatibility-date-dump.schema_capnp",
+        "//src/workerd/io",
+        "//src/workerd/io:compatibility-date_capnp",
+        "@capnp-cpp//src/capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
+    src = "compatibility-date-dump-test.c++",
+    deps = [
+        ":compatibility-date-dump.schema_capnp",
+        "//src/workerd/io",
+        "//src/workerd/io:compatibility-date_capnp",
+        "@capnp-cpp//src/capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+    ],
 )
