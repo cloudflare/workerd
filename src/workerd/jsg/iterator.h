@@ -37,6 +37,29 @@ static kj::Maybe<Signature> tryGetGeneratorFunction(
           kj::Maybe<v8::Local<v8::Object>>(object));
 }
 
+template <typename Signature>
+static kj::Maybe<Signature> tryGetGeneratorFunctionJsValue(
+    Lock& js, JsObject& object, kj::StringPtr name) {
+  auto val = object.get(js, name);
+  KJ_IF_SOME(fn, val.tryCast<JsFunction>()) {
+    return Signature([fn = JsRef(js, fn), obj = JsRef(js, object)](
+                         jsg::Lock& js, Optional<JsValue> arg) -> GeneratorNext<JsValue> {
+      return js.tryCatch([&]() -> GeneratorNext<JsValue> {
+        auto result = fn.getHandle(js).call(js, obj.getHandle(js), arg.orDefault(js.undefined()));
+        auto obj = JSG_REQUIRE_NONNULL(
+            result.tryCast<JsObject>(), TypeError, "Generator method did not return an object");
+        auto done = obj.get(js, "done"_kj).tryCast<JsBoolean>().orDefault(js.boolean(false));
+        auto value = obj.get(js, "value"_kj);
+        return GeneratorNext<JsValue>{
+          .done = done.value(js),
+          .value = kj::mv(value),
+        };
+      }, [&](Value exception) -> GeneratorNext<JsValue> { js.throwException(kj::mv(exception)); });
+    });
+  }
+  return kj::none;
+}
+
 template <typename T>
 class Generator final {
   // See the documentation in jsg.h
@@ -105,7 +128,7 @@ class Generator final {
   }
 
   void visitForGc(GcVisitor& visitor) {
-    visitForGc(maybeActive);
+    visitor.visit(maybeActive);
   }
 
  private:
@@ -126,6 +149,103 @@ class Generator final {
               tryGetGeneratorFunction<ReturnSignature, TypeWrapper>(js, object, "return"_kj)),
           maybeThrow(tryGetGeneratorFunction<ThrowSignature, TypeWrapper>(js, object, "throw"_kj)) {
     }
+    Active(Active&&) = default;
+    Active& operator=(Active&&) = default;
+    KJ_DISALLOW_COPY(Active);
+
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(maybeNext, maybeReturn, maybeThrow);
+    }
+  };
+  kj::Maybe<Active> maybeActive;
+};
+
+// A variation of Generator that always returns JsValue. It will never need to unwrap
+// the yielded values to C++ types so it can skip the TypeWrapper ceremony.
+template <>
+class Generator<jsg::JsValue> final {
+ public:
+  Generator(Lock& js, JsObject object): maybeActive(Active(js, object)) {}
+  Generator(Generator&&) = default;
+  Generator& operator=(Generator&&) = default;
+  KJ_DISALLOW_COPY(Generator);
+
+  // If nothing is returned, the generator is complete.
+  kj::Maybe<jsg::JsValue> next(Lock& js) {
+    KJ_IF_SOME(active, maybeActive) {
+      KJ_IF_SOME(nextfn, active.maybeNext) {
+        return js.tryCatch([&] {
+          auto result = nextfn(js, js.undefined());
+          if (result.done || result.value == kj::none) {
+            maybeActive = kj::none;
+            return kj::Maybe<jsg::JsValue>();
+          }
+          return result.value;
+        }, [&](Value exception) { return throw_(js, kj::mv(exception)); });
+      }
+      maybeActive = kj::none;
+    }
+    return kj::none;
+  }
+
+  // If nothing is returned, the generator is complete.
+  kj::Maybe<jsg::JsValue> return_(Lock& js, kj::Maybe<jsg::JsValue> maybeValue = kj::none) {
+    KJ_IF_SOME(active, maybeActive) {
+      KJ_IF_SOME(returnFn, active.maybeReturn) {
+        return js.tryCatch([&] {
+          auto result = returnFn(js, kj::mv(maybeValue));
+          if (result.done || result.value == kj::none) {
+            maybeActive = kj::none;
+          }
+          return result.value;
+        }, [&](Value exception) { return throw_(js, kj::mv(exception)); });
+      }
+      maybeActive = kj::none;
+    }
+    return kj::none;
+  }
+
+  // If nothing is returned, the generator is complete. If there
+  // is no throw handler in the generator, the method will throw.
+  // It's also possible (and even likely) that the throw handler
+  // will just re-throw the exception.
+  kj::Maybe<jsg::JsValue> throw_(Lock& js, Value exception) {
+    KJ_IF_SOME(active, maybeActive) {
+      KJ_IF_SOME(throwFn, active.maybeThrow) {
+        return js.tryCatch([&] -> kj::Maybe<jsg::JsValue> {
+          auto result = throwFn(js, JsValue(exception.getHandle(js)));
+          if (result.done || result.value == kj::none) {
+            maybeActive = kj::none;
+          }
+          return result.value;
+        }, [&](Value exception) -> kj::Maybe<jsg::JsValue> {
+          maybeActive = kj::none;
+          js.throwException(kj::mv(exception));
+        });
+      }
+    }
+    js.throwException(kj::mv(exception));
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(maybeActive);
+  }
+
+ private:
+  using Next = GeneratorNext<jsg::JsValue>;
+  using NextSignature = Function<Next(Optional<jsg::JsValue>)>;
+  using ReturnSignature = Function<Next(Optional<jsg::JsValue>)>;
+  using ThrowSignature = Function<Next(Optional<jsg::JsValue>)>;
+
+  struct Active final {
+    kj::Maybe<NextSignature> maybeNext;
+    kj::Maybe<ReturnSignature> maybeReturn;
+    kj::Maybe<ThrowSignature> maybeThrow;
+
+    Active(Lock& js, JsObject object)
+        : maybeNext(tryGetGeneratorFunctionJsValue<NextSignature>(js, object, "next"_kj)),
+          maybeReturn(tryGetGeneratorFunctionJsValue<ReturnSignature>(js, object, "return"_kj)),
+          maybeThrow(tryGetGeneratorFunctionJsValue<ThrowSignature>(js, object, "throw"_kj)) {}
     Active(Active&&) = default;
     Active& operator=(Active&&) = default;
     KJ_DISALLOW_COPY(Active);
