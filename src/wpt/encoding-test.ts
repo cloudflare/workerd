@@ -527,18 +527,10 @@ export default {
   'textdecoder-fatal-streaming.any.js': {},
   'textdecoder-fatal.any.js': {},
   'textdecoder-ignorebom.any.js': {},
-  'textdecoder-labels.any.js': {
-    comment: 'x-user-defined is rejected at TextDecoder construction time',
-    expectedFailures: ['x-user-defined => x-user-defined'],
-  },
+  'textdecoder-labels.any.js': {},
   'textdecoder-streaming.any.js': {},
   'textdecoder-utf16-surrogates.any.js': {},
-  'textencoder-constructor-non-utf.any.js': {
-    comment: 'x-user-defined is rejected at TextDecoder construction time',
-    expectedFailures: [
-      'Encoding argument supported for decode: x-user-defined',
-    ],
-  },
+  'textencoder-constructor-non-utf.any.js': {},
   'textencoder-utf16-surrogates.any.js': {},
   'unsupported-encodings.any.js': {
     comment: 'XMLHttpRequest is not defined',

@@ -498,6 +498,37 @@ kj::Maybe<jsg::JsString> AsciiDecoder::decode(
   return js.str(result.asPtr());
 }
 
+kj::Maybe<jsg::JsString> XUserDefinedDecoder::decode(
+    jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush) {
+  // x-user-defined encoding per WHATWG spec:
+  // https://encoding.spec.whatwg.org/#x-user-defined-decoder
+  // - 0x00-0x7F: code point = byte (ASCII identity)
+  // - 0x80-0xFF: code point = 0xF780 + (byte - 0x80) = 0xF700 + byte
+
+  // Check if we have any high bytes that need remapping
+  bool hasHighBytes =
+      !simdutf::validate_ascii(reinterpret_cast<const char*>(buffer.begin()), buffer.size());
+
+  if (!hasHighBytes) {
+    // Fast path: all ASCII bytes, identity mapping
+    return js.str(buffer);
+  }
+
+  // Slow path: at least one byte >= 0x80, need uint16_t for PUA mapping
+  auto result = kj::heapArray<uint16_t>(buffer.size());
+  for (size_t i = 0; i < buffer.size(); i++) {
+    auto byte = buffer[i];
+    if (byte < 0x80) {
+      result[i] = byte;
+    } else {
+      // Map 0x80-0xFF to U+F780-U+F7FF (Private Use Area)
+      result[i] = 0xF700 + byte;
+    }
+  }
+
+  return js.str(result.asPtr());
+}
+
 void IcuDecoder::reset() {
   bomSeen = false;
   return ucnv_reset(inner.get());
@@ -509,6 +540,9 @@ Decoder& TextDecoder::getImpl() {
       return dec;
     }
     KJ_CASE_ONEOF(dec, IcuDecoder) {
+      return dec;
+    }
+    KJ_CASE_ONEOF(dec, XUserDefinedDecoder) {
       return dec;
     }
   }
@@ -528,13 +562,16 @@ jsg::Ref<TextDecoder> TextDecoder::constructor(jsg::Lock& js,
 
   KJ_IF_SOME(label, maybeLabel) {
     encoding = getEncodingForLabel(label);
-    JSG_REQUIRE(encoding != Encoding::Replacement && encoding != Encoding::X_User_Defined &&
-            encoding != Encoding::INVALID,
-        RangeError, errorMessage(label));
+    JSG_REQUIRE(encoding != Encoding::Replacement && encoding != Encoding::INVALID, RangeError,
+        errorMessage(label));
   }
 
   if (encoding == Encoding::Windows_1252) {
     return js.alloc<TextDecoder>(AsciiDecoder(), options);
+  }
+
+  if (encoding == Encoding::X_User_Defined) {
+    return js.alloc<TextDecoder>(XUserDefinedDecoder(), options);
   }
 
   return js.alloc<TextDecoder>(
@@ -563,6 +600,9 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
       return dec.decode(js, buffer, flush);
     }
     KJ_CASE_ONEOF(dec, IcuDecoder) {
+      return dec.decode(js, buffer, flush);
+    }
+    KJ_CASE_ONEOF(dec, XUserDefinedDecoder) {
       return dec.decode(js, buffer, flush);
     }
   }
