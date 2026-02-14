@@ -7,6 +7,20 @@
 
 namespace workerd::api::streams {
 
+namespace {
+kj::Maybe<kj::Array<const kj::byte>> getDataFromBufferSource(
+    jsg::Lock& js, const jsg::JsValue& value) {
+  KJ_IF_SOME(view, value.tryCast<jsg::JsArrayBufferView>()) {
+    return kj::heapArray<const kj::byte>(view.asArrayPtr());
+  } else KJ_IF_SOME(buffer, value.tryCast<jsg::JsArrayBuffer>()) {
+    return kj::heapArray<const kj::byte>(buffer.asArrayPtr());
+  } else KJ_IF_SOME(buffer, value.tryCast<jsg::JsSharedArrayBuffer>()) {
+    return kj::heapArray<const kj::byte>(buffer.asArrayPtr());
+  }
+  return kj::none;
+}
+}  // namespace
+
 // The Active state maintains a queue of tasks, such as write or flush operations. Each task
 // contains a promise-returning function object and a fulfiller. When the first task is
 // enqueued, the active state begins processing the queue asynchronously. Each function
@@ -203,14 +217,17 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
   // verify that the value is a source of bytes. We accept three possible
   // types: ArrayBuffer, ArrayBufferView, and String. If it is a string,
   // we convert it to UTF-8 bytes. Anything else is an error.
-  if (value.isArrayBufferView() || value.isArrayBuffer() || value.isSharedArrayBuffer()) {
-    // We can just wrap the value with a jsg::BufferSource and write it.
-    jsg::BufferSource source(js, value);
-    if (active.options.detachOnWrite && source.canDetach(js)) {
-      // Detach from the original ArrayBuffer...
-      // ... and re-wrap it with a new BufferSource that we own.
-      source = jsg::BufferSource(js, source.detach(js));
-    }
+  KJ_IF_SOME(source, getDataFromBufferSource(js, value)) {
+    // Due to V8 sandbox rules, we cannot safely directly access the memory of
+    // the ArrayBuffer or SharedArrayBuffer backing store from outside of the
+    // isolate lock, instead we need to allocate a kj::Array<kj::byte> and copy
+    // the data into it.
+    // Because we are copying the data here, we don't need to worry about detaching
+    // the buffer or it being modified concurrently while we are writing it. If we
+    // avoid the copy later by using memory protection keys, we'll need to revisit
+    // this and make sure we are properly handling those cases.
+    // TODO(later): We can possibly optimize this by getting the memory protection key and
+    // avoiding the copy.
 
     // Zero-length writes are a no-op.
     if (source.size() == 0) {
@@ -241,7 +258,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
     // is destroyed, the write queue is destroyed along with the lambda.
     auto promise =
         active.enqueue(kj::coCapture([&active, source = kj::mv(source)]() -> kj::Promise<void> {
-      co_await active.sink->write(source.asArrayPtr());
+      co_await active.sink->write(source.asPtr());
       active.bytesInFlight -= source.size();
     }));
     return ioContext

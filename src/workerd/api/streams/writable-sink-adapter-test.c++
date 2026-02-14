@@ -80,7 +80,6 @@ KJ_TEST("Basic construction with default options") {
         "Adapter should have default highWaterMark of 16384");
     auto& options = KJ_ASSERT_NONNULL(adapter->getOptions());
     KJ_ASSERT(options.highWaterMark == 16384);
-    KJ_ASSERT(options.detachOnWrite == false);
 
     auto readyPromise = adapter->getReady(env.js);
     KJ_ASSERT(readyPromise.getState(env.js) == jsg::Promise<void>::State::FULFILLED,
@@ -102,21 +101,6 @@ KJ_TEST("Construction with custom highWaterMark option") {
   });
 }
 
-KJ_TEST("Construction with detachOnWrite=true option") {
-  TestFixture fixture;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink =
-        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink),
-        WritableStreamSinkJsAdapter::Options{
-          .detachOnWrite = true,
-        });
-    auto& options = KJ_ASSERT_NONNULL(adapter->getOptions());
-    KJ_ASSERT(options.detachOnWrite == true);
-  });
-}
-
 KJ_TEST("Construction with all custom options combined") {
   TestFixture fixture;
 
@@ -126,11 +110,9 @@ KJ_TEST("Construction with all custom options combined") {
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink),
         WritableStreamSinkJsAdapter::Options{
           .highWaterMark = 100,
-          .detachOnWrite = true,
         });
     auto& options = KJ_ASSERT_NONNULL(adapter->getOptions());
     KJ_ASSERT(options.highWaterMark == 100);
-    KJ_ASSERT(options.detachOnWrite == true);
   });
 }
 
@@ -799,56 +781,6 @@ KJ_TEST("ready promise signals backpressure correctly") {
       KJ_ASSERT(readyPromise.getState(js) == jsg::Promise<void>::State::FULFILLED,
           "Ready promise should be fulfilled when no backpressure");
     })).attach(kj::mv(adapter));
-  });
-}
-
-KJ_TEST("detachOnWrite option detaches ArrayBuffer before write") {
-  TestFixture fixture;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto recordingSink = kj::heap<SimpleEventRecordingSink>();
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableSink(kj::mv(recordingSink)),
-        WritableStreamSinkJsAdapter::Options{
-          .detachOnWrite = true,
-        });
-
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 10);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    KJ_ASSERT(!source.isDetached());
-    jsg::JsValue handle(source.getHandle(env.js));
-
-    auto writePromise = adapter->write(env.js, handle);
-
-    jsg::BufferSource source2(env.js, handle);
-    KJ_ASSERT(source2.size() == 0);
-
-    return env.context.awaitJs(env.js, kj::mv(writePromise)).attach(kj::mv(adapter));
-  });
-}
-
-KJ_TEST("detachOnWrite option detaches Uint8Array before write") {
-  TestFixture fixture;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto recordingSink = kj::heap<SimpleEventRecordingSink>();
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableSink(kj::mv(recordingSink)),
-        WritableStreamSinkJsAdapter::Options{
-          .detachOnWrite = true,
-        });
-
-    auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(env.js, 10);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    KJ_ASSERT(!source.isDetached());
-    jsg::JsValue handle(source.getHandle(env.js));
-
-    auto writePromise = adapter->write(env.js, handle);
-
-    jsg::BufferSource source2(env.js, handle);
-    KJ_ASSERT(source2.size() == 0);
-
-    return env.context.awaitJs(env.js, kj::mv(writePromise)).attach(kj::mv(adapter));
   });
 }
 
