@@ -13,6 +13,8 @@ wrangler_bin.wrangler_binary(
     name = "wrangler_bin",
 )
 
+# These targets require no-sandbox execution (the Next.js build writes outside the sandbox),
+# which is incompatible with RBE where all actions run in remote containers.
 js_run_binary(
     name = "opennextjs-build",
     srcs = [
@@ -40,7 +42,10 @@ js_run_binary(
     out_dirs = [".open-next"],
     patch_node_fs = False,
     tags = ["no-downstream"],
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = ["@platforms//os:linux"] + select({
+        "@//build/config:is_rbe": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     tool = ":opennextjs_cloudflare_bin",
     visibility = ["//visibility:public"],
 )
@@ -69,7 +74,10 @@ js_run_binary(
     execution_requirements = {"no-sandbox": "1"},
     patch_node_fs = False,
     tags = ["no-downstream"],
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = ["@platforms//os:linux"] + select({
+        "@//build/config:is_rbe": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     tool = ":wrangler_bin",
     visibility = ["//visibility:public"],
 )

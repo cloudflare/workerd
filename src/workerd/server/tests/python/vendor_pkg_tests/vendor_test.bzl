@@ -35,7 +35,7 @@ def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_sr
             --out=$@ \
             @paths.txt
         """ % (vendored_srcs_target, level, test_template),
-        tools = ["@python_3_13//:python3"],
+        tools = ["@python_3_13//:python3", "@python_3_13//:files"],
     )
 
     # Create the py_wd_test
