@@ -49,7 +49,7 @@ rust_library(
     ],
     version = "33.0.1",
     deps = [
-        "@crates_vendor__bitflags-2.10.0//:bitflags",
+        "@crates_vendor__bitflags-2.11.0//:bitflags",
         "@crates_vendor__either-1.15.0//:either",
         "@crates_vendor__num-bigint-0.4.6//:num_bigint",
         "@crates_vendor__phf-0.11.3//:phf",

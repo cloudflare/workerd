@@ -43,7 +43,7 @@ rust_library(
     ],
     version = "0.33.0",
     deps = [
-        "@crates_vendor__bitflags-2.10.0//:bitflags",
+        "@crates_vendor__bitflags-2.11.0//:bitflags",
         "@crates_vendor__cssparser-0.36.0//:cssparser",
         "@crates_vendor__derive_more-2.1.1//:derive_more",
         "@crates_vendor__log-0.4.29//:log",

@@ -579,12 +579,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__bitflags-2.10.0",
-        sha256 = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3",
+        name = "crates_vendor__bitflags-2.11.0",
+        sha256 = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/bitflags/2.10.0/download"],
-        strip_prefix = "bitflags-2.10.0",
-        build_file = Label("//deps/rust/crates:BUILD.bitflags-2.10.0.bazel"),
+        urls = ["https://static.crates.io/crates/bitflags/2.11.0/download"],
+        strip_prefix = "bitflags-2.11.0",
+        build_file = Label("//deps/rust/crates:BUILD.bitflags-2.11.0.bazel"),
     )
 
     maybe(
@@ -2598,12 +2598,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__uuid-1.20.0",
-        sha256 = "ee48d38b119b0cd71fe4141b30f5ba9c7c5d9f4e7a3a8b4a674e4b6ef789976f",
+        name = "crates_vendor__uuid-1.21.0",
+        sha256 = "b672338555252d43fd2240c714dc444b8c6fb0a5c5335e65a07bba7742735ddb",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/uuid/1.20.0/download"],
-        strip_prefix = "uuid-1.20.0",
-        build_file = Label("//deps/rust/crates:BUILD.uuid-1.20.0.bazel"),
+        urls = ["https://static.crates.io/crates/uuid/1.21.0/download"],
+        strip_prefix = "uuid-1.21.0",
+        build_file = Label("//deps/rust/crates:BUILD.uuid-1.21.0.bazel"),
     )
 
     maybe(
