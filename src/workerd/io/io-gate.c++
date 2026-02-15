@@ -341,7 +341,38 @@ kj::Promise<void> OutputGate::onBroken() {
   } else {
     auto paf = kj::newPromiseAndFulfiller<void>();
     brokenState = kj::mv(paf.fulfiller);
+    // TODO DO NOT COMMIT - replacing the returned promise with one that logs
+    // apparently makes the "critical error" test in sql-test.js fail,
+    // apparently because it somehow causes the IoContext::abortWhen() promise
+    // to run IoContext::abort() later in the event loop?
+    //
+    // But this is surprising to me... My understanding is that adding an eager
+    // promise to a promise chain largely shouldn't affect the order in which it
+    // runs... but here, abort() seems to run sooner if the promise added to
+    // the chain is *not* eager?
+#if 0
+    // works...
     return kj::mv(paf.promise);
+#elif 0
+    // also works?
+    return paf.promise.then([]() -> void {
+      KJ_DBG("XXX - onBroken then (shouldn't happen"); // TODO DO NOT COMMIT
+    }, [](kj::Exception&& e) -> void {
+      KJ_DBG("XXX - onBroken catch", e); // TODO DO NOT COMMIT
+      kj::throwFatalException(kj::mv(e));
+    });
+#else
+    // fails...
+    return paf.promise.then([]() -> kj::Promise<void> {
+      KJ_DBG("XXX - onBroken then (shouldn't happen"); // TODO DO NOT COMMIT
+      return kj::READY_NOW;
+    }, [](kj::Exception&& e) -> kj::Promise<void> {
+      KJ_DBG("XXX - onBroken catch", e); // TODO DO NOT COMMIT
+      // Also fails when returning the exception directly:
+      //return kj::mv(e);
+      kj::throwFatalException(kj::mv(e));
+    });
+#endif
   }
 }
 
