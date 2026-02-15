@@ -45,3 +45,31 @@ use_repo(compat, "cc_compatibility_proxy")
 
 cc_configure = use_extension("@rules_cc//cc:extensions.bzl", "cc_configure_extension")
 use_repo(cc_configure, "local_config_cc")
+
+# Hermetic LLVM toolchain for Remote Build Execution (RBE).
+# Downloads a Linux x86_64 LLVM distribution so the compiler is delivered via Bazel's CAS
+# to remote containers — no compiler needs to be pre-installed in the container image.
+# Only activated via --config=rbe (see .bazelrc); does not affect local or CI builds.
+bazel_dep(name = "toolchains_llvm", version = "1.6.0")
+
+llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
+llvm.toolchain(
+    exec_arch = "x86_64",
+    # Force Linux x86_64 exec platform so toolchains_llvm downloads the Linux LLVM
+    # binary and registers with exec_compatible_with=[linux, x86_64]. Without this,
+    # it creates a host-matching toolchain (macOS) which can't run on remote containers.
+    exec_os = "linux",
+    llvm_version = "19.1.6",
+)
+
+# Sysroot for linux-x86_64 — "/" resolves to the container's root filesystem at
+# execution time, providing system headers and libraries from the Debian base image.
+llvm.sysroot(
+    path = "/",
+    targets = ["linux-x86_64"],
+)
+use_repo(llvm, "llvm_toolchain", "llvm_toolchain_llvm")
+
+# NOTE: No register_toolchains here. The hermetic LLVM toolchain is registered only
+# via --extra_toolchains in .bazelrc under --config=rbe, so it doesn't interfere with
+# local builds (macOS system clang) or Linux CI builds (system clang from cc_configure).
