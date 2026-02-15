@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Lapid <dlapid@cloudflare.com>
+Date: Sat, 15 Feb 2026 00:00:00 +0000
+Subject: [PATCH] Fix _symlink_sysroot_tree to include both files and runfiles
+
+_symlink_sysroot_tree accepts a target_files parameter that callers use
+to pass runfiles (e.g. the gcc-ld/ directory for the self-contained
+linker). However, the loop on line 155 iterates over target.files instead
+of the target_files parameter, so the extra files are silently dropped.
+
+This causes the gcc-ld/ linker wrappers to be missing from the sysroot
+and therefore from action inputs. Simply replacing target.files with
+target_files is also insufficient, because for a filegroup the
+default_runfiles.files depset contains only the data attribute files,
+not the srcs files. This means the rust-lld binary (in srcs) would be
+missing from the sysroot at its original lib/rustlib/.../bin/ path,
+while only being placed at bin/ by _symlink_sysroot_bin.
+
+The gcc-ld/ld.lld wrapper resolves rust-lld relative to itself
+(parent dir), so rust-lld must exist at lib/rustlib/.../bin/rust-lld.
+
+Fix by merging target.files with the provided target_files so that
+both the linker binary and its associated runfiles (gcc-ld wrappers)
+are symlinked into the sysroot at their correct paths.
+
+---
+ rust/toolchain.bzl | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/rust/toolchain.bzl b/rust/toolchain.bzl
+index 1111111..2222222 100644
+--- a/rust/toolchain.bzl
++++ b/rust/toolchain.bzl
+@@ -152,7 +152,9 @@ def _symlink_sysroot_tree(ctx, name, target, target_files = None):
+     tree_files = []
+     if target_files == None:
+         target_files = target.files
+-    for file in target.files.to_list():
++    else:
++        target_files = depset(transitive = [target.files, target_files])
++    for file in target_files.to_list():
+         # Parse the path to the file relative to the workspace root so a
+         # symlink matching this path can be created within the sysroot.
+ 
