@@ -135,19 +135,30 @@ function installUsingNPM(pkg: string, subpath: string, binPath: string): void {
     // command instead of a HTTP request so that it hopefully works in situations
     // where HTTP requests are blocked but the "npm" command still works due to,
     // for example, a custom configured npm registry and special firewall rules.
-    child_process.execSync(
-      `npm install --loglevel=error --prefer-offline --no-audit --progress=false ${pkg}@${WORKERD_VERSION}`,
+    child_process.execFileSync(
+      "npm",
+      [
+        "install",
+        "--loglevel=error",
+        "--prefer-offline",
+        "--no-audit",
+        "--progress=false",
+        `${pkg}@${WORKERD_VERSION}`
+      ],
       { cwd: installDir, stdio: "pipe", env }
     );
 
     // Move the downloaded binary executable into place. The destination path
     // is the same one that the JavaScript API code uses so it will be able to
     // find the binary executable here later.
+    // Validate pkg and subpath to prevent path traversal
+    const sanitizedPkg = pkg.replace(/\.\./g, "");
+    const sanitizedSubpath = subpath.replace(/\.\./g, "");
     const installedBinPath = path.join(
       installDir,
       "node_modules",
-      pkg,
-      subpath
+      sanitizedPkg,
+      sanitizedSubpath
     );
     fs.renameSync(installedBinPath, binPath);
   } finally {
@@ -170,6 +181,10 @@ function installUsingNPM(pkg: string, subpath: string, binPath: string): void {
 
 function removeRecursive(dir: string): void {
   for (const entry of fs.readdirSync(dir)) {
+    // Validate entry to prevent path traversal - skip entries with .. or /
+    if (entry.includes("..") || entry.includes("/") || entry.includes("\\")) {
+      continue;
+    }
     const entryPath = path.join(dir, entry);
     let stats;
     try {
