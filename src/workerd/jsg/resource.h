@@ -1189,7 +1189,39 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     kj::Maybe<Ret> (U::*)(jsg::Lock&, kj::String),
     getNamedMethod> {
 
-  // Check the expected shape of the proxy. Unfortunately we can't check that the instance matches.
+  static void proxyGetTrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    liftKj(args, [&]() -> v8::Local<v8::Value> {
+      auto isolate = args.GetIsolate();
+      auto context = isolate->GetCurrentContext();
+      auto target = args[0].As<v8::Object>();
+      auto prop = args[1];
+      auto receiver = args[2];
+      // Eliminate the not-object case first.
+      if (!receiver->IsObject()) {
+        return check(target->Get(context, prop));
+      }
+      auto receiver_obj = receiver.As<v8::Object>();
+      // Check if the property exists on the prototype chain or the key is not a string.
+      if (!prop->IsString() || check(target->Has(context, prop))) {
+        return check(target->Get(context, prop, receiver_obj));
+      }
+      // Property not on prototype.
+      auto& wrapper = TypeWrapper::from(isolate);
+      if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(receiver_obj)) {
+        throwTypeError(isolate, kIllegalInvocation);
+      }
+      // Now check the wildcard callback.
+      auto& self = extractInternalPointer<T, false>(context, receiver_obj);
+      auto& lock = Lock::from(isolate);
+      KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(prop.As<v8::String>()))) {
+        return wrapper.wrap(lock, context, receiver_obj, kj::fwd<Ret>(value));
+      } else {
+        return check(target->Get(context, prop, receiver_obj));
+      }
+    });
+  }
+
+  // Check the expected shape of the proxy. Unfortunately we can't check that the instance matches the receiver because we don't have one.
   static void validateProxyIntegrity(
       v8::Isolate* isolate, v8::Local<v8::Object> obj, v8::Local<v8::Object> expectedTarget) {
     auto proto = obj->GetPrototypeV2();
@@ -1198,56 +1230,15 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     }
   }
 
-  static void proxyGetTrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    liftKj(args, [&]() -> v8::Local<v8::Value> {
-      auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
-      auto reflectGetFn = args.Data().As<v8::Function>();
-      auto target = args[0].As<v8::Object>();
-      auto prop = args[1];
-      auto receiver = args[2];
-      // Check if the property exists on the prototype chain. Call Reflect.get if so.
-      if (check(target->Has(context, prop))) {
-        v8::Local<v8::Value> rArgs[] = {target, prop, receiver};
-        return check(reflectGetFn->Call(context, v8::Undefined(isolate), 3, rArgs));
-      }
-      // Property not on prototype. Only try wildcard for string properties.
-      if (!prop->IsString() || !receiver->IsObject()) {
-        v8::Local<v8::Value> rArgs[] = {target, prop, receiver};
-        return check(reflectGetFn->Call(context, v8::Undefined(isolate), 3, rArgs));
-      }
-      auto obj = receiver.As<v8::Object>();
-      validateProxyIntegrity(isolate, obj, target);
-      auto& wrapper = TypeWrapper::from(isolate);
-      // TODO can we install a security check on function directly?
-      if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
-        throwTypeError(isolate, kIllegalInvocation);
-      }
-      // Now check the wildcard callback.
-      auto& self = extractInternalPointer<T, false>(context, obj);
-      auto& lock = Lock::from(isolate);
-      KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(prop.As<v8::String>()))) {
-        return wrapper.wrap(lock, context, obj, kj::fwd<Ret>(value));
-      } else {
-        v8::Local<v8::Value> rArgs[] = {target, prop, receiver};
-        return check(reflectGetFn->Call(context, v8::Undefined(isolate), 3, rArgs));
-      }
-    });
-  }
-
   static void proxyHasTrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() -> v8::Local<v8::Value> {
       auto isolate = args.GetIsolate();
       auto context = isolate->GetCurrentContext();
       auto target = args[0].As<v8::Object>();
       auto prop = args[1];
-      // Check if prop exists anywhere on the target's prototype chain.
-      if (check(target->Has(context, prop))) {
+      // Check if the property exists on the prototype chain or the key is not a string.
+      if (!prop->IsString() || check(target->Has(context, prop))) {
         return v8::True(isolate).As<v8::Value>();
-      }
-      // Not on prototype. Only try wildcard for string properties.
-      if (!prop->IsString()) {
-        return v8::False(isolate).As<v8::Value>();
       }
       auto instance = args.Data().As<v8::Object>();
       validateProxyIntegrity(isolate, instance, target);
@@ -1266,7 +1257,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     });
   }
 
-  // Forward getPrototypeOf to the target.
+  // Jut forward getPrototypeOf to the target.
   static void proxyGetPrototypeOfTrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(args[0]);
   }
@@ -1274,17 +1265,16 @@ struct WildcardPropertyCallbacks<TypeWrapper,
   static v8::Local<v8::Object> createProxyHandler(
       v8::Isolate* isolate, v8::Local<v8::Object> instance) {
     auto context = isolate->GetCurrentContext();
-    // Cache Reflect.get
-    auto reflectObj =
-        check(context->Global()->Get(context, v8StrIntern(isolate, "Reflect"))).As<v8::Object>();
-    auto reflectGetFn = check(reflectObj->Get(context, v8StrIntern(isolate, "get")));
     auto handler = v8::Object::New(isolate);
-    check(handler->Set(context, v8StrIntern(isolate, "get"),
-        v8::Function::New(context, proxyGetTrap, reflectGetFn).ToLocalChecked()));
+    // TODO this could be a function template
+    check(handler->Set(
+        context, v8StrIntern(isolate, "get"), check(v8::Function::New(context, proxyGetTrap))));
+    // Install instance as a data on the function so we can refer back to it.
     check(handler->Set(context, v8StrIntern(isolate, "has"),
-        v8::Function::New(context, proxyHasTrap, instance.As<v8::Value>()).ToLocalChecked()));
+        check(v8::Function::New(context, proxyHasTrap, instance.As<v8::Value>()))));
+    // TODO this could be a function template
     check(handler->Set(context, v8StrIntern(isolate, "getPrototypeOf"),
-        v8::Function::New(context, proxyGetPrototypeOfTrap).ToLocalChecked()));
+        check(v8::Function::New(context, proxyGetPrototypeOfTrap))));
     return handler;
   }
 };
