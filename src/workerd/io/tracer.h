@@ -76,6 +76,14 @@ class BaseTracer: public kj::Refcounted {
       kj::Date timestamp,
       const kj::ConstString& methodName) = 0;
 
+  // Emits workflow-level attributes (instanceId, workflowName) as a standalone Attribute event
+  // for streaming tail workers, and stores them on the buffered trace for legacy compatibility.
+  // Called from WorkflowEntrypoint::runStep() after extracting the values from the JS event object.
+  virtual void setWorkflowInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      kj::String instanceId,
+      kj::String workflowName) = 0;
+
   // Mark this tracer as intentionally unused (e.g., for duplicate alarm requests).
   // When set, the destructor will not log a warning about missing Onset event.
   void markUnused() {
@@ -159,6 +167,11 @@ class WorkerTracer final: public BaseTracer {
       kj::Date timestamp,
       const kj::ConstString& methodName) override;
 
+  void setWorkflowInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      kj::String instanceId,
+      kj::String workflowName) override;
+
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
@@ -203,6 +216,9 @@ class UserSpanObserver final: public SpanObserver {
   kj::Own<SpanObserver> newChild() override;
   void report(const Span& span) override;
   kj::Date getTime() override;
+  kj::Maybe<tracing::SpanId> getSpanId() override {
+    return spanId;
+  }
 
  private:
   kj::Own<SpanSubmitter> submitter;

@@ -1631,6 +1631,40 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
   }
 }
 
+void TraceContext::addLog(
+    kj::Date timestamp, kj::ConstString key, SpanBuilder::TagValue value) {
+  if (!isObserved()) {
+    return;
+  }
+  if (!span.isObserved()) {
+    userSpan.addLog(timestamp, kj::mv(key), kj::mv(value));
+    return;
+  }
+  if (!userSpan.isObserved()) {
+    span.addLog(timestamp, kj::mv(key), kj::mv(value));
+    return;
+  }
+  // Both observed — need to clone key and value for each span.
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(s, kj::ConstString) {
+      span.addLog(timestamp, key.clone(), s.clone());
+      userSpan.addLog(timestamp, kj::mv(key), kj::mv(s));
+    }
+    KJ_CASE_ONEOF(b, bool) {
+      span.addLog(timestamp, key.clone(), b);
+      userSpan.addLog(timestamp, kj::mv(key), b);
+    }
+    KJ_CASE_ONEOF(d, double) {
+      span.addLog(timestamp, key.clone(), d);
+      userSpan.addLog(timestamp, kj::mv(key), d);
+    }
+    KJ_CASE_ONEOF(i, int64_t) {
+      span.addLog(timestamp, key.clone(), i);
+      userSpan.addLog(timestamp, kj::mv(key), i);
+    }
+  }
+}
+
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
   if (!isObserved()) {
     return;
