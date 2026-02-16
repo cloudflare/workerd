@@ -724,6 +724,7 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("scriptName", scriptName);
   tracker.trackField("scriptVersion", scriptVersion);
   tracker.trackField("dispatchNamespace", dispatchNamespace);
+  tracker.trackField("durableObjectId", durableObjectId);
   KJ_IF_SOME(tags, scriptTags) {
     for (const auto& tag: tags) {
       tracker.trackField("scriptTag", tag);

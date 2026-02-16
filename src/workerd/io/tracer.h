@@ -203,6 +203,9 @@ class UserSpanObserver final: public SpanObserver {
   kj::Own<SpanObserver> newChild() override;
   void report(const Span& span) override;
   kj::Date getTime() override;
+  kj::Maybe<tracing::SpanId> getSpanId() override {
+    return spanId;
+  }
 
  private:
   kj::Own<SpanSubmitter> submitter;

@@ -1631,6 +1631,10 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
   }
 }
 
+void TraceContext::addLog(kj::Date timestamp, kj::ConstString key, SpanBuilder::TagValue value) {
+  span.addLog(timestamp, kj::mv(key), kj::mv(value));
+}
+
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
   if (!isObserved()) {
     return;
