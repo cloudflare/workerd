@@ -512,6 +512,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::V8Ref<v8::Promise> promise,
       jsg::Value value);
 
+  // Track a set of address->callback overrides for which the connect(address) behavior should be
+  // overridden via callbacks rather than using the default Socket connect() logic.
+  // This is useful for allowing generic client libraries to connect to private local services using
+  // just a provided address (rather than requiring them to support being passed a binding to call
+  // binding.connect() on).
+  using ConnectFn = kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)>;
+  void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
+  kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
+
   // ---------------------------------------------------------------------------
   // JS API
 
