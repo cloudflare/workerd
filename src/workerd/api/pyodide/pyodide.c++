@@ -29,8 +29,8 @@ namespace workerd::api::pyodide {
 
 const kj::Maybe<jsg::Bundle::Reader> PyodideBundleManager::getPyodideBundle(
     kj::StringPtr version) const {
-  return bundles.lockShared()->find(version).map(
-      [](const MessageBundlePair& t) { return t.bundle; });
+  auto lock = bundles.lockShared();
+  return lock->find(version).map([](const MessageBundlePair& t) { return t.bundle; });
 }
 
 void PyodideBundleManager::setPyodideBundleData(
@@ -43,18 +43,24 @@ void PyodideBundleManager::setPyodideBundleData(
       wordArray, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue})
                            .attach(kj::mv(data));
   auto bundle = messageReader->getRoot<jsg::Bundle>();
-  bundles.lockExclusive()->insert(
-      kj::mv(version), {.messageReader = kj::mv(messageReader), .bundle = bundle});
+  {
+    auto lock = bundles.lockExclusive();
+    lock->insert(kj::mv(version), {.messageReader = kj::mv(messageReader), .bundle = bundle});
+  }
 }
 
 const kj::Maybe<const kj::Array<unsigned char>&> PyodidePackageManager::getPyodidePackage(
     kj::StringPtr id) const {
-  return packages.lockShared()->find(id);
+  auto lock = packages.lockShared();
+  return lock->find(id);
 }
 
 void PyodidePackageManager::setPyodidePackageData(
     kj::String id, kj::Array<unsigned char> data) const {
-  packages.lockExclusive()->insert(kj::mv(id), kj::mv(data));
+  {
+    auto lock = packages.lockExclusive();
+    lock->insert(kj::mv(id), kj::mv(data));
+  }
 }
 
 static int readToTarget(

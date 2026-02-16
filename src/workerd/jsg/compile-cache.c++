@@ -16,11 +16,15 @@ std::unique_ptr<v8::ScriptCompiler::CachedData> CompileCache::Data::AsCachedData
 
 void CompileCache::add(
     kj::StringPtr key, std::shared_ptr<v8::ScriptCompiler::CachedData> cached) const {
-  cache.lockExclusive()->upsert(kj::str(key), Data(kj::mv(cached)), [](auto&, auto&&) {});
+  {
+    auto lock = cache.lockExclusive();
+    lock->upsert(kj::str(key), Data(kj::mv(cached)), [](auto&, auto&&) {});
+  }
 }
 
 kj::Maybe<CompileCache::Data&> CompileCache::find(kj::StringPtr key) const {
-  KJ_IF_SOME(value, cache.lockExclusive()->find(key)) {
+  auto lock = cache.lockExclusive();
+  KJ_IF_SOME(value, lock->find(key)) {
     if (value.data != nullptr) {
       return value;
     }

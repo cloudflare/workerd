@@ -582,8 +582,11 @@ MemoryCacheProvider::~MemoryCacheProvider() noexcept(false) {
   // TODO(cleanup): Later, assuming progress is made on kj::Ptr<T>, we ought to be able
   // to remove this. For now we just need to make sure that the MemoryCacheProvider instance
   // outlives any SharedMemoryCache instances that are referencing it.
-  KJ_REQUIRE(caches.lockShared()->size() == 0,
-      "There are still active SharedMemoryCache instances. Use-after-free errors are likely.");
+  {
+    auto lock = caches.lockShared();
+    KJ_REQUIRE(lock->size() == 0,
+        "There are still active SharedMemoryCache instances. Use-after-free errors are likely.");
+  }
 }
 
 kj::Own<const SharedMemoryCache> MemoryCacheProvider::getInstance(

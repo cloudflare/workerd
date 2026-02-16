@@ -1347,11 +1347,13 @@ class Server::InspectorServiceIsolateRegistrar final {
 
  private:
   void attach(const Server::InspectorService* anInspectorService) {
-    *inspectorService.lockExclusive() = anInspectorService;
+    auto lock = inspectorService.lockExclusive();
+    *lock = anInspectorService;
   }
 
   void detach() {
-    *inspectorService.lockExclusive() = nullptr;
+    auto lock = inspectorService.lockExclusive();
+    *lock = nullptr;
   }
 
   kj::MutexGuarded<const InspectorService*> inspectorService;
@@ -5501,7 +5503,10 @@ uint startInspector(
       auto parsed = co_await network.parseAddress(inspectorAddress, DEFAULT_PORT);
       auto listener = parsed->listen();
       // EW-7716: Signal to thread that started the inspector service that the inspector is ready.
-      *inspectorPort.lockExclusive() = listener->getPort();
+      {
+        auto lock = inspectorPort.lockExclusive();
+        *lock = listener->getPort();
+      }
       KJ_LOG(INFO, "Inspector is listening");
       co_await inspectorService->listen(kj::mv(listener));
     }))();

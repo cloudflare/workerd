@@ -25,7 +25,10 @@ KJ_TEST("CrossThreadWaitList") {
       KJ_ASSERT(!promise2.poll(ws));
       KJ_ASSERT(!list.isDone());
 
-      (*ready.lockExclusive())++;
+      {
+        auto lock = ready.lockExclusive();
+        (*lock)++;
+      }
 
       promise1.wait(ws);
       promise2.wait(ws);
@@ -68,7 +71,10 @@ KJ_TEST("CrossThreadWaitList exceptions") {
       KJ_ASSERT(!promise2.poll(ws));
       KJ_ASSERT(!list.isDone());
 
-      (*ready.lockExclusive())++;
+      {
+        auto lock = ready.lockExclusive();
+        (*lock)++;
+      }
 
       promise1
           .then([]() { KJ_FAIL_REQUIRE("didn't throw"); }, [](kj::Exception&& e) {

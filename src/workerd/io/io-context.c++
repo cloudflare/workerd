@@ -1540,7 +1540,10 @@ WarningAggregator::~WarningAggregator() noexcept(false) {
 }
 
 void WarningAggregator::add(kj::Own<WarningContext> warning) const {
-  warnings.lockExclusive()->add(kj::mv(warning));
+  {
+    auto lock = warnings.lockExclusive();
+    lock->add(kj::mv(warning));
+  }
 }
 
 kj::Own<WarningAggregator> IoContext::getWarningAggregator(

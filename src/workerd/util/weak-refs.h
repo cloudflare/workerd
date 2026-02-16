@@ -45,7 +45,8 @@ class AtomicWeakRef final: public kj::AtomicRefcounted {
   // to acquire a strong reference. Any code acquiring a strong reference prior to the refcount
   // dropping to 0 will prevent invalidation until that extra reference is dropped.
   inline void invalidate() const {
-    *this_.lockExclusive() = nullptr;
+    auto lock = this_.lockExclusive();
+    *lock = nullptr;
   }
 
   friend T;

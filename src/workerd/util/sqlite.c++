@@ -2403,7 +2403,8 @@ class SqliteDatabase::Vfs::DefaultLockManager final: public SqliteDatabase::Lock
     }
 
     bool checkReservedLock() override {
-      return state->guarded.lockShared()->hasReserved;
+      auto lock = state->guarded.lockShared();
+      return lock->hasReserved;
     }
 
     kj::ArrayPtr<byte> getSharedMemoryRegion(uint index, uint size, bool extend) override {

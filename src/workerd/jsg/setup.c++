@@ -233,7 +233,10 @@ void IsolateBase::deferDestruction(Item item) {
   KJ_REQUIRE_NONNULL(ptr, "tried to defer destruction after V8 isolate was destroyed");
   KJ_REQUIRE(queueState == QueueState::ACTIVE, "tried to defer destruction during isolate shutdown",
       queueState);
-  queue.lockExclusive()->push(kj::mv(item));
+  {
+    auto lock = queue.lockExclusive();
+    lock->push(kj::mv(item));
+  }
 }
 
 kj::Arc<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
@@ -250,7 +253,8 @@ void IsolateBase::applyDeferredActions() {
     // Safe to destroy the popped batch outside of the lock because the lock is only actually used
     // to guard the push buffer.
     DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
-    auto drop = queue.lockExclusive()->pop();
+    auto lock = queue.lockExclusive();
+    auto drop = lock->pop();
   }
 
   externalMemoryTarget->applyDeferredMemoryUpdate();

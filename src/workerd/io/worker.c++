@@ -606,7 +606,8 @@ struct Worker::Isolate::Impl {
       impl.currentLock = *this;
 
       // Now's a good time to destroy any workers queued up for destruction.
-      auto workersToDestroy = impl.workerDestructionQueue.lockExclusive()->pop();
+      auto workerDestructionLock = impl.workerDestructionQueue.lockExclusive();
+      auto workersToDestroy = workerDestructionLock->pop();
       for (auto& workerImpl: workersToDestroy.asArrayPtr()) {
         KJ_IF_SOME(c, workerImpl->context) {
           disposeContext(kj::mv(c));
@@ -1538,7 +1539,10 @@ Worker::Isolate::~Isolate() noexcept(false) {
   // The cpuLimitNearlyExceededCallback may hold references to objects owned by the isolate and
   // their destructors need the isolate to still exist. So destroy them before we destroy the
   // isolate.
-  *cpuLimitNearlyExceededCallback.lockExclusive() = kj::none;
+  {
+    auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
+    *lock = kj::none;
+  }
 
   // Make sure to destroy things under lock. This lock should never be contended since the isolate
   // is about to be destroyed, but we have to take the lock in order to enter the isolate.
@@ -1583,7 +1587,8 @@ bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isol
 }
 
 kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
-  KJ_IF_SOME(cb, *cpuLimitNearlyExceededCallback.lockExclusive()) {
+  auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
+  KJ_IF_SOME(cb, *lock) {
     return cb.reference();
   }
   return kj::none;
@@ -2935,7 +2940,8 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
     // This method is called on the I/O thread, which also adds messages to the `incomingQueue`.
     // So long as this method does not yield/resume mid-way, there is no concern about how
     // long the queue lock is held for whilst dispatching messages.
-    auto i = kj::atomicAddRef(*this->state.lockExclusive()->get()->isolate);
+    auto stateLock = this->state.lockExclusive();
+    auto i = kj::atomicAddRef(*stateLock->get()->isolate);
     auto asyncLock = co_await i->takeAsyncLockWithoutRequest(nullptr);
     handleDispatchProtocolMessage(asyncLock, incomingQueue);
   }
@@ -3097,7 +3103,10 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
         auto message = co_await webSocket.receive(MAX_MESSAGE_SIZE);
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
-            incomingQueue.lockExclusive()->messages.add(kj::mv(text));
+            {
+              auto lock = incomingQueue.lockExclusive();
+              lock->messages.add(kj::mv(text));
+            }
             incomingQueueNotifier->notify();
           }
           KJ_CASE_ONEOF(blob, kj::Array<byte>) {

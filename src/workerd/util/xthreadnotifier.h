@@ -26,7 +26,11 @@ class XThreadNotifier final: public kj::AtomicRefcounted {
   XThreadNotifier(): paf(kj::newPromiseAndCrossThreadFulfiller<void>()) {}
 
   kj::Promise<void> awaitNotification() {
-    auto promise = kj::mv(paf.lockExclusive()->promise);
+    kj::Promise<void> promise = nullptr;
+    {
+      auto lock = paf.lockExclusive();
+      promise = kj::mv(lock->promise);
+    }
     co_await promise;
     auto lockedPaf = paf.lockExclusive();
     auto nextPaf = kj::newPromiseAndCrossThreadFulfiller<void>();
@@ -35,7 +39,10 @@ class XThreadNotifier final: public kj::AtomicRefcounted {
   }
 
   void notify() const {
-    paf.lockExclusive()->fulfiller->fulfill();
+    {
+      auto lock = paf.lockExclusive();
+      lock->fulfiller->fulfill();
+    }
   }
 
  private:
