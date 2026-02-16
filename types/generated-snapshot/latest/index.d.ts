@@ -480,54 +480,63 @@ interface ExecutionContext<Props = unknown> {
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
 }
-type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
+type ExportedHandlerFetchHandler<
+  Env = unknown,
+  CfHostMetadata = unknown,
+  Props = unknown,
+> = (
   request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => Response | Promise<Response>;
-type ExportedHandlerTailHandler<Env = unknown> = (
+type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (
   events: TraceItem[],
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
-type ExportedHandlerTraceHandler<Env = unknown> = (
+type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (
   traces: TraceItem[],
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
-type ExportedHandlerTailStreamHandler<Env = unknown> = (
+type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (
   event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
-type ExportedHandlerScheduledHandler<Env = unknown> = (
+type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (
   controller: ScheduledController,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
-type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (
+type ExportedHandlerQueueHandler<
+  Env = unknown,
+  Message = unknown,
+  Props = unknown,
+> = (
   batch: MessageBatch<Message>,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
-type ExportedHandlerTestHandler<Env = unknown> = (
+type ExportedHandlerTestHandler<Env = unknown, Props = unknown> = (
   controller: TestController,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
 interface ExportedHandler<
   Env = unknown,
   QueueHandlerMessage = unknown,
   CfHostMetadata = unknown,
+  Props = unknown,
 > {
-  fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
-  tail?: ExportedHandlerTailHandler<Env>;
-  trace?: ExportedHandlerTraceHandler<Env>;
-  tailStream?: ExportedHandlerTailStreamHandler<Env>;
-  scheduled?: ExportedHandlerScheduledHandler<Env>;
-  test?: ExportedHandlerTestHandler<Env>;
-  email?: EmailExportedHandler<Env>;
-  queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage>;
+  fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
+  tail?: ExportedHandlerTailHandler<Env, Props>;
+  trace?: ExportedHandlerTraceHandler<Env, Props>;
+  tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
+  scheduled?: ExportedHandlerScheduledHandler<Env, Props>;
+  test?: ExportedHandlerTestHandler<Env, Props>;
+  email?: EmailExportedHandler<Env, Props>;
+  queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
 }
 interface StructuredSerializeOptions {
   transfer?: any[];
@@ -10830,10 +10839,10 @@ interface SendEmail {
 declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
 }
-declare type EmailExportedHandler<Env = unknown> = (
+declare type EmailExportedHandler<Env = unknown, Props = unknown> = (
   message: ForwardableEmailMessage,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
 declare module "cloudflare:email" {
   let _EmailMessage: {
