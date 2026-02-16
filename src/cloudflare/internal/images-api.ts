@@ -290,7 +290,7 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
   }
 
   async list(options?: ImageListOptions): Promise<ImageList> {
-    return this.#fetcher.list(options || {});
+    return this.#fetcher.list(options);
   }
 }
 
