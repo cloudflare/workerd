@@ -34,6 +34,7 @@
 #include <rust/jsg/ffi.h>
 #include <v8-inspector.h>
 #include <v8-profiler.h>
+#include <v8-wasm.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
@@ -657,6 +658,9 @@ struct Worker::Isolate::Impl {
 
     void gcPrologue() {
       metrics.gcPrologue();
+      // Filter out WASM shutdown signal entries where the module has exited, allowing
+      // the linear memory to be reclaimed.
+      limitEnforcer.filterWasmShutdownSignals();
     }
     void gcEpilogue() {
       metrics.gcEpilogue();
@@ -1600,6 +1604,13 @@ void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)>
       FAILED, "Python Workers Internal Error: CpuLimitNearlyExceededCallback already set"));
 }
 
+void Worker::Isolate::registerWasmShutdownSignal(
+    std::shared_ptr<v8::BackingStore> backingStore, uint32_t offset) const {
+  // Register the WASM module for receiving shutdown signals. The signal handler will
+  // iterate the list unconditionally when CPU time is nearly exhausted.
+  limitEnforcer->registerWasmShutdownSignal(kj::mv(backingStore), offset);
+}
+
 // EW-1319: Set WebAssembly.Module @@HasInstance
 //
 // The instanceof operator can be changed by setting the @@HasInstance method
@@ -1621,10 +1632,102 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
       module->DefineOwnProperty(context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
 }
 
+// Installs a shim around WebAssembly.instantiate and WebAssembly.Instance that hooks into the
+// shutdown signal if it exists
+void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context) {
+  // We need to enter the context because this function compiles and executes JavaScript via
+  // v8::Script::Compile/Run. setupContext() is called before JSG_WITHIN_CONTEXT_SCOPE, so the
+  // context is not yet entered at this point.
+  v8::Context::Scope contextScope(context);
+  auto isolate = lock.v8Isolate;
+
+  auto webAssembly =
+      jsg::check(context->Global()->Get(context, jsg::v8StrIntern(isolate, "WebAssembly")))
+          .As<v8::Object>();
+
+  // Create a C++ callback that the JS shims call to register a {memory, offset} pair.
+  // __registerWasmShutdownSignal(memory: WebAssembly.Memory, offset: number)
+  auto registerCb = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
+      auto isolate = info.GetIsolate();
+      if (info.Length() < 2 || !info[0]->IsWasmMemoryObject() || !info[1]->IsUint32()) {
+        isolate->ThrowException(jsg::v8Str(
+            isolate, "registerWasmShutdownSignal: expected (WebAssembly.Memory, uint32)"_kj));
+        return;
+      }
+      auto memory = info[0].As<v8::WasmMemoryObject>();
+      auto offset = info[1].As<v8::Uint32>()->Value();
+      auto backingStore = memory->Buffer()->GetBackingStore();
+      Worker::Isolate::from(jsg::Lock::from(isolate))
+          .registerWasmShutdownSignal(kj::mv(backingStore), offset);
+    });
+  };
+  auto registerFn = jsg::check(v8::Function::New(context, registerCb));
+
+  // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
+  // WebAssembly.Instance (sync constructor). A shared helper inspects exports for the
+  // "signal_address_v1" convention.
+  //
+  // The factory receives:
+  //   originalInstantiate  - the original WebAssembly.instantiate function
+  //   originalInstance     - the original WebAssembly.Instance constructor
+  //   registerShutdown     - the C++ registration callback
+  //   wa                   - the WebAssembly object
+  auto shimSource = jsg::v8Str(isolate,
+      "(function(originalInstantiate, originalInstance, registerShutdown, wa) {\n"
+      "  function checkExports(instance) {\n"
+      "    var exports = instance.exports;\n"
+      "    var shutdownGlobal = exports['signal_address_v1'];\n"
+      "    if (shutdownGlobal instanceof wa.Global) {\n"
+      "      var memory = exports['memory'];\n"
+      "      if (memory instanceof wa.Memory) {\n"
+      "        registerShutdown(memory, shutdownGlobal.value);\n"
+      "      }\n"
+      "    }\n"
+      "  }\n"
+      "\n"
+      "  wa.instantiate = function instantiate(moduleOrBytes, imports) {\n"
+      "    return originalInstantiate.call(wa, moduleOrBytes, imports).then(function(result) {\n"
+      "      // When called with bytes, result is {module, instance}.\n"
+      "      // When called with a Module, result is just an Instance directly.\n"
+      "      checkExports(result.instance || result);\n"
+      "      return result;\n"
+      "    });\n"
+      "  };\n"
+      "\n"
+      "  wa.Instance = function Instance(module, imports) {\n"
+      "    var instance = new originalInstance(module, imports);\n"
+      "    checkExports(instance);\n"
+      "    return instance;\n"
+      "  };\n"
+      "  wa.Instance.prototype = originalInstance.prototype;\n"
+      "  Object.defineProperty(wa.Instance.prototype, 'constructor',\n"
+      "    { value: wa.Instance, writable: true, configurable: true });\n"
+      "})\n"_kj);
+
+  auto shimFactory = jsg::check(v8::Script::Compile(context, shimSource));
+  auto shimFactoryResult = jsg::check(shimFactory->Run(context));
+  auto shimFactoryFn = shimFactoryResult.As<v8::Function>();
+
+  // Grab the originals before they are replaced.
+  auto instantiateKey = jsg::v8StrIntern(isolate, "instantiate");
+  auto instanceKey = jsg::v8StrIntern(isolate, "Instance");
+  auto originalInstantiate =
+      jsg::check(webAssembly->Get(context, instantiateKey)).As<v8::Function>();
+  auto originalInstance = jsg::check(webAssembly->Get(context, instanceKey)).As<v8::Function>();
+
+  // Call the factory — it mutates `wa` in place.
+  v8::Local<v8::Value> args[] = {originalInstantiate, originalInstance, registerFn, webAssembly};
+  jsg::check(shimFactoryFn->Call(context, context->Global(), 4, args));
+}
+
 void Worker::setupContext(
     jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
+
+  // Shim WebAssembly.instantiate to detect modules exporting "signal_address_v1".
+  shimWebAssemblyInstantiate(lock, context);
 
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.

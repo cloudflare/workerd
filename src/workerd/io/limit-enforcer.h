@@ -6,12 +6,15 @@
 
 #include <workerd/io/outcome.capnp.h>
 
+#include <v8-array-buffer.h>
 #include <v8-isolate.h>
 
 #include <kj/async.h>   // For Promise
 #include <kj/memory.h>  // for Own
 #include <kj/one-of.h>  // for OneOf
 #include <kj/time.h>    // for Duration
+
+#include <memory>  // for std::shared_ptr
 
 namespace workerd {
 class IsolateObserver;
@@ -97,6 +100,25 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   }
 
   virtual bool hasExcessivelyExceededHeapLimit() const = 0;
+
+  // Registers a WASM module for receiving the "shut down" signal when CPU time is nearly
+  // exhausted. The signal handler will write 1 (as a uint32) into the module's linear memory
+  // at `offset` bytes from the start of `backingStore`.
+  //
+  // Must be called with the isolate lock held.
+  virtual void registerWasmShutdownSignal(
+      std::shared_ptr<v8::BackingStore> backingStore, uint32_t offset) const {
+    // Default no-op for open-source workerd and test fixtures.
+  }
+
+  // Filters out WASM shutdown signal entries where the module has exited (indicated by a
+  // non-zero value in the module_exited field at offset+4). This should be called from a
+  // GC prologue hook to allow linear memory to be reclaimed.
+  //
+  // Must be called with the isolate lock held.
+  virtual void filterWasmShutdownSignals() const {
+    // Default no-op for open-source workerd and test fixtures.
+  }
 
   // Inserts a custom mark event named `name` into this isolate's perf event data stream. At
   // present, this is only implemented internally. Call this function from various APIs to be able
