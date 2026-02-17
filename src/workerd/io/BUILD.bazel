@@ -59,16 +59,6 @@ wd_cc_library(
         "worker.h",
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
-    # global CPU-specific options are inconvenient to specify with bazel – just set the options we
-    # need for CRC32C in this target for now.
-    copts = select({
-        "@platforms//cpu:aarch64": [
-            "-mcrc",
-        ],
-        "@platforms//cpu:x86_64": [
-            "-msse4.2",
-        ],
-    }),
     implementation_deps = [
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",

@@ -38,7 +38,13 @@ wd_cc_library(
     # code elimination, but doing so results in a smaller size improvement than enabling
     # optimization here, or no additional improvement when doing combined with enabling
     # optimization.
-    copts = ["-O3"],
+    copts = select({
+        "@platforms//os:windows": [
+            "/O2",
+            "/clang:-O3",
+        ],
+        "//conditions:default": ["-O3"],
+    }),
     defines = select({
         ":really_use_perfetto": ["WORKERD_USE_PERFETTO"],
         "//conditions:default": [],
