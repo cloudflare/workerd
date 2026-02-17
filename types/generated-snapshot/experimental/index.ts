@@ -4220,7 +4220,7 @@ export declare abstract class Performance extends EventTarget {
    */
   measure(
     measureName: string,
-    measureOptionsOrStartMark: PerformanceMeasureOptions | string,
+    measureOptionsOrStartMark?: PerformanceMeasureOptions | string,
     maybeEndMark?: string,
   ): PerformanceMeasure;
   /**
