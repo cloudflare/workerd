@@ -926,6 +926,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> processValue;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
   kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
+  kj::HashMap<kj::String, ConnectFn> connectOverrides;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.

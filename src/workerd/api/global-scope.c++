@@ -738,11 +738,12 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
   }
 }
 
-void Worker::setConnectOverride(kj::String networkAddress, ConnectFn connectFn) {
+void ServiceWorkerGlobalScope::setConnectOverride(kj::String networkAddress, ConnectFn connectFn) {
   connectOverrides.upsert(kj::mv(networkAddress), kj::mv(connectFn));
 }
 
-kj::Maybe<Worker::ConnectFn&> Worker::getConnectOverride(kj::StringPtr networkAddress) {
+kj::Maybe<ServiceWorkerGlobalScope::ConnectFn&> ServiceWorkerGlobalScope::getConnectOverride(
+    kj::StringPtr networkAddress) {
   return connectOverrides.find(networkAddress);
 }
 
