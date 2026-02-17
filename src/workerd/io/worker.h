@@ -287,7 +287,7 @@ class Worker::Script: public kj::AtomicRefcounted {
   using WasmModule = WorkerSource::WasmModule;
   using JsonModule = WorkerSource::JsonModule;
   using PythonModule = WorkerSource::PythonModule;
-  using PythonRequirement = WorkerSource::PythonRequirement;
+  using ObsoletePythonRequirement = WorkerSource::ObsoletePythonRequirement;
   using CapnpModule = WorkerSource::CapnpModule;
   using ModuleContent = WorkerSource::ModuleContent;
   using Module = WorkerSource::Module;

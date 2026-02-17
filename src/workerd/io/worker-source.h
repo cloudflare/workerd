@@ -56,9 +56,8 @@ struct WorkerSource {
     kj::StringPtr body;
   };
 
-  // PythonRequirement is a variant of ModuleContent, but has no body. The module name specifies
-  // a Python package to be provided by the system.
-  struct PythonRequirement {};
+  // This is no longer supported by Python, but it used to define built-in packages.
+  struct ObsoletePythonRequirement {};
 
   // CapnpModule is a .capnp Cap'n Proto schema file. The original text of the file isn't provided;
   // instead, `ModulesSource::capnpSchemas` contains all the capnp schemas needed by the Worker,
@@ -77,7 +76,7 @@ struct WorkerSource {
       WasmModule,
       JsonModule,
       PythonModule,
-      PythonRequirement,
+      ObsoletePythonRequirement,
       CapnpModule>;
 
   struct Module {

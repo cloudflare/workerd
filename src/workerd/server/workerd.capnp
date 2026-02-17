@@ -300,13 +300,8 @@ struct Worker {
       # A Python module. All bundles containing this value type are converted into a JS/WASM Worker
       # Bundle prior to execution.
 
-      pythonRequirement @9 :Text;
-      # A Python package that is required by this bundle. The package must be supported by
-      # Pyodide (https://pyodide.org/en/stable/usage/packages-in-pyodide.html). All packages listed
-      # will be installed prior to the execution of the worker.
-      #
-      # The value of this field is ignored and should always be an empty string. Only the module
-      # name matters. The field should have been declared `Void`, but it's difficult to change now.
+      obsoletePythonRequirement @9 :Text;
+      # This position used to be the pythonRequirement type that has now been deprecated.
     }
 
     namedExports @10 :List(Text);

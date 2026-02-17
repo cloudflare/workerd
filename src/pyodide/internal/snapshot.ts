@@ -8,7 +8,6 @@ import {
   SHOULD_SNAPSHOT_TO_DISK,
   IS_CREATING_BASELINE_SNAPSHOT,
   MEMORY_SNAPSHOT_READER,
-  REQUIREMENTS,
   IS_CREATING_SNAPSHOT,
   IS_EW_VALIDATING,
   IS_DEDICATED_SNAPSHOT_ENABLED,
@@ -447,7 +446,7 @@ function recordDsoHandles(Module: Module): DsoHandles {
  *
  * This function returns a list of modules that have been imported.
  */
-function memorySnapshotDoImports(Module: Module): string[] {
+function memorySnapshotDoImports(Module: Module): void {
   const baselineSnapshotImports =
     MetadataReader.constructor.getBaselineSnapshotImports();
   const toImport = baselineSnapshotImports.join(',');
@@ -459,31 +458,6 @@ function memorySnapshotDoImports(Module: Module): string[] {
   simpleRunPython(Module, 'sysconfig.get_config_vars()');
   // Delete to avoid polluting globals
   simpleRunPython(Module, `del ${toDelete}`);
-  if (IS_CREATING_BASELINE_SNAPSHOT) {
-    // We've done all the imports for the baseline snapshot.
-    return [];
-  }
-  if (REQUIREMENTS.length == 0) {
-    // Don't attempt to scan for package imports if the Worker has specified no package
-    // requirements, as this means their code isn't going to be importing any modules that we need
-    // to include in a snapshot.
-    return [];
-  }
-
-  // The `importedModules` list will contain all modules that have been imported, including local
-  // modules, the usual `js` and other stdlib modules. We want to filter out local imports, so we
-  // grab them and put them into a set for fast filtering.
-  const importedModules: string[] = MetadataReader.getPackageSnapshotImports(
-    Module.API.version
-  );
-  const deduplicatedModules = [...new Set(importedModules)];
-
-  // Import the modules list so they are included in the snapshot.
-  if (deduplicatedModules.length > 0) {
-    simpleRunPython(Module, 'import ' + deduplicatedModules.join(','));
-  }
-
-  return deduplicatedModules;
 }
 
 function describeValue(val: any): string {
@@ -891,7 +865,7 @@ export function maybeCollectSnapshot(
 ): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
-  const importedModulesList = memorySnapshotDoImports(Module);
+  memorySnapshotDoImports(Module);
   if (!IS_CREATING_SNAPSHOT) {
     return;
   }
@@ -904,7 +878,7 @@ export function maybeCollectSnapshot(
 
   collectSnapshot(
     Module,
-    importedModulesList,
+    [],
     customSerializedObjects,
     IS_CREATING_BASELINE_SNAPSHOT ? 'baseline' : 'package'
   );
